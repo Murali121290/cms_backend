@@ -1,0 +1,17 @@
+sqlalchemy
+psycopg2-binary
+python-jose
+passlib[bcrypt]
+python-multipart
+pydantic-settings
+alembic
+celery
+redis
+python-docx
+lxml
+bcrypt
+jinja2
+pywin32
+openpyxl
+pandas
+PyYAML
