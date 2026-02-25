@@ -17,6 +17,9 @@ from app.processing.technical_engine import TechnicalEngine
 from app.processing.legacy.highlighter.technical_editor import TechnicalEditor
 from app.processing.references_engine import ReferencesEngine
 from app.processing.structuring_engine import StructuringEngine
+from app.processing.bias_engine import BiasEngine
+from app.processing.ai_extractor_engine import AIExtractorEngine
+from app.processing.xml_engine import XMLEngine
 
 # Configure specialized logger for processing
 logger = logging.getLogger("app.processing")
@@ -32,7 +35,10 @@ PROCESS_PERMISSIONS = {
     'ppd': ['PPD', 'ProjectManager', 'Admin'],
     'permissions': ['PermissionsManager', 'ProjectManager', 'Admin'],
     'reference_validation': ['Editor', 'CopyEditor', 'Admin'],
-    'structuring': ['Editor', 'CopyEditor', 'Admin']
+    'structuring': ['Editor', 'CopyEditor', 'Admin'],
+    'bias_scan': ['Editor', 'CopyEditor', 'Admin', 'ProjectManager'],
+    'credit_extractor_ai': ['PermissionsManager', 'ProjectManager', 'Admin'],
+    'word_to_xml': ['PPD', 'ProjectManager', 'Admin']
 }
 
 def check_permission(user, process_type: str):
@@ -118,6 +124,18 @@ def background_processing_task(
                 generated_files = StructuringEngine().process_document(file_path, mode=mode)
                 success_msg = f"Structuring completed (mode: {mode})"
 
+            elif process_type == 'bias_scan':
+                generated_files = BiasEngine().process_document(file_path)
+                success_msg = "Bias Scan completed successfully"
+
+            elif process_type == 'credit_extractor_ai':
+                generated_files = AIExtractorEngine().process_document(file_path)
+                success_msg = "AI Credit Extraction completed"
+
+            elif process_type == 'word_to_xml':
+                generated_files = XMLEngine().process_document(file_path)
+                success_msg = "Word to XML conversion completed"
+
             else:
                 is_macro_fallback = True
                 with OptimizedDocumentProcessor() as processor:
@@ -143,6 +161,10 @@ def background_processing_task(
                         mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                     elif p_filename.endswith(".txt"): 
                         mime = "text/plain"
+                    elif p_filename.endswith(".zip"):
+                        mime = "application/zip"
+                    elif p_filename.endswith(".xml"):
+                        mime = "application/xml"
                     
                     new_rec = models.File(
                         filename=p_filename,

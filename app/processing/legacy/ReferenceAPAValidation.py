@@ -1,18 +1,52 @@
 import os
 import re
 import logging
-
+try:
+    from flask import Flask, render_template, request, send_file, redirect, url_for, flash, make_response, session
+    from werkzeug.utils import secure_filename
+except ImportError:
+    class MockApp:
+        config = {}
+        secret_key = ""
+        def route(self, *args, **kwargs): return lambda f: f
+        def __setitem__(self, key, value): pass
+    Flask = lambda *args, **kwargs: MockApp()
+    secure_filename = lambda x: x
+    request = session = render_template = redirect = url_for = flash = make_response = send_file = None
 from docx import Document
 import io
 import zipfile
-from .citation_parsers import get_parser, auto_detect_style
+from citation_parsers import get_parser, auto_detect_style
+from validation_core import CitationProcessor, ValidationReport
+try:
+    from utils import track_changes
+    TRACK_CHANGES_ENABLED = True
+except ImportError:
+    track_changes = None
+    TRACK_CHANGES_ENABLED = False
 
-# Configure logging
+# Configure logging (import logging only once — the second import at line 11 was removed)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+app = Flask(__name__)
+app.secret_key = os.environ.get('SESSION_SECRET', 'dev-secret-key')
+
+UPLOAD_FOLDER = 'uploads'
+ALLOWED_EXTENSIONS = {'docx'}
+
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
+
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
 def extract_text_from_docx(file_path):
@@ -553,762 +587,571 @@ def check_abbreviation_usage(matched_pairs, citations, references, citation_loca
     return abbreviation_errors
 
 
-def validate_document(file_path, parser=None):
-    if parser is None:
-        parser = get_parser('apa')
-        
-    paragraphs = extract_text_from_docx(file_path)
-    
-    citations, citation_locations = find_citations_in_text(paragraphs, parser)
-    references, reference_details, abbreviation_map = find_references_in_bibliography(paragraphs, parser)
-    
-    # 1. Match Citations
-    matched_citations, matched_references, matched_pairs = get_citation_matches(citations, references, abbreviation_map)
-    
-    # Validation Results Containers
-    missing_refs = []
-    unused_refs = []
-    valid_citations = []
-    format_errors = []
-    year_mismatches = []
-    spelling_mismatches = []
-    et_al_errors = []
-    abbreviation_errors = []
-    
-    # 2. Process Matches and Identify Mismatches
-    for cite_key, cite_data in citations.items():
-        cite_author = cite_data['author'].strip()
-        cite_year = cite_data['year']
-        
-        if cite_key in matched_citations:
-            valid_citations.append(cite_data['display'])
-            
-            # Et al. Check
-            ref_key = matched_pairs[cite_key]
-            et_al_check = check_et_al_misuse(cite_data, references[ref_key])
-            if et_al_check and et_al_check['has_error']:
-                et_al_errors.append({
-                    'citation': cite_data['display'],
-                    'message': et_al_check['message'],
-                    'correct_form': et_al_check['correct_form'],
-                    'author_count': et_al_check['author_count'],
-                    'locations': citation_locations.get(cite_key, []),
-                    'severity': et_al_check.get('severity', 'error')
-                })
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LOW-LEVEL HELPERS
+# ─────────────────────────────────────────────────────────────────────────────
+
+from lxml import etree as _lxml_etree
+from docx.oxml.ns import qn as _qn
+from docx.oxml import OxmlElement as _OxmlElement
+from docx.opc.part import Part as _Part
+from docx.opc.packuri import PackURI as _PackURI
+
+_W_NS_AP   = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+_MC_NS_AP  = "http://schemas.openxmlformats.org/markup-compatibility/2006"
+_W14_NS_AP = "http://schemas.microsoft.com/office/word/2010/wordml"
+_NSMAP_AP  = {"w": _W_NS_AP, "mc": _MC_NS_AP, "w14": _W14_NS_AP}
+_COMMENTS_REL_AP = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments"
+_COMMENTS_CT_AP  = "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"
+
+
+def _ensure_cite_bib_style(doc):
+    """Create the cite_bib character style if it doesn't already exist."""
+    from docx.enum.style import WD_STYLE_TYPE
+    if "cite_bib" not in [s.name for s in doc.styles]:
+        doc.styles.add_style("cite_bib", WD_STYLE_TYPE.CHARACTER)
+
+
+def _get_comments_part(doc):
+    """Resolve (or create) word/comments.xml Part, returning the Part object."""
+    doc_part = doc.part
+    for rel in doc_part.rels.values():
+        if rel.reltype == _COMMENTS_REL_AP:
+            return rel.target_part
+    for p in doc_part.package.parts:
+        if p.partname == "/word/comments.xml":
+            doc_part.relate_to(p, _COMMENTS_REL_AP)
+            return p
+    root = _lxml_etree.Element(f"{{{_W_NS_AP}}}comments", nsmap=_NSMAP_AP)
+    root.set(f"{{{_MC_NS_AP}}}Ignorable", "w14 wp14")
+    blob = _lxml_etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
+    part = _Part(_PackURI("/word/comments.xml"), _COMMENTS_CT_AP, blob, doc_part.package)
+    doc_part.package.add_part(part)
+    doc_part.relate_to(part, _COMMENTS_REL_AP)
+    return part
+
+
+def _add_word_comment(doc, para, text, author="APA Checker", initials="AC"):
+    """
+    Attach a Word comment to the first runs of *para* using lxml so the
+    namespace prefix stays as w: (not ns0:) — avoids the OOXML schema error.
+    """
+    if not para.runs:
+        return False
+    try:
+        cp = _get_comments_part(doc)
+        try:
+            tree = _lxml_etree.fromstring(cp._blob)
+        except Exception:
+            tree = _lxml_etree.Element(f"{{{_W_NS_AP}}}comments", nsmap=_NSMAP_AP)
+
+        existing = [
+            int(c.get(f"{{{_W_NS_AP}}}id"))
+            for c in tree.findall(f"{{{_W_NS_AP}}}comment")
+            if c.get(f"{{{_W_NS_AP}}}id")
+        ]
+        cid = max(existing) + 1 if existing else 0
+
+        cel = _lxml_etree.SubElement(tree, f"{{{_W_NS_AP}}}comment")
+        cel.set(f"{{{_W_NS_AP}}}id",       str(cid))
+        cel.set(f"{{{_W_NS_AP}}}author",   author)
+        cel.set(f"{{{_W_NS_AP}}}initials", initials)
+        pel = _lxml_etree.SubElement(cel, f"{{{_W_NS_AP}}}p")
+        rel = _lxml_etree.SubElement(pel, f"{{{_W_NS_AP}}}r")
+        tel = _lxml_etree.SubElement(rel,  f"{{{_W_NS_AP}}}t")
+        tel.text = text
+
+        cp._blob = _lxml_etree.tostring(tree, xml_declaration=True, encoding="UTF-8", standalone=True)
+
+        p_el = para._element
+        start = _OxmlElement("w:commentRangeStart"); start.set(_qn("w:id"), str(cid))
+        end   = _OxmlElement("w:commentRangeEnd");   end.set(_qn("w:id"),   str(cid))
+        ref   = _OxmlElement("w:commentReference");  ref.set(_qn("w:id"),   str(cid))
+        ref_r = _OxmlElement("w:r"); ref_r.append(ref)
+
+        pPr = p_el.find(_qn("w:pPr"))
+        if pPr is not None:
+            pPr.addnext(start)
         else:
-            # Matches failed, check for Year Mismatch
-            found_year_match = False
-            for ref_key, ref_data in references.items():
-                if normalize_citation_key(ref_data['author'], '0000').split('|')[0] == normalize_citation_key(cite_author, '0000').split('|')[0]:
-                     year_mismatches.append({
-                        'citation': cite_data['display'],
-                        'cited_year': cite_year,
-                        'ref_year': ref_data['year'],
-                        'ref_key': ref_key,
-                        'locations': citation_locations.get(cite_key, [])
-                    })
-                     found_year_match = True
-                     break
-            
-            if found_year_match:
-                if cite_data['warnings']:
-                     format_errors.append({
-                        'citation': cite_data['display'],
-                        'warnings': cite_data['warnings'],
-                        'locations': citation_locations.get(cite_key, [])
-                    })
-                continue
-            
-            # Check for Spelling Mismatch
-            potential_match_key = check_spelling_mismatch(cite_author, references)
-            if potential_match_key:
-                spelling_mismatches.append({
-                    'citation': cite_data['display'],
-                    'cited_author': cite_author,
-                    'ref_author': references[potential_match_key]['author'],
-                    'ref_key': potential_match_key,
-                    'locations': citation_locations.get(cite_key, [])
-                })
-                if cite_data['warnings']:
-                     format_errors.append({
-                        'citation': cite_data['display'],
-                        'warnings': cite_data['warnings'],
-                        'locations': citation_locations.get(cite_key, [])
-                    })
-                continue
-                
-            # Missing Reference
-            missing_refs.append({
-                'reference': cite_data['display'],
-                'cited_at_paragraphs': citation_locations.get(cite_key, [])
-            })
+            p_el.insert(0, start)
+        p_el.append(end)
+        p_el.append(ref_r)
+        return True
+    except Exception as exc:
+        logger.debug("Comment failed: %s", exc)
+        return False
 
-        if cite_data['warnings']:
-             format_errors.append({
-                'citation': cite_data['display'],
-                'warnings': cite_data['warnings'],
-                'locations': citation_locations.get(cite_key, [])
-            })
 
-    # 3. Check Abbreviation Usage
-    abbreviation_errors = check_abbreviation_usage(matched_pairs, citations, references, citation_locations)
-    
-    # 4. Find Unused References
-    for ref_key, ref_data in references.items():
-        if ref_key not in matched_references:
-            involved_in_mismatch = False
-            for ym in year_mismatches:
-                if ym['ref_key'] == ref_key: involved_in_mismatch = True
-            for sm in spelling_mismatches:
-                if sm['ref_key'] == ref_key: involved_in_mismatch = True
-                
-            if not involved_in_mismatch:
-                detail = reference_details.get(ref_key, {})
-                unused_refs.append({
-                    'reference': ref_data['display'],
-                    'line': detail.get('line', 'Unknown'),
-                    'text': detail.get('text', 'N/A')
-                })
-
-    # 5. Find Duplicates
-    duplicates_list = find_duplicates(references, reference_details)
-
-    return {
-        'total_citations': len(citations),
-        'total_references': len(references),
-        'valid_count': len(matched_citations),
-        'missing_references': missing_refs,
-        'unused_references': unused_refs,
-        'duplicates': duplicates_list,
-        'valid_citations': sorted(valid_citations),
-        'format_errors': format_errors,
-        'year_mismatches': year_mismatches,
-        'spelling_mismatches': spelling_mismatches,
-        'et_al_errors': et_al_errors,
-        'abbreviation_errors': abbreviation_errors,
-        'all_citations': list(citations.keys()),
-        'all_references': list(references.keys()),
-        'matched_citation_keys': list(matched_citations),
-        'citations': citations,
-        'references': references,
-        'citation_locations': citation_locations,
-        'reference_details': reference_details
-    }
-
-def validate_document_multi_style(file_path, citation_style=None):
+def _find_runs_for_text(para, needle):
     """
-    Validate document with support for multiple citation styles.
-    
-    Args:
-        file_path: Path to Word document
-        citation_style: Optional style ('apa', 'vancouver', 'chicago'). 
-                       If None, will auto-detect.
-    
-    Returns:
-        Dict with validation results including detected style
+    Return the list of runs in *para* whose combined text contains *needle*.
+    Tries exact match first, then case-insensitive.
     """
-    paragraphs = extract_text_from_docx(file_path)
-    
-    # Auto-detect style if not specified
+    if not needle:
+        return []
+    full = "".join(r.text for r in para.runs)
+    pos = full.find(needle)
+    if pos == -1:
+        pos = full.lower().find(needle.lower())
+    if pos == -1:
+        return []
+    end = pos + len(needle)
+    result, cur = [], 0
+    for r in para.runs:
+        rlen = len(r.text)
+        if cur < end and cur + rlen > pos:
+            result.append(r)
+        cur += rlen
+    return result
+
+
+def _apply_style_to_runs(runs, style_name):
+    """Apply a character style to a list of runs (best-effort)."""
+    for r in runs:
+        try:
+            r.style = style_name
+        except Exception:
+            pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CORE: SINGLE-PASS PROCESS & ANNOTATE
+# ─────────────────────────────────────────────────────────────────────────────
+
+def process_and_annotate_document(input_path, output_path, citation_style=None):
+    """
+    Single-pass pipeline:
+      1. Auto-detect APA style (or use provided).
+      2. Find every in-text citation (body paragraphs only, before <ref-open>).
+      3. Find every reference entry (between <ref-open> … <ref-close>).
+      4. Match citations → references:
+           a. Exact key match
+           b. Smart / normalised match (handles «and» vs «&», et al, abbreviations)
+           c. Fuzzy spelling match (SequenceMatcher ≥ 0.80)
+      5. For each body paragraph:
+           • Locate citation run(s) and apply  cite_bib  character style
+             (green highlight = matched, yellow = unmatched)
+           • Add Word comment for MISSING REFERENCE (no match at all)
+           • Add Word comment for SPELLING MISMATCH (close but different spelling)
+      6. For unused references add Word comment UNUSED REFERENCE.
+      7. Save annotated doc to output_path.
+    Returns a summary dict.
+    """
+    import difflib
+    from docx.enum.text import WD_COLOR_INDEX
+
+    # ── 0. Setup ────────────────────────────────────────────────────────────
     if citation_style is None:
-        sample_text = ' '.join(paragraphs[:50])  # Use first 50 paragraphs
-        citation_style = auto_detect_style(sample_text)
-        logger.info(f"Auto-detected citation style: {citation_style}")
-    
-    # Get appropriate parser
+        citation_style = "apa"
+
     try:
         parser = get_parser(citation_style)
-        logger.info(f"Using {citation_style.upper()} parser")
-    except ValueError as e:
-        # Fall back to APA if style not supported
-        logger.warning(f"Unsupported style '{citation_style}', falling back to APA: {e}")
-        parser = get_parser('apa')
-        citation_style = 'apa'
-    
-    # Use the detected parser with validation logic
-    results = validate_document(file_path, parser=parser)
-    
-    # Add detected style to results
-    results['citation_style'] = citation_style.upper()
-    results['citation_style_name'] = {
-        'apa': 'APA (American Psychological Association)',
-        'vancouver': 'Vancouver',
-        'chicago': 'Chicago (Author-Year)'
-    }.get(citation_style, citation_style.upper())
-    
-    return results
+    except Exception:
+        parser = get_parser("apa")
+        citation_style = "apa"
+
+    doc = Document(input_path)
+    _ensure_cite_bib_style(doc)
+
+    paragraphs_text = [p.text for p in doc.paragraphs]
+
+    # ── 1. Find citations (body only, stop at <ref-open>) ──────────────────
+    citations = {}          # cite_key -> {author, year, display, type, raw}
+    cite_para_idx = {}      # cite_key -> list[paragraph_index (0-based)]
+
+    for idx, para_text in enumerate(paragraphs_text):
+        if "<ref-open>" in para_text:
+            break
+        found = parser.parse_citation(para_text)
+        for cite in found:
+            author = cite.get("author", "").strip()
+            year   = cite.get("year",   "").strip()
+            if not author or not year:
+                continue
+            key = normalize_citation_key(author, year)
+            if key not in citations:
+                citations[key] = {
+                    "author":  author,
+                    "year":    year,
+                    "display": f"({author}, {year})" if cite.get("type") == "parenthetical"
+                               else f"{author} ({year})",
+                    "type":    cite.get("type", "parenthetical"),
+                    "raw":     cite.get("raw", ""),
+                }
+            cite_para_idx.setdefault(key, [])
+            if idx not in cite_para_idx[key]:
+                cite_para_idx[key].append(idx)
+
+    # ── 2. Find references (between <ref-open> … <ref-close>) ──────────────
+    references      = {}  # ref_key -> {author, year, full_author, display}
+    ref_para_idx    = {}  # ref_key -> paragraph_index (0-based)
+    in_refs         = False
+
+    for idx, para_text in enumerate(paragraphs_text):
+        stripped = para_text.strip()
+        if "<ref-open>"  in stripped: in_refs = True;  continue
+        if "<ref-close>" in stripped: in_refs = False; continue
+        if not in_refs or not stripped:
+            continue
+        ref_data = parser.parse_reference(stripped)
+        if not ref_data:
+            continue
+        author_disp = ref_data.get("author", "")
+        year        = ref_data.get("year",   "")
+        full_author = ref_data.get("full_author", author_disp)
+        key = normalize_citation_key(author_disp, year)
+        if key not in references:
+            references[key] = {
+                "author":      author_disp,
+                "year":        year,
+                "full_author": full_author,
+                "display":     f"{author_disp} ({year})",
+                "text":        stripped[:150],
+            }
+            ref_para_idx[key] = idx
+
+    # ── 3. Match every citation → a reference ──────────────────────────────
+    # Returns (ref_key | None, match_type)
+    def _match(cite_key, cite_data):
+        # a. Exact key
+        if cite_key in references:
+            return cite_key, "exact"
+        # b. Smart / normalised
+        smart = check_smart_match(cite_data, references)
+        if smart:
+            return smart, "smart"
+        # c. Fuzzy spelling (author only, same year)
+        ca_norm = normalize_text_for_comparison(cite_data["author"])
+        best_k, best_r = None, 0.0
+        for rk, rd in references.items():
+            if rd["year"] != cite_data["year"]:
+                continue
+            ra_norm = normalize_text_for_comparison(rd["author"])
+            ratio = difflib.SequenceMatcher(None, ca_norm, ra_norm).ratio()
+            if ratio > best_r:
+                best_r, best_k = ratio, rk
+        if best_k and best_r >= 0.80:
+            return best_k, "spelling" if best_r < 0.97 else "smart"
+        return None, "none"
+
+    matched_pairs  = {}   # cite_key -> ref_key
+    match_types    = {}   # cite_key -> "exact"|"smart"|"spelling"|"none"
+    matched_refs   = set()
+
+    for ck, cd in citations.items():
+        rk, mt = _match(ck, cd)
+        match_types[ck] = mt
+        if rk:
+            matched_pairs[ck] = rk
+            matched_refs.add(rk)
+
+    # ── 4. Build summary counts ─────────────────────────────────────────────
+    missing_citations  = [ck for ck in citations if ck not in matched_pairs]
+    spelling_mismatches = [ck for ck, mt in match_types.items() if mt == "spelling"]
+    unused_references  = [rk for rk in references if rk not in matched_refs]
+
+    # ── 5. Annotate body paragraphs ─────────────────────────────────────────
+    comments_added = 0
+    styles_applied = 0
+
+    for cite_key, para_indices in cite_para_idx.items():
+        cd        = citations[cite_key]
+        is_matched = cite_key in matched_pairs
+        is_spelling = match_types.get(cite_key) == "spelling"
+        highlight  = WD_COLOR_INDEX.BRIGHT_GREEN if is_matched and not is_spelling \
+                     else WD_COLOR_INDEX.YELLOW
+
+        # Search candidates: raw text first, then display form
+        candidates = []
+        if cd.get("raw"):
+            candidates.append(cd["raw"])
+        if cd["display"] not in candidates:
+            candidates.append(cd["display"])
+
+        for pidx in para_indices:
+            if pidx >= len(doc.paragraphs):
+                continue
+            para = doc.paragraphs[pidx]
+
+            # Find runs
+            target_runs = []
+            for cand in candidates:
+                target_runs = _find_runs_for_text(para, cand)
+                if target_runs:
+                    break
+            # Fallback: search by year string
+            if not target_runs and cd["year"]:
+                target_runs = _find_runs_for_text(para, cd["year"])
+
+            # Apply cite_bib style + highlight
+            if target_runs:
+                _apply_style_to_runs(target_runs, "cite_bib")
+                for r in target_runs:
+                    try:
+                        r.font.highlight_color = highlight
+                    except Exception:
+                        pass
+                styles_applied += 1
+
+            # Add comment if needed
+            if not is_matched:
+                msg = (f"MISSING REFERENCE: '{cd['display']}' has no matching entry "
+                       f"in the bibliography.")
+                if _add_word_comment(doc, para, msg):
+                    comments_added += 1
+
+            elif is_spelling:
+                ref_data  = references[matched_pairs[cite_key]]
+                msg = (f"SPELLING MISMATCH: Cited as '{cd['author']}' but bibliography "
+                       f"has '{ref_data['author']}'. Please verify spelling.")
+                if _add_word_comment(doc, para, msg):
+                    comments_added += 1
+
+    # ── 6. Annotate unused references ───────────────────────────────────────
+    for rk in unused_references:
+        pidx = ref_para_idx.get(rk)
+        if pidx is None or pidx >= len(doc.paragraphs):
+            continue
+        para = doc.paragraphs[pidx]
+        msg  = (f"UNUSED REFERENCE: '{references[rk]['display']}' is in the bibliography "
+                f"but is never cited in the text.")
+        if _add_word_comment(doc, para, msg):
+            comments_added += 1
+
+    # ── 7. Save ─────────────────────────────────────────────────────────────
+    doc.save(output_path)
+
+    return {
+        "total_citations":    len(citations),
+        "total_references":   len(references),
+        "matched_count":      len(matched_pairs),
+        "missing_citations":  len(missing_citations),
+        "spelling_mismatches":len(spelling_mismatches),
+        "unused_references":  len(unused_references),
+        "styles_applied":     styles_applied,
+        "comments_added":     comments_added,
+        "citation_style":     citation_style.upper(),
+        # detail lists for report
+        "_missing":  [citations[k]["display"]           for k in missing_citations],
+        "_spelling": [(citations[k]["display"],
+                       references[matched_pairs[k]]["author"])
+                      for k in spelling_mismatches if k in matched_pairs],
+        "_unused":   [references[k]["display"]          for k in unused_references],
+    }
 
 
 def generate_report(results, filename):
-    # Calculate Total Comments/Issues for Status Line
-    total_issues = (
-        len(results['missing_references']) + 
-        len(results['unused_references']) + 
-        len(results.get('format_errors', [])) + 
-        len(results.get('year_mismatches', [])) + 
-        len(results.get('spelling_mismatches', [])) +
-        len(results.get('et_al_errors', [])) +
-        len(results.get('abbreviation_errors', []))
-    )
-    
-    # Determine Style Label
-    style_label = "Name/Year"
-    if "VANCOUVER" in results.get('citation_style', '').upper():
-         style_label = "Numerical"
+    """Build a plain-text validation report from process_and_annotate_document results."""
+    total_issues = (results["missing_citations"]
+                    + results["spelling_mismatches"]
+                    + results["unused_references"])
+    lines = []
+    lines.append(f"STATUS: APA Name/Year: {total_issues} issue(s)")
+    lines.append("")
+    lines.append("=" * 60)
+    lines.append("APA CITATION VALIDATION REPORT")
+    lines.append("=" * 60)
+    lines.append(f"\nDocument : {filename}")
+    lines.append(f"Style    : {results.get('citation_style', 'APA')}")
+    lines.append("-" * 60)
+    lines.append("\nSUMMARY:")
+    lines.append(f"  In-text citations found   : {results['total_citations']}")
+    lines.append(f"  Bibliography entries found : {results['total_references']}")
+    lines.append(f"  Matched (valid)           : {results['matched_count']}")
+    lines.append(f"  Missing references        : {results['missing_citations']}")
+    lines.append(f"  Spelling mismatches       : {results['spelling_mismatches']}")
+    lines.append(f"  Unused references         : {results['unused_references']}")
+    lines.append(f"  cite_bib styles applied   : {results['styles_applied']}")
+    lines.append(f"  Word comments added       : {results['comments_added']}")
 
-    report_lines = []
-    
-    # Status Header
-    report_lines.append(f"STATUS: {style_label}: {total_issues} comments")
-    report_lines.append("")
-    
-    # Main Title
-    report_lines.append("=" * 60)
-    report_lines.append("NAME AND YEAR VALIDATION REPORT")
-    report_lines.append("=" * 60)
-    
-    # Previous report content follows...
-    # report_lines.append("=" * 60) # User removed this dup line in example, but kept CITATION VALIDATION REPORT below?
-    # Actually the user example has:
-    # STATUS...
-    # ===
-    # NAME AND YEAR...
-    # ===
-    # ===
-    # CITATION VALIDATION...
-    
-    # I will replicate this structure exactly to be safe.
-    
-    report_lines.append("=" * 60)
-    report_lines.append("CITATION VALIDATION REPORT")
-    report_lines.append("=" * 60)
-    report_lines.append(f"\nDocument: {filename}")
-    report_lines.append(f"Style: {results.get('citation_style_name', 'APA')}")
-    report_lines.append("-" * 60)
-    
-    report_lines.append("\nSUMMARY:")
-    report_lines.append(f"  Total in-text citations found: {results['total_citations']}")
-    report_lines.append(f"  Total references in bibliography: {results['total_references']}")
-    report_lines.append(f"  Valid (matched) citations: {results['valid_count']}")
-    report_lines.append(f"  Missing references: {len(results['missing_references'])}")
-    report_lines.append(f"  Unused references: {len(results['unused_references'])}")
-    report_lines.append(f"  Format Errors: {len(results.get('format_errors', []))}")
-    report_lines.append(f"  Year Mismatches: {len(results.get('year_mismatches', []))}")
-    report_lines.append(f"  Spelling Mismatches: {len(results.get('spelling_mismatches', []))}")
-    report_lines.append(f"  Spelling Mismatches: {len(results.get('spelling_mismatches', []))}")
-    report_lines.append(f"  Et Al. Errors: {len(results.get('et_al_errors', []))}")
-    report_lines.append(f"  Abbreviation Errors: {len(results.get('abbreviation_errors', []))}")
-    
-    if results['missing_references']:
-        report_lines.append("\n" + "-" * 60)
-        report_lines.append("MISSING REFERENCES (cited but not in bibliography):")
-        report_lines.append("-" * 60)
-        for item in results['missing_references']:
-            report_lines.append(f"\n  {item['reference']}")
-            report_lines.append(f"    Cited in paragraph(s): {', '.join(map(str, item['cited_at_paragraphs']))}")
-    
-    if results.get('year_mismatches'):
-        report_lines.append("\n" + "-" * 60)
-        report_lines.append("YEAR MISMATCHES (Author matches but year differs):")
-        report_lines.append("-" * 60)
-        for item in results['year_mismatches']:
-            report_lines.append(f"\n  Citation: {item['citation']}")
-            report_lines.append(f"  Reference Year: {item['ref_year']}")
-            report_lines.append(f"  Cited in paragraph(s): {', '.join(map(str, item['locations']))}")
+    if results["_missing"]:
+        lines.append("\n" + "-" * 60)
+        lines.append("MISSING REFERENCES (cited but not in bibliography):")
+        lines.append("-" * 60)
+        for item in results["_missing"]:
+            lines.append(f"  {item}")
 
-    if results.get('spelling_mismatches'):
-        report_lines.append("\n" + "-" * 60)
-        report_lines.append("SPELLING MISMATCHES (Author spelling differs):")
-        report_lines.append("-" * 60)
-        for item in results['spelling_mismatches']:
-            report_lines.append(f"\n  Citation: {item['citation']}")
-            report_lines.append(f"  Cited Author: {item['cited_author']}")
-            report_lines.append(f"  Ref Author: {item['ref_author']}")
-            report_lines.append(f"  Cited in paragraph(s): {', '.join(map(str, item['locations']))}")
+    if results["_spelling"]:
+        lines.append("\n" + "-" * 60)
+        lines.append("SPELLING MISMATCHES:")
+        lines.append("-" * 60)
+        for cited, ref_auth in results["_spelling"]:
+            lines.append(f"  Cited:  {cited}")
+            lines.append(f"  Ref:    {ref_auth}")
 
-    if results.get('et_al_errors'):
-        report_lines.append("\n" + "-" * 60)
-        report_lines.append("ET AL. ERRORS (Incorrect use of 'et al.'):") 
-        report_lines.append("-" * 60)
-        for item in results['et_al_errors']:
-            report_lines.append(f"\n  Citation: {item['citation']}")
-            report_lines.append(f"  Issue: {item['message']}")
-            report_lines.append(f"  Correct Form: {item['correct_form']}")
-            report_lines.append(f"  Cited in paragraph(s): {', '.join(map(str, item['locations']))}")
+    if results["_unused"]:
+        lines.append("\n" + "-" * 60)
+        lines.append("UNUSED REFERENCES (in bibliography but never cited):")
+        lines.append("-" * 60)
+        for item in results["_unused"]:
+            lines.append(f"  {item}")
 
-    if results.get('abbreviation_errors'):
-        report_lines.append("\n" + "-" * 60)
-        report_lines.append("ABBREVIATION ERRORS (First vs Subsequent Usage):") 
-        report_lines.append("-" * 60)
-        for item in results['abbreviation_errors']:
-            report_lines.append(f"\n  Citation: {item['citation']}")
-            report_lines.append(f"  Issue: {item['message']}")
-            report_lines.append(f"  Cited in paragraph(s): {', '.join(map(str, item['locations']))}")
-
-    if results.get('duplicates'):
-        report_lines.append("\n" + "-" * 60)
-        report_lines.append("DUPLICATE REFERENCES:")
-        report_lines.append("-" * 60)
-        for d in results['duplicates']:
-            report_lines.append(f"\n  Original ID: {d['duplicate_of']}")
-            report_lines.append(f"  Duplicate ID: {d['id']}")
-            report_lines.append(f"  Text: {d['text']}")
-            report_lines.append(f"  Similarity Score: {d['score']}%")
-            
-    if results.get('format_errors'):
-        report_lines.append("\n" + "-" * 60)
-        report_lines.append("FORMAT ERRORS (APA Style Violations):")
-        report_lines.append("-" * 60)
-        for item in results['format_errors']:
-            report_lines.append(f"\n  Citation: {item['citation']}")
-            for w in item['warnings']:
-                report_lines.append(f"    - {w}")
-            report_lines.append(f"    Cited in paragraph(s): {', '.join(map(str, item['locations']))}")
-    
-    if results['unused_references']:
-        report_lines.append("\n" + "-" * 60)
-        report_lines.append("UNUSED REFERENCES (in bibliography but never cited):")
-        report_lines.append("-" * 60)
-        for item in results['unused_references']:
-            report_lines.append(f"\\n  {item['reference']}")
-            report_lines.append(f"    Line: {item['line']}")
-            report_lines.append(f"    Text: {item['text']}")
-    
-    if results['valid_citations']:
-        report_lines.append("\\n" + "-" * 60)
-        report_lines.append("VALID CITATIONS:")
-        report_lines.append("-" * 60)
-        for ref in results['valid_citations']:
-            report_lines.append(f"  {ref}")
-    
-    report_lines.append("\\n" + "=" * 60)
-    report_lines.append("END OF REPORT")
-    report_lines.append("=" * 60)
-    
-    return "\n".join(report_lines)
+    lines.append("\n" + "=" * 60)
+    lines.append("END OF REPORT")
+    lines.append("=" * 60)
+    return "\n".join(lines)
 
 
-def find_citation_in_runs(paragraph, citation_text, fuzzy_threshold=0.75):
-    """
-    Find the specific run(s) containing a citation text in a paragraph.
-    Uses robust index mapping to handle citations split across multiple runs.
+# ─────────────────────────────────────────────────────────────────────────────
+# ReferencesStructing optional dependency
+# ─────────────────────────────────────────────────────────────────────────────
+import shutil
+import uuid
+from pathlib import Path
+
+try:
+    import ReferencesStructing as RS
+    RS_AVAILABLE = True
+except Exception as _rs_err:
+    RS = None  # type: ignore
+    RS_AVAILABLE = False
+    logger.warning(f"ReferencesStructing not available: {_rs_err}")
+
+
     
-    Args:
-        paragraph: python-docx Paragraph object
-        citation_text: Citation text to find (e.g., "(Smith, 2020)")
-        fuzzy_threshold: Minimum similarity ratio for fuzzy matching (0.0-1.0) - Unused in strict index mode but kept for signature
+@app.route('/', methods=['GET', 'POST'])
+def index():
+    if request.method == 'POST':
+        if 'file' not in request.files:
+            flash('No file selected', 'error')
+            return redirect(request.url)
         
-    Returns:
-        List of Run objects containing the citation.
-    """
-    if not citation_text:
-        return []
+        files = request.files.getlist('file')
+        if not files or files[0].filename == '':
+            flash('No file selected', 'error')
+            return redirect(request.url)
 
-    # 1. Build full text and map run indices
-    full_text = ""
-    run_map = [] # List of (start_index, end_index, run_object)
-    
-    current_idx = 0
-    for run in paragraph.runs:
-        text_len = len(run.text)
-        run_map.append((current_idx, current_idx + text_len, run))
-        full_text += run.text
-        current_idx += text_len
-        
-    # 2. Find citation in full text
-    # Normalize for loose matching (ignore case/whitespace diffs if exact fails)
-    
-    # Try Exact Match first
-    start_pos = full_text.find(citation_text)
-    
-    if start_pos == -1:
-        # Try Case Insensitive
-        start_pos = full_text.lower().find(citation_text.lower())
-        
-    if start_pos == -1:
-        # Try normalizing whitespace (collapse spaces)
-        # This is harder to map back to indices directly if we change length.
-        # But commonly the issue is just simple splits.
-        # Let's try aggressive "remove all spaces" match as a fallback?
-        # No, that breaks index mapping.
-        # Let's rely on the calling function to provide varying candidates (regex output).
-        return []
-        
-    end_pos = start_pos + len(citation_text)
-    
-    # 3. Collect Runs Overlapping with [start_pos, end_pos]
-    matched_runs = []
-    
-    for r_start, r_end, run_obj in run_map:
-        # Check for overlap
-        # Overlap if run starts before match ends AND run ends after match starts
-        if r_start < end_pos and r_end > start_pos:
-            matched_runs.append(run_obj)
-            
-    return matched_runs
+        # Options
+        check_validation = request.form.get('check_validation') == 'yes'
+        check_structuring = request.form.get('check_structuring') == 'yes'
+        citation_style = request.form.get('citation_style', 'auto')
+        if citation_style == 'auto': citation_style = None
 
+        if not check_validation and not check_structuring:
+            flash('Please select at least one option (Reference Check or Structuring)', 'warning')
+            return redirect(request.url)
 
-def insert_comments_in_document(file_path, results, citation_locations, reference_details):
-    """
-    Insert Word comments for missing references, unused references, and mismatches.
-    """
-    doc = Document(file_path)
-    comment_count = 0
-    
-    # 1. Missing References
-    for item in results['missing_references']:
-        citation_text = item['reference']
-        # The parser might return display format, which might not match exact text in doc if we normalized it.
-        # But we stored 'raw' in parser if we used it, but here we iterate existing list.
-        # We need to rely on citation_locations which links Key -> Paragraph Index.
-        # We'll need a way to link 'item' back to key or rely on display text searching.
+        # Create Batch Directory
+        batch_id = str(uuid.uuid4())[:8]
+        batch_dir = os.path.join(app.config['UPLOAD_FOLDER'], f"batch_{batch_id}")
+        os.makedirs(batch_dir, exist_ok=True)
         
-        # Simpler approach: Iterate citation_locations
-        pass # Logic handled below generically
-    
-    # helper to add comment with improved matching
-    def add_comment_to_citation(cite_text, paragraphs, message):
-        count = 0
-        for para_num in paragraphs:
-            if para_num <= len(doc.paragraphs):
-                para = doc.paragraphs[para_num - 1]
+        results_map = [] # To store (file_path, arcname)
+
+        try:
+            for file in files:
+                if not (file.filename and allowed_file(file.filename)):
+                    continue
                 
-                # Try 1: Exact index match with citation text
-                runs = find_citation_in_runs(para, cite_text, fuzzy_threshold=0.75)
-                
-                # Try 2: Regex Based Candidates (Robust Fallback)
-                if not runs:
-                    import re
-                    # Extract year
-                    year_match = re.search(r'(\b\d{4}[a-z]?\b|n\.d\.|in press)', cite_text, re.IGNORECASE)
-                    year_part = year_match.group(1) if year_match else None
-                    
-                    # Extract author (everything before year or parens often works)
-                    author_part = None
-                    if '(' in cite_text:
-                        author_part = cite_text.split('(')[0].strip()
-                        if not author_part: # Leading paren case: (Author, Year)
-                            # Remove leading paren and extract until comma/year
-                            cleaned = cite_text.replace('(', '').replace(')', '')
-                            if year_part:
-                                author_part = cleaned.split(year_part)[0].strip(' ,.')
-                            else:
-                                author_part = cleaned
+                original_filename = secure_filename(file.filename)
+                file_path = os.path.join(batch_dir, original_filename)
+                file.save(file_path)
+
+                # Track current working document
+                current_doc_path = file_path
+                current_doc_name = original_filename
+
+                # 1. STRUCTURING PHASE
+                if check_structuring:
+                    if not RS_AVAILABLE:
+                        logger.warning("Structuring skipped — ReferencesStructing module not available.")
+                        flash("Structuring module not available. Validation only.", "warning")
                     else:
-                        if year_part:
-                            author_part = cite_text.split(year_part)[0].strip(' ,(')
-                        else:
-                            author_part = cite_text.strip()
-                            
-                    if author_part and year_part:
-                        # Escape special chars
-                        author_regex = re.escape(author_part).replace(r'\ ', r'\s+')
-                        regexes = []
-                        # 1. Parenthetical Pattern: (Author... Year...)
-                        regexes.append(re.compile(r'\([^)]*?' + author_regex + r'.*?' + re.escape(year_part) + r'.*?\)', re.IGNORECASE))
-                        # 2. Narrative Pattern: Author... (Year...)
-                        regexes.append(re.compile(author_regex + r'.*?\([^)]*?' + re.escape(year_part) + r'.*?\)', re.IGNORECASE))
-                        
-                        candidates = []
-                        for pattern in regexes:
-                            candidates.extend(pattern.findall(para.text))
-                            
-                        for cand in candidates:
-                            runs = find_citation_in_runs(para, cand)
-                            if runs: break
+                        try:
+                            logger.info(f"Structuring references for {original_filename}")
+                            struct_res = RS.process_docx_file(Path(file_path), Path(batch_dir))
 
-                # Fallback 3: Just Author if all else fails
-                if not runs and author_part and len(author_part) > 2 and "Unknown" not in author_part:
-                     runs = find_citation_in_runs(para, author_part)
-                     
-                # Fallback 4: Just Year
-                if not runs and year_part:
-                     if year_part in para.text:
-                         # Anchor to first run or try to find year specifically?
-                         # Finding year in runs using find_citation_in_runs
-                         runs = find_citation_in_runs(para, year_part)
+                            structured_path = str(struct_res['output_docx'])
+                            log_path = str(struct_res['log_file'])
 
-                # Fallback 5: Unknown/Fail -> First run
-                if not runs and "Unknown" in cite_text and para.runs:
-                     runs = [para.runs[0]]
-                
-                if runs:
+                            if os.path.exists(structured_path):
+                                results_map.append((structured_path, f"Structured/{current_doc_name.replace('.docx', '_Structured.docx')}"))
+                                results_map.append((log_path, f"Logs/{current_doc_name.replace('.docx', '_Structuring_Log.txt')}"))
+                                # Hand off structured doc to validation phase
+                                current_doc_path = structured_path
+                                current_doc_name = os.path.basename(structured_path)
+                        except Exception as e:
+                            logger.error(f"Error structuring {original_filename}: {e}")
+                            results_map.append((file_path, f"Errors/{original_filename}_Structuring_Failed.docx"))
+
+                # 2. VALIDATION PHASE
+                if check_validation:
                     try:
-                        doc.add_comment(
-                            runs=runs,
-                            text=message,
-                            author="Citation Checker",
-                            initials="CC"
+                        logger.info(f"Validating {current_doc_name}")
+
+                        # Output path for the annotated DOCX
+                        annotated_filename = current_doc_name.replace('.docx', '_Annotated.docx')
+                        annotated_path = os.path.join(batch_dir, annotated_filename)
+
+                        # Single-pass: APA check/fix, cite_bib style, match, comments
+                        processor = CitationProcessor(current_doc_path)
+                        report    = processor.process(annotated_path)
+
+                        # Save plain-text report
+                        report_text = (
+                            f"Document: {current_doc_name}\n\n"
+                            + report.summary()
                         )
-                        count += 1
-                        logger.debug(f"Successfully added comment to paragraph {para_num}")
+                        report_filename = f"{current_doc_name}_Report.txt"
+                        report_path = os.path.join(batch_dir, report_filename)
+                        with open(report_path, 'w', encoding='utf-8') as f:
+                            f.write(report_text)
+
+                        results_map.append((report_path,    f"Reports/{report_filename}"))
+                        results_map.append((annotated_path, f"Annotated/{annotated_filename}"))
+
+                        s = report.stats
+                        logger.info(
+                            f"Validation done — matched:{s.get('matched',0)} "
+                            f"missing:{s.get('missing',0)} "
+                            f"year:{s.get('year_mismatch',0)} "
+                            f"spelling:{s.get('spelling_mismatch',0)} "
+                            f"unused:{s.get('unused',0)}"
+                        )
                     except Exception as e:
-                        logger.warning(f"Failed to add comment for '{cite_text}' at paragraph {para_num}: {e}")
-                else:
-                    logger.warning(f"Could not locate citation '{cite_text}' in paragraph {para_num}")
-        
-        return count
+                        logger.error(f"Error validating {current_doc_name}: {e}", exc_info=True)
 
-    # Add comments for Missing References
-    for item in results['missing_references']:
-        msg = f"⚠️ MISSING REFERENCE: '{item['reference']}' is not in the bibliography."
-        comment_count += add_comment_to_citation(item['reference'], item['cited_at_paragraphs'], msg)
+            # GENERATE ZIP
+            if not results_map:
+                flash('No results generated. Please check files and try again.', 'error')
+                return redirect(request.url)
 
-    # Add comments for Year Mismatches
-    for item in results.get('year_mismatches', []):
-        msg = f"📅 YEAR MISMATCH: You cited '{item['cited_year']}' but bibliography has '{item['ref_year']}'."
-        comment_count += add_comment_to_citation(item['citation'], item['locations'], msg)
-
-    # Add comments for Spelling Mismatches
-    for item in results.get('spelling_mismatches', []):
-        msg = f"🔤 SPELLING MISMATCH: Cited as '{item['cited_author']}' but bibliography has '{item['ref_author']}'."
-        comment_count += add_comment_to_citation(item['citation'], item['locations'], msg)
-
-    # Add comments for Format Errors
-    for item in results.get('format_errors', []):
-        warnings_str = "\\n".join(item['warnings'])
-        msg = f"📝 FORMAT ERROR: {warnings_str}"
-        comment_count += add_comment_to_citation(item['citation'], item['locations'], msg)
-    
-    # Add comments for Et Al. Errors
-    for item in results.get('et_al_errors', []):
-        msg = f"✏️ ET AL. ERROR: {item['message']}"
-        comment_count += add_comment_to_citation(item['citation'], item['locations'], msg)
-    
-    # Add comments for Abbreviation Errors (NEW)
-    for item in results.get('abbreviation_errors', []):
-        msg = f"🔤 ABBREVIATION ERROR: {item['message']}"
-        comment_count += add_comment_to_citation(item['citation'], item['locations'], msg)
-
-    # Add comments for Unused References
-    for item in results['unused_references']:
-
-
-        # We need to find the reference in the bibliography section again?
-        # or use reference_details which has line number.
-        line_num = item['line']
-        if line_num != 'Unknown' and line_num <= len(doc.paragraphs):
-             para = doc.paragraphs[line_num - 1]
-             if para.runs:
-                try:
-                    runs_to_comment = para.runs[:min(3, len(para.runs))]
-                    doc.add_comment(
-                        runs=runs_to_comment,
-                        text=f"ℹ️ UNUSED REFERENCE: This reference is never cited in the text.",
-                        author="Citation Checker",
-                        initials="CC"
-                    )
-                    comment_count += 1
-                except:
-                    pass
-    
-    return doc, comment_count
-
-
-def apply_citation_formatting(file_path, results):
-    """
-    Format ALL citations in the document:
-    1. Shorten multi-author citations (3+ authors) to 'et al.' if not already (for valid matches).
-    2. Apply 'cite_bib' character style.
-    3. Highlight in Green (Valid/Matched) or Yellow (Unmatched/Mismatch).
-    """
-    from docx.shared import RGBColor
-    from docx.enum.text import WD_COLOR_INDEX
-    
-    doc = Document(file_path)
-    count = 0
-    
-    # Ensure style exists
-    from docx.enum.style import WD_STYLE_TYPE
-    styles = doc.styles
-    try:
-        styles['cite_bib']
-    except KeyError:
-        # Create character style if missing
-        style = styles.add_style('cite_bib', WD_STYLE_TYPE.CHARACTER)
-        #font = style.font
-        #font.superscript = True
-        # Optional: Set color or other properties if desired by default
-        # font.color.rgb = RGBColor(0, 0, 0)
-    
-    citations = results['citations']
-    references = results['references']
-    citation_locations = results['citation_locations']
-    matched_keys = set(results.get('matched_citation_keys', []))
-    
-    # Iterate through ALL detected citations
-    # We sort by location availability to group work? No, just iterate dict.
-    # But same citation key might have multiple locations.
-    
-    for cite_key, cite_data in citations.items():
-        location_indices = citation_locations.get(cite_key, [])
-        
-        # Determine Status
-        is_valid = cite_key in matched_keys
-        
-        # Determine Color
-        highlight_color = WD_COLOR_INDEX.BRIGHT_GREEN if is_valid else WD_COLOR_INDEX.YELLOW
-        
-        # Determine Shortening (Only for valid matches)
-        should_shorten = False
-        full_shortened_str = ""
-        first_author_surname = ""
-        
-        if is_valid:
-            target_ref_data = None
-            if cite_key in references:
-                target_ref_data = references[cite_key]
-            else:
-                match_found = match_citation_to_reference(cite_data, references)
-                if not match_found:
-                     match_found = check_smart_match(cite_data, references)
-                if match_found:
-                    target_ref_data = references[match_found]
+            memory_file = io.BytesIO()
+            with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for src_path, arc_name in results_map:
+                    if os.path.exists(src_path):
+                        zf.write(src_path, arc_name)
             
-            # Shortening disabled as per user request to preserve original text
-            # if target_ref_data:
-            #     ref_full_author = target_ref_data.get('full_author', '')
-            #     comma_count = ref_full_author.count(',')
-            #     if comma_count >= 3 and '&' in ref_full_author:
-            #          should_shorten = True
-            #     first_author_surname = extract_first_surname(ref_full_author)
-            #     
-            #     if cite_data['type'] == 'parenthetical':
-            #          full_shortened_str = f"({first_author_surname} et al., {cite_data['year']})"
-            #     else:
-            #          full_shortened_str = f"{first_author_surname} et al. ({cite_data['year']})"
+            memory_file.seek(0)
+            
+            # Use send_file with a callback to clean up? 
+            # Flask send_file doesn't support cleanup callback easily in older versions, 
+            # but we can trust OS temp cleaning or do it in a finally block if we weren't returning
+            # Since we are returning a stream, we can't delete immediately.
+            # Best practice: schedule a cleanup or trust the unique dir is small enough until standard purge.
+            # OR read bytes and delete.
+            
+            response = make_response(send_file(
+                memory_file,
+                mimetype='application/zip',
+                as_attachment=True,
+                download_name=f"Processed_Results_{batch_id}.zip"
+            ))
+            
+            # Set cookie for frontend to detect download completion
+            token = request.form.get('download_token')
+            if token:
+                response.set_cookie('download_token', token, max_age=10, path='/')
+                
+            return response
 
-        # Apply to Document Paragraphs
-        for para_idx in location_indices:
-             if para_idx > len(doc.paragraphs): continue
-             para = doc.paragraphs[para_idx - 1]
-             
-             citation_display = cite_data['display']
-             
-             # Locate text Strategy
-             # 1. Try raw text
-             # 2. Try display text
-             # 3. Try Regex reconstruction (Robust fallback)
-             
-             search_candidates = []
-             
-             # Candidate 1: Raw text stored in parser data
-             if 'raw' in cite_data and cite_data['raw']:
-                 search_candidates.append(cite_data['raw'])
-             
-             # Candidate 2: Display text
-             if citation_display and citation_display not in search_candidates:
-                 search_candidates.append(citation_display)
+        except Exception as e:
+            logger.error(f"Batch processing error: {e}", exc_info=True)
+            flash(f'Error processing files: {str(e)}', 'error')
+            return redirect(request.url)
 
-             # Candidate 3: Regex match in this specific paragraph
-             try:
-                 author_part = cite_data.get('author', '').strip()
-                 year_part = cite_data.get('year', '').strip()
-                 
-                 if author_part and year_part:
-                     import re
-                     # Escape special chars in author but allow for some flexibility
-                     author_regex = re.escape(author_part).replace(r'\ ', r'\s+')
-                     
-                 if author_part and year_part:
-                     import re
-                     # Escape special chars in author but allow for some flexibility
-                     author_regex = re.escape(author_part).replace(r'\ ', r'\s+')
-                     
-                     regexes = []
-                     # 1. Parenthetical Pattern: (Author... Year...)
-                     regexes.append(re.compile(r'\([^)]*?' + author_regex + r'.*?' + re.escape(year_part) + r'.*?\)', re.IGNORECASE))
-                     # 2. Narrative Pattern: Author... (Year...)
-                     regexes.append(re.compile(author_regex + r'.*?\([^)]*?' + re.escape(year_part) + r'.*?\)', re.IGNORECASE))
-                     
-                     for pattern in regexes:
-                         matches = pattern.findall(para.text)
-                         for m in matches:
-                             if m not in search_candidates:
-                                 search_candidates.append(m)
-             except Exception as e:
-                 logging.warning(f"Failed to generate regex candidate: {e}")
+    return render_template('index.html')
 
-             
-             run_group = None
-             matched_candidate = None
-             full_text_found = ""
-             
-             # Try candidates
-             for candidate in search_candidates:
-                 if not candidate: continue
-                 # Clean candidates of trailing punctuation for search
-                 clean_candidate = candidate.strip('.,; ')
-                 
-                 rg = find_citation_in_runs(para, clean_candidate, fuzzy_threshold=0.85)
-                 if rg:
-                     # Verify match
-                     ft = "".join(r.text for r in rg)
-                     # Check if it contains the essential parts (Author/Year) to confirm it's not a false positive
-                     if clean_candidate in ft or cite_data['year'] in ft: # Loose check
-                         run_group = rg
-                         matched_candidate = clean_candidate
-                         full_text_found = ft
-                         break
-             
-             if run_group:
-                 # Robust Replacement Logic
-                 full_text = full_text_found
-                 
-                 # Collapse run group to single run
-                 for r in run_group[1:]:
-                     r.text = ""
-                 
-                 final_citation_text = matched_candidate
-                 
-                 # Apply Shortening if Valid
-                 if is_valid and should_shorten and "et al" not in matched_candidate.lower():
-                     has_open_paren = '(' in matched_candidate
-                     has_close_paren = ')' in matched_candidate
-                     
-                     replacement_str = full_shortened_str
-                     if not has_open_paren and not has_close_paren:
-                         replacement_str = full_shortened_str.replace('(', '').replace(')', '')
-                     
-                     # Simple replace
-                     full_text = full_text.replace(matched_candidate, replacement_str, 1)
-                     final_citation_text = replacement_str
-                 
-                 # Split and Style
-                 run = run_group[0]
-                 run.text = full_text 
-                 
-                 try:
-                     start_idx = full_text.find(final_citation_text)
-                     if start_idx != -1:
-                         end_idx = start_idx + len(final_citation_text)
-                         
-                         pre_text = full_text[:start_idx]
-                         post_text = full_text[end_idx:]
-                         
-                         run.text = pre_text
-                         
-                         cite_run = para.add_run(final_citation_text)
-                         cite_run.style = 'cite_bib'
-                         cite_run.font.highlight_color = highlight_color
-                         
-                         run._element.addnext(cite_run._element)
-                         
-                         if post_text:
-                             post_run = para.add_run(post_text)
-                             if run.style and run.style.name != 'Default Paragraph Font':
-                                  post_run.style = run.style
-                             cite_run._element.addnext(post_run._element)
-                             
-                         count += 1
-                     else:
-                         # Fallback if text replacement made find impossible?
-                         pass
-                 except Exception as e:
-                     logger.error(f"Error splitting runs for formatting: {e}")
-                            
-    doc.save(file_path)
-    return count
-
-
-
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)

@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     
     # Database
     DATABASE_URL: str = "postgresql://user:password@localhost/cms_db"
+    REDIS_URL: str = "redis://localhost:6379/0"
 
     class Config:
         env_file = ".env"

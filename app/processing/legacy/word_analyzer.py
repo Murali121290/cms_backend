@@ -5,12 +5,22 @@ import tempfile
 import datetime
 import webbrowser
 from pathlib import Path
-from flask import Flask, request, render_template_string, send_from_directory, redirect, url_for
+try:
+    from flask import Flask, request, render_template_string, send_from_directory, redirect, url_for
+except ImportError:
+    class MockApp:
+        def route(self, *args, **kwargs): return lambda f: f
+        def __setitem__(self, key, value): pass
+    Flask = lambda *args, **kwargs: MockApp()
+    request = send_from_directory = render_template_string = redirect = url_for = None
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import List, Tuple, Dict, Any
 import pythoncom
-from flask import Flask, request, render_template_string, send_file, redirect, url_for, jsonify
+try:
+    from flask import Flask, request, render_template_string, send_file, redirect, url_for, jsonify
+except ImportError:
+    pass
 import threading
 
 progress_data = {}

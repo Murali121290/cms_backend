@@ -89,32 +89,22 @@ class ReferencesEngine:
         # ---------------------------------------------------------
         if run_apa_validation:
             try:
-                 # Returns: dict of results
-                 apa_results = ReferenceAPAValidation.validate_document_multi_style(current_path)
+                 from app.processing.legacy.validation_core import CitationProcessor
+                 
+                 processor = CitationProcessor(current_path)
+                 report = processor.run()
                  
                  if not report_only:
-                     # Apply Formatting (Bold/Italic/Superscript)
-                     formatted_count = ReferenceAPAValidation.apply_citation_formatting(current_path, apa_results)
-                     
-                     # Insert Comments for issues
-                     annotated_doc, comment_count = ReferenceAPAValidation.insert_comments_in_document(
-                         current_path,
-                         apa_results,
-                         apa_results['citation_locations'],
-                         apa_results['reference_details']
-                     )
-                     
-                     # Save Final Version (NY = Name Year)
-                     if comment_count > 0 or formatted_count > 0:
-                         base = os.path.splitext(os.path.basename(current_path))[0]
-                         ny_path = os.path.join(folder, f"{base}_NY.docx")
-                         annotated_doc.save(ny_path)
-                         current_path = ny_path
-                         generated_files.append(current_path)
+                     # Save Final Version (NY = Name Year) if there are issues
+                     base = os.path.splitext(os.path.basename(current_path))[0]
+                     ny_path = os.path.join(folder, f"{base}_NY.docx")
+                     processor.save(ny_path)
+                     current_path = ny_path
+                     generated_files.append(current_path)
                  
                  # Generate Text Report
                  base_orig = os.path.splitext(os.path.basename(file_path))[0]
-                 report_text = ReferenceAPAValidation.generate_report(apa_results, base_orig)
+                 report_text = f"Document: {base_orig}\n\n{report.summary()}"
                  report_path = os.path.join(folder, f"{base_orig}_ReferenceReport.txt")
                  
                  with open(report_path, "w", encoding="utf-8") as f:

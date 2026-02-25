@@ -5,8 +5,8 @@ settings = get_settings()
 
 celery_app = Celery(
     "worker",
-    broker=f"redis://localhost:6379/0", # Default Redis URL
-    backend=f"redis://localhost:6379/0"
+    broker=getattr(settings, "REDIS_URL", "redis://localhost:6379/0"),
+    backend=getattr(settings, "REDIS_URL", "redis://localhost:6379/0")
 )
 
 celery_app.conf.task_routes = {

@@ -322,6 +322,13 @@
                                 Processing</div>
 
                             {% if 'Editor' in user.roles or 'CopyEditor' in user.roles or 'Admin' in user.roles %}
+                            <button onclick="runAllProcesses(event, '{{ file.id }}')"
+                                class="w-full text-left px-4 py-1.5 text-sm text-slate-700 hover:bg-emerald-600 hover:text-white flex items-center gap-3">
+                                <i class="fas fa-play-circle w-4 text-emerald-500 hover:text-white"></i> Run All
+                                Processes
+                            </button>
+                            <div class="border-t border-slate-100 my-1"></div>
+
                             <button onclick="runProcess(event, this)" data-file-id="{{ file.id }}"
                                 data-process-type="language"
                                 class="w-full text-left px-4 py-1.5 text-sm text-slate-700 hover:bg-blue-600 hover:text-white flex items-center gap-3">
@@ -357,6 +364,28 @@
                                 data-process-type="permissions"
                                 class="w-full text-left px-4 py-1.5 text-sm text-slate-700 hover:bg-blue-600 hover:text-white flex items-center gap-3">
                                 <i class="fas fa-shield-alt w-4 text-rose-500"></i> Permissions Check
+                            </button>
+                            <button onclick="runProcess(event, this)" data-file-id="{{ file.id }}"
+                                data-process-type="credit_extractor_ai"
+                                class="w-full text-left px-4 py-1.5 text-sm text-slate-700 hover:bg-blue-600 hover:text-white flex items-center gap-3">
+                                <i class="fas fa-robot w-4 text-emerald-500"></i> AI Credit Extraction
+                            </button>
+                            {% endif %}
+
+                            {% if 'Editor' in user.roles or 'CopyEditor' in user.roles or 'Admin' in user.roles or
+                            'ProjectManager' in user.roles %}
+                            <button onclick="runProcess(event, this)" data-file-id="{{ file.id }}"
+                                data-process-type="bias_scan"
+                                class="w-full text-left px-4 py-1.5 text-sm text-slate-700 hover:bg-blue-600 hover:text-white flex items-center gap-3">
+                                <i class="fas fa-eye w-4 text-indigo-500"></i> Bias Scan
+                            </button>
+                            {% endif %}
+
+                            {% if 'PPD' in user.roles or 'Admin' in user.roles or 'ProjectManager' in user.roles %}
+                            <button onclick="runProcess(event, this)" data-file-id="{{ file.id }}"
+                                data-process-type="word_to_xml"
+                                class="w-full text-left px-4 py-1.5 text-sm text-slate-700 hover:bg-blue-600 hover:text-white flex items-center gap-3">
+                                <i class="fas fa-file-code w-4 text-amber-500"></i> Word to XML
                             </button>
                             {% endif %}
                             {% endif %}
@@ -509,6 +538,13 @@
                                         <div class="border-t border-slate-100 my-1"></div>
                                         {% if 'Editor' in user.roles or 'CopyEditor' in user.roles or 'Admin' in
                                         user.roles %}
+                                        <button onclick="runAllProcesses(event, '{{ file.id }}')"
+                                            class="w-full text-left px-4 py-1.5 text-sm text-slate-700 hover:bg-emerald-600 hover:text-white flex items-center gap-3">
+                                            <i class="fas fa-play-circle w-4 text-emerald-500 hover:text-white"></i> Run
+                                            All Processes
+                                        </button>
+                                        <div class="border-t border-slate-100 my-1"></div>
+
                                         <button onclick="runProcess(event, this)" data-file-id="{{ file.id }}"
                                             data-process-type="language"
                                             class="w-full text-left px-4 py-1.5 text-sm text-slate-700 hover:bg-blue-600 hover:text-white flex items-center gap-3">
@@ -518,6 +554,29 @@
                                             class="w-full text-left px-4 py-1.5 text-sm text-slate-700 hover:bg-blue-600 hover:text-white flex items-center gap-3">
                                             <i class="fas fa-cogs w-4 text-slate-500"></i> Technical Edit
                                         </a>
+                                        <button onclick="runProcess(event, this)" data-file-id="{{ file.id }}"
+                                            data-process-type="bias_scan"
+                                            class="w-full text-left px-4 py-1.5 text-sm text-slate-700 hover:bg-blue-600 hover:text-white flex items-center gap-3">
+                                            <i class="fas fa-eye w-4 text-indigo-500"></i> Bias Scan
+                                        </button>
+                                        {% endif %}
+
+                                        {% if 'PermissionsManager' in user.roles or 'ProjectManager' in user.roles or
+                                        'Admin' in user.roles %}
+                                        <button onclick="runProcess(event, this)" data-file-id="{{ file.id }}"
+                                            data-process-type="credit_extractor_ai"
+                                            class="w-full text-left px-4 py-1.5 text-sm text-slate-700 hover:bg-blue-600 hover:text-white flex items-center gap-3">
+                                            <i class="fas fa-robot w-4 text-emerald-500"></i> AI Credit Extraction
+                                        </button>
+                                        {% endif %}
+
+                                        {% if 'PPD' in user.roles or 'Admin' in user.roles or 'ProjectManager' in
+                                        user.roles %}
+                                        <button onclick="runProcess(event, this)" data-file-id="{{ file.id }}"
+                                            data-process-type="word_to_xml"
+                                            class="w-full text-left px-4 py-1.5 text-sm text-slate-700 hover:bg-blue-600 hover:text-white flex items-center gap-3">
+                                            <i class="fas fa-file-code w-4 text-amber-500"></i> Word to XML
+                                        </button>
                                         {% endif %}
                                         {% endif %}
                                         <div class="border-t border-slate-100 my-1"></div>
@@ -821,6 +880,40 @@
         </div>
     </div>
 </div>
+
+<!-- Check In Modal -->
+<div id="checkInModal{{ file.id }}"
+    class="fixed inset-0 bg-black/50 flex items-center justify-center z-[1050] hidden modal-overlay">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-md m-4 overflow-hidden">
+        <div class="bg-slate-50 border-b border-slate-200 px-6 py-4 flex justify-between items-center">
+            <h5 class="font-bold text-slate-800">Check In File</h5>
+            <button type="button" class="text-slate-400 hover:text-slate-600 transition-colors"
+                onclick="document.getElementById('checkInModal{{ file.id }}').classList.add('hidden')">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <form action="/projects/{{ project.id }}/chapter/{{ chapter.id }}/upload" method="post"
+            enctype="multipart/form-data">
+            <div class="p-6 space-y-4">
+                <p class="text-sm text-slate-600">Please upload your modified version of <strong>{{ file.filename
+                        }}</strong>. Ensure the filename remains exactly the same to properly check it back in.</p>
+                <div>
+                    <input type="file" name="files" required
+                        class="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100">
+                </div>
+                <input type="hidden" name="category" value="{{ file.category }}">
+            </div>
+            <div class="bg-slate-50 border-t border-slate-200 px-6 py-4 flex justify-end gap-3">
+                <button type="button"
+                    class="px-4 py-2 text-slate-600 font-medium hover:bg-slate-200 rounded-lg transition-colors"
+                    onclick="document.getElementById('checkInModal{{ file.id }}').classList.add('hidden')">Cancel</button>
+                <button type="submit"
+                    class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-colors shadow-sm">Check
+                    In</button>
+            </div>
+        </form>
+    </div>
+</div>
 {% endif %}
 {% endfor %}
 {% endblock %}
@@ -1000,6 +1093,20 @@
                 alert(`Error during ${processType}: ${error.message}`);
             });
     }
+
+    // Run All Processes
+    window.runAllProcesses = function (event, fileId) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        if (activeDropdown) activeDropdown.classList.add('hidden');
+        if (!confirm('Run standard processes (Structuring, Reference Check, Technical Edit)? This will run sequentially.')) return;
+
+        // Define the sequence of standard editing processes
+        const processes = ['structuring', 'reference_structuring', 'technical'];
+
+        runReferenceCheckSequence(fileId, processes, 0);
+    };
 
     // Structuring runner
     // Structuring runner with polling

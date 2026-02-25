@@ -4,13 +4,32 @@ import io
 import zipfile
 from collections import defaultdict
 
-
+try:
+    from flask import Flask, request, send_file, render_template, redirect, url_for, session
+except ImportError:
+    class MockApp:
+        def route(self, *args, **kwargs): return lambda f: f
+        def __setitem__(self, key, value): pass
+    Flask = lambda *args, **kwargs: MockApp()
+    request = session = send_file = render_template = redirect = url_for = None
 from docx import Document
 from docx.oxml.text.paragraph import CT_P
 from docx.oxml.table import CT_Tbl
 from docx.text.paragraph import Paragraph
 from docx.table import Table
+from docx.shared import RGBColor
+try:
+    from utils import track_changes
+    TRACK_CHANGES_ENABLED = True
+except ImportError:
+    track_changes = None
+    TRACK_CHANGES_ENABLED = False
+import logging
 
+app = Flask(__name__)
+app.secret_key = "secret_key_for_session_encryption"
+UPLOAD_DIR = "temp_reports"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # =====================================================
 # Helpers & Core Logic
@@ -101,17 +120,10 @@ def format_numbers(nums):
 def is_citation_run(run):
     """
     Determine if a run is part of a citation.
-    Checks for 'cite_bib' style OR superscript with number-like content.
+    Strictly checks for 'cite_bib' styles.
     """
-    if run.style and run.style.name == "cite_bib":
+    if run.style and run.style.name in ["cite_bib"]:
         return True
-    if run.font.superscript:
-        text = run.text.strip()
-        if not text:
-            return False
-        # Must look like numbers/ranges/separators
-        if re.match(r'^[\d,\-–—\s]+$', text):
-            return True
     return False
 
 
@@ -140,12 +152,6 @@ class ReferenceProcessor:
                             found_id = nums[0]
                             bib_run = run
                             break
-                            
-                # Fallback: Check start of text if no styled run
-                if found_id is None:
-                    match = re.match(r'^(\d+)', para.text.strip())
-                    if match:
-                        found_id = int(match.group(1))
                 
                 if found_id is not None:
                     refs_found.add(found_id)
@@ -168,9 +174,6 @@ class ReferenceProcessor:
         appearance_order = []
         seen = set()
         
-        # Regex for fallback pattern ^1-3^
-        citation_pattern = re.compile(r'\^([\d,\-–—\s]+)\^')
-
         for para in iter_document_paragraphs(self.doc):
             # 1. Process runs
             current_group = []
@@ -189,16 +192,6 @@ class ReferenceProcessor:
                                 seen.add(n)
                                 appearance_order.append(n)
                         current_group = []
-                    
-                    # Check fallback pattern in non-citation run
-                    matches = citation_pattern.findall(run.text)
-                    for m in matches:
-                        nums = get_numbers(m)
-                        all_cited_ids.extend(nums)
-                        for n in nums:
-                            if n not in seen:
-                                seen.add(n)
-                                appearance_order.append(n)
             
             # Flush trailing group
             if current_group:
@@ -349,140 +342,38 @@ class ReferenceProcessor:
             mapping[old_id] = new_id
             new_id += 1
             
-        # Create Mapping
-        mapping = {} 
-        new_id = 1
-        for old_id in appearance_order:
-            mapping[old_id] = new_id
-            new_id += 1
-            
-        # 1. Update Citations in Text
-        # Matches: ^1-3^ OR [1-3] OR (1-3)
-        # Note: Be careful with (1) as it can be a list. We verify contents are numeric.
-        citation_pattern = re.compile(r'(\^|\[|\()([\d,\-–—\s]+)(\^|\]|\))')
-        
-        # Track processed run elements to prevent double-processing (chaining)
-        # if the document iteration visits the same element multiple times
-        processed_elements = set()
-        
         for para in iter_document_paragraphs(self.doc):
-            # Iterate runs safely with index since we might modify list
             i = 0
             while i < len(para.runs):
                 run = para.runs[i]
                 
-                # Skip if already processed
-                if run._element in processed_elements:
-                    i += 1
-                    continue
-                
-                original_text = run.text
-                
-                # Check for Citation Pattern matches
-                match = citation_pattern.search(original_text)
-                
-                if match:
-                    # We found a match! We must split the run to style JUST the citation.
-                    start, end = match.span()
-                    
-                    pre_text = original_text[:start]
-                    match_text = original_text[start:end]
-                    post_text = original_text[end:]
-                    
-                    # Calculate replacement text
-                    # Regex Group 2 contains the numbers: [1-3] -> group 2="1-3"
-                    nums = get_numbers(match.group(2))
-                    new_nums = [mapping.get(n, n) for n in nums]
-                    # Format: 1-3
-                    converted_text = format_numbers(new_nums)
-                    
-                    # 1. Update Current Run -> Pre Text
-                    run.text = pre_text
-                    
-                    # 2. Insert Match Run
-                    new_run = para.add_run(converted_text)
-                    new_run.style = "cite_bib"
-                    new_run.font.superscript = True
-                    
-                    # Mark new run as processed so we don't re-process it
-                    processed_elements.add(new_run._element)
-                    
-                    # Move new_run to be after current run
-                    run._element.addnext(new_run._element)
-                    
-                    # 3. Insert Post Run (if exists)
-                    if post_text:
-                        post_run = para.add_run(post_text)
-                        # Copy original style/font props if possible? 
-                        # Ideally yes, but complex. Inheriting 'style' is good enough often.
-                        if run.style:
-                            post_run.style = run.style
-                        
-                        # Move post_run to be after new_run
-                        new_run._element.addnext(post_run._element)
-                        
-                        # We don't advance i yet, or we assume post_run might have MORE citations?
-                        # If post_run has citations, we need to process it.
-                        # But we just inserted it at i+2 roughly.
-                        # The runs list might not update automatically for 'para.runs[i]' indexing if cached?
-                        # python-docx re-reads xml usually.
-                        # Let's verify 'para.runs' reflects changes. 
-                        # If it does, next iter will be new_run (styled) -> skip? 
-                        # Then post_run -> process.
-                        
-                    # We modified the document structure.
-                    # We should probably restart check on 'post_run' if we suspect multiple citations?
-                    # Simply incrementing i might land us on new_run or post_run.
-                    # Since we split current match, we should continue loop.
-                    # But index strategy is tricky if list changes.
-                    # Safer: Break and restart paragraph scan? Or just recursive?
-                    # Given simple needs: let's assuming one per run or use recursive replacement on string FIRST?
-                    # No, string replacement loses style boundaries.
-                    # Let's just break for this run and continue to next (which might be the post_run we just added).
-                    # Actually, if we use list(para.runs) iterator, it won't see new ones.
-                    # We are using while index.
-                    
-                    # Logic: 
-                    # i = current (now pre)
-                    # i+1 = new_run (styled)
-                    # i+2 = post_run
-                    # We want to continue checking from i+2.
-                    i += 1 # Skip new_run
-                    if post_text:
-                         # We want to check post_run next.
-                         # i is now new_run index. i+1 is post_run.
-                         # loop continues, i becomes i+1.
-                         pass
-                    else:
-                         # No post run. i is new_run.
-                         pass
-                    
-                    i += 1
-                    continue
-                
-                elif is_citation_run(run):
-                    # Existing formatted citation logic (likely superscripts without brackets)
-                    # If it's already styled/superscript, we just update numbers.
-                    current_group = [run]
-                    # check next runs? (Group logic from original code was complex)
-                    # For simplicty, let's just update this single run if it stands alone.
-                    # The original code grouped multiple runs.
-                    # We can keep that logic if we assume they are contiguous.
-                    # We can't easily mix index logic with grouping across runs if we want to be safe.
-                    # But is_citation_run is strict.
-                    
-                    # If valid citation run, just update text.
+                if is_citation_run(run):
                     txt = run.text
                     nums = get_numbers(txt)
                     if nums:
                          new_nums = [mapping.get(n, n) for n in nums]
-                         run.text = format_numbers(new_nums)
-                         # Ensure style is enforced
-                         run.style = "cite_bib"
-                         run.font.superscript = True
+                         new_text = format_numbers(new_nums)
                          
-                         # Mark as processed
-                         processed_elements.add(run._element)
+                         is_renumbered = (nums != new_nums)
+                         highlight_color = "008000" if is_renumbered else None
+                         
+                         style_name = run.style.name if run.style else "cite_bib"
+                         
+                         if TRACK_CHANGES_ENABLED:
+                             # Must replace the whole run
+                             track_changes.delete_tracked_run(para, run)
+                             
+                             run_del = run._element.getparent()
+                             anchor = run_del if run_del.tag == track_changes.qn('w:del') else run._element
+                             
+                             ins_new = track_changes.add_tracked_text(para, new_text, style=style_name, color=highlight_color)
+                             anchor.addnext(ins_new)
+                         else:
+                             run.text = new_text
+                             if is_renumbered:
+                                 run.font.color.rgb = RGBColor(0, 128, 0)
+                
+                i += 1
                 
                 i += 1
 
@@ -532,7 +423,21 @@ class ReferenceProcessor:
         for obj in cited_refs:
             # Update ID text
             if obj['run']:
-                obj['run'].text = str(obj['new_id'])
+                old_text = obj['run'].text
+                new_text = str(obj['new_id'])
+                
+                if old_text != new_text:
+                    if TRACK_CHANGES_ENABLED:
+                        style_name = obj['run'].style.name if obj['run'].style else None
+                        
+                        track_changes.delete_tracked_run(obj['para'], obj['run'])
+                        run_del = obj['run']._element.getparent()
+                        anchor = run_del if run_del.tag == track_changes.qn('w:del') else obj['run']._element
+                        
+                        ins_new = track_changes.add_tracked_text(obj['para'], new_text, style=style_name)
+                        anchor.addnext(ins_new)
+                    else:
+                        obj['run'].text = new_text
             
             body.insert(insert_idx, obj['para']._element)
             insert_idx += 1
@@ -591,80 +496,111 @@ def process_document(file):
     return doc, before_stats, after_stats, mapping, status_msg
 
 
-def generate_report(before_stats, after_stats, mapping, status_msg, filename):
-    """
-    Generate a text report for numerical validation results.
-    """
-    total_issues = (
-        len(before_stats.get('missing_references', [])) +
-        len(before_stats.get('unused_references', [])) +
-        len(before_stats.get('duplicate_references', [])) +
-        len(before_stats.get('sequence_issues', []))
-    )
-    
-    report_lines = []
-    
-    # Status Header
-    report_lines.append(f"STATUS: Numerical: {total_issues} issues")
-    report_lines.append("")
-    
-    # Main Title
-    report_lines.append("=" * 60)
-    report_lines.append("NUMERICAL VALIDATION REPORT")
-    report_lines.append("=" * 60)
-    report_lines.append(f"\nDocument: {filename}")
-    report_lines.append(f"Status: {status_msg}")
-    report_lines.append("-" * 60)
-    
-    report_lines.append("\nSUMMARY:")
-    report_lines.append(f"  Total references in bibliography: {before_stats['total_references']}")
-    report_lines.append(f"  Total citations in text: {before_stats['total_citations']}")
-    report_lines.append(f"  Missing references: {len(before_stats.get('missing_references', []))}")
-    report_lines.append(f"  Unused references: {len(before_stats.get('unused_references', []))}")
-    report_lines.append(f"  Duplicate references: {len(before_stats.get('duplicate_references', []))}")
-    report_lines.append(f"  Sequence issues: {len(before_stats.get('sequence_issues', []))}")
-    report_lines.append(f"  Is perfect: {before_stats.get('is_perfect', False)}")
-    
-    if mapping:
-        report_lines.append(f"\nMAPPING (Renumbering):")
-        for old, new in mapping.items():
-            if old != new:
-                report_lines.append(f"  {old} -> {new}")
-    
-    if before_stats.get('missing_references'):
-        report_lines.append("\n" + "-" * 60)
-        report_lines.append("MISSING REFERENCES (cited but not in bibliography):")
-        report_lines.append("-" * 60)
-        for ref in before_stats['missing_references']:
-            report_lines.append(f"  {ref}")
-    
-    if before_stats.get('unused_references'):
-        report_lines.append("\n" + "-" * 60)
-        report_lines.append("UNUSED REFERENCES (in bibliography but not cited):")
-        report_lines.append("-" * 60)
-        for ref in before_stats['unused_references']:
-            report_lines.append(f"  {ref}")
-    
-    if before_stats.get('duplicate_references'):
-        report_lines.append("\n" + "-" * 60)
-        report_lines.append("DUPLICATE REFERENCES:")
-        report_lines.append("-" * 60)
-        for dup in before_stats['duplicate_references']:
-            report_lines.append(f"  ID: {dup.get('id', 'N/A')}, Text: {dup.get('text', 'N/A')}")
-    
-    if before_stats.get('sequence_issues'):
-        report_lines.append("\n" + "-" * 60)
-        report_lines.append("SEQUENCE ISSUES:")
-        report_lines.append("-" * 60)
-        for issue in before_stats['sequence_issues']:
-            report_lines.append(f"  Position {issue['position']}: Expected {issue['expected']}, Found {issue['current']}")
-    
-    report_lines.append("\n" + "=" * 60)
-    report_lines.append("END OF REPORT")
-    report_lines.append("=" * 60)
-    
-    return "\n".join(report_lines)
-
-
 # =====================================================
+# Flask Routes
+# =====================================================
+@app.route("/")
+def upload_file():
+    return render_template("upload.html")
 
+
+@app.route("/process", methods=["GET", "POST"])
+def process():
+    if request.method == "POST":
+        file = request.files.get("file")
+        if not file or not file.filename.endswith(".docx"):
+            return "Invalid file", 400
+
+        doc, before, after, mapping, status_msg = process_document(file)
+
+        base = os.path.splitext(file.filename)[0]
+        doc_path = os.path.join(UPLOAD_DIR, f"{base}_renumbered.docx")
+        report_path = os.path.join(UPLOAD_DIR, f"{base}_validation.txt")
+
+        doc.save(doc_path)
+
+        with open(report_path, "w", encoding="utf-8") as f:
+            f.write(f"STATUS: {status_msg}\n")
+            f.write("VALIDATION BEFORE\n")
+            f.write(str(before) + "\n\n")
+            f.write("VALIDATION AFTER\n")
+            f.write(str(after) + "\n\n")
+            if mapping:
+                f.write("RENUMBERING MAPPING (Old -> New)\n")
+                for old, new in sorted(mapping.items(), key=lambda x: x[1]):
+                    f.write(f"{old} -> {new}\n")
+
+        # Create ZIP package
+        zip_filename = f"{base}_results.zip"
+        zip_path = os.path.join(UPLOAD_DIR, zip_filename)
+        
+        # Validation HTML Report (Offline)
+        html_report_filename = f"{base}_results.html"
+        html_report_path = os.path.join(UPLOAD_DIR, html_report_filename)
+        
+        # Render the template for offline use
+        # Note: We pass offline_mode=True to make links relative
+        html_content = render_template(
+            "validation_results.html",
+            filename=file.filename,
+            results=after,
+            before=before,
+            mapping=mapping,
+            status_msg=status_msg,
+            report_file=os.path.basename(report_path),
+            doc_file=os.path.basename(doc_path),
+            zip_file=None, # No zip button in offline report
+            offline_mode=True 
+        )
+        
+        with open(html_report_path, "w", encoding="utf-8") as f:
+            f.write(html_content)
+
+        with zipfile.ZipFile(zip_path, 'w') as zf:
+             # Add Doc
+             zf.write(doc_path, arcname=os.path.basename(doc_path))
+             # Add Text Report
+             zf.write(report_path, arcname=os.path.basename(report_path))
+             # Add HTML Report
+             zf.write(html_report_path, arcname=os.path.basename(html_report_path))
+
+        # Store data in session for GET request
+        session['processing_result'] = {
+            'filename': file.filename,
+            'before': before,
+            'after': after,
+            'mapping': mapping,
+            'status_msg': status_msg,
+            'report_file': os.path.basename(report_path),
+            'doc_file': os.path.basename(doc_path),
+            'zip_file': zip_filename
+        }
+        
+        return redirect(url_for('process'))
+
+    # GET request - retrieve from session
+    result = session.get('processing_result')
+    if not result:
+        return redirect(url_for('upload_file'))
+        
+    return render_template(
+        "validation_results.html",
+        filename=result['filename'],
+        results=result['after'],
+        before=result['before'],
+        mapping=result['mapping'],
+        status_msg=result['status_msg'],
+        report_file=result['report_file'],
+        doc_file=result['doc_file'],
+        zip_file=result.get('zip_file')
+    )
+
+
+@app.route("/download/<path:filename>")
+def download_file(filename):
+    # Security: Ensure filename is in UPLOAD_DIR
+    return send_file(os.path.join(UPLOAD_DIR, filename), as_attachment=True)
+
+
+if __name__ == "__main__":
+    app.run(debug=True, port=5000)
