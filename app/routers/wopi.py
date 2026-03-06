@@ -21,7 +21,7 @@ from app import database
 from app.auth import get_current_user_from_cookie
 from app.models import File, User
 from fastapi.templating import Jinja2Templates
-from app.routers.structuring import COLLABORA_BASE_URL, WOPI_BASE_URL
+from app.routers.structuring import COLLABORA_BASE_URL, COLLABORA_PUBLIC_URL, WOPI_BASE_URL
 
 logger = logging.getLogger("app.routers.wopi")
 
@@ -76,20 +76,11 @@ async def edit_file_page(
     wopi_src = f"{WOPI_BASE_URL}/wopi/files/{file_id}"
     wopi_src_encoded = urllib.parse.quote(wopi_src, safe="")
     collabora_url = (
-        f"{COLLABORA_BASE_URL}/browser/dist/cool.html"
+        f"{COLLABORA_PUBLIC_URL}/browser/dist/cool.html"
         f"?WOPISrc={wopi_src_encoded}"
         f"&lang=en"
     )
     
-    # Verify Collabora connectivity (quick check)
-    import socket, ssl as ssl_mod
-    try:
-        host = urllib.parse.urlparse(COLLABORA_BASE_URL).hostname
-        port = urllib.parse.urlparse(COLLABORA_BASE_URL).port or 9980
-        sock = socket.create_connection((host, port), timeout=0.5)
-        sock.close()
-    except Exception:
-        collabora_url = None
 
     return templates.TemplateResponse("editor.html", {
         "request": request,
