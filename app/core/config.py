@@ -13,6 +13,17 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql://user:password@localhost/cms_db"
     REDIS_URL: str = "redis://localhost:6379/0"
 
+    # Optional external AI Structuring service integration (disabled by default)
+    # When AI_STRUCTURING_BASE_URL is set, the StructuringEngine can offload structuring
+    # to an external service and pull the processed DOCX back into the CMS.
+    AI_STRUCTURING_BASE_URL: str = ""
+    AI_STRUCTURING_API_KEY: str = ""
+    AI_STRUCTURING_DOCUMENT_TYPE: str = "Academic Document"
+    AI_STRUCTURING_USE_MARKERS: bool = False
+    AI_STRUCTURING_POLL_INTERVAL_SECONDS: int = 2
+    AI_STRUCTURING_MAX_WAIT_SECONDS: int = 900
+    AI_STRUCTURING_REQUEST_TIMEOUT_SECONDS: int = 30
+
     class Config:
         env_file = ".env"
 

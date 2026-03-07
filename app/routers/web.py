@@ -1,3 +1,4 @@
+from app.services.file_service import UPLOAD_DIR
 from fastapi import APIRouter, Request, Form, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.templating import Jinja2Templates
@@ -341,6 +342,26 @@ async def update_user_role(
     db.commit()
     return RedirectResponse(url="/admin/users?msg=Role+Updated", status_code=status.HTTP_302_FOUND)
 
+
+@router.post("/admin/users/{user_id}/delete")
+async def admin_delete_user(
+    request: Request,
+    user_id: int,
+    user=Depends(get_current_user_from_cookie),
+    db: Session = Depends(database.get_db)
+):
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+    from app.models import User
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        return RedirectResponse(url="/admin/users?msg=User+not+found", status_code=302)
+    if target.username == user.username:
+        return RedirectResponse(url="/admin/users?msg=Cannot+delete+yourself", status_code=302)
+    db.delete(target)
+    db.commit()
+    return RedirectResponse(url="/admin/users?msg=User+deleted", status_code=302)
+
 @router.post("/admin/users/{user_id}/status")
 async def toggle_user_status(
     user_id: int,
@@ -479,7 +500,7 @@ async def create_project_with_files(
 
     # 3. Process Files
     if files:
-        base_path = f"data/uploads/{code}"
+        base_path = f"{UPLOAD_DIR}/{code}"
         os.makedirs(base_path, exist_ok=True)
 
         for upload in files:
@@ -517,7 +538,7 @@ async def create_project_with_files(
 
             # Structure: data/uploads/{CODE}/{CH}/{Category}/filename
             safe_cat = category.replace(" ", "_")
-            chapter_path = f"data/uploads/{code}/{target_ch_num}/{safe_cat}"
+            chapter_path = f"{UPLOAD_DIR}/{code}/{target_ch_num}/{safe_cat}"
             os.makedirs(chapter_path, exist_ok=True)
             
             file_path = f"{chapter_path}/{upload.filename}"
@@ -602,7 +623,7 @@ async def create_chapter(
     
     # Create directory structure for the chapter
     # data/uploads/{CODE}/{CH_NUM}/
-    chapter_base_dir = f"data/uploads/{project.code}/{number}"
+    chapter_base_dir = f"{UPLOAD_DIR}/{project.code}/{number}"
     categories = ["Manuscript", "Art", "InDesign", "Proof", "XML"]
     
     for category in categories:
@@ -642,8 +663,8 @@ async def rename_chapter(
     
     # Rename directory if number changed
     if old_number != number:
-        old_dir = f"data/uploads/{project.code}/{old_number}"
-        new_dir = f"data/uploads/{project.code}/{number}"
+        old_dir = f"{UPLOAD_DIR}/{project.code}/{old_number}"
+        new_dir = f"{UPLOAD_DIR}/{project.code}/{number}"
         if os.path.exists(old_dir):
             os.rename(old_dir, new_dir)
     
@@ -673,7 +694,7 @@ async def download_chapter_zip(
     import tempfile
     from fastapi.responses import FileResponse
     
-    chapter_dir = f"data/uploads/{project.code}/{chapter.number}"
+    chapter_dir = f"{UPLOAD_DIR}/{project.code}/{chapter.number}"
     
     if not os.path.exists(chapter_dir):
         raise HTTPException(status_code=404, detail="Chapter directory not found")
@@ -714,7 +735,7 @@ async def delete_chapter(
     
     # Delete directory
     import shutil
-    chapter_dir = f"data/uploads/{project.code}/{chapter.number}"
+    chapter_dir = f"{UPLOAD_DIR}/{project.code}/{chapter.number}"
     if os.path.exists(chapter_dir):
         shutil.rmtree(chapter_dir)
     
@@ -775,7 +796,7 @@ async def upload_chapter_files(
     # Storage Path: data/uploads/{CODE}/CH{XX}/{CATEGORY}
     # Clean category name for path (e.g. "InDesign" -> "InDesign")
     safe_cat = category.replace(" ", "_")
-    base_path = f"data/uploads/{project.code}/{chapter.number}/{safe_cat}"
+    base_path = f"{UPLOAD_DIR}/{project.code}/{chapter.number}/{safe_cat}"
     os.makedirs(base_path, exist_ok=True)
 
     for upload in files:
@@ -927,7 +948,7 @@ async def delete_project(
     if not project: raise HTTPException(status_code=404)
     
     # Delete Folder
-    project_path = f"data/uploads/{project.code}"
+    project_path = f"{UPLOAD_DIR}/{project.code}"
     if os.path.exists(project_path):
         shutil.rmtree(project_path, ignore_errors=True)
         
@@ -952,7 +973,7 @@ async def delete_chapter(
     
     # Delete Chapter Folder
     # Path: data/uploads/{CODE}/{CH_NUM}
-    chapter_path = f"data/uploads/{project.code}/{chapter.number}"
+    chapter_path = f"{UPLOAD_DIR}/{project.code}/{chapter.number}"
     if os.path.exists(chapter_path):
         shutil.rmtree(chapter_path, ignore_errors=True)
         
@@ -1154,3 +1175,106 @@ async def technical_editor_page(
         "technical_editor_form.html",
         {"request": request, "file": file_record, "user": user_data}
     )
+
+
+@router.get("/admin/users/{user_id}/edit", response_class=HTMLResponse)
+async def admin_edit_user_page(
+    request: Request,
+    user_id: int,
+    user=Depends(get_current_user_from_cookie),
+    db: Session = Depends(database.get_db)
+):
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+    from app.models import User, Role
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    roles = db.query(Role).all()
+    return templates.TemplateResponse("admin_edit_user.html", {
+        "request": request, "user": user, "target": target, "roles": roles
+    })
+
+
+@router.post("/admin/users/{user_id}/edit")
+async def admin_edit_user(
+    request: Request,
+    user_id: int,
+    user=Depends(get_current_user_from_cookie),
+    db: Session = Depends(database.get_db)
+):
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+    from app.models import User, Role
+    form = await request.form()
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if form.get("email"):
+        target.email = form["email"]
+    db.commit()
+    return RedirectResponse(url="/admin/users?msg=User+updated", status_code=302)
+
+
+@router.get("/admin/users/{user_id}/password", response_class=HTMLResponse)
+async def admin_change_password_page(
+    request: Request,
+    user_id: int,
+    user=Depends(get_current_user_from_cookie),
+    db: Session = Depends(database.get_db)
+):
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+    from app.models import User
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    return templates.TemplateResponse("admin_change_password.html", {
+        "request": request, "user": user, "target": target
+    })
+
+
+@router.post("/admin/users/{user_id}/password")
+async def admin_change_password(
+    request: Request,
+    user_id: int,
+    user=Depends(get_current_user_from_cookie),
+    db: Session = Depends(database.get_db)
+):
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+    from app.models import User
+    from app.auth import hash_password
+    form = await request.form()
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    new_password = form.get("new_password", "")
+    if len(new_password) < 6:
+        return templates.TemplateResponse("admin_change_password.html", {
+            "request": request, "user": user, "target": target,
+            "error": "Password must be at least 6 characters"
+        })
+    target.password_hash = hash_password(new_password)
+    db.commit()
+    return RedirectResponse(url="/admin/users?msg=Password+changed", status_code=302)
+
+
+@router.post("/admin/users/{user_id}/delete")
+async def admin_delete_user(
+    request: Request,
+    user_id: int,
+    user=Depends(get_current_user_from_cookie),
+    db: Session = Depends(database.get_db)
+):
+    if not user:
+        return RedirectResponse(url="/login", status_code=302)
+    from app.models import User
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        return RedirectResponse(url="/admin/users?msg=User+not+found", status_code=302)
+    if target.username == user.username:
+        return RedirectResponse(url="/admin/users?msg=Cannot+delete+yourself", status_code=302)
+    db.delete(target)
+    db.commit()
+    return RedirectResponse(url="/admin/users?msg=User+deleted", status_code=302)

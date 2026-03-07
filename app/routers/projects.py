@@ -4,7 +4,7 @@ from typing import List
 from app import database, schemas
 from app.services import project_service
 from app.rbac import require_role
-from app.auth import get_current_user
+from app.auth import get_current_user, get_current_user_from_cookie
 
 router = APIRouter()
 
@@ -38,3 +38,14 @@ def update_project_status(
     if not project:
          raise HTTPException(status_code=404, detail="Project not found")
     return project
+
+@router.delete("/{project_id}")
+def delete_project(
+    project_id: int,
+    db: Session = Depends(database.get_db),
+    user = Depends(get_current_user_from_cookie)
+):
+    result = project_service.delete_project_v2(db, project_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {"message": "Project deleted successfully"}
