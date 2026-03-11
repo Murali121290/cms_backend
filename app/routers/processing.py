@@ -1,3 +1,5 @@
+from app.services.file_service import UPLOAD_DIR
+from app.utils.inject_styles import inject_publisher_styles
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -157,6 +159,11 @@ def background_processing_task(
                         mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     elif p_filename.endswith(".docx"): 
                         mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        try:
+                            inject_publisher_styles(processed_path)
+                            logger.info(f"Publisher styles injected into: {p_filename}")
+                        except Exception as style_err:
+                            logger.warning(f"Style injection failed for {p_filename}: {style_err}")
                     elif p_filename.endswith(".txt"): 
                         mime = "text/plain"
                     elif p_filename.endswith(".zip"):
@@ -248,7 +255,7 @@ async def run_file_process(
         chapter = db.query(models.Chapter).filter(models.Chapter.id == file_record.chapter_id).first()
         
         if project and chapter:
-            backup_dir = os.path.abspath(f"data/uploads/{project.code}/{chapter.number}/{file_record.category}/Archive")
+            backup_dir = os.path.abspath(f"{UPLOAD_DIR}/{project.code}/{chapter.number}/{file_record.category}/Archive")
         else:
             backup_dir = os.path.join(os.path.dirname(file_path), "Archive")
             

@@ -17,6 +17,7 @@ from app.processing.structuring_lib.rules_loader import get_rules_loader
 # Collabora Online base URL (change if running on a different host/port)
 # Container is running with ssl.enable=false; use 127.0.0.1 for reliability on Windows
 COLLABORA_BASE_URL = os.environ.get("COLLABORA_URL", "http://127.0.0.1:9980")
+COLLABORA_PUBLIC_URL = os.environ.get("COLLABORA_PUBLIC_URL", COLLABORA_BASE_URL)
 # The public base URL of THIS FastAPI server (so Collabora can reach WOPI endpoints)
 WOPI_BASE_URL = os.environ.get("WOPI_BASE_URL", "http://host.docker.internal:8000")
 
@@ -122,21 +123,10 @@ async def review_structuring(
         wopi_src = f"{WOPI_BASE_URL}/wopi/files/{file_id}/structuring"
         wopi_src_encoded = urllib.parse.quote(wopi_src, safe="")
         collabora_url = (
-            f"{COLLABORA_BASE_URL}/browser/dist/cool.html"
+            f"{COLLABORA_PUBLIC_URL}/browser/dist/cool.html"
             f"?WOPISrc={wopi_src_encoded}"
             f"&lang=en"
         )
-        # Quick check: if Collabora is not reachable, pass None so template shows fallback
-        import socket, ssl as ssl_mod
-        try:
-            host = urllib.parse.urlparse(COLLABORA_BASE_URL).hostname
-            port = urllib.parse.urlparse(COLLABORA_BASE_URL).port or 9980
-            sock = socket.create_connection((host, port), timeout=2)
-            sock.close()
-            logger.info(f"Collabora reachable at {COLLABORA_BASE_URL}")
-        except Exception as e:
-            collabora_url = None
-            logger.warning(f"Collabora Online not reachable at {COLLABORA_BASE_URL}: {e} – showing fallback UI")
 
         return templates.TemplateResponse("structuring_review.html", {
             "request": request,
