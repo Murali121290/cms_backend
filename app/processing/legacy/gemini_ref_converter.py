@@ -105,6 +105,39 @@ def _build_response_schema() -> types.Schema:
 RESPONSE_SCHEMA = _build_response_schema()
 
 
+def _build_validation_schema() -> types.Schema:
+    return types.Schema(
+        type=types.Type.OBJECT,
+        required=["is_valid", "validation_errors", "corrected_reference", "metadata"],
+        properties={
+            "is_valid": types.Schema(
+                type=types.Type.BOOLEAN,
+                description="True if the reference perfectly matches the target citation style rules, False otherwise."
+            ),
+            "validation_errors": types.Schema(
+                type=types.Type.ARRAY,
+                items=types.Schema(type=types.Type.STRING),
+                description="List of specific formatting errors or missing required data (if any). Empty list if perfectly valid."
+            ),
+            "corrected_reference": types.Schema(
+                type=types.Type.STRING,
+                description="The reference corrected to perfectly match the target citation style."
+            ),
+            "metadata": types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    field: types.Schema(type=types.Type.STRING, nullable=True)
+                    for field in BIB_FIELDS
+                },
+                required=BIB_FIELDS
+            ),
+        }
+    )
+
+
+VALIDATION_SCHEMA = _build_validation_schema()
+
+
 # ─────────────────────────────────────────────
 # PER-TYPE STYLE RULES
 # ─────────────────────────────────────────────
@@ -258,10 +291,12 @@ RULES:
 CONVERSION_MAP = {
     (CitationStyle.AMA, CitationStyle.APA): ("AMA 11th Edition", "APA 7th Edition"),
     (CitationStyle.APA, CitationStyle.AMA): ("APA 7th Edition", "AMA 11th Edition"),
+    (CitationStyle.APA, CitationStyle.APA): ("APA 7th Edition", "APA 7th Edition (Strict Formatting Validation)"),
+    (CitationStyle.AMA, CitationStyle.AMA): ("AMA 11th Edition", "AMA 11th Edition (Strict Formatting Validation)"),
 }
 
 
-def _build_prompt(raw_text: str, source_style: CitationStyle, target_style: CitationStyle) -> str:
+def _build_prompt(raw_text: str, source_style: CitationStyle, target_style: CitationStyle, cr_item: Optional[Dict[str, Any]] = None) -> str:
     source_label, target_label = CONVERSION_MAP[(source_style, target_style)]
     rules_map = APA_RULES if target_style == CitationStyle.APA else AMA_RULES
     rules_block = "\n".join([
@@ -269,11 +304,21 @@ def _build_prompt(raw_text: str, source_style: CitationStyle, target_style: Cita
         for ref_type, rules in rules_map.items()
     ])
 
+    cr_block = ""
+    if cr_item:
+        cr_block = f"""
+## VERIFIED DATABASE MATCH (CrossRef/PubMed)
+The following metadata was securely matched for this reference in scientific databases. 
+You MUST prioritize this database content for updating missing elements, ensuring exact journal names (abbreviation/capitalization), and correcting DOIs.
+CRITICAL AUTHOR RULE: DO NOT replace the original author list from the input reference with the database authors if the database authors are generic (e.g. "NA", "&NA", "Anonymous"), heavily abbreviated, or missing. Always prioritize keeping the specific authors provided in the input string; only use the database authors to correct minor spelling mistakes!
+{json.dumps(cr_item, indent=2)}
+"""
+
     return f"""You are a professional bibliographic reference conversion expert specializing in {source_label} to {target_label} conversion.
 
 ## YOUR TASK
 1. Detect the reference type (journal, book, edited_book, book_chapter, website, ereference, conference, thesis, report).
-2. Extract ALL available metadata into the bib_ fields.
+2. Extract ALL available metadata into the bib_ fields. If database match metadata is provided below, incorporate it completely to fix/complete the reference (add DOIs, fix capitals, expand abstracts).
 3. Reformat the reference strictly according to {target_label} rules for the detected type.
 4. Note any missing data, assumptions made, or issues in "conversion_notes".
 
@@ -295,12 +340,57 @@ def _build_prompt(raw_text: str, source_style: CitationStyle, target_style: Cita
 
 ## {target_label} FORMATTING RULES BY REFERENCE TYPE
 {rules_block}
-
+{cr_block}
 ## INPUT REFERENCE ({source_label})
 {raw_text}
 
 ## OUTPUT
 Return valid JSON matching the required schema exactly.
+"""
+
+
+def _build_validation_prompt(raw_text: str, target_style: CitationStyle) -> str:
+    target_label = "APA 7th Edition" if target_style == CitationStyle.APA else "AMA 11th Edition"
+    rules_map = APA_RULES if target_style == CitationStyle.APA else AMA_RULES
+    rules_block = "\n".join([
+        f"### {ref_type.upper()}\n{rules}"
+        for ref_type, rules in rules_map.items()
+    ])
+
+    return f"""You are a professional bibliographic reference validation expert specializing in {target_label}.
+
+## YOUR TASK
+Given an input reference, validate whether it perfectly adheres to {target_label} guidelines.
+1. Detect the reference type (journal, book, edited_book, book_chapter, website, ereference, conference, thesis, report).
+2. Check if the reference perfectly matches the {target_label} rules for the detected type.
+3. If there are any formatting issues, punctuation errors, missing required elements, or style deviations, set 'is_valid' to false and list the issues in 'validation_errors'.
+4. Provide the fully corrected reference in 'corrected_reference'.
+5. Extract ALL available metadata into the bib_ fields.
+
+## STRICT EXTRACTION RULES
+- bib_reftype: one of: journal, book, edited_book, book_chapter, website, ereference, conference, thesis, report, unknown
+- bib_surname / bib_fname: ALL authors in order, pipe-separated (|) if multiple. e.g. "Smith|Jones|Lee" / "John A|Mary B|Chris"
+- bib_ed_surname / bib_ed_fname: same format for editors
+- bib_year: 4-digit year ONLY
+- bib_volume / bib_issue: numeric string only, no labels
+- bib_fpage / bib_lpage: digits only, no "pp.", "p.", or labels
+- bib_doi: raw DOI string only — strip "https://doi.org/" prefix
+- bib_url: full URL only, no trailing period
+- bib_accessed: date in "Month DD, YYYY" format
+- bib_confdate: full date range as written
+- bib_editionno: number only (e.g., "2", "3")
+- bib_deg: full degree name (e.g., "Doctoral dissertation", "Master's thesis")
+- All other string fields: extract verbatim from source
+- Return null for any field not present in the source — NEVER fabricate data
+
+## {target_label} FORMATTING RULES BY REFERENCE TYPE
+{rules_block}
+
+## INPUT REFERENCE
+{raw_text}
+
+## OUTPUT
+Return valid JSON matching the required validation schema exactly.
 """
 
 
@@ -313,6 +403,7 @@ def convert_reference(
     source_style: CitationStyle,
     target_style: CitationStyle,
     model_name: str = "gemini-2.0-flash",
+    cr_item: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Convert a bibliographic reference between AMA 11th and APA 7th edition.
@@ -335,17 +426,13 @@ def convert_reference(
         logger.error("raw_text is empty")
         return None
 
-    if source_style == target_style:
-        logger.error("source_style and target_style must be different")
-        return None
-
     if (source_style, target_style) not in CONVERSION_MAP:
         logger.error(f"Unsupported conversion: {source_style} → {target_style}")
         return None
 
-    api_key = os.environ.get("GOOGLE_API_KEY")
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
-        logger.error("GOOGLE_API_KEY not found in environment")
+        logger.error("API Key not found in environment (checked GEMINI_API_KEY and GOOGLE_API_KEY)")
         return None
 
     # ── API call (new google.genai SDK) ───────────────────────────
@@ -360,7 +447,7 @@ def convert_reference(
             top_k=1,
         )
 
-        prompt = _build_prompt(raw_text, source_style, target_style)
+        prompt = _build_prompt(raw_text, source_style, target_style, cr_item)
 
         response = client.models.generate_content(
             model=model_name,
@@ -420,6 +507,103 @@ def convert_reference(
         return None
     except Exception as e:
         logger.exception(f"Unexpected error during conversion: {e}")
+        return None
+
+
+def validate_reference(
+    raw_text: str,
+    target_style: CitationStyle,
+    model_name: str = "gemini-2.0-flash",
+) -> Optional[Dict[str, Any]]:
+    """
+    Validate a bibliographic reference against AMA 11th or APA 7th edition rules.
+
+    Args:
+        raw_text:      Raw reference string to validate.
+        target_style:  Target citation style (CitationStyle.AMA or CitationStyle.APA) to validate against.
+        model_name:    Gemini model to use.
+
+    Returns:
+        Dict with:
+          - is_valid (bool): True if valid
+          - validation_errors (list[str]): List of errors if invalid
+          - corrected_reference (str): Corrected reference
+          - metadata (dict): extracted bib_ fields
+        Returns None on failure.
+    """
+    if not raw_text or not raw_text.strip():
+        logger.error("raw_text is empty")
+        return None
+
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
+        logger.error("API Key not found in environment (checked GEMINI_API_KEY and GOOGLE_API_KEY)")
+        return None
+
+    try:
+        client = genai.Client(api_key=api_key)
+
+        generation_config = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=VALIDATION_SCHEMA,
+            temperature=0.0,
+            top_p=1.0,
+            top_k=1,
+        )
+
+        prompt = _build_validation_prompt(raw_text, target_style)
+
+        response = client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+            config=generation_config,
+        )
+
+        if not response or not response.candidates:
+            logger.error("No candidates in Gemini response")
+            return None
+
+        candidate = response.candidates[0]
+        finish_reason = candidate.finish_reason
+
+        # STOP = 1, MAX_TOKENS = 2 in the new SDK
+        if finish_reason not in (
+            types.FinishReason.STOP,
+            types.FinishReason.MAX_TOKENS,
+        ):
+            logger.error(f"Unexpected finish reason: {finish_reason}")
+            return None
+
+        raw_json = response.text
+        if not raw_json or not raw_json.strip():
+            logger.error("Empty response text from Gemini")
+            return None
+
+        parsed: Dict[str, Any] = json.loads(raw_json)
+
+        if "is_valid" not in parsed or "validation_errors" not in parsed or "corrected_reference" not in parsed:
+            logger.error(f"Missing keys in validation response: {list(parsed.keys())}")
+            return None
+
+        # Normalize metadata
+        meta = parsed.get("metadata", {})
+        for field in BIB_FIELDS:
+            meta.setdefault(field, None)
+        parsed["metadata"] = meta
+
+        ref_type = meta.get("bib_reftype", "unknown")
+        target_lbl = "APA 7th" if target_style == CitationStyle.APA else "AMA 11th"
+
+        status = "VALID" if parsed["is_valid"] else "INVALID"
+        logger.info(f"Validated [{ref_type}] against {target_lbl}: {status}")
+
+        return parsed
+
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error during validation: {e}")
+        return None
+    except Exception as e:
+        logger.exception(f"Unexpected error during validation: {e}")
         return None
 
 

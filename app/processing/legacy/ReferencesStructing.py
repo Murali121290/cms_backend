@@ -40,10 +40,6 @@ from docx.shared import Pt
 import difflib
 
 import os
-import sys
-
-# Add the 'app' directory to sys.path so 'utils' can be imported
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 # Import utils
 try:
@@ -74,8 +70,7 @@ PREF_DOI_THRESHOLD = 0.5   # prefer DOI source if similarity >= this
 import json
 import atexit
 
-from app.core.paths import REF_CACHE_PATH
-REF_CACHE_FILE = REF_CACHE_PATH
+REF_CACHE_FILE = Path("ref_cache.json")
 REF_CACHE = {
     "crossref_doi": {},
     "crossref_search": {},

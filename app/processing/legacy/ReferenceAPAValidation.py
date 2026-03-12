@@ -1,19 +1,11 @@
 import os
 import re
 import logging
-try:
-    from flask import Flask, render_template, request, send_file, redirect, url_for, flash, make_response, session
-    from werkzeug.utils import secure_filename
-except ImportError:
-    class MockApp:
-        config = {}
-        secret_key = ""
-        def route(self, *args, **kwargs): return lambda f: f
-        def __setitem__(self, key, value): pass
-    Flask = lambda *args, **kwargs: MockApp()
-    secure_filename = lambda x: x
-    request = session = render_template = redirect = url_for = flash = make_response = send_file = None
+from flask import Flask, render_template, request, send_file, redirect, url_for, flash, make_response, session
+from werkzeug.utils import secure_filename
 from docx import Document
+from docx.oxml.ns import qn as _qn
+from docx.oxml import OxmlElement as _OxmlElement
 import io
 import zipfile
 from citation_parsers import get_parser, auto_detect_style
@@ -607,10 +599,16 @@ _COMMENTS_CT_AP  = "application/vnd.openxmlformats-officedocument.wordprocessing
 
 
 def _ensure_cite_bib_style(doc):
-    """Create the cite_bib character style if it doesn't already exist."""
+    """Create the cite_bib character style if it doesn't already exist.
+    
+    Explicitly sets w:styleId='cite_bib' on the element so that
+    w:rStyle w:val='cite_bib' resolves correctly when the doc is opened in Word.
+    """
     from docx.enum.style import WD_STYLE_TYPE
     if "cite_bib" not in [s.name for s in doc.styles]:
-        doc.styles.add_style("cite_bib", WD_STYLE_TYPE.CHARACTER)
+        new_style = doc.styles.add_style("cite_bib", WD_STYLE_TYPE.CHARACTER)
+        # Ensure the styleId matches what _apply_style_to_runs inserts
+        new_style.element.set(_qn("w:styleId"), "cite_bib")
 
 
 def _get_comments_part(doc):
@@ -707,10 +705,25 @@ def _find_runs_for_text(para, needle):
 
 
 def _apply_style_to_runs(runs, style_name):
-    """Apply a character style to a list of runs (best-effort)."""
+    """
+    Apply a character style to a list of runs using XML-level insertion so the
+    w:rStyle element is always present (r.style= only works reliably for paragraph
+    styles in python-docx and silently no-ops for character styles on many builds).
+    """
+    style_id = style_name.replace(" ", "")  # Word styleId strips spaces
     for r in runs:
         try:
-            r.style = style_name
+            r_el = r._element
+            rPr = r_el.find(_qn("w:rPr"))
+            if rPr is None:
+                rPr = _OxmlElement("w:rPr")
+                r_el.insert(0, rPr)
+            # Remove any existing rStyle to avoid duplicates
+            for old in rPr.findall(_qn("w:rStyle")):
+                rPr.remove(old)
+            rStyle = _OxmlElement("w:rStyle")
+            rStyle.set(_qn("w:val"), style_id)
+            rPr.insert(0, rStyle)
         except Exception:
             pass
 
@@ -754,13 +767,15 @@ def process_and_annotate_document(input_path, output_path, citation_style=None):
     doc = Document(input_path)
     _ensure_cite_bib_style(doc)
 
-    paragraphs_text = [p.text for p in doc.paragraphs]
+    # Import the body+table iterator from validation_core
+    from validation_core import iter_body_paragraphs
 
     # ── 1. Find citations (body only, stop at <ref-open>) ──────────────────
-    citations = {}          # cite_key -> {author, year, display, type, raw}
-    cite_para_idx = {}      # cite_key -> list[paragraph_index (0-based)]
+    citations    = {}   # cite_key -> {author, year, display, type, raw}
+    cite_para_map = {}  # cite_key -> list[(idx, para_obj, source)]
 
-    for idx, para_text in enumerate(paragraphs_text):
+    for idx, para, source in iter_body_paragraphs(doc):
+        para_text = para.text
         if "<ref-open>" in para_text:
             break
         found = parser.parse_citation(para_text)
@@ -779,17 +794,23 @@ def process_and_annotate_document(input_path, output_path, citation_style=None):
                     "type":    cite.get("type", "parenthetical"),
                     "raw":     cite.get("raw", ""),
                 }
-            cite_para_idx.setdefault(key, [])
-            if idx not in cite_para_idx[key]:
-                cite_para_idx[key].append(idx)
+            cite_para_map.setdefault(key, [])
+            # Record (index, paragraph object, source label) — avoid duplicates for same para
+            already = [e[0] for e in cite_para_map[key]]
+            if idx not in already:
+                cite_para_map[key].append((idx, para, source))
+
+    # Back-compat alias: cite_para_idx still used in summary counts below
+    cite_para_idx = {k: [e[0] for e in v] for k, v in cite_para_map.items()}
 
     # ── 2. Find references (between <ref-open> … <ref-close>) ──────────────
-    references      = {}  # ref_key -> {author, year, full_author, display}
-    ref_para_idx    = {}  # ref_key -> paragraph_index (0-based)
-    in_refs         = False
+    # References live in the body paragraphs only (never in a table cell)
+    references   = {}   # ref_key -> {author, year, full_author, display}
+    ref_para_map = {}   # ref_key -> para_obj
+    in_refs      = False
 
-    for idx, para_text in enumerate(paragraphs_text):
-        stripped = para_text.strip()
+    for idx, para, source in iter_body_paragraphs(doc):
+        stripped = para.text.strip()
         if "<ref-open>"  in stripped: in_refs = True;  continue
         if "<ref-close>" in stripped: in_refs = False; continue
         if not in_refs or not stripped:
@@ -809,7 +830,10 @@ def process_and_annotate_document(input_path, output_path, citation_style=None):
                 "display":     f"{author_disp} ({year})",
                 "text":        stripped[:150],
             }
-            ref_para_idx[key] = idx
+            ref_para_map[key] = para
+
+    # Back-compat: ref_para_idx used later
+    ref_para_idx = {}   # not needed for annotation any more (we store para objects)
 
     # ── 3. Match every citation → a reference ──────────────────────────────
     # Returns (ref_key | None, match_type)
@@ -851,16 +875,16 @@ def process_and_annotate_document(input_path, output_path, citation_style=None):
     spelling_mismatches = [ck for ck, mt in match_types.items() if mt == "spelling"]
     unused_references  = [rk for rk in references if rk not in matched_refs]
 
-    # ── 5. Annotate body paragraphs ─────────────────────────────────────────
+    # ── 5. Annotate all paragraphs (body + table cells) ─────────────────────
     comments_added = 0
     styles_applied = 0
 
-    for cite_key, para_indices in cite_para_idx.items():
-        cd        = citations[cite_key]
-        is_matched = cite_key in matched_pairs
+    for cite_key, para_entries in cite_para_map.items():
+        cd          = citations[cite_key]
+        is_matched  = cite_key in matched_pairs
         is_spelling = match_types.get(cite_key) == "spelling"
-        highlight  = WD_COLOR_INDEX.BRIGHT_GREEN if is_matched and not is_spelling \
-                     else WD_COLOR_INDEX.YELLOW
+        highlight   = WD_COLOR_INDEX.BRIGHT_GREEN if is_matched and not is_spelling \
+                      else WD_COLOR_INDEX.YELLOW
 
         # Search candidates: raw text first, then display form
         candidates = []
@@ -869,10 +893,11 @@ def process_and_annotate_document(input_path, output_path, citation_style=None):
         if cd["display"] not in candidates:
             candidates.append(cd["display"])
 
-        for pidx in para_indices:
-            if pidx >= len(doc.paragraphs):
-                continue
-            para = doc.paragraphs[pidx]
+        for pidx, para, source in para_entries:
+            loc_label = (
+                f" [TABLE {source.replace('table:','').replace('r','row ').replace('c',', col ')}]"
+                if source.startswith("table:") else ""
+            )
 
             # Find runs
             target_runs = []
@@ -896,26 +921,25 @@ def process_and_annotate_document(input_path, output_path, citation_style=None):
 
             # Add comment if needed
             if not is_matched:
-                msg = (f"MISSING REFERENCE: '{cd['display']}' has no matching entry "
-                       f"in the bibliography.")
+                msg = (f"MISSING REFERENCE{loc_label}: '{cd['display']}' has no matching "
+                       f"entry in the bibliography.")
                 if _add_word_comment(doc, para, msg):
                     comments_added += 1
 
             elif is_spelling:
                 ref_data  = references[matched_pairs[cite_key]]
-                msg = (f"SPELLING MISMATCH: Cited as '{cd['author']}' but bibliography "
+                msg = (f"SPELLING MISMATCH{loc_label}: Cited as '{cd['author']}' but bibliography "
                        f"has '{ref_data['author']}'. Please verify spelling.")
                 if _add_word_comment(doc, para, msg):
                     comments_added += 1
 
     # ── 6. Annotate unused references ───────────────────────────────────────
     for rk in unused_references:
-        pidx = ref_para_idx.get(rk)
-        if pidx is None or pidx >= len(doc.paragraphs):
+        para = ref_para_map.get(rk)
+        if para is None:
             continue
-        para = doc.paragraphs[pidx]
-        msg  = (f"UNUSED REFERENCE: '{references[rk]['display']}' is in the bibliography "
-                f"but is never cited in the text.")
+        msg = (f"UNUSED REFERENCE: '{references[rk]['display']}' is in the bibliography "
+               f"but is never cited in the text.")
         if _add_word_comment(doc, para, msg):
             comments_added += 1
 

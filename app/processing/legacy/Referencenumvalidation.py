@@ -4,27 +4,17 @@ import io
 import zipfile
 from collections import defaultdict
 
-try:
-    from flask import Flask, request, send_file, render_template, redirect, url_for, session
-except ImportError:
-    class MockApp:
-        def route(self, *args, **kwargs): return lambda f: f
-        def __setitem__(self, key, value): pass
-    Flask = lambda *args, **kwargs: MockApp()
-    request = session = send_file = render_template = redirect = url_for = None
+from flask import Flask, request, send_file, render_template, redirect, url_for, session
 from docx import Document
 from docx.oxml.text.paragraph import CT_P
 from docx.oxml.table import CT_Tbl
 from docx.text.paragraph import Paragraph
 from docx.table import Table
 from docx.shared import RGBColor
-try:
-    from utils import track_changes
-    TRACK_CHANGES_ENABLED = True
-except ImportError:
-    track_changes = None
-    TRACK_CHANGES_ENABLED = False
+from utils import track_changes
 import logging
+
+TRACK_CHANGES_ENABLED = True
 
 app = Flask(__name__)
 app.secret_key = "secret_key_for_session_encryption"
