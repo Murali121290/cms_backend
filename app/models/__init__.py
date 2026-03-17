@@ -1,7 +1,7 @@
 from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, DateTime, Enum as SQLEnum
 from sqlalchemy.orm import relationship
 from datetime import datetime
-from .database import Base
+from app.database import Base
 import enum
 
 class WorkflowStatus(str, enum.Enum):

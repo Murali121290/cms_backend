@@ -4,7 +4,12 @@ ensure_runtime_dirs()
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import users, teams, projects, files, web
+from app.domains.auth import api_v1 as users
+from app.domains.files import api_v1 as files
+from app.domains.projects import api_v1 as projects
+from app.domains.projects import teams_api_v1 as teams
+from app.legacy import web
+from app.routers import api_v2
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -25,6 +30,7 @@ app.add_middleware(
 app.include_router(web.router, tags=["Web UI"])
 
 # API Routers
+app.include_router(api_v2.router, prefix="/api/v2", tags=["API v2"])
 app.include_router(users.router, prefix=f"{settings.API_V1_STR}/users", tags=["Users"])
 app.include_router(teams.router, prefix=f"{settings.API_V1_STR}/teams", tags=["Teams"])
 app.include_router(projects.router, prefix=f"{settings.API_V1_STR}/projects", tags=["Projects"])
@@ -36,7 +42,7 @@ app.include_router(processing.router, prefix=f"{settings.API_V1_STR}/processing"
 from app.routers import structuring
 app.include_router(structuring.router, prefix=f"{settings.API_V1_STR}", tags=["Structuring"])
 # WOPI Router (LibreOffice Online / Collabora)
-from app.routers import wopi
+from app.integrations.wopi import router as wopi
 app.include_router(wopi.router, tags=["WOPI"])
 
 @app.get("/")
