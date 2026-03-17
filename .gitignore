@@ -1,14 +1,24 @@
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 *.pyd
 .pytest_cache/
+
+# Virtual env
 .venv/
 venv/
+
+# Node
+node_modules/
+dist/
+build/
+
+# Logs
+*.log
+
 .env
 .env.*
-*.log
 
 # IDE
 .idea/
@@ -16,6 +26,7 @@ venv/
 
 # OS
 .DS_Store
+Thumbs.db
 
 # Runtime / instance data
 cms.db
