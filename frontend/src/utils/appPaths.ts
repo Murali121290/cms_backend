@@ -6,7 +6,9 @@ export const uiPaths = {
   adminDashboard: "/ui/admin",
   adminUsers: "/ui/admin/users",
   projects: "/ui/projects",
+  projectCreate: "/ui/projects/create",
   projectDetail: (projectId: number | string) => `/ui/projects/${projectId}`,
+  projectEditor: (projectId: number | string) => `/ui/editor/${projectId}`,
   chapterDetail: (projectId: number | string, chapterId: number | string) =>
     `/ui/projects/${projectId}/chapters/${chapterId}`,
   technicalReview: (
@@ -19,6 +21,11 @@ export const uiPaths = {
     chapterId: number | string,
     fileId: number | string,
   ) => `/ui/projects/${projectId}/chapters/${chapterId}/files/${fileId}/structuring-review`,
+  fileEditor: (
+    projectId: number | string,
+    chapterId: number | string,
+    fileId: number | string,
+  ) => `/ui/projects/${projectId}/chapters/${chapterId}/files/${fileId}/edit`,
 } as const;
 
 export const ssrPaths = {

@@ -489,3 +489,10 @@ export interface NotificationsResponse {
   notifications: NotificationItem[];
   refreshed_at: string;
 }
+
+export interface ProjectBootstrapResponse {
+  project: ProjectSummary;
+  chapters: ChapterSummary[];
+  ingested_files: FileRecord[];
+  redirect_to: string;
+}

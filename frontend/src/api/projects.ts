@@ -7,10 +7,20 @@ import type {
   ChapterFilesResponse,
   ChapterRenameRequest,
   ChapterRenameResponse,
+  ProjectBootstrapResponse,
   ProjectChaptersResponse,
   ProjectDetailResponse,
   ProjectsListResponse,
 } from "@/types/api";
+
+export async function createProject(formData: FormData) {
+  const response = await apiClient.post<ProjectBootstrapResponse>(
+    "/projects/bootstrap",
+    formData,
+    { headers: { "Content-Type": "multipart/form-data" } },
+  );
+  return response.data;
+}
 
 export async function getProjects(offset = 0, limit = 100) {
   const response = await apiClient.get<ProjectsListResponse>("/projects", {

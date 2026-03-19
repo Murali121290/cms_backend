@@ -1,84 +1,206 @@
-import { Link } from "react-router-dom";
+import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { FolderPlus, FolderOpen, ExternalLink, BookOpen } from "lucide-react";
 
-import { ProjectsTable } from "@/features/projects/components/ProjectsTable";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { SkeletonTable } from "@/components/ui/SkeletonLoader";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { SearchInput } from "@/components/ui/SearchInput";
 import { useProjectsQuery } from "@/features/projects/useProjectsQuery";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import { getSsrUrl, ssrPaths, uiPaths } from "@/utils/appPaths";
+import { uiPaths } from "@/utils/appPaths";
 
 export function ProjectsPage() {
-  useDocumentTitle("CMS UI Projects");
+  useDocumentTitle("Projects — S4 Carlisle CMS");
+  const navigate = useNavigate();
   const projectsQuery = useProjectsQuery(0, 100);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
 
-  if (projectsQuery.isPending) {
-    return (
-      <main className="page projects-page projects-page--state">
-        <section className="panel projects-state-card">
-          <div className="projects-state-card__icon">📚</div>
-          <h1 className="projects-state-card__title">Loading projects</h1>
-          <p className="projects-state-card__message">
-            Fetching the projects list from /api/v2/projects.
-          </p>
-        </section>
-      </main>
-    );
-  }
+  const projects = projectsQuery.data?.projects ?? [];
+  const total = projectsQuery.data?.pagination.total ?? 0;
 
-  if (projectsQuery.isError) {
-    return (
-      <main className="page projects-page projects-page--state">
-        <section className="panel projects-state-card projects-state-card--error">
-          <div className="projects-state-card__icon">!</div>
-          <h1 className="projects-state-card__title">Projects unavailable</h1>
-          <p className="projects-state-card__message">
-            The frontend shell could not load the projects list contract.
-          </p>
-          <div className="projects-state-card__actions">
-            <button className="button" onClick={() => projectsQuery.refetch()}>
-              Retry
-            </button>
-            <a className="button button--secondary" href={getSsrUrl(ssrPaths.projects)}>
-              Open SSR projects
-            </a>
-          </div>
-        </section>
-      </main>
-    );
-  }
+  const filteredProjects = projects.filter((project) => {
+    const matchesSearch =
+      !searchQuery ||
+      project.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      project.code.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesStatus = !statusFilter || project.status === statusFilter;
+    return matchesSearch && matchesStatus;
+  });
+
+  const uniqueStatuses = Array.from(new Set(projects.map((p) => p.status))).sort();
 
   return (
-    <main className="page projects-page">
-      <section className="projects-shell">
-        <header className="projects-shell__header">
-          <div className="projects-shell__breadcrumbs">
-            <Link className="projects-shell__breadcrumb-link" to={uiPaths.dashboard}>
-              Dashboard
-            </Link>
-            <span className="projects-shell__breadcrumb-separator">›</span>
-            <h1 className="projects-shell__title">Projects</h1>
-          </div>
+    <main className="page-enter page px-6 py-6 max-w-7xl mx-auto">
+      <PageHeader
+        title="Projects"
+        subtitle={`${total} project${total === 1 ? "" : "s"}`}
+        primaryAction={
+          <Link
+            to={uiPaths.projectCreate}
+            className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md bg-gold-600 text-white hover:bg-gold-700 active:bg-gold-800 border border-gold-600 shadow-subtle transition-all duration-150"
+          >
+            <FolderPlus className="w-4 h-4" aria-hidden="true" />
+            New Project
+          </Link>
+        }
+      />
 
-          <div className="projects-shell__actions">
-            <a className="button projects-shell__create-button" href={getSsrUrl(ssrPaths.projectCreate)}>
-              <span aria-hidden="true">＋</span>
-              <span>New Project</span>
-            </a>
-          </div>
-        </header>
+      {/* Filter bar */}
+      <div className="flex flex-wrap gap-3 mb-6 mt-6">
+        <SearchInput
+          value={searchQuery}
+          onChange={setSearchQuery}
+          placeholder="Search by title or code…"
+          className="w-64"
+        />
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="border border-surface-400 rounded-md px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-gold-600 focus:outline-none text-navy-800"
+        >
+          <option value="">All statuses</option>
+          {uniqueStatuses.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+      </div>
 
-        <div className="projects-shell__content">
-          {projectsQuery.data.projects.length === 0 ? (
-            <div className="projects-empty">
-              <div className="projects-empty__icon">📘</div>
-              <p className="projects-empty__title">No projects found</p>
-              <a className="projects-empty__link" href={getSsrUrl(ssrPaths.projectCreate)}>
-                Create your first project
-              </a>
-            </div>
-          ) : (
-            <ProjectsTable projects={projectsQuery.data.projects} />
-          )}
-        </div>
-      </section>
+      {/* Table card */}
+      <div className="bg-white rounded-lg shadow-card overflow-hidden">
+        {projectsQuery.isPending ? (
+          <SkeletonTable rows={8} cols={7} />
+        ) : projectsQuery.isError ? (
+          <div className="p-8 text-center text-sm text-navy-500">
+            Failed to load projects.{" "}
+            <button
+              className="text-gold-700 underline hover:text-gold-800"
+              onClick={() => void projectsQuery.refetch()}
+              type="button"
+            >
+              Retry
+            </button>
+          </div>
+        ) : filteredProjects.length === 0 ? (
+          <EmptyState
+            icon={FolderOpen}
+            title="No projects yet"
+            description="Create your first project to get started"
+            action={
+              <Link
+                to={uiPaths.projectCreate}
+                className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md bg-gold-600 text-white hover:bg-gold-700 border border-gold-600 shadow-subtle transition-all duration-150"
+              >
+                <FolderPlus className="w-4 h-4" aria-hidden="true" />
+                New Project
+              </Link>
+            }
+          />
+        ) : (
+          <table className="w-full border-collapse">
+            <thead className="bg-surface-100 border-b border-surface-300">
+              <tr>
+                <th className="text-xs font-semibold text-navy-500 uppercase tracking-wide px-4 py-3 text-left">
+                  Project Title / Code
+                </th>
+                <th className="text-xs font-semibold text-navy-500 uppercase tracking-wide px-4 py-3 text-left">
+                  Publisher
+                </th>
+                <th className="text-xs font-semibold text-navy-500 uppercase tracking-wide px-4 py-3 text-left">
+                  XML Standard
+                </th>
+                <th className="text-xs font-semibold text-navy-500 uppercase tracking-wide px-4 py-3 text-left">
+                  Chapters
+                </th>
+                <th className="text-xs font-semibold text-navy-500 uppercase tracking-wide px-4 py-3 text-left">
+                  Files
+                </th>
+                <th className="text-xs font-semibold text-navy-500 uppercase tracking-wide px-4 py-3 text-left">
+                  Status
+                </th>
+                <th className="text-xs font-semibold text-navy-500 uppercase tracking-wide px-4 py-3 text-left">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredProjects.map((project) => (
+                <tr
+                  key={project.id}
+                  className="group border-b border-surface-200 hover:bg-surface-50 transition-colors duration-120 cursor-pointer"
+                  onClick={() => navigate(uiPaths.projectDetail(project.id))}
+                >
+                  {/* Title / Code */}
+                  <td className="px-4 py-3.5 text-sm">
+                    <div className="text-[14px] font-semibold text-navy-900 group-hover:text-gold-600 transition-colors duration-120">
+                      {project.title}
+                    </div>
+                    <div style={{ color: '#6B6560' }} className="text-[12px] mt-0.5 font-mono">
+                      {project.code}
+                    </div>
+                  </td>
+
+                  {/* Publisher */}
+                  <td className="px-4 py-3.5 text-sm text-navy-700">
+                    {project.client_name ?? "—"}
+                  </td>
+
+                  {/* XML Standard */}
+                  <td className="px-4 py-3.5 text-sm text-navy-700">
+                    {project.xml_standard}
+                  </td>
+
+                  {/* Chapters */}
+                  <td className="px-4 py-3.5 text-sm text-navy-700 tabular-nums">
+                    {project.chapter_count}
+                  </td>
+
+                  {/* Files */}
+                  <td className="px-4 py-3.5 text-sm text-navy-700 tabular-nums">
+                    {project.file_count}
+                  </td>
+
+                  {/* Status */}
+                  <td className="px-4 py-3.5 text-sm">
+                    <StatusBadge status={project.status} size="sm" />
+                  </td>
+
+                  {/* Actions — stopPropagation so row onClick doesn't fire */}
+                  <td
+                    className="px-4 py-3.5 text-sm"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        title="View project"
+                        className="w-7 h-7 rounded flex items-center justify-center text-navy-500 hover:bg-surface-200 hover:text-navy-900 transition-colors"
+                        onClick={() => navigate(uiPaths.projectDetail(project.id))}
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span className="sr-only">View {project.title}</span>
+                      </button>
+                      <button
+                        type="button"
+                        title="Open in editor"
+                        className="w-7 h-7 rounded flex items-center justify-center text-navy-500 hover:bg-surface-200 hover:text-navy-900 transition-colors"
+                        onClick={() => navigate(uiPaths.projectEditor(project.id))}
+                      >
+                        <BookOpen className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span className="sr-only">Open {project.title} in editor</span>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
     </main>
   );
 }

@@ -1,3 +1,7 @@
+import { Info } from "lucide-react";
+
+import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
 import type { TechnicalIssue } from "@/types/api";
 
 interface TechnicalIssuesFormProps {
@@ -33,91 +37,119 @@ export function TechnicalIssuesForm({
   const groupedIssues = groupIssuesByCategory(issues);
 
   return (
-    <section className="technical-review-panel">
-      <div className="technical-review-panel__info">
-        <div className="technical-review-panel__info-icon">i</div>
-        <div>
-          <h2>Review Suggestions</h2>
-          <p>
-            The system has analyzed this document and found the following patterns. Select the
-            preferred replacement for each item, then apply the current technical review contract.
-          </p>
+    <section className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <h2 className="font-semibold text-navy-900">Issues Found</h2>
+          <Badge variant="default" size="sm">
+            {issues.length}
+          </Badge>
         </div>
       </div>
 
-      <div className="technical-issue-groups">
+      {/* Issue groups */}
+      <div className="space-y-3">
         {groupedIssues.map(([category, categoryIssues]) => (
-          <section className="technical-issue-group" key={category}>
-            <div className="technical-issue-group__header">{category}</div>
-            <div className="technical-issue-group__body">
+          <div key={category}>
+            <div className="mb-2">
+              <Badge variant="info" size="sm">
+                {category}
+              </Badge>
+            </div>
+            <div className="space-y-3">
               {categoryIssues.map((issue) => {
                 const currentValue = replacements[issue.key] ?? "";
                 const hasOptions = issue.options.length > 0;
 
                 return (
-                  <article className="technical-issue-row" key={issue.key}>
-                    <div className="technical-issue-row__summary">
-                      <div className="technical-issue-row__titleline">
-                        <span className="technical-issue-row__count">{issue.count}</span>
-                        <h3>{issue.label}</h3>
+                  <div
+                    className="bg-white rounded-lg shadow-card p-4 mb-3"
+                    key={issue.key}
+                  >
+                    <div className="flex items-start justify-between gap-3 mb-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium text-navy-900">{issue.label}</span>
+                        <Badge variant="default" size="sm">
+                          {category}
+                        </Badge>
                       </div>
-                      {issue.found.length > 0 ? (
-                        <p className="technical-issue-row__found">
-                          Found: <span>{issue.found.join(", ")}</span>
-                        </p>
-                      ) : null}
+                      <span className="text-sm text-navy-500 shrink-0">
+                        {issue.count} occurrence{issue.count === 1 ? "" : "s"}
+                      </span>
                     </div>
 
-                    <div className="technical-issue-row__options">
+                    {issue.found.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5 mb-3">
+                        {issue.found.map((item, idx) => (
+                          <span
+                            key={idx}
+                            className="inline-block px-2 py-0.5 bg-surface-200 text-navy-600 text-xs rounded"
+                          >
+                            {item}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    <div className="mt-3">
                       {hasOptions ? (
-                        issue.options.map((option) => (
-                          <label className="technical-option" key={`${issue.key}-${option}`}>
-                            <input
-                              checked={currentValue === option}
-                              disabled={isPending}
-                              name={issue.key}
-                              type="radio"
-                              value={option}
-                              onChange={(event) =>
-                                onReplacementChange(issue.key, event.target.value)
-                              }
-                            />
-                            <span>{option}</span>
-                          </label>
-                        ))
+                        <div className="space-y-1.5">
+                          <p className="text-xs font-medium text-navy-500 uppercase tracking-wide mb-2">
+                            Select replacement
+                          </p>
+                          {issue.options.map((option) => (
+                            <label
+                              key={`${issue.key}-${option}`}
+                              className="flex items-center gap-2 cursor-pointer"
+                            >
+                              <input
+                                checked={currentValue === option}
+                                disabled={isPending}
+                                name={issue.key}
+                                type="radio"
+                                value={option}
+                                className="accent-gold-600"
+                                onChange={(e) => onReplacementChange(issue.key, e.target.value)}
+                              />
+                              <span className="text-sm text-navy-700">{option}</span>
+                            </label>
+                          ))}
+                        </div>
                       ) : (
-                        <label className="field technical-issue-row__manual">
-                          <span>Replacement</span>
+                        <div>
+                          <label className="block text-xs font-medium text-navy-500 uppercase tracking-wide mb-1.5">
+                            Replacement
+                          </label>
                           <input
-                            className="search-input"
+                            className="w-full border border-surface-400 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gold-600 focus:border-transparent disabled:opacity-50"
                             disabled={isPending}
                             placeholder="Enter replacement"
                             type="text"
                             value={currentValue}
-                            onChange={(event) =>
-                              onReplacementChange(issue.key, event.target.value)
-                            }
+                            onChange={(e) => onReplacementChange(issue.key, e.target.value)}
                           />
-                        </label>
+                        </div>
                       )}
                     </div>
-                  </article>
+                  </div>
                 );
               })}
             </div>
-          </section>
+          </div>
         ))}
       </div>
 
-      <div className="technical-review-panel__actions">
-        <button
-          className="button"
+      {/* Apply All button */}
+      <div className="pt-2">
+        <Button
+          variant="primary"
           disabled={isPending || !canApply}
-          type="button"
+          isLoading={isPending}
           onClick={() => void onSubmit()}
         >
-          {isPending ? "Processing..." : "Apply Changes"}
-        </button>
+          Apply All
+        </Button>
       </div>
     </section>
   );

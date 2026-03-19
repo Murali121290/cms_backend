@@ -86,6 +86,18 @@ export async function getFileVersions(fileId: number, limit = 50) {
   return response.data;
 }
 
+export async function downloadChapterPackage(projectId: number, chapterId: number, fallbackFilename: string) {
+  const response = await apiClient.get<Blob>(
+    `/projects/${projectId}/chapters/${chapterId}/package`,
+    { responseType: "blob" },
+  );
+
+  return {
+    blob: response.data,
+    filename: getDownloadFilename(response.headers["content-disposition"], fallbackFilename),
+  };
+}
+
 export async function downloadFileVersion(fileId: number, versionId: number, fallbackFilename: string) {
   const response = await apiClient.get<Blob>(`/files/${fileId}/versions/${versionId}/download`, {
     responseType: "blob",

@@ -1,115 +1,105 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
+
 import { getApiErrorMessage } from "@/api/client";
-import { ChapterCreateForm } from "@/features/projects/components/ChapterCreateForm";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { SkeletonTable } from "@/components/ui/SkeletonLoader";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { AddChapterDrawer } from "@/features/projects/components/AddChapterDrawer";
 import { ProjectChaptersTable } from "@/features/projects/components/ProjectChaptersTable";
-import { ProjectMetadataPanel } from "@/features/projects/components/ProjectMetadataPanel";
-import { useChapterMutations } from "@/features/projects/useChapterMutations";
 import { useProjectChaptersQuery } from "@/features/projects/useProjectChaptersQuery";
 import { useProjectDetailQuery } from "@/features/projects/useProjectDetailQuery";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import { getSsrUrl, ssrPaths, uiPaths } from "@/utils/appPaths";
+import { uiPaths } from "@/utils/appPaths";
+import type { ChapterSummary } from "@/types/api";
+
+type ActiveTab = "chapters" | "overview";
 
 export function ProjectDetailPage() {
   const { projectId } = useParams();
-  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<ActiveTab>("chapters");
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [editingChapter, setEditingChapter] = useState<ChapterSummary | null>(null);
   const parsedProjectId = Number.parseInt(projectId ?? "", 10);
   const isValidProjectId = Number.isInteger(parsedProjectId) && parsedProjectId > 0;
   const normalizedProjectId = isValidProjectId ? parsedProjectId : null;
   const projectDetailQuery = useProjectDetailQuery(normalizedProjectId);
   const projectChaptersQuery = useProjectChaptersQuery(normalizedProjectId);
-  const chapterMutations = useChapterMutations({ projectId: normalizedProjectId });
 
   useDocumentTitle(
-    normalizedProjectId === null ? "CMS UI Project" : `CMS UI Project ${normalizedProjectId}`,
+    normalizedProjectId === null
+      ? "Projects — S4 Carlisle CMS"
+      : projectDetailQuery.data?.project.title
+        ? `${projectDetailQuery.data.project.title} — S4 Carlisle CMS`
+        : `Project ${normalizedProjectId} — S4 Carlisle CMS`,
   );
 
   if (normalizedProjectId === null) {
     return (
-      <main className="page project-detail-page project-detail-page--state">
-        <section className="panel project-detail-state-card project-detail-state-card--error">
-          <div className="project-detail-state-card__icon">!</div>
-          <h1 className="project-detail-state-card__title">Invalid project route</h1>
-          <p className="project-detail-state-card__message">
-            The selected project identifier is not valid.
-          </p>
-          <div className="project-detail-state-card__actions">
-            <Link className="button" to={uiPaths.projects}>
-              Back to projects
-            </Link>
-          </div>
-        </section>
+      <main className="page-enter page px-6 py-6 max-w-7xl mx-auto">
+        <div className="bg-white rounded-lg shadow-card p-8 text-center">
+          <p className="text-sm text-navy-500 mb-4">The selected project identifier is not valid.</p>
+          <Link className="text-sm text-gold-700 hover:text-gold-800 font-medium" to={uiPaths.projects}>
+            Back to projects
+          </Link>
+        </div>
       </main>
     );
   }
 
   if (projectDetailQuery.isPending || projectChaptersQuery.isPending) {
     return (
-      <main className="page project-detail-page project-detail-page--state">
-        <section className="panel project-detail-state-card">
-          <div className="project-detail-state-card__icon">📁</div>
-          <h1 className="project-detail-state-card__title">Loading project</h1>
-          <p className="project-detail-state-card__message">
-            Fetching the project detail and chapter summary contracts from /api/v2.
-          </p>
-        </section>
+      <main className="page-enter page px-6 py-6 max-w-7xl mx-auto">
+        <div className="mb-6">
+          <div className="skeleton-shimmer rounded h-8 w-64 mb-2" aria-hidden="true" />
+          <div className="skeleton-shimmer rounded h-4 w-40" aria-hidden="true" />
+        </div>
+        <div className="bg-white rounded-lg shadow-card overflow-hidden">
+          <SkeletonTable rows={6} cols={8} />
+        </div>
       </main>
     );
   }
 
   if (projectDetailQuery.isError || projectChaptersQuery.isError) {
     const error = projectDetailQuery.error ?? projectChaptersQuery.error;
-
     return (
-      <main className="page project-detail-page project-detail-page--state">
-        <section className="panel project-detail-state-card project-detail-state-card--error">
-          <div className="project-detail-state-card__icon">!</div>
-          <h1 className="project-detail-state-card__title">Project detail unavailable</h1>
-          <p className="project-detail-state-card__message">
-            {getApiErrorMessage(error, "The frontend shell could not load the project detail contracts.")}
+      <main className="page-enter page px-6 py-6 max-w-7xl mx-auto">
+        <div className="bg-white rounded-lg shadow-card p-8 text-center">
+          <p className="text-sm text-navy-500 mb-4">
+            {getApiErrorMessage(error, "The project detail could not be loaded.")}
           </p>
-          <div className="project-detail-state-card__actions">
+          <div className="flex items-center justify-center gap-3">
             <button
-              className="button"
+              className="text-sm text-gold-700 hover:text-gold-800 font-medium"
               onClick={() => {
                 void projectDetailQuery.refetch();
                 void projectChaptersQuery.refetch();
               }}
+              type="button"
             >
               Retry
             </button>
-            <Link className="button button--secondary" to={uiPaths.projects}>
+            <Link className="text-sm text-navy-600 hover:text-navy-900 font-medium" to={uiPaths.projects}>
               Back to projects
             </Link>
-            <a
-              className="button button--secondary"
-              href={getSsrUrl(ssrPaths.projectDetail(normalizedProjectId))}
-            >
-              Open SSR project view
-            </a>
           </div>
-        </section>
+        </div>
       </main>
     );
   }
 
   if (!projectDetailQuery.data || !projectChaptersQuery.data) {
     return (
-      <main className="page project-detail-page project-detail-page--state">
-        <section className="panel project-detail-state-card project-detail-state-card--error">
-          <div className="project-detail-state-card__icon">!</div>
-          <h1 className="project-detail-state-card__title">Project detail unavailable</h1>
-          <p className="project-detail-state-card__message">
-            The project detail contract returned no data.
-          </p>
-          <div className="project-detail-state-card__actions">
-            <Link className="button" to={uiPaths.projects}>
-              Back to projects
-            </Link>
-          </div>
-        </section>
+      <main className="page-enter page px-6 py-6 max-w-7xl mx-auto">
+        <div className="bg-white rounded-lg shadow-card p-8 text-center">
+          <p className="text-sm text-navy-500 mb-4">No project data was returned.</p>
+          <Link className="text-sm text-gold-700 hover:text-gold-800 font-medium" to={uiPaths.projects}>
+            Back to projects
+          </Link>
+        </div>
       </main>
     );
   }
@@ -117,157 +107,110 @@ export function ProjectDetailPage() {
   const project = projectDetailQuery.data.project;
   const chapters = projectChaptersQuery.data.chapters;
 
+  const tabs: { id: ActiveTab; label: string }[] = [
+    { id: "chapters", label: "Chapters" },
+    { id: "overview", label: "Overview" },
+  ];
+
+  const overviewFields: { label: string; value: string | number }[] = [
+    { label: "Code", value: project.code },
+    { label: "Publisher", value: project.client_name ?? "—" },
+    { label: "XML Standard", value: project.xml_standard },
+    { label: "Status", value: project.status },
+    { label: "Chapters", value: project.chapter_count },
+    { label: "Files", value: project.file_count },
+  ];
+
   return (
-    <main className="page project-detail-page">
-      <div className="project-detail-shell">
-        <div className="project-detail-commandbar">
-          <div className="project-detail-commandbar__group">
-            <button
-              className="project-detail-commandbar__button"
-              type="button"
-              onClick={() => setIsCreateOpen(true)}
+    <main className="page-enter page px-6 py-6 max-w-7xl mx-auto">
+      <PageHeader
+        breadcrumb={
+          <span className="flex items-center gap-1.5">
+            <Link
+              to={uiPaths.projects}
+              className="hover:text-navy-700 transition-colors"
             >
-              <span aria-hidden="true">＋</span>
-              <span>New</span>
-              <span className="project-detail-commandbar__chevron">▾</span>
-            </button>
-          </div>
-
-          <div className="project-detail-commandbar__group">
-            <button
-              className={`project-detail-commandbar__button${viewMode === "grid" ? " active" : ""}`}
-              type="button"
-              onClick={() => setViewMode("grid")}
-            >
-              <span aria-hidden="true">▦</span>
-              <span>View</span>
-            </button>
-            <button
-              className={`project-detail-commandbar__button${viewMode === "list" ? " active" : ""}`}
-              type="button"
-              onClick={() => setViewMode("list")}
-            >
-              <span aria-hidden="true">☰</span>
-              <span>Details</span>
-            </button>
-          </div>
-        </div>
-
-        <div className="project-detail-addressbar">
-          <div className="project-detail-addressbar__nav">
-            <Link className="project-detail-addressbar__nav-button" to={uiPaths.projects}>
-              ←
+              Projects
             </Link>
-            <button
-              className="project-detail-addressbar__nav-button"
-              type="button"
-              onClick={() => window.location.reload()}
-            >
-              ↻
-            </button>
-          </div>
+            <span aria-hidden="true">›</span>
+            <span className="text-navy-700 truncate max-w-xs">{project.title}</span>
+          </span>
+        }
+        title={project.title}
+        badge={<StatusBadge status={project.status} size="sm" />}
+        subtitle={project.client_name ?? project.code}
+      />
 
-          <div className="project-detail-addressbar__path">
-            <span className="project-detail-addressbar__icon">🖥</span>
-            <div className="project-detail-addressbar__segments">
-              <Link className="project-detail-addressbar__link" to={uiPaths.projects}>
-                Projects
-              </Link>
-              <span className="project-detail-addressbar__separator">›</span>
-              <span>{project.code}</span>
-            </div>
-          </div>
-
-          <a
-            className="project-detail-addressbar__ssr-link"
-            href={getSsrUrl(ssrPaths.projectDetail(normalizedProjectId))}
+      {/* Tab bar */}
+      <div className="inline-flex border-b border-surface-300 mb-6 mt-6 w-full">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setActiveTab(tab.id)}
+            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === tab.id
+                ? "border-gold-600 text-gold-700"
+                : "border-transparent text-navy-500 hover:text-navy-700"
+            }`}
           >
-            Open SSR view
-          </a>
-        </div>
-
-        <div className="project-detail-explorer">
-          <aside className="project-detail-sidebar">
-            <div className="project-detail-sidebar__section-label">Quick Access</div>
-            <Link className="project-detail-sidebar__item" to={uiPaths.dashboard}>
-              <span aria-hidden="true">★</span>
-              <span>Favorites</span>
-            </Link>
-            <Link className="project-detail-sidebar__item" to={uiPaths.projects}>
-              <span aria-hidden="true">🕘</span>
-              <span>Recent</span>
-            </Link>
-
-            <div className="project-detail-sidebar__section-label">This PC</div>
-            <div className="project-detail-sidebar__item project-detail-sidebar__item--active">
-              <span aria-hidden="true">📂</span>
-              <span>{project.code}</span>
-            </div>
-            <div className="project-detail-sidebar__tree">
-              {chapters.map((chapter) => (
-                <Link
-                  className="project-detail-sidebar__tree-link"
-                  key={chapter.id}
-                  to={uiPaths.chapterDetail(project.id, chapter.id)}
-                >
-                  <span aria-hidden="true">📁</span>
-                  <span>Ch {chapter.number}</span>
-                </Link>
-              ))}
-            </div>
-          </aside>
-
-          <section className="project-detail-main">
-            <div className="project-detail-main__section">
-              <ProjectMetadataPanel project={project} />
-            </div>
-
-            {chapterMutations.status ? (
-              <div className={`status-banner status-banner--${chapterMutations.status.tone}`}>
-                {chapterMutations.status.message}
-              </div>
-            ) : null}
-
-            <div className="project-detail-main__section">
-              {chapters.length === 0 ? (
-                <div className="project-detail-empty">
-                  <div className="project-detail-empty__icon">📂</div>
-                  <p className="project-detail-empty__title">No chapters available</p>
-                  <p className="project-detail-empty__copy">
-                    This project currently has no chapter rows to display in the frontend shell.
-                  </p>
-                </div>
-              ) : (
-                <ProjectChaptersTable
-                  chapters={chapters}
-                  isPending={chapterMutations.isPending}
-                  onDelete={(chapterId, number) => chapterMutations.deleteChapter(chapterId, number)}
-                  onRename={(chapterId, number, title) =>
-                    chapterMutations.renameChapter(chapterId, number, title)
-                  }
-                  projectId={project.id}
-                  viewMode={viewMode}
-                />
-              )}
-            </div>
-          </section>
-        </div>
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      {isCreateOpen ? (
-        <div className="project-detail-modal-backdrop" role="presentation">
-          <div className="project-detail-modal">
-            <ChapterCreateForm
-              isPending={chapterMutations.isPending("create")}
-              onCancel={() => setIsCreateOpen(false)}
-              onSubmit={async (number, title) => {
-                await chapterMutations.createChapter(number, title);
-                setIsCreateOpen(false);
-              }}
+      {/* Chapters tab */}
+      {activeTab === "chapters" && (
+        <div className="bg-white rounded-lg shadow-card overflow-hidden">
+          {chapters.length === 0 ? (
+            <EmptyState
+              title="No chapters yet"
+              description="This project has no chapters to display."
+              action={
+                <button
+                  type="button"
+                  onClick={() => { setEditingChapter(null); setIsDrawerOpen(true); }}
+                  className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md bg-gold-600 text-white hover:bg-gold-700 border border-gold-600 shadow-subtle transition-all duration-150"
+                >
+                  Add first chapter
+                </button>
+              }
             />
+          ) : (
+            <ProjectChaptersTable
+              chapters={chapters}
+              projectId={project.id}
+              onAddChapter={() => { setEditingChapter(null); setIsDrawerOpen(true); }}
+              onEditChapter={(chapter) => { setEditingChapter(chapter); setIsDrawerOpen(true); }}
+            />
+          )}
+        </div>
+      )}
+
+      <AddChapterDrawer
+        isOpen={isDrawerOpen}
+        onClose={() => { setIsDrawerOpen(false); setEditingChapter(null); }}
+        projectId={normalizedProjectId}
+        projectName={project.title}
+        existingChapters={chapters}
+        editingChapter={editingChapter}
+      />
+
+      {/* Overview tab */}
+      {activeTab === "overview" && (
+        <div className="bg-white rounded-lg shadow-card p-6">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
+            {overviewFields.map((field) => (
+              <div key={field.label} className="space-y-1">
+                <p className="text-xs uppercase tracking-wide text-navy-500 font-medium">
+                  {field.label}
+                </p>
+                <p className="text-sm font-medium text-navy-900 mt-1">{field.value}</p>
+              </div>
+            ))}
           </div>
         </div>
-      ) : null}
+      )}
     </main>
   );
 }

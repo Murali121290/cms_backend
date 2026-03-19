@@ -1,67 +1,48 @@
-# ── Python ────────────────────────────────────────────────────────────────────
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-*.egg-info/
-dist/
-build/
-.eggs/
-
-# ── Virtual environment ────────────────────────────────────────────────────────
-.venv/
-venv/
-env/
-ENV/
-
-# ── Git ───────────────────────────────────────────────────────────────────────
-.git/
+.git
 .gitignore
 .gitattributes
 
-# ── IDE / Editor ──────────────────────────────────────────────────────────────
-.idea/
-.vscode/
-*.iml
-*.iml
+.venv
+venv
+env
+ENV
+.pytest_cache
+.mypy_cache
+.ruff_cache
+__pycache__
+*.py[cod]
 
-# ── OS ────────────────────────────────────────────────────────────────────────
-.DS_Store
-Thumbs.db
-desktop.ini
+.idea
+.vscode
+.claude
 
-# ── Docker ────────────────────────────────────────────────────────────────────
-docker-compose*.yml
-Dockerfile
-.dockerignore
+node_modules
+frontend/node_modules
+frontend/dist
+dist
+build
 
-# ── Test files ────────────────────────────────────────────────────────────────
-tests/
-*.test.py
-
-# ── Documentation ─────────────────────────────────────────────────────────────
-*.md
-docs/
-
-# ── Local data / outputs (mounted as volumes in compose) ─────────────────────
-uploads/
-outputs/
-temp_reports/
-cms.db
-
-# ── Env files (never bake secrets into the image) ─────────────────────────────
 .env
-.env.*
+.env.local
+.env.*.local
+ai_structuring_backend/.env
 
-# ── Alembic migrations (only needed at runtime, not build time) ───────────────
-# Comment out if you want migrations copied into image
-# alembic/
+cms.db
+data
+uploads
+outputs
+temp_reports
+runtime
+ref_cache.json
 
-# ── Large / unnecessary files ─────────────────────────────────────────────────
+tests
+docs
+deploy
+
 *.log
 *.tmp
 *.bak
 *.zip
 *.tar.gz
-ref_cache.json
+.DS_Store
+Thumbs.db

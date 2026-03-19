@@ -1,12 +1,16 @@
 import { Navigate, createBrowserRouter } from "react-router-dom";
 
 import { AppLayout } from "@/components/layout/AppLayout";
+import { AdminGate } from "@/features/session/AdminGate";
 import { SessionGate } from "@/features/session/SessionGate";
 import { AdminDashboardPage } from "@/pages/AdminDashboardPage";
 import { AdminUsersPage } from "@/pages/AdminUsersPage";
 import { ChapterDetailPage } from "@/pages/ChapterDetailPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { LoginPage } from "@/pages/LoginPage";
+import { EditorPage } from "@/pages/EditorPage";
+import { FileEditorPage } from "@/pages/FileEditorPage";
+import { ProjectCreatePage } from "@/pages/ProjectCreatePage";
 import { ProjectDetailPage } from "@/pages/ProjectDetailPage";
 import { ProjectsPage } from "@/pages/ProjectsPage";
 import { RegisterPage } from "@/pages/RegisterPage";
@@ -45,15 +49,23 @@ export const router = createBrowserRouter([
       },
       {
         path: "admin",
-        element: <AdminDashboardPage />,
+        element: <AdminGate><AdminDashboardPage /></AdminGate>,
       },
       {
         path: "admin/users",
-        element: <AdminUsersPage />,
+        element: <AdminGate><AdminUsersPage /></AdminGate>,
       },
       {
         path: "projects",
         element: <ProjectsPage />,
+      },
+      {
+        path: "editor/:projectId",
+        element: <EditorPage />,
+      },
+      {
+        path: "projects/create",
+        element: <ProjectCreatePage />,
       },
       {
         path: "projects/:projectId",
@@ -70,6 +82,10 @@ export const router = createBrowserRouter([
       {
         path: "projects/:projectId/chapters/:chapterId/files/:fileId/structuring-review",
         element: <StructuringReviewPage />,
+      },
+      {
+        path: "projects/:projectId/chapters/:chapterId/files/:fileId/edit",
+        element: <FileEditorPage />,
       },
     ],
   },

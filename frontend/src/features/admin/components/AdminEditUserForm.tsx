@@ -1,6 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 
+import { Button } from "@/components/ui/Button";
 import type { AdminUser } from "@/types/api";
+
+const schema = z.object({
+  email: z.string().min(1, "Email is required").email("Enter a valid email"),
+});
+
+type FormValues = z.infer<typeof schema>;
 
 interface AdminEditUserFormProps {
   user: AdminUser;
@@ -9,58 +19,71 @@ interface AdminEditUserFormProps {
   onCancel: () => void;
 }
 
+const inputClass =
+  "w-full border border-surface-400 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-gold-600 focus:border-transparent disabled:opacity-50 disabled:bg-surface-100";
+
 export function AdminEditUserForm({
   user,
   isPending,
   onSubmit,
   onCancel,
 }: AdminEditUserFormProps) {
-  const [email, setEmail] = useState(user.email);
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors },
+    setError,
+  } = useForm<FormValues>({
+    resolver: zodResolver(schema),
+    defaultValues: { email: user.email },
+  });
 
+  // Reset when user changes (drawer opened for different user)
   useEffect(() => {
-    setEmail(user.email);
-  }, [user.email, user.id]);
+    reset({ email: user.email });
+  }, [user.id, user.email, reset]);
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    await onSubmit(email);
+  async function onValid(values: FormValues) {
+    try {
+      await onSubmit(values.email.trim());
+    } catch (err) {
+      setError("root", {
+        message: err instanceof Error ? err.message : "Failed to update user.",
+      });
+    }
   }
 
   return (
-    <section className="admin-form-card admin-form-card--edit">
-      <div className="admin-form-card__header">
-        <div>
-          <h2>Edit User: {user.username}</h2>
-          <p>Update the current user email address.</p>
+    <form onSubmit={(e) => void handleSubmit(onValid)(e)} className="space-y-4">
+      {errors.root ? (
+        <div className="bg-error-100 border border-error-100 text-error-600 text-sm rounded-md px-3 py-2">
+          {errors.root.message}
         </div>
+      ) : null}
+
+      <div>
+        <label className="block text-sm font-medium text-navy-700 mb-1.5">Email</label>
+        <input
+          {...register("email")}
+          className={inputClass}
+          disabled={isPending}
+          type="email"
+          autoComplete="email"
+        />
+        {errors.email ? (
+          <p className="text-xs text-error-600 mt-1">{errors.email.message}</p>
+        ) : null}
       </div>
 
-      <form className="admin-form-grid admin-form-card__grid" onSubmit={handleSubmit}>
-        <label className="field">
-          <span>Email</span>
-          <input
-            className="search-input admin-form-card__input"
-            disabled={isPending}
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-          />
-        </label>
-
-        <div className="upload-actions admin-form-card__actions">
-          <button className="button" disabled={isPending} type="submit">
-            {isPending ? "Saving..." : "Save Changes"}
-          </button>
-          <button
-            className="button button--secondary"
-            disabled={isPending}
-            type="button"
-            onClick={onCancel}
-          >
-            Cancel
-          </button>
-        </div>
-      </form>
-    </section>
+      <div className="flex items-center justify-end gap-3 pt-2">
+        <Button variant="ghost" type="button" disabled={isPending} onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button variant="primary" type="submit" isLoading={isPending} disabled={isPending}>
+          Save Changes
+        </Button>
+      </div>
+    </form>
   );
 }

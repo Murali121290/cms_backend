@@ -1,6 +1,19 @@
-import { useState } from "react";
+import { useEffect } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 
+import { Button } from "@/components/ui/Button";
 import type { AdminRole } from "@/types/api";
+
+const schema = z.object({
+  username: z.string().min(1, "Username is required").max(64),
+  email: z.string().min(1, "Email is required").email("Enter a valid email"),
+  password: z.string().min(8, "Password must be at least 8 characters"),
+  roleId: z.number().positive("Select a role"),
+});
+
+type FormValues = z.infer<typeof schema>;
 
 interface AdminCreateUserFormProps {
   roles: AdminRole[];
@@ -14,106 +27,140 @@ interface AdminCreateUserFormProps {
   onCancel?: () => void;
 }
 
+const inputClass =
+  "w-full border border-surface-400 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-gold-600 focus:border-transparent disabled:opacity-50 disabled:bg-surface-100";
+
 export function AdminCreateUserForm({
   roles,
   isPending,
   onSubmit,
   onCancel,
 }: AdminCreateUserFormProps) {
-  const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [roleId, setRoleId] = useState<number>(roles[0]?.id ?? 0);
+  const {
+    register,
+    handleSubmit,
+    reset,
+    setValue,
+    formState: { errors },
+    setError,
+  } = useForm<FormValues>({
+    resolver: zodResolver(schema),
+    defaultValues: {
+      username: "",
+      email: "",
+      password: "",
+      roleId: roles[0]?.id ?? 0,
+    },
+  });
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!username.trim() || !email.trim() || !password || !roleId) {
-      return;
+  // Update default roleId if roles load after mount
+  useEffect(() => {
+    if (roles[0]?.id) setValue("roleId", roles[0].id);
+  }, [roles, setValue]);
+
+  async function onValid(values: FormValues) {
+    try {
+      await onSubmit({
+        username: values.username.trim(),
+        email: values.email.trim(),
+        password: values.password,
+        roleId: values.roleId,
+      });
+      reset({ username: "", email: "", password: "", roleId: roles[0]?.id ?? 0 });
+    } catch (err) {
+      setError("root", {
+        message: err instanceof Error ? err.message : "Failed to create user.",
+      });
     }
-
-    await onSubmit({
-      username: username.trim(),
-      email: email.trim(),
-      password,
-      roleId,
-    });
-
-    setUsername("");
-    setEmail("");
-    setPassword("");
-    setRoleId(roles[0]?.id ?? 0);
   }
 
   return (
-    <section className="admin-form-card admin-form-card--create">
-      <div className="admin-form-card__header">
-        <div>
-          <h2>Create New User</h2>
-          <p>Add a new user to the system</p>
+    <form onSubmit={(e) => void handleSubmit(onValid)(e)} className="space-y-4">
+      {errors.root ? (
+        <div className="bg-error-100 border border-error-100 text-error-600 text-sm rounded-md px-3 py-2">
+          {errors.root.message}
         </div>
-        {onCancel ? (
-          <button className="admin-form-card__back" disabled={isPending} type="button" onClick={onCancel}>
-            Back to Users
-          </button>
+      ) : null}
+
+      <div>
+        <label className="block text-sm font-medium text-navy-700 mb-1.5">Username</label>
+        <input
+          {...register("username")}
+          className={inputClass}
+          disabled={isPending}
+          placeholder="e.g. john_doe"
+          type="text"
+          autoComplete="username"
+        />
+        {errors.username ? (
+          <p className="text-xs text-error-600 mt-1">{errors.username.message}</p>
         ) : null}
       </div>
 
-      <form className="admin-form-grid admin-form-card__grid" onSubmit={handleSubmit}>
-        <label className="field">
-          <span>Username</span>
-          <input
-            className="search-input admin-form-card__input"
-            disabled={isPending}
-            placeholder="e.g. john_doe"
-            type="text"
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-          />
-        </label>
-        <label className="field">
-          <span>Email</span>
-          <input
-            className="search-input admin-form-card__input"
-            disabled={isPending}
-            placeholder="e.g. john@example.com"
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-          />
-        </label>
-        <label className="field">
-          <span>Password</span>
-          <input
-            className="search-input admin-form-card__input"
-            disabled={isPending}
-            placeholder="Min. 6 characters"
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-          />
-        </label>
-        <label className="field">
-          <span>Role</span>
-          <select
-            className="select-input admin-form-card__input"
-            disabled={isPending}
-            value={roleId}
-            onChange={(event) => setRoleId(Number.parseInt(event.target.value, 10))}
-          >
-            {roles.map((role) => (
-              <option key={role.id} value={role.id}>
-                {role.name}
-                {role.description ? ` - ${role.description}` : ""}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="upload-actions admin-form-card__actions">
-          <button className="button" disabled={isPending || roles.length === 0} type="submit">
-            {isPending ? "Creating..." : "Create User"}
-          </button>
-        </div>
-      </form>
-    </section>
+      <div>
+        <label className="block text-sm font-medium text-navy-700 mb-1.5">Email</label>
+        <input
+          {...register("email")}
+          className={inputClass}
+          disabled={isPending}
+          placeholder="e.g. john@example.com"
+          type="email"
+          autoComplete="email"
+        />
+        {errors.email ? (
+          <p className="text-xs text-error-600 mt-1">{errors.email.message}</p>
+        ) : null}
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-navy-700 mb-1.5">Password</label>
+        <input
+          {...register("password")}
+          className={inputClass}
+          disabled={isPending}
+          placeholder="Min. 8 characters"
+          type="password"
+          autoComplete="new-password"
+        />
+        {errors.password ? (
+          <p className="text-xs text-error-600 mt-1">{errors.password.message}</p>
+        ) : null}
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-navy-700 mb-1.5">Role</label>
+        <select
+          {...register("roleId", { valueAsNumber: true })}
+          className={inputClass}
+          disabled={isPending || roles.length === 0}
+        >
+          {roles.map((role) => (
+            <option key={role.id} value={role.id}>
+              {role.name}
+              {role.description ? ` — ${role.description}` : ""}
+            </option>
+          ))}
+        </select>
+        {errors.roleId ? (
+          <p className="text-xs text-error-600 mt-1">{errors.roleId.message}</p>
+        ) : null}
+      </div>
+
+      <div className="flex items-center justify-end gap-3 pt-2">
+        {onCancel ? (
+          <Button variant="ghost" type="button" disabled={isPending} onClick={onCancel}>
+            Cancel
+          </Button>
+        ) : null}
+        <Button
+          variant="primary"
+          type="submit"
+          isLoading={isPending}
+          disabled={isPending || roles.length === 0}
+        >
+          Create User
+        </Button>
+      </div>
+    </form>
   );
 }

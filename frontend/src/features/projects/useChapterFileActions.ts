@@ -196,6 +196,7 @@ export function useChapterFileActions({
 
   return {
     status,
+    clearStatus: () => setStatus(null),
     isPending,
     handleDownload,
     handleCheckout,

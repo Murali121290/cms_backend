@@ -1,74 +1,40 @@
+import { BarChart3, Users } from "lucide-react";
 import { Link } from "react-router-dom";
 
-import { getSsrUrl, uiPaths } from "@/utils/appPaths";
+import { uiPaths } from "@/utils/appPaths";
 
 type DashboardAdminShortcutsProps = {
   userId: number;
 };
 
-export function DashboardAdminShortcuts({ userId }: DashboardAdminShortcutsProps) {
-  const shortcutItems = [
-    {
-      title: "Admin",
-      description: "Overview",
-      colorClass: "dashboard-shortcut__icon dashboard-shortcut__icon--emerald",
-      icon: "🛡",
-      to: uiPaths.adminDashboard,
-      external: false,
-    },
-    {
-      title: "Users",
-      description: "Manage accounts",
-      colorClass: "dashboard-shortcut__icon dashboard-shortcut__icon--blue",
-      icon: "👥",
-      to: uiPaths.adminUsers,
-      external: false,
-    },
-    {
-      title: "Create User",
-      description: "Add new admin/user",
-      colorClass: "dashboard-shortcut__icon dashboard-shortcut__icon--indigo",
-      icon: "➕",
-      to: uiPaths.adminUsers,
-      external: false,
-    },
-    {
-      title: "Stats",
-      description: "System metrics",
-      colorClass: "dashboard-shortcut__icon dashboard-shortcut__icon--amber",
-      icon: "📊",
-      to: uiPaths.adminDashboard,
-      external: false,
-    },
-    {
-      title: "Change Password",
-      description: "Your admin password",
-      colorClass: "dashboard-shortcut__icon dashboard-shortcut__icon--rose",
-      icon: "🔑",
-      to: getSsrUrl(`/admin/users/${userId}/password`),
-      external: true,
-    },
-  ] as const;
-
+export function DashboardAdminShortcuts({ userId: _userId }: DashboardAdminShortcutsProps) {
   return (
-    <section className="dashboard-shortcuts panel">
-      <h2 className="dashboard-section-heading">Admin Shortcuts</h2>
-      <div className="dashboard-shortcuts__grid">
-        {shortcutItems.map((item) =>
-          item.external ? (
-            <a className="dashboard-shortcut" href={item.to} key={item.title}>
-              <div className={item.colorClass}>{item.icon}</div>
-              <div className="dashboard-shortcut__title">{item.title}</div>
-              <div className="dashboard-shortcut__description">{item.description}</div>
-            </a>
-          ) : (
-            <Link className="dashboard-shortcut" key={item.title} to={item.to}>
-              <div className={item.colorClass}>{item.icon}</div>
-              <div className="dashboard-shortcut__title">{item.title}</div>
-              <div className="dashboard-shortcut__description">{item.description}</div>
-            </Link>
-          ),
-        )}
+    <section className="mb-6">
+      <h2 className="text-xs font-medium text-navy-500 uppercase tracking-wide mb-3">
+        Admin
+      </h2>
+      <div className="flex flex-wrap gap-3">
+        <Link
+          className="bg-navy-50 border border-navy-100 rounded-md p-4 flex items-center gap-3 hover:bg-navy-100 transition-colors cursor-pointer min-w-[160px]"
+          to={uiPaths.adminUsers}
+        >
+          <Users className="w-5 h-5 text-navy-600 shrink-0" />
+          <div>
+            <p className="text-sm font-medium text-navy-800">Manage Users</p>
+            <p className="text-xs text-navy-500">Accounts &amp; roles</p>
+          </div>
+        </Link>
+
+        <Link
+          className="bg-navy-50 border border-navy-100 rounded-md p-4 flex items-center gap-3 hover:bg-navy-100 transition-colors cursor-pointer min-w-[160px]"
+          to={uiPaths.adminDashboard}
+        >
+          <BarChart3 className="w-5 h-5 text-navy-600 shrink-0" />
+          <div>
+            <p className="text-sm font-medium text-navy-800">Admin Dashboard</p>
+            <p className="text-xs text-navy-500">System metrics</p>
+          </div>
+        </Link>
       </div>
     </section>
   );

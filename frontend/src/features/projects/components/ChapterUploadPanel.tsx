@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Upload, CheckCircle2, AlertCircle } from "lucide-react";
 
 import type { FileUploadResponse } from "@/types/api";
 
@@ -20,18 +21,6 @@ interface ChapterUploadPanelProps {
   onUpload: (category: string, files: File[]) => Promise<unknown>;
   onClearResult: () => void;
   onClose?: () => void;
-}
-
-function uploadedItemLabel(item: FileUploadResponse["uploaded"][number]) {
-  if (item.operation === "created") {
-    return "Created";
-  }
-
-  if (item.archived_version_num !== null) {
-    return `Replaced, archived v${item.archived_version_num}`;
-  }
-
-  return "Replaced";
 }
 
 export function ChapterUploadPanel({
@@ -61,26 +50,11 @@ export function ChapterUploadPanel({
     }
   }, [activeTab, selectedFiles.length]);
 
-  const hasResult = result !== null || statusMessage !== null || errorMessage !== null;
   const canSubmit = selectedFiles.length > 0 && !isPending;
-  const selectedLabel = useMemo(() => {
-    if (selectedFiles.length === 0) {
-      return "No files selected";
-    }
-
-    if (selectedFiles.length === 1) {
-      return selectedFiles[0].name;
-    }
-
-    return `${selectedFiles.length} files selected`;
-  }, [selectedFiles]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canSubmit) {
-      return;
-    }
-
+    if (!canSubmit) return;
     try {
       await onUpload(category, selectedFiles);
       setSelectedFiles([]);
@@ -88,125 +62,180 @@ export function ChapterUploadPanel({
         fileInputRef.current.value = "";
       }
     } catch {
-      // The error message is surfaced via the hook state.
+      // error surfaced via hook state
     }
   }
 
+  function handleDrop(event: React.DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const droppedFiles = Array.from(event.dataTransfer.files);
+    if (droppedFiles.length > 0) {
+      setSelectedFiles(droppedFiles);
+    }
+  }
+
+  function handleDragOver(event: React.DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+  }
+
   return (
-    <section className="chapter-upload-panel">
-      <div className="chapter-upload-panel__header">
+    <section className="space-y-4">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h2>Upload files</h2>
-          <span className="helper-text">Add files to the selected folder. Replacements keep version history.</span>
+          <h2 className="text-base font-semibold text-navy-900">Upload files</h2>
+          <p className="text-sm text-navy-400 mt-0.5">
+            Uploading to:{" "}
+            <span className="font-medium text-navy-700">{category}</span>
+          </p>
         </div>
-        {onClose ? (
+        {onClose && (
           <button
-            className="chapter-upload-panel__close"
+            className="text-navy-400 hover:text-navy-700 transition-colors text-sm"
             disabled={isPending}
             type="button"
             onClick={onClose}
           >
             Close
           </button>
-        ) : null}
+        )}
       </div>
 
-      <form className="upload-form chapter-upload-panel__form" onSubmit={handleSubmit}>
-        <label className="field">
-          <span>Category</span>
-          <select
-            className="select-input"
-            disabled={isPending}
-            value={category}
-            onChange={(event) => setCategory(event.target.value)}
-          >
-            {categoryOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
+      {/* Category selector */}
+      <div className="flex items-center gap-3">
+        <label htmlFor="upload-category" className="text-xs font-medium text-navy-500 uppercase tracking-wide shrink-0">
+          Category
         </label>
+        <select
+          id="upload-category"
+          className="border border-surface-400 rounded-md px-3 py-1.5 text-sm bg-white text-navy-800 focus:outline-none focus:ring-2 focus:ring-gold-600"
+          disabled={isPending}
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+        >
+          {categoryOptions.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      </div>
 
-        <label className="field field--grow">
-          <span>Files</span>
+      {/* Drop zone */}
+      <form onSubmit={handleSubmit}>
+        <div
+          className="bg-surface-100 border-2 border-dashed border-surface-400 rounded-lg p-6 flex flex-col items-center gap-3 text-center cursor-pointer hover:border-gold-400 hover:bg-surface-50 transition-colors"
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+          onClick={() => fileInputRef.current?.click()}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => e.key === "Enter" && fileInputRef.current?.click()}
+          aria-label="Drop files here or click to upload"
+        >
+          <Upload className="w-8 h-8 text-navy-400" aria-hidden="true" />
+          <div>
+            <p className="text-sm font-medium text-navy-700">
+              {selectedFiles.length > 0
+                ? selectedFiles.length === 1
+                  ? selectedFiles[0].name
+                  : `${selectedFiles.length} files selected`
+                : "Drop files here or click to upload"}
+            </p>
+            <p className="text-xs text-navy-400 mt-0.5">
+              Uploading to: <span className="font-medium">{category}</span>
+            </p>
+          </div>
           <input
             ref={fileInputRef}
-            className="file-input"
-            disabled={isPending}
-            multiple
             type="file"
-            onChange={(event) => setSelectedFiles(Array.from(event.target.files ?? []))}
+            multiple
+            disabled={isPending}
+            className="sr-only"
+            onChange={(e) => setSelectedFiles(Array.from(e.target.files ?? []))}
           />
-          <span className="helper-text">{selectedLabel}</span>
-        </label>
+        </div>
 
-        <div className="upload-actions">
-          <button className="button" disabled={!canSubmit} type="submit">
-            {isPending ? "Uploading..." : "Upload"}
+        <div className="flex items-center gap-2 mt-3">
+          <button
+            className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md bg-gold-600 text-white hover:bg-gold-700 disabled:opacity-50 disabled:cursor-not-allowed border border-gold-600 shadow-subtle transition-all duration-150"
+            disabled={!canSubmit}
+            type="submit"
+          >
+            {isPending ? "Uploading…" : "Upload"}
           </button>
-          {hasResult ? (
+          {(result || statusMessage || errorMessage) && (
             <button
-              className="button button--secondary"
+              className="inline-flex items-center h-9 px-4 text-sm font-medium rounded-md border border-surface-400 text-navy-700 hover:bg-surface-100 transition-colors"
               disabled={isPending}
               type="button"
               onClick={onClearResult}
             >
               Clear results
             </button>
-          ) : null}
+          )}
         </div>
       </form>
 
-      {statusMessage ? (
-        <div className={`status-banner ${isPending ? "status-banner--pending" : "status-banner--success"}`}>
-          {statusMessage}
+      {/* Status messages */}
+      {statusMessage && !errorMessage && (
+        <div className="flex items-start gap-2 text-sm rounded-md bg-surface-100 border border-surface-300 px-3 py-2.5">
+          <CheckCircle2 className="w-4 h-4 text-success-600 mt-0.5 shrink-0" aria-hidden="true" />
+          <span className="text-navy-700">{statusMessage}</span>
         </div>
-      ) : null}
-      {errorMessage ? <div className="status-banner status-banner--error">{errorMessage}</div> : null}
+      )}
+      {errorMessage && (
+        <div className="flex items-start gap-2 text-sm rounded-md bg-error-50 border border-error-200 px-3 py-2.5">
+          <AlertCircle className="w-4 h-4 text-error-600 mt-0.5 shrink-0" aria-hidden="true" />
+          <span className="text-error-700">{errorMessage}</span>
+        </div>
+      )}
 
-      {result ? (
-        <div className="upload-results stack">
-          <div className="upload-result-block">
-            <h3>Uploaded</h3>
+      {/* Upload results */}
+      {result && (
+        <div className="space-y-3 text-sm">
+          <div>
+            <p className="font-medium text-navy-700 mb-1">
+              Uploaded ({result.uploaded.length})
+            </p>
             {result.uploaded.length === 0 ? (
-              <p className="helper-text">No files were uploaded.</p>
+              <p className="text-navy-400 text-xs">No files were uploaded.</p>
             ) : (
-              <ul className="result-list">
+              <ul className="space-y-1">
                 {result.uploaded.map((item) => (
-                  <li className="result-item" key={`${item.file.id}-${item.file.version}`}>
-                    <strong>{item.file.filename}</strong>
-                    <span>{uploadedItemLabel(item)}</span>
-                    <span className="helper-text">
-                      {item.file.category} | v{item.file.version}
+                  <li
+                    key={`${item.file.id}-${item.file.version}`}
+                    className="flex items-center gap-2 text-xs text-navy-700"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5 text-success-600 shrink-0" aria-hidden="true" />
+                    <span className="font-medium">{item.file.filename}</span>
+                    <span className="text-navy-400">
+                      {item.operation === "created" ? "Created" : `Replaced (v${item.archived_version_num ?? "?"})`}
                     </span>
-                    {item.archive_path ? (
-                      <span className="helper-text">Archive: {item.archive_path}</span>
-                    ) : null}
                   </li>
                 ))}
               </ul>
             )}
           </div>
-
-          <div className="upload-result-block">
-            <h3>Skipped</h3>
-            {result.skipped.length === 0 ? (
-              <p className="helper-text">No files were skipped.</p>
-            ) : (
-              <ul className="result-list">
+          {result.skipped.length > 0 && (
+            <div>
+              <p className="font-medium text-navy-700 mb-1">
+                Skipped ({result.skipped.length})
+              </p>
+              <ul className="space-y-1">
                 {result.skipped.map((item) => (
-                  <li className="result-item" key={`${item.code}-${item.filename}`}>
-                    <strong>{item.filename}</strong>
-                    <span>{item.code}</span>
-                    <span className="helper-text">{item.message}</span>
+                  <li
+                    key={`${item.code}-${item.filename}`}
+                    className="text-xs text-navy-500"
+                  >
+                    <span className="font-medium">{item.filename}</span> — {item.message}
                   </li>
                 ))}
               </ul>
-            )}
-          </div>
+            </div>
+          )}
         </div>
-      ) : null}
+      )}
     </section>
   );
 }

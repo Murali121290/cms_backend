@@ -1,227 +1,411 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  Check,
+  Code2,
+  Eye,
+  ExternalLink,
+  FileText,
+  Layout,
+  Minus,
+  Palette,
+  Pencil,
+  PlusCircle,
+  Trash2,
+} from "lucide-react";
 
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { useToast } from "@/components/ui/useToast";
+import { deleteChapter } from "@/api/projects";
+import { getApiErrorMessage } from "@/api/client";
 import type { ChapterSummary } from "@/types/api";
 import { uiPaths } from "@/utils/appPaths";
+import { cn } from "@/utils/cn";
 
-type ChapterActionKind = "create" | "rename" | "delete";
+/* ─── Stage config ─────────────────────────────────────────────────────────── */
+
+const STAGES = [
+  {
+    key: "has_art" as const,
+    label: "ART",
+    Icon: Palette,
+    color: "#E8A838",
+    bg: "rgba(232,168,56,0.10)",
+    text: "#A06515",
+  },
+  {
+    key: "has_manuscript" as const,
+    label: "MS",
+    Icon: FileText,
+    color: "#2B579A",
+    bg: "rgba(43,87,154,0.10)",
+    text: "#2B579A",
+  },
+  {
+    key: "has_indesign" as const,
+    label: "INDESIGN",
+    Icon: Layout,
+    color: "#FF3366",
+    bg: "rgba(255,51,102,0.10)",
+    text: "#CC1144",
+  },
+  {
+    key: "has_proof" as const,
+    label: "PROOF",
+    Icon: Eye,
+    color: "#7C3AED",
+    bg: "rgba(124,58,237,0.10)",
+    text: "#7C3AED",
+  },
+  {
+    key: "has_xml" as const,
+    label: "XML",
+    Icon: Code2,
+    color: "#16A34A",
+    bg: "rgba(22,163,74,0.10)",
+    text: "#16A34A",
+  },
+] as const;
+
+type StageKey = (typeof STAGES)[number]["key"];
+type CellState = "done" | "not_started";
+
+function getState(chapter: ChapterSummary, key: StageKey): CellState {
+  return chapter[key] ? "done" : "not_started";
+}
+
+/* ─── Progress summary ─────────────────────────────────────────────────────── */
+
+function ProgressSummary({ chapters }: { chapters: ChapterSummary[] }) {
+  const total = chapters.length;
+  if (total === 0) return null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 bg-surface-50 border-b border-surface-200">
+      <span className="text-[10px] font-semibold text-navy-400 uppercase tracking-widest">
+        Progress
+      </span>
+      {STAGES.map((stage) => {
+        const done = chapters.filter((c) => c[stage.key]).length;
+        const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+        return (
+          <div key={stage.key} className="flex items-center gap-1.5">
+            <stage.Icon className="w-3 h-3 shrink-0" style={{ color: stage.color }} aria-hidden="true" />
+            <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: stage.text }}>
+              {stage.label}
+            </span>
+            <div className="w-16 h-1.5 rounded-full bg-surface-300 overflow-hidden">
+              <div
+                className="h-full rounded-full transition-[width] duration-500"
+                style={{ width: `${pct}%`, backgroundColor: stage.color }}
+              />
+            </div>
+            <span className="text-[10px] text-navy-400 tabular-nums w-8 text-right">
+              {done}/{total}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ─── Stage cell ────────────────────────────────────────────────────────────── */
+
+function StageCell({ state, color, label }: { state: CellState; color: string; label: string }) {
+  if (state === "done") {
+    return (
+      <div className="flex items-center justify-center">
+        <span
+          className="flex items-center justify-center w-5 h-5 rounded-full"
+          style={{ backgroundColor: color }}
+          title={`${label}: Done`}
+          aria-label={`${label}: Done`}
+        >
+          <Check className="w-3 h-3 text-white" strokeWidth={3} aria-hidden="true" />
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center justify-center" aria-label={`${label}: Not started`}>
+      <Minus className="w-3.5 h-3.5 text-navy-300 opacity-40" aria-hidden="true" />
+    </div>
+  );
+}
+
+/* ─── Row action icon button ────────────────────────────────────────────────── */
+
+function ActionBtn({
+  label,
+  onClick,
+  destructive = false,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  destructive?: boolean;
+  children: React.ReactNode;
+}) {
+  const [hov, setHov] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        width: 28,
+        height: 28,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        borderRadius: 6,
+        border: "none",
+        padding: 0,
+        cursor: "pointer",
+        color: hov ? (destructive ? "#B91C1C" : "#1A1714") : "#9C9590",
+        backgroundColor: hov ? (destructive ? "#FEE2E2" : "#F0EBE4") : "transparent",
+        transition: "color 100ms ease, background-color 100ms ease",
+        flexShrink: 0,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+/* ─── Main component ────────────────────────────────────────────────────────── */
 
 interface ProjectChaptersTableProps {
   projectId: number;
   chapters: ChapterSummary[];
-  viewMode: "grid" | "list";
-  isPending: (action: ChapterActionKind, chapterId?: number | null) => boolean;
-  onRename: (chapterId: number, number: string, title: string) => Promise<unknown>;
-  onDelete: (chapterId: number, number: string) => Promise<unknown>;
-}
-
-function ProjectChapterGridCard({
-  projectId,
-  chapter,
-  isPending,
-  onRename,
-  onDelete,
-}: {
-  projectId: number;
-  chapter: ChapterSummary;
-  isPending: ProjectChaptersTableProps["isPending"];
-  onRename: ProjectChaptersTableProps["onRename"];
-  onDelete: ProjectChaptersTableProps["onDelete"];
-}) {
-  const [isRenameOpen, setIsRenameOpen] = useState(false);
-  const [number, setNumber] = useState(chapter.number);
-  const [title, setTitle] = useState(chapter.title);
-
-  useEffect(() => {
-    setNumber(chapter.number);
-    setTitle(chapter.title);
-  }, [chapter.number, chapter.title]);
-
-  return (
-    <>
-      <article className="project-chapter-card">
-        <div className="project-chapter-card__icon-wrap">
-          <div className="project-chapter-card__icon">📁</div>
-          <div className="project-chapter-card__number">{chapter.number}</div>
-        </div>
-        <Link className="project-chapter-card__title" to={uiPaths.chapterDetail(projectId, chapter.id)}>
-          Chapter {chapter.number} - {chapter.title}
-        </Link>
-        <div className="project-chapter-card__badges">
-          {chapter.has_manuscript ? <span className="project-chapter-card__badge">Manuscript</span> : null}
-          {chapter.has_art ? <span className="project-chapter-card__badge">Art</span> : null}
-          {chapter.has_indesign ? <span className="project-chapter-card__badge">InDesign</span> : null}
-          {chapter.has_proof ? <span className="project-chapter-card__badge">Proof</span> : null}
-          {chapter.has_xml ? <span className="project-chapter-card__badge">XML</span> : null}
-        </div>
-        <div className="project-chapter-card__actions">
-          <button
-            className="button button--secondary button--small"
-            type="button"
-            onClick={() => setIsRenameOpen(true)}
-          >
-            Rename
-          </button>
-          <a
-            className="button button--secondary button--small"
-            href={`/api/v2/projects/${projectId}/chapters/${chapter.id}/package`}
-          >
-            Download ZIP
-          </a>
-          <button
-            className="button button--secondary button--small"
-            disabled={isPending("delete", chapter.id)}
-            type="button"
-            onClick={() => void onDelete(chapter.id, chapter.number)}
-          >
-            {isPending("delete", chapter.id) ? "Deleting..." : "Delete"}
-          </button>
-        </div>
-      </article>
-
-      {isRenameOpen ? (
-        <div className="project-detail-modal-backdrop" role="presentation">
-          <div className="project-detail-modal">
-            <section className="project-detail-form-card">
-              <div className="project-detail-form-card__header">
-                <h3>Rename Chapter</h3>
-                <button
-                  className="project-detail-form-card__close"
-                  type="button"
-                  onClick={() => setIsRenameOpen(false)}
-                >
-                  ×
-                </button>
-              </div>
-
-              <form
-                className="project-detail-form-card__form"
-                onSubmit={async (event) => {
-                  event.preventDefault();
-                  await onRename(chapter.id, number.trim(), title.trim());
-                  setIsRenameOpen(false);
-                }}
-              >
-                <label className="field">
-                  <span>Chapter Number</span>
-                  <input
-                    className="search-input"
-                    disabled={isPending("rename", chapter.id)}
-                    required
-                    type="text"
-                    value={number}
-                    onChange={(event) => setNumber(event.target.value)}
-                  />
-                </label>
-                <label className="field">
-                  <span>Chapter Title</span>
-                  <input
-                    className="search-input"
-                    disabled={isPending("rename", chapter.id)}
-                    required
-                    type="text"
-                    value={title}
-                    onChange={(event) => setTitle(event.target.value)}
-                  />
-                </label>
-                <div className="project-detail-form-card__actions">
-                  <button
-                    className="button button--secondary"
-                    type="button"
-                    onClick={() => setIsRenameOpen(false)}
-                  >
-                    Cancel
-                  </button>
-                  <button className="button" disabled={isPending("rename", chapter.id)} type="submit">
-                    {isPending("rename", chapter.id) ? "Saving..." : "Save Changes"}
-                  </button>
-                </div>
-              </form>
-            </section>
-          </div>
-        </div>
-      ) : null}
-    </>
-  );
+  onAddChapter: () => void;
+  onEditChapter: (chapter: ChapterSummary) => void;
 }
 
 export function ProjectChaptersTable({
   projectId,
   chapters,
-  viewMode,
-  isPending,
-  onRename,
-  onDelete,
+  onAddChapter,
+  onEditChapter,
 }: ProjectChaptersTableProps) {
-  if (viewMode === "grid") {
-    return (
-      <div className="project-chapter-grid">
-        {chapters.map((chapter) => (
-          <ProjectChapterGridCard
-            chapter={chapter}
-            isPending={isPending}
-            key={chapter.id}
-            onDelete={onDelete}
-            onRename={onRename}
-            projectId={projectId}
-          />
-        ))}
-      </div>
-    );
+  const { addToast } = useToast();
+  const queryClient = useQueryClient();
+
+  const [pendingDelete, setPendingDelete] = useState<ChapterSummary | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [addBtnHov, setAddBtnHov] = useState(false);
+
+  async function handleDelete() {
+    if (!pendingDelete) return;
+    setIsDeleting(true);
+    try {
+      await deleteChapter(projectId, pendingDelete.id);
+      await queryClient.invalidateQueries({ queryKey: ["project-chapters", projectId] });
+      addToast({ title: `Chapter ${pendingDelete.number} deleted`, variant: "success" });
+      setPendingDelete(null);
+    } catch (err) {
+      addToast({
+        title: "Failed to delete chapter",
+        description: getApiErrorMessage(err, "An unexpected error occurred."),
+        variant: "error",
+        duration: 6000,
+      });
+    } finally {
+      setIsDeleting(false);
+    }
   }
 
   return (
-    <div className="project-chapter-list">
-      <table className="list-table project-chapter-list__table">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Manuscript</th>
-            <th>Art</th>
-            <th>InDesign</th>
-            <th>Proof</th>
-            <th>XML</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {chapters.map((chapter) => (
-            <tr key={chapter.id}>
-              <td>
-                <div className="project-chapter-list__name-cell">
-                  <span className="project-chapter-list__folder">📁</span>
-                  <Link className="table-link" to={uiPaths.chapterDetail(projectId, chapter.id)}>
-                    Chapter {chapter.number} - {chapter.title}
-                  </Link>
-                </div>
-              </td>
-              <td>{chapter.has_manuscript ? "Yes" : "No"}</td>
-              <td>{chapter.has_art ? "Yes" : "No"}</td>
-              <td>{chapter.has_indesign ? "Yes" : "No"}</td>
-              <td>{chapter.has_proof ? "Yes" : "No"}</td>
-              <td>{chapter.has_xml ? "Yes" : "No"}</td>
-              <td>
-                <div className="table-actions">
-                  <a
-                    className="button button--secondary button--small"
-                    href={`/api/v2/projects/${projectId}/chapters/${chapter.id}/package`}
+    <div>
+      {/* Progress summary row */}
+      <ProgressSummary chapters={chapters} />
+
+      {/* Scrollable table */}
+      <div className="overflow-x-auto overflow-y-auto max-h-[60vh]">
+        <table className="w-full border-collapse min-w-[700px]">
+          <thead className="sticky top-0 z-10 bg-white border-b border-surface-200 shadow-subtle">
+            <tr>
+              <th
+                scope="col"
+                className="text-xs font-semibold text-navy-500 uppercase tracking-wide px-4 py-3 text-left"
+                style={{ width: 48 }}
+              >
+                #
+              </th>
+              <th
+                scope="col"
+                className="text-xs font-semibold text-navy-500 uppercase tracking-wide px-4 py-3 text-left"
+              >
+                Title
+              </th>
+              {STAGES.map((stage) => (
+                <th
+                  key={stage.key}
+                  scope="col"
+                  className="px-2 py-2.5 text-center"
+                  style={{ width: 80, minWidth: 80 }}
+                >
+                  <div
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded-full mx-auto"
+                    style={{ backgroundColor: stage.bg }}
                   >
-                    Package
-                  </a>
-                  <button
-                    className="button button--secondary button--small"
-                    disabled={isPending("delete", chapter.id)}
-                    type="button"
-                    onClick={() => void onDelete(chapter.id, chapter.number)}
-                  >
-                    {isPending("delete", chapter.id) ? "Deleting..." : "Delete"}
-                  </button>
-                </div>
-              </td>
+                    <stage.Icon
+                      className="w-3 h-3 shrink-0"
+                      style={{ color: stage.color }}
+                      aria-hidden="true"
+                    />
+                    <span
+                      className="text-[10px] font-semibold uppercase tracking-wide leading-none"
+                      style={{ color: stage.text }}
+                    >
+                      {stage.label}
+                    </span>
+                  </div>
+                </th>
+              ))}
+              <th
+                scope="col"
+                className="text-xs font-semibold text-navy-500 uppercase tracking-wide px-4 py-3 text-right"
+                style={{ width: 120 }}
+              >
+                Actions
+              </th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+
+          <tbody>
+            {chapters.map((chapter, index) => (
+              <tr
+                key={chapter.id}
+                className={cn(
+                  "border-b border-surface-200 transition-colors duration-100",
+                  "[&:hover]:bg-[#F0F4FF]",
+                  index % 2 === 0 ? "bg-white" : "bg-[#FAFAFA]",
+                )}
+              >
+                <td
+                  className="px-4 py-3.5 text-sm text-navy-400 tabular-nums"
+                  style={{ width: 48 }}
+                >
+                  {chapter.number}
+                </td>
+                <td className="px-4 py-3.5 text-sm">
+                  <Link
+                    to={uiPaths.chapterDetail(projectId, chapter.id)}
+                    className="font-medium text-navy-900 hover:text-gold-700 transition-colors"
+                  >
+                    {chapter.title || `Chapter ${chapter.number}`}
+                  </Link>
+                </td>
+                {STAGES.map((stage) => (
+                  <td
+                    key={stage.key}
+                    className="px-2 py-3.5 text-center"
+                    style={{ width: 80 }}
+                  >
+                    <StageCell
+                      state={getState(chapter, stage.key)}
+                      color={stage.color}
+                      label={stage.label}
+                    />
+                  </td>
+                ))}
+                <td className="px-4 py-3.5 text-right" style={{ width: 120 }}>
+                  <div className="flex items-center justify-end gap-0.5">
+                    {/* View */}
+                    <Link
+                      to={uiPaths.chapterDetail(projectId, chapter.id)}
+                      aria-label="View Chapter"
+                      title="View Chapter"
+                      className="hover:bg-[#F0EBE4] hover:text-[#1A1714]"
+                      style={{
+                        width: 28,
+                        height: 28,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        borderRadius: 6,
+                        color: "#9C9590",
+                        textDecoration: "none",
+                        transition: "color 100ms ease, background-color 100ms ease",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <ExternalLink size={14} aria-hidden />
+                    </Link>
+                    {/* Edit */}
+                    <ActionBtn label="Edit Chapter" onClick={() => onEditChapter(chapter)}>
+                      <Pencil size={14} aria-hidden />
+                    </ActionBtn>
+                    {/* Delete */}
+                    <ActionBtn
+                      label="Delete Chapter"
+                      destructive
+                      onClick={() => setPendingDelete(chapter)}
+                    >
+                      <Trash2 size={14} aria-hidden />
+                    </ActionBtn>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Add chapter — full-width dashed button */}
+      <div className="px-4 py-3 border-t border-surface-200">
+        <button
+          type="button"
+          onClick={onAddChapter}
+          onMouseEnter={() => setAddBtnHov(true)}
+          onMouseLeave={() => setAddBtnHov(false)}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: "100%",
+            padding: "10px",
+            border: `1.5px dashed ${addBtnHov ? "#C9821A" : "#D1CBC3"}`,
+            borderRadius: 6,
+            background: addBtnHov ? "#FEF8EE" : "transparent",
+            color: addBtnHov ? "#C9821A" : "#6B6560",
+            fontSize: 13,
+            fontWeight: 500,
+            cursor: "pointer",
+            transition: "border-color 150ms ease, background 150ms ease, color 150ms ease",
+          }}
+        >
+          <PlusCircle
+            size={15}
+            style={{
+              marginRight: 6,
+              color: addBtnHov ? "#C9821A" : "#9C9590",
+              flexShrink: 0,
+              transition: "color 150ms ease",
+            }}
+            aria-hidden
+          />
+          Add chapter
+        </button>
+      </div>
+
+      {/* Delete confirmation */}
+      <ConfirmDialog
+        isOpen={pendingDelete !== null}
+        onClose={() => { if (!isDeleting) setPendingDelete(null); }}
+        onConfirm={() => void handleDelete()}
+        title={`Delete ${pendingDelete?.title || `Chapter ${pendingDelete?.number}`}?`}
+        description="This will permanently delete the chapter and all its files. This action cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        isLoading={isDeleting}
+      />
     </div>
   );
 }
