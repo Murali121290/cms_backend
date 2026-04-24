@@ -877,7 +877,7 @@ def validate_and_repair(
                     changed = True
                     change_reason.append("ref-zone-heading")
             elif tag.startswith(("UL-", "BL-")) and tag not in {"SR", "SRH1"}:
-                desired_ref = "REF-U" if _starts_with_ref_bullet(text) else "REF-N"
+                desired_ref = "REF-N" if _starts_with_number(text) else "REF-U"
                 if tag != desired_ref:
                     tag = desired_ref
                     changed = True
@@ -886,7 +886,7 @@ def validate_and_repair(
                 # Preserve appendix reference family tags in appendix/reference sections.
                 pass
             elif tag not in {"SR", "SRH1"} and _looks_like_reference_entry(text):
-                desired_ref = "REF-U" if _starts_with_ref_bullet(text) else "REF-N"
+                desired_ref = "REF-N" if _starts_with_number(text) else "REF-U"
                 if tag != desired_ref:
                     tag = desired_ref
                     changed = True
@@ -1107,7 +1107,7 @@ def validate_and_repair(
         if not _looks_like_reference_entry(text):
             continue
 
-        desired = "REF-U" if _starts_with_ref_bullet(text) else "REF-N"
+        desired = "REF-N" if _starts_with_number(text) else "REF-U"
         if clf.get("tag") != desired:
             clf["tag"] = desired
             clf["confidence"] = max(float(clf.get("confidence", 0)), 0.99)
