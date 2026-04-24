@@ -1428,5 +1428,15 @@
   "toc 7",
   "toc 8",
   "toc 9",
-  "zbx"
+  "zbx",
+  "CS-TTL",
+  "CS-H1",
+  "CS-TXT",
+  "CS-TXT-FIRST",
+  "EOC-TXT",
+  "EOC-TXT-FIRST",
+  "EOC-TXT-FLUSH",
+  "NBX-UNT-T2",
+  "UNBX-TTL",
+  "UNBX-FN"
 ]
