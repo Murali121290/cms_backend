@@ -539,6 +539,17 @@ def validate_and_repair(
         tag = clf.get("tag", "TXT")
         original_input_tag = tag  # Preserve original for table heading map lookup
         confidence = clf.get("confidence", 85)
+        # Normalize confidence to a 0.0-1.0 scale. Callers historically pass
+        # either an integer percentage (85) or a float fraction (0.85); without
+        # this normalization, `confidence >= 0.90` would be True for any
+        # percentage-scale input and cause tags to be locked regardless of
+        # real confidence — blocking the semantic-list and zone alignment
+        # passes from ever running.
+        try:
+            if confidence is not None and float(confidence) > 1.0:
+                confidence = float(confidence) / 100.0
+        except (TypeError, ValueError):
+            confidence = 0.0
         reason = clf.get("reasoning")
 
         block = block_lookup.get(para_id, {})
@@ -812,17 +823,21 @@ def validate_and_repair(
                 changed = True
                 change_reason.append("list-position")
             elif not lock_tag and list_tag and tag.startswith(("BL", "NL", "UL", "TBL", "TNL", "TUL")):
-                # Align list position if needed
-                if tag != list_tag:
+                # Align list position if needed. Prefer semantic_list_tag when
+                # it was computed: _list_tag_from_meta drops nested-level
+                # indicators (BL2 -> BL), so using list_tag alone would demote
+                # BL2-MID to BL-MID when metadata only records list_kind=bullet.
+                target = semantic_list_tag or list_tag
+                if tag != target:
                     skip_alignment = False
                     # Prevent BL -> UL drift when metadata is ambiguous.
                     # But allow UL -> BL correction when list metadata indicates bullet lists.
-                    if tag.startswith("BL-") and list_tag.startswith("UL-"):
+                    if tag.startswith("BL-") and target.startswith("UL-"):
                         skip_alignment = True
                     if preserve_lists and tag.startswith("BL-"):
                         skip_alignment = True
                     if not skip_alignment:
-                        tag = list_tag
+                        tag = target
                         changed = True
                         change_reason.append("list-position")
             elif preserve_lists and tag.startswith("BL-"):
