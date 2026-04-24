@@ -60,6 +60,30 @@ _PIPELINE_BLOCK_STAGE_POLICY = BlockTransformPolicy(
 )
 
 
+def _unique_output_base(processed_dir: Path, base_name: str, max_attempts: int = 99) -> str:
+    """Return a base name whose ``{base_name}_processed.docx`` does not collide.
+
+    When re-running the engine on the same input, the original output files
+    would otherwise be overwritten. On collision, append ``_v2``, ``_v3`` … up
+    to ``max_attempts``. The same suffix is reused for the review / json /
+    html companion files so the four outputs for a run stay grouped.
+    """
+    if not (processed_dir / f"{base_name}_processed.docx").exists():
+        return base_name
+    for i in range(2, max_attempts + 1):
+        candidate = f"{base_name}_v{i}"
+        if not (processed_dir / f"{candidate}_processed.docx").exists():
+            logger.info(
+                "OUTPUT_NAME_DEDUP: %s_processed.docx already exists, writing as %s_processed.docx",
+                base_name, candidate,
+            )
+            return candidate
+    raise RuntimeError(
+        f"Could not allocate unique output filename for {base_name!r} in "
+        f"{processed_dir} after {max_attempts} attempts"
+    )
+
+
 def _run_block_transform_stage(stage_name: str, fn, blocks: list[dict], *args, policy=None, **kwargs) -> list[dict]:
     """Run a block transform and fail fast if it mutates count/order/IDs unexpectedly."""
     before = snapshot_blocks_for_contract(blocks)
@@ -310,10 +334,14 @@ def process_document(
     # Stage 5: Reconstruction
     logger.info("Stage 5: Document Reconstruction")
     
-    # Generate output filenames
-    base_name = input_path.stem
+    # Generate output filenames — dedup against existing files in the
+    # processed/ subfolder so re-running on the same input does not clobber
+    # prior outputs.
+    processed_dir = output_folder / "processed"
+    processed_dir.mkdir(parents=True, exist_ok=True)
+    base_name = _unique_output_base(processed_dir, input_path.stem)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    
+
     output_name = f"{base_name}_processed.docx"
     review_name = f"{base_name}_processed_review.docx"
     json_name = f"{base_name}_processed_results.json"
