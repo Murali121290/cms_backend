@@ -498,10 +498,21 @@ def validate_and_repair(
     allowed_styles: Iterable[str] | None = None,
     preserve_lists: bool = False,
     preserve_marker_pmi: bool = False,
+    llm_required: bool = False,
 ) -> list[dict]:
     """
     Validate and repair classification results based on deterministic rules.
+
+    When ``llm_required=True`` is passed, the function raises ``ValueError``
+    if any input tag was invalid (i.e. outside ``allowed_styles``) — callers
+    use this to force an explicit LLM re-classification instead of silently
+    accepting a heuristic fallback repair.
     """
+    from collections import Counter
+
+    # Tag distribution before any repair, for observability.
+    _before_tags = Counter(str(c.get("tag", "")) for c in classifications)
+
     # Metrics tracking for STYLE_CANONICALIZATION logging
     metrics = {
         "invalid_styles": 0,      # Styles not in allowed_styles
@@ -1209,5 +1220,30 @@ def validate_and_repair(
         metrics["alias_resolved"],
         metrics["zone_repaired"],
     )
+
+    # Tag distribution after repair + top coercion transitions.
+    _after_tags = Counter(str(c.get("tag", "")) for c in repaired)
+    _coercions: Counter = Counter()
+    _clf_by_id = {c.get("id"): c for c in classifications}
+    for fixed in repaired:
+        orig = _clf_by_id.get(fixed.get("id"))
+        if orig is None:
+            continue
+        o_tag = str(orig.get("tag", ""))
+        f_tag = str(fixed.get("tag", ""))
+        if o_tag != f_tag:
+            _coercions[f"{o_tag} -> {f_tag}"] += 1
+    logger.info("TAG_DISTRIBUTION_BEFORE %s", dict(_before_tags.most_common()))
+    logger.info("TAG_DISTRIBUTION_AFTER %s", dict(_after_tags.most_common()))
+    logger.info("TAG_COERCIONS_TOP %s", dict(_coercions.most_common(20)))
+
+    # When the caller insists on LLM involvement, fail fast if any tag had
+    # to be repaired rather than silently accepting heuristic fallbacks.
+    if llm_required and metrics["invalid_styles"] > 0:
+        raise ValueError(
+            f"validate_and_repair: {metrics['invalid_styles']} tag(s) were "
+            f"outside allowed_styles and llm_required=True — refusing to "
+            f"return heuristic fallbacks."
+        )
 
     return repaired
