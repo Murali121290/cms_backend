@@ -12,6 +12,7 @@ from typing import Callable, Optional
 
 from .blocks import extract_blocks
 from .classifier import classify_blocks_with_prompt
+from .content_zones import detect_content_zones, apply_content_zone_overlays
 from .reconstruction import DocumentReconstructor
 from .confidence import ConfidenceFilter
 from .validator import validate_and_repair
@@ -138,6 +139,12 @@ def process_document(
     blocks = _run_block_transform_stage("reference_numbering_pre", normalize_reference_numbering, blocks)
     blocks = _run_block_transform_stage("list_hierarchy_lock", enforce_list_hierarchy_from_word_xml, blocks)
     blocks = _run_block_transform_stage("zone_style_restriction", restrict_allowed_styles_per_zone, blocks)
+
+    # Stage 1c: Content-driven zone detection (Case Study, Objectives, Key
+    # Terms, Key Points, EOC, Post-References). Annotates each block's
+    # metadata with `content_zone` and `content_zone_role`; consumed by the
+    # overlay pass after classification to produce zone-qualified tags.
+    detect_content_zones(blocks)
 
     # Stage 2: Classification (Option 2 retry ladder)
     logger.info("Stage 2: AI Classification")
@@ -303,6 +310,12 @@ def process_document(
                 retry_count += 1
                 continue
             break
+
+    # Apply content-driven zone overlays (CS-*, EOC-*, OBJ-*, KT-*, KP-*,
+    # post-References PMI). Runs once after both classifier branches have
+    # produced the validator's final classifications, so the trace below
+    # captures the post-overlay tags.
+    classifications = apply_content_zone_overlays(classifications, blocks, allowed_styles)
 
     # Diagnostics: emit STYLE_TAG_TRACE when STYLE_TRACE=1
     emit_style_tag_trace(input_path.name, blocks, classifications)

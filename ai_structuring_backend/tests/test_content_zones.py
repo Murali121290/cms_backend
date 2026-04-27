@@ -1,0 +1,239 @@
+"""Tests for content-driven zone detection and overlay enforcement."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+
+from processor.content_zones import (
+    detect_content_zones,
+    apply_content_zone_overlays,
+)
+
+
+def _b(bid, text):
+    return {"id": bid, "text": text, "metadata": {}}
+
+
+def _c(bid, tag):
+    return {"id": bid, "tag": tag, "confidence": 85}
+
+
+# ---------------------------------------------------------------------------
+# Detection
+# ---------------------------------------------------------------------------
+
+def test_detect_case_study_zone_propagates_until_next_opener():
+    blocks = [
+        _b(1, "Some intro paragraph."),
+        _b(2, "Case Study"),
+        _b(3, "Mr. Smith presents with..."),
+        _b(4, "He was admitted on Tuesday."),
+        _b(5, "Summary"),
+        _b(6, "In conclusion..."),
+    ]
+    detect_content_zones(blocks)
+
+    assert blocks[0]["metadata"].get("content_zone") is None
+    assert blocks[1]["metadata"]["content_zone"] == "CASE_STUDY"
+    assert blocks[1]["metadata"]["content_zone_role"] == "OPENER"
+    assert blocks[2]["metadata"]["content_zone"] == "CASE_STUDY"
+    assert blocks[2]["metadata"]["content_zone_role"] == "FIRST_BODY"
+    assert blocks[3]["metadata"]["content_zone"] == "CASE_STUDY"
+    assert blocks[3]["metadata"].get("content_zone_role") is None
+    assert blocks[4]["metadata"]["content_zone"] == "EOC_SUMMARY"
+    assert blocks[4]["metadata"]["content_zone_role"] == "OPENER"
+    assert blocks[5]["metadata"]["content_zone"] == "EOC_SUMMARY"
+    assert blocks[5]["metadata"]["content_zone_role"] == "FIRST_BODY"
+
+
+def test_heading_with_terminal_punctuation_is_not_an_opener():
+    blocks = [
+        _b(1, "Case study: a discussion of."),  # has terminal punctuation
+        _b(2, "Body paragraph."),
+    ]
+    detect_content_zones(blocks)
+    assert blocks[0]["metadata"].get("content_zone") is None
+    assert blocks[1]["metadata"].get("content_zone") is None
+
+
+def test_objectives_kt_kp_eoc_post_ref_all_detected():
+    blocks = [
+        _b(1, "Objectives"),
+        _b(2, "Learn things"),
+        _b(3, "Key Terms"),
+        _b(4, "Term A"),
+        _b(5, "Summary"),
+        _b(6, "We discussed."),
+        _b(7, "Key Points"),
+        _b(8, "Point one"),
+        _b(9, "References"),
+        _b(10, "Smith J. 2020."),
+        _b(11, "Figure 99 caption"),  # post-ref figure caption
+    ]
+    detect_content_zones(blocks)
+    assert blocks[0]["metadata"]["content_zone"] == "OBJ"
+    assert blocks[2]["metadata"]["content_zone"] == "KT"
+    assert blocks[4]["metadata"]["content_zone"] == "EOC_SUMMARY"
+    assert blocks[6]["metadata"]["content_zone"] == "KP"
+    assert blocks[8]["metadata"]["content_zone"] == "POST_REF"
+    assert blocks[10]["metadata"]["content_zone"] == "POST_REF"
+
+
+# ---------------------------------------------------------------------------
+# Overlay enforcement
+# ---------------------------------------------------------------------------
+
+ALLOWED = {
+    "TXT", "TXT-FLUSH", "H1", "PMI", "T1", "FIG-LEG",
+    "BL-FIRST", "BL-MID", "BL-LAST",
+    "NL-FIRST", "NL-MID", "NL-LAST",
+    "UL-FIRST", "UL-MID", "UL-LAST",
+    "CS-TTL", "CS-H1", "CS-TXT", "CS-TXT-FIRST",
+    "EOC-H1", "EOC-TXT", "EOC-TXT-FIRST", "EOC-TXT-FLUSH",
+    "EOC-NL-FIRST", "EOC-NL-MID", "EOC-NL-LAST",
+    "OBJ1", "OBJ-BL-FIRST", "OBJ-BL-MID", "OBJ-BL-LAST",
+    "OBJ-NL-FIRST", "OBJ-NL-MID", "OBJ-NL-LAST",
+    "OBJ-UL-FIRST", "OBJ-UL-MID", "OBJ-UL-LAST",
+    "KT1", "KT-UL-FIRST", "KT-UL-MID", "KT-UL-LAST",
+    "KT-BL-FIRST", "KT-BL-MID", "KT-BL-LAST",
+    "KT-NL-FIRST", "KT-NL-MID", "KT-NL-LAST",
+    "KP1", "KP-BL-FIRST", "KP-BL-MID", "KP-BL-LAST",
+    "KP-NL-FIRST", "KP-NL-MID", "KP-NL-LAST",
+}
+
+
+def test_overlay_case_study_promotes_text_and_heading():
+    blocks = [
+        _b(1, "Case Study"),
+        _b(2, "First paragraph of the case."),
+        _b(3, "Second paragraph."),
+        _b(4, "Diagnostic heading"),
+    ]
+    detect_content_zones(blocks)
+    clfs = [
+        _c(1, "TTL"),
+        _c(2, "TXT"),
+        _c(3, "TXT"),
+        _c(4, "H1"),
+    ]
+    out = apply_content_zone_overlays(clfs, blocks, ALLOWED)
+    assert out[0]["tag"] == "CS-TTL"
+    assert out[1]["tag"] == "CS-TXT-FIRST"
+    assert out[2]["tag"] == "CS-TXT"
+    assert out[3]["tag"] == "CS-H1"
+
+
+def test_overlay_eoc_summary_remaps_text_and_lists():
+    blocks = [
+        _b(1, "Summary"),
+        _b(2, "First sentence."),
+        _b(3, "Second sentence."),
+        _b(4, "First bullet"),
+        _b(5, "Last bullet"),
+    ]
+    detect_content_zones(blocks)
+    clfs = [
+        _c(1, "H1"),
+        _c(2, "TXT"),
+        _c(3, "TXT-FLUSH"),
+        _c(4, "NL-FIRST"),
+        _c(5, "NL-LAST"),
+    ]
+    out = apply_content_zone_overlays(clfs, blocks, ALLOWED)
+    assert out[0]["tag"] == "EOC-H1"
+    assert out[1]["tag"] == "EOC-TXT-FIRST"
+    assert out[2]["tag"] == "EOC-TXT-FLUSH"
+    assert out[3]["tag"] == "EOC-NL-FIRST"
+    assert out[4]["tag"] == "EOC-NL-LAST"
+
+
+def test_overlay_objectives_remaps_lists_and_title():
+    blocks = [
+        _b(1, "Objectives"),
+        _b(2, "Identify..."),
+        _b(3, "Describe..."),
+    ]
+    detect_content_zones(blocks)
+    clfs = [
+        _c(1, "H1"),
+        _c(2, "BL-FIRST"),
+        _c(3, "BL-LAST"),
+    ]
+    out = apply_content_zone_overlays(clfs, blocks, ALLOWED)
+    assert out[0]["tag"] == "OBJ1"
+    assert out[1]["tag"] == "OBJ-BL-FIRST"
+    assert out[2]["tag"] == "OBJ-BL-LAST"
+
+
+def test_overlay_key_terms_uses_kt_family():
+    blocks = [
+        _b(1, "Key Terms"),
+        _b(2, "Term A"),
+        _b(3, "Term B"),
+    ]
+    detect_content_zones(blocks)
+    clfs = [
+        _c(1, "H1"),
+        _c(2, "UL-FIRST"),
+        _c(3, "UL-LAST"),
+    ]
+    out = apply_content_zone_overlays(clfs, blocks, ALLOWED)
+    assert out[0]["tag"] == "KT1"
+    assert out[1]["tag"] == "KT-UL-FIRST"
+    assert out[2]["tag"] == "KT-UL-LAST"
+
+
+def test_overlay_key_points_uses_kp_family_not_kt():
+    blocks = [
+        _b(1, "Key Points"),
+        _b(2, "Point one"),
+        _b(3, "Point two"),
+    ]
+    detect_content_zones(blocks)
+    clfs = [
+        _c(1, "H1"),
+        _c(2, "BL-FIRST"),
+        _c(3, "BL-LAST"),
+    ]
+    out = apply_content_zone_overlays(clfs, blocks, ALLOWED)
+    assert out[0]["tag"] == "KP1"
+    assert out[1]["tag"] == "KP-BL-FIRST"
+    assert out[2]["tag"] == "KP-BL-LAST"
+
+
+def test_overlay_post_references_promotes_captions_to_pmi():
+    blocks = [
+        _b(1, "References"),
+        _b(2, "Smith et al. 2020."),
+        _b(3, "Figure 99. Cardiac anatomy."),
+        _b(4, "Table 99. Patient demographics."),
+    ]
+    detect_content_zones(blocks)
+    clfs = [
+        _c(1, "H1"),
+        _c(2, "REF-N"),
+        _c(3, "FIG-LEG"),
+        _c(4, "T1"),
+    ]
+    out = apply_content_zone_overlays(clfs, blocks, ALLOWED)
+    # The opener H1 in POST_REF zone is left alone (POST_REF only promotes
+    # captions); the reference body stays REF-N.
+    assert out[0]["tag"] == "H1"
+    assert out[1]["tag"] == "REF-N"
+    assert out[2]["tag"] == "PMI"
+    assert out[3]["tag"] == "PMI"
+
+
+def test_overlay_skips_when_target_not_in_allowed():
+    blocks = [_b(1, "Case Study"), _b(2, "Body.")]
+    detect_content_zones(blocks)
+    clfs = [_c(1, "TTL"), _c(2, "TXT")]
+    # ALLOWED minus CS-TTL — CS-TXT-FIRST is allowed though, so test partial.
+    limited = ALLOWED - {"CS-TTL"}
+    out = apply_content_zone_overlays(clfs, blocks, limited)
+    assert out[0]["tag"] == "TTL"  # unchanged: CS-TTL not allowed
+    assert out[1]["tag"] == "CS-TXT-FIRST"  # promoted: target is allowed
