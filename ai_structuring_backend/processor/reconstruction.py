@@ -125,9 +125,14 @@ STYLE_DEFINITIONS = {
     "EOC-LL2-MID": {"font_size": 11, "left_indent": 0.75, "space_after": 2},
 
     # Tables - Titles
-    "T1": {"font_size": 10, "bold": True, "space_before": 6, "space_after": 2},
-    "T11": {"font_size": 10, "bold": True, "space_before": 6, "space_after": 2},
-    "T12": {"font_size": 10, "bold": True, "space_before": 6, "space_after": 2},
+    # bold:True deliberately omitted so the caption style does not force bold
+    # on captions whose source runs are not bold. Runs that ARE explicitly
+    # bold in the source remain bold; runs that are not stay un-bold. This
+    # matches publisher feedback: "ALSO Bold added table captions" was a
+    # complaint about the engine adding bold that wasn't in the source.
+    "T1": {"font_size": 10, "space_before": 6, "space_after": 2},
+    "T11": {"font_size": 10, "space_before": 6, "space_after": 2},
+    "T12": {"font_size": 10, "space_before": 6, "space_after": 2},
 
     # Tables - Headers
     "T2": {"font_size": 10, "bold": True, "alignment": "center"},
