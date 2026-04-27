@@ -49,6 +49,101 @@ _ZONE_OPENERS: list[tuple[str, re.Pattern]] = [
 _TERMINAL_PUNCT_RE = re.compile(r"[.!?:]\s*$")
 
 
+# ---------------------------------------------------------------------------
+# Chapter / Section / Unit / Part opener patterns (front-matter, content-only)
+# ---------------------------------------------------------------------------
+
+# Anchor only at document start (configurable via _OPENER_LOOKAHEAD blocks).
+# A standalone numeric paragraph is *only* treated as a chapter number when
+# followed by a heading-shape title within the next non-blank paragraph.
+_OPENER_LOOKAHEAD = 6
+
+_CHAPTER_OPENER_RE = re.compile(
+    r"^\s*(?:<CN>\s*)?chapter\s+([0-9IVXLCDM]+)\s*$", re.IGNORECASE
+)
+_SECTION_OPENER_RE = re.compile(
+    r"^\s*(?:<SN>\s*)?section\s+([0-9IVXLCDM]+)\s*$", re.IGNORECASE
+)
+_UNIT_OPENER_RE = re.compile(
+    r"^\s*(?:<UN>\s*)?unit\s+([0-9IVXLCDM]+)\s*$", re.IGNORECASE
+)
+_PART_OPENER_RE = re.compile(
+    r"^\s*(?:<PN>\s*)?part\s+([0-9IVXLCDM]+)\s*$", re.IGNORECASE
+)
+_BARE_NUMBER_RE = re.compile(r"^\s*\d+\s*$")
+
+# Maps the matched word to the WK style family used for number+title.
+_OPENER_FAMILIES: list[tuple[re.Pattern, str, str]] = [
+    (_CHAPTER_OPENER_RE, "CN", "CT"),
+    (_SECTION_OPENER_RE, "SN", "ST"),
+    (_UNIT_OPENER_RE,    "UN", "UT"),
+    (_PART_OPENER_RE,    "PN", "PT"),
+]
+
+
+def _detect_front_matter_opener(blocks: list[dict]) -> None:
+    """Mark the chapter/section/unit/part number+title openers in metadata.
+
+    Looks at the first ``_OPENER_LOOKAHEAD`` non-empty paragraphs. The first
+    one matching an opener pattern is tagged as the number block; the next
+    non-empty heading-shape paragraph is the title block. Bare numeric-only
+    text qualifies as a chapter number only when followed by a heading-shape
+    title within the lookahead window (avoids tagging stray "12" body
+    paragraphs as chapter openers).
+    """
+    if not blocks:
+        return
+    # Index of first non-empty block — that is where openers can live.
+    candidate_indices = []
+    for idx, b in enumerate(blocks):
+        if (b.get("text") or "").strip():
+            candidate_indices.append(idx)
+        if len(candidate_indices) >= _OPENER_LOOKAHEAD:
+            break
+    if not candidate_indices:
+        return
+
+    for cand_pos, block_idx in enumerate(candidate_indices):
+        text = (blocks[block_idx].get("text") or "").strip()
+
+        matched_number_role: str | None = None
+        matched_title_role: str | None = None
+
+        for pat, num_role, title_role in _OPENER_FAMILIES:
+            if pat.match(text):
+                matched_number_role = num_role
+                matched_title_role = title_role
+                break
+
+        if matched_number_role is None and _BARE_NUMBER_RE.match(text):
+            # Bare-number opener: only valid if a heading-shape title follows
+            # within the lookahead window.
+            for next_pos in range(cand_pos + 1, len(candidate_indices)):
+                next_idx = candidate_indices[next_pos]
+                next_text = (blocks[next_idx].get("text") or "").strip()
+                if _is_heading_shape(next_text):
+                    matched_number_role = "CN"
+                    matched_title_role = "CT"
+                    break
+
+        if matched_number_role is None:
+            continue
+
+        meta = blocks[block_idx].setdefault("metadata", {})
+        meta["content_zone_role"] = matched_number_role
+
+        # Title is the next heading-shape paragraph in the lookahead window.
+        for next_pos in range(cand_pos + 1, len(candidate_indices)):
+            next_idx = candidate_indices[next_pos]
+            next_text = (blocks[next_idx].get("text") or "").strip()
+            if _is_heading_shape(next_text):
+                tmeta = blocks[next_idx].setdefault("metadata", {})
+                tmeta["content_zone_role"] = matched_title_role
+                break
+
+        return  # Only one front-matter opener per document.
+
+
 def _is_heading_shape(text: str) -> bool:
     t = (text or "").strip()
     if not t:
@@ -87,6 +182,11 @@ def detect_content_zones(blocks: list[dict]) -> list[dict]:
     openers inherit the active zone. Paragraphs before any opener get no
     ``content_zone`` (treated as plain body).
     """
+    # First, mark front-matter openers (chapter/section/unit/part number +
+    # title). These are *roles*, not zone names — they live in
+    # content_zone_role even before the first heading-driven zone opens.
+    _detect_front_matter_opener(blocks)
+
     current: str | None = None
     role_for_first_body = False  # next non-opener paragraph becomes FIRST_BODY
 
@@ -198,6 +298,17 @@ _OVERLAY_DISPATCH = {
 }
 
 
+# Front-matter opener role -> direct tag promotion. Applied in addition to
+# the zone overlays above; preserves whatever the validator picked when
+# the role isn't one of these.
+_FRONT_MATTER_ROLE_TAGS = {
+    "CN": "CN", "CT": "CT",
+    "SN": "SN", "ST": "ST",
+    "UN": "UN", "UT": "UT",
+    "PN": "PN", "PT": "PT",
+}
+
+
 def apply_content_zone_overlays(
     classifications: list[dict],
     blocks: list[dict] | Iterable[dict],
@@ -231,6 +342,22 @@ def apply_content_zone_overlays(
         meta = block_meta_by_id.get(clf.get("id"), {})
         zone = meta.get("content_zone")
         role = meta.get("content_zone_role")
+
+        # Front-matter opener takes priority over zone overlays — chapter/
+        # section/unit/part numbers and titles get a direct tag promotion
+        # regardless of zone state.
+        fm_target = _FRONT_MATTER_ROLE_TAGS.get(role) if role else None
+        if fm_target and fm_target != tag:
+            if allowed is None or fm_target in allowed:
+                out.append({
+                    **clf,
+                    "tag": fm_target,
+                    "repaired": True,
+                    "repair_reason": (
+                        (clf.get("repair_reason") or "") + ",content-front-matter"
+                    ).lstrip(","),
+                })
+                continue
 
         if not zone or zone not in _OVERLAY_DISPATCH:
             out.append(clf)

@@ -228,6 +228,67 @@ def test_overlay_post_references_promotes_captions_to_pmi():
     assert out[3]["tag"] == "PMI"
 
 
+def test_detect_chapter_opener_marks_number_and_title_roles():
+    blocks = [
+        _b(1, "Chapter 3"),
+        _b(2, "Cardiac Anatomy"),
+        _b(3, "Body paragraph."),
+    ]
+    detect_content_zones(blocks)
+    assert blocks[0]["metadata"]["content_zone_role"] == "CN"
+    assert blocks[1]["metadata"]["content_zone_role"] == "CT"
+    assert blocks[2]["metadata"].get("content_zone_role") is None
+
+
+def test_detect_section_opener_uses_section_family():
+    blocks = [
+        _b(1, "Section 2"),
+        _b(2, "Pediatric Care"),
+    ]
+    detect_content_zones(blocks)
+    assert blocks[0]["metadata"]["content_zone_role"] == "SN"
+    assert blocks[1]["metadata"]["content_zone_role"] == "ST"
+
+
+def test_detect_bare_number_opener_only_when_title_follows():
+    # "3" on its own with a heading-shape title following → chapter number.
+    blocks = [_b(1, "3"), _b(2, "Cardiac Anatomy"), _b(3, "Body.")]
+    detect_content_zones(blocks)
+    assert blocks[0]["metadata"]["content_zone_role"] == "CN"
+    assert blocks[1]["metadata"]["content_zone_role"] == "CT"
+
+    # "12" with no following heading → not a chapter opener.
+    blocks2 = [_b(1, "12"), _b(2, "This is a body sentence with a period.")]
+    detect_content_zones(blocks2)
+    assert blocks2[0]["metadata"].get("content_zone_role") is None
+
+
+def test_overlay_promotes_chapter_number_and_title_tags():
+    blocks = [
+        _b(1, "Chapter 3"),
+        _b(2, "Cardiac Anatomy"),
+        _b(3, "Body."),
+    ]
+    detect_content_zones(blocks)
+    clfs = [_c(1, "TXT"), _c(2, "H1"), _c(3, "TXT")]
+    out = apply_content_zone_overlays(clfs, blocks, ALLOWED | {"CN", "CT"})
+    assert out[0]["tag"] == "CN"
+    assert out[1]["tag"] == "CT"
+    assert out[2]["tag"] == "TXT"
+
+
+def test_overlay_promotes_section_number_and_title_tags():
+    blocks = [
+        _b(1, "Section 2"),
+        _b(2, "Pediatric Care"),
+    ]
+    detect_content_zones(blocks)
+    clfs = [_c(1, "TXT"), _c(2, "H1")]
+    out = apply_content_zone_overlays(clfs, blocks, ALLOWED | {"SN", "ST"})
+    assert out[0]["tag"] == "SN"
+    assert out[1]["tag"] == "ST"
+
+
 def test_overlay_skips_when_target_not_in_allowed():
     blocks = [_b(1, "Case Study"), _b(2, "Body.")]
     detect_content_zones(blocks)
