@@ -164,7 +164,12 @@ STYLE_DEFINITIONS = {
 
     # Figures
     "FIG-LEG": {"font_size": 10, "space_before": 6, "space_after": 6},
-    "PMI": {"font_size": 9, "italic": True},
+    # PMI is a house overlay, not a canonical WK tag. The previous default
+    # baked italic:True into the style, which then propagated to inline
+    # references like <TAB 3-1> when post-References table captions were
+    # promoted T1 -> PMI by the content-zone overlay. Source runs control
+    # their own italic now; the engine only sets PMI's font size.
+    "PMI": {"font_size": 9},
 
     # References
     "REF-N": {"font_size": 10, "hanging_indent": 0.5, "space_after": 2},
