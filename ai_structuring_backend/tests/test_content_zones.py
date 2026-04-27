@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT))
 from processor.content_zones import (
     detect_content_zones,
     apply_content_zone_overlays,
+    apply_roman_outline_overlays,
 )
 
 
@@ -287,6 +288,64 @@ def test_overlay_promotes_section_number_and_title_tags():
     out = apply_content_zone_overlays(clfs, blocks, ALLOWED | {"SN", "ST"})
     assert out[0]["tag"] == "SN"
     assert out[1]["tag"] == "ST"
+
+
+def test_roman_overlay_promotes_upper_roman_list_to_out1():
+    blocks = [
+        _b(1, "I. Planning"),
+        _b(2, "II. Development"),
+        _b(3, "III. Testing"),
+    ]
+    clfs = [_c(1, "BL-FIRST"), _c(2, "BL-MID"), _c(3, "BL-LAST")]
+    out = apply_roman_outline_overlays(clfs, blocks, ALLOWED | {
+        "OUT1-FIRST", "OUT1-MID", "OUT1-LAST",
+    })
+    assert out[0]["tag"] == "OUT1-FIRST"
+    assert out[1]["tag"] == "OUT1-MID"
+    assert out[2]["tag"] == "OUT1-LAST"
+
+
+def test_roman_overlay_promotes_lower_roman_list_to_out1():
+    blocks = [
+        _b(1, "i. Apple"),
+        _b(2, "ii. Banana"),
+        _b(3, "iii. Mango"),
+    ]
+    clfs = [_c(1, "NL-FIRST"), _c(2, "NL-MID"), _c(3, "NL-LAST")]
+    out = apply_roman_outline_overlays(clfs, blocks, ALLOWED | {
+        "OUT1-FIRST", "OUT1-MID", "OUT1-LAST",
+    })
+    assert out[0]["tag"] == "OUT1-FIRST"
+    assert out[2]["tag"] == "OUT1-LAST"
+
+
+def test_roman_overlay_does_not_promote_solitary_pronoun_I():
+    # "I. " on its own without a roman neighbour is ambiguous (pronoun
+    # plus terminal period) and must not be promoted.
+    blocks = [
+        _b(1, "Some preamble."),
+        _b(2, "I. think this is a body sentence."),
+        _b(3, "Following text."),
+    ]
+    clfs = [_c(1, "TXT"), _c(2, "BL-FIRST"), _c(3, "TXT")]
+    out = apply_roman_outline_overlays(clfs, blocks, ALLOWED | {
+        "OUT1-FIRST", "OUT1-MID", "OUT1-LAST",
+    })
+    assert out[1]["tag"] == "BL-FIRST"  # unchanged
+
+
+def test_roman_overlay_skips_non_list_tags():
+    blocks = [_b(1, "II. Heading-like")]
+    clfs = [_c(1, "H1")]  # not a list tag
+    out = apply_roman_outline_overlays(clfs, blocks, ALLOWED | {"OUT1-FIRST"})
+    assert out[0]["tag"] == "H1"
+
+
+def test_roman_overlay_skips_when_target_not_allowed():
+    blocks = [_b(1, "II. Item one"), _b(2, "III. Item two")]
+    clfs = [_c(1, "BL-FIRST"), _c(2, "BL-LAST")]
+    out = apply_roman_outline_overlays(clfs, blocks, ALLOWED)  # no OUT1-*
+    assert out[0]["tag"] == "BL-FIRST"
 
 
 def test_overlay_skips_when_target_not_in_allowed():

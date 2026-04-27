@@ -386,3 +386,112 @@ def apply_content_zone_overlays(
         })
 
     return out
+
+
+# ---------------------------------------------------------------------------
+# Roman-numeral outline overlay (BL-*/NL-* with roman markers -> OUT1-*)
+# ---------------------------------------------------------------------------
+
+# Strict roman numeral leading marker followed by . or ) and whitespace.
+# Excludes single "I" / "i" because those are commonly the pronoun, not a
+# list marker; require at least two roman characters or an unambiguous list
+# context (sequence of same-class markers).
+_ROMAN_MARKER_RE = re.compile(
+    r"^\s*(?P<num>(?:[IVXLCDM]{2,}|[ivxlcdm]{2,}|[Ii]))[.)]\s+",
+)
+_UPPER_ROMAN_RE = re.compile(r"^[IVXLCDM]+$")
+_LOWER_ROMAN_RE = re.compile(r"^[ivxlcdm]+$")
+
+
+def _has_roman_marker(text: str) -> str | None:
+    """Return ``"upper"``, ``"lower"`` or None for the leading roman class."""
+    m = _ROMAN_MARKER_RE.match(text or "")
+    if not m:
+        return None
+    num = m.group("num")
+    if _UPPER_ROMAN_RE.fullmatch(num):
+        return "upper"
+    if _LOWER_ROMAN_RE.fullmatch(num):
+        return "lower"
+    return None
+
+
+_LIST_TAG_RE = re.compile(r"^(?:BL|NL|UL)-(?P<pos>FIRST|MID|LAST)$")
+
+
+def apply_roman_outline_overlays(
+    classifications: list[dict],
+    blocks: list[dict] | Iterable[dict],
+    allowed_styles: Iterable[str] | None = None,
+) -> list[dict]:
+    """Rewrite ``BL-*`` / ``NL-*`` / ``UL-*`` tags to ``OUT1-*`` for items
+    whose text leads with a roman-numeral marker.
+
+    A solitary ``I.`` or ``i.`` is only treated as a roman marker when at
+    least one neighbour (previous or next) classification also carries a
+    roman marker — guards against rewriting "I." sentences that are pronoun
+    plus full-stop in body prose.
+
+    Skips when the candidate ``OUT1-{pos}`` is not in ``allowed_styles``.
+    """
+    if not classifications:
+        return classifications
+
+    allowed: set[str] | None = (
+        set(allowed_styles) if allowed_styles is not None else None
+    )
+
+    block_text_by_id: dict = {}
+    for b in blocks:
+        bid = b.get("id")
+        if bid is not None:
+            block_text_by_id[bid] = b.get("text") or ""
+
+    # First pass — flag each classification's roman-marker class (or None).
+    flags: list[str | None] = []
+    for clf in classifications:
+        text = block_text_by_id.get(clf.get("id"), "")
+        flags.append(_has_roman_marker(text))
+
+    # Filter ambiguous singletons. A solitary "I."/"i." with no neighbour
+    # of the same class is not a list — leave it alone.
+    n = len(classifications)
+    for i, mark in enumerate(flags):
+        if mark is None:
+            continue
+        text = block_text_by_id.get(classifications[i].get("id"), "")
+        m = _ROMAN_MARKER_RE.match(text)
+        if not m:
+            continue
+        num = m.group("num")
+        if num not in {"I", "i"}:
+            continue
+        prev_class = flags[i - 1] if i - 1 >= 0 else None
+        next_class = flags[i + 1] if i + 1 < n else None
+        if prev_class != mark and next_class != mark:
+            flags[i] = None
+
+    out: list[dict] = []
+    for clf, mark in zip(classifications, flags):
+        if mark is None:
+            out.append(clf)
+            continue
+        tag = str(clf.get("tag") or "")
+        m = _LIST_TAG_RE.match(tag)
+        if not m:
+            out.append(clf)
+            continue
+        new_tag = f"OUT1-{m.group('pos')}"
+        if allowed is not None and new_tag not in allowed:
+            out.append(clf)
+            continue
+        out.append({
+            **clf,
+            "tag": new_tag,
+            "repaired": True,
+            "repair_reason": (
+                (clf.get("repair_reason") or "") + ",roman-outline"
+            ).lstrip(","),
+        })
+
+    return out

@@ -12,7 +12,11 @@ from typing import Callable, Optional
 
 from .blocks import extract_blocks
 from .classifier import classify_blocks_with_prompt
-from .content_zones import detect_content_zones, apply_content_zone_overlays
+from .content_zones import (
+    detect_content_zones,
+    apply_content_zone_overlays,
+    apply_roman_outline_overlays,
+)
 from .reconstruction import DocumentReconstructor
 from .confidence import ConfidenceFilter
 from .validator import validate_and_repair
@@ -316,6 +320,10 @@ def process_document(
     # produced the validator's final classifications, so the trace below
     # captures the post-overlay tags.
     classifications = apply_content_zone_overlays(classifications, blocks, allowed_styles)
+    # Roman-numeral marker -> OUT1 outline family. Runs after zone overlays
+    # so that a roman-numeral list inside e.g. an EOC zone still gets the
+    # outline tag (zone overlays don't touch OUT-* tags).
+    classifications = apply_roman_outline_overlays(classifications, blocks, allowed_styles)
 
     # Diagnostics: emit STYLE_TAG_TRACE when STYLE_TRACE=1
     emit_style_tag_trace(input_path.name, blocks, classifications)
