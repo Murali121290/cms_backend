@@ -709,7 +709,15 @@ def validate_and_repair(
                     change_reason.append("box-title")
 
         # Reference zone enforcement (initial pass)
-        if para_id in reference_zone_ids and lock_tag and not norm_tag.startswith("REF-"):
+        # Skip the unlock if the author asserted the tag inline — explicit
+        # markers like <FIG-LEG>, <TSN>, <REF-H1> after the reference
+        # heading must survive zone enforcement.
+        if (
+            para_id in reference_zone_ids
+            and lock_tag
+            and not norm_tag.startswith("REF-")
+            and not inline_override
+        ):
             lock_tag = False
 
         if in_reference_zone and _looks_like_reference_entry(text):
@@ -908,7 +916,10 @@ def validate_and_repair(
             came_from_h4h5 = True
 
         # Reference-zone deterministic mapping must happen before allowed-style filtering.
-        if in_reference_zone:
+        # Skip when the author asserted an inline tag override — explicit
+        # markers like <FIG-LEG>, <TSN>, <REF-H1> after the reference
+        # heading must not be coerced to REF-N/REF-U.
+        if in_reference_zone and not inline_override:
             text_stripped = text.strip()
             if text_stripped.lower().startswith("<ref-h2>") or meta.get("ref_heading"):
                 if tag != "REFH2":
@@ -985,6 +996,9 @@ def validate_and_repair(
     for idx, clf in enumerate(repaired):
         para_id = clf.get("id")
         block = block_lookup.get(para_id, {})
+        # Author-asserted inline overrides survive BACK_MATTER downgrade.
+        if block.get("_inline_tag_override"):
+            continue
         zone = block.get("metadata", {}).get("context_zone", "BODY")
         tag = clf.get("tag", "")
 
@@ -1121,6 +1135,10 @@ def validate_and_repair(
         para_id = clf.get("id")
         block = block_lookup.get(para_id, {})
         meta = block.get("metadata", {})
+        # Author-asserted inline tag overrides (e.g. <FIG-LEG>, <TSN>,
+        # <REF-H1>) survive even when sitting inside the reference zone.
+        if block.get("_inline_tag_override"):
+            continue
         in_reference_zone = bool(meta.get("is_reference_zone")) or (
             meta.get("context_zone") in {"REFERENCE", "BACK_MATTER"} and meta.get("is_reference_zone")
         )
@@ -1168,6 +1186,10 @@ def validate_and_repair(
     for clf in repaired:
         para_id = clf.get("id")
         block = block_lookup.get(para_id, {})
+        # Author-asserted inline overrides survive marker-driven ref-section
+        # coercion as well.
+        if block.get("_inline_tag_override"):
+            continue
         meta = block.get("metadata", {})
         text = (block.get("text", "") or "").strip()
         tag = clf.get("tag", "")

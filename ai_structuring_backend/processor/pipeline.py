@@ -357,12 +357,19 @@ def process_document(
 
     # Preserve lightweight zone metadata for reconstruction-time review highlighting.
     block_meta_by_id = {b["id"]: (b.get("metadata") or {}) for b in blocks}
+    block_by_id = {b["id"]: b for b in blocks}
     for clf in classifications:
         meta = block_meta_by_id.get(clf.get("id"), {})
-        if not meta:
-            continue
-        clf["context_zone"] = meta.get("context_zone")
-        clf["is_reference_zone"] = bool(meta.get("is_reference_zone"))
+        if meta:
+            clf["context_zone"] = meta.get("context_zone")
+            clf["is_reference_zone"] = bool(meta.get("is_reference_zone"))
+        # Restore inline-marker info dropped by the ConfidenceFilter ->
+        # ClassificationResult dataclass round-trip, so reconstruction can
+        # strip the leading "<TAG>" prefix from output text.
+        block = block_by_id.get(clf.get("id"))
+        if block and block.get("_inline_tag_override"):
+            clf["_inline_tag_override"] = block["_inline_tag_override"]
+            clf["_inline_tag_marker"] = block.get("_inline_tag_marker") or ""
 
     # Stage 5: Reconstruction
     logger.info("Stage 5: Document Reconstruction")

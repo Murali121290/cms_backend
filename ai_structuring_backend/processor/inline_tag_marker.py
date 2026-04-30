@@ -98,14 +98,28 @@ def _canonicalise_against_allowed(
     allowed_styles: Iterable[str],
 ) -> str | None:
     """Return the canonical form of ``raw_tag`` if it matches an allowed
-    style under case-insensitive comparison; otherwise return ``None``."""
+    style under case-insensitive comparison or normalisation; otherwise
+    return ``None``.
+
+    Handles common alias forms — e.g. the source might use ``REF-H1`` while
+    the canonical vocabulary entry is ``REFH1``. ``normalize_style`` resolves
+    the alias.
+    """
     if not raw_tag:
         return None
-    upper = raw_tag.upper()
+    candidates: list[str] = [raw_tag, raw_tag.upper()]
+    try:
+        from app.services.style_normalizer import normalize_style
+        normalised = normalize_style(raw_tag)
+        if normalised:
+            candidates.append(normalised)
+    except Exception:
+        pass
+    upper_targets = {c.upper() for c in candidates if c}
     for style in allowed_styles:
         if not style:
             continue
-        if style.upper() == upper:
+        if style.upper() in upper_targets:
             return style
     return None
 

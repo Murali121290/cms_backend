@@ -38,6 +38,16 @@ KNOWN_MARKERS = {
 
 _MARKER_ONLY_TOKEN_RE = re.compile(r"^\s*</?[A-Za-z][A-Za-z0-9._ -]*>\s*$")
 
+# Leading authoritative inline tag marker (e.g. "<CJC-TTL>", "<T2>",
+# "<TBL-MID>"). Reconstruction may consume it as a tag override and strip
+# it from output text; integrity comparison must therefore strip the same
+# token from both input and output normalised text so the two match.
+# Uppercase-only — leaves lowercase structural fences ("<body-open>",
+# "<front-close>") intact.
+_LEADING_INLINE_TAG_MARKER_RE = re.compile(
+    r"^\s*<[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*>\s?",
+)
+
 
 def _para_diag_snapshot(para_info: Dict | None) -> Dict | None:
     """Compact paragraph snapshot for first-difference diagnostics."""
@@ -113,6 +123,10 @@ def _normalize_text(text: str) -> str:
     # Remove known marker tokens
     for marker in KNOWN_MARKERS:
         text = text.replace(marker, '')
+
+    # Strip a leading authoritative inline tag marker so the integrity
+    # check is blind to whether reconstruction removed it.
+    text = _LEADING_INLINE_TAG_MARKER_RE.sub("", text, count=1)
 
     # Collapse whitespace
     text = re.sub(r'\s+', ' ', text)
