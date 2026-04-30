@@ -691,13 +691,19 @@ class GeminiClassifier:
         tag = str(allowed[0]).strip() if allowed else "PMI"
         if not tag:
             tag = "PMI"
-        return {
+        result = {
             "id": paragraph.get("id"),
             "tag": tag,
             "confidence": 99,
             "gated": True,
             "gate_rule": "skip-llm",
         }
+        # Propagate inline tag marker info so reconstruction can strip the
+        # leading "<TAG>" prefix from output text.
+        if paragraph.get("_inline_tag_override"):
+            result["_inline_tag_override"] = paragraph["_inline_tag_override"]
+            result["_inline_tag_marker"] = paragraph.get("_inline_tag_marker") or ""
+        return result
     
     def _apply_rules(
         self,
