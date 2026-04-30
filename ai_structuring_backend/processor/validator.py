@@ -584,6 +584,19 @@ def validate_and_repair(
         original_tag = norm_tag
         came_from_h4h5 = False
 
+        # Author-asserted inline tag marker (e.g. "<CJC-TTL>Foo"): the
+        # pre-classification lock already populated allowed_styles + skip_llm,
+        # so the classifier emitted the asserted tag at confidence 99. Hard
+        # lock it here so no downstream repair pass rewrites the override.
+        inline_override = block.get("_inline_tag_override")
+        if inline_override:
+            if tag != inline_override:
+                tag = inline_override
+                norm_tag = normalize_style(tag, meta=meta)
+                changed = True
+                change_reason.append("inline-tag-override")
+            lock_tag = True
+
         # Composite tag detection and repair (before canonicalization)
         if not lock_tag and _is_composite_tag(tag):
             components = _split_composite_tag(tag)

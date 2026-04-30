@@ -336,12 +336,25 @@ def apply_content_zone_overlays(
         if bid is not None:
             block_meta_by_id[bid] = b.get("metadata") or {}
 
+    block_by_id: dict = {}
+    for b in blocks:
+        bid = b.get("id")
+        if bid is not None:
+            block_by_id[bid] = b
+
     out: list[dict] = []
     for clf in classifications:
         tag = str(clf.get("tag") or "")
         meta = block_meta_by_id.get(clf.get("id"), {})
         zone = meta.get("content_zone")
         role = meta.get("content_zone_role")
+
+        # Author asserted the tag inline (e.g. "<CJC-TTL>Foo"); skip both
+        # front-matter promotion and zone overlay so we don't stomp on it.
+        block = block_by_id.get(clf.get("id"), {})
+        if block.get("_inline_tag_override"):
+            out.append(clf)
+            continue
 
         # Front-matter opener takes priority over zone overlays — chapter/
         # section/unit/part numbers and titles get a direct tag promotion
@@ -442,14 +455,21 @@ def apply_roman_outline_overlays(
     )
 
     block_text_by_id: dict = {}
+    block_by_id: dict = {}
     for b in blocks:
         bid = b.get("id")
         if bid is not None:
             block_text_by_id[bid] = b.get("text") or ""
+            block_by_id[bid] = b
 
     # First pass — flag each classification's roman-marker class (or None).
+    # Inline-tag-override blocks are excluded from outline rewriting so
+    # author-asserted tags survive intact.
     flags: list[str | None] = []
     for clf in classifications:
+        if block_by_id.get(clf.get("id"), {}).get("_inline_tag_override"):
+            flags.append(None)
+            continue
         text = block_text_by_id.get(clf.get("id"), "")
         flags.append(_has_roman_marker(text))
 

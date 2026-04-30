@@ -30,6 +30,7 @@ from .ref_numbering import normalize_reference_numbering
 from .table_title_rules import enforce_table_title_rules
 from .list_hierarchy import enforce_list_hierarchy_from_word_xml
 from .marker_lock import lock_marker_blocks, relock_marker_classifications
+from .inline_tag_marker import lock_inline_tag_blocks
 from .zone_style_restriction import (
     restrict_allowed_styles_per_zone,
     enforce_zone_style_restrictions,
@@ -136,9 +137,22 @@ def process_document(
     # Stage 1: Ingestion
     logger.info("Stage 1: Document Ingestion (Blocks + Structural Features)")
     blocks, paragraphs, stats = extract_blocks(input_path)
-    
+
+    # Allowed styles loaded once, used by both the inline-tag lock below and
+    # later validator/overlay stages.
+    allowed_styles = load_allowed_styles()
+
     # Stage 1b: Deterministic pre-classification locks (before LLM)
     blocks = _run_block_transform_stage("marker_lock", lock_marker_blocks, blocks, policy=STYLE_TAG_ONLY_POLICY)
+    # Inline tag marker lock: paragraphs starting with <TAG>content where TAG
+    # is in allowed_styles (e.g. <CJC-TTL>Foo, <T2>System) bypass the LLM and
+    # adopt the asserted tag deterministically.
+    blocks = _run_block_transform_stage(
+        "inline_tag_marker_lock",
+        lambda b: lock_inline_tag_blocks(b, allowed_styles),
+        blocks,
+        policy=STYLE_TAG_ONLY_POLICY,
+    )
     blocks = _run_block_transform_stage("table_title_rules", enforce_table_title_rules, blocks)
     blocks = _run_block_transform_stage("reference_numbering_pre", normalize_reference_numbering, blocks)
     blocks = _run_block_transform_stage("list_hierarchy_lock", enforce_list_hierarchy_from_word_xml, blocks)
@@ -157,8 +171,6 @@ def process_document(
     quality_score = None
     quality_action = None
     quality_metrics = {}
-
-    allowed_styles = load_allowed_styles()
 
     if classifier_override:
         classifications = classifier_override(blocks, paragraphs)
