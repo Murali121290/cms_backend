@@ -192,3 +192,17 @@ def lock_inline_tag_blocks(
         logger.info("INLINE_TAG_MARKER_LOCK locked=%d", locked)
 
     return blocks_list
+
+
+def propagate_inline_marker_info(source: dict, target: dict) -> None:
+    """Copy inline marker fields from a locked block to a classification dict.
+
+    Used by both the deterministic gate and the classifier's skip-llm path
+    so the marker info reaches reconstruction (which strips the leading
+    ``<TAG>`` from the output text). No-op when the source has no
+    override set.
+    """
+    if not source.get("_inline_tag_override"):
+        return
+    target["_inline_tag_override"] = source["_inline_tag_override"]
+    target["_inline_tag_marker"] = source.get("_inline_tag_marker") or ""

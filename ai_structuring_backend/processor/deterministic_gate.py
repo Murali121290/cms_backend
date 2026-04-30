@@ -216,14 +216,12 @@ def gate_for_llm(
     gated: list[dict] = []
     llm_needed: list[dict] = []
 
+    from .inline_tag_marker import propagate_inline_marker_info
+
     for block in blocks:
         clf = classify_deterministic(block)
         if clf is not None:
-            # Propagate inline-marker metadata so reconstruction can strip the
-            # leading "<TAG>" prefix from output text.
-            if block.get("_inline_tag_override"):
-                clf["_inline_tag_override"] = block["_inline_tag_override"]
-                clf["_inline_tag_marker"] = block.get("_inline_tag_marker") or ""
+            propagate_inline_marker_info(block, clf)
             gated.append(clf)
             metrics.gated_count += 1
             metrics._inc(clf["gate_rule"])

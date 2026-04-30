@@ -687,6 +687,7 @@ class GeminiClassifier:
 
     def _build_skip_llm_result(self, paragraph: dict) -> dict:
         """Return a deterministic classification for blocks explicitly excluded from LLM."""
+        from .inline_tag_marker import propagate_inline_marker_info
         allowed = paragraph.get("allowed_styles") or []
         tag = str(allowed[0]).strip() if allowed else "PMI"
         if not tag:
@@ -698,11 +699,7 @@ class GeminiClassifier:
             "gated": True,
             "gate_rule": "skip-llm",
         }
-        # Propagate inline tag marker info so reconstruction can strip the
-        # leading "<TAG>" prefix from output text.
-        if paragraph.get("_inline_tag_override"):
-            result["_inline_tag_override"] = paragraph["_inline_tag_override"]
-            result["_inline_tag_marker"] = paragraph.get("_inline_tag_marker") or ""
+        propagate_inline_marker_info(paragraph, result)
         return result
     
     def _apply_rules(
