@@ -155,6 +155,43 @@ def _is_heading_shape(text: str) -> bool:
     return True
 
 
+# Chapter Section Title (CST) — all-caps section banners within a chapter
+# that are NOT one of the recognised content-zone openers (Case Study,
+# Objectives, Key Terms, Key Points, Summary, Review Questions,
+# Conclusion, References) and NOT chapter/section/unit/part openers.
+# Examples from feedback corpus: "STRUCTURE AND FUNCTION", "OBJECTIVE CUES",
+# "CLINICAL JUDGMENT", "PRIORITY URGENT ASSESSMENT". The all-caps shape
+# distinguishes CST from regular H1 headings (which use mixed case).
+_CST_ALL_CAPS_RE = re.compile(r"^[A-Z][A-Z0-9\s/&,\-]*[A-Z0-9]$")
+
+
+def _is_cst_section_heading(text: str) -> bool:
+    """Return True if *text* looks like a chapter section title (CST role).
+
+    CST is an all-caps short heading that is not a known zone opener, not
+    a chapter/section/unit/part opener, and not bare numeric content.
+    """
+    t = (text or "").strip()
+    if not _is_heading_shape(t):
+        return False
+    if len(t) < 3:
+        return False
+    if not _CST_ALL_CAPS_RE.match(t):
+        return False
+    # Single-letter content sneaks through the regex; require >= 2 letters.
+    letters = sum(1 for c in t if c.isalpha())
+    if letters < 2:
+        return False
+    # Excluded: known zone openers (REFERENCES, SUMMARY, etc.) and front
+    # matter openers (CHAPTER N, SECTION N, etc.).
+    if _match_opener(t) is not None:
+        return False
+    for pat, _, _ in _OPENER_FAMILIES:
+        if pat.match(t):
+            return False
+    return True
+
+
 def _match_opener(text: str) -> str | None:
     """Return the zone name if *text* opens a known content zone."""
     if not _is_heading_shape(text):
@@ -201,6 +238,12 @@ def detect_content_zones(blocks: list[dict]) -> list[dict]:
             meta["content_zone_role"] = "OPENER"
             role_for_first_body = True
             continue
+
+        # Chapter Section Title (CST): all-caps section banner inside a
+        # chapter, not a recognised zone opener. Only set if no role was
+        # already assigned (e.g. front-matter CT/CN takes priority).
+        if not meta.get("content_zone_role") and _is_cst_section_heading(text):
+            meta["content_zone_role"] = "CST"
 
         if current is not None:
             meta["content_zone"] = current
@@ -306,6 +349,9 @@ _FRONT_MATTER_ROLE_TAGS = {
     "SN": "SN", "ST": "ST",
     "UN": "UN", "UT": "UT",
     "PN": "PN", "PT": "PT",
+    # Chapter section title (e.g. "STRUCTURE AND FUNCTION", "OBJECTIVE CUES",
+    # "CLINICAL JUDGMENT" — all-caps section banners within a chapter).
+    "CST": "CST",
 }
 
 

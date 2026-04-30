@@ -357,3 +357,68 @@ def test_overlay_skips_when_target_not_in_allowed():
     out = apply_content_zone_overlays(clfs, blocks, limited)
     assert out[0]["tag"] == "TTL"  # unchanged: CS-TTL not allowed
     assert out[1]["tag"] == "CS-TXT-FIRST"  # promoted: target is allowed
+
+
+# ---------------------------------------------------------------------------
+# Chapter Section Title (CST) — content-only fallback
+# ---------------------------------------------------------------------------
+
+
+def test_cst_detected_for_all_caps_section_heading():
+    blocks = [_b(1, "STRUCTURE AND FUNCTION")]
+    detect_content_zones(blocks)
+    assert blocks[0]["metadata"].get("content_zone_role") == "CST"
+
+
+def test_cst_detected_for_objective_cues():
+    blocks = [_b(1, "OBJECTIVE CUES")]
+    detect_content_zones(blocks)
+    assert blocks[0]["metadata"].get("content_zone_role") == "CST"
+
+
+def test_cst_not_set_for_mixed_case_heading():
+    """Regular H1-shape headings stay un-roled."""
+    blocks = [_b(1, "Structure and Function")]
+    detect_content_zones(blocks)
+    assert blocks[0]["metadata"].get("content_zone_role") is None
+
+
+def test_cst_skipped_when_text_is_known_zone_opener():
+    """REFERENCES is a POST_REF opener, not CST."""
+    blocks = [_b(1, "REFERENCES")]
+    detect_content_zones(blocks)
+    role = blocks[0]["metadata"].get("content_zone_role")
+    # OPENER role wins; CST never fires.
+    assert role == "OPENER"
+
+
+def test_cst_skipped_for_chapter_opener():
+    """CHAPTER 6 is a chapter number opener, not CST."""
+    blocks = [_b(1, "CHAPTER 6"), _b(2, "Pain Assessment")]
+    detect_content_zones(blocks)
+    assert blocks[0]["metadata"].get("content_zone_role") == "CN"
+
+
+def test_cst_overlay_promotes_to_cst_tag():
+    blocks = [_b(1, "STRUCTURE AND FUNCTION")]
+    detect_content_zones(blocks)
+    clfs = [_c(1, "H1")]
+    out = apply_content_zone_overlays(clfs, blocks, ALLOWED | {"CST"})
+    assert out[0]["tag"] == "CST"
+
+
+def test_cst_overlay_skipped_when_inline_override_present():
+    """Author wrote <CST>...; Slice 1 lock means overlay must not double-stamp."""
+    blocks = [
+        {
+            "id": 1,
+            "text": "STRUCTURE AND FUNCTION",
+            "metadata": {"content_zone_role": "CST"},
+            "_inline_tag_override": "CST",
+        }
+    ]
+    clfs = [{"id": 1, "tag": "CST", "confidence": 0.99}]
+    out = apply_content_zone_overlays(clfs, blocks, ALLOWED | {"CST"})
+    assert out[0]["tag"] == "CST"
+    # repaired flag should be absent (no rewrite happened)
+    assert not out[0].get("repaired")
