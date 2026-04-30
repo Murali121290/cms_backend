@@ -38,15 +38,7 @@ KNOWN_MARKERS = {
 
 _MARKER_ONLY_TOKEN_RE = re.compile(r"^\s*</?[A-Za-z][A-Za-z0-9._ -]*>\s*$")
 
-# Leading authoritative inline tag marker (e.g. "<CJC-TTL>", "<T2>",
-# "<TBL-MID>"). Reconstruction may consume it as a tag override and strip
-# it from output text; integrity comparison must therefore strip the same
-# token from both input and output normalised text so the two match.
-# Uppercase-only — leaves lowercase structural fences ("<body-open>",
-# "<front-close>") intact.
-_LEADING_INLINE_TAG_MARKER_RE = re.compile(
-    r"^\s*<[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*>\s?",
-)
+from .inline_tag_marker import LEADING_INLINE_TAG_MARKER_RE as _LEADING_INLINE_TAG_MARKER_RE
 
 
 def _para_diag_snapshot(para_info: Dict | None) -> Dict | None:

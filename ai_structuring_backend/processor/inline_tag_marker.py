@@ -50,6 +50,15 @@ INLINE_TAG_MARKER_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+# Uppercase-only marker prefix — used by :mod:`structure_guard` and
+# :mod:`integrity` to strip an authoritative marker from comparison text
+# (reconstruction's marker strip is a legal style-only mutation, not a
+# content change). Lowercase structural fences ("<body-open>") stay
+# intact — those are deliberately preserved by the engine.
+LEADING_INLINE_TAG_MARKER_RE = re.compile(
+    r"^\s*<[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*>\s?",
+)
+
 
 def extract_inline_tag(
     text: str,
@@ -77,29 +86,37 @@ def extract_inline_tag(
     if not m:
         return None, "", text
     raw_tag = m.group("tag") or ""
-    canon = _canonicalise_against_allowed(raw_tag, allowed_styles)
+    canon = _canonicalise_against_allowed(raw_tag, _build_allowed_lookup(allowed_styles))
     if canon is None:
         return None, "", text
-    # Reconstruct the literal marker the author wrote so the reconstruction
-    # layer can strip the exact substring (preserving any leading whitespace
-    # before the marker, which is rare but possible in indented sources).
     leading_ws_len = len(text) - len(text.lstrip())
     marker_str = text[leading_ws_len : leading_ws_len + len(raw_tag) + 2]  # <TAG>
     rest = text[leading_ws_len + len(raw_tag) + 2 :]
-    # Drop a single space immediately after the marker if present, but
-    # preserve any other content (tabs, content with non-space leading char).
     if rest.startswith(" "):
         rest = rest[1:]
     return canon, marker_str, rest
 
 
+def _build_allowed_lookup(allowed_styles: Iterable[str]) -> dict[str, str]:
+    """Return an uppercase-key -> canonical-style dict for O(1) lookup.
+
+    When the same dict is reused across many calls (the typical case
+    inside :func:`lock_inline_tag_blocks`), pass it directly to
+    :func:`_canonicalise_against_allowed` instead of paying the build
+    cost per block.
+    """
+    if isinstance(allowed_styles, dict):
+        return allowed_styles
+    return {s.upper(): s for s in allowed_styles if s}
+
+
 def _canonicalise_against_allowed(
     raw_tag: str,
-    allowed_styles: Iterable[str],
+    allowed_lookup: dict[str, str] | Iterable[str],
 ) -> str | None:
     """Return the canonical form of ``raw_tag`` if it matches an allowed
-    style under case-insensitive comparison or normalisation; otherwise
-    return ``None``.
+    style under case-insensitive comparison or alias normalisation;
+    otherwise return ``None``.
 
     Handles common alias forms — e.g. the source might use ``REF-H1`` while
     the canonical vocabulary entry is ``REFH1``. ``normalize_style`` resolves
@@ -107,20 +124,20 @@ def _canonicalise_against_allowed(
     """
     if not raw_tag:
         return None
-    candidates: list[str] = [raw_tag, raw_tag.upper()]
+    lookup = (
+        allowed_lookup if isinstance(allowed_lookup, dict)
+        else _build_allowed_lookup(allowed_lookup)
+    )
+    hit = lookup.get(raw_tag.upper())
+    if hit is not None:
+        return hit
     try:
         from app.services.style_normalizer import normalize_style
         normalised = normalize_style(raw_tag)
         if normalised:
-            candidates.append(normalised)
+            return lookup.get(normalised.upper())
     except Exception:
         pass
-    upper_targets = {c.upper() for c in candidates if c}
-    for style in allowed_styles:
-        if not style:
-            continue
-        if style.upper() in upper_targets:
-            return style
     return None
 
 
@@ -152,7 +169,7 @@ def lock_inline_tag_blocks(
     blocks_list = list(blocks)
     if not blocks_list:
         return blocks_list
-    allowed_list = list(allowed_styles or [])
+    allowed_lookup = _build_allowed_lookup(allowed_styles or [])
 
     locked = 0
     for block in blocks_list:
@@ -161,7 +178,7 @@ def lock_inline_tag_blocks(
         text = block.get("text", "")
         if not text or not text.strip():
             continue
-        tag, marker_str, _stripped = extract_inline_tag(text, allowed_list)
+        tag, marker_str, _stripped = extract_inline_tag(text, allowed_lookup)
         if tag is None:
             continue
         block["lock_style"] = True

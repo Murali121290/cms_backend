@@ -70,12 +70,7 @@ def _list_level_from_style_name(style_name: str) -> int:
         return 0
 
 
-# Uppercase-only — distinguishes author-asserted tag markers (e.g. "<CJC-TTL>",
-# "<H1>", "<T2>") from lowercase structural fences ("<body-open>",
-# "<front-close>") which the engine intentionally preserves.
-_LEADING_INLINE_TAG_MARKER_RE = re.compile(
-    r"^\s*<[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*>\s?",
-)
+from .inline_tag_marker import LEADING_INLINE_TAG_MARKER_RE as _LEADING_INLINE_TAG_MARKER_RE
 
 
 def _normalize_text(text: str) -> str:
