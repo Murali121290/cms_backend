@@ -1,14 +1,36 @@
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 *.pyd
 .pytest_cache/
+
+# Virtual env
 .venv/
 venv/
-.env
-.env.*
+env/
+ENV/
+
+# Node
+node_modules/
+dist/
+build/
+frontend/dist/
+
+# Logs
 *.log
+
+# Local env files
+.env
+.env.local
+.env.*.local
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+ai_structuring_backend/.env
+!.env.example
+!ai_structuring_backend/.env.example
+!frontend/.env.example
 
 # IDE
 .idea/
@@ -16,17 +38,36 @@ venv/
 
 # OS
 .DS_Store
+Thumbs.db
+desktop.ini
 
 # Runtime / instance data
 cms.db
+*.sqlite
+*.db
 data/
-ref_cache.json
-
-# Celery / misc
-celerybeat-schedule
-
-# Local runtime
+uploads/
+outputs/
+temp_reports/
 runtime/
+ref_cache.json
+celerybeat-schedule
 app/processing/legacy/ref_cache.json
 *.save
-*.save
+docker-compose.yml.bak
+
+# SSL / TLS certificates and keys (never commit these)
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Runtime volume path (on-premise deploy)
+/opt/cms_runtime/
+
+# Internal QA corpus — publisher IP, do not commit
+/Tag files/
+/Tagged/
+.feedback_extract.txt
+.corpus_styles.txt
