@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { X } from "lucide-react";
 
@@ -33,10 +33,10 @@ export function NewStyleDialog({ isOpen, onClose, onAdd }: NewStyleDialogProps) 
       <div className="bg-white rounded-lg shadow-lg p-6 max-w-sm w-full mx-4">
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-navy-800">Create New Style</h2>
+          <h2 className="text-lg font-semibold text-text">Create New Style</h2>
           <button
             onClick={onClose}
-            className="text-navy-400 hover:text-navy-600"
+            className="text-muted hover:text-text"
           >
             <X className="w-5 h-5" />
           </button>
@@ -45,7 +45,7 @@ export function NewStyleDialog({ isOpen, onClose, onAdd }: NewStyleDialogProps) 
         {/* Form */}
         <form onSubmit={handleSubmit}>
           <div className="mb-4">
-            <label className="block text-sm font-medium text-navy-700 mb-2">
+            <label className="block text-sm font-medium text-text mb-2">
               Style Name
             </label>
             <input
@@ -53,11 +53,11 @@ export function NewStyleDialog({ isOpen, onClose, onAdd }: NewStyleDialogProps) 
               value={styleName}
               onChange={(e) => setStyleName(e.target.value)}
               placeholder="e.g., Quote, Caption, Sidebar"
-              className="w-full px-3 py-2 border border-navy-200 rounded-md focus:outline-none focus:ring-2 focus:ring-gold-400"
+              className="w-full px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-gold-400"
               disabled={isLoading}
               autoFocus
             />
-            <p className="text-xs text-navy-400 mt-1">
+            <p className="text-xs text-muted mt-1">
               Custom style will be applied as a paragraph.
             </p>
           </div>

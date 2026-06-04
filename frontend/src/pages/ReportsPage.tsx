@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+﻿import { useMemo } from "react";
 
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProgressBar } from "@/components/ui/ProgressBar";
@@ -38,11 +38,11 @@ function BreakdownCard({ title, subtitle, rows, total, color = "gold", emptyText
   return (
     <section className="bg-white rounded-lg shadow-card p-5">
       <header className="mb-4">
-        <h2 className="text-sm font-semibold text-navy-900">{title}</h2>
-        <p className="text-xs text-navy-400 mt-0.5">{subtitle}</p>
+        <h2 className="text-sm font-semibold text-text">{title}</h2>
+        <p className="text-xs text-muted mt-0.5">{subtitle}</p>
       </header>
       {rows.length === 0 ? (
-        <p className="text-sm text-navy-400 py-4 text-center">{emptyText}</p>
+        <p className="text-sm text-muted py-4 text-center">{emptyText}</p>
       ) : (
         <ul className="space-y-3">
           {rows.map((row) => {
@@ -50,9 +50,9 @@ function BreakdownCard({ title, subtitle, rows, total, color = "gold", emptyText
             return (
               <li key={row.label}>
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm text-navy-700 capitalize truncate pr-2">{row.label}</span>
-                  <span className="text-xs text-navy-400 tabular-nums shrink-0">
-                    {row.count} · {pct}%
+                  <span className="text-sm text-text capitalize truncate pr-2">{row.label}</span>
+                  <span className="text-xs text-muted tabular-nums shrink-0">
+                    {row.count} Â· {pct}%
                   </span>
                 </div>
                 <ProgressBar value={pct} color={color} size="sm" />
@@ -66,7 +66,7 @@ function BreakdownCard({ title, subtitle, rows, total, color = "gold", emptyText
 }
 
 export function ReportsPage() {
-  useDocumentTitle("Reports — S4 Carlisle CMS");
+  useDocumentTitle("Reports â€” S4 Carlisle CMS");
 
   const dashboardQuery = useReportsDashboardQuery();
   const activitiesQuery = useReportsActivitiesQuery();
@@ -100,9 +100,9 @@ export function ReportsPage() {
           </div>
         ) : dashboardQuery.isError ? (
           <div className="bg-white rounded-lg shadow-card p-8 text-center mb-6">
-            <p className="text-sm text-navy-500 mb-4">Reports could not be loaded.</p>
+            <p className="text-sm text-muted mb-4">Reports could not be loaded.</p>
             <button
-              className="text-sm text-gold-700 hover:text-gold-800 font-medium underline"
+              className="text-sm text-primary hover:text-primary font-medium underline"
               onClick={() => void dashboardQuery.refetch()}
             >
               Retry
@@ -125,7 +125,7 @@ export function ReportsPage() {
             title="Recent Activity by Type"
             subtitle={
               activitiesQuery.data
-                ? `${activitiesQuery.data.summary.total} activities · ${activitiesQuery.data.summary.today} today`
+                ? `${activitiesQuery.data.summary.total} activities Â· ${activitiesQuery.data.summary.today} today`
                 : "Recent activity"
             }
             rows={activitiesByType}

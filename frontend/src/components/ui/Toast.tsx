@@ -30,8 +30,8 @@ const variantConfig: Record<
   },
   error: {
     icon: AlertCircle,
-    iconClass: "text-error-600",
-    borderClass: "border-error-100",
+    iconClass: "text-danger",
+    borderClass: "border-danger/20",
     bgClass: "bg-white",
   },
   warning: {
@@ -49,13 +49,13 @@ const variantConfig: Record<
   processing: {
     icon: Loader2,
     iconClass: "text-[#C9821A] animate-spin",
-    borderClass: "border-surface-200 border-l-4 border-l-[#C9821A]",
+    borderClass: "border-border border-l-4 border-l-[#C9821A]",
     bgClass: "bg-white",
   },
   timeout: {
     icon: AlertTriangle,
     iconClass: "text-[#92400E]",
-    borderClass: "border-surface-200 border-l-4 border-l-[#92400E]",
+    borderClass: "border-border border-l-4 border-l-[#92400E]",
     bgClass: "bg-white",
   },
 };
@@ -93,13 +93,13 @@ function ToastItem({ toast, onRemove }: ToastItemProps) {
         <p
           className={cn(
             "text-sm font-medium leading-snug",
-            isTimeout ? "text-[#92400E]" : "text-navy-900"
+            isTimeout ? "text-[#92400E]" : "text-text"
           )}
         >
           {toast.title}
         </p>
         {toast.description && (
-          <p className="mt-0.5 text-xs text-navy-400 leading-relaxed">
+          <p className="mt-0.5 text-xs text-muted leading-relaxed">
             {toast.description}
           </p>
         )}
@@ -109,7 +109,7 @@ function ToastItem({ toast, onRemove }: ToastItemProps) {
         type="button"
         onClick={() => onRemove(toast.id)}
         aria-label="Dismiss notification"
-        className="shrink-0 -mt-0.5 -mr-0.5 p-1 rounded-sm text-navy-300 hover:text-navy-900 hover:bg-surface-100 transition-colors duration-100"
+        className="shrink-0 -mt-0.5 -mr-0.5 p-1 rounded-sm text-muted hover:text-text hover:bg-background transition-colors duration-100"
       >
         <X className="size-3.5" aria-hidden="true" />
       </button>

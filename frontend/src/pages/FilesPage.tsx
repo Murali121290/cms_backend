@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Download, Pencil } from "lucide-react";
 
@@ -29,7 +29,7 @@ function triggerBrowserDownload(blob: Blob, filename: string) {
 }
 
 export function FilesPage() {
-  useDocumentTitle("Files — S4 Carlisle CMS");
+  useDocumentTitle("Files â€” S4 Carlisle CMS");
   const { addToast } = useToast();
 
   const [q, setQ] = useState("");
@@ -60,7 +60,7 @@ export function FilesPage() {
     {
       key: "filename",
       header: "File",
-      render: (f) => <span className="font-medium text-navy-900">{f.filename}</span>,
+      render: (f) => <span className="font-medium text-text">{f.filename}</span>,
     },
     {
       key: "category",
@@ -71,9 +71,9 @@ export function FilesPage() {
       key: "project",
       header: "Project",
       render: (f) => (
-        <span className="text-navy-600">
-          {f.project_code ? `${f.project_code}` : "—"}
-          {f.project_title ? <span className="text-navy-400"> · {f.project_title}</span> : null}
+        <span className="text-text">
+          {f.project_code ? `${f.project_code}` : "â€”"}
+          {f.project_title ? <span className="text-muted"> Â· {f.project_title}</span> : null}
         </span>
       ),
     },
@@ -82,25 +82,25 @@ export function FilesPage() {
       header: "Chapter",
       render: (f) =>
         f.chapter_number ? (
-          <span className="text-navy-600">
+          <span className="text-text">
             Ch {f.chapter_number}
-            {f.chapter_title ? <span className="text-navy-400"> · {f.chapter_title}</span> : null}
+            {f.chapter_title ? <span className="text-muted"> Â· {f.chapter_title}</span> : null}
           </span>
         ) : (
-          <span className="text-navy-400">—</span>
+          <span className="text-muted">â€”</span>
         ),
     },
     {
       key: "version",
       header: "Ver",
       align: "right",
-      render: (f) => <span className="tabular-nums text-navy-600">v{f.version}</span>,
+      render: (f) => <span className="tabular-nums text-text">v{f.version}</span>,
     },
     {
       key: "uploaded_at",
       header: "Uploaded",
       render: (f) => (
-        <span className="text-navy-500 text-xs">
+        <span className="text-muted text-xs">
           {new Date(f.uploaded_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
         </span>
       ),
@@ -110,7 +110,7 @@ export function FilesPage() {
       header: "Status",
       render: (f) =>
         f.lock.is_checked_out ? (
-          <Badge variant="warning">Locked{f.lock.checked_out_by_username ? ` · ${f.lock.checked_out_by_username}` : ""}</Badge>
+          <Badge variant="warning">Locked{f.lock.checked_out_by_username ? ` Â· ${f.lock.checked_out_by_username}` : ""}</Badge>
         ) : (
           <Badge variant="success">Available</Badge>
         ),
@@ -125,7 +125,7 @@ export function FilesPage() {
             type="button"
             onClick={() => void handleDownload(f)}
             title="Download"
-            className="p-1.5 text-navy-500 hover:text-navy-900 hover:bg-surface-200 rounded-md transition-colors"
+            className="p-1.5 text-muted hover:text-text hover:bg-background rounded-md transition-colors"
           >
             <Download className="w-4 h-4" />
           </button>
@@ -133,7 +133,7 @@ export function FilesPage() {
             <Link
               to={uiPaths.docxEditor(f.project_id, f.chapter_id, f.id)}
               title="Edit (formatting-preserving)"
-              className="p-1.5 text-navy-500 hover:text-navy-900 hover:bg-surface-200 rounded-md transition-colors"
+              className="p-1.5 text-muted hover:text-text hover:bg-background rounded-md transition-colors"
             >
               <Pencil className="w-4 h-4" />
             </Link>
@@ -154,13 +154,13 @@ export function FilesPage() {
         <SearchInput
           value={q}
           onChange={resetAndSet(setQ)}
-          placeholder="Search filenames…"
+          placeholder="Search filenamesâ€¦"
           className="w-72"
         />
         <select
           value={category}
           onChange={(e) => resetAndSet(setCategory)(e.target.value)}
-          className="h-9 px-3 text-sm bg-white border border-surface-400 rounded-md text-navy-900 focus:outline-none focus:border-navy-900"
+          className="h-9 px-3 text-sm bg-white border border-border rounded-md text-text focus:outline-none focus:border-text"
         >
           <option value="">All categories</option>
           {CATEGORIES.map((c) => (
@@ -173,9 +173,9 @@ export function FilesPage() {
 
       <div className="bg-white rounded-lg shadow-card overflow-hidden">
         {query.isError ? (
-          <div className="p-8 text-center text-sm text-navy-500">
+          <div className="p-8 text-center text-sm text-muted">
             Failed to load files.{" "}
-            <button className="text-gold-700 underline" onClick={() => void query.refetch()}>
+            <button className="text-primary underline" onClick={() => void query.refetch()}>
               Retry
             </button>
           </div>
@@ -191,7 +191,7 @@ export function FilesPage() {
 
       {/* Pagination */}
       {total > PAGE_SIZE && (
-        <div className="flex items-center justify-between mt-4 text-sm text-navy-500">
+        <div className="flex items-center justify-between mt-4 text-sm text-muted">
           <span>
             Page {page} of {pageCount}
           </span>
@@ -200,7 +200,7 @@ export function FilesPage() {
               type="button"
               disabled={offset === 0}
               onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
-              className="h-9 px-3 rounded-md border border-surface-400 bg-white text-navy-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-surface-100 transition-colors"
+              className="h-9 px-3 rounded-md border border-border bg-white text-text disabled:opacity-40 disabled:cursor-not-allowed hover:bg-background transition-colors"
             >
               Previous
             </button>
@@ -208,7 +208,7 @@ export function FilesPage() {
               type="button"
               disabled={offset + PAGE_SIZE >= total}
               onClick={() => setOffset((o) => o + PAGE_SIZE)}
-              className="h-9 px-3 rounded-md border border-surface-400 bg-white text-navy-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-surface-100 transition-colors"
+              className="h-9 px-3 rounded-md border border-border bg-white text-text disabled:opacity-40 disabled:cursor-not-allowed hover:bg-background transition-colors"
             >
               Next
             </button>

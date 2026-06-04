@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+﻿import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/api/client";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -11,7 +11,7 @@ async function getActivities() {
 }
 
 export function ActivitiesPage() {
-  useDocumentTitle("Activities — S4 Carlisle CMS");
+  useDocumentTitle("Activities â€” S4 Carlisle CMS");
   const query = useQuery({ queryKey: ["activities"], queryFn: getActivities });
   const activities = query.data?.activities ?? [];
 
@@ -25,35 +25,35 @@ export function ActivitiesPage() {
         {query.isPending ? (
           <SkeletonTable rows={8} cols={5} />
         ) : query.isError ? (
-          <div className="p-8 text-center text-sm text-navy-500">
+          <div className="p-8 text-center text-sm text-muted">
             Failed to load activities.{" "}
-            <button className="text-gold-700 underline" onClick={() => void query.refetch()}>Retry</button>
+            <button className="text-primary underline" onClick={() => void query.refetch()}>Retry</button>
           </div>
         ) : activities.length === 0 ? (
-          <div className="p-8 text-center text-sm text-navy-500">No activities yet.</div>
+          <div className="p-8 text-center text-sm text-muted">No activities yet.</div>
         ) : (
           <table className="w-full border-collapse">
-            <thead className="bg-surface-100 border-b border-surface-300">
+            <thead className="bg-background border-b border-border">
               <tr>
-                <th className="text-xs font-semibold text-navy-500 uppercase tracking-wide px-4 py-3 text-left">Type</th>
-                <th className="text-xs font-semibold text-navy-500 uppercase tracking-wide px-4 py-3 text-left">Title</th>
-                <th className="text-xs font-semibold text-navy-500 uppercase tracking-wide px-4 py-3 text-left">Project</th>
-                <th className="text-xs font-semibold text-navy-500 uppercase tracking-wide px-4 py-3 text-left">Chapter</th>
-                <th className="text-xs font-semibold text-navy-500 uppercase tracking-wide px-4 py-3 text-left">Time</th>
+                <th className="text-xs font-semibold text-muted uppercase tracking-wide px-4 py-3 text-left">Type</th>
+                <th className="text-xs font-semibold text-muted uppercase tracking-wide px-4 py-3 text-left">Title</th>
+                <th className="text-xs font-semibold text-muted uppercase tracking-wide px-4 py-3 text-left">Project</th>
+                <th className="text-xs font-semibold text-muted uppercase tracking-wide px-4 py-3 text-left">Chapter</th>
+                <th className="text-xs font-semibold text-muted uppercase tracking-wide px-4 py-3 text-left">Time</th>
               </tr>
             </thead>
             <tbody>
               {activities.map((a) => (
-                <tr key={a.id} className="border-b border-surface-200 hover:bg-surface-50 transition-colors">
+                <tr key={a.id} className="border-b border-border hover:bg-background transition-colors">
                   <td className="px-4 py-3 text-sm">
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gold-100 text-gold-800 capitalize">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-primary text-primary capitalize">
                       {a.type}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-sm text-navy-800 font-medium">{a.title}</td>
-                  <td className="px-4 py-3 text-sm text-navy-600">{a.project?.title ?? "—"}</td>
-                  <td className="px-4 py-3 text-sm text-navy-600">{a.chapter?.title ?? "—"}</td>
-                  <td className="px-4 py-3 text-sm text-navy-500">{new Date(a.timestamp).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</td>
+                  <td className="px-4 py-3 text-sm text-text font-medium">{a.title}</td>
+                  <td className="px-4 py-3 text-sm text-text">{a.project?.title ?? "â€”"}</td>
+                  <td className="px-4 py-3 text-sm text-text">{a.chapter?.title ?? "â€”"}</td>
+                  <td className="px-4 py-3 text-sm text-muted">{new Date(a.timestamp).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</td>
                 </tr>
               ))}
             </tbody>

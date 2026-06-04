@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+﻿import { useState, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -13,7 +13,7 @@ import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { uiPaths } from "@/utils/appPaths";
 import { WORKFLOW_DEFINITIONS } from "@/features/workflow/workflowDefinitions";
 
-/* ─── Zod schema ───────────────────────────────────────────────────────────── */
+/* â”€â”€â”€ Zod schema â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 const schema = z.object({
   code: z.string().min(1, "Project code is required").max(64),
@@ -32,27 +32,27 @@ const schema = z.object({
 
 type FormValues = z.infer<typeof schema>;
 
-/* ─── Style constants ─────────────────────────────────────────────────────── */
+/* â”€â”€â”€ Style constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 const labelClass =
-  "block text-[11px] font-medium uppercase tracking-wide text-navy-500 mb-1.5";
+  "block text-[11px] font-medium uppercase tracking-wide text-muted mb-1.5";
 
 const inputClass =
-  "w-full border border-surface-400 rounded-md px-3 py-2.5 text-sm text-navy-900 " +
-  "placeholder:text-navy-300 focus:outline-none focus:border-gold-600 focus:ring-1 " +
-  "focus:ring-gold-600/20 disabled:opacity-50 disabled:bg-surface-100 transition-colors";
+  "w-full border border-border rounded-md px-3 py-2.5 text-sm text-text " +
+  "placeholder:text-muted focus:outline-none focus:border-primary focus:ring-1 " +
+  "focus:ring-gold-600/20 disabled:opacity-50 disabled:bg-background transition-colors";
 
 const sectionHeadingClass =
-  "text-base font-semibold text-navy-900 border-b border-surface-200 pb-3 mb-5";
+  "text-base font-semibold text-text border-b border-border pb-3 mb-5";
 
-const fieldErrorClass = "text-xs text-error-600 mt-1";
+const fieldErrorClass = "text-xs text-danger mt-1";
 
-const requiredAsterisk = <span className="text-gold-600 ml-0.5">*</span>;
+const requiredAsterisk = <span className="text-primary ml-0.5">*</span>;
 
-/* ─── Page ─────────────────────────────────────────────────────────────────── */
+/* â”€â”€â”€ Page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 export function ProjectCreatePage() {
-  useDocumentTitle("Create New Project — S4 Carlisle CMS");
+  useDocumentTitle("Create New Project â€” S4 Carlisle CMS");
 
   const navigate = useNavigate();
   const [files, setFiles] = useState<File[]>([]);
@@ -106,20 +106,20 @@ export function ProjectCreatePage() {
       <div className="mb-6">
         <Link
           to={uiPaths.projects}
-          className="inline-flex items-center gap-1.5 text-sm text-navy-500 hover:text-navy-900 transition-colors mb-4"
+          className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-text transition-colors mb-4"
         >
           <ArrowLeft className="w-4 h-4" aria-hidden="true" />
           Back to Projects
         </Link>
-        <h1 className="text-2xl font-semibold text-navy-900">Create New Project</h1>
-        <p className="text-sm text-navy-500 mt-1">Start a new book or project</p>
+        <h1 className="text-2xl font-semibold text-text">Create New Project</h1>
+        <p className="text-sm text-muted mt-1">Start a new book or project</p>
       </div>
 
       {/* Server error */}
       {serverError ? (
         <div
           role="alert"
-          className="mb-6 px-4 py-3 bg-error-100 border border-error-200 text-error-700 text-sm rounded-md"
+          className="mb-6 px-4 py-3 bg-danger/10 border border-danger/30 text-danger text-sm rounded-md"
         >
           {serverError}
         </div>
@@ -128,9 +128,9 @@ export function ProjectCreatePage() {
       <form
         onSubmit={(e) => void handleSubmit(onValid)(e)}
         noValidate
-        className="bg-white border border-surface-200 rounded-lg p-8 shadow-sm space-y-8"
+        className="bg-white border border-border rounded-lg p-8 shadow-sm space-y-8"
       >
-        {/* ── Section 1: Project Details ─────────────────────────── */}
+        {/* â”€â”€ Section 1: Project Details â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         <section aria-labelledby="section-details">
           <h2 id="section-details" className={sectionHeadingClass}>
             Project Details
@@ -152,7 +152,7 @@ export function ProjectCreatePage() {
                 autoComplete="off"
                 aria-describedby={errors.code ? "code-error" : "code-hint"}
               />
-              <p id="code-hint" className="text-xs text-navy-400 mt-1">
+              <p id="code-hint" className="text-xs text-muted mt-1">
                 Unique identifier for the project
               </p>
               {errors.code ? (
@@ -206,7 +206,7 @@ export function ProjectCreatePage() {
           </div>
         </section>
 
-        {/* ── Section 2: Configuration ───────────────────────────── */}
+        {/* â”€â”€ Section 2: Configuration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         <section aria-labelledby="section-config">
           <h2 id="section-config" className={sectionHeadingClass}>
             Configuration
@@ -269,22 +269,22 @@ export function ProjectCreatePage() {
                 <option value="">None (assign later)</option>
                 {WORKFLOW_DEFINITIONS.map((wf) => (
                   <option key={wf.id} value={wf.id}>
-                    {wf.id} · {wf.title} — {wf.short}
+                    {wf.id} Â· {wf.title} â€” {wf.short}
                   </option>
                 ))}
               </select>
-              <p className="text-xs text-navy-400 mt-1">
+              <p className="text-xs text-muted mt-1">
                 Determines the production stage track for this project.
               </p>
             </div>
           </div>
         </section>
 
-        {/* ── Section 3: Initial Files ───────────────────────────── */}
+        {/* â”€â”€ Section 3: Initial Files â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         <section aria-labelledby="section-files">
           <h2 id="section-files" className={sectionHeadingClass}>
             Initial Files
-            <span className="ml-2 text-xs font-normal text-navy-400 normal-case tracking-normal">
+            <span className="ml-2 text-xs font-normal text-muted normal-case tracking-normal">
               Optional
             </span>
           </h2>
@@ -304,16 +304,16 @@ export function ProjectCreatePage() {
               {files.map((f, i) => (
                 <li
                   key={`${f.name}-${i}`}
-                  className="flex items-center justify-between text-xs text-navy-700 bg-surface-100 rounded px-3 py-1.5"
+                  className="flex items-center justify-between text-xs text-text bg-background rounded px-3 py-1.5"
                 >
                   <span className="truncate max-w-[80%]">{f.name}</span>
                   <button
                     type="button"
                     aria-label={`Remove ${f.name}`}
-                    className="text-navy-400 hover:text-error-600 transition-colors ml-2 shrink-0"
+                    className="text-muted hover:text-danger transition-colors ml-2 shrink-0"
                     onClick={() => setFiles((prev) => prev.filter((_, idx) => idx !== i))}
                   >
-                    ×
+                    Ã—
                   </button>
                 </li>
               ))}
@@ -321,8 +321,8 @@ export function ProjectCreatePage() {
           ) : null}
         </section>
 
-        {/* ── Form actions ──────────────────────────────────────── */}
-        <div className="flex items-center justify-end gap-3 pt-2 border-t border-surface-200">
+        {/* â”€â”€ Form actions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+        <div className="flex items-center justify-end gap-3 pt-2 border-t border-border">
           <Button
             variant="ghost"
             type="button"

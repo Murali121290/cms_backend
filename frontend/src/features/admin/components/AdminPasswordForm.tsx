@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+﻿import { useEffect } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Eye, EyeOff } from "lucide-react";
@@ -23,9 +23,9 @@ interface AdminPasswordFormProps {
 }
 
 const inputClass =
-  "w-full border border-surface-400 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-gold-600 focus:border-transparent disabled:opacity-50 disabled:bg-surface-100 pr-10";
+  "w-full border border-border rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-gold-600 focus:border-transparent disabled:opacity-50 disabled:bg-background pr-10";
 
-/** Returns 0–4 strength score based on password heuristics */
+/** Returns 0â€“4 strength score based on password heuristics */
 function getStrength(password: string): number {
   if (password.length === 0) return 0;
   let score = 0;
@@ -39,7 +39,7 @@ function getStrength(password: string): number {
 const strengthLabels = ["", "Weak", "Fair", "Good", "Strong"];
 const strengthColors = [
   "",
-  "bg-error-500",
+  "bg-danger",
   "bg-warning-500",
   "bg-info-500",
   "bg-success-500",
@@ -57,12 +57,12 @@ function PasswordStrengthBar({ password }: { password: string }) {
             key={seg}
             className={cn(
               "h-1 flex-1 rounded-full transition-colors duration-200",
-              score >= seg ? strengthColors[score] : "bg-surface-300"
+              score >= seg ? strengthColors[score] : "bg-background"
             )}
           />
         ))}
       </div>
-      <p className={cn("text-xs font-medium", score <= 1 ? "text-error-600" : score === 2 ? "text-warning-600" : score === 3 ? "text-info-600" : "text-success-600")}>
+      <p className={cn("text-xs font-medium", score <= 1 ? "text-danger" : score === 2 ? "text-warning-600" : score === 3 ? "text-info-600" : "text-success-600")}>
         {strengthLabels[score]}
       </p>
     </div>
@@ -110,13 +110,13 @@ export function AdminPasswordForm({
   return (
     <form onSubmit={(e) => void handleSubmit(onValid)(e)} className="space-y-4">
       {errors.root ? (
-        <div className="bg-error-100 border border-error-100 text-error-600 text-sm rounded-md px-3 py-2">
+        <div className="bg-danger/10 border border-danger/20 text-danger text-sm rounded-md px-3 py-2">
           {errors.root.message}
         </div>
       ) : null}
 
       <div>
-        <label className="block text-sm font-medium text-navy-700 mb-1.5">New Password</label>
+        <label className="block text-sm font-medium text-text mb-1.5">New Password</label>
         <div className="relative">
           <input
             {...register("password")}
@@ -128,7 +128,7 @@ export function AdminPasswordForm({
           />
           <button
             type="button"
-            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-navy-400 hover:text-navy-700 transition-colors"
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted hover:text-text transition-colors"
             onClick={() => setShowPassword((v) => !v)}
             aria-label={showPassword ? "Hide password" : "Show password"}
           >
@@ -141,7 +141,7 @@ export function AdminPasswordForm({
         </div>
         <PasswordStrengthBar password={passwordValue ?? ""} />
         {errors.password ? (
-          <p className="text-xs text-error-600 mt-1">{errors.password.message}</p>
+          <p className="text-xs text-danger mt-1">{errors.password.message}</p>
         ) : null}
       </div>
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -13,7 +13,7 @@ import { uploadChapterFiles } from "@/api/files";
 import { getApiErrorMessage } from "@/api/client";
 import type { ChapterSummary } from "@/types/api";
 
-// ─── Schema ───────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Schema â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const schema = z.object({
   number: z.string().min(1, "Chapter number is required"),
@@ -22,7 +22,7 @@ const schema = z.object({
 
 type FormValues = z.infer<typeof schema>;
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function nextChapterNumber(chapters: ChapterSummary[]): string {
   if (chapters.length === 0) return "1";
@@ -33,19 +33,19 @@ function nextChapterNumber(chapters: ChapterSummary[]): string {
   return String(Math.max(...nums) + 1);
 }
 
-// ─── Shared field styles ──────────────────────────────────────────────────────
+// â”€â”€â”€ Shared field styles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const labelClass =
   "block text-[11px] font-medium uppercase tracking-wide text-[#6B6560] mb-1.5";
 
 const inputClass =
-  "w-full border border-surface-400 rounded-md px-3 py-2.5 text-sm text-navy-900 " +
-  "placeholder:text-navy-300 focus:outline-none focus:border-gold-600 focus:ring-1 " +
+  "w-full border border-border rounded-md px-3 py-2.5 text-sm text-text " +
+  "placeholder:text-muted focus:outline-none focus:border-primary focus:ring-1 " +
   "focus:ring-gold-600/30 transition-colors duration-100";
 
-const errorClass = "mt-1 text-xs text-error-600";
+const errorClass = "mt-1 text-xs text-danger";
 
-// ─── Component ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export interface AddChapterDrawerProps {
   isOpen: boolean;
@@ -206,19 +206,19 @@ export function AddChapterDrawer({
           )}
         </div>
 
-        {/* File upload — only shown in create mode */}
+        {/* File upload â€” only shown in create mode */}
         {!isEditing && (
           <div>
             <p className={labelClass}>Initial File (Optional)</p>
             {selectedFile ? (
-              <div className="flex items-center justify-between gap-2 px-3 py-2.5 border border-surface-400 rounded-md bg-surface-50">
-                <span className="text-sm text-navy-800 truncate min-w-0">
+              <div className="flex items-center justify-between gap-2 px-3 py-2.5 border border-border rounded-md bg-background">
+                <span className="text-sm text-text truncate min-w-0">
                   {selectedFile.name}
                 </span>
                 <button
                   type="button"
                   onClick={removeFile}
-                  className="shrink-0 p-1 rounded hover:bg-surface-200 text-navy-400 hover:text-navy-700 transition-colors"
+                  className="shrink-0 p-1 rounded hover:bg-background text-muted hover:text-text transition-colors"
                   aria-label="Remove file"
                 >
                   <FileX className="w-4 h-4" aria-hidden="true" />
@@ -233,17 +233,17 @@ export function AddChapterDrawer({
                 className="min-h-0"
               />
             )}
-            <p className="mt-1.5 text-xs text-navy-400">
+            <p className="mt-1.5 text-xs text-muted">
               DOCX, PDF, XML accepted. Chapter can be created without a file.
             </p>
           </div>
         )}
       </form>
 
-      {/* Sticky footer — negative margins cancel SlideDrawer's px-6 py-5 padding */}
-      <div className="sticky bottom-0 -mx-6 -mb-5 mt-6 px-6 py-4 bg-white border-t border-surface-200">
+      {/* Sticky footer â€” negative margins cancel SlideDrawer's px-6 py-5 padding */}
+      <div className="sticky bottom-0 -mx-6 -mb-5 mt-6 px-6 py-4 bg-white border-t border-border">
         {submitError && (
-          <div className="mb-3 px-3 py-2.5 text-sm text-error-700 bg-error-50 border border-error-200 rounded-md">
+          <div className="mb-3 px-3 py-2.5 text-sm text-danger bg-danger/5 border border-danger/30 rounded-md">
             {submitError}
           </div>
         )}
@@ -252,7 +252,7 @@ export function AddChapterDrawer({
             type="button"
             onClick={onClose}
             disabled={isSubmitting}
-            className="flex-1 h-9 px-4 text-sm font-medium rounded-md border border-surface-400 text-navy-600 bg-white hover:bg-surface-100 disabled:opacity-50 transition-colors duration-100"
+            className="flex-1 h-9 px-4 text-sm font-medium rounded-md border border-border text-text bg-white hover:bg-background disabled:opacity-50 transition-colors duration-100"
           >
             Cancel
           </button>

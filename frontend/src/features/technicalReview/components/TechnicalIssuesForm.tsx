@@ -1,4 +1,4 @@
-import { Info } from "lucide-react";
+﻿import { Info } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -41,7 +41,7 @@ export function TechnicalIssuesForm({
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <h2 className="font-semibold text-navy-900">Issues Found</h2>
+          <h2 className="font-semibold text-text">Issues Found</h2>
           <Badge variant="default" size="sm">
             {issues.length}
           </Badge>
@@ -69,12 +69,12 @@ export function TechnicalIssuesForm({
                   >
                     <div className="flex items-start justify-between gap-3 mb-2">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-medium text-navy-900">{issue.label}</span>
+                        <span className="font-medium text-text">{issue.label}</span>
                         <Badge variant="default" size="sm">
                           {category}
                         </Badge>
                       </div>
-                      <span className="text-sm text-navy-500 shrink-0">
+                      <span className="text-sm text-muted shrink-0">
                         {issue.count} occurrence{issue.count === 1 ? "" : "s"}
                       </span>
                     </div>
@@ -84,7 +84,7 @@ export function TechnicalIssuesForm({
                         {issue.found.map((item, idx) => (
                           <span
                             key={idx}
-                            className="inline-block px-2 py-0.5 bg-surface-200 text-navy-600 text-xs rounded"
+                            className="inline-block px-2 py-0.5 bg-background text-text text-xs rounded"
                           >
                             {item}
                           </span>
@@ -95,7 +95,7 @@ export function TechnicalIssuesForm({
                     <div className="mt-3">
                       {hasOptions ? (
                         <div className="space-y-1.5">
-                          <p className="text-xs font-medium text-navy-500 uppercase tracking-wide mb-2">
+                          <p className="text-xs font-medium text-muted uppercase tracking-wide mb-2">
                             Select replacement
                           </p>
                           {issue.options.map((option) => (
@@ -112,17 +112,17 @@ export function TechnicalIssuesForm({
                                 className="accent-gold-600"
                                 onChange={(e) => onReplacementChange(issue.key, e.target.value)}
                               />
-                              <span className="text-sm text-navy-700">{option}</span>
+                              <span className="text-sm text-text">{option}</span>
                             </label>
                           ))}
                         </div>
                       ) : (
                         <div>
-                          <label className="block text-xs font-medium text-navy-500 uppercase tracking-wide mb-1.5">
+                          <label className="block text-xs font-medium text-muted uppercase tracking-wide mb-1.5">
                             Replacement
                           </label>
                           <input
-                            className="w-full border border-surface-400 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gold-600 focus:border-transparent disabled:opacity-50"
+                            className="w-full border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gold-600 focus:border-transparent disabled:opacity-50"
                             disabled={isPending}
                             placeholder="Enter replacement"
                             type="text"

@@ -55,7 +55,7 @@ export function SlideDrawer({
     <div className="fixed inset-0 z-[200] flex">
       {/* Backdrop */}
       <div
-        className="absolute inset-0 bg-navy-900/40"
+        className="absolute inset-0 bg-text/40"
         aria-hidden="true"
         onClick={onClose}
       />
@@ -72,18 +72,18 @@ export function SlideDrawer({
         aria-labelledby="drawer-title"
       >
         {/* Header */}
-        <div className="flex items-start justify-between px-6 py-5 border-b border-surface-200">
+        <div className="flex items-start justify-between px-6 py-5 border-b border-border">
           <div>
-            <h2 id="drawer-title" className="text-base font-semibold text-navy-900">
+            <h2 id="drawer-title" className="text-base font-semibold text-text">
               {title}
             </h2>
             {description ? (
-              <p className="text-xs text-navy-500 mt-0.5">{description}</p>
+              <p className="text-xs text-muted mt-0.5">{description}</p>
             ) : null}
           </div>
           <button
             type="button"
-            className="ml-4 p-1.5 rounded hover:bg-surface-200 text-navy-400 hover:text-navy-700 transition-colors shrink-0"
+            className="ml-4 p-1.5 rounded hover:bg-background text-muted hover:text-text transition-colors shrink-0"
             aria-label="Close drawer"
             onClick={onClose}
           >

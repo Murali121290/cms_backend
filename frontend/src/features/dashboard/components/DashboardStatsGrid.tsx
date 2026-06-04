@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowUpRight, Clock, FolderOpen, TrendingUp } from "lucide-react";
+﻿import { AlertTriangle, ArrowUpRight, Clock, FolderOpen, TrendingUp } from "lucide-react";
 import type { DashboardStats } from "@/types/api";
 
 interface DashboardStatsGridProps {
@@ -17,13 +17,13 @@ function MetricCard({ label, value, trendText, icon, iconBg }: MetricCardProps) 
   return (
     <article className="bg-white rounded-lg shadow-card hover:shadow-hover transition-all duration-150 p-5 flex items-start justify-between">
       <div className="min-w-0">
-        <p className="text-xs text-navy-500 uppercase tracking-wide font-medium">
+        <p className="text-xs text-muted uppercase tracking-wide font-medium">
           {label}
         </p>
-        <p className="text-3xl font-bold text-navy-900 mt-1 font-mono leading-none">
+        <p className="text-3xl font-bold text-text mt-1 font-mono leading-none">
           {value}
         </p>
-        <p className="text-xs text-navy-400 mt-2">{trendText}</p>
+        <p className="text-xs text-muted mt-2">{trendText}</p>
       </div>
       <div
         className={`w-10 h-10 rounded-md flex items-center justify-center shrink-0 ml-3 ${iconBg}`}
@@ -41,8 +41,8 @@ export function DashboardStatsGrid({ stats }: DashboardStatsGridProps) {
         label="Total Projects"
         value={stats.total_projects}
         trendText={stats.on_time_trend ?? "All time"}
-        icon={<FolderOpen className="w-5 h-5 text-gold-600" />}
-        iconBg="bg-gold-100"
+        icon={<FolderOpen className="w-5 h-5 text-primary" />}
+        iconBg="bg-primary"
       />
       <MetricCard
         label="On Time Rate"

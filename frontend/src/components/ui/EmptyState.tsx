@@ -54,12 +54,12 @@ export function EmptyState({
       {Icon && (
         <div
           className={cn(
-            "flex items-center justify-center bg-surface-200",
+            "flex items-center justify-center bg-background",
             config.iconWrapper
           )}
         >
           <Icon
-            className={cn(config.iconSize, "text-navy-300")}
+            className={cn(config.iconSize, "text-muted")}
             aria-hidden="true"
           />
         </div>
@@ -68,14 +68,14 @@ export function EmptyState({
       <div className="space-y-1.5">
         <h3
           className={cn(
-            "font-serif font-semibold text-navy-900",
+            "font-semibold text-text",
             config.title
           )}
         >
           {title}
         </h3>
         {description && (
-          <p className={cn("text-navy-400 leading-relaxed max-w-xs", config.desc)}>
+          <p className={cn("text-muted leading-relaxed max-w-xs", config.desc)}>
             {description}
           </p>
         )}

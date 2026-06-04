@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   Activity,
   BarChart3,
+  ChevronLeft,
   ChevronRight,
   Files,
   FolderOpen,
@@ -15,8 +16,10 @@ import {
 } from "lucide-react";
 
 import { NotificationBell } from "@/features/notifications/components/NotificationBell";
+import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { useLogout } from "@/features/session/useLogout";
 import { useSessionStore } from "@/stores/sessionStore";
+import { useSidebarStore } from "@/stores/useSidebarStore";
 import { uiPaths } from "@/utils/appPaths";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -30,20 +33,12 @@ interface NavItem {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-/**
- * Converts a URL pathname segment into a human-readable label.
- * e.g. "chapter-detail" → "Chapter Detail"
- */
 function segmentToLabel(segment: string): string {
   return segment
     .replace(/-/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-/**
- * Maps a full UI pathname to a list of breadcrumb crumbs.
- * Returns at minimum [{ label: "Home", path: "/" }].
- */
 interface Crumb {
   label: string;
   path: string;
@@ -52,13 +47,11 @@ interface Crumb {
 function buildBreadcrumbs(pathname: string): Crumb[] {
   const crumbs: Crumb[] = [{ label: "Home", path: "/" }];
 
-  // Strip the /ui prefix
   const stripped = pathname.replace(/^\/ui\/?/, "");
   if (!stripped) return crumbs;
 
   const segments = stripped.split("/").filter(Boolean);
 
-  // Build human labels for well-known segments
   const labelMap: Record<string, string> = {
     dashboard: "Dashboard",
     admin: "Admin Dashboard",
@@ -73,10 +66,8 @@ function buildBreadcrumbs(pathname: string): Crumb[] {
   let accPath = "/ui";
   for (const seg of segments) {
     accPath = `${accPath}/${seg}`;
-    // If the segment looks like a numeric ID, show it as an ID crumb
     if (/^\d+$/.test(seg)) {
       const prev = crumbs[crumbs.length - 1];
-      // e.g. "Projects" → "Projects #42"
       crumbs[crumbs.length - 1] = {
         ...prev,
         label: `${prev.label} #${seg}`,
@@ -91,16 +82,6 @@ function buildBreadcrumbs(pathname: string): Crumb[] {
 
   return crumbs;
 }
-
-// ─── Sidebar style constants (inline — bypasses Tailwind compilation) ────────
-
-const SIDEBAR_BG   = '#1A1714';
-const SIDEBAR_TEXT = '#D4CFC9';
-const SIDEBAR_MUTED = '#6B6560';
-const GOLD         = '#C9821A';
-
-const NAV_ITEM_CLASS =
-  "flex items-center gap-3 mx-2 my-0.5 rounded-md cursor-pointer transition-colors duration-150";
 
 // ─── Sidebar ────────────────────────────────────────────────────────────────
 
@@ -121,6 +102,7 @@ function Sidebar({
   isPendingLogout,
   onLogout,
 }: SidebarProps) {
+  const { collapsed, toggle } = useSidebarStore();
   const [logoError, setLogoError] = useState(false);
 
   const primaryNavItems: NavItem[] = [
@@ -183,84 +165,77 @@ function Sidebar({
 
   return (
     <aside
-      style={{ backgroundColor: SIDEBAR_BG }}
-      className="w-[220px] h-screen flex flex-col fixed left-0 top-0 z-20"
+      className={`fixed left-0 top-0 z-20 h-screen bg-sidebar border-r border-white/10 flex flex-col transition-all duration-300 ${
+        collapsed ? "w-16" : "w-60"
+      }`}
       aria-label="Application sidebar"
     >
       {/* Logo area */}
-      <div
-        style={{ borderColor: 'rgba(255,255,255,0.1)' }}
-        className="px-4 py-5 border-b"
-      >
-        {!logoError ? (
+      <div className="h-16 px-4 border-b border-white/10 flex items-center justify-center">
+        {!collapsed && !logoError ? (
           <img
             alt="PubCMS logo"
-            className="h-8 w-auto object-contain"
+            className="h-6 w-auto object-contain"
             src="/logo.png"
             onError={() => setLogoError(true)}
           />
+        ) : !collapsed ? (
+          <span className="font-semibold text-sm text-white">PubCMS</span>
         ) : (
-          <span style={{ color: '#FFFFFF' }} className="font-semibold text-base">PubCMS</span>
+          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-white font-bold text-xs">
+            P
+          </div>
         )}
       </div>
 
       {/* Nav */}
-      <nav
-        className="flex-1 overflow-y-auto py-2"
-        aria-label="Primary navigation"
-      >
-        <p
-          style={{ color: SIDEBAR_MUTED }}
-          className="px-4 pt-5 pb-1 text-[10px] font-medium uppercase tracking-widest"
-        >
-          Main
-        </p>
+      <nav className="flex-1 overflow-y-auto py-2" aria-label="Primary navigation">
+        {!collapsed && (
+          <p className="px-4 pt-5 pb-1 text-[10px] font-medium uppercase tracking-widest text-sidebar-text">
+            Main
+          </p>
+        )}
         {primaryNavItems.map((item) => (
           <NavLink
             key={item.label}
             to={item.to}
             end={item.end}
-            className={NAV_ITEM_CLASS}
-            style={({ isActive }) => ({
-              color: isActive ? '#FFFFFF' : SIDEBAR_TEXT,
-              backgroundColor: isActive ? 'rgba(201,130,26,0.15)' : 'transparent',
-              borderLeft: isActive ? `3px solid ${GOLD}` : '3px solid transparent',
-              paddingTop: '0.625rem',
-              paddingBottom: '0.625rem',
-              paddingLeft: isActive ? '0.75rem' : '1rem',
-              paddingRight: '1rem',
-            })}
+            className={({ isActive }) =>
+              `flex items-center gap-3 ${collapsed ? "justify-center px-2" : "px-2"} py-2.5 mx-1 rounded-lg transition-colors duration-150 ${
+                isActive
+                  ? "bg-primary text-white"
+                  : "text-sidebar-text hover:bg-white/8 hover:text-white"
+              }`
+            }
+            title={collapsed ? item.label : undefined}
           >
             {item.icon}
-            <span className="text-[14px] font-medium">{item.label}</span>
+            {!collapsed && <span className="text-sm font-medium">{item.label}</span>}
           </NavLink>
         ))}
 
         {isAdmin && (
           <>
-            <p
-              style={{ color: SIDEBAR_MUTED }}
-              className="px-4 pt-5 pb-1 text-[10px] font-medium uppercase tracking-widest"
-            >
-              Admin
-            </p>
+            {!collapsed && (
+              <p className="px-4 pt-5 pb-1 text-[10px] font-medium uppercase tracking-widest text-sidebar-text">
+                Admin
+              </p>
+            )}
             {adminNavItems.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
-                className={NAV_ITEM_CLASS}
-                style={({ isActive }) => ({
-                  color: isActive ? '#FFFFFF' : SIDEBAR_TEXT,
-                  backgroundColor: isActive ? 'rgba(201,130,26,0.15)' : 'transparent',
-                  borderLeft: isActive ? `3px solid ${GOLD}` : '3px solid transparent',
-                  paddingTop: '0.625rem',
-                  paddingBottom: '0.625rem',
-                  paddingLeft: isActive ? '0.75rem' : '1rem',
-                  paddingRight: '1rem',
-                })}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 ${collapsed ? "justify-center px-2" : "px-2"} py-2.5 mx-1 rounded-lg transition-colors duration-150 ${
+                    isActive
+                      ? "bg-primary text-white"
+                      : "text-sidebar-text hover:bg-white/8 hover:text-white"
+                  }`
+                }
+                title={collapsed ? item.label : undefined}
               >
                 {item.icon}
-                <span className="text-[14px] font-medium">{item.label}</span>
+                {!collapsed && <span className="text-sm font-medium">{item.label}</span>}
               </NavLink>
             ))}
           </>
@@ -268,38 +243,57 @@ function Sidebar({
       </nav>
 
       {/* Bottom user section */}
-      <div
-        style={{ borderColor: 'rgba(255,255,255,0.1)' }}
-        className="mt-auto px-4 py-4 border-t"
-      >
+      <div className="mt-auto px-2 py-4 border-t border-white/10">
         <div className="flex items-center gap-3">
-          <div
-            style={{ backgroundColor: GOLD, color: '#FFFFFF' }}
-            className="w-8 h-8 rounded-full flex items-center justify-center text-[13px] font-semibold flex-shrink-0"
-          >
+          <div className="w-8 h-8 rounded-lg bg-primary text-white flex items-center justify-center text-xs font-bold flex-shrink-0">
             {viewerInitial}
           </div>
-          <div className="min-w-0">
-            <p style={{ color: '#FFFFFF' }} className="text-[13px] font-semibold truncate">{username}</p>
-            <p style={{ color: SIDEBAR_MUTED }} className="text-[11px] truncate">{role}</p>
-          </div>
-        </div>
-        <button
-          style={{ color: SIDEBAR_MUTED }}
-          className="flex items-center gap-2 text-[13px] mt-3 cursor-pointer w-full bg-transparent border-none transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
-          disabled={isPendingLogout}
-          type="button"
-          onClick={onLogout}
-          onMouseEnter={(e) => { e.currentTarget.style.color = '#F87171'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = SIDEBAR_MUTED; }}
-        >
-          {isPendingLogout ? (
-            <Loader2 className="w-4 h-4 flex-shrink-0 animate-spin" />
-          ) : (
-            <LogOut className="w-4 h-4 flex-shrink-0" />
+          {!collapsed && (
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-semibold text-white truncate">{username}</p>
+              <p className="text-xs text-sidebar-text truncate">{role}</p>
+            </div>
           )}
-          <span>{isPendingLogout ? "Signing out…" : "Logout"}</span>
-        </button>
+        </div>
+
+        {!collapsed && (
+          <>
+            <button
+              className="flex items-center gap-2 text-xs mt-3 w-full px-2 py-2 rounded-lg bg-transparent border-none text-sidebar-text hover:bg-white/8 hover:text-white transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={isPendingLogout}
+              type="button"
+              onClick={onLogout}
+            >
+              {isPendingLogout ? (
+                <Loader2 className="w-4 h-4 flex-shrink-0 animate-spin" />
+              ) : (
+                <LogOut className="w-4 h-4 flex-shrink-0" />
+              )}
+              <span>{isPendingLogout ? "Signing out…" : "Logout"}</span>
+            </button>
+
+            <div className="mt-2 pt-2 border-t border-white/10">
+              <ThemeSwitcher />
+              <button
+                onClick={toggle}
+                className="flex items-center justify-center w-full mt-2 p-2 rounded-lg text-sidebar-text hover:bg-white/8 hover:text-white transition-colors duration-150"
+                title="Toggle sidebar"
+              >
+                <ChevronLeft size={18} />
+              </button>
+            </div>
+          </>
+        )}
+
+        {collapsed && (
+          <button
+            onClick={toggle}
+            className="flex items-center justify-center w-full mt-2 p-2 rounded-lg text-sidebar-text hover:bg-white/8 hover:text-white transition-colors duration-150"
+            title="Toggle sidebar"
+          >
+            <ChevronRight size={18} />
+          </button>
+        )}
       </div>
     </aside>
   );
@@ -317,8 +311,7 @@ function TopBar({ username, viewerInitial }: TopBarProps) {
   const crumbs = buildBreadcrumbs(location.pathname);
 
   return (
-    <header className="h-14 flex-shrink-0 flex items-center justify-between px-6 bg-white border-b border-surface-300">
-      {/* Breadcrumb */}
+    <header className="h-14 flex-shrink-0 flex items-center justify-between px-6 bg-card border-b border-border">
       <nav aria-label="Breadcrumb">
         <ol className="flex items-center gap-1 text-sm">
           {crumbs.map((crumb, index) => {
@@ -328,16 +321,16 @@ function TopBar({ username, viewerInitial }: TopBarProps) {
                 {index > 0 && (
                   <ChevronRight
                     aria-hidden="true"
-                    className="text-navy-400"
+                    className="text-muted"
                     size={14}
                   />
                 )}
                 {isLast ? (
-                  <span className="font-medium text-navy-900" aria-current="page">
+                  <span className="font-medium text-text" aria-current="page">
                     {crumb.label}
                   </span>
                 ) : (
-                  <span className="text-navy-400">{crumb.label}</span>
+                  <span className="text-muted">{crumb.label}</span>
                 )}
               </li>
             );
@@ -345,20 +338,17 @@ function TopBar({ username, viewerInitial }: TopBarProps) {
         </ol>
       </nav>
 
-      {/* Right side actions */}
       <div className="flex items-center gap-4">
-        {/* Notification bell */}
         <div className="relative">
           <NotificationBell />
         </div>
 
-        {/* User menu (display only, no dropdown) */}
         <button
-          className="flex items-center gap-2 px-3 py-1.5 rounded-md hover:bg-surface-100 text-sm font-medium text-navy-700 transition-colors cursor-pointer"
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-background text-sm font-medium text-text transition-colors cursor-pointer"
           type="button"
           aria-label={`Signed in as ${username}`}
         >
-          <div className="w-6 h-6 rounded-full bg-gold-600 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">
+          <div className="w-6 h-6 rounded-lg bg-primary text-white text-xs font-bold flex items-center justify-center flex-shrink-0">
             {viewerInitial}
           </div>
           <span>{username}</span>
@@ -370,10 +360,8 @@ function TopBar({ username, viewerInitial }: TopBarProps) {
 
 // ─── AppLayout ───────────────────────────────────────────────────────────────
 
-/** Normalize a role value that might be a string, a {name} object, or a Python repr string. */
 function resolveRoleName(role: unknown): string {
   if (typeof role === "string") {
-    // Reject Python object reprs like "<app.models.Role object at 0x...>"
     if (role.startsWith("<") && role.endsWith(">")) return "User";
     return role;
   }
@@ -385,6 +373,7 @@ function resolveRoleName(role: unknown): string {
 
 export function AppLayout() {
   const viewer = useSessionStore((state) => state.viewer);
+  const { collapsed } = useSidebarStore();
   const logoutMutation = useLogout();
 
   const resolvedRoles = (viewer?.roles ?? []).map(resolveRoleName).filter(Boolean);
@@ -394,7 +383,7 @@ export function AppLayout() {
   const primaryRole = resolvedRoles[0] ?? "Viewer";
 
   return (
-    <div className="h-screen overflow-hidden bg-surface-200">
+    <div className="h-screen overflow-hidden bg-background">
       <Sidebar
         isAdmin={isAdmin}
         isPendingLogout={logoutMutation.isPending}
@@ -404,7 +393,11 @@ export function AppLayout() {
         onLogout={() => logoutMutation.mutate()}
       />
 
-      <div className="ml-[220px] flex flex-col h-screen overflow-hidden">
+      <div
+        className={`flex flex-col h-screen overflow-hidden transition-all duration-300 ${
+          collapsed ? "ml-16" : "ml-60"
+        }`}
+      >
         <TopBar username={username} viewerInitial={viewerInitial} />
         <main className="flex-1 overflow-y-auto p-6 page-enter">
           <Outlet />

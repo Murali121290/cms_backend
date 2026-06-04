@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import type { ComponentType } from "react";
 import type { LucideProps } from "lucide-react";
 import {
@@ -50,13 +50,13 @@ export function ChapterToolbar({ viewMode, onViewModeChange, onUpload, onDownloa
   const [uploadOpen, setUploadOpen] = useState(false);
 
   return (
-    <div className="h-11 flex items-center gap-1.5 px-4 bg-white border-b border-surface-200 shrink-0">
+    <div className="h-11 flex items-center gap-1.5 px-4 bg-white border-b border-border shrink-0">
       {/* Upload with dropdown */}
       <div className="relative">
         <button
           type="button"
           aria-expanded={uploadOpen}
-          className="inline-flex items-center gap-1.5 h-7 px-3 text-xs font-medium rounded bg-gold-600 text-white hover:bg-gold-700 active:bg-gold-800 transition-colors"
+          className="inline-flex items-center gap-1.5 h-7 px-3 text-xs font-medium rounded bg-primary text-white hover:bg-primary active:bg-primary transition-colors"
           onClick={() => setUploadOpen((prev) => !prev)}
         >
           <Upload className="w-3.5 h-3.5" aria-hidden="true" />
@@ -72,12 +72,12 @@ export function ChapterToolbar({ viewMode, onViewModeChange, onUpload, onDownloa
               aria-hidden="true"
               onClick={() => setUploadOpen(false)}
             />
-            <div className="absolute left-0 top-full mt-1 z-20 bg-white border border-surface-200 rounded-md shadow-card min-w-[168px]">
+            <div className="absolute left-0 top-full mt-1 z-20 bg-white border border-border rounded-md shadow-card min-w-[168px]">
               {UPLOAD_OPTIONS.map((opt) => (
                 <button
                   key={opt.category}
                   type="button"
-                  className="flex items-center gap-2 w-full px-3 py-2 text-xs text-navy-700 hover:bg-surface-100 transition-colors first:rounded-t-md last:rounded-b-md"
+                  className="flex items-center gap-2 w-full px-3 py-2 text-xs text-text hover:bg-background transition-colors first:rounded-t-md last:rounded-b-md"
                   onClick={() => {
                     setUploadOpen(false);
                     onUpload(opt.category);
@@ -93,9 +93,9 @@ export function ChapterToolbar({ viewMode, onViewModeChange, onUpload, onDownloa
       </div>
 
       {/* Divider */}
-      <div className="w-px h-5 bg-surface-300 mx-1" aria-hidden="true" />
+      <div className="w-px h-5 bg-background mx-1" aria-hidden="true" />
 
-      {/* Edit action icons (Cut / Copy / Paste / Delete) — enabled when files are selected */}
+      {/* Edit action icons (Cut / Copy / Paste / Delete) â€” enabled when files are selected */}
       {(
         [
           { Icon: Scissors, label: "Cut" },
@@ -110,7 +110,7 @@ export function ChapterToolbar({ viewMode, onViewModeChange, onUpload, onDownloa
           title={label}
           aria-label={label}
           disabled
-          className="inline-flex items-center justify-center w-7 h-7 rounded text-navy-300 cursor-not-allowed"
+          className="inline-flex items-center justify-center w-7 h-7 rounded text-muted cursor-not-allowed"
         >
           <Icon className="w-3.5 h-3.5" aria-hidden="true" />
         </button>
@@ -122,9 +122,9 @@ export function ChapterToolbar({ viewMode, onViewModeChange, onUpload, onDownloa
       {/* Automate */}
       <button
         type="button"
-        className="inline-flex items-center gap-1.5 h-7 px-3 text-xs font-medium rounded border border-surface-300 text-navy-600 hover:bg-surface-100 transition-colors"
+        className="inline-flex items-center gap-1.5 h-7 px-3 text-xs font-medium rounded border border-border text-text hover:bg-background transition-colors"
       >
-        <Zap className="w-3.5 h-3.5 text-gold-500" aria-hidden="true" />
+        <Zap className="w-3.5 h-3.5 text-primary" aria-hidden="true" />
         Automate
       </button>
 
@@ -136,23 +136,23 @@ export function ChapterToolbar({ viewMode, onViewModeChange, onUpload, onDownloa
           aria-label="Download chapter package"
           disabled={isDownloading}
           className={cn(
-            "inline-flex items-center gap-1.5 h-7 px-3 text-xs font-medium rounded border border-surface-300 transition-colors",
+            "inline-flex items-center gap-1.5 h-7 px-3 text-xs font-medium rounded border border-border transition-colors",
             isDownloading
-              ? "text-navy-300 cursor-not-allowed"
-              : "text-navy-600 hover:bg-surface-100"
+              ? "text-muted cursor-not-allowed"
+              : "text-text hover:bg-background"
           )}
           onClick={onDownload}
         >
           <Download className="w-3.5 h-3.5" aria-hidden="true" />
-          {isDownloading ? "Downloading…" : "Download"}
+          {isDownloading ? "Downloadingâ€¦" : "Download"}
         </button>
       )}
 
       {/* Divider */}
-      <div className="w-px h-5 bg-surface-300 mx-1" aria-hidden="true" />
+      <div className="w-px h-5 bg-background mx-1" aria-hidden="true" />
 
       {/* View mode toggle */}
-      <div className="inline-flex rounded border border-surface-300 overflow-hidden" role="group" aria-label="View mode">
+      <div className="inline-flex rounded border border-border overflow-hidden" role="group" aria-label="View mode">
         <button
           type="button"
           title="Grid view"
@@ -161,8 +161,8 @@ export function ChapterToolbar({ viewMode, onViewModeChange, onUpload, onDownloa
           className={cn(
             "inline-flex items-center justify-center w-7 h-7 transition-colors",
             viewMode === "grid"
-              ? "bg-surface-200 text-navy-800"
-              : "text-navy-400 hover:bg-surface-50 hover:text-navy-700"
+              ? "bg-background text-text"
+              : "text-muted hover:bg-background hover:text-text"
           )}
           onClick={() => onViewModeChange("grid")}
         >
@@ -174,10 +174,10 @@ export function ChapterToolbar({ viewMode, onViewModeChange, onUpload, onDownloa
           aria-label="List view"
           aria-pressed={viewMode === "list"}
           className={cn(
-            "inline-flex items-center justify-center w-7 h-7 border-l border-surface-300 transition-colors",
+            "inline-flex items-center justify-center w-7 h-7 border-l border-border transition-colors",
             viewMode === "list"
-              ? "bg-surface-200 text-navy-800"
-              : "text-navy-400 hover:bg-surface-50 hover:text-navy-700"
+              ? "bg-background text-text"
+              : "text-muted hover:bg-background hover:text-text"
           )}
           onClick={() => onViewModeChange("list")}
         >

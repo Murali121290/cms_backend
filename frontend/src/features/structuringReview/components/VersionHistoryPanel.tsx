@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Clock, Download, FolderOpen, AlertCircle } from "lucide-react";
 import { getFileVersions } from "@/api/files";
@@ -39,19 +39,19 @@ export function VersionHistoryPanel({
   const archivedVersions = versionsQuery.data?.versions ?? [];
 
   return (
-    <div className="bg-white rounded-lg shadow-card border border-navy-100 flex flex-col h-full">
+    <div className="bg-white rounded-lg shadow-card border border-border flex flex-col h-full">
       {/* Header */}
-      <div className="p-4 border-b border-navy-100">
+      <div className="p-4 border-b border-border">
         <button
           onClick={() => setIsExpanded(!isExpanded)}
-          className="w-full flex items-center justify-between text-left hover:bg-surface-50 transition-colors p-2 -m-2"
+          className="w-full flex items-center justify-between text-left hover:bg-background transition-colors p-2 -m-2"
         >
-          <h3 className="text-xs font-semibold text-navy-800 uppercase tracking-wider flex items-center gap-2">
-            <Clock className="w-4 h-4 text-gold-600" />
+          <h3 className="text-xs font-semibold text-text uppercase tracking-wider flex items-center gap-2">
+            <Clock className="w-4 h-4 text-primary" />
             Version History
           </h3>
-          <span className="text-sm font-semibold text-navy-600">
-            {isExpanded ? "−" : "+"}
+          <span className="text-sm font-semibold text-text">
+            {isExpanded ? "âˆ’" : "+"}
           </span>
         </button>
       </div>
@@ -60,15 +60,15 @@ export function VersionHistoryPanel({
       {isExpanded && (
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {versionsQuery.isPending ? (
-            <div className="text-center py-6 text-navy-400 text-xs">
-              <div className="inline-block animate-spin">⟳</div>
+            <div className="text-center py-6 text-muted text-xs">
+              <div className="inline-block animate-spin">âŸ³</div>
               <p className="mt-2">Loading versions...</p>
             </div>
           ) : versionsQuery.isError ? (
-            <div className="p-3 bg-error-50 border border-error-200 rounded-md">
+            <div className="p-3 bg-danger/5 border border-danger/30 rounded-md">
               <div className="flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 text-error-600 flex-shrink-0 mt-0.5" />
-                <div className="text-xs text-error-700">
+                <AlertCircle className="w-4 h-4 text-danger flex-shrink-0 mt-0.5" />
+                <div className="text-xs text-danger">
                   <p className="font-semibold">Failed to load versions</p>
                   <p className="mt-1">
                     {getApiErrorMessage(versionsQuery.error, "Unable to fetch version history")}
@@ -77,7 +77,7 @@ export function VersionHistoryPanel({
               </div>
             </div>
           ) : archivedVersions.length === 0 ? (
-            <div className="text-center py-6 text-navy-400 text-xs">
+            <div className="text-center py-6 text-muted text-xs">
               <Clock className="w-8 h-8 mx-auto mb-2 opacity-50" />
               <p>No previous versions available</p>
             </div>
@@ -100,7 +100,7 @@ export function VersionHistoryPanel({
 
               {/* Archived versions */}
               <div className="space-y-2">
-                <p className="text-[10px] font-bold text-navy-600 uppercase tracking-wider px-2">
+                <p className="text-[10px] font-bold text-text uppercase tracking-wider px-2">
                   Earlier Versions ({archivedVersions.length})
                 </p>
                 {[...archivedVersions]
@@ -108,14 +108,14 @@ export function VersionHistoryPanel({
                   .map((version) => (
                     <div
                       key={version.id}
-                      className="p-3 border border-navy-100 rounded-lg hover:bg-surface-50 hover:border-navy-200 transition-all"
+                      className="p-3 border border-border rounded-lg hover:bg-background hover:border-border transition-all"
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex-1 min-w-0">
-                          <p className="text-xs font-semibold text-navy-800">
+                          <p className="text-xs font-semibold text-text">
                             Version {version.version_num}
                           </p>
-                          <p className="text-[10px] text-navy-500 mt-1">
+                          <p className="text-[10px] text-muted mt-1">
                             {formatDateTime(version.uploaded_at)}
                           </p>
                         </div>
@@ -123,7 +123,7 @@ export function VersionHistoryPanel({
                       <div className="flex items-center gap-2 mt-3">
                         <button
                           onClick={() => onOpenVersion(version.id)}
-                          className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 bg-navy-700 text-white text-[10px] font-bold rounded hover:bg-navy-800 transition-colors"
+                          className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 bg-text/10 text-white text-[10px] font-bold rounded hover:bg-text/15 transition-colors"
                         >
                           <FolderOpen className="w-3 h-3" />
                           Open
@@ -132,7 +132,7 @@ export function VersionHistoryPanel({
                           href={`/api/v2/files/${fileId}/versions/${version.id}/download`}
                           download
                           title={`Download version ${version.version_num}`}
-                          className="px-2.5 py-1.5 bg-navy-100 text-navy-700 text-[10px] font-bold rounded hover:bg-navy-200 transition-colors inline-flex items-center gap-1.5"
+                          className="px-2.5 py-1.5 bg-sidebar/5 text-text text-[10px] font-bold rounded hover:bg-sidebar/10 transition-colors inline-flex items-center gap-1.5"
                         >
                           <Download className="w-3 h-3" />
                         </a>

@@ -1,4 +1,4 @@
-import { Fragment, useState, useRef } from "react";
+﻿import { Fragment, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -40,7 +40,7 @@ type FileActionKind = "download" | "checkout" | "cancel_checkout" | "delete";
 type SortKey = "uploaded_at" | "version" | "filename";
 type SortDir = "asc" | "desc";
 
-// ─── File type config ─────────────────────────────────────────────────────────
+// â”€â”€â”€ File type config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 interface FileTypeConfig {
   Icon: React.ElementType;
@@ -67,14 +67,14 @@ function getFileTypeConfig(filename: string, mimeType: string): FileTypeConfig {
   if (ext === "zip" || ext === "rar")
     return { Icon: Archive,   color: "#6B6560", bg: "#F0EBE4", badge: "ZIP"  };
 
-  // Fallback — derive badge from extension or mime
+  // Fallback â€” derive badge from extension or mime
   const badge = ext
     ? ext.toUpperCase().slice(0, 4)
     : (mimeType.split("/").pop() ?? "FILE").toUpperCase().slice(0, 4);
   return { Icon: File, color: "#6B6560", bg: "#F5F4F1", badge };
 }
 
-// ─── Portal Tooltip ───────────────────────────────────────────────────────────
+// â”€â”€â”€ Portal Tooltip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function PortalTooltip({ label, x, y }: { label: string; x: number; y: number }) {
   return createPortal(
@@ -105,7 +105,7 @@ function PortalTooltip({ label, x, y }: { label: string; x: number; y: number })
   );
 }
 
-// ─── Action Icon Button ───────────────────────────────────────────────────────
+// â”€â”€â”€ Action Icon Button â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 interface ActionIconBtnProps {
   label: string;
@@ -156,7 +156,7 @@ function ActionIconBtn({ label, disabled, onClick, children }: ActionIconBtnProp
   );
 }
 
-// ─── Action Link Icon ─────────────────────────────────────────────────────────
+// â”€â”€â”€ Action Link Icon â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function ActionLinkIcon({ label, to, children }: {
   label: string; to: string; children: React.ReactNode;
@@ -198,7 +198,7 @@ function ActionLinkIcon({ label, to, children }: {
   );
 }
 
-// ─── Action Download Link ─────────────────────────────────────────────────────
+// â”€â”€â”€ Action Download Link â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function ActionDownloadLink({ label, href, children }: {
   label: string; href: string; children: React.ReactNode;
@@ -241,7 +241,7 @@ function ActionDownloadLink({ label, href, children }: {
   );
 }
 
-// ─── Sortable column header ───────────────────────────────────────────────────
+// â”€â”€â”€ Sortable column header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function SortableHeader({
   label,
@@ -264,7 +264,7 @@ function SortableHeader({
   return (
     <th
       style={{ cursor: "pointer", userSelect: "none", textAlign: align }}
-      className="px-3 transition-colors duration-100 hover:bg-surface-200"
+      className="px-3 transition-colors duration-100 hover:bg-background"
       onClick={() => onSort(colKey)}
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
@@ -391,7 +391,7 @@ function InlineFileVersionsList({
     <>
       {sortedVersions.map((v, idx) => {
         const isLast = idx === sortedVersions.length - 1;
-        const treeConnector = isLast ? "└──" : "├──";
+        const treeConnector = isLast ? "â””â”€â”€" : "â”œâ”€â”€";
         const uploadedDate = new Date(v.uploaded_at).toLocaleDateString("en-US", {
           month: "short",
           day: "numeric",
@@ -406,7 +406,7 @@ function InlineFileVersionsList({
               borderBottom: "1px solid #F0EBE4",
               height: "36px",
             }}
-            className="transition-colors duration-100 hover:bg-surface-50"
+            className="transition-colors duration-100 hover:bg-background"
           >
             <td className="px-2" style={{ verticalAlign: "middle" }}>
               <div
@@ -532,7 +532,7 @@ function InlineFileVersionsList({
                   cursor: downloadingId !== null ? "not-allowed" : "pointer",
                   transition: "background-color 100ms, color 100ms",
                 }}
-                className="hover:bg-surface-200 hover:text-navy-900"
+                className="hover:bg-background hover:text-text"
                 title={`Download v${v.version_num}`}
               >
                 <ArrowDownToLine
@@ -548,7 +548,7 @@ function InlineFileVersionsList({
   );
 }
 
-// ─── ChapterFilesTable ────────────────────────────────────────────────────────
+// â”€â”€â”€ ChapterFilesTable â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 interface ChapterFilesTableProps {
   projectId: number;
@@ -628,7 +628,7 @@ export function ChapterFilesTable({
       return sortDir === "asc" ? cmp : -cmp;
     });
 
-  // Highest version across current view — used to mark the "latest" dot in VER cell
+  // Highest version across current view â€” used to mark the "latest" dot in VER cell
   const maxVersion = filteredFiles.length > 0
     ? Math.max(...filteredFiles.map((f) => f.version))
     : 0;
@@ -652,7 +652,7 @@ export function ChapterFilesTable({
     <>
       <div>
         <table className="w-full border-collapse" style={{ tableLayout: "fixed" }}>
-          {/* Authoritative column widths — 7 cols, no separate icon col (icon lives inside filename cell) */}
+          {/* Authoritative column widths â€” 7 cols, no separate icon col (icon lives inside filename cell) */}
           <colgroup>
             <col style={{ width: "28px" }} />   {/* chevron */}
             <col />                              {/* filename (flex-1, absorbs remaining) */}
@@ -663,14 +663,14 @@ export function ChapterFilesTable({
             <col style={{ width: "96px" }} />   {/* actions */}
           </colgroup>
 
-          {/* ── Table header ── */}
+          {/* â”€â”€ Table header â”€â”€ */}
           <thead style={{
             backgroundColor: "#F5F4F1",
             borderTop: "1px solid #E2DDD6",
             borderBottom: "2px solid #E2DDD6",
           }}>
             <tr style={{ height: "36px" }}>
-              {/* Chevron — no label */}
+              {/* Chevron â€” no label */}
               <th className="px-2" aria-label="Expand row" />
 
               {/* FILENAME */}
@@ -682,7 +682,7 @@ export function ChapterFilesTable({
                 onSort={handleSort}
               />
 
-              {/* TYPE — sortable */}
+              {/* TYPE â€” sortable */}
               <SortableHeader
                 label="Type"
                 colKey="filename"
@@ -692,7 +692,7 @@ export function ChapterFilesTable({
                 align="center"
               />
 
-              {/* VER — sortable */}
+              {/* VER â€” sortable */}
               <SortableHeader
                 label="Ver"
                 colKey="version"
@@ -702,7 +702,7 @@ export function ChapterFilesTable({
                 align="center"
               />
 
-              {/* UPLOADED — sortable */}
+              {/* UPLOADED â€” sortable */}
               <SortableHeader
                 label="Uploaded"
                 colKey="uploaded_at"
@@ -711,7 +711,7 @@ export function ChapterFilesTable({
                 onSort={handleSort}
               />
 
-              {/* STATUS — not sortable */}
+              {/* STATUS â€” not sortable */}
               <th className="px-3" style={{ textAlign: "center" }}>
                 <span style={{
                   fontSize: "11px", fontWeight: 500,
@@ -722,7 +722,7 @@ export function ChapterFilesTable({
                 </span>
               </th>
 
-              {/* ACTIONS — not sortable */}
+              {/* ACTIONS â€” not sortable */}
               <th className="px-3" style={{ textAlign: "right" }}>
                 <span style={{
                   fontSize: "11px", fontWeight: 500,
@@ -735,7 +735,7 @@ export function ChapterFilesTable({
             </tr>
           </thead>
 
-          {/* ── Table body ── */}
+          {/* â”€â”€ Table body â”€â”€ */}
           <tbody>
             {filteredFiles.map((file, index) => {
               const isExpanded    = expandedFileId === file.id;
@@ -764,7 +764,7 @@ export function ChapterFilesTable({
 
               return (
                 <Fragment key={file.id}>
-                  {/* ── File row ── */}
+                  {/* â”€â”€ File row â”€â”€ */}
                   <tr
                     style={{
                       backgroundColor: rowBg,
@@ -779,7 +779,7 @@ export function ChapterFilesTable({
                       setMenuState({ file, anchor: { type: "cursor", x: e.clientX, y: e.clientY } });
                     }}
                   >
-                    {/* ── Chevron ── */}
+                    {/* â”€â”€ Chevron â”€â”€ */}
                     <td
                       className="px-2 py-3"
                       style={{ verticalAlign: "middle", cursor: "pointer" }}
@@ -798,7 +798,7 @@ export function ChapterFilesTable({
                       />
                     </td>
 
-                    {/* ── Filename (icon embedded) ── */}
+                    {/* â”€â”€ Filename (icon embedded) â”€â”€ */}
                     <td
                       className="px-3 py-3"
                       style={{
@@ -848,7 +848,7 @@ export function ChapterFilesTable({
                       </div>
                     </td>
 
-                    {/* ── Type chip ── */}
+                    {/* â”€â”€ Type chip â”€â”€ */}
                     <td className="px-3 py-3" style={{ verticalAlign: "middle", textAlign: "center" }}>
                       <span style={{
                         fontFamily: "ui-monospace, monospace",
@@ -865,7 +865,7 @@ export function ChapterFilesTable({
                       </span>
                     </td>
 
-                    {/* ── Version ── */}
+                    {/* â”€â”€ Version â”€â”€ */}
                     <td className="px-3 py-3" style={{ verticalAlign: "middle", textAlign: "center" }}>
                       <button
                         type="button"
@@ -873,7 +873,7 @@ export function ChapterFilesTable({
                           e.stopPropagation();
                           toggleVersions(file.id);
                         }}
-                        className="group flex items-center justify-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold select-none border border-transparent transition-all duration-150 hover:bg-surface-200 active:scale-95"
+                        className="group flex items-center justify-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold select-none border border-transparent transition-all duration-150 hover:bg-background active:scale-95"
                         style={{
                           fontFamily: "ui-monospace, monospace",
                           color: "#6B6560",
@@ -906,14 +906,14 @@ export function ChapterFilesTable({
                       </button>
                     </td>
 
-                    {/* ── Uploaded ── */}
+                    {/* â”€â”€ Uploaded â”€â”€ */}
                     <td className="px-3 py-3" style={{ verticalAlign: "middle" }}>
                       <span style={{ fontSize: "12px", color: "#6B6560", whiteSpace: "nowrap" }}>
                         {uploadedDate}
                       </span>
                     </td>
 
-                    {/* ── Status / Lock ── */}
+                    {/* â”€â”€ Status / Lock â”€â”€ */}
                     <td className="px-3 py-3" style={{ verticalAlign: "middle", textAlign: "center" }}>
                       {file.lock.is_checked_out ? (
                         <span style={{
@@ -944,7 +944,7 @@ export function ChapterFilesTable({
                       )}
                     </td>
 
-                    {/* ── Actions (4 inline: Download · Preview · Edit · More) ── */}
+                    {/* â”€â”€ Actions (4 inline: Download Â· Preview Â· Edit Â· More) â”€â”€ */}
                     <td
                       className="px-2 py-3"
                       style={{ verticalAlign: "middle" }}
@@ -978,7 +978,7 @@ export function ChapterFilesTable({
                     </td>
                   </tr>
 
-                  {/* ── Version History Sub-rows ── */}
+                  {/* â”€â”€ Version History Sub-rows â”€â”€ */}
                   {expandedVersions[file.id] && (
                     <InlineFileVersionsList
                       fileId={file.id}
@@ -989,7 +989,7 @@ export function ChapterFilesTable({
                     />
                   )}
 
-                  {/* ── Details row (animated expand) ── */}
+                  {/* â”€â”€ Details row (animated expand) â”€â”€ */}
                   <tr style={{ borderBottom: isExpanded ? "1px solid #E2DDD6" : "none" }}>
                     <td colSpan={7} style={{ padding: 0, border: "none" }}>
                       <div style={{

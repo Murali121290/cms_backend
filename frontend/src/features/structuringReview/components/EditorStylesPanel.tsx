@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/Button";
 import { BookOpen, Plus } from "lucide-react";
 import type { WysiwygEditorHandle } from "@/features/editor";
@@ -69,15 +69,15 @@ export function StylesPanel({ styles, editorRef }: StylesPanelProps) {
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-card border border-navy-100 flex flex-col h-full">
+    <div className="bg-white rounded-lg shadow-card border border-border flex flex-col h-full">
       {/* Header */}
-      <div className="p-4 border-b border-navy-100">
-        <h3 className="text-xs font-semibold text-navy-800 uppercase tracking-wider flex items-center gap-2">
-          <BookOpen className="w-4 h-4 text-gold-600" />
+      <div className="p-4 border-b border-border">
+        <h3 className="text-xs font-semibold text-text uppercase tracking-wider flex items-center gap-2">
+          <BookOpen className="w-4 h-4 text-primary" />
           Paragraph Styles
         </h3>
         <div className="mt-2 flex items-center gap-2">
-          <span className="text-[10px] text-navy-400">Current:</span>
+          <span className="text-[10px] text-muted">Current:</span>
           <span className="px-2 py-1 bg-amber-100 text-amber-900 border border-amber-300 rounded text-[10px] font-semibold">
             {currentStyle}
           </span>
@@ -87,7 +87,7 @@ export function StylesPanel({ styles, editorRef }: StylesPanelProps) {
       {/* Styles List */}
       <div className="flex-1 overflow-y-auto styles-scrollbar pr-1 p-3 space-y-2">
         {allStyles.length === 0 ? (
-          <div className="text-center py-6 text-navy-400 text-xs">
+          <div className="text-center py-6 text-muted text-xs">
             No styles available
           </div>
         ) : (
@@ -98,7 +98,7 @@ export function StylesPanel({ styles, editorRef }: StylesPanelProps) {
               className={`group w-full text-left px-3 py-2 rounded-md text-sm font-medium transition-all border relative ${
                 currentStyle === style
                   ? "bg-emerald-100 border-emerald-400 text-emerald-900 ring-2 ring-emerald-300"
-                  : "bg-surface-50 border-navy-100 text-navy-700 hover:bg-navy-100 hover:border-navy-200"
+                  : "bg-background border-border text-text hover:bg-sidebar/5 hover:border-border"
               }`}
             >
               <div className="flex items-center justify-between">
@@ -106,7 +106,7 @@ export function StylesPanel({ styles, editorRef }: StylesPanelProps) {
                   <span className="font-mono text-[10px] uppercase tracking-wide">
                     {style}
                   </span>
-                  <p className="text-[10px] text-navy-400 mt-0.5">
+                  <p className="text-[10px] text-muted mt-0.5">
                     {style === "Normal" || style === "Body Text"
                       ? "Regular paragraph"
                       : style.startsWith("H")
@@ -119,7 +119,7 @@ export function StylesPanel({ styles, editorRef }: StylesPanelProps) {
                     <span className="w-2 h-2 rounded-full bg-emerald-600"></span>
                   )}
                   {currentStyle !== style && (
-                    <span className="text-[9px] font-semibold px-1.5 py-0.5 bg-navy-700 text-white rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                    <span className="text-[9px] font-semibold px-1.5 py-0.5 bg-text/10 text-white rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
                       Apply
                     </span>
                   )}
@@ -131,7 +131,7 @@ export function StylesPanel({ styles, editorRef }: StylesPanelProps) {
       </div>
 
       {/* New Style Button */}
-      <div className="border-t border-navy-100 p-3">
+      <div className="border-t border-border p-3">
         <Button
           variant="secondary"
           size="sm"

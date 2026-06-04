@@ -1,4 +1,4 @@
-import {
+﻿import {
   useRef,
   useState,
   useCallback,
@@ -142,8 +142,8 @@ export function UploadZone({
           "w-full min-h-[9rem] p-6 rounded-md border-2 border-dashed",
           "transition-all duration-150",
           isDragging
-            ? "border-navy-500 bg-navy-50 scale-[1.01]"
-            : "border-surface-400 bg-surface-100 hover:border-navy-300 hover:bg-white",
+            ? "border-border bg-sidebar/3 scale-[1.01]"
+            : "border-border bg-background hover:border-border hover:bg-white",
           isUploading ? "cursor-default opacity-70" : "cursor-pointer"
         )}
       >
@@ -161,30 +161,30 @@ export function UploadZone({
         <div
           className={cn(
             "flex items-center justify-center size-12 rounded-md",
-            isDragging ? "bg-navy-100" : "bg-surface-200"
+            isDragging ? "bg-sidebar/5" : "bg-background"
           )}
         >
           <Upload
             className={cn(
               "size-6",
-              isDragging ? "text-navy-600" : "text-navy-400"
+              isDragging ? "text-text" : "text-muted"
             )}
             aria-hidden="true"
           />
         </div>
 
         <div className="text-center space-y-1">
-          <p className="text-sm font-medium text-navy-900">
+          <p className="text-sm font-medium text-text">
             {isDragging ? "Drop files here" : label ?? "Drag & drop files here"}
           </p>
-          <p className="text-xs text-navy-400">
+          <p className="text-xs text-muted">
             or{" "}
-            <span className="text-gold-600 font-medium underline underline-offset-2">
+            <span className="text-primary font-medium underline underline-offset-2">
               browse to upload
             </span>
           </p>
           {descParts.length > 0 && (
-            <p className="text-xs text-navy-300 mt-1">{descParts.join(" · ")}</p>
+            <p className="text-xs text-muted mt-1">{descParts.join(" Â· ")}</p>
           )}
         </div>
 
@@ -204,7 +204,7 @@ export function UploadZone({
           {validationErrors.map((err, i) => (
             <li
               key={i}
-              className="flex items-start gap-1.5 text-xs text-error-600"
+              className="flex items-start gap-1.5 text-xs text-danger"
             >
               <AlertCircle
                 className="size-3.5 shrink-0 mt-px"

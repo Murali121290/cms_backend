@@ -18,10 +18,10 @@ const trackHeightClasses: Record<ProgressSize, string> = {
 };
 
 const fillColorClasses: Record<ProgressColor, string> = {
-  navy: "bg-navy-900",
-  gold: "bg-gold-600",
+  navy: "bg-text",
+  gold: "bg-primary",
   success: "bg-success-600",
-  error: "bg-error-600",
+  error: "bg-danger",
 };
 
 export function ProgressBar({
@@ -40,10 +40,10 @@ export function ProgressBar({
       {(label || showValue) && (
         <div className="flex items-center justify-between mb-1.5">
           {label && (
-            <span className="text-sm text-navy-700 font-medium">{label}</span>
+            <span className="text-sm text-text font-medium">{label}</span>
           )}
           {showValue && !isIndeterminate && (
-            <span className="text-xs text-navy-400 tabular-nums">
+            <span className="text-xs text-muted tabular-nums">
               {clampedValue}%
             </span>
           )}
@@ -57,7 +57,7 @@ export function ProgressBar({
         aria-valuemax={100}
         aria-label={label}
         className={cn(
-          "w-full bg-surface-300 rounded-full overflow-hidden",
+          "w-full bg-background rounded-full overflow-hidden",
           trackHeightClasses[size]
         )}
       >

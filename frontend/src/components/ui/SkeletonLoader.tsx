@@ -56,7 +56,7 @@ export function SkeletonCard({ className }: SkeletonCardProps) {
     <div
       aria-hidden="true"
       className={cn(
-        "bg-white rounded-md border border-surface-400 p-5 space-y-4",
+        "bg-white rounded-md border border-border p-5 space-y-4",
         className
       )}
     >
@@ -90,7 +90,7 @@ export function SkeletonTable({
     <div aria-hidden="true" className={cn("w-full", className)}>
       {/* Header row */}
       <div
-        className="grid gap-4 px-4 py-3 border-b border-surface-400"
+        className="grid gap-4 px-4 py-3 border-b border-border"
         style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
       >
         {Array.from({ length: cols }).map((_, i) => (
@@ -102,7 +102,7 @@ export function SkeletonTable({
       {Array.from({ length: rows }).map((_, rowIdx) => (
         <div
           key={rowIdx}
-          className="grid gap-4 px-4 py-3.5 border-b border-surface-300"
+          className="grid gap-4 px-4 py-3.5 border-b border-border"
           style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
         >
           {Array.from({ length: cols }).map((_, colIdx) => (

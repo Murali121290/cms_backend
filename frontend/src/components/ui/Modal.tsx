@@ -117,7 +117,7 @@ export function Modal({
     >
       {/* Overlay */}
       <div
-        className="absolute inset-0 bg-navy-900/50 backdrop-blur-sm animate-[overlay-in_150ms_ease-out]"
+        className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-[overlay-in_150ms_ease-out]"
         onClick={onClose}
         aria-hidden="true"
       />
@@ -131,7 +131,7 @@ export function Modal({
         aria-describedby={description ? `${titleId}-desc` : undefined}
         onKeyDown={handleKeyDown}
         className={cn(
-          "relative z-10 w-full bg-white rounded-lg shadow-modal",
+          "relative z-10 w-full bg-card rounded-2xl shadow-lg",
           "animate-[modal-in_150ms_ease-out]",
           "flex flex-col max-h-[90vh]",
           sizeClasses[size]
@@ -139,18 +139,18 @@ export function Modal({
       >
         {/* Header */}
         {(title || description) && (
-          <div className="px-6 pt-6 pb-4 border-b border-surface-400 shrink-0">
+          <div className="px-6 pt-6 pb-4 border-b border-border shrink-0">
             {title && (
               <div className="flex items-start justify-between gap-4">
                 <h2
                   id={titleId}
-                  className="font-serif text-lg font-semibold text-navy-900 leading-snug"
+                  className="text-lg font-semibold text-text leading-snug"
                 >
                   {title}
                 </h2>
                 <button
                   onClick={onClose}
-                  className="shrink-0 -mt-0.5 p-1 rounded-sm text-navy-400 hover:text-navy-900 hover:bg-surface-100 transition-colors duration-100"
+                  className="shrink-0 -mt-0.5 p-1 rounded-sm text-muted hover:text-text hover:bg-background transition-colors duration-100"
                   aria-label="Close dialog"
                 >
                   <X className="size-4" aria-hidden="true" />
@@ -160,7 +160,7 @@ export function Modal({
             {description && (
               <p
                 id={`${titleId}-desc`}
-                className="mt-1.5 text-sm text-navy-400 leading-relaxed"
+                className="mt-1.5 text-sm text-muted leading-relaxed"
               >
                 {description}
               </p>
@@ -172,7 +172,7 @@ export function Modal({
         {!title && !description && (
           <button
             onClick={onClose}
-            className="absolute top-4 right-4 p-1 rounded-sm text-navy-400 hover:text-navy-900 hover:bg-surface-100 transition-colors duration-100"
+            className="absolute top-4 right-4 p-1 rounded-sm text-muted hover:text-text hover:bg-background transition-colors duration-100"
             aria-label="Close dialog"
           >
             <X className="size-4" aria-hidden="true" />
@@ -184,7 +184,7 @@ export function Modal({
 
         {/* Footer */}
         {footer && (
-          <div className="px-6 py-4 border-t border-surface-400 bg-surface-100 shrink-0 rounded-b-lg">
+          <div className="px-6 py-4 border-t border-border bg-background shrink-0 rounded-b-2xl">
             {footer}
           </div>
         )}

@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+﻿import { useState, useRef } from "react";
 import {
   ArrowLeft,
   BookOpen,
@@ -58,14 +58,14 @@ export function TechnicalEditorPage() {
 
   useDocumentTitle(
     normalizedFileId === null
-      ? "Technical Editor — S4 Carlisle CMS"
-      : `Technical Editor #${normalizedFileId} — S4 Carlisle CMS`,
+      ? "Technical Editor â€” S4 Carlisle CMS"
+      : `Technical Editor #${normalizedFileId} â€” S4 Carlisle CMS`,
   );
 
-  // ── Invalid params ────────────────────────────────────────────────────────
+  // â”€â”€ Invalid params â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (normalizedProjectId === null || normalizedChapterId === null || normalizedFileId === null) {
     return (
-      <main className="page-enter min-h-screen bg-surface-100 p-6 flex items-center justify-center">
+      <main className="page-enter min-h-screen bg-background p-6 flex items-center justify-center">
         <div className="bg-white rounded-lg shadow-card p-10 max-w-md w-full text-center space-y-4">
           <EmptyState
             title="Invalid technical editor route"
@@ -79,10 +79,10 @@ export function TechnicalEditorPage() {
     );
   }
 
-  // ── Loading ───────────────────────────────────────────────────────────────
+  // â”€â”€ Loading â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (reviewQuery.isPending) {
     return (
-      <main className="page-enter min-h-screen bg-surface-100 p-6">
+      <main className="page-enter min-h-screen bg-background p-6">
         <div className="max-w-6xl mx-auto space-y-6">
           <div className="h-14 skeleton-shimmer rounded-md" aria-hidden="true" />
           <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
@@ -97,7 +97,7 @@ export function TechnicalEditorPage() {
 
   if (reviewQuery.isError) {
     return (
-      <main className="page-enter min-h-screen bg-surface-100 p-6 flex items-center justify-center">
+      <main className="page-enter min-h-screen bg-background p-6 flex items-center justify-center">
         <div className="bg-white rounded-lg shadow-card p-10 max-w-md w-full text-center space-y-4">
           <EmptyState
             title="Failed to load technical editor"
@@ -114,7 +114,7 @@ export function TechnicalEditorPage() {
   const review = reviewQuery.data;
   if (!review) {
     return (
-      <main className="page-enter min-h-screen bg-surface-100 p-6 flex items-center justify-center">
+      <main className="page-enter min-h-screen bg-background p-6 flex items-center justify-center">
         <EmptyState
           title="No file data"
           description="Unable to load the requested file."
@@ -138,10 +138,10 @@ export function TechnicalEditorPage() {
   };
 
   return (
-    <main className="flex flex-col h-screen bg-surface-100">
+    <main className="flex flex-col h-screen bg-background">
       {/* Page Header */}
       {!isFullscreen && (
-        <div className="flex-shrink-0 bg-white border-b border-surface-200">
+        <div className="flex-shrink-0 bg-white border-b border-border">
           <PageHeader
             title="Technical Editor Workspace"
             subtitle={review.file.filename}
@@ -169,13 +169,13 @@ export function TechnicalEditorPage() {
 
       {/* Tab Controls */}
       {!isFullscreen && (
-        <div className="flex border-b border-navy-200 bg-white">
+        <div className="flex border-b border-border bg-white">
           <button
             onClick={() => setActiveTab("overview")}
             className={`py-3 px-6 font-semibold text-sm flex items-center gap-2 border-b-2 transition-all ${
               activeTab === "overview"
-                ? "border-navy-600 text-navy-800"
-                : "border-transparent text-navy-400 hover:text-navy-600"
+                ? "border-text text-text"
+                : "border-transparent text-muted hover:text-text"
             }`}
           >
             <LayoutDashboard className="w-4 h-4" />
@@ -185,8 +185,8 @@ export function TechnicalEditorPage() {
             onClick={() => setActiveTab("editor")}
             className={`py-3 px-6 font-semibold text-sm flex items-center gap-2 border-b-2 transition-all ${
               activeTab === "editor"
-                ? "border-navy-600 text-navy-800"
-                : "border-transparent text-navy-400 hover:text-navy-600"
+                ? "border-text text-text"
+                : "border-transparent text-muted hover:text-text"
             }`}
           >
             <FileText className="w-4 h-4" />
@@ -197,8 +197,8 @@ export function TechnicalEditorPage() {
               onClick={() => setActiveTab("collabora")}
               className={`py-3 px-6 font-semibold text-sm flex items-center gap-2 border-b-2 transition-all ${
                 activeTab === "collabora"
-                  ? "border-navy-600 text-navy-800"
-                  : "border-transparent text-navy-400 hover:text-navy-600"
+                  ? "border-text text-text"
+                  : "border-transparent text-muted hover:text-text"
               }`}
             >
               <BookOpen className="w-4 h-4" />
@@ -210,37 +210,37 @@ export function TechnicalEditorPage() {
 
       {/* Content area */}
       <div className="flex-1 overflow-hidden bg-white">
-        {/* ── TAB 1: OVERVIEW ──────────────────────────────────────────── */}
+        {/* â”€â”€ TAB 1: OVERVIEW â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         {(activeTab === "overview" || isFullscreen) && !isFullscreen && (
           <div className="space-y-6 page-enter p-6 max-w-6xl mx-auto">
             {/* File info card */}
-            <div className="bg-white rounded-lg shadow-card p-6 border border-navy-100">
-              <h3 className="text-sm font-semibold text-navy-900 mb-4 flex items-center gap-2">
-                <Info className="w-4 h-4 text-navy-500" />
+            <div className="bg-white rounded-lg shadow-card p-6 border border-border">
+              <h3 className="text-sm font-semibold text-text mb-4 flex items-center gap-2">
+                <Info className="w-4 h-4 text-muted" />
                 Document Information
               </h3>
               <dl className="space-y-3">
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="p-3 bg-surface-100 rounded-lg">
-                    <dt className="text-[10px] uppercase font-bold text-navy-400 tracking-wider">Filename</dt>
-                    <dd className="text-xs font-semibold text-navy-700 mt-1">{review.file.filename}</dd>
+                  <div className="p-3 bg-background rounded-lg">
+                    <dt className="text-[10px] uppercase font-bold text-muted tracking-wider">Filename</dt>
+                    <dd className="text-xs font-semibold text-text mt-1">{review.file.filename}</dd>
                   </div>
-                  <div className="p-3 bg-surface-100 rounded-lg">
-                    <dt className="text-[10px] uppercase font-bold text-navy-400 tracking-wider">Version</dt>
-                    <dd className="text-sm font-bold text-navy-800 mt-1 font-mono">v{review.file.version}</dd>
+                  <div className="p-3 bg-background rounded-lg">
+                    <dt className="text-[10px] uppercase font-bold text-muted tracking-wider">Version</dt>
+                    <dd className="text-sm font-bold text-text mt-1 font-mono">v{review.file.version}</dd>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="p-3 bg-surface-100 rounded-lg">
-                    <dt className="text-[10px] uppercase font-bold text-navy-400 tracking-wider">Collabora</dt>
+                  <div className="p-3 bg-background rounded-lg">
+                    <dt className="text-[10px] uppercase font-bold text-muted tracking-wider">Collabora</dt>
                     <dd className="mt-1">
                       <Badge variant={hasCollabora ? "success" : "error"} size="sm">
                         {hasCollabora ? "Available" : "Unavailable"}
                       </Badge>
                     </dd>
                   </div>
-                  <div className="p-3 bg-surface-100 rounded-lg">
-                    <dt className="text-[10px] uppercase font-bold text-navy-400 tracking-wider">Lock</dt>
+                  <div className="p-3 bg-background rounded-lg">
+                    <dt className="text-[10px] uppercase font-bold text-muted tracking-wider">Lock</dt>
                     <dd className="mt-1">
                       <Badge variant={review.file.lock.is_checked_out ? "warning" : "success"} size="sm">
                         {review.file.lock.is_checked_out
@@ -254,32 +254,32 @@ export function TechnicalEditorPage() {
             </div>
 
             {/* Quick action */}
-            <div className="bg-white rounded-lg shadow-card p-6 border border-navy-100">
-              <h3 className="text-sm font-semibold text-navy-900 mb-4 flex items-center gap-2">
-                <ChevronRight className="w-4 h-4 text-navy-500" />
+            <div className="bg-white rounded-lg shadow-card p-6 border border-border">
+              <h3 className="text-sm font-semibold text-text mb-4 flex items-center gap-2">
+                <ChevronRight className="w-4 h-4 text-muted" />
                 Quick Actions
               </h3>
               <button
                 type="button"
                 onClick={() => setActiveTab("editor")}
-                className="w-full flex items-center justify-between px-4 py-3 bg-navy-50 hover:bg-navy-100 rounded-lg transition-colors group"
+                className="w-full flex items-center justify-between px-4 py-3 bg-sidebar/3 hover:bg-sidebar/5 rounded-lg transition-colors group"
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-md bg-navy-800 flex items-center justify-center">
+                  <div className="w-8 h-8 rounded-md bg-text/15 flex items-center justify-center">
                     <FileText className="w-4 h-4 text-white" />
                   </div>
                   <div className="text-left">
-                    <p className="text-sm font-semibold text-navy-800">Open WYSIWYG Editor</p>
-                    <p className="text-xs text-navy-500">Review and save edits</p>
+                    <p className="text-sm font-semibold text-text">Open WYSIWYG Editor</p>
+                    <p className="text-xs text-muted">Review and save edits</p>
                   </div>
                 </div>
-                <ChevronRight className="w-4 h-4 text-navy-400 group-hover:text-navy-700 transition-colors" />
+                <ChevronRight className="w-4 h-4 text-muted group-hover:text-text transition-colors" />
               </button>
             </div>
           </div>
         )}
 
-        {/* ── TAB 2: WYSIWYG EDITOR ─────────────────────────────────────── */}
+        {/* â”€â”€ TAB 2: WYSIWYG EDITOR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         {(activeTab === "editor" || isFullscreen) && activeTab !== "collabora" && (
           <div className="flex-1 flex flex-col min-h-0 page-enter">
             <WysiwygEditor
@@ -320,16 +320,16 @@ export function TechnicalEditorPage() {
           </div>
         )}
 
-        {/* ── TAB 3: COLLABORA EDITOR ──────────────────────────────────── */}
+        {/* â”€â”€ TAB 3: COLLABORA EDITOR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         {activeTab === "collabora" && collabora_url && (
           <div className="flex-1 flex flex-col min-h-0 page-enter">
             {/* Collabora Toolbar */}
-            <div className="bg-white border-b border-navy-200 px-4 py-3 flex items-center gap-4 shadow-sm">
+            <div className="bg-white border-b border-border px-4 py-3 flex items-center gap-4 shadow-sm">
               <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                 <span className="text-xs font-medium text-emerald-700">Auto-saving via WOPI</span>
               </div>
-              <span className="text-xs text-navy-400">Editing: {review.file.filename}</span>
+              <span className="text-xs text-muted">Editing: {review.file.filename}</span>
             </div>
 
             {/* Split pane: tabbed sidebar + Collabora Editor */}

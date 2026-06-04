@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+﻿import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ChevronDown, ChevronRight, FileText, Loader2, ShieldCheck } from "lucide-react";
 
@@ -20,7 +20,7 @@ interface SelectedFile {
 }
 
 export function QualityControlPage() {
-  useDocumentTitle("Quality Control — S4 Carlisle CMS");
+  useDocumentTitle("Quality Control â€” S4 Carlisle CMS");
 
   const projectsQuery = useProjectsQuery();
   const projects = projectsQuery.data?.projects ?? [];
@@ -40,9 +40,9 @@ export function QualityControlPage() {
       />
 
       <div className="mt-6 grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-6">
-        {/* ── File picker ─────────────────────────────────────────── */}
+        {/* â”€â”€ File picker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         <aside className="bg-white rounded-lg shadow-card p-4">
-          <label htmlFor="qc-project" className="block text-xs font-semibold text-navy-700 mb-1.5 uppercase tracking-wide">
+          <label htmlFor="qc-project" className="block text-xs font-semibold text-text mb-1.5 uppercase tracking-wide">
             Project
           </label>
           <select
@@ -53,24 +53,24 @@ export function QualityControlPage() {
               setSelected(null);
             }}
             disabled={projectsQuery.isPending || projects.length === 0}
-            className="w-full px-3 py-2 rounded-md border border-navy-200 text-sm focus:outline-none focus:ring-2 focus:ring-gold-500 focus:border-transparent mb-4"
+            className="w-full px-3 py-2 rounded-md border border-border text-sm focus:outline-none focus:ring-2 focus:ring-gold-500 focus:border-transparent mb-4"
           >
             {projects.length === 0 && <option value="">No projects</option>}
             {projects.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.code} — {p.title}
+                {p.code} â€” {p.title}
               </option>
             ))}
           </select>
 
-          <p className="text-xs font-semibold text-navy-500 uppercase tracking-wide mb-2">
+          <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-2">
             Manuscript files
           </p>
           <div className="space-y-2 max-h-[60vh] overflow-y-auto">
             {chaptersQuery.isPending ? (
-              <p className="text-sm text-navy-400">Loading chapters…</p>
+              <p className="text-sm text-muted">Loading chaptersâ€¦</p>
             ) : chapters.length === 0 ? (
-              <p className="text-sm text-navy-400">No chapters in this project.</p>
+              <p className="text-sm text-muted">No chapters in this project.</p>
             ) : (
               chapters.map((chapter) => (
                 <ChapterFilePicker
@@ -91,7 +91,7 @@ export function QualityControlPage() {
           </div>
         </aside>
 
-        {/* ── Results ─────────────────────────────────────────────── */}
+        {/* â”€â”€ Results â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         <section>
           {selected ? (
             <QualityResults selected={selected} />
@@ -120,27 +120,27 @@ function ChapterFilePicker({ chapter, selectedFileId, onSelect }: ChapterFilePic
   const manuscriptFiles = (filesQuery.data?.files ?? []).filter((f) => f.category === "Manuscript");
 
   return (
-    <div className="border border-navy-100 rounded-md">
+    <div className="border border-border rounded-md">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-center justify-between p-2.5 hover:bg-navy-50 transition-colors text-left"
+        className="w-full flex items-center justify-between p-2.5 hover:bg-sidebar/3 transition-colors text-left"
       >
-        <span className="text-sm font-medium text-navy-700 truncate pr-2">
+        <span className="text-sm font-medium text-text truncate pr-2">
           Ch {chapter.number}: {chapter.title}
         </span>
         {expanded ? (
-          <ChevronDown className="w-4 h-4 text-navy-400 shrink-0" />
+          <ChevronDown className="w-4 h-4 text-muted shrink-0" />
         ) : (
-          <ChevronRight className="w-4 h-4 text-navy-400 shrink-0" />
+          <ChevronRight className="w-4 h-4 text-muted shrink-0" />
         )}
       </button>
       {expanded && (
-        <div className="border-t border-navy-100 bg-navy-50 p-2 space-y-1">
+        <div className="border-t border-border bg-sidebar/3 p-2 space-y-1">
           {filesQuery.isPending ? (
-            <p className="text-xs text-navy-400 px-1 py-1">Loading…</p>
+            <p className="text-xs text-muted px-1 py-1">Loadingâ€¦</p>
           ) : manuscriptFiles.length === 0 ? (
-            <p className="text-xs text-navy-400 px-1 py-1">No manuscript files.</p>
+            <p className="text-xs text-muted px-1 py-1">No manuscript files.</p>
           ) : (
             manuscriptFiles.map((file) => (
               <button
@@ -149,8 +149,8 @@ function ChapterFilePicker({ chapter, selectedFileId, onSelect }: ChapterFilePic
                 onClick={() => onSelect(file.id, file.filename)}
                 className={`w-full flex items-center gap-2 text-xs px-2 py-1.5 rounded text-left transition-colors ${
                   selectedFileId === file.id
-                    ? "bg-gold-100 text-gold-800 font-medium"
-                    : "hover:bg-white text-navy-700"
+                    ? "bg-primary text-primary font-medium"
+                    : "hover:bg-white text-text"
                 }`}
               >
                 <FileText className="w-3.5 h-3.5 shrink-0" />
@@ -181,39 +181,39 @@ function QualityResults({ selected }: { selected: SelectedFile }) {
 
   return (
     <div className="bg-white rounded-lg shadow-card p-5">
-      <header className="flex items-start justify-between gap-4 mb-4 pb-4 border-b border-surface-200">
+      <header className="flex items-start justify-between gap-4 mb-4 pb-4 border-b border-border">
         <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-navy-900 truncate">{selected.filename}</h2>
-          <p className="text-xs text-navy-400 mt-0.5">
+          <h2 className="text-sm font-semibold text-text truncate">{selected.filename}</h2>
+          <p className="text-xs text-muted mt-0.5">
             {query.isPending
-              ? "Scanning…"
+              ? "Scanningâ€¦"
               : query.isError
                 ? "Scan failed"
-                : `${totalFindings} findings · ${issues.length} issue types`}
+                : `${totalFindings} findings Â· ${issues.length} issue types`}
           </p>
         </div>
         <Link
           to={uiPaths.technicalReview(selected.projectId, selected.chapterId, selected.fileId)}
-          className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md bg-gold-600 text-white hover:bg-gold-700 border border-gold-600 shadow-subtle transition-all duration-150 shrink-0"
+          className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md bg-primary text-white hover:bg-primary border border-primary shadow-subtle transition-all duration-150 shrink-0"
         >
           Open full review
         </Link>
       </header>
 
       {query.isPending ? (
-        <div className="flex items-center justify-center gap-2 py-12 text-navy-500 text-sm">
-          <Loader2 className="w-5 h-5 animate-spin text-gold-600" />
-          Running technical-review scan…
+        <div className="flex items-center justify-center gap-2 py-12 text-muted text-sm">
+          <Loader2 className="w-5 h-5 animate-spin text-primary" />
+          Running technical-review scanâ€¦
         </div>
       ) : query.isError ? (
-        <div className="py-10 text-center text-sm text-navy-500">
+        <div className="py-10 text-center text-sm text-muted">
           Could not scan this file.{" "}
-          <button className="text-gold-700 underline" onClick={() => void query.refetch()}>
+          <button className="text-primary underline" onClick={() => void query.refetch()}>
             Retry
           </button>
         </div>
       ) : issues.length === 0 ? (
-        <p className="py-10 text-center text-sm text-navy-500">No issues found in this file. 🎉</p>
+        <p className="py-10 text-center text-sm text-muted">No issues found in this file. ðŸŽ‰</p>
       ) : (
         <>
           {/* Category summary */}
@@ -221,10 +221,10 @@ function QualityResults({ selected }: { selected: SelectedFile }) {
             {byCategory.map(([cat, count]) => (
               <span
                 key={cat}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-100 text-navy-700 text-xs font-medium"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-background text-text text-xs font-medium"
               >
                 {cat}
-                <span className="inline-flex items-center justify-center min-w-5 h-5 px-1 rounded-full bg-gold-100 text-gold-700 text-[10px] font-semibold">
+                <span className="inline-flex items-center justify-center min-w-5 h-5 px-1 rounded-full bg-primary text-primary text-[10px] font-semibold">
                   {count}
                 </span>
               </span>
@@ -235,7 +235,7 @@ function QualityResults({ selected }: { selected: SelectedFile }) {
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-sm">
               <thead>
-                <tr className="border-b border-surface-300 text-navy-500 text-xs uppercase tracking-wide">
+                <tr className="border-b border-border text-muted text-xs uppercase tracking-wide">
                   <th className="py-2 px-2 text-left font-semibold">Issue</th>
                   <th className="py-2 px-2 text-left font-semibold">Category</th>
                   <th className="py-2 px-2 text-right font-semibold">Count</th>
@@ -244,13 +244,13 @@ function QualityResults({ selected }: { selected: SelectedFile }) {
               </thead>
               <tbody>
                 {issues.map((issue) => (
-                  <tr key={issue.key} className="border-b border-surface-200 align-top">
-                    <td className="py-2 px-2 font-medium text-navy-800">{issue.label}</td>
-                    <td className="py-2 px-2 text-navy-600">{issue.category ?? "—"}</td>
+                  <tr key={issue.key} className="border-b border-border align-top">
+                    <td className="py-2 px-2 font-medium text-text">{issue.label}</td>
+                    <td className="py-2 px-2 text-text">{issue.category ?? "â€”"}</td>
                     <td className="py-2 px-2 text-right tabular-nums">{issue.count}</td>
-                    <td className="py-2 px-2 text-navy-500 max-w-md">
+                    <td className="py-2 px-2 text-muted max-w-md">
                       <span className="line-clamp-2">
-                        {issue.found.slice(0, 3).join(", ") || "—"}
+                        {issue.found.slice(0, 3).join(", ") || "â€”"}
                       </span>
                     </td>
                   </tr>

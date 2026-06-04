@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+﻿import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -28,7 +28,7 @@ interface AdminCreateUserFormProps {
 }
 
 const inputClass =
-  "w-full border border-surface-400 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-gold-600 focus:border-transparent disabled:opacity-50 disabled:bg-surface-100";
+  "w-full border border-border rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-gold-600 focus:border-transparent disabled:opacity-50 disabled:bg-background";
 
 export function AdminCreateUserForm({
   roles,
@@ -77,13 +77,13 @@ export function AdminCreateUserForm({
   return (
     <form onSubmit={(e) => void handleSubmit(onValid)(e)} className="space-y-4">
       {errors.root ? (
-        <div className="bg-error-100 border border-error-100 text-error-600 text-sm rounded-md px-3 py-2">
+        <div className="bg-danger/10 border border-danger/20 text-danger text-sm rounded-md px-3 py-2">
           {errors.root.message}
         </div>
       ) : null}
 
       <div>
-        <label className="block text-sm font-medium text-navy-700 mb-1.5">Username</label>
+        <label className="block text-sm font-medium text-text mb-1.5">Username</label>
         <input
           {...register("username")}
           className={inputClass}
@@ -93,12 +93,12 @@ export function AdminCreateUserForm({
           autoComplete="username"
         />
         {errors.username ? (
-          <p className="text-xs text-error-600 mt-1">{errors.username.message}</p>
+          <p className="text-xs text-danger mt-1">{errors.username.message}</p>
         ) : null}
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-navy-700 mb-1.5">Email</label>
+        <label className="block text-sm font-medium text-text mb-1.5">Email</label>
         <input
           {...register("email")}
           className={inputClass}
@@ -108,12 +108,12 @@ export function AdminCreateUserForm({
           autoComplete="email"
         />
         {errors.email ? (
-          <p className="text-xs text-error-600 mt-1">{errors.email.message}</p>
+          <p className="text-xs text-danger mt-1">{errors.email.message}</p>
         ) : null}
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-navy-700 mb-1.5">Password</label>
+        <label className="block text-sm font-medium text-text mb-1.5">Password</label>
         <input
           {...register("password")}
           className={inputClass}
@@ -123,12 +123,12 @@ export function AdminCreateUserForm({
           autoComplete="new-password"
         />
         {errors.password ? (
-          <p className="text-xs text-error-600 mt-1">{errors.password.message}</p>
+          <p className="text-xs text-danger mt-1">{errors.password.message}</p>
         ) : null}
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-navy-700 mb-1.5">Role</label>
+        <label className="block text-sm font-medium text-text mb-1.5">Role</label>
         <select
           {...register("roleId", { valueAsNumber: true })}
           className={inputClass}
@@ -137,12 +137,12 @@ export function AdminCreateUserForm({
           {roles.map((role) => (
             <option key={role.id} value={role.id}>
               {role.name}
-              {role.description ? ` — ${role.description}` : ""}
+              {role.description ? ` â€” ${role.description}` : ""}
             </option>
           ))}
         </select>
         {errors.roleId ? (
-          <p className="text-xs text-error-600 mt-1">{errors.roleId.message}</p>
+          <p className="text-xs text-danger mt-1">{errors.roleId.message}</p>
         ) : null}
       </div>
 

@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import { Check, X, Upload } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -36,9 +36,9 @@ export function ReferenceCheckModal({ file, isOpen, onClose }: ReferenceCheckMod
 
   // Compute pipeline summary
   const pipelineSteps: string[] = [];
-  if (runValidation) pipelineSteps.push("① Number Validation");
-  if (runNameYear) pipelineSteps.push("② Name & Year Validation (APA)");
-  if (runStructuring) pipelineSteps.push("③ Structuring & Conversion");
+  if (runValidation) pipelineSteps.push("â‘  Number Validation");
+  if (runNameYear) pipelineSteps.push("â‘¡ Name & Year Validation (APA)");
+  if (runStructuring) pipelineSteps.push("â‘¢ Structuring & Conversion");
 
   async function handleSubmit() {
     setErrorMsg(null);
@@ -69,7 +69,7 @@ export function ReferenceCheckModal({ file, isOpen, onClose }: ReferenceCheckMod
       await startProcessingJob(file.id, processType, "style", options);
 
       addToast({
-        title: "✓ Processing Started",
+        title: "âœ“ Processing Started",
         description: `Reference processing job queued for "${file.filename}"`,
         variant: "success",
       });
@@ -95,10 +95,10 @@ export function ReferenceCheckModal({ file, isOpen, onClose }: ReferenceCheckMod
       size="lg"
       footer={
         <div className="flex items-center justify-between gap-3">
-          <div className="text-sm text-navy-600">
+          <div className="text-sm text-text">
             {pipelineSteps.length > 0 && (
               <span className="font-medium">
-                Will run: <span className="text-[#C9821A]">{pipelineSteps.join(" → ")}</span>
+                Will run: <span className="text-[#C9821A]">{pipelineSteps.join(" â†’ ")}</span>
               </span>
             )}
           </div>
@@ -107,7 +107,7 @@ export function ReferenceCheckModal({ file, isOpen, onClose }: ReferenceCheckMod
               type="button"
               onClick={onClose}
               disabled={isSubmitting}
-              className="px-4 py-2 text-sm font-medium text-navy-600 bg-white border border-surface-400 rounded-md hover:bg-surface-100 disabled:opacity-50 transition-colors"
+              className="px-4 py-2 text-sm font-medium text-text bg-white border border-border rounded-md hover:bg-background disabled:opacity-50 transition-colors"
             >
               Cancel
             </button>
@@ -118,7 +118,7 @@ export function ReferenceCheckModal({ file, isOpen, onClose }: ReferenceCheckMod
               className="px-4 py-2 text-sm font-medium text-white bg-[#C9821A] rounded-md hover:bg-[#B3711A] disabled:opacity-50 transition-colors flex items-center gap-2"
             >
               <Upload size={16} />
-              {isSubmitting ? "Processing…" : "Start Processing"}
+              {isSubmitting ? "Processingâ€¦" : "Start Processing"}
             </button>
           </div>
         </div>
@@ -126,7 +126,7 @@ export function ReferenceCheckModal({ file, isOpen, onClose }: ReferenceCheckMod
     >
       <div className="flex flex-col gap-6">
         {errorMsg && (
-          <div className="flex items-start gap-3 px-4 py-3 text-sm text-error-700 bg-error-50 border border-error-200 rounded-md">
+          <div className="flex items-start gap-3 px-4 py-3 text-sm text-danger bg-danger/5 border border-danger/30 rounded-md">
             <X size={16} className="flex-shrink-0 mt-0.5" />
             {errorMsg}
           </div>
@@ -135,7 +135,7 @@ export function ReferenceCheckModal({ file, isOpen, onClose }: ReferenceCheckMod
         {/* Processing Pipeline Section */}
         <div className="space-y-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
           <div className="text-xs font-bold text-blue-600 uppercase tracking-wider">
-            Processing Pipeline — Select steps to run in order
+            Processing Pipeline â€” Select steps to run in order
           </div>
 
           {/* Step 1: Number Validation */}
@@ -153,13 +153,13 @@ export function ReferenceCheckModal({ file, isOpen, onClose }: ReferenceCheckMod
               {runValidation && <Check size={14} color="#FFFFFF" strokeWidth={3} />}
             </span>
             <div className="flex-1">
-              <div className="text-sm font-semibold text-navy-800">Step 1 — Number Validation
-                <span className="text-xs font-normal text-navy-600 ml-2">(AMA / Vancouver)</span>
+              <div className="text-sm font-semibold text-text">Step 1 â€” Number Validation
+                <span className="text-xs font-normal text-text ml-2">(AMA / Vancouver)</span>
               </div>
-              <div className="text-xs text-navy-700 mt-1">
+              <div className="text-xs text-text mt-1">
                 Checks in-text citation numbers match the numbered reference list. Highlights mismatches.
               </div>
-              <div className="text-xs text-blue-600 font-medium mt-2">📄 Output: Annotated .docx with highlighted changes</div>
+              <div className="text-xs text-blue-600 font-medium mt-2">ðŸ“„ Output: Annotated .docx with highlighted changes</div>
             </div>
           </label>
 
@@ -173,10 +173,10 @@ export function ReferenceCheckModal({ file, isOpen, onClose }: ReferenceCheckMod
                 {[
                   { value: "auto", label: "Auto-detect (recommended)" },
                   { value: "styled", label: "Already styled with cite_bib character style" },
-                  { value: "superscript", label: "Superscript numbers (e.g., ¹, ²⁻⁴)" },
+                  { value: "superscript", label: "Superscript numbers (e.g., Â¹, Â²â»â´)" },
                   { value: "bracket", label: "Bracketed numbers (e.g., [1], [2-4])" },
                   { value: "paren", label: "Parenthetical numbers (e.g., (1), (2-4))" },
-                  { value: "plain", label: "Plain numbers (⚠️ high false-positive risk)" },
+                  { value: "plain", label: "Plain numbers (âš ï¸ high false-positive risk)" },
                 ].map((opt) => (
                   <label key={opt.value} className="flex items-center gap-2 text-xs cursor-pointer">
                     <input
@@ -188,7 +188,7 @@ export function ReferenceCheckModal({ file, isOpen, onClose }: ReferenceCheckMod
                       className="w-3 h-3"
                       style={{ accentColor: "#C9821A" }}
                     />
-                    <span className="text-navy-700">{opt.label}</span>
+                    <span className="text-text">{opt.label}</span>
                   </label>
                 ))}
               </div>
@@ -210,13 +210,13 @@ export function ReferenceCheckModal({ file, isOpen, onClose }: ReferenceCheckMod
               {runNameYear && <Check size={14} color="#FFFFFF" strokeWidth={3} />}
             </span>
             <div className="flex-1">
-              <div className="text-sm font-semibold text-navy-800">Step 2 — Name & Year Validation
-                <span className="text-xs font-normal text-navy-600 ml-2">(APA / Chicago)</span>
+              <div className="text-sm font-semibold text-text">Step 2 â€” Name & Year Validation
+                <span className="text-xs font-normal text-text ml-2">(APA / Chicago)</span>
               </div>
-              <div className="text-xs text-navy-700 mt-1">
+              <div className="text-xs text-text mt-1">
                 Validates author names, years, et al., suffixes (a/b/c), org abbreviations. Inserts Word comments for issues.
               </div>
-              <div className="text-xs text-blue-600 font-medium mt-2">💬 Output: .docx with Word comments for issues</div>
+              <div className="text-xs text-blue-600 font-medium mt-2">ðŸ’¬ Output: .docx with Word comments for issues</div>
             </div>
           </label>
 
@@ -235,11 +235,11 @@ export function ReferenceCheckModal({ file, isOpen, onClose }: ReferenceCheckMod
               {runStructuring && <Check size={14} color="#FFFFFF" strokeWidth={3} />}
             </span>
             <div className="flex-1">
-              <div className="text-sm font-semibold text-navy-800">Step 3 — Structuring & Conversion</div>
-              <div className="text-xs text-navy-700 mt-1">
-                Restructures and converts references between APA ↔ AMA formats with URL validation.
+              <div className="text-sm font-semibold text-text">Step 3 â€” Structuring & Conversion</div>
+              <div className="text-xs text-text mt-1">
+                Restructures and converts references between APA â†” AMA formats with URL validation.
               </div>
-              <div className="text-xs text-blue-600 font-medium mt-2">📝 Output: .docx with track changes (format conversions)</div>
+              <div className="text-xs text-blue-600 font-medium mt-2">ðŸ“ Output: .docx with track changes (format conversions)</div>
             </div>
           </label>
 
@@ -277,8 +277,8 @@ export function ReferenceCheckModal({ file, isOpen, onClose }: ReferenceCheckMod
                 {reportOnly && <Check size={14} color="#FFFFFF" strokeWidth={3} />}
               </span>
               <div>
-                <div className="text-sm font-semibold text-navy-800">Report Only (no annotated .docx)</div>
-                <div className="text-xs text-navy-700">Only produce the log/report — do not save an annotated Word document.</div>
+                <div className="text-sm font-semibold text-text">Report Only (no annotated .docx)</div>
+                <div className="text-xs text-text">Only produce the log/report â€” do not save an annotated Word document.</div>
               </div>
             </label>
           </div>
@@ -286,8 +286,8 @@ export function ReferenceCheckModal({ file, isOpen, onClose }: ReferenceCheckMod
 
         {/* Pipeline Summary */}
         {pipelineSteps.length > 0 && (
-          <div className="px-3 py-2 bg-white border border-blue-300 rounded-lg text-xs text-navy-700">
-            <strong className="text-blue-600">Will run:</strong> {pipelineSteps.join(" → ")}
+          <div className="px-3 py-2 bg-white border border-blue-300 rounded-lg text-xs text-text">
+            <strong className="text-blue-600">Will run:</strong> {pipelineSteps.join(" â†’ ")}
             {reportOnly && <span className="ml-2 text-blue-600 font-medium">[Report Only]</span>}
           </div>
         )}

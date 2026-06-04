@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useImperativeHandle, forwardRef, useState } from "react";
+﻿import React, { useEffect, useRef, useImperativeHandle, forwardRef, useState } from "react";
 import { useOnlyOfficeConfig } from "./useOnlyOfficeConfig";
 import { useOnlyOfficeScript } from "./useOnlyOfficeScript";
 
@@ -23,7 +23,7 @@ export const OnlyOfficeEditor = forwardRef<OnlyOfficeEditorHandle, OnlyOfficeEdi
 
     // Surface the live connector to the parent. The connector is created
     // asynchronously (onDocumentReady), so a ref read during render is always
-    // stale — this effect pushes it up whenever it changes.
+    // stale â€” this effect pushes it up whenever it changes.
     useEffect(() => {
       onConnectorReady?.(connector);
     }, [connector, onConnectorReady]);
@@ -77,7 +77,7 @@ export const OnlyOfficeEditor = forwardRef<OnlyOfficeEditorHandle, OnlyOfficeEdi
               if (stopId) window.clearTimeout(stopId);
             }
           } catch {
-            // Not ready yet — the poll below will retry.
+            // Not ready yet â€” the poll below will retry.
           }
         }
       };
@@ -123,8 +123,8 @@ export const OnlyOfficeEditor = forwardRef<OnlyOfficeEditorHandle, OnlyOfficeEdi
     if (configLoading || (publicUrl && !scriptLoaded)) {
       return (
         <div className="flex flex-col items-center justify-center p-10 bg-slate-100" style={{ height }}>
-          <div className="w-8 h-8 border-4 border-navy-600 border-t-transparent rounded-full animate-spin"></div>
-          <span className="text-sm font-semibold mt-4 text-navy-800">Loading OnlyOffice Editor...</span>
+          <div className="w-8 h-8 border-4 border-text border-t-transparent rounded-full animate-spin"></div>
+          <span className="text-sm font-semibold mt-4 text-text">Loading OnlyOffice Editor...</span>
         </div>
       );
     }

@@ -29,8 +29,8 @@ export function Breadcrumb({ items, className }: BreadcrumbProps) {
                     className={cn(
                       "text-sm leading-none",
                       isLast
-                        ? "font-semibold text-navy-900"
-                        : "text-navy-400"
+                        ? "font-semibold text-text"
+                        : "text-muted"
                     )}
                   >
                     {item.label}
@@ -38,7 +38,7 @@ export function Breadcrumb({ items, className }: BreadcrumbProps) {
                 ) : (
                   <Link
                     to={item.href}
-                    className="text-sm leading-none text-navy-400 hover:text-navy-900 transition-colors duration-100 rounded-sm"
+                    className="text-sm leading-none text-muted hover:text-text transition-colors duration-100 rounded-sm"
                   >
                     {item.label}
                   </Link>
@@ -47,7 +47,7 @@ export function Breadcrumb({ items, className }: BreadcrumbProps) {
 
               {!isLast && (
                 <li aria-hidden="true" className="flex items-center">
-                  <ChevronRight className="size-3.5 text-navy-300 shrink-0" />
+                  <ChevronRight className="size-3.5 text-muted shrink-0" />
                 </li>
               )}
             </Fragment>

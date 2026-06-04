@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import { GitBranch } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
@@ -41,13 +41,13 @@ export function ProjectWorkflowPanel({ projectId, workflowType, workflowStageNo 
     );
   }
 
-  // ── Not assigned ──────────────────────────────────────────────
+  // â”€â”€ Not assigned â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (!definition) {
     return (
       <section className="bg-white rounded-lg shadow-card p-4 mb-4">
         <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-2 text-sm text-navy-600">
-            <GitBranch className="w-4 h-4 text-navy-400" />
+          <div className="flex items-center gap-2 text-sm text-text">
+            <GitBranch className="w-4 h-4 text-muted" />
             {workflowType ? (
               <span>
                 Unknown workflow <Badge variant="warning">{workflowType}</Badge>
@@ -60,12 +60,12 @@ export function ProjectWorkflowPanel({ projectId, workflowType, workflowStageNo 
             <select
               value={assignValue}
               onChange={(e) => setAssignValue(e.target.value)}
-              className="h-9 px-2 text-sm bg-white border border-surface-400 rounded-md text-navy-900 focus:outline-none focus:border-navy-900"
+              className="h-9 px-2 text-sm bg-white border border-border rounded-md text-text focus:outline-none focus:border-text"
             >
-              <option value="">Select workflow…</option>
+              <option value="">Select workflowâ€¦</option>
               {WORKFLOW_DEFINITIONS.map((wf) => (
                 <option key={wf.id} value={wf.id}>
-                  {wf.id} · {wf.title}
+                  {wf.id} Â· {wf.title}
                 </option>
               ))}
             </select>
@@ -73,7 +73,7 @@ export function ProjectWorkflowPanel({ projectId, workflowType, workflowStageNo 
               type="button"
               onClick={assign}
               disabled={!assignValue || mutation.isPending}
-              className="h-9 px-3 text-sm font-medium rounded-md bg-gold-600 text-white hover:bg-gold-700 disabled:opacity-40 transition-colors"
+              className="h-9 px-3 text-sm font-medium rounded-md bg-primary text-white hover:bg-primary disabled:opacity-40 transition-colors"
             >
               Assign
             </button>
@@ -83,7 +83,7 @@ export function ProjectWorkflowPanel({ projectId, workflowType, workflowStageNo 
     );
   }
 
-  // ── Assigned ──────────────────────────────────────────────────
+  // â”€â”€ Assigned â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const currentIdx = Math.max(0, definition.stages.findIndex((s) => s.no === workflowStageNo));
   const currentStage = definition.stages[currentIdx];
   const progress = Math.round(((currentIdx + 1) / definition.stages.length) * 100);
@@ -93,11 +93,11 @@ export function ProjectWorkflowPanel({ projectId, workflowType, workflowStageNo 
     <section className="bg-white rounded-lg shadow-card p-4 mb-4">
       <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
         <div className="flex items-center gap-2 min-w-0">
-          <GitBranch className="w-4 h-4 text-gold-600 shrink-0" />
+          <GitBranch className="w-4 h-4 text-primary shrink-0" />
           <Badge variant="default">
             {definition.id} {definition.title}
           </Badge>
-          <span className="text-xs text-navy-400">
+          <span className="text-xs text-muted">
             Stage {currentStage?.no} of {definition.stages.length}
           </span>
         </div>
@@ -106,11 +106,11 @@ export function ProjectWorkflowPanel({ projectId, workflowType, workflowStageNo 
             value={currentStage?.no ?? ""}
             onChange={(e) => setStage(e.target.value)}
             disabled={mutation.isPending}
-            className="h-9 px-2 text-sm bg-white border border-surface-400 rounded-md text-navy-900 focus:outline-none focus:border-navy-900"
+            className="h-9 px-2 text-sm bg-white border border-border rounded-md text-text focus:outline-none focus:border-text"
           >
             {definition.stages.map((s) => (
               <option key={s.no} value={s.no}>
-                {s.no} · {s.name}
+                {s.no} Â· {s.name}
               </option>
             ))}
           </select>
@@ -119,7 +119,7 @@ export function ProjectWorkflowPanel({ projectId, workflowType, workflowStageNo 
               type="button"
               onClick={() => setStage(nextStage.no)}
               disabled={mutation.isPending}
-              className="h-9 px-3 text-sm font-medium rounded-md bg-gold-600 text-white hover:bg-gold-700 disabled:opacity-50 transition-colors"
+              className="h-9 px-3 text-sm font-medium rounded-md bg-primary text-white hover:bg-primary disabled:opacity-50 transition-colors"
             >
               Advance
             </button>
@@ -127,9 +127,9 @@ export function ProjectWorkflowPanel({ projectId, workflowType, workflowStageNo 
         </div>
       </div>
       <ProgressBar value={progress} color="gold" size="md" showValue label={currentStage?.name} />
-      <p className="text-xs text-navy-500 mt-2">
-        Owner: <span className="text-navy-700 font-medium">{currentStage?.owner}</span> · Deliverable:{" "}
-        <span className="text-navy-700 font-medium">{currentStage?.out}</span>
+      <p className="text-xs text-muted mt-2">
+        Owner: <span className="text-text font-medium">{currentStage?.owner}</span> Â· Deliverable:{" "}
+        <span className="text-text font-medium">{currentStage?.out}</span>
       </p>
     </section>
   );

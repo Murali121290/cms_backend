@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+﻿import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -20,7 +20,7 @@ interface AdminEditUserFormProps {
 }
 
 const inputClass =
-  "w-full border border-surface-400 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-gold-600 focus:border-transparent disabled:opacity-50 disabled:bg-surface-100";
+  "w-full border border-border rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-gold-600 focus:border-transparent disabled:opacity-50 disabled:bg-background";
 
 export function AdminEditUserForm({
   user,
@@ -57,13 +57,13 @@ export function AdminEditUserForm({
   return (
     <form onSubmit={(e) => void handleSubmit(onValid)(e)} className="space-y-4">
       {errors.root ? (
-        <div className="bg-error-100 border border-error-100 text-error-600 text-sm rounded-md px-3 py-2">
+        <div className="bg-danger/10 border border-danger/20 text-danger text-sm rounded-md px-3 py-2">
           {errors.root.message}
         </div>
       ) : null}
 
       <div>
-        <label className="block text-sm font-medium text-navy-700 mb-1.5">Email</label>
+        <label className="block text-sm font-medium text-text mb-1.5">Email</label>
         <input
           {...register("email")}
           className={inputClass}
@@ -72,7 +72,7 @@ export function AdminEditUserForm({
           autoComplete="email"
         />
         {errors.email ? (
-          <p className="text-xs text-error-600 mt-1">{errors.email.message}</p>
+          <p className="text-xs text-danger mt-1">{errors.email.message}</p>
         ) : null}
       </div>
 

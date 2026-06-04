@@ -61,17 +61,17 @@ export function Card({
           : undefined
       }
       className={cn(
-        "bg-white rounded-md border border-surface-400 shadow-card overflow-hidden",
+        "bg-card rounded-xl border border-border shadow-sm overflow-hidden",
         "transition-all duration-150",
         isInteractive &&
-          "cursor-pointer hover:shadow-hover hover:-translate-y-px",
+          "cursor-pointer hover:shadow-md hover:-translate-y-px",
         className
       )}
     >
       {header && (
         <div
           className={cn(
-            "border-b border-surface-400 bg-surface-100",
+            "border-b border-border bg-background",
             headerPaddingClasses[padding]
           )}
         >
@@ -86,7 +86,7 @@ export function Card({
       {footer && (
         <div
           className={cn(
-            "border-t border-surface-400 bg-surface-100",
+            "border-t border-border bg-background",
             footerPaddingClasses[padding]
           )}
         >

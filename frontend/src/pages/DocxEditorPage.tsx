@@ -1,4 +1,4 @@
-import { useNavigate, useParams, Link } from "react-router-dom";
+﻿import { useNavigate, useParams, Link } from "react-router-dom";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { ArrowLeft, Loader2, AlertCircle } from "lucide-react";
 
@@ -24,12 +24,12 @@ export function DocxEditorPage() {
     staleTime: 0,
   });
 
-  useDocumentTitle(query.data ? `${query.data.filename} — Editor` : "Editor — S4 Carlisle CMS");
+  useDocumentTitle(query.data ? `${query.data.filename} â€” Editor` : "Editor â€” S4 Carlisle CMS");
 
   const saveMutation = useMutation({
     mutationFn: (html: string) => saveFileXhtmlRuns(numericFileId, html),
     onSuccess: (result) => {
-      addToast({ title: "Saved — changes applied to a new DOCX version", variant: "success" });
+      addToast({ title: "Saved â€” changes applied to a new DOCX version", variant: "success" });
       // The save creates a new file version; navigate to it so further edits chain correctly.
       if (result.file_id && result.file_id !== numericFileId && projectId && chapterId) {
         navigate(uiPaths.docxEditor(projectId, chapterId, result.file_id), { replace: true });
@@ -43,22 +43,22 @@ export function DocxEditorPage() {
   });
 
   return (
-    <div className="flex flex-col h-screen bg-surface-50">
+    <div className="flex flex-col h-screen bg-background">
       {/* Topbar */}
-      <div className="flex items-center gap-3 px-4 h-12 bg-white border-b border-surface-200 flex-shrink-0">
+      <div className="flex items-center gap-3 px-4 h-12 bg-white border-b border-border flex-shrink-0">
         {projectId && chapterId && (
           <Link
             to={uiPaths.chapterDetail(projectId, chapterId)}
-            className="flex items-center gap-1.5 text-sm text-navy-500 hover:text-navy-900 transition-colors"
+            className="flex items-center gap-1.5 text-sm text-muted hover:text-text transition-colors"
           >
             <ArrowLeft className="w-4 h-4" />
             Back
           </Link>
         )}
-        <span className="text-sm font-medium text-navy-800 truncate">
-          {query.data?.filename ?? "Loading…"}
+        <span className="text-sm font-medium text-text truncate">
+          {query.data?.filename ?? "Loadingâ€¦"}
         </span>
-        <span className="ml-auto text-xs text-navy-400">Formatting-preserving editor</span>
+        <span className="ml-auto text-xs text-muted">Formatting-preserving editor</span>
       </div>
 
       {/* Editor area */}
@@ -66,19 +66,19 @@ export function DocxEditorPage() {
         {!hasValidFile ? (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-sm">
             <AlertCircle className="w-8 h-8 text-red-400" />
-            <p className="text-navy-600">Invalid file.</p>
+            <p className="text-text">Invalid file.</p>
           </div>
         ) : query.isPending ? (
-          <div className="flex items-center justify-center h-full gap-2 text-navy-500 text-sm">
-            <Loader2 className="w-5 h-5 animate-spin text-gold-600" />
-            Loading document…
+          <div className="flex items-center justify-center h-full gap-2 text-muted text-sm">
+            <Loader2 className="w-5 h-5 animate-spin text-primary" />
+            Loading documentâ€¦
           </div>
         ) : query.isError ? (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-sm">
             <AlertCircle className="w-8 h-8 text-red-400" />
-            <p className="text-navy-600">{getApiErrorMessage(query.error, "Failed to load document.")}</p>
+            <p className="text-text">{getApiErrorMessage(query.error, "Failed to load document.")}</p>
             <button
-              className="px-4 py-2 rounded-md bg-gold-600 text-white text-sm hover:bg-gold-700"
+              className="px-4 py-2 rounded-md bg-primary text-white text-sm hover:bg-primary"
               onClick={() => void query.refetch()}
             >
               Retry

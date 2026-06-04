@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import { ChevronLeft, ChevronRight, Download } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
@@ -13,10 +13,10 @@ export function StructuringMetadataPanel({ review }: StructuringMetadataPanelPro
 
   if (collapsed) {
     return (
-      <div className="flex flex-col items-center py-4 px-1 bg-white border-l border-surface-300 w-10 shrink-0">
+      <div className="flex flex-col items-center py-4 px-1 bg-white border-l border-border w-10 shrink-0">
         <button
           type="button"
-          className="p-1.5 rounded hover:bg-surface-200 text-navy-400 hover:text-navy-700 transition-colors"
+          className="p-1.5 rounded hover:bg-background text-muted hover:text-text transition-colors"
           aria-label="Expand metadata panel"
           onClick={() => setCollapsed(false)}
         >
@@ -27,15 +27,15 @@ export function StructuringMetadataPanel({ review }: StructuringMetadataPanelPro
   }
 
   return (
-    <aside className="bg-white border-l border-surface-300 w-64 shrink-0 flex flex-col overflow-y-auto">
+    <aside className="bg-white border-l border-border w-64 shrink-0 flex flex-col overflow-y-auto">
       {/* Panel header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-surface-300">
-        <span className="text-xs font-semibold text-navy-500 uppercase tracking-wide">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+        <span className="text-xs font-semibold text-muted uppercase tracking-wide">
           Document Info
         </span>
         <button
           type="button"
-          className="p-1.5 rounded hover:bg-surface-200 text-navy-400 hover:text-navy-700 transition-colors"
+          className="p-1.5 rounded hover:bg-background text-muted hover:text-text transition-colors"
           aria-label="Collapse metadata panel"
           onClick={() => setCollapsed(true)}
         >
@@ -46,19 +46,19 @@ export function StructuringMetadataPanel({ review }: StructuringMetadataPanelPro
       <div className="flex-1 overflow-y-auto p-4 space-y-5">
         {/* File info */}
         <section>
-          <h3 className="text-xs font-semibold text-navy-500 uppercase tracking-wide mb-3">
+          <h3 className="text-xs font-semibold text-muted uppercase tracking-wide mb-3">
             File
           </h3>
           <dl className="space-y-2.5">
             <div>
-              <dt className="text-xs text-navy-400">Source file</dt>
-              <dd className="text-xs font-medium text-navy-700 mt-0.5 break-all">
+              <dt className="text-xs text-muted">Source file</dt>
+              <dd className="text-xs font-medium text-text mt-0.5 break-all">
                 {review.file.filename}
               </dd>
             </div>
             <div>
-              <dt className="text-xs text-navy-400">Processed file</dt>
-              <dd className="text-xs font-medium text-navy-700 mt-0.5 break-all">
+              <dt className="text-xs text-muted">Processed file</dt>
+              <dd className="text-xs font-medium text-text mt-0.5 break-all">
                 {review.processed_file.filename}
               </dd>
             </div>
@@ -67,12 +67,12 @@ export function StructuringMetadataPanel({ review }: StructuringMetadataPanelPro
 
         {/* Editor info */}
         <section>
-          <h3 className="text-xs font-semibold text-navy-500 uppercase tracking-wide mb-3">
+          <h3 className="text-xs font-semibold text-muted uppercase tracking-wide mb-3">
             Editor
           </h3>
           <dl className="space-y-2.5">
             <div>
-              <dt className="text-xs text-navy-400">Mode</dt>
+              <dt className="text-xs text-muted">Mode</dt>
               <dd className="mt-0.5">
                 <Badge variant="info" size="sm">
                   {review.editor.mode}
@@ -80,7 +80,7 @@ export function StructuringMetadataPanel({ review }: StructuringMetadataPanelPro
               </dd>
             </div>
             <div>
-              <dt className="text-xs text-navy-400">WOPI mode</dt>
+              <dt className="text-xs text-muted">WOPI mode</dt>
               <dd className="mt-0.5">
                 <Badge variant="default" size="sm">
                   {review.editor.wopi_mode}
@@ -88,8 +88,8 @@ export function StructuringMetadataPanel({ review }: StructuringMetadataPanelPro
               </dd>
             </div>
             <div>
-              <dt className="text-xs text-navy-400">Save mode</dt>
-              <dd className="text-xs text-navy-700 mt-0.5">{review.editor.save_mode}</dd>
+              <dt className="text-xs text-muted">Save mode</dt>
+              <dd className="text-xs text-text mt-0.5">{review.editor.save_mode}</dd>
             </div>
           </dl>
         </section>
@@ -97,7 +97,7 @@ export function StructuringMetadataPanel({ review }: StructuringMetadataPanelPro
         {/* Styles */}
         {review.styles.length > 0 ? (
           <section>
-            <h3 className="text-xs font-semibold text-navy-500 uppercase tracking-wide mb-3">
+            <h3 className="text-xs font-semibold text-muted uppercase tracking-wide mb-3">
               Styles ({review.styles.length})
             </h3>
             <div className="flex flex-wrap gap-1.5">
@@ -114,7 +114,7 @@ export function StructuringMetadataPanel({ review }: StructuringMetadataPanelPro
         <section>
           <a
             href={review.actions.export_href}
-            className="flex items-center gap-2 text-xs text-navy-600 hover:text-navy-900 transition-colors"
+            className="flex items-center gap-2 text-xs text-text hover:text-text transition-colors"
           >
             <Download className="w-3.5 h-3.5" aria-hidden="true" />
             <span>Export document</span>

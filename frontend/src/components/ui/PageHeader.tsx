@@ -25,18 +25,18 @@ export function PageHeader({
       {/* Left side: breadcrumb + title + subtitle */}
       <div className="min-w-0 flex-1">
         {breadcrumb && (
-          <div className="mb-1.5 text-sm text-navy-400">{breadcrumb}</div>
+          <div className="mb-1.5 text-sm text-muted">{breadcrumb}</div>
         )}
 
         <div className="flex items-center gap-2.5 flex-wrap">
-          <h1 className="font-serif text-2xl font-semibold text-navy-900 leading-tight truncate">
+          <h1 className="text-2xl font-semibold text-text leading-tight truncate">
             {title}
           </h1>
           {badge && <div className="shrink-0">{badge}</div>}
         </div>
 
         {subtitle && (
-          <p className="mt-1 text-sm text-navy-400 leading-snug">{subtitle}</p>
+          <p className="mt-1 text-sm text-muted leading-snug">{subtitle}</p>
         )}
       </div>
 

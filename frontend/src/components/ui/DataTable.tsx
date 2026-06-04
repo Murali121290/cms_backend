@@ -71,10 +71,10 @@ export function DataTable<T>({
       ) : (
         <table
           role="table"
-          className="w-full border-collapse text-sm text-navy-900"
+          className="w-full border-collapse text-sm text-text"
         >
           <thead>
-            <tr className="sticky top-0 bg-white z-[10] border-b border-surface-400">
+            <tr className="sticky top-0 bg-white z-[10] border-b border-border">
               {columns.map((col) => {
                 const isSorted = sortKey === col.key;
                 return (
@@ -84,11 +84,11 @@ export function DataTable<T>({
                     aria-sort={getAriaSortValue(col)}
                     style={col.width ? { width: col.width } : undefined}
                     className={cn(
-                      "px-4 py-3 font-semibold text-xs text-navy-400 uppercase tracking-wide",
-                      "bg-surface-100",
+                      "px-4 py-3 font-semibold text-xs text-muted uppercase tracking-wide",
+                      "bg-background",
                       col.align ? alignClasses[col.align] : "text-left",
                       col.sortable &&
-                        "cursor-pointer select-none hover:text-navy-900 hover:bg-surface-200 transition-colors duration-100"
+                        "cursor-pointer select-none hover:text-text hover:bg-background transition-colors duration-100"
                     )}
                     onClick={col.sortable ? () => handleSort(col) : undefined}
                     onKeyDown={
@@ -142,7 +142,7 @@ export function DataTable<T>({
               data.map((row, rowIndex) => (
                 <tr
                   key={keyExtractor(row)}
-                  className="border-b border-surface-300 hover:bg-surface-100 transition-colors duration-100"
+                  className="border-b border-border hover:bg-background transition-colors duration-100"
                 >
                   {columns.map((col) => (
                     <td

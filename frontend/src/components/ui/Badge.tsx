@@ -20,19 +20,19 @@ interface BadgeProps {
 
 const variantClasses: Record<BadgeVariant, string> = {
   default:
-    "bg-surface-300 text-navy-700 border border-surface-400",
+    "bg-background text-text border border-border",
   success:
-    "bg-success-100 text-success-600 border border-success-100",
+    "bg-success/15 text-success border border-success/30",
   warning:
-    "bg-warning-100 text-warning-600 border border-warning-100",
+    "bg-warning/15 text-warning border border-warning/30",
   error:
-    "bg-error-100 text-error-600 border border-error-100",
+    "bg-danger/15 text-danger border border-danger/30",
   info:
-    "bg-info-100 text-info-600 border border-info-100",
+    "bg-info/15 text-info border border-info/30",
   navy:
-    "bg-navy-900 text-white border border-navy-900",
+    "bg-sidebar text-white border border-sidebar",
   outline:
-    "bg-transparent text-navy-700 border border-surface-400",
+    "bg-transparent text-text border border-border",
 };
 
 const sizeClasses: Record<BadgeSize, string> = {

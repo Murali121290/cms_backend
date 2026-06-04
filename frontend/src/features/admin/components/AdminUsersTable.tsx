@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import { Edit2, KeyRound, Trash2, UserCheck, UserX } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
@@ -44,7 +44,7 @@ function initials(value: string) {
   return value.trim().slice(0, 2).toUpperCase();
 }
 
-/** Map role name → Badge variant */
+/** Map role name â†’ Badge variant */
 function roleBadgeVariant(roleName: string): "error" | "info" | "default" {
   const lower = roleName.toLowerCase();
   if (lower === "admin") return "error";
@@ -82,7 +82,7 @@ function AdminUserRow({
 
   return (
     <>
-      <tr className="border-b border-surface-300 hover:bg-surface-100 transition-colors duration-100">
+      <tr className="border-b border-border hover:bg-background transition-colors duration-100">
         {/* User cell */}
         <td className="px-4 py-3">
           <div className="flex items-center gap-3">
@@ -96,15 +96,15 @@ function AdminUserRow({
               {initials(user.username)}
             </div>
             <div className="min-w-0">
-              <div className="text-sm font-medium text-navy-900 truncate">{user.username}</div>
-              <div className="text-xs text-navy-400">ID {user.id}</div>
+              <div className="text-sm font-medium text-text truncate">{user.username}</div>
+              <div className="text-xs text-muted">ID {user.id}</div>
             </div>
           </div>
         </td>
 
         {/* Email cell */}
         <td className="px-4 py-3">
-          <span className="text-sm text-navy-600">{user.email}</span>
+          <span className="text-sm text-text">{user.email}</span>
         </td>
 
         {/* Role cell */}
@@ -129,7 +129,7 @@ function AdminUserRow({
             </div>
             <div className="flex items-center gap-1.5">
               <select
-                className="text-xs border border-surface-400 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-gold-600 disabled:opacity-50"
+                className="text-xs border border-border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-gold-600 disabled:opacity-50"
                 disabled={isPending("role", user.id)}
                 value={selectedRoleId}
                 onChange={(e) => setSelectedRoleId(Number.parseInt(e.target.value, 10))}
@@ -141,12 +141,12 @@ function AdminUserRow({
                 ))}
               </select>
               <button
-                className="text-xs px-2 py-1 border border-surface-400 rounded hover:bg-surface-200 disabled:opacity-50 text-navy-700 transition-colors"
+                className="text-xs px-2 py-1 border border-border rounded hover:bg-background disabled:opacity-50 text-text transition-colors"
                 disabled={isPending("role", user.id)}
                 type="button"
                 onClick={() => void onUpdateRole(user.id, selectedRoleId, user.username)}
               >
-                {isPending("role", user.id) ? "Saving…" : "Save"}
+                {isPending("role", user.id) ? "Savingâ€¦" : "Save"}
               </button>
             </div>
           </div>
@@ -165,7 +165,7 @@ function AdminUserRow({
             {/* Edit email */}
             <button
               aria-label={`Edit ${user.username}`}
-              className="p-1.5 rounded hover:bg-surface-200 text-navy-500 hover:text-navy-900 transition-colors"
+              className="p-1.5 rounded hover:bg-background text-muted hover:text-text transition-colors"
               type="button"
               onClick={() => onOpenEditUser(user)}
             >
@@ -175,7 +175,7 @@ function AdminUserRow({
             {/* Change password */}
             <button
               aria-label={`Change password for ${user.username}`}
-              className="p-1.5 rounded hover:bg-surface-200 text-navy-500 hover:text-navy-900 transition-colors"
+              className="p-1.5 rounded hover:bg-background text-muted hover:text-text transition-colors"
               type="button"
               onClick={() => onOpenPasswordUser(user)}
             >
@@ -185,7 +185,7 @@ function AdminUserRow({
             {/* Toggle status */}
             <button
               aria-label={`${user.is_active ? "Disable" : "Enable"} ${user.username}`}
-              className="p-1.5 rounded hover:bg-surface-200 text-navy-500 hover:text-navy-900 transition-colors disabled:opacity-50"
+              className="p-1.5 rounded hover:bg-background text-muted hover:text-text transition-colors disabled:opacity-50"
               disabled={isPending("status", user.id)}
               type="button"
               onClick={() => setConfirmToggle(true)}
@@ -200,7 +200,7 @@ function AdminUserRow({
             {/* Delete */}
             <button
               aria-label={`Delete ${user.username}`}
-              className="p-1.5 rounded hover:bg-error-100 text-navy-400 hover:text-error-600 transition-colors disabled:opacity-50"
+              className="p-1.5 rounded hover:bg-danger/10 text-muted hover:text-danger transition-colors disabled:opacity-50"
               disabled={isPending("delete", user.id)}
               type="button"
               onClick={() => {
@@ -233,7 +233,7 @@ function AdminUserRow({
         isLoading={isPending("status", user.id)}
       />
 
-      {/* Delete confirm — requires email typing */}
+      {/* Delete confirm â€” requires email typing */}
       <Modal
         isOpen={confirmDelete}
         onClose={() => setConfirmDelete(false)}
@@ -261,18 +261,18 @@ function AdminUserRow({
         }
       >
         <div className="space-y-3">
-          <p className="text-sm text-navy-600">
+          <p className="text-sm text-text">
             You are about to permanently delete{" "}
-            <span className="font-semibold text-navy-900">{user.username}</span>{" "}
+            <span className="font-semibold text-text">{user.username}</span>{" "}
             (<span className="font-mono text-xs">{user.email}</span>).
           </p>
           <div>
-            <label className="block text-xs font-medium text-navy-700 mb-1.5">
+            <label className="block text-xs font-medium text-text mb-1.5">
               Type <span className="font-mono font-semibold">{user.email}</span> to confirm
             </label>
             <input
               type="email"
-              className="w-full border border-surface-400 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-error-500 focus:border-transparent"
+              className="w-full border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-error-500 focus:border-transparent"
               placeholder={user.email}
               value={deleteEmailInput}
               autoComplete="off"
@@ -300,20 +300,20 @@ export function AdminUsersTable({
       <div className="overflow-x-auto">
         <table className="w-full text-left">
           <thead>
-            <tr className="bg-surface-100 border-b border-surface-400">
-              <th className="px-4 py-3 text-xs font-semibold text-navy-500 uppercase tracking-wide">
+            <tr className="bg-background border-b border-border">
+              <th className="px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide">
                 User
               </th>
-              <th className="px-4 py-3 text-xs font-semibold text-navy-500 uppercase tracking-wide">
+              <th className="px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide">
                 Email
               </th>
-              <th className="px-4 py-3 text-xs font-semibold text-navy-500 uppercase tracking-wide">
+              <th className="px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide">
                 Role
               </th>
-              <th className="px-4 py-3 text-xs font-semibold text-navy-500 uppercase tracking-wide">
+              <th className="px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide">
                 Status
               </th>
-              <th className="px-4 py-3 text-xs font-semibold text-navy-500 uppercase tracking-wide text-right">
+              <th className="px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide text-right">
                 Actions
               </th>
             </tr>

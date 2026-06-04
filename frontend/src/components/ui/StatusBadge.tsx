@@ -52,13 +52,13 @@ function capitalize(s: string): string {
 }
 
 const pulseDotVariantClasses: Record<NonNullable<BadgeVariant>, string> = {
-  default: "bg-navy-400",
-  success: "bg-success-600",
-  warning: "bg-warning-600",
-  error: "bg-error-600",
-  info: "bg-info-600",
+  default: "bg-muted",
+  success: "bg-success",
+  warning: "bg-warning",
+  error: "bg-danger",
+  info: "bg-info",
   navy: "bg-white",
-  outline: "bg-navy-400",
+  outline: "bg-muted",
 };
 
 export function StatusBadge({ status, size = "md", className }: StatusBadgeProps) {

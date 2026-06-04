@@ -1,4 +1,4 @@
-import { useEditor, EditorContent } from "@tiptap/react";
+﻿import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Bold as TiptapBold } from "@tiptap/extension-bold";
 import { Italic as TiptapItalic } from "@tiptap/extension-italic";
@@ -709,7 +709,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
     return (
       <div className="flex flex-col bg-[#e8e8e8] w-full" style={{ height }}>
 
-        {/* ── Toolbar ─────────────────────────────────────────────────────── */}
+        {/* â”€â”€ Toolbar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         <div className="sticky top-0 z-10 bg-[#090d16] border-b border-slate-800 px-3 py-2 flex items-center gap-1.5 overflow-x-auto shadow-md flex-wrap">
 
           {/* Style Badge */}
@@ -904,11 +904,11 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
             <>
               <ToolbarDivider />
               <div className="flex items-center gap-1 bg-[#131b2e] border border-slate-700/60 rounded-md p-0.5" title="Table Tools">
-                <button onClick={() => editor.chain().focus().addRowBefore().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Row Above">R+↑</button>
-                <button onClick={() => editor.chain().focus().addRowAfter().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Row Below">R+↓</button>
+                <button onClick={() => editor.chain().focus().addRowBefore().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Row Above">R+â†‘</button>
+                <button onClick={() => editor.chain().focus().addRowAfter().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Row Below">R+â†“</button>
                 <div className="w-px h-3.5 bg-slate-800" />
-                <button onClick={() => editor.chain().focus().addColumnBefore().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Column Left">C+←</button>
-                <button onClick={() => editor.chain().focus().addColumnAfter().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Column Right">C+→</button>
+                <button onClick={() => editor.chain().focus().addColumnBefore().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Column Left">C+â†</button>
+                <button onClick={() => editor.chain().focus().addColumnAfter().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Column Right">C+â†’</button>
                 <div className="w-px h-3.5 bg-slate-800" />
                 <button onClick={() => editor.chain().focus().mergeCells().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Merge Cells">Merge</button>
                 <button onClick={() => editor.chain().focus().splitCell().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Split Cell">Split</button>
@@ -1091,7 +1091,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           </ToolbarButton>
         </div>
 
-        {/* ── Find & Replace Bar ──────────────────────────────────────────── */}
+        {/* â”€â”€ Find & Replace Bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         {showFindReplace && (
           <div className="bg-slate-900 border-b border-slate-700 px-4 py-2 flex items-center gap-3 text-sm flex-wrap">
             <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -1168,7 +1168,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           </div>
         )}
 
-        {/* ── Link Dialog ─────────────────────────────────────────────────── */}
+        {/* â”€â”€ Link Dialog â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         {showLinkDialog && (
           <div className="bg-slate-900 border-b border-slate-700 px-4 py-2 flex items-center gap-3">
             <LinkIcon className="w-4 h-4 text-blue-400 shrink-0" />
@@ -1190,12 +1190,12 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           </div>
         )}
 
-        {/* ── Document Area ────────────────────────────────────────────────── */}
+        {/* â”€â”€ Document Area â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         <div className="flex-1 overflow-y-auto bg-gradient-to-tr from-slate-100 to-slate-50 p-8 flex justify-start lg:justify-center items-start overflow-x-auto">
           <div className={sidePanel ? "flex gap-8 w-full max-w-[1400px] justify-start lg:justify-center" : ""}>
             {/* Word-style Document Page */}
             <div
-              className="bg-white flex-shrink-0 font-serif text-sm transition-shadow duration-300 relative"
+              className="bg-white flex-shrink-0 text-sm transition-shadow duration-300 relative"
               style={{
                 fontFamily: "'Times New Roman', Times, serif",
                 lineHeight: "2",
@@ -1325,7 +1325,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
               <div className="absolute left-[100%] top-0 ml-8 w-80 h-full pointer-events-none hidden xl:block">
                 {Object.keys(comments).length > 0 && (
                   <div className="pointer-events-auto bg-slate-900/90 border border-slate-700/80 rounded-md p-3 mb-4 text-[10px] text-slate-300 font-bold uppercase tracking-wide flex items-center gap-1.5 shadow-md">
-                    <span className="text-amber-400">⚠️</span>
+                    <span className="text-amber-400">âš ï¸</span>
                     <span>Comments are review-only; not written to exported DOCX.</span>
                   </div>
                 )}
@@ -1395,7 +1395,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           </div>
         </div>
 
-        {/* ── Save Bar ─────────────────────────────────────────────────────── */}
+        {/* â”€â”€ Save Bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         <div className="border-t border-slate-200 bg-white/95 backdrop-blur-sm px-6 py-3 flex items-center gap-3 shadow-md">
           <Button
             variant="primary"
@@ -1434,7 +1434,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
             {/* Word / char count */}
             <span className="flex items-center gap-1.5 text-[11px] text-slate-400 font-mono">
               <FileText className="w-3.5 h-3.5" />
-              {wordCount.toLocaleString()} words · {charCount.toLocaleString()} chars
+              {wordCount.toLocaleString()} words Â· {charCount.toLocaleString()} chars
             </span>
 
             {tcEnabled && (
@@ -1445,7 +1445,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           </div>
         </div>
 
-        {/* ── Editor CSS ───────────────────────────────────────────────────── */}
+        {/* â”€â”€ Editor CSS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         <style>{`
         .ProseMirror {
           outline: none;

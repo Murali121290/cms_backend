@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -23,7 +23,7 @@ import type { ChapterSummary } from "@/types/api";
 import { uiPaths } from "@/utils/appPaths";
 import { cn } from "@/utils/cn";
 
-/* ─── Stage config ─────────────────────────────────────────────────────────── */
+/* â”€â”€â”€ Stage config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 const STAGES = [
   {
@@ -75,15 +75,15 @@ function getState(chapter: ChapterSummary, key: StageKey): CellState {
   return chapter[key] ? "done" : "not_started";
 }
 
-/* ─── Progress summary ─────────────────────────────────────────────────────── */
+/* â”€â”€â”€ Progress summary â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function ProgressSummary({ chapters }: { chapters: ChapterSummary[] }) {
   const total = chapters.length;
   if (total === 0) return null;
 
   return (
-    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 bg-surface-50 border-b border-surface-200">
-      <span className="text-[10px] font-semibold text-navy-400 uppercase tracking-widest">
+    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 bg-background border-b border-border">
+      <span className="text-[10px] font-semibold text-muted uppercase tracking-widest">
         Progress
       </span>
       {STAGES.map((stage) => {
@@ -95,13 +95,13 @@ function ProgressSummary({ chapters }: { chapters: ChapterSummary[] }) {
             <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: stage.text }}>
               {stage.label}
             </span>
-            <div className="w-16 h-1.5 rounded-full bg-surface-300 overflow-hidden">
+            <div className="w-16 h-1.5 rounded-full bg-background overflow-hidden">
               <div
                 className="h-full rounded-full transition-[width] duration-500"
                 style={{ width: `${pct}%`, backgroundColor: stage.color }}
               />
             </div>
-            <span className="text-[10px] text-navy-400 tabular-nums w-8 text-right">
+            <span className="text-[10px] text-muted tabular-nums w-8 text-right">
               {done}/{total}
             </span>
           </div>
@@ -111,7 +111,7 @@ function ProgressSummary({ chapters }: { chapters: ChapterSummary[] }) {
   );
 }
 
-/* ─── Stage cell ────────────────────────────────────────────────────────────── */
+/* â”€â”€â”€ Stage cell â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function StageCell({ state, color, label }: { state: CellState; color: string; label: string }) {
   if (state === "done") {
@@ -130,12 +130,12 @@ function StageCell({ state, color, label }: { state: CellState; color: string; l
   }
   return (
     <div className="flex items-center justify-center" aria-label={`${label}: Not started`}>
-      <Minus className="w-3.5 h-3.5 text-navy-300 opacity-40" aria-hidden="true" />
+      <Minus className="w-3.5 h-3.5 text-muted opacity-40" aria-hidden="true" />
     </div>
   );
 }
 
-/* ─── Row action icon button ────────────────────────────────────────────────── */
+/* â”€â”€â”€ Row action icon button â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function ActionBtn({
   label,
@@ -178,7 +178,7 @@ function ActionBtn({
   );
 }
 
-/* ─── Main component ────────────────────────────────────────────────────────── */
+/* â”€â”€â”€ Main component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 interface ProjectChaptersTableProps {
   projectId: number;
@@ -228,18 +228,18 @@ export function ProjectChaptersTable({
       {/* Scrollable table */}
       <div className="overflow-x-auto overflow-y-auto max-h-[60vh]">
         <table className="w-full border-collapse min-w-[700px]">
-          <thead className="sticky top-0 z-10 bg-white border-b border-surface-200 shadow-subtle">
+          <thead className="sticky top-0 z-10 bg-white border-b border-border shadow-subtle">
             <tr>
               <th
                 scope="col"
-                className="text-xs font-semibold text-navy-500 uppercase tracking-wide px-4 py-3 text-left"
+                className="text-xs font-semibold text-muted uppercase tracking-wide px-4 py-3 text-left"
                 style={{ width: 48 }}
               >
                 #
               </th>
               <th
                 scope="col"
-                className="text-xs font-semibold text-navy-500 uppercase tracking-wide px-4 py-3 text-left"
+                className="text-xs font-semibold text-muted uppercase tracking-wide px-4 py-3 text-left"
               >
                 Title
               </th>
@@ -270,7 +270,7 @@ export function ProjectChaptersTable({
               ))}
               <th
                 scope="col"
-                className="text-xs font-semibold text-navy-500 uppercase tracking-wide px-4 py-3 text-right"
+                className="text-xs font-semibold text-muted uppercase tracking-wide px-4 py-3 text-right"
                 style={{ width: 120 }}
               >
                 Actions
@@ -283,13 +283,13 @@ export function ProjectChaptersTable({
               <tr
                 key={chapter.id}
                 className={cn(
-                  "border-b border-surface-200 transition-colors duration-100",
+                  "border-b border-border transition-colors duration-100",
                   "[&:hover]:bg-[#F0F4FF]",
                   index % 2 === 0 ? "bg-white" : "bg-[#FAFAFA]",
                 )}
               >
                 <td
-                  className="px-4 py-3.5 text-sm text-navy-400 tabular-nums"
+                  className="px-4 py-3.5 text-sm text-muted tabular-nums"
                   style={{ width: 48 }}
                 >
                   {chapter.number}
@@ -297,7 +297,7 @@ export function ProjectChaptersTable({
                 <td className="px-4 py-3.5 text-sm">
                   <Link
                     to={uiPaths.chapterDetail(projectId, chapter.id)}
-                    className="font-medium text-navy-900 hover:text-gold-700 transition-colors"
+                    className="font-medium text-text hover:text-primary transition-colors"
                   >
                     {chapter.title || `Chapter ${chapter.number}`}
                   </Link>
@@ -358,8 +358,8 @@ export function ProjectChaptersTable({
         </table>
       </div>
 
-      {/* Add chapter — full-width dashed button */}
-      <div className="px-4 py-3 border-t border-surface-200">
+      {/* Add chapter â€” full-width dashed button */}
+      <div className="px-4 py-3 border-t border-border">
         <button
           type="button"
           onClick={onAddChapter}

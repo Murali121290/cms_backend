@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+﻿import { useEffect, useRef, useState, useCallback } from "react";
 import { Link, useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -37,13 +37,13 @@ import type { ChapterCategoryCounts } from "@/types/api";
 import { uiPaths } from "@/utils/appPaths";
 import { cn } from "@/utils/cn";
 
-/* ─── Loading skeleton ─────────────────────────────────────────────────────── */
+/* â”€â”€â”€ Loading skeleton â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function ChapterDetailSkeleton() {
   return (
     <div className="-m-6 flex h-[calc(100vh-3.5rem)] overflow-hidden">
       {/* Sidebar skeleton */}
-      <div className="w-52 flex-shrink-0 bg-white border-r border-surface-200 p-4 space-y-3">
+      <div className="w-52 flex-shrink-0 bg-white border-r border-border p-4 space-y-3">
         <div className="skeleton-shimmer rounded h-5 w-32 mb-4" />
         {Array.from({ length: 6 }).map((_, i) => (
           <div key={i} className="skeleton-shimmer rounded h-8 w-full" />
@@ -65,7 +65,7 @@ function ChapterDetailSkeleton() {
   );
 }
 
-/* ─── Error card ───────────────────────────────────────────────────────────── */
+/* â”€â”€â”€ Error card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function ChapterDetailError({
   message,
@@ -79,19 +79,19 @@ function ChapterDetailError({
   return (
     <div className="flex items-center justify-center min-h-[60vh]">
       <div className="bg-white rounded-lg shadow-card p-8 max-w-md w-full text-center">
-        <div className="w-12 h-12 bg-error-100 rounded-full flex items-center justify-center mx-auto mb-4">
-          <AlertCircle className="w-6 h-6 text-error-600" />
+        <div className="w-12 h-12 bg-danger/10 rounded-full flex items-center justify-center mx-auto mb-4">
+          <AlertCircle className="w-6 h-6 text-danger" />
         </div>
-        <p className="text-sm text-navy-500 mb-6">{message}</p>
+        <p className="text-sm text-muted mb-6">{message}</p>
         <div className="flex items-center justify-center gap-3">
           <button
             type="button"
-            className="text-sm font-medium text-gold-700 hover:text-gold-800 transition-colors"
+            className="text-sm font-medium text-primary hover:text-primary transition-colors"
             onClick={onRetry}
           >
             Retry
           </button>
-          <Link className="text-sm text-navy-500 hover:text-navy-700 font-medium" to={backTo}>
+          <Link className="text-sm text-muted hover:text-text font-medium" to={backTo}>
             Back to project
           </Link>
         </div>
@@ -100,7 +100,7 @@ function ChapterDetailError({
   );
 }
 
-/* ─── Status banner ─────────────────────────────────────────────────────────── */
+/* â”€â”€â”€ Status banner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 const BANNER_STYLES = {
   success: {
@@ -184,7 +184,7 @@ function StatusBanner({
   );
 }
 
-/* ─── Section file view ─────────────────────────────────────────────────────── */
+/* â”€â”€â”€ Section file view â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function SectionFileView({
   section,
@@ -210,7 +210,7 @@ function SectionFileView({
       {/* Back link */}
       <button
         type="button"
-        className="inline-flex items-center gap-1.5 text-sm text-navy-500 hover:text-navy-900 transition-colors w-fit"
+        className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-text transition-colors w-fit"
         onClick={onBack}
       >
         <ArrowLeft className="w-4 h-4" aria-hidden="true" />
@@ -261,13 +261,13 @@ function SectionFileView({
         </button>
       </div>
 
-      {/* File content — no overflow-hidden so portaled tooltips/popovers render freely */}
+      {/* File content â€” no overflow-hidden so portaled tooltips/popovers render freely */}
       <div className="bg-white rounded-lg shadow-card">{children}</div>
     </div>
   );
 }
 
-/* ─── Main page ─────────────────────────────────────────────────────────────── */
+/* â”€â”€â”€ Main page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 export function ChapterDetailPage() {
   const { projectId, chapterId } = useParams();
@@ -297,7 +297,7 @@ export function ChapterDetailPage() {
     }
   }
 
-  /* View mode — persisted in localStorage */
+  /* View mode â€” persisted in localStorage */
   const [viewMode, setViewModeRaw] = useState<ViewMode>(() => {
     try {
       const stored = localStorage.getItem("chapter-files-view");
@@ -355,10 +355,10 @@ export function ChapterDetailPage() {
 
   useDocumentTitle(
     normalizedChapterId === null
-      ? "Chapters — S4 Carlisle CMS"
+      ? "Chapters â€” S4 Carlisle CMS"
       : chapterDetailQuery.data?.chapter.title
-        ? `${chapterDetailQuery.data.chapter.title} — S4 Carlisle CMS`
-        : `Chapter ${normalizedChapterId} — S4 Carlisle CMS`,
+        ? `${chapterDetailQuery.data.chapter.title} â€” S4 Carlisle CMS`
+        : `Chapter ${normalizedChapterId} â€” S4 Carlisle CMS`,
   );
 
   /* Close upload panel after successful upload */
@@ -467,7 +467,7 @@ export function ChapterDetailPage() {
     async (fileId: number, processType: string, mode = "style", options?: Record<string, any>) => {
       const toastId = addToast({
         title: `${processType} in progress`,
-        description: "Processing file…",
+        description: "Processing fileâ€¦",
         variant: "processing",
         duration: 0,
       });
@@ -488,15 +488,15 @@ export function ChapterDetailPage() {
     [addToast, updateToast],
   );
 
-  /* ── Invalid params ─────────────────────────────────────────── */
+  /* â”€â”€ Invalid params â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   if (normalizedProjectId === null || normalizedChapterId === null) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="bg-white rounded-lg shadow-card p-8 text-center">
-          <p className="text-sm text-navy-500 mb-4">
+          <p className="text-sm text-muted mb-4">
             The selected project or chapter identifier is not valid.
           </p>
-          <Link className="text-sm text-gold-700 hover:text-gold-800 font-medium" to={uiPaths.projects}>
+          <Link className="text-sm text-primary hover:text-primary font-medium" to={uiPaths.projects}>
             Back to projects
           </Link>
         </div>
@@ -504,12 +504,12 @@ export function ChapterDetailPage() {
     );
   }
 
-  /* ── Loading ─────────────────────────────────────────────────── */
+  /* â”€â”€ Loading â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   if (chapterDetailQuery.isPending || chapterFilesQuery.isPending) {
     return <ChapterDetailSkeleton />;
   }
 
-  /* ── Error ───────────────────────────────────────────────────── */
+  /* â”€â”€ Error â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   if (chapterDetailQuery.isError || chapterFilesQuery.isError) {
     const error = chapterDetailQuery.error ?? chapterFilesQuery.error;
     return (
@@ -524,14 +524,14 @@ export function ChapterDetailPage() {
     );
   }
 
-  /* ── No data ─────────────────────────────────────────────────── */
+  /* â”€â”€ No data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   if (!chapterDetailQuery.data || !chapterFilesQuery.data) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="bg-white rounded-lg shadow-card p-8 text-center">
-          <p className="text-sm text-navy-500 mb-4">No chapter data was returned.</p>
+          <p className="text-sm text-muted mb-4">No chapter data was returned.</p>
           <Link
-            className="text-sm text-gold-700 hover:text-gold-800 font-medium"
+            className="text-sm text-primary hover:text-primary font-medium"
             to={uiPaths.projectDetail(normalizedProjectId)}
           >
             Back to project
@@ -588,18 +588,18 @@ export function ChapterDetailPage() {
     });
   }
 
-  /* ── Render ───────────────────────────────────────────────────── */
+  /* â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   return (
     <div className="-m-6 flex h-[calc(100vh-3.5rem)] overflow-hidden">
-      {/* ── Left sidebar: section nav ──────────────────────────────── */}
+      {/* â”€â”€ Left sidebar: section nav â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <aside
-        className="w-52 flex-shrink-0 bg-white border-r border-surface-200 flex flex-col overflow-y-auto"
+        className="w-52 flex-shrink-0 bg-white border-r border-border flex flex-col overflow-y-auto"
         aria-label="Chapter file sections"
       >
         {/* Header */}
-        <div className="flex items-center gap-2.5 px-4 py-3.5 border-b border-surface-200">
-          <FolderOpen className="w-5 h-5 text-gold-500 flex-shrink-0" aria-hidden="true" />
-          <span className="text-sm font-semibold text-navy-900">Chapter Files</span>
+        <div className="flex items-center gap-2.5 px-4 py-3.5 border-b border-border">
+          <FolderOpen className="w-5 h-5 text-primary flex-shrink-0" aria-hidden="true" />
+          <span className="text-sm font-semibold text-text">Chapter Files</span>
         </div>
 
         {/* Overview nav item */}
@@ -609,14 +609,14 @@ export function ChapterDetailPage() {
             className={cn(
               "w-full flex items-center gap-2.5 px-4 py-2 text-sm transition-colors duration-100",
               activeSection === null
-                ? "bg-surface-100 border-l-2 border-l-gold-600 text-navy-900 font-medium"
-                : "text-navy-600 hover:bg-surface-50 hover:text-navy-900"
+                ? "bg-background border-l-2 border-l-gold-600 text-text font-medium"
+                : "text-text hover:bg-background hover:text-text"
             )}
             onClick={() => setSection(null)}
           >
-            <FolderOpen className="w-4 h-4 flex-shrink-0 text-navy-400" aria-hidden="true" />
+            <FolderOpen className="w-4 h-4 flex-shrink-0 text-muted" aria-hidden="true" />
             <span className="flex-1 text-left">All Files</span>
-            <span className="text-[10px] tabular-nums text-navy-400 bg-surface-200 px-1.5 py-0.5 rounded-full">
+            <span className="text-[10px] tabular-nums text-muted bg-background px-1.5 py-0.5 rounded-full">
               {Object.values(categoryCounts).reduce((a, b) => a + b, 0)}
             </span>
           </button>
@@ -631,8 +631,8 @@ export function ChapterDetailPage() {
                 className={cn(
                   "w-full flex items-center gap-2.5 px-4 py-2 text-sm transition-colors duration-100",
                   isActive
-                    ? "bg-surface-100 border-l-2 border-l-gold-600 text-navy-900 font-medium"
-                    : "text-navy-600 hover:bg-surface-50 hover:text-navy-900"
+                    ? "bg-background border-l-2 border-l-gold-600 text-text font-medium"
+                    : "text-text hover:bg-background hover:text-text"
                 )}
                 onClick={() => setSection(s.key)}
               >
@@ -642,7 +642,7 @@ export function ChapterDetailPage() {
                   aria-hidden="true"
                 />
                 <span className="flex-1 text-left">{s.label}</span>
-                <span className="text-[10px] tabular-nums text-navy-400 bg-surface-200 px-1.5 py-0.5 rounded-full">
+                <span className="text-[10px] tabular-nums text-muted bg-background px-1.5 py-0.5 rounded-full">
                   {categoryCounts[s.key]}
                 </span>
               </button>
@@ -652,22 +652,22 @@ export function ChapterDetailPage() {
 
       </aside>
 
-      {/* ── Main content ───────────────────────────────────────────── */}
+      {/* â”€â”€ Main content â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         {/* Breadcrumb bar */}
-        <div className="flex items-center gap-1.5 px-5 py-2.5 bg-white border-b border-surface-200 text-xs text-navy-400 shrink-0">
-          <Link to={uiPaths.projects} className="hover:text-navy-700 transition-colors">
+        <div className="flex items-center gap-1.5 px-5 py-2.5 bg-white border-b border-border text-xs text-muted shrink-0">
+          <Link to={uiPaths.projects} className="hover:text-text transition-colors">
             Projects
           </Link>
-          <span aria-hidden="true" className="text-surface-400">›</span>
+          <span aria-hidden="true" className="text-border">â€º</span>
           <Link
             to={uiPaths.projectDetail(project.id)}
-            className="hover:text-navy-700 transition-colors max-w-[10rem] truncate"
+            className="hover:text-text transition-colors max-w-[10rem] truncate"
           >
             {project.title}
           </Link>
-          <span aria-hidden="true" className="text-surface-400">›</span>
-          <span className="font-medium text-navy-700" aria-current="page">
+          <span aria-hidden="true" className="text-border">â€º</span>
+          <span className="font-medium text-text" aria-current="page">
             {chapter.title || `Chapter ${chapter.number}`}
           </span>
         </div>
@@ -714,11 +714,11 @@ export function ChapterDetailPage() {
           )}
 
           {activeSection === null ? (
-            /* ── Overview: card grid ──────────────────────────────── */
+            /* â”€â”€ Overview: card grid â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
             <div className="space-y-4">
               <div className="flex items-center gap-3">
-                <FolderOpen className="w-6 h-6 text-gold-500" aria-hidden="true" />
-                <h1 className="text-lg font-semibold text-navy-900">
+                <FolderOpen className="w-6 h-6 text-primary" aria-hidden="true" />
+                <h1 className="text-lg font-semibold text-text">
                   {chapter.title || `Chapter ${chapter.number}`}
                 </h1>
               </div>
@@ -729,7 +729,7 @@ export function ChapterDetailPage() {
               />
             </div>
           ) : (
-            /* ── Section file view ─────────────────────────────────── */
+            /* â”€â”€ Section file view â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
             <SectionFileView
               section={activeSectionDef!}
               count={categoryCounts[activeSection]}

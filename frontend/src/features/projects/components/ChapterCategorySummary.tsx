@@ -1,5 +1,5 @@
-/**
- * ChapterCategorySummary — re-exported for backward compat.
+﻿/**
+ * ChapterCategorySummary â€” re-exported for backward compat.
  * The new primary exports are CHAPTER_SECTIONS and ChapterSectionCards.
  */
 import type { ComponentType } from "react";
@@ -9,11 +9,11 @@ import { FileText, Palette, Layout, Eye, Code2, FolderOpen } from "lucide-react"
 import type { ChapterCategoryCounts } from "@/types/api";
 import { cn } from "@/utils/cn";
 
-// ─── ChapterSection type (used by ChapterFilesTable) ────────────────────────
+// â”€â”€â”€ ChapterSection type (used by ChapterFilesTable) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export type ChapterSection = "Overview" | keyof ChapterCategoryCounts;
 
-// ─── Section config ──────────────────────────────────────────────────────────
+// â”€â”€â”€ Section config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export interface SectionDef {
   key: keyof ChapterCategoryCounts;
@@ -75,19 +75,19 @@ export const CHAPTER_SECTIONS: SectionDef[] = [
   },
 ];
 
-/** Build a fast lookup: paramKey → SectionDef */
+/** Build a fast lookup: paramKey â†’ SectionDef */
 export const SECTION_BY_PARAM: Record<string, SectionDef> = Object.fromEntries(
   CHAPTER_SECTIONS.map((s) => [s.paramKey, s])
 );
 
-/** Build a fast lookup: key → SectionDef */
+/** Build a fast lookup: key â†’ SectionDef */
 export const SECTION_BY_KEY: Record<keyof ChapterCategoryCounts, SectionDef> =
   Object.fromEntries(CHAPTER_SECTIONS.map((s) => [s.key, s])) as Record<
     keyof ChapterCategoryCounts,
     SectionDef
   >;
 
-// ─── 5-card grid (overview) ──────────────────────────────────────────────────
+// â”€â”€â”€ 5-card grid (overview) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 interface ChapterSectionCardsProps {
   counts: ChapterCategoryCounts;
@@ -100,8 +100,8 @@ export function ChapterSectionCards({ counts, onSelect }: ChapterSectionCardsPro
   return (
     <div className="space-y-6">
       {/* Total summary */}
-      <p className="text-sm text-navy-500">
-        <span className="font-semibold text-navy-900">{total}</span> files across all categories
+      <p className="text-sm text-muted">
+        <span className="font-semibold text-text">{total}</span> files across all categories
       </p>
 
       {/* Card grid */}
@@ -114,9 +114,9 @@ export function ChapterSectionCards({ counts, onSelect }: ChapterSectionCardsPro
               type="button"
               onClick={() => onSelect(s.key)}
               className={cn(
-                "group bg-white rounded-lg border border-surface-200 p-4",
+                "group bg-white rounded-lg border border-border p-4",
                 "flex flex-col items-start gap-3 text-left",
-                "hover:shadow-hover hover:border-gold-300 transition-all duration-150",
+                "hover:shadow-hover hover:border-primary transition-all duration-150",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold-600"
               )}
             >
@@ -127,8 +127,8 @@ export function ChapterSectionCards({ counts, onSelect }: ChapterSectionCardsPro
                 <s.Icon className="w-5 h-5" style={{ color: s.color }} aria-hidden="true" />
               </div>
               <div>
-                <h3 className="text-sm font-semibold text-navy-900 leading-snug">{s.label}</h3>
-                <p className="text-xs text-navy-400 mt-0.5 tabular-nums">
+                <h3 className="text-sm font-semibold text-text leading-snug">{s.label}</h3>
+                <p className="text-xs text-muted mt-0.5 tabular-nums">
                   {count} {count === 1 ? "file" : "files"}
                 </p>
               </div>
@@ -140,7 +140,7 @@ export function ChapterSectionCards({ counts, onSelect }: ChapterSectionCardsPro
   );
 }
 
-// ─── Backward-compat stub (no longer rendered) ───────────────────────────────
+// â”€â”€â”€ Backward-compat stub (no longer rendered) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /** @deprecated Use ChapterSectionCards instead */
 export function ChapterCategorySummary(_props: {

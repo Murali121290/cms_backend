@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Bell, CheckCheck } from "lucide-react";
 
@@ -37,7 +37,7 @@ export function NotificationBell() {
     return `Notifications (${notifications.length})`;
   }, [notifications.length, notificationsQuery.isError, notificationsQuery.isPending]);
 
-  // ── Outside click ──────────────────────────────────────────────────────────
+  // â”€â”€ Outside click â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     if (!isOpen) return;
 
@@ -51,7 +51,7 @@ export function NotificationBell() {
     return () => document.removeEventListener("mousedown", handleMouseDown);
   }, [isOpen]);
 
-  // ── Escape key ─────────────────────────────────────────────────────────────
+  // â”€â”€ Escape key â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     if (!isOpen) return;
 
@@ -79,14 +79,14 @@ export function NotificationBell() {
         aria-expanded={isOpen}
         aria-haspopup="listbox"
         aria-label={buttonLabel}
-        className="relative w-9 h-9 rounded-full flex items-center justify-center text-navy-600 hover:bg-surface-200 transition-colors duration-150"
+        className="relative w-9 h-9 rounded-full flex items-center justify-center text-text hover:bg-background transition-colors duration-150"
         onClick={() => setIsOpen((prev) => !prev)}
       >
         <Bell size={18} strokeWidth={1.75} aria-hidden="true" />
         {hasUnread && (
           <span
             aria-label="Unread notifications"
-            className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-error-600"
+            className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-danger"
           />
         )}
       </button>
@@ -97,18 +97,18 @@ export function NotificationBell() {
           role="listbox"
           aria-label="Notifications"
           style={{ zIndex: 9999 }}
-          className="absolute right-0 top-full mt-2 w-80 rounded-md bg-white shadow-modal border border-surface-300 flex flex-col"
+          className="absolute right-0 top-full mt-2 w-80 rounded-md bg-white shadow-modal border border-border flex flex-col"
         >
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-2.5 border-b border-surface-200 shrink-0">
-            <span className="text-xs font-semibold text-navy-500 uppercase tracking-wide">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-border shrink-0">
+            <span className="text-xs font-semibold text-muted uppercase tracking-wide">
               Notifications
             </span>
             {notifications.length > 0 && hasUnread && (
               <button
                 type="button"
                 onClick={markAllRead}
-                className="flex items-center gap-1 text-xs text-navy-400 hover:text-navy-700 transition-colors"
+                className="flex items-center gap-1 text-xs text-muted hover:text-text transition-colors"
                 aria-label="Mark all as read"
               >
                 <CheckCheck size={13} aria-hidden="true" />
@@ -119,11 +119,11 @@ export function NotificationBell() {
 
           {/* Body */}
           {notificationsQuery.isPending ? (
-            <div className="px-4 py-6 text-center text-sm text-navy-400">
-              Loading…
+            <div className="px-4 py-6 text-center text-sm text-muted">
+              Loadingâ€¦
             </div>
           ) : notificationsQuery.isError ? (
-            <div className="px-4 py-6 text-center text-sm text-error-600">
+            <div className="px-4 py-6 text-center text-sm text-danger">
               Could not load notifications.
             </div>
           ) : notifications.length === 0 ? (
@@ -150,7 +150,7 @@ export function NotificationBell() {
                     key={notification.id}
                     role="option"
                     aria-selected={isRead}
-                    className="px-4 py-3 hover:bg-surface-50 transition-colors"
+                    className="px-4 py-3 hover:bg-background transition-colors"
                     onClick={() => markRead(notification.id)}
                   >
                     <div className="flex items-start justify-between gap-2">
@@ -158,16 +158,16 @@ export function NotificationBell() {
                         <p
                           className={
                             isRead
-                              ? "text-sm text-navy-400"
-                              : "text-sm font-medium text-navy-900"
+                              ? "text-sm text-muted"
+                              : "text-sm font-medium text-text"
                           }
                         >
                           {notification.title}
                         </p>
-                        <p className="text-xs text-navy-500 mt-0.5 leading-relaxed">
+                        <p className="text-xs text-muted mt-0.5 leading-relaxed">
                           {notification.description}
                         </p>
-                        <p className="text-xs text-navy-300 mt-1">
+                        <p className="text-xs text-muted mt-1">
                           {notification.relative_time}
                         </p>
                       </div>
@@ -179,7 +179,7 @@ export function NotificationBell() {
                             markRead(notification.id);
                             setIsOpen(false);
                           }}
-                          className="shrink-0 text-xs text-gold-700 hover:text-gold-800 font-medium transition-colors mt-0.5"
+                          className="shrink-0 text-xs text-primary hover:text-primary font-medium transition-colors mt-0.5"
                         >
                           View
                         </Link>

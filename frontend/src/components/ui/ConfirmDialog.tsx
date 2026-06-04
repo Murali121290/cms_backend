@@ -23,8 +23,8 @@ const variantConfig: Record<
 > = {
   danger: {
     icon: AlertCircle,
-    iconClass: "text-error-600",
-    bgClass: "bg-error-100",
+    iconClass: "text-danger",
+    bgClass: "bg-danger/10",
   },
   warning: {
     icon: AlertTriangle,
@@ -75,10 +75,10 @@ export function ConfirmDialog({
         </div>
 
         <div className="flex-1 min-w-0">
-          <h3 className="font-serif text-base font-semibold text-navy-900 leading-snug">
+          <h3 className="text-base font-semibold text-text leading-snug">
             {title}
           </h3>
-          <p className="mt-1.5 text-sm text-navy-400 leading-relaxed">
+          <p className="mt-1.5 text-sm text-muted leading-relaxed">
             {description}
           </p>
         </div>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { FolderPlus, FolderOpen, ExternalLink, Trash2 } from "lucide-react";
 
@@ -16,7 +16,7 @@ import { uiPaths } from "@/utils/appPaths";
 import { useSessionStore } from "@/stores/sessionStore";
 
 export function ProjectsPage() {
-  useDocumentTitle("Projects — S4 Carlisle CMS");
+  useDocumentTitle("Projects â€” S4 Carlisle CMS");
   const navigate = useNavigate();
   const projectsQuery = useProjectsQuery(0, 100);
   const queryClient = useQueryClient();
@@ -59,7 +59,7 @@ export function ProjectsPage() {
         primaryAction={
           <Link
             to={uiPaths.projectCreate}
-            className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md bg-gold-600 text-white hover:bg-gold-700 active:bg-gold-800 border border-gold-600 shadow-subtle transition-all duration-150"
+            className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md bg-primary text-white hover:bg-primary active:bg-primary border border-primary shadow-subtle transition-all duration-150"
           >
             <FolderPlus className="w-4 h-4" aria-hidden="true" />
             New Project
@@ -72,13 +72,13 @@ export function ProjectsPage() {
         <SearchInput
           value={searchQuery}
           onChange={setSearchQuery}
-          placeholder="Search by title or code…"
+          placeholder="Search by title or codeâ€¦"
           className="w-64"
         />
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="border border-surface-400 rounded-md px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-gold-600 focus:outline-none text-navy-800"
+          className="border border-border rounded-md px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-gold-600 focus:outline-none text-text"
         >
           <option value="">All statuses</option>
           {uniqueStatuses.map((s) => (
@@ -94,10 +94,10 @@ export function ProjectsPage() {
         {projectsQuery.isPending ? (
           <SkeletonTable rows={8} cols={7} />
         ) : projectsQuery.isError ? (
-          <div className="p-8 text-center text-sm text-navy-500">
+          <div className="p-8 text-center text-sm text-muted">
             Failed to load projects.{" "}
             <button
-              className="text-gold-700 underline hover:text-gold-800"
+              className="text-primary underline hover:text-primary"
               onClick={() => void projectsQuery.refetch()}
               type="button"
             >
@@ -112,7 +112,7 @@ export function ProjectsPage() {
             action={
               <Link
                 to={uiPaths.projectCreate}
-                className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md bg-gold-600 text-white hover:bg-gold-700 border border-gold-600 shadow-subtle transition-all duration-150"
+                className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md bg-primary text-white hover:bg-primary border border-primary shadow-subtle transition-all duration-150"
               >
                 <FolderPlus className="w-4 h-4" aria-hidden="true" />
                 New Project
@@ -121,27 +121,27 @@ export function ProjectsPage() {
           />
         ) : (
           <table className="w-full border-collapse">
-            <thead className="bg-surface-100 border-b border-surface-300">
+            <thead className="bg-background border-b border-border">
               <tr>
-                <th className="text-xs font-semibold text-navy-500 uppercase tracking-wide px-4 py-3 text-left">
+                <th className="text-xs font-semibold text-muted uppercase tracking-wide px-4 py-3 text-left">
                   Project Title / Code
                 </th>
-                <th className="text-xs font-semibold text-navy-500 uppercase tracking-wide px-4 py-3 text-left">
+                <th className="text-xs font-semibold text-muted uppercase tracking-wide px-4 py-3 text-left">
                   Publisher
                 </th>
-                <th className="text-xs font-semibold text-navy-500 uppercase tracking-wide px-4 py-3 text-left">
+                <th className="text-xs font-semibold text-muted uppercase tracking-wide px-4 py-3 text-left">
                   XML Standard
                 </th>
-                <th className="text-xs font-semibold text-navy-500 uppercase tracking-wide px-4 py-3 text-left">
+                <th className="text-xs font-semibold text-muted uppercase tracking-wide px-4 py-3 text-left">
                   Chapters
                 </th>
-                <th className="text-xs font-semibold text-navy-500 uppercase tracking-wide px-4 py-3 text-left">
+                <th className="text-xs font-semibold text-muted uppercase tracking-wide px-4 py-3 text-left">
                   Files
                 </th>
-                <th className="text-xs font-semibold text-navy-500 uppercase tracking-wide px-4 py-3 text-left">
+                <th className="text-xs font-semibold text-muted uppercase tracking-wide px-4 py-3 text-left">
                   Status
                 </th>
-                <th className="text-xs font-semibold text-navy-500 uppercase tracking-wide px-4 py-3 text-left">
+                <th className="text-xs font-semibold text-muted uppercase tracking-wide px-4 py-3 text-left">
                   Actions
                 </th>
               </tr>
@@ -150,12 +150,12 @@ export function ProjectsPage() {
               {filteredProjects.map((project) => (
                 <tr
                   key={project.id}
-                  className="group border-b border-surface-200 hover:bg-surface-50 transition-colors duration-120 cursor-pointer"
+                  className="group border-b border-border hover:bg-background transition-colors duration-120 cursor-pointer"
                   onClick={() => navigate(uiPaths.projectDetail(project.id))}
                 >
                   {/* Title / Code */}
                   <td className="px-4 py-3.5 text-sm">
-                    <div className="text-[14px] font-semibold text-navy-900 group-hover:text-gold-600 transition-colors duration-120">
+                    <div className="text-[14px] font-semibold text-text group-hover:text-primary transition-colors duration-120">
                       {project.title}
                     </div>
                     <div style={{ color: '#6B6560' }} className="text-[12px] mt-0.5 font-mono">
@@ -164,22 +164,22 @@ export function ProjectsPage() {
                   </td>
 
                   {/* Publisher */}
-                  <td className="px-4 py-3.5 text-sm text-navy-700">
-                    {project.client_name ?? "—"}
+                  <td className="px-4 py-3.5 text-sm text-text">
+                    {project.client_name ?? "â€”"}
                   </td>
 
                   {/* XML Standard */}
-                  <td className="px-4 py-3.5 text-sm text-navy-700">
+                  <td className="px-4 py-3.5 text-sm text-text">
                     {project.xml_standard}
                   </td>
 
                   {/* Chapters */}
-                  <td className="px-4 py-3.5 text-sm text-navy-700 tabular-nums">
+                  <td className="px-4 py-3.5 text-sm text-text tabular-nums">
                     {project.chapter_count}
                   </td>
 
                   {/* Files */}
-                  <td className="px-4 py-3.5 text-sm text-navy-700 tabular-nums">
+                  <td className="px-4 py-3.5 text-sm text-text tabular-nums">
                     {project.file_count}
                   </td>
 
@@ -188,7 +188,7 @@ export function ProjectsPage() {
                     <StatusBadge status={project.status} size="sm" />
                   </td>
 
-                  {/* Actions — stopPropagation so row onClick doesn't fire */}
+                  {/* Actions â€” stopPropagation so row onClick doesn't fire */}
                   <td
                     className="px-4 py-3.5 text-sm"
                     onClick={(e) => e.stopPropagation()}
@@ -197,7 +197,7 @@ export function ProjectsPage() {
                       <button
                         type="button"
                         title="View project"
-                        className="w-7 h-7 rounded flex items-center justify-center text-navy-500 hover:bg-surface-200 hover:text-navy-900 transition-colors"
+                        className="w-7 h-7 rounded flex items-center justify-center text-muted hover:bg-background hover:text-text transition-colors"
                         onClick={() => navigate(uiPaths.projectDetail(project.id))}
                       >
                         <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
@@ -207,7 +207,7 @@ export function ProjectsPage() {
                         <button
                           type="button"
                           title="Delete project"
-                          className="w-7 h-7 rounded flex items-center justify-center text-navy-500 hover:bg-red-50 hover:text-red-600 transition-colors"
+                          className="w-7 h-7 rounded flex items-center justify-center text-muted hover:bg-red-50 hover:text-red-600 transition-colors"
                           onClick={(e) => handleDelete(e, project.id, project.title)}
                           disabled={deleteMutation.isPending}
                         >

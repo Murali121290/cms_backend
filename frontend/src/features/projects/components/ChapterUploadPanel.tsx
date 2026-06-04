@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+﻿import { useEffect, useRef, useState } from "react";
 import { Upload, CheckCircle2, AlertCircle } from "lucide-react";
 
 import type { FileUploadResponse } from "@/types/api";
@@ -83,15 +83,15 @@ export function ChapterUploadPanel({
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-base font-semibold text-navy-900">Upload files</h2>
-          <p className="text-sm text-navy-400 mt-0.5">
+          <h2 className="text-base font-semibold text-text">Upload files</h2>
+          <p className="text-sm text-muted mt-0.5">
             Uploading to:{" "}
-            <span className="font-medium text-navy-700">{category}</span>
+            <span className="font-medium text-text">{category}</span>
           </p>
         </div>
         {onClose && (
           <button
-            className="text-navy-400 hover:text-navy-700 transition-colors text-sm"
+            className="text-muted hover:text-text transition-colors text-sm"
             disabled={isPending}
             type="button"
             onClick={onClose}
@@ -103,12 +103,12 @@ export function ChapterUploadPanel({
 
       {/* Category selector */}
       <div className="flex items-center gap-3">
-        <label htmlFor="upload-category" className="text-xs font-medium text-navy-500 uppercase tracking-wide shrink-0">
+        <label htmlFor="upload-category" className="text-xs font-medium text-muted uppercase tracking-wide shrink-0">
           Category
         </label>
         <select
           id="upload-category"
-          className="border border-surface-400 rounded-md px-3 py-1.5 text-sm bg-white text-navy-800 focus:outline-none focus:ring-2 focus:ring-gold-600"
+          className="border border-border rounded-md px-3 py-1.5 text-sm bg-white text-text focus:outline-none focus:ring-2 focus:ring-gold-600"
           disabled={isPending}
           value={category}
           onChange={(e) => setCategory(e.target.value)}
@@ -124,7 +124,7 @@ export function ChapterUploadPanel({
       {/* Drop zone */}
       <form onSubmit={handleSubmit}>
         <div
-          className="bg-surface-100 border-2 border-dashed border-surface-400 rounded-lg p-6 flex flex-col items-center gap-3 text-center cursor-pointer hover:border-gold-400 hover:bg-surface-50 transition-colors"
+          className="bg-background border-2 border-dashed border-border rounded-lg p-6 flex flex-col items-center gap-3 text-center cursor-pointer hover:border-primary hover:bg-background transition-colors"
           onDrop={handleDrop}
           onDragOver={handleDragOver}
           onClick={() => fileInputRef.current?.click()}
@@ -133,16 +133,16 @@ export function ChapterUploadPanel({
           onKeyDown={(e) => e.key === "Enter" && fileInputRef.current?.click()}
           aria-label="Drop files here or click to upload"
         >
-          <Upload className="w-8 h-8 text-navy-400" aria-hidden="true" />
+          <Upload className="w-8 h-8 text-muted" aria-hidden="true" />
           <div>
-            <p className="text-sm font-medium text-navy-700">
+            <p className="text-sm font-medium text-text">
               {selectedFiles.length > 0
                 ? selectedFiles.length === 1
                   ? selectedFiles[0].name
                   : `${selectedFiles.length} files selected`
                 : "Drop files here or click to upload"}
             </p>
-            <p className="text-xs text-navy-400 mt-0.5">
+            <p className="text-xs text-muted mt-0.5">
               Uploading to: <span className="font-medium">{category}</span>
             </p>
           </div>
@@ -158,15 +158,15 @@ export function ChapterUploadPanel({
 
         <div className="flex items-center gap-2 mt-3">
           <button
-            className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md bg-gold-600 text-white hover:bg-gold-700 disabled:opacity-50 disabled:cursor-not-allowed border border-gold-600 shadow-subtle transition-all duration-150"
+            className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md bg-primary text-white hover:bg-primary disabled:opacity-50 disabled:cursor-not-allowed border border-primary shadow-subtle transition-all duration-150"
             disabled={!canSubmit}
             type="submit"
           >
-            {isPending ? "Uploading…" : "Upload"}
+            {isPending ? "Uploadingâ€¦" : "Upload"}
           </button>
           {(result || statusMessage || errorMessage) && (
             <button
-              className="inline-flex items-center h-9 px-4 text-sm font-medium rounded-md border border-surface-400 text-navy-700 hover:bg-surface-100 transition-colors"
+              className="inline-flex items-center h-9 px-4 text-sm font-medium rounded-md border border-border text-text hover:bg-background transition-colors"
               disabled={isPending}
               type="button"
               onClick={onClearResult}
@@ -179,15 +179,15 @@ export function ChapterUploadPanel({
 
       {/* Status messages */}
       {statusMessage && !errorMessage && (
-        <div className="flex items-start gap-2 text-sm rounded-md bg-surface-100 border border-surface-300 px-3 py-2.5">
+        <div className="flex items-start gap-2 text-sm rounded-md bg-background border border-border px-3 py-2.5">
           <CheckCircle2 className="w-4 h-4 text-success-600 mt-0.5 shrink-0" aria-hidden="true" />
-          <span className="text-navy-700">{statusMessage}</span>
+          <span className="text-text">{statusMessage}</span>
         </div>
       )}
       {errorMessage && (
-        <div className="flex items-start gap-2 text-sm rounded-md bg-error-50 border border-error-200 px-3 py-2.5">
-          <AlertCircle className="w-4 h-4 text-error-600 mt-0.5 shrink-0" aria-hidden="true" />
-          <span className="text-error-700">{errorMessage}</span>
+        <div className="flex items-start gap-2 text-sm rounded-md bg-danger/5 border border-danger/30 px-3 py-2.5">
+          <AlertCircle className="w-4 h-4 text-danger mt-0.5 shrink-0" aria-hidden="true" />
+          <span className="text-danger">{errorMessage}</span>
         </div>
       )}
 
@@ -195,21 +195,21 @@ export function ChapterUploadPanel({
       {result && (
         <div className="space-y-3 text-sm">
           <div>
-            <p className="font-medium text-navy-700 mb-1">
+            <p className="font-medium text-text mb-1">
               Uploaded ({result.uploaded.length})
             </p>
             {result.uploaded.length === 0 ? (
-              <p className="text-navy-400 text-xs">No files were uploaded.</p>
+              <p className="text-muted text-xs">No files were uploaded.</p>
             ) : (
               <ul className="space-y-1">
                 {result.uploaded.map((item) => (
                   <li
                     key={`${item.file.id}-${item.file.version}`}
-                    className="flex items-center gap-2 text-xs text-navy-700"
+                    className="flex items-center gap-2 text-xs text-text"
                   >
                     <CheckCircle2 className="w-3.5 h-3.5 text-success-600 shrink-0" aria-hidden="true" />
                     <span className="font-medium">{item.file.filename}</span>
-                    <span className="text-navy-400">
+                    <span className="text-muted">
                       {item.operation === "created" ? "Created" : `Replaced (v${item.archived_version_num ?? "?"})`}
                     </span>
                   </li>
@@ -219,16 +219,16 @@ export function ChapterUploadPanel({
           </div>
           {result.skipped.length > 0 && (
             <div>
-              <p className="font-medium text-navy-700 mb-1">
+              <p className="font-medium text-text mb-1">
                 Skipped ({result.skipped.length})
               </p>
               <ul className="space-y-1">
                 {result.skipped.map((item) => (
                   <li
                     key={`${item.code}-${item.filename}`}
-                    className="text-xs text-navy-500"
+                    className="text-xs text-muted"
                   >
-                    <span className="font-medium">{item.filename}</span> — {item.message}
+                    <span className="font-medium">{item.filename}</span> â€” {item.message}
                   </li>
                 ))}
               </ul>

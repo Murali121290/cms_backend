@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { BookOpen } from "lucide-react";
 
@@ -32,18 +32,18 @@ export function ProjectDetailPage() {
 
   useDocumentTitle(
     normalizedProjectId === null
-      ? "Projects — S4 Carlisle CMS"
+      ? "Projects â€” S4 Carlisle CMS"
       : projectDetailQuery.data?.project.title
-        ? `${projectDetailQuery.data.project.title} — S4 Carlisle CMS`
-        : `Project ${normalizedProjectId} — S4 Carlisle CMS`,
+        ? `${projectDetailQuery.data.project.title} â€” S4 Carlisle CMS`
+        : `Project ${normalizedProjectId} â€” S4 Carlisle CMS`,
   );
 
   if (normalizedProjectId === null) {
     return (
       <main className="page-enter page px-6 py-6 max-w-7xl mx-auto">
         <div className="bg-white rounded-lg shadow-card p-8 text-center">
-          <p className="text-sm text-navy-500 mb-4">The selected project identifier is not valid.</p>
-          <Link className="text-sm text-gold-700 hover:text-gold-800 font-medium" to={uiPaths.projects}>
+          <p className="text-sm text-muted mb-4">The selected project identifier is not valid.</p>
+          <Link className="text-sm text-primary hover:text-primary font-medium" to={uiPaths.projects}>
             Back to projects
           </Link>
         </div>
@@ -70,12 +70,12 @@ export function ProjectDetailPage() {
     return (
       <main className="page-enter page px-6 py-6 max-w-7xl mx-auto">
         <div className="bg-white rounded-lg shadow-card p-8 text-center">
-          <p className="text-sm text-navy-500 mb-4">
+          <p className="text-sm text-muted mb-4">
             {getApiErrorMessage(error, "The project detail could not be loaded.")}
           </p>
           <div className="flex items-center justify-center gap-3">
             <button
-              className="text-sm text-gold-700 hover:text-gold-800 font-medium"
+              className="text-sm text-primary hover:text-primary font-medium"
               onClick={() => {
                 void projectDetailQuery.refetch();
                 void projectChaptersQuery.refetch();
@@ -84,7 +84,7 @@ export function ProjectDetailPage() {
             >
               Retry
             </button>
-            <Link className="text-sm text-navy-600 hover:text-navy-900 font-medium" to={uiPaths.projects}>
+            <Link className="text-sm text-text hover:text-text font-medium" to={uiPaths.projects}>
               Back to projects
             </Link>
           </div>
@@ -97,8 +97,8 @@ export function ProjectDetailPage() {
     return (
       <main className="page-enter page px-6 py-6 max-w-7xl mx-auto">
         <div className="bg-white rounded-lg shadow-card p-8 text-center">
-          <p className="text-sm text-navy-500 mb-4">No project data was returned.</p>
-          <Link className="text-sm text-gold-700 hover:text-gold-800 font-medium" to={uiPaths.projects}>
+          <p className="text-sm text-muted mb-4">No project data was returned.</p>
+          <Link className="text-sm text-primary hover:text-primary font-medium" to={uiPaths.projects}>
             Back to projects
           </Link>
         </div>
@@ -117,7 +117,7 @@ export function ProjectDetailPage() {
 
   const overviewFields: { label: string; value: string | number }[] = [
     { label: "Code", value: project.code },
-    { label: "Publisher", value: project.client_name ?? "—" },
+    { label: "Publisher", value: project.client_name ?? "â€”" },
     { label: "XML Standard", value: project.xml_standard },
     { label: "Status", value: project.status },
     { label: "Chapters", value: project.chapter_count },
@@ -131,12 +131,12 @@ export function ProjectDetailPage() {
           <span className="flex items-center gap-1.5">
             <Link
               to={uiPaths.projects}
-              className="hover:text-navy-700 transition-colors"
+              className="hover:text-text transition-colors"
             >
               Projects
             </Link>
-            <span aria-hidden="true">›</span>
-            <span className="text-navy-700 truncate max-w-xs">{project.title}</span>
+            <span aria-hidden="true">â€º</span>
+            <span className="text-text truncate max-w-xs">{project.title}</span>
           </span>
         }
         title={project.title}
@@ -146,7 +146,7 @@ export function ProjectDetailPage() {
 
       <div className="flex items-center justify-end gap-2 -mt-2 mb-3">
         <Link to={uiPaths.projectStylesheets(normalizedProjectId)}>
-          <button className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md border border-navy-200 bg-white text-navy-700 hover:bg-navy-50 shadow-subtle transition-all duration-150">
+          <button className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md border border-border bg-white text-text hover:bg-sidebar/3 shadow-subtle transition-all duration-150">
             <BookOpen className="w-4 h-4" />
             Stylesheets
           </button>
@@ -160,7 +160,7 @@ export function ProjectDetailPage() {
       />
 
       {/* Tab bar */}
-      <div className="inline-flex border-b border-surface-300 mb-6 mt-6 w-full">
+      <div className="inline-flex border-b border-border mb-6 mt-6 w-full">
         {tabs.map((tab) => (
           <button
             key={tab.id}
@@ -168,8 +168,8 @@ export function ProjectDetailPage() {
             onClick={() => setActiveTab(tab.id)}
             className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
               activeTab === tab.id
-                ? "border-gold-600 text-gold-700"
-                : "border-transparent text-navy-500 hover:text-navy-700"
+                ? "border-primary text-primary"
+                : "border-transparent text-muted hover:text-text"
             }`}
           >
             {tab.label}
@@ -188,7 +188,7 @@ export function ProjectDetailPage() {
                 <button
                   type="button"
                   onClick={() => { setEditingChapter(null); setIsDrawerOpen(true); }}
-                  className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md bg-gold-600 text-white hover:bg-gold-700 border border-gold-600 shadow-subtle transition-all duration-150"
+                  className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md bg-primary text-white hover:bg-primary border border-primary shadow-subtle transition-all duration-150"
                 >
                   Add first chapter
                 </button>
@@ -225,10 +225,10 @@ export function ProjectDetailPage() {
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
             {overviewFields.map((field) => (
               <div key={field.label} className="space-y-1">
-                <p className="text-xs uppercase tracking-wide text-navy-500 font-medium">
+                <p className="text-xs uppercase tracking-wide text-muted font-medium">
                   {field.label}
                 </p>
-                <p className="text-sm font-medium text-navy-900 mt-1">{field.value}</p>
+                <p className="text-sm font-medium text-text mt-1">{field.value}</p>
               </div>
             ))}
           </div>
