@@ -56,16 +56,14 @@ async def review_structuring(
         )
 
         if page_state["status"] == "error":
-            return templates.TemplateResponse(
-                "error.html",
+            return templates.TemplateResponse(request, "error.html",
                 {
                     "request": request,
                     "error_message": page_state["error_message"],
                 },
             )
 
-        return templates.TemplateResponse(
-            "structuring_review.html",
+        return templates.TemplateResponse(request, "structuring_review.html",
             {
                 "request": request,
                 "file": page_state["file"],
@@ -78,8 +76,7 @@ async def review_structuring(
         raise
     except Exception as exc:
         logger.error(f"Error loading review interface: {exc}", exc_info=True)
-        return templates.TemplateResponse(
-            "error.html",
+        return templates.TemplateResponse(request, "error.html",
             {
                 "request": request,
                 "error_message": f"Error loading document structure: {str(exc)}",
@@ -136,3 +133,75 @@ async def export_structuring(
         filename=export_payload["filename"],
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# XHTML Review Panel Endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@router.get("/files/{file_id}/structuring/xhtml")
+async def get_xhtml_content_endpoint(
+    file_id: int,
+    db: Session = Depends(database.get_db),
+    user: User = Depends(get_current_user_from_cookie),
+):
+    """
+    Retrieve XHTML content for the review panel.
+    Returns {"content": str, "exists": bool, "mtime": float, "xhtml_path": str}
+    """
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    payload = structuring_review_service.get_xhtml_content(db, file_id=file_id)
+    return JSONResponse(payload)
+
+
+@router.post("/files/{file_id}/structuring/xhtml/generate")
+async def generate_xhtml_endpoint(
+    file_id: int,
+    db: Session = Depends(database.get_db),
+    user: User = Depends(get_current_user_from_cookie),
+):
+    """
+    Generate XHTML from the processed DOCX.
+    Runs as a background task.
+    """
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    result = structuring_review_service.generate_xhtml(db, file_id=file_id, logger=logger)
+    return JSONResponse(result)
+
+
+@router.post("/files/{file_id}/structuring/xhtml")
+async def save_xhtml_endpoint(
+    file_id: int,
+    request: Request,
+    db: Session = Depends(database.get_db),
+    user: User = Depends(get_current_user_from_cookie),
+):
+    """
+    Save edited XHTML and convert back to DOCX.
+    The DOCX update triggers Collabora auto-reload via Version hash change.
+    """
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    body = await request.json()
+    html_content = body.get("html_content", "")
+
+    try:
+        result = structuring_review_service.save_xhtml_and_convert(
+            db,
+            file_id=file_id,
+            html_content=html_content,
+            username=user.username,
+            logger=logger,
+        )
+        return JSONResponse(result)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Unexpected error saving XHTML: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))

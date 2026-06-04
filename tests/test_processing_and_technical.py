@@ -53,29 +53,29 @@ def test_processing_start_creates_backup_version_locks_file_and_schedules_backgr
     assert scheduled[0]["kwargs"]["user_username"] == admin_user.username
 
 
-def test_structuring_status_returns_processing_until_processed_file_row_exists(
+def test_structuring_status_returns_processing_until_file_unlocked(
     auth_cookie_client,
     admin_user,
     file_record,
-    file_record_factory,
+    db_session,
 ):
     client = auth_cookie_client(admin_user)
+
+    file_record.is_checked_out = True
+    file_record.checked_out_by_id = admin_user.id
+    db_session.commit()
 
     processing_response = client.get(f"/api/v1/processing/files/{file_record.id}/structuring_status")
     assert processing_response.status_code == 200
     assert processing_response.json() == {"status": "processing"}
 
-    _original, processed = file_record_factory(
-        project=file_record.project,
-        chapter=file_record.chapter,
-        filename=file_record.filename,
-        category=file_record.category,
-        create_processed=True,
-    )
+    file_record.is_checked_out = False
+    file_record.checked_out_by_id = None
+    db_session.commit()
 
     completed_response = client.get(f"/api/v1/processing/files/{file_record.id}/structuring_status")
     assert completed_response.status_code == 200
-    assert completed_response.json() == {"status": "completed", "new_file_id": processed.id}
+    assert completed_response.json() == {"status": "completed", "new_file_id": file_record.id}
 
 
 def test_background_processing_success_registers_outputs_and_unlocks_file(
@@ -113,6 +113,10 @@ def test_background_processing_success_registers_outputs_and_unlocks_file(
     assert file_record.checked_out_by_id is None
     assert file_record.checked_out_at is None
 
+    # In-place overwriting: original file should match the output path bytes
+    assert Path(file_record.path).read_bytes() == b"processed-docx-bytes"
+
+    # No new file record is created
     generated = (
         db_session.query(models.File)
         .filter(
@@ -120,12 +124,9 @@ def test_background_processing_success_registers_outputs_and_unlocks_file(
             models.File.chapter_id == file_record.chapter_id,
             models.File.filename == output_path.name,
         )
-        .order_by(models.File.id.desc())
         .first()
     )
-    assert generated is not None
-    assert generated.path == str(output_path)
-    assert generated.category == file_record.category
+    assert generated is None
 
 
 def test_background_processing_failure_unlocks_file_without_generating_rows(
@@ -180,11 +181,10 @@ def test_technical_scan_requires_permission_and_returns_legacy_dict_shape(
     editor_user,
     file_record,
 ):
-    class FakeTechnicalEditor:
-        def scan(self, _file_path):
-            return {"xray": {"found": ["Xray"], "count": 1}}
+    def _fake_scan_errors(db, file_id, logger, technical_editor_cls):
+        return {"xray": {"found": ["Xray"], "count": 1}}
 
-    monkeypatch.setattr("app.routers.processing.TechnicalEditor", FakeTechnicalEditor)
+    monkeypatch.setattr("app.routers.processing.technical_editor_service.scan_errors", _fake_scan_errors)
 
     forbidden_client = auth_cookie_client(viewer_user)
     forbidden_response = forbidden_client.get(f"/api/v1/processing/files/{file_record.id}/technical/scan")
@@ -196,7 +196,7 @@ def test_technical_scan_requires_permission_and_returns_legacy_dict_shape(
     assert allowed_response.json() == {"xray": {"found": ["Xray"], "count": 1}}
 
 
-def test_technical_apply_creates_techedited_derivative_and_db_row(
+def test_technical_apply_updates_file_in_place_and_archives_previous_version(
     monkeypatch,
     auth_cookie_client,
     editor_user,
@@ -208,7 +208,8 @@ def test_technical_apply_creates_techedited_derivative_and_db_row(
         assert author == editor_user.username
         Path(output_path).write_bytes(Path(input_path).read_bytes())
 
-    monkeypatch.setattr("app.routers.processing.TechnicalEditor.process", _fake_process)
+    monkeypatch.setattr("app.processing.legacy.highlighter.technical_editor.TechnicalEditor.process", _fake_process)
+    Path(file_record.path).write_bytes(b"some-initial-docx-data")
 
     client = auth_cookie_client(editor_user)
     response = client.post(
@@ -219,8 +220,16 @@ def test_technical_apply_creates_techedited_derivative_and_db_row(
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "completed"
+    assert payload["new_file_id"] == file_record.id
 
-    new_file = db_session.query(models.File).filter(models.File.id == payload["new_file_id"]).first()
-    assert new_file is not None
-    assert new_file.filename.endswith("_TechEdited.docx")
-    assert Path(new_file.path).exists()
+    db_session.refresh(file_record)
+    assert file_record.version == 2
+    assert Path(file_record.path).read_bytes() == b"some-initial-docx-data"
+
+    version_entry = (
+        db_session.query(models.FileVersion)
+        .filter(models.FileVersion.file_id == file_record.id, models.FileVersion.version_num == 1)
+        .first()
+    )
+    assert version_entry is not None
+    assert Path(version_entry.path).exists()

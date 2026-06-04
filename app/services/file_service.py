@@ -161,6 +161,16 @@ def delete_file_and_capture_context(db: Session, *, file_id: int):
 
     if file_record.path and os.path.exists(file_record.path):
         try:
+            # Also clean up the corresponding XHTML file if it exists
+            dir_name = os.path.dirname(file_record.path)
+            base_name = os.path.splitext(os.path.basename(file_record.path))[0]
+            xhtml_path = os.path.join(dir_name, "xhtml", f"{base_name}.html")
+            if os.path.exists(xhtml_path):
+                try:
+                    os.remove(xhtml_path)
+                except Exception as e:
+                    print(f"Error deleting associated XHTML file on disk: {e}")
+
             os.remove(file_record.path)
         except Exception as e:
             print(f"Error deleting file on disk: {e}")

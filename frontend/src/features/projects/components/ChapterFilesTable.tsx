@@ -1,6 +1,7 @@
 import { Fragment, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import {
   AlignLeft,
   Archive,
@@ -28,6 +29,8 @@ import {
 } from "@/features/projects/components/FileContextMenu";
 import { FileDetailsPanel } from "@/features/projects/components/FileDetailsPanel";
 import { ReferenceCheckModal } from "@/features/projects/components/ReferenceCheckModal";
+import { getFileVersions, downloadFileVersion } from "@/api/files";
+import { useToast } from "@/components/ui/useToast";
 import type { FileRecord } from "@/types/api";
 import { uiPaths } from "@/utils/appPaths";
 import type { ChapterSection } from "@/features/projects/components/ChapterCategorySummary";
@@ -285,6 +288,266 @@ function SortableHeader({
   );
 }
 
+interface InlineFileVersionsListProps {
+  fileId: number;
+  projectId: number;
+  chapterId: number;
+  currentVersion: number;
+  originalFilename: string;
+}
+
+function InlineFileVersionsList({
+  fileId,
+  projectId,
+  chapterId,
+  currentVersion,
+  originalFilename,
+}: InlineFileVersionsListProps) {
+  const versionsQuery = useQuery({
+    queryKey: ["file-versions", fileId],
+    queryFn: () => getFileVersions(fileId),
+    staleTime: 5 * 60_000,
+  });
+
+  const { addToast } = useToast();
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
+
+  async function handleDownloadVersion(versionId: number, versionNum: number, archivedFilename: string) {
+    if (downloadingId !== null) return;
+    setDownloadingId(versionId);
+    try {
+      const { blob, filename } = await downloadFileVersion(fileId, versionId, archivedFilename);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      addToast({
+        title: "Download failed",
+        description: "Failed to download this version.",
+        variant: "error",
+      });
+    } finally {
+      setDownloadingId(null);
+    }
+  }
+
+  if (versionsQuery.isLoading) {
+    return (
+      <tr>
+        <td />
+        <td colSpan={6} style={{ padding: "10px 16px", backgroundColor: "#FAF9F6", borderBottom: "1px solid #F0EBE4" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span
+              style={{
+                width: "12px",
+                height: "12px",
+                borderRadius: "50%",
+                border: "2px solid #E8E3DD",
+                borderTopColor: "#C9821A",
+                display: "inline-block",
+              }}
+              className="animate-spin"
+            />
+            <span style={{ fontSize: "11px", color: "#9C9590" }}>Loading version history...</span>
+          </div>
+        </td>
+      </tr>
+    );
+  }
+
+  if (versionsQuery.isError) {
+    return (
+      <tr>
+        <td />
+        <td colSpan={6} style={{ padding: "10px 16px", backgroundColor: "#FAF9F6", borderBottom: "1px solid #F0EBE4" }}>
+          <span style={{ fontSize: "11px", color: "#B91C1C", fontWeight: 500 }}>
+            Failed to load version history.
+          </span>
+        </td>
+      </tr>
+    );
+  }
+
+  const archivedVersions = versionsQuery.data?.versions ?? [];
+  if (archivedVersions.length === 0) {
+    return (
+      <tr>
+        <td />
+        <td colSpan={6} style={{ padding: "10px 16px", backgroundColor: "#FAF9F6", borderBottom: "1px solid #F0EBE4" }}>
+          <span style={{ fontSize: "11px", color: "#9C9590", fontStyle: "italic" }}>
+            No previous version history found.
+          </span>
+        </td>
+      </tr>
+    );
+  }
+
+  const sortedVersions = [...archivedVersions].sort((a, b) => b.version_num - a.version_num);
+
+  return (
+    <>
+      {sortedVersions.map((v, idx) => {
+        const isLast = idx === sortedVersions.length - 1;
+        const treeConnector = isLast ? "└──" : "├──";
+        const uploadedDate = new Date(v.uploaded_at).toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        });
+
+        return (
+          <tr
+            key={v.id}
+            style={{
+              backgroundColor: "#FAF9F6",
+              borderBottom: "1px solid #F0EBE4",
+              height: "36px",
+            }}
+            className="transition-colors duration-100 hover:bg-surface-50"
+          >
+            <td className="px-2" style={{ verticalAlign: "middle" }}>
+              <div
+                style={{
+                  width: "1px",
+                  height: "100%",
+                  backgroundColor: "#E2DDD6",
+                  margin: "0 auto",
+                  display: "block",
+                }}
+              />
+            </td>
+
+            <td className="px-3" style={{ verticalAlign: "middle", paddingLeft: "16px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
+                <span
+                  style={{
+                    fontFamily: "monospace",
+                    color: "#D4CFC9",
+                    fontSize: "12px",
+                    userSelect: "none",
+                  }}
+                >
+                  {treeConnector}
+                </span>
+                <span
+                  style={{
+                    fontSize: "12.5px",
+                    fontWeight: 450,
+                    color: "#6B6560",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                  title={v.archived_filename}
+                >
+                  {v.archived_filename}
+                </span>
+              </div>
+            </td>
+
+            <td style={{ verticalAlign: "middle", textAlign: "center" }}>
+              <span
+                style={{
+                  fontFamily: "ui-monospace, monospace",
+                  fontSize: "9px",
+                  fontWeight: 500,
+                  color: "#9C9590",
+                  backgroundColor: "#F5F4F1",
+                  padding: "1px 4px",
+                  borderRadius: "3px",
+                  display: "inline-block",
+                }}
+              >
+                DOCX
+              </span>
+            </td>
+
+            <td style={{ verticalAlign: "middle", textAlign: "center" }}>
+              <span
+                style={{
+                  fontFamily: "ui-monospace, monospace",
+                  fontSize: "11px",
+                  color: "#807A74",
+                  fontWeight: 500,
+                }}
+              >
+                v{v.version_num}
+              </span>
+            </td>
+
+            <td className="px-3" style={{ verticalAlign: "middle" }}>
+              <span style={{ fontSize: "11.5px", color: "#807A74", whiteSpace: "nowrap" }}>
+                {uploadedDate}
+              </span>
+            </td>
+
+            <td style={{ verticalAlign: "middle", textAlign: "center" }}>
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
+                  backgroundColor: "#F0EBE4",
+                  padding: "2px 6px",
+                  borderRadius: "4px",
+                }}
+              >
+                <span
+                  style={{
+                    width: "4px",
+                    height: "4px",
+                    borderRadius: "50%",
+                    backgroundColor: "#9C9590",
+                    display: "inline-block",
+                  }}
+                />
+                <span style={{ fontSize: "10.5px", color: "#6B6560", whiteSpace: "nowrap" }}>
+                  Archived
+                </span>
+              </span>
+            </td>
+
+            <td className="px-2" style={{ verticalAlign: "middle", textAlign: "right" }}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void handleDownloadVersion(v.id, v.version_num, v.archived_filename);
+                }}
+                disabled={downloadingId !== null}
+                style={{
+                  width: "24px",
+                  height: "24px",
+                  borderRadius: "4px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  border: "none",
+                  padding: 0,
+                  color: downloadingId === v.id ? "#C9821A" : "#9C9590",
+                  backgroundColor: "transparent",
+                  cursor: downloadingId !== null ? "not-allowed" : "pointer",
+                  transition: "background-color 100ms, color 100ms",
+                }}
+                className="hover:bg-surface-200 hover:text-navy-900"
+                title={`Download v${v.version_num}`}
+              >
+                <ArrowDownToLine
+                  size={13}
+                  className={downloadingId === v.id ? "animate-bounce" : ""}
+                />
+              </button>
+            </td>
+          </tr>
+        );
+      })}
+    </>
+  );
+}
+
 // ─── ChapterFilesTable ────────────────────────────────────────────────────────
 
 interface ChapterFilesTableProps {
@@ -297,6 +560,7 @@ interface ChapterFilesTableProps {
   onCheckout: (file: FileRecord) => void | Promise<void>;
   onCancelCheckout: (file: FileRecord) => void | Promise<void>;
   onDelete: (file: FileRecord) => void | Promise<void>;
+  onStartProcessing?: (fileId: number, processType: string, mode?: string) => Promise<void>;
 }
 
 export function ChapterFilesTable({
@@ -309,6 +573,7 @@ export function ChapterFilesTable({
   onCheckout,
   onCancelCheckout,
   onDelete,
+  onStartProcessing,
 }: ChapterFilesTableProps) {
   const [pendingDeleteFile, setPendingDeleteFile] = useState<FileRecord | null>(null);
   const [menuState, setMenuState] = useState<{ file: FileRecord; anchor: MenuAnchor } | null>(null);
@@ -317,6 +582,14 @@ export function ChapterFilesTable({
   const [hoveredFileId, setHoveredFileId] = useState<number | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("uploaded_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [expandedVersions, setExpandedVersions] = useState<Record<number, boolean>>({});
+
+  function toggleVersions(fileId: number) {
+    setExpandedVersions((prev) => ({
+      ...prev,
+      [fileId]: !prev[fileId],
+    }));
+  }
 
   function handleSort(key: SortKey) {
     if (sortKey === key) {
@@ -594,14 +867,23 @@ export function ChapterFilesTable({
 
                     {/* ── Version ── */}
                     <td className="px-3 py-3" style={{ verticalAlign: "middle", textAlign: "center" }}>
-                      <span style={{
-                        fontFamily: "ui-monospace, monospace",
-                        fontSize: "12px",
-                        color: "#6B6560",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "3px",
-                      }}>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleVersions(file.id);
+                        }}
+                        className="group flex items-center justify-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold select-none border border-transparent transition-all duration-150 hover:bg-surface-200 active:scale-95"
+                        style={{
+                          fontFamily: "ui-monospace, monospace",
+                          color: "#6B6560",
+                          backgroundColor: expandedVersions[file.id] ? "#F0EBE4" : "transparent",
+                          cursor: "pointer",
+                          margin: "0 auto",
+                          border: "none",
+                        }}
+                        title="Click to view all version history"
+                      >
                         {isLatestVer && (
                           <span
                             aria-label="Latest version"
@@ -611,8 +893,17 @@ export function ChapterFilesTable({
                             }}
                           />
                         )}
-                        v{file.version}
-                      </span>
+                        <span>v{file.version}</span>
+                        <ChevronDown
+                          size={11}
+                          className="transition-transform duration-200"
+                          style={{
+                            transform: expandedVersions[file.id] ? "rotate(180deg)" : "rotate(0deg)",
+                            color: expandedVersions[file.id] ? "#C9821A" : "#9C9590",
+                            transition: "transform 200ms ease",
+                          }}
+                        />
+                      </button>
                     </td>
 
                     {/* ── Uploaded ── */}
@@ -687,6 +978,17 @@ export function ChapterFilesTable({
                     </td>
                   </tr>
 
+                  {/* ── Version History Sub-rows ── */}
+                  {expandedVersions[file.id] && (
+                    <InlineFileVersionsList
+                      fileId={file.id}
+                      projectId={projectId}
+                      chapterId={chapterId}
+                      currentVersion={file.version}
+                      originalFilename={file.filename}
+                    />
+                  )}
+
                   {/* ── Details row (animated expand) ── */}
                   <tr style={{ borderBottom: isExpanded ? "1px solid #E2DDD6" : "none" }}>
                     <td colSpan={7} style={{ padding: 0, border: "none" }}>
@@ -752,12 +1054,14 @@ export function ChapterFilesTable({
             setRefCheckFile(menuState.file);
             setMenuState(null);
           }}
+          onStartProcessing={onStartProcessing}
         />
       )}
 
       {/* Reference Check modal */}
       {refCheckFile && (
         <ReferenceCheckModal
+          key={refCheckFile.id}
           file={refCheckFile}
           isOpen={refCheckFile !== null}
           onClose={() => setRefCheckFile(null)}

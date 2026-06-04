@@ -2,6 +2,7 @@ from app.utils.timezone import now_ist_naive
 from fastapi import BackgroundTasks, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
+from typing import Optional, Dict, Any
 
 from app import database, models
 
@@ -46,6 +47,7 @@ def background_processing_task(
     user_id: int,
     user_username: str,
     mode: str = "style",
+    options: Optional[dict[str, Any]] = None,
     *,
     logger,
     inject_publisher_styles_func,
@@ -94,19 +96,46 @@ def background_processing_task(
                 "reference_report_only",
                 "reference_structuring",
             ]:
-                run_struct = process_type == "reference_structuring"
-                run_num = process_type == "reference_number_validation"
-                run_apa = process_type == "reference_apa_chicago_validation"
-                report_only = process_type == "reference_report_only"
+                # Define defaults based on process type to prevent UnboundLocalError
+                run_struct = True
+                run_num = True
+                run_apa = True
+                report_only = False
+                target_style = "Auto"
+                citation_format = "auto"
 
-                if process_type in ["reference_validation", "macro_processing"]:
+                if process_type == "reference_structuring":
                     run_struct = True
+                    run_num = False
+                    run_apa = False
+                elif process_type == "reference_number_validation":
+                    run_struct = False
+                    run_num = True
+                    run_apa = False
+                elif process_type == "reference_apa_chicago_validation":
+                    run_struct = False
+                    run_num = False
+                    run_apa = True
+                elif process_type == "reference_report_only":
+                    run_struct = False
                     run_num = True
                     run_apa = True
+                    report_only = True
 
-                if report_only:
-                    run_num = True
-                    run_apa = True
+                # Dynamic overrides from options dictionary if provided
+                if options:
+                    if "run_structuring" in options:
+                        run_struct = bool(options["run_structuring"])
+                    if "run_validation" in options:
+                        run_num = bool(options["run_validation"])
+                    if "run_name_year_validation" in options:
+                        run_apa = bool(options["run_name_year_validation"])
+                    if "report_only" in options:
+                        report_only = bool(options["report_only"])
+                    if "target_style" in options:
+                        target_style = str(options["target_style"])
+                    if "citation_format" in options:
+                        citation_format = str(options["citation_format"])
 
                 generated_files = references_engine_cls().process_document(
                     file_path,
@@ -114,6 +143,8 @@ def background_processing_task(
                     run_num_validation=run_num,
                     run_apa_validation=run_apa,
                     report_only=report_only,
+                    target_style=target_style,
+                    citation_format=citation_format,
                 )
                 success_msg = f"References processing completed ({process_type})"
 
@@ -150,42 +181,80 @@ def background_processing_task(
                         f"Processing output file: {processed_path}, Exists: {os.path.exists(processed_path)}"
                     )
 
-                    mime = "application/octet-stream"
-                    if processed_filename.endswith(".html"):
-                        mime = "text/html"
-                    elif processed_filename.endswith(".xlsx") or processed_filename.endswith(".xls"):
-                        mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    elif processed_filename.endswith(".docx"):
-                        mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                        try:
-                            inject_publisher_styles_func(processed_path)
-                            logger.info(
-                                f"Publisher styles injected into: {processed_filename}"
-                            )
-                        except Exception as style_err:
-                            logger.warning(
-                                f"Style injection failed for {processed_filename}: {style_err}"
-                            )
-                    elif processed_filename.endswith(".txt"):
-                        mime = "text/plain"
-                    elif processed_filename.endswith(".zip"):
-                        mime = "application/zip"
-                    elif processed_filename.endswith(".xml"):
-                        mime = "application/xml"
+                    # Filter out intermediate files for reference processes
+                    if process_type in [
+                        "macro_processing",
+                        "reference_validation",
+                        "reference_number_validation",
+                        "reference_apa_chicago_validation",
+                        "reference_report_only",
+                        "reference_structuring",
+                    ]:
+                        keep = False
+                        if processed_filename.endswith("_Processed.docx") or processed_filename.endswith("_Structured.docx"):
+                            keep = True
+                        elif processed_filename.endswith("_log.txt") and not processed_filename.endswith("_conversion_log.txt") and not processed_filename.endswith("_fix_log.txt"):
+                            keep = True
+                        
+                        if not keep:
+                            logger.info(f"Deleting intermediate reference job output file: {processed_filename}")
+                            if os.path.exists(processed_path):
+                                try:
+                                    os.remove(processed_path)
+                                except Exception as rm_err:
+                                    logger.warning(f"Failed to delete intermediate file {processed_path}: {rm_err}")
+                            continue
 
-                    new_record = models.File(
-                        filename=processed_filename,
-                        path=processed_path,
-                        file_type=mime,
-                        project_id=file_record.project_id,
-                        chapter_id=file_record.chapter_id,
-                        version=1,
-                        category=file_record.category,
-                    )
-                    db.add(new_record)
-                    logger.info(
-                        f"Registered result file: {processed_filename} to category {file_record.category}"
-                    )
+                    # For structuring and technical: move staging file to original path (in-place update)
+                    if process_type in ("structuring", "technical") and os.path.exists(processed_path):
+                        if processed_filename.endswith(".docx"):
+                            try:
+                                inject_publisher_styles_func(processed_path)
+                                logger.info(f"Publisher styles injected into: {processed_filename}")
+                            except Exception as style_err:
+                                logger.warning(f"Style injection failed for {processed_filename}: {style_err}")
+
+                        shutil.move(processed_path, file_path)
+                        file_record.uploaded_at = now_ist_naive()
+                        logger.info(f"In-place overwrite: {file_record.filename} (v{file_record.version})")
+                    else:
+                        # All other types (references, bias, xml, etc.) create new records
+                        mime = "application/octet-stream"
+                        if processed_filename.endswith(".html"):
+                            mime = "text/html"
+                        elif processed_filename.endswith(".xlsx") or processed_filename.endswith(".xls"):
+                            mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        elif processed_filename.endswith(".docx"):
+                            mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                            try:
+                                inject_publisher_styles_func(processed_path)
+                                logger.info(
+                                    f"Publisher styles injected into: {processed_filename}"
+                                )
+                            except Exception as style_err:
+                                logger.warning(
+                                    f"Style injection failed for {processed_filename}: {style_err}"
+                                )
+                        elif processed_filename.endswith(".txt"):
+                            mime = "text/plain"
+                        elif processed_filename.endswith(".zip"):
+                            mime = "application/zip"
+                        elif processed_filename.endswith(".xml"):
+                            mime = "application/xml"
+
+                        new_record = models.File(
+                            filename=processed_filename,
+                            path=processed_path,
+                            file_type=mime,
+                            project_id=file_record.project_id,
+                            chapter_id=file_record.chapter_id,
+                            version=1,
+                            category=file_record.category,
+                        )
+                        db.add(new_record)
+                        logger.info(
+                            f"Registered result file: {processed_filename} to category {file_record.category}"
+                        )
             else:
                 logger.warning(f"No generated files returned from {process_type} processing")
 
@@ -218,6 +287,7 @@ def start_process(
     upload_dir: str,
     logger,
     background_task_callable,
+    options: Optional[Dict[str, Any]] = None,
 ):
     logger.info(
         f"Process triggered: {process_type} on file {file_id} by {user.username if user else 'Unknown'}"
@@ -289,6 +359,7 @@ def start_process(
         user_id=user.id,
         user_username=user.username,
         mode=mode,
+        options=options,
     )
 
     return JSONResponse(
@@ -310,22 +381,38 @@ def get_structuring_status(db: Session, *, file_id: int, user):
     if not file_record:
         raise HTTPException(status_code=404, detail="File not found")
 
-    original_name = file_record.filename
-    name_only = original_name.rsplit(".", 1)[0]
-    ext = original_name.rsplit(".", 1)[1] if "." in original_name else ""
-    processed_name = f"{name_only}_Processed.{ext}"
+    # If the file is unlocked, background structuring has completed!
+    if not file_record.is_checked_out:
+        return {"status": "completed", "new_file_id": file_record.id}
+    return {"status": "processing"}
 
-    processed_file = (
-        db.query(models.File)
-        .filter(
+
+def get_reference_validation_status(db: Session, *, file_id: int, user):
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    file_record = db.query(models.File).filter(models.File.id == file_id).first()
+    if not file_record:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    # If the parent file is still checked out, the job is still running
+    if file_record.is_checked_out:
+        return {"status": "processing"}
+
+    # Completed! Let's find the derived Processed file or fall back to Structured or original
+    derived_file = db.query(models.File).filter(
+        models.File.project_id == file_record.project_id,
+        models.File.chapter_id == file_record.chapter_id,
+        models.File.filename.like("%_Processed.docx")
+    ).order_by(models.File.id.desc()).first()
+
+    if not derived_file:
+        derived_file = db.query(models.File).filter(
             models.File.project_id == file_record.project_id,
             models.File.chapter_id == file_record.chapter_id,
-            models.File.filename == processed_name,
-        )
-        .order_by(models.File.uploaded_at.desc())
-        .first()
-    )
+            models.File.filename.like("%_Structured.docx")
+        ).order_by(models.File.id.desc()).first()
 
-    if processed_file:
-        return {"status": "completed", "new_file_id": processed_file.id}
-    return {"status": "processing"}
+    new_file_id = derived_file.id if derived_file else file_record.id
+    return {"status": "completed", "new_file_id": new_file_id}
+

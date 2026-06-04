@@ -39,6 +39,7 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 
 COPY alembic.ini ./
 COPY app ./app
+RUN pip install --no-build-isolation -e /app/app/processing/manuscript_core/
 COPY alembic ./alembic
 COPY migrations ./migrations
 

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { FolderPlus, FolderOpen, ExternalLink, BookOpen, Trash2 } from "lucide-react";
+import { FolderPlus, FolderOpen, ExternalLink, Trash2 } from "lucide-react";
 
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -202,15 +202,6 @@ export function ProjectsPage() {
                       >
                         <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
                         <span className="sr-only">View {project.title}</span>
-                      </button>
-                      <button
-                        type="button"
-                        title="Open in editor"
-                        className="w-7 h-7 rounded flex items-center justify-center text-navy-500 hover:bg-surface-200 hover:text-navy-900 transition-colors"
-                        onClick={() => navigate(uiPaths.projectEditor(project.id))}
-                      >
-                        <BookOpen className="w-3.5 h-3.5" aria-hidden="true" />
-                        <span className="sr-only">Open {project.title} in editor</span>
                       </button>
                       {canDelete && (
                         <button

@@ -3,11 +3,16 @@ import axios from "axios";
 import { apiClient } from "@/api/client";
 import type { ProcessingStartResponse, ProcessingStatusResponse } from "@/types/api";
 
-export async function startProcessingJob(fileId: number, processType = "structuring", mode = "style") {
+export async function startProcessingJob(
+  fileId: number,
+  processType = "structuring",
+  mode = "style",
+  options: Record<string, any> = {},
+) {
   const response = await apiClient.post<ProcessingStartResponse>(`/files/${fileId}/processing-jobs`, {
     process_type: processType,
     mode,
-    options: {},
+    options,
   });
   return response.data;
 }

@@ -20,7 +20,6 @@ import {
   Wrench,
 } from "lucide-react";
 
-import { useProcessingJob } from "@/features/processing/useProcessingJob";
 import type { FileRecord } from "@/types/api";
 import { uiPaths } from "@/utils/appPaths";
 
@@ -40,6 +39,7 @@ export interface FileContextMenuProps {
   onCancelCheckout: () => void;
   onDelete: () => void;
   onOpenReferenceCheck: () => void;
+  onStartProcessing?: (fileId: number, processType: string, mode?: string) => Promise<void>;
 }
 
 // ─── Position helper ──────────────────────────────────────────────────────────
@@ -267,9 +267,9 @@ export function FileContextMenu({
   onCancelCheckout,
   onDelete,
   onOpenReferenceCheck,
+  onStartProcessing,
 }: FileContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
-  const processingJob = useProcessingJob({ fileId: file.id, projectId, chapterId });
 
   const [confirmStep, setConfirmStep] = useState<{
     processType: string;
@@ -327,6 +327,10 @@ export function FileContextMenu({
   const hasCancelCheckout = file.available_actions.includes("cancel_checkout");
   const hasTechnicalEdit = file.available_actions.includes("technical_edit");
   const hasStructuringReview = file.available_actions.includes("structuring_review");
+  const filenameLower = file.filename.toLowerCase();
+  const hasReferenceReview =
+    filenameLower.endsWith("_processed.docx") ||
+    filenameLower.endsWith("_structured.docx");
 
   if (!mounted) return null;
 
@@ -400,10 +404,10 @@ export function FileContextMenu({
               <button
                 type="button"
                 onClick={() => {
-                  const { processType, mode, actionName: _ } = confirmStep;
+                  const { processType, mode } = confirmStep;
                   setConfirmStep(null);
+                  void onStartProcessing?.(file.id, processType, mode);
                   onClose();
-                  void processingJob.startJob(processType, mode);
                 }}
                 style={{
                   flex: 1,
@@ -434,6 +438,18 @@ export function FileContextMenu({
               to={uiPaths.fileEditor(projectId, chapterId, file.id)}
               onClick={onClose}
             />
+            <MenuLinkItem
+              icon={FilePen}
+              label="Edit in Editor"
+              to={`${uiPaths.structuringReview(projectId, chapterId, file.id)}?tab=editor`}
+              onClick={onClose}
+            />
+            <MenuLinkItem
+              icon={FilePen}
+              label="Edit in OnlyOffice"
+              to={`${uiPaths.structuringReview(projectId, chapterId, file.id)}?tab=onlyoffice`}
+              onClick={onClose}
+            />
             <MenuDownloadItem
               icon={ArrowDownToLine}
               label="Download"
@@ -445,6 +461,14 @@ export function FileContextMenu({
                 icon={Layers}
                 label="View Structuring Review"
                 to={uiPaths.structuringReview(projectId, chapterId, file.id)}
+                onClick={onClose}
+              />
+            )}
+            {hasReferenceReview && (
+              <MenuLinkItem
+                icon={BookCheck}
+                label="Reference Review"
+                to={uiPaths.referenceReview(projectId, chapterId, file.id)}
                 onClick={onClose}
               />
             )}

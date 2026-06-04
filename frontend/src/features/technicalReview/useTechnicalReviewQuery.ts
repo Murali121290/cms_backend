@@ -2,11 +2,12 @@ import { useQuery } from "@tanstack/react-query";
 
 import { getTechnicalReview } from "@/api/technicalReview";
 
-export function useTechnicalReviewQuery(fileId: number | null) {
+export function useTechnicalReviewQuery(fileId: number | null, stylesheetId?: number | null) {
   return useQuery({
-    queryKey: ["technical-review", fileId],
-    queryFn: () => getTechnicalReview(fileId as number),
+    queryKey: ["technical-review", fileId, stylesheetId ?? null],
+    queryFn: () => getTechnicalReview(fileId as number, stylesheetId ?? undefined),
     enabled: fileId !== null,
-    staleTime: 30_000,
+    staleTime: 0,
+    gcTime: 0,
   });
 }

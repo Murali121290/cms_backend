@@ -4,9 +4,12 @@ import urllib.parse
 from datetime import datetime
 
 from fastapi import HTTPException, Response
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.models import File
+from app.domains.files import version_service
+from app.utils.timezone import now_ist_naive
 
 
 def get_file_record(
@@ -40,6 +43,13 @@ def get_target_path(file_record: File, mode: str = "original"):
         name_only = os.path.splitext(base_name)[0]
         processed_filename = f"{name_only}_Processed.docx"
         processed_path = os.path.join(dir_name, processed_filename)
+
+        # Fallback if _Processed.docx does not exist but the original file has been processed in-place
+        if not os.path.exists(processed_path) and os.path.exists(original_path):
+            has_history = file_record.version > 1 or (hasattr(file_record, "versions") and len(file_record.versions) > 0)
+            if has_history:
+                processed_path = original_path
+
         return processed_path, processed_filename
 
     return original_path, os.path.basename(original_path)
@@ -112,6 +122,8 @@ def build_check_file_info_payload(
             "UserFriendlyName": "CMS User",
             "UserCanWrite": True,
             "SupportsUpdate": True,
+            "PostMessageOrigin": "*",
+            "UIMode": "compact",
         }
 
     file_record = get_file_record(db, file_id=file_id, detail="File not found")
@@ -141,6 +153,8 @@ def build_check_file_info_payload(
         "DisableExport": False,
         "DisablePrint": False,
         "HideSaveOption": False,
+        "PostMessageOrigin": "*",
+        "UIMode": "compact",
     }
 
 
@@ -150,6 +164,10 @@ def build_file_response_payload(
     file_id: int,
     mode: str,
 ):
+    from app.utils.inject_styles import inject_publisher_styles
+    import logging
+    wopi_logger = logging.getLogger("app.wopi")
+
     if mode == "structuring":
         file_record = get_file_record(db, file_id=file_id, detail=None, bare_404=True)
         file_path, filename = _ensure_target_exists(
@@ -158,6 +176,11 @@ def build_file_response_payload(
             missing_detail=None,
             bare_404=True,
         )
+        try:
+            wopi_logger.info(f"Injecting publisher styles into structuring file: {file_path}")
+            inject_publisher_styles(file_path)
+        except Exception as e:
+            wopi_logger.warning(f"Failed to inject styles into {file_path}: {e}")
         return {"path": file_path, "filename": filename}
 
     file_record = get_file_record(db, file_id=file_id, detail="File not found")
@@ -168,6 +191,11 @@ def build_file_response_payload(
         mode="original",
         missing_detail="File not found",
     )
+    try:
+        wopi_logger.info(f"Injecting publisher styles into original file: {file_path}")
+        inject_publisher_styles(file_path)
+    except Exception as e:
+        wopi_logger.warning(f"Failed to inject styles into {file_path}: {e}")
     return {"path": file_path, "filename": filename}
 
 
@@ -184,13 +212,39 @@ def write_file_bytes(
         file_path, filename = get_target_path(file_record, mode="structuring")
 
         if not body:
-            return Response(status_code=200)
+            stat = os.stat(file_path)
+            return JSONResponse({
+                "LastModifiedTime": datetime.utcfromtimestamp(stat.st_mtime).strftime("%Y-%m-%dT%H:%M:%SZ")
+            })
 
         try:
+            existing_bytes = b""
+            if os.path.exists(file_path):
+                with open(file_path, "rb") as f:
+                    existing_bytes = f.read()
+
+            if hashlib.sha256(existing_bytes).digest() != hashlib.sha256(body).digest():
+                try:
+                    version_service.archive_existing_file(
+                        db,
+                        existing_file=file_record,
+                        base_path=os.path.dirname(file_path),
+                        uploaded_by_id=None,
+                        source_path=file_path,
+                    )
+                    file_record.version += 1
+                    file_record.uploaded_at = now_ist_naive()
+                    db.commit()
+                except Exception as exc:
+                    logger.warning(f"WOPI version archive failed (non-fatal): {exc}")
+
             with open(file_path, "wb") as handle:
                 handle.write(body)
             logger.info(f"WOPI PutFile (Structuring): saved {filename}")
-            return Response(status_code=200)
+            stat = os.stat(file_path)
+            return JSONResponse({
+                "LastModifiedTime": datetime.utcfromtimestamp(stat.st_mtime).strftime("%Y-%m-%dT%H:%M:%SZ")
+            })
         except Exception as exc:
             logger.error(f"Error: {exc}")
             raise HTTPException(status_code=500, detail=str(exc))
@@ -199,13 +253,38 @@ def write_file_bytes(
     file_path, filename = get_target_path(file_record, mode="original")
 
     if not body:
-        return Response(status_code=200)
+        stat = os.stat(file_path)
+        return JSONResponse({
+            "LastModifiedTime": datetime.utcfromtimestamp(stat.st_mtime).strftime("%Y-%m-%dT%H:%M:%SZ")
+        })
 
     try:
+        existing_bytes = b""
+        if os.path.exists(file_path):
+            with open(file_path, "rb") as f:
+                existing_bytes = f.read()
+
+        if hashlib.sha256(existing_bytes).digest() != hashlib.sha256(body).digest():
+            try:
+                version_service.archive_existing_file(
+                    db,
+                    existing_file=file_record,
+                    base_path=os.path.dirname(file_path),
+                    uploaded_by_id=None,
+                )
+                file_record.version += 1
+                file_record.uploaded_at = now_ist_naive()
+                db.commit()
+            except Exception as exc:
+                logger.warning(f"WOPI version archive failed (non-fatal): {exc}")
+
         with open(file_path, "wb") as handle:
             handle.write(body)
         logger.info(f"WOPI PutFile: saved {filename} ({len(body)} bytes)")
-        return Response(status_code=200)
+        stat = os.stat(file_path)
+        return JSONResponse({
+            "LastModifiedTime": datetime.utcfromtimestamp(stat.st_mtime).strftime("%Y-%m-%dT%H:%M:%SZ")
+        })
     except Exception as exc:
         logger.error(f"WOPI PutFile error: {exc}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(exc))

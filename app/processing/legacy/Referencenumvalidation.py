@@ -1,8 +1,14 @@
 import re
 import os
+import sys
 import io
 import zipfile
 from collections import defaultdict
+
+# Add app directory to path for legacy module imports
+_app_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _app_dir not in sys.path:
+    sys.path.insert(0, _app_dir)
 
 from flask import Flask, request, send_file, render_template, redirect, url_for, session
 from docx import Document
@@ -11,7 +17,7 @@ from docx.oxml.table import CT_Tbl
 from docx.text.paragraph import Paragraph
 from docx.table import Table
 from docx.shared import RGBColor
-from utils import track_changes
+from app.utils import track_changes
 import logging
 
 TRACK_CHANGES_ENABLED = True

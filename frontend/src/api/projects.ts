@@ -11,6 +11,7 @@ import type {
   ProjectChaptersResponse,
   ProjectDetailResponse,
   ProjectsListResponse,
+  ProjectWorkflowUpdateResponse,
 } from "@/types/api";
 
 export async function createProject(formData: FormData) {
@@ -79,5 +80,16 @@ export async function deleteChapter(projectId: number, chapterId: number) {
 
 export async function deleteProject(projectId: number) {
   const response = await apiClient.delete(`/projects/${projectId}`);
+  return response.data;
+}
+
+export async function updateProjectWorkflow(
+  projectId: number,
+  payload: { workflow_type?: string | null; workflow_stage_no?: string | null },
+) {
+  const response = await apiClient.patch<ProjectWorkflowUpdateResponse>(
+    `/projects/${projectId}/workflow`,
+    payload,
+  );
   return response.data;
 }

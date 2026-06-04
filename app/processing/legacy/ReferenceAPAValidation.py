@@ -1,6 +1,13 @@
 import os
+import sys
 import re
 import logging
+
+# Add app directory to path for legacy module imports
+_app_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _app_dir not in sys.path:
+    sys.path.insert(0, _app_dir)
+
 from flask import Flask, render_template, request, send_file, redirect, url_for, flash, make_response, session
 from werkzeug.utils import secure_filename
 from docx import Document
@@ -11,9 +18,9 @@ import zipfile
 from citation_parsers import get_parser, auto_detect_style
 from validation_core import CitationProcessor, ValidationReport
 try:
-    from utils import track_changes
+    from app.utils import track_changes
     TRACK_CHANGES_ENABLED = True
-except ImportError:
+except ImportError as e:
     track_changes = None
     TRACK_CHANGES_ENABLED = False
 

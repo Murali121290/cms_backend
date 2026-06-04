@@ -40,7 +40,8 @@ def background_processing_task(
     process_type: str,
     user_id: int,
     user_username: str,
-    mode: str = "style" 
+    mode: str = "style",
+    options: Optional[Dict[str, Any]] = None,
 ):
     return processing_service.background_processing_task(
         file_id=file_id,
@@ -48,6 +49,7 @@ def background_processing_task(
         user_id=user_id,
         user_username=user_username,
         mode=mode,
+        options=options,
         logger=logger,
         inject_publisher_styles_func=inject_publisher_styles,
         permissions_engine_cls=PermissionsEngine,
@@ -70,6 +72,10 @@ async def run_file_process(
     user=Depends(get_current_user_from_cookie), 
     db: Session = Depends(database.get_db)
 ):
+    options = None
+    if item:
+        options = item.get("options") if "options" in item else item
+
     return processing_service.start_process(
         db,
         file_id=file_id,
@@ -80,6 +86,7 @@ async def run_file_process(
         upload_dir=UPLOAD_DIR,
         logger=logger,
         background_task_callable=background_processing_task,
+        options=options,
     )
 
 @router.get("/files/{file_id}/structuring_status")
@@ -101,6 +108,7 @@ def scan_technical_errors(
     db: Session = Depends(database.get_db)
 ):
     """
+    DEPRECATED: Use GET /api/v2/files/{file_id}/technical-review instead.
     Scans the document for technical editing patterns and returns found items.
     """
     if not user:
@@ -122,6 +130,7 @@ def apply_technical_edits(
     db: Session = Depends(database.get_db)
 ):
     """
+    DEPRECATED: Use POST /api/v2/files/{file_id}/technical-review/apply instead.
     Applies selected technical edits with Track Changes.
     replacements: {'xray': 'X-ray', 'percent': '%'}
     """

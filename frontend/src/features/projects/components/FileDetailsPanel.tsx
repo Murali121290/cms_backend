@@ -340,80 +340,141 @@ function PropertiesColumn({ file }: { file: FileRecord }) {
 // ─── Column 3: Processing History ─────────────────────────────────────────────
 
 function ProcessingHistoryColumn({ file }: { file: FileRecord }) {
-  const processingQuery = useQuery({
+  const structuringQuery = useQuery({
     queryKey: ["processing-status", file.id, "structuring"],
     queryFn: () => getProcessingStatus(file.id, "structuring"),
     staleTime: 5 * 60_000,
     retry: false, // 404 = never processed; don't retry
+    refetchInterval: (query) =>
+      query.state.data?.status === "processing" ? 2000 : false,
   });
+
+  const refValidationQuery = useQuery({
+    queryKey: ["processing-status", file.id, "reference_validation"],
+    queryFn: () => getProcessingStatus(file.id, "reference_validation"),
+    staleTime: 5 * 60_000,
+    retry: false, // 404 = never processed; don't retry
+    refetchInterval: (query) =>
+      query.state.data?.status === "processing" ? 2000 : false,
+  });
+
+  const refStructuringQuery = useQuery({
+    queryKey: ["processing-status", file.id, "reference_structuring"],
+    queryFn: () => getProcessingStatus(file.id, "reference_structuring"),
+    staleTime: 5 * 60_000,
+    retry: false, // 404 = never processed; don't retry
+    refetchInterval: (query) =>
+      query.state.data?.status === "processing" ? 2000 : false,
+  });
+
+  const isLoading =
+    structuringQuery.isLoading ||
+    refValidationQuery.isLoading ||
+    refStructuringQuery.isLoading;
+
+  const activeJobs: { name: string; status: string; derived_filename?: string | null; compatibility_status?: string }[] = [];
+
+  if (structuringQuery.data) {
+    activeJobs.push({
+      name: "Structuring",
+      status: structuringQuery.data.status,
+      compatibility_status: structuringQuery.data.compatibility_status,
+      derived_filename: structuringQuery.data.derived_filename,
+    });
+  }
+
+  if (
+    refValidationQuery.data &&
+    (refValidationQuery.data.status === "processing" || refValidationQuery.data.derived_filename)
+  ) {
+    activeJobs.push({
+      name: "Reference Validation",
+      status: refValidationQuery.data.status,
+      compatibility_status: refValidationQuery.data.compatibility_status,
+      derived_filename: refValidationQuery.data.derived_filename,
+    });
+  }
+
+  if (
+    refStructuringQuery.data &&
+    (refStructuringQuery.data.status === "processing" || refStructuringQuery.data.derived_filename)
+  ) {
+    activeJobs.push({
+      name: "Reference Structuring",
+      status: refStructuringQuery.data.status,
+      compatibility_status: refStructuringQuery.data.compatibility_status,
+      derived_filename: refStructuringQuery.data.derived_filename,
+    });
+  }
 
   return (
     <div>
       <SectionLabel text="Processing History" />
 
-      {processingQuery.isLoading ? (
+      {isLoading ? (
         <>
           <SkeletonField />
           <SkeletonField />
         </>
-      ) : processingQuery.isError ? (
+      ) : activeJobs.length === 0 ? (
         <p style={{ fontSize: "12px", color: "#A09B96", fontStyle: "italic", margin: "0 0 8px" }}>
           No processing jobs run yet.
         </p>
-      ) : processingQuery.data ? (
-        <div>
-          {/* Timeline entry */}
-          <div style={{ display: "flex", gap: "10px" }}>
-            {/* Status dot */}
-            <div style={{ flexShrink: 0, marginTop: "4px" }}>
-              <div style={{
-                width: "8px",
-                height: "8px",
-                borderRadius: "50%",
-                backgroundColor: processingQuery.data.status === "completed" ? "#166534" : "#1D4ED8",
-              }} />
-            </div>
-            <div>
-              <p style={{ fontSize: "13px", fontWeight: 500, color: "#1A1714", margin: "0 0 4px" }}>
-                Structuring
-              </p>
-              <span style={{
-                display: "inline-block",
-                fontSize: "10px",
-                fontWeight: 500,
-                padding: "1px 6px",
-                borderRadius: "3px",
-                marginBottom: "6px",
-                ...(processingQuery.data.status === "completed"
-                  ? { backgroundColor: "#DCFCE7", color: "#166534" }
-                  : { backgroundColor: "#DBEAFE", color: "#1D4ED8" }),
-              }}>
-                {processingQuery.data.status === "completed" ? "Completed" : "Processing"}
-              </span>
-              {processingQuery.data.compatibility_status && (
-                <p style={{ fontSize: "11px", color: "#6B6560", margin: "0 0 2px" }}>
-                  Compatibility: {processingQuery.data.compatibility_status}
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          {activeJobs.map((job, idx) => (
+            <div key={idx} style={{ display: "flex", gap: "10px" }}>
+              {/* Status dot */}
+              <div style={{ flexShrink: 0, marginTop: "4px" }}>
+                <div style={{
+                  width: "8px",
+                  height: "8px",
+                  borderRadius: "50%",
+                  backgroundColor: job.status === "completed" ? "#166534" : "#1D4ED8",
+                }} />
+              </div>
+              <div>
+                <p style={{ fontSize: "13px", fontWeight: 500, color: "#1A1714", margin: "0 0 4px" }}>
+                  {job.name}
                 </p>
-              )}
-              {processingQuery.data.derived_filename && (
-                <p style={{ fontSize: "11px", color: "#6B6560", margin: 0 }}>
-                  Output: <span style={{ fontFamily: "ui-monospace, monospace" }}>{processingQuery.data.derived_filename}</span>
-                </p>
-              )}
+                <span style={{
+                  display: "inline-block",
+                  fontSize: "10px",
+                  fontWeight: 500,
+                  padding: "1px 6px",
+                  borderRadius: "3px",
+                  marginBottom: "6px",
+                  ...(job.status === "completed"
+                    ? { backgroundColor: "#DCFCE7", color: "#166534" }
+                    : { backgroundColor: "#DBEAFE", color: "#1D4ED8" }),
+                }}>
+                  {job.status === "completed" ? "Completed" : "Processing"}
+                </span>
+                {job.compatibility_status && (
+                  <p style={{ fontSize: "11px", color: "#6B6560", margin: "0 0 2px" }}>
+                    Compatibility: {job.compatibility_status}
+                  </p>
+                )}
+                {job.derived_filename && (
+                  <p style={{ fontSize: "11px", color: "#6B6560", margin: 0 }}>
+                    Output: <span style={{ fontFamily: "ui-monospace, monospace" }}>{job.derived_filename}</span>
+                  </p>
+                )}
+              </div>
             </div>
-          </div>
+          ))}
 
           <p style={{
             fontSize: "11px",
             color: "#A09B96",
-            margin: "12px 0 0",
+            margin: "4px 0 0",
             paddingTop: "10px",
             borderTop: "1px solid #F0EBE4",
           }}>
             Other process types available via the ⋯ menu.
           </p>
         </div>
-      ) : null}
+      )}
     </div>
   );
 }

@@ -9,7 +9,7 @@ Endpoints:
 
 import logging
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -23,6 +23,7 @@ from app.integrations.collabora.config import (
 )
 from app.models import User
 from app.services import wopi_service
+from app.domains.review import service as review_service
 
 logger = logging.getLogger("app.routers.wopi")
 
@@ -57,8 +58,7 @@ async def edit_file_page(
         wopi_base_url=WOPI_BASE_URL,
     )
 
-    return templates.TemplateResponse(
-        "editor.html",
+    return templates.TemplateResponse(request, "editor.html",
         {
             "request": request,
             "file": page_state["file"],
@@ -161,17 +161,36 @@ async def wopi_get_file_structuring(
     )
 
 
+def _regen_xhtml_background(file_id: int):
+    """Background task to regenerate XHTML after DOCX save."""
+    try:
+        db = database.SessionLocal()
+        review_service.generate_xhtml(db, file_id=file_id, logger=logger)
+        logger.info(f"Background XHTML regeneration completed for file {file_id}")
+    except Exception as e:
+        logger.error(f"Background XHTML regeneration failed for file {file_id}: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
 @router.post("/wopi/files/{file_id}/structuring/contents")
 async def wopi_put_file_structuring(
     file_id: int,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(database.get_db),
 ):
     body = await request.body()
-    return wopi_service.write_file_bytes(
+    result = wopi_service.write_file_bytes(
         db,
         file_id=file_id,
         mode="structuring",
         body=body,
         logger=logger,
     )
+
+    # Trigger XHTML regeneration in background if body was written
+    if body:
+        background_tasks.add_task(_regen_xhtml_background, file_id=file_id)
+
+    return result

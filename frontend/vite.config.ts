@@ -37,6 +37,7 @@ export default defineConfig(({ mode }) => {
             "vendor-react": ["react", "react-dom", "react-router-dom"],
             "vendor-query": ["@tanstack/react-query"],
             "vendor-forms": ["react-hook-form", "@hookform/resolvers", "zod"],
+            "vendor-tiptap": ["@tiptap/react", "@tiptap/core"],
           },
         },
       },

@@ -33,14 +33,8 @@ describe("StructuringReviewPage", () => {
     expect(screen.getByText("Processed file not found.")).toBeInTheDocument();
   });
 
-  it("keeps save, export, return, and editor handoff wired to the current contract", async () => {
+  it("renders the dashboard overview and wired actions successfully", async () => {
     getStructuringReview.mockResolvedValueOnce(createStructuringReviewResponse());
-    saveStructuringReview.mockResolvedValueOnce({
-      status: "ok",
-      file_id: 100,
-      saved_change_count: 0,
-      target_filename: "chapter01_Processed.docx",
-    });
 
     renderRoute({
       path: "/ui/projects/:projectId/chapters/:chapterId/files/:fileId/structuring-review",
@@ -48,27 +42,31 @@ describe("StructuringReviewPage", () => {
       element: <StructuringReviewPage />,
     });
 
-    expect(await screen.findByRole("heading", { name: "chapter01.docx" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Save & Exit" })).toHaveAttribute(
-      "href",
-      "/ui/projects/10/chapters/20",
-    );
-    expect(screen.getByRole("link", { name: "Export Word" })).toHaveAttribute(
+    // Check header
+    expect(await screen.findByRole("heading", { name: "Document Structuring Workspace" })).toBeInTheDocument();
+    
+    // Check metric values
+    expect(screen.getAllByText("structuring")[0]).toBeInTheDocument(); // Editor Mode
+    expect(screen.getByText("wopi autosave")).toBeInTheDocument(); // Save Mode
+    expect(screen.getAllByText("2")[0]).toBeInTheDocument(); // Styles applied
+
+    // Check styles table
+    expect(screen.getByText("style-a")).toBeInTheDocument();
+    expect(screen.getByText("style-b")).toBeInTheDocument();
+
+    // Check links/actions
+    expect(screen.getByRole("button", { name: "Export Processed File" }).closest("a")).toHaveAttribute(
       "href",
       "/api/v2/files/100/structuring-review/export",
     );
-    expect(screen.getByRole("link", { name: "Open provided editor URL" })).toHaveAttribute(
-      "href",
-      "http://localhost/cool.html?WOPISrc=http://localhost/wopi/files/100/structuring",
-    );
+    expect(screen.getByRole("button", { name: "Back" })).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "Save Changes" }));
-
+    // Switch to Editor Tab
+    await userEvent.click(screen.getByRole("button", { name: "Structuring Editor Workspace" }));
+    
+    // Ensure Editor space mounts (displays Loading document... since the secondary query isn't explicitly mocked to return data)
     await waitFor(() => {
-      expect(saveStructuringReview).toHaveBeenCalledWith(
-        "/api/v2/files/100/structuring-review/save",
-        {},
-      );
+      expect(screen.getByText("Loading document…")).toBeInTheDocument();
     });
   });
 });

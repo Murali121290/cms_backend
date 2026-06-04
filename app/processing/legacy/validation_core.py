@@ -364,6 +364,9 @@ def match_citation(cite_author: str, cite_year: str, bibliography: Dict[str,dict
     cn = _norm(cite_author); cf = _first_surname(cite_author); cw = _surname_set(cite_author)
     cb = _strip_suffix(cite_year); cu = cite_author.strip().upper()
     ym: List[str]=[]; fh: List[Tuple[float,str,str]]=[]; sh: List[str]=[]
+    matcher = difflib.SequenceMatcher(None, "", "")
+    len_cn = len(cn)
+    
     for key, ref in bibliography.items():
         rfull=ref["full_author"]; rn=_norm(rfull); ry=ref["year"]; rb=_strip_suffix(ry)
         rf=_first_surname(rfull); yok=(cite_year==ry)
@@ -373,19 +376,63 @@ def match_citation(cite_author: str, cite_year: str, bibliography: Dict[str,dict
         if cn==rn:
             if yok: return key,"exact"
             _sfx_or_miss(); continue
-        if cf and rf and (cf==rf or difflib.SequenceMatcher(None, cf, rf).ratio() >= FUZZY_THRESHOLD):
-            if yok: return key,"smart"
-            _sfx_or_miss(); continue
+            
+        # cf/rf matching (first surname)
+        if cf and rf:
+            if cf == rf:
+                if yok: return key,"smart"
+                _sfx_or_miss(); continue
+            else:
+                len_cf = len(cf)
+                len_rf = len(rf)
+                if len_cf > 0 and len_rf > 0 and min(len_cf, len_rf) / max(len_cf, len_rf) >= FUZZY_THRESHOLD:
+                    matcher.set_seq1(cf)
+                    matcher.set_seq2(rf)
+                    if matcher.real_quick_ratio() >= FUZZY_THRESHOLD and matcher.quick_ratio() >= FUZZY_THRESHOLD and matcher.ratio() >= FUZZY_THRESHOLD:
+                        if yok: return key,"smart"
+                        _sfx_or_miss(); continue
             
         bib_surnames = _surname_set(rfull)
-        if cw and (cw.issubset(bib_surnames) or all(any(w1==w2 or difflib.SequenceMatcher(None, w1, w2).ratio() >= FUZZY_THRESHOLD for w2 in bib_surnames) for w1 in cw)):
-            if yok: return key,"smart"
-            _sfx_or_miss(); continue
+        if cw:
+            if cw.issubset(bib_surnames):
+                if yok: return key,"smart"
+                _sfx_or_miss(); continue
+            else:
+                # check if all words are fuzzy matches
+                all_match = True
+                for w1 in cw:
+                    w1_matched = False
+                    len_w1 = len(w1)
+                    for w2 in bib_surnames:
+                        if w1 == w2:
+                            w1_matched = True
+                            break
+                        len_w2 = len(w2)
+                        if len_w1 > 0 and len_w2 > 0 and min(len_w1, len_w2) / max(len_w1, len_w2) >= FUZZY_THRESHOLD:
+                            matcher.set_seq1(w1)
+                            matcher.set_seq2(w2)
+                            if matcher.real_quick_ratio() >= FUZZY_THRESHOLD and matcher.quick_ratio() >= FUZZY_THRESHOLD and matcher.ratio() >= FUZZY_THRESHOLD:
+                                w1_matched = True
+                                break
+                    if not w1_matched:
+                        all_match = False
+                        break
+                if all_match:
+                    if yok: return key,"smart"
+                    _sfx_or_miss(); continue
+                    
         if _is_org_match(cite_author, rfull):
             if yok: return key,"org_abbrev"
             _sfx_or_miss(); continue
-        ratio=difflib.SequenceMatcher(None,cn,rn).ratio()
-        if ratio>=FUZZY_THRESHOLD: fh.append((ratio,key,ry))
+            
+        len_rn = len(rn)
+        if len_cn > 0 and len_rn > 0 and min(len_cn, len_rn) / max(len_cn, len_rn) >= FUZZY_THRESHOLD:
+            matcher.set_seq1(cn)
+            matcher.set_seq2(rn)
+            if matcher.real_quick_ratio() >= FUZZY_THRESHOLD and matcher.quick_ratio() >= FUZZY_THRESHOLD:
+                ratio = matcher.ratio()
+                if ratio>=FUZZY_THRESHOLD: fh.append((ratio,key,ry))
+                
     if sh:
         unique={bibliography[k]["raw"] for k in sh}
         return sh[0], "suffix_mismatch" if len(unique)==1 else "suffix_ambiguous"
@@ -449,9 +496,27 @@ def check_bibliography_structure(entries: List[Dict]) -> List[Dict]:
                         "message":f"🔡 SUFFIX ORDER: '{disp} ({bare}{s})' out of order — expected {', '.join(bare+x for x in exp)}."})
     # e: near-duplicate fuzzy
     rl=list({e["raw"] for e in entries})
+    matcher = difflib.SequenceMatcher(None, "", "")
     for i in range(len(rl)):
+        text_a = rl[i].lower()
+        len_a = len(text_a)
+        if len_a == 0:
+            continue
+        matcher.set_seq1(text_a)
         for j in range(i+1,len(rl)):
-            r=difflib.SequenceMatcher(None,rl[i].lower(),rl[j].lower()).ratio()
+            text_b = rl[j].lower()
+            len_b = len(text_b)
+            if len_b == 0:
+                continue
+            # Length ratio check: can't be >= NEAR_DUP_THRESHOLD if length ratio is smaller
+            if min(len_a, len_b) / max(len_a, len_b) < NEAR_DUP_THRESHOLD:
+                continue
+            matcher.set_seq2(text_b)
+            if matcher.real_quick_ratio() < NEAR_DUP_THRESHOLD:
+                continue
+            if matcher.quick_ratio() < NEAR_DUP_THRESHOLD:
+                continue
+            r = matcher.ratio()
             if r>=NEAR_DUP_THRESHOLD:
                 for e in entries:
                     if e["raw"]==rl[j]:

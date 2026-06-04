@@ -8,16 +8,22 @@ import { AdminUsersPage } from "@/pages/AdminUsersPage";
 import { ChapterDetailPage } from "@/pages/ChapterDetailPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { LoginPage } from "@/pages/LoginPage";
-import { EditorPage } from "@/pages/EditorPage";
 import { FileEditorPage } from "@/pages/FileEditorPage";
+import { DocxEditorPage } from "@/pages/DocxEditorPage";
 import { ProjectCreatePage } from "@/pages/ProjectCreatePage";
 import { ProjectDetailPage } from "@/pages/ProjectDetailPage";
 import { ProjectsPage } from "@/pages/ProjectsPage";
 import { RegisterPage } from "@/pages/RegisterPage";
+import { StylesheetsPage } from "@/pages/StylesheetsPage";
 import { StructuringReviewPage } from "@/pages/StructuringReviewPage";
 import { TechnicalReviewPage } from "@/pages/TechnicalReviewPage";
-import { ComingSoonPage } from "@/pages/ComingSoonPage";
+import { TechnicalEditorPage } from "@/pages/TechnicalEditorPage";
+import { ReferenceValidationReviewPage } from "@/pages/ReferenceValidationReviewPage";
 import { ActivitiesPage } from "@/pages/ActivitiesPage";
+import { ReportsPage } from "@/pages/ReportsPage";
+import { QualityControlPage } from "@/pages/QualityControlPage";
+import { FilesPage } from "@/pages/FilesPage";
+import { WorkflowPage } from "@/pages/WorkflowPage";
 import { uiPaths } from "@/utils/appPaths";
 
 function UiRouteLayout() {
@@ -62,16 +68,16 @@ export const router = createBrowserRouter([
         element: <ProjectsPage />,
       },
       {
-        path: "editor/:projectId",
-        element: <EditorPage />,
-      },
-      {
         path: "projects/create",
         element: <ProjectCreatePage />,
       },
       {
         path: "projects/:projectId",
         element: <ProjectDetailPage />,
+      },
+      {
+        path: "projects/:projectId/stylesheets",
+        element: <StylesheetsPage />,
       },
       {
         path: "projects/:projectId/chapters/:chapterId",
@@ -82,17 +88,29 @@ export const router = createBrowserRouter([
         element: <TechnicalReviewPage />,
       },
       {
+        path: "projects/:projectId/chapters/:chapterId/files/:fileId/technical-editor",
+        element: <TechnicalEditorPage />,
+      },
+      {
         path: "projects/:projectId/chapters/:chapterId/files/:fileId/structuring-review",
         element: <StructuringReviewPage />,
+      },
+      {
+        path: "projects/:projectId/chapters/:chapterId/files/:fileId/reference-review",
+        element: <ReferenceValidationReviewPage />,
       },
       {
         path: "projects/:projectId/chapters/:chapterId/files/:fileId/edit",
         element: <FileEditorPage />,
       },
-      { path: "workflow", element: <ComingSoonPage /> },
-      { path: "files", element: <ComingSoonPage /> },
-      { path: "quality-control", element: <ComingSoonPage /> },
-      { path: "reports", element: <ComingSoonPage /> },
+      {
+        path: "projects/:projectId/chapters/:chapterId/files/:fileId/wysiwyg",
+        element: <DocxEditorPage />,
+      },
+      { path: "workflow", element: <WorkflowPage /> },
+      { path: "files", element: <FilesPage /> },
+      { path: "quality-control", element: <QualityControlPage /> },
+      { path: "reports", element: <ReportsPage /> },
       { path: "activities", element: <ActivitiesPage /> },
     ],
   },

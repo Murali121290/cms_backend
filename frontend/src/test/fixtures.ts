@@ -59,6 +59,8 @@ export function createProjectSummary(overrides: Partial<ProjectSummary> = {}): P
     team_id: null,
     chapter_count: 2,
     file_count: 3,
+    workflow_type: null,
+    workflow_stage_no: null,
     ...overrides,
   };
 }
@@ -226,6 +228,7 @@ export function createTechnicalScanResponse(
         options: ["the"],
       },
     },
+    onlyoffice_available: false,
     ...overrides,
   };
 }
@@ -243,6 +246,7 @@ export function createStructuringReviewResponse(
     },
     editor: {
       mode: "structuring",
+      onlyoffice_available: false,
       collabora_url: "http://localhost/cool.html?WOPISrc=http://localhost/wopi/files/100/structuring",
       wopi_mode: "structuring",
       save_mode: "wopi_autosave",

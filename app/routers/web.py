@@ -48,7 +48,7 @@ async def home(request: Request, user=Depends(get_current_user_from_cookie)):
 
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request})
+    return templates.TemplateResponse(request, "login.html", {"request": request})
 
 @router.post("/login", response_class=HTMLResponse)
 async def login_submit(
@@ -61,7 +61,7 @@ async def login_submit(
         auth_result = auth_service.authenticate_browser_user(db, username, password)
         return session_service.build_login_redirect_response(auth_result["access_token"])
     except Exception as e:
-         return templates.TemplateResponse("login.html", {"request": request, "error": str(e)})
+         return templates.TemplateResponse(request, "login.html", {"request": request, "error": str(e)})
 
 @router.get("/logout")
 async def logout():
@@ -69,7 +69,7 @@ async def logout():
 
 @router.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request):
-    return templates.TemplateResponse("register.html", {"request": request})
+    return templates.TemplateResponse(request, "register.html", {"request": request})
 
 @router.post("/register", response_class=HTMLResponse)
 async def register_submit(
@@ -90,7 +90,7 @@ async def register_submit(
         )
         return session_service.build_registration_success_response()
     except Exception as e:
-         return templates.TemplateResponse("register.html", {"request": request, "error": str(e)})
+         return templates.TemplateResponse(request, "register.html", {"request": request, "error": str(e)})
 
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(
@@ -104,8 +104,7 @@ async def dashboard(
     page_data = dashboard_service.get_dashboard_page_data(db, skip=0, limit=100)
     user_data = session_service.build_user_context(user, include_email=True)
     
-    return templates.TemplateResponse(
-        "dashboard.html", 
+    return templates.TemplateResponse(request, "dashboard.html", 
         {
             "request": request,
             "user": user_data,
@@ -125,8 +124,7 @@ async def projects_list(
 
     page_data = project_read_service.get_projects_page_data(db, skip=0, limit=100)
     user_data = session_service.build_user_context(user)
-    return templates.TemplateResponse(
-        "projects.html", 
+    return templates.TemplateResponse(request, "projects.html", 
         {"request": request, "user": user_data, "projects": page_data["projects"]}
     )
 
@@ -139,8 +137,7 @@ async def create_project_page(
         return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
         
     user_data = {"username": user.username, "roles": [r.name for r in user.roles], "id": user.id}
-    return templates.TemplateResponse(
-        "project_create.html",
+    return templates.TemplateResponse(request, "project_create.html",
         {"request": request, "user": user_data}
     )
 
@@ -155,8 +152,7 @@ async def admin_dashboard(
 
     admin_stats = admin_user_service.get_admin_dashboard_stats(db)
     user_data = session_service.build_user_context(user)
-    return templates.TemplateResponse(
-        "admin_dashboard.html",
+    return templates.TemplateResponse(request, "admin_dashboard.html",
         {"request": request, "user": user_data, "admin_stats": admin_stats}
     )
 
@@ -172,8 +168,7 @@ async def admin_create_user_page(
     roles = db.query(models.Role).all()
     user_data = {"username": user.username, "roles": [r.name for r in user.roles], "id": user.id}
     
-    return templates.TemplateResponse(
-        "admin_create_user.html",
+    return templates.TemplateResponse(request, "admin_create_user.html",
         {"request": request, "user": user_data, "roles": roles}
     )
 
@@ -202,8 +197,7 @@ async def admin_create_user_submit(
     except Exception as e:
         roles = admin_user_service.get_available_roles(db)
         user_data = session_service.build_user_context(user)
-        return templates.TemplateResponse(
-            "admin_create_user.html",
+        return templates.TemplateResponse(request, "admin_create_user.html",
             {"request": request, "user": user_data, "roles": roles, "error": str(e)}
         )
 
@@ -224,8 +218,7 @@ async def admin_users(
     page_data = admin_user_service.get_admin_users_page_data(db)
     user_data = session_service.build_user_context(user, include_email=True)
     
-    return templates.TemplateResponse(
-        "admin_users.html", 
+    return templates.TemplateResponse(request, "admin_users.html", 
         {
             "request": request, 
             "user": user_data, 
@@ -253,8 +246,7 @@ async def update_user_role(
     if role_update["status"] == "last_admin_blocked":
         page_data = admin_user_service.get_admin_users_page_data(db)
         user_data = session_service.build_user_context(user, include_email=True)
-        return templates.TemplateResponse(
-            "admin_users.html",
+        return templates.TemplateResponse(request, "admin_users.html",
             {
                 "request": request,
                 "user": user_data,
@@ -329,8 +321,7 @@ async def admin_stats(
     }
     
     user_data = {"username": user.username, "roles": [r.name for r in user.roles], "id": user.id}
-    return templates.TemplateResponse(
-        "admin_stats.html",
+    return templates.TemplateResponse(request, "admin_stats.html",
         {"request": request, "user": user_data, "stats": stats}
     )
 
@@ -349,8 +340,7 @@ async def admin_change_password_page(
         return RedirectResponse(url="/admin/users", status_code=302)
         
     user_data = {"username": user.username, "roles": [r.name for r in user.roles], "id": user.id}
-    return templates.TemplateResponse(
-        "admin_change_password.html",
+    return templates.TemplateResponse(request, "admin_change_password.html",
         {"request": request, "user": user_data, "target_user": target_user}
     )
 
@@ -402,8 +392,7 @@ async def create_project_with_files(
         )
     except project_service.ProjectBootstrapValidationError as exc:
         user_data = session_service.build_user_context(user)
-        return templates.TemplateResponse(
-            "project_create.html",
+        return templates.TemplateResponse(request, "project_create.html",
             {"request": request, "user": user_data, "error": str(exc)},
         )
 
@@ -424,8 +413,7 @@ async def project_chapters(
     if not project: raise HTTPException(status_code=404)
 
     user_data = session_service.build_user_context(user)
-    return templates.TemplateResponse(
-        "project_chapters.html", 
+    return templates.TemplateResponse(request, "project_chapters.html", 
         {"request": request, "project": project, "chapters": page_data["chapters"], "user": user_data}
     )
 
@@ -566,8 +554,7 @@ async def chapter_detail(
         raise HTTPException(status_code=404)
 
     user_data = session_service.build_user_context(user)
-    return templates.TemplateResponse(
-        "chapter_detail.html", 
+    return templates.TemplateResponse(request, "chapter_detail.html", 
         {
             "request": request,
             "project": project,
@@ -744,8 +731,7 @@ async def activities_page(
 
     activities, today_count = activity_service.get_recent_activities(db)
     user_data = session_service.build_user_context(user)
-    return templates.TemplateResponse(
-        "activities.html",
+    return templates.TemplateResponse(request, "activities.html",
         {"request": request, "user": user_data, "activities": activities, "today_count": today_count}
     )
 
@@ -762,11 +748,9 @@ async def technical_editor_page(
     if not file_record:
         raise HTTPException(status_code=404, detail="File not found")
         
-    user_data = {"username": user.username, "roles": [r.name for r in user.roles], "id": user.id}
-    
-    return templates.TemplateResponse(
-        "technical_editor_form.html",
-        {"request": request, "file": file_record, "user": user_data}
+    return RedirectResponse(
+        url=f"/ui/projects/{file_record.project_id}/chapters/{file_record.chapter_id}/files/{file_id}/technical-review",
+        status_code=302
     )
 
 
@@ -784,7 +768,7 @@ async def admin_edit_user_page(
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
     roles = db.query(Role).all()
-    return templates.TemplateResponse("admin_edit_user.html", {
+    return templates.TemplateResponse(request, "admin_edit_user.html", {
         "request": request, "user": user, "target": target, "roles": roles
     })
 
@@ -819,7 +803,7 @@ async def admin_change_password_page(
     target = db.query(User).filter(User.id == user_id).first()
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
-    return templates.TemplateResponse("admin_change_password.html", {
+    return templates.TemplateResponse(request, "admin_change_password.html", {
         "request": request, "user": user, "target": target
     })
 
@@ -843,7 +827,7 @@ async def admin_change_password(
     except LookupError:
         raise HTTPException(status_code=404, detail="User not found")
     if result["status"] == "error":
-        return templates.TemplateResponse("admin_change_password.html", {
+        return templates.TemplateResponse(request, "admin_change_password.html", {
             "request": request, "user": user, "target": result["target_user"],
             "error": result["error"]
         })

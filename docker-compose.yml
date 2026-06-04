@@ -23,13 +23,19 @@ services:
   db:
     image: postgres:15
     container_name: cms_db
+    ports:
+      # Mapped to 5433 on the host to avoid collision with a local Windows
+      # PostgreSQL instance that may already occupy port 5432.
+      # For local dev, use: DATABASE_URL=postgresql://cms_user:cms_password@127.0.0.1:5433/cms_db
+      - "5433:5432"
     env_file: .env
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
-      POSTGRES_USER:     ${POSTGRES_USER:-cms_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cms_pass}
-      POSTGRES_DB:       ${POSTGRES_DB:-cms_db}
+      POSTGRES_USER:             ${POSTGRES_USER:-cms_user}
+      POSTGRES_PASSWORD:         ${POSTGRES_PASSWORD:-cms_password}
+      POSTGRES_DB:               ${POSTGRES_DB:-cms_db}
+      POSTGRES_HOST_AUTH_METHOD: md5
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cms_user} -d ${POSTGRES_DB:-cms_db}"]
       interval: 10s
@@ -41,8 +47,8 @@ services:
   redis:
     image: redis:7-alpine
     container_name: cms_redis
-    # Port is NOT exposed to the host — Redis is internal only.
-    # Remove the healthcheck expose if you need remote access for debugging.
+    ports:
+      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -58,8 +64,8 @@ services:
     container_name: cms_backend
     env_file: .env
     volumes:
-      # Uploads persist on the host at /opt/cms_runtime/data/uploads
-      - /opt/cms_runtime/data/uploads:/opt/cms_runtime/data/uploads
+      # Use named volumes for uploads and runtime data on Windows
+      - cms_runtime_data:/opt/cms_runtime/data
       - ./outputs:/app/outputs
       - ./data:/app/data
       - ./temp_reports:/app/temp_reports
@@ -86,7 +92,7 @@ services:
     container_name: cms_celery_worker
     env_file: .env
     volumes:
-      - /opt/cms_runtime/data/uploads:/opt/cms_runtime/data/uploads
+      - cms_runtime_data:/opt/cms_runtime/data
       - ./outputs:/app/outputs
       - ./data:/app/data
       - ./temp_reports:/app/temp_reports
@@ -110,8 +116,8 @@ services:
     container_name: cms_collabora
     env_file: .env
     environment:
-      # Allow WOPI requests originating from both the public URL and the
-      # internal backend service URL.
+      # Allow WOPI requests originating from both public URL (for browser)
+      # and internal Docker service name (for Collabora->backend communication).
       aliasgroup1: "http://${HOST_DOMAIN:-localhost}:${HOST_PORT:-8080}"
       aliasgroup2: "http://backend:8000"
       DONT_GEN_SSL_CERT: "YES"
@@ -124,6 +130,18 @@ services:
       - "host.docker.internal:host-gateway"
     ports:
       - "9980:9980"
+    restart: always
+
+  onlyoffice:
+    image: onlyoffice/documentserver
+    container_name: cms_onlyoffice
+    ports:
+      - "8083:80"
+    environment:
+      JWT_ENABLED: "true"
+      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:-secret}
+      JWT_HEADER: "Authorization"
+      JWT_IN_BODY: "true"
     restart: always
 
   # ── AI Structuring Service ────────────────────────────────────────────────
@@ -199,6 +217,7 @@ services:
       - certbot_webroot:/var/www/certbot:ro
     depends_on:
       - backend
+      - onlyoffice
       - collabora
     restart: always
 
@@ -206,6 +225,7 @@ volumes:
   postgres_data:
   certbot_webroot:
   ref_cache:
+  cms_runtime_data:
   ai_structuring_uploads:
   ai_structuring_outputs:
   ai_structuring_data:

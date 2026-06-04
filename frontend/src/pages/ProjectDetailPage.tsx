@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-
+import { BookOpen } from "lucide-react";
 
 import { getApiErrorMessage } from "@/api/client";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -11,6 +11,7 @@ import { AddChapterDrawer } from "@/features/projects/components/AddChapterDrawe
 import { ProjectChaptersTable } from "@/features/projects/components/ProjectChaptersTable";
 import { useProjectChaptersQuery } from "@/features/projects/useProjectChaptersQuery";
 import { useProjectDetailQuery } from "@/features/projects/useProjectDetailQuery";
+import { ProjectWorkflowPanel } from "@/features/workflow/ProjectWorkflowPanel";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { uiPaths } from "@/utils/appPaths";
 import type { ChapterSummary } from "@/types/api";
@@ -139,6 +140,21 @@ export function ProjectDetailPage() {
         title={project.title}
         badge={<StatusBadge status={project.status} size="sm" />}
         subtitle={project.client_name ?? project.code}
+      />
+
+      <div className="flex items-center justify-end gap-2 -mt-2 mb-3">
+        <Link to={uiPaths.projectStylesheets(normalizedProjectId)}>
+          <button className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md border border-navy-200 bg-white text-navy-700 hover:bg-navy-50 shadow-subtle transition-all duration-150">
+            <BookOpen className="w-4 h-4" />
+            Stylesheets
+          </button>
+        </Link>
+      </div>
+
+      <ProjectWorkflowPanel
+        projectId={project.id}
+        workflowType={project.workflow_type}
+        workflowStageNo={project.workflow_stage_no}
       />
 
       {/* Tab bar */}

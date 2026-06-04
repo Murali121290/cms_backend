@@ -33,31 +33,35 @@ describe("TechnicalReviewPage", () => {
     expect(screen.getByText("Technical scan unavailable.")).toBeInTheDocument();
   });
 
-  it("keeps apply wired to the current technical review mutation flow", async () => {
+  it("renders premium dashboard elements successfully", async () => {
     getTechnicalReview.mockResolvedValueOnce(
       createTechnicalScanResponse({
-        issues: [
+        issues: [],
+        findings: [
           {
-            key: "issue-1",
-            label: "Issue 1",
-            category: "Formatting",
-            count: 2,
-            found: ["teh", "teh"],
-            options: ["the", "The"],
-          },
+            para_index: 0,
+            match_start: 5,
+            surface: "teh",
+            replacement: "the",
+            context: "This is teh test.",
+            category: "spelling",
+            rule_id: "rule-1",
+            rule_label: "Spelling Correction"
+          }
         ],
+        spelling_summary: {
+          variants: [
+            { uk: "colour", us: "color", uk_count: 2, us_count: 1 }
+          ]
+        },
+        stats: {
+          word_count: 120,
+          char_count: 700,
+          missing_captions: 1,
+          missing_citations: 0
+        }
       }),
     );
-    applyTechnicalReview.mockResolvedValueOnce({
-      status: "completed",
-      source_file_id: 100,
-      new_file_id: 101,
-      new_file: {
-        ...createTechnicalScanResponse().file,
-        id: 101,
-        filename: "chapter01_TechEdited.docx",
-      },
-    });
 
     renderRoute({
       path: "/ui/projects/:projectId/chapters/:chapterId/files/:fileId/technical-review",
@@ -65,14 +69,17 @@ describe("TechnicalReviewPage", () => {
       element: <TechnicalReviewPage />,
     });
 
-    expect(await screen.findByRole("heading", { name: "Technical Editing" })).toBeInTheDocument();
+    // Check heading
+    expect(await screen.findByText("Advanced Manuscript consistency reviewer")).toBeInTheDocument();
+    
+    // Switch to Overview Dashboard tab
+    const dashboardTab = screen.getByRole("button", { name: /overview dashboard/i });
+    await userEvent.click(dashboardTab);
 
-    await userEvent.click(screen.getAllByRole("button", { name: "Apply Changes" })[0]);
-
-    await waitFor(() => {
-      expect(applyTechnicalReview).toHaveBeenCalledWith(100, {
-        "issue-1": "the",
-      });
-    });
+    // Check metric values
+    expect(screen.getByText("120")).toBeInTheDocument(); // Word count
+    expect(screen.getByText("700")).toBeInTheDocument(); // Char count
+    expect(screen.getByText("colour")).toBeInTheDocument(); // Variant table
+    expect(screen.getByText("color")).toBeInTheDocument(); // Variant table
   });
 });

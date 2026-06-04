@@ -8,7 +8,6 @@ export const uiPaths = {
   projects: "/projects",
   projectCreate: "/projects/create",
   projectDetail: (projectId: number | string) => `/projects/${projectId}`,
-  projectEditor: (projectId: number | string) => `/editor/${projectId}`,
   chapterDetail: (projectId: number | string, chapterId: number | string) =>
     `/projects/${projectId}/chapters/${chapterId}`,
   technicalReview: (
@@ -16,16 +15,33 @@ export const uiPaths = {
     chapterId: number | string,
     fileId: number | string,
   ) => `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/technical-review`,
+  technicalEditor: (
+    projectId: number | string,
+    chapterId: number | string,
+    fileId: number | string,
+  ) => `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/technical-editor`,
   structuringReview: (
     projectId: number | string,
     chapterId: number | string,
     fileId: number | string,
   ) => `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/structuring-review`,
+  referenceReview: (
+    projectId: number | string,
+    chapterId: number | string,
+    fileId: number | string,
+  ) => `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/reference-review`,
   fileEditor: (
     projectId: number | string,
     chapterId: number | string,
     fileId: number | string,
   ) => `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/edit`,
+  docxEditor: (
+    projectId: number | string,
+    chapterId: number | string,
+    fileId: number | string,
+  ) => `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/wysiwyg`,
+  projectStylesheets: (projectId: number | string) =>
+    `/projects/${projectId}/stylesheets`,
 } as const;
 
 export const ssrPaths = {

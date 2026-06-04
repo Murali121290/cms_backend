@@ -1,6 +1,6 @@
 import { useParams, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, AlertCircle } from "lucide-react";
+import { ArrowLeft, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { apiClient } from "@/api/client";
 import { uiPaths } from "@/utils/appPaths";
@@ -40,6 +40,13 @@ export function FileEditorPage() {
         <span className="text-sm font-medium text-navy-800 truncate">
           {query.data?.filename ?? "Loading…"}
         </span>
+        <div className="ml-auto flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+            <span className="text-xs text-emerald-600 font-medium">Auto-saving</span>
+          </div>
+          <span className="text-xs text-navy-400">Collabora Online</span>
+        </div>
       </div>
 
       {/* Editor area */}

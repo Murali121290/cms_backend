@@ -96,6 +96,8 @@ class ProjectSummary(BaseModel):
     team_id: int | None = None
     chapter_count: int
     file_count: int
+    workflow_type: str | None = None
+    workflow_stage_no: str | None = None
 
 
 class ChapterSummary(BaseModel):
@@ -140,6 +142,18 @@ class ProjectsListResponse(BaseModel):
     pagination: ProjectsPagination
 
 
+class FileListItem(FileRecord):
+    project_code: str | None = None
+    project_title: str | None = None
+    chapter_number: str | None = None
+    chapter_title: str | None = None
+
+
+class FilesListResponse(BaseModel):
+    files: list[FileListItem]
+    pagination: ProjectsPagination
+
+
 class ProjectDetail(BaseModel):
     id: int
     code: str
@@ -150,6 +164,8 @@ class ProjectDetail(BaseModel):
     team_id: int | None = None
     chapter_count: int
     file_count: int
+    workflow_type: str | None = None
+    workflow_stage_no: str | None = None
     chapters: list[ChapterSummary] = Field(default_factory=list)
 
 
@@ -378,6 +394,16 @@ class ProjectBootstrapResponse(BaseModel):
     redirect_to: str
 
 
+class ProjectWorkflowUpdateRequest(BaseModel):
+    workflow_type: str | None = None
+    workflow_stage_no: str | None = None
+
+
+class ProjectWorkflowUpdateResponse(BaseModel):
+    status: Literal["ok"] = "ok"
+    project: ProjectSummary
+
+
 class ProjectDeleteInfo(BaseModel):
     project_id: int
     code: str
@@ -529,10 +555,20 @@ class TechnicalScanResponse(BaseModel):
     file: FileRecord
     issues: list[TechnicalIssue]
     raw_scan: dict[str, Any]
+    onlyoffice_available: bool = False
+    collabora_url: str | None = None
+    findings: list[dict] | None = None
+    inconsistencies: dict[str, Any] | None = None
+    spelling_summary: dict[str, Any] | None = None
+    ia_report: dict[str, Any] | None = None
+    stats: dict[str, Any] | None = None
+    active_stylesheet: "StylesheetSummary | None" = None
 
 
 class TechnicalApplyRequest(BaseModel):
-    replacements: dict[str, str]
+    replacements: dict[str, str] | None = None
+    selected_findings: list[dict] | None = None
+    highlight_findings: list[dict] | None = None
 
 
 class TechnicalApplyResponse(BaseModel):
@@ -542,6 +578,21 @@ class TechnicalApplyResponse(BaseModel):
     new_file: FileRecord
 
 
+class StructuredBlock(BaseModel):
+    index: int
+    type: Literal["paragraph", "table", "footnote", "endnote"]
+    style: str
+    html: str
+    ref_index: int | None = None
+
+
+class StructuredContentResponse(BaseModel):
+    status: Literal["ok"] = "ok"
+    filename: str
+    blocks: list[StructuredBlock]
+    available_styles: list[str]
+
+
 class StructuringProcessedFile(BaseModel):
     filename: str
     exists: Literal[True] = True
@@ -549,6 +600,7 @@ class StructuringProcessedFile(BaseModel):
 
 class StructuringReviewEditor(BaseModel):
     mode: Literal["structuring"] = "structuring"
+    onlyoffice_available: bool = False
     collabora_url: str | None = None
     wopi_mode: Literal["structuring"] = "structuring"
     save_mode: Literal["wopi_autosave"] = "wopi_autosave"
@@ -579,4 +631,125 @@ class StructuringSaveResponse(BaseModel):
     status: Literal["ok"] = "ok"
     file_id: int
     saved_change_count: int
+    target_filename: str
+
+
+# ─── Editorial Stylesheets ────────────────────────────────────────────────────
+
+
+class IARow(BaseModel):
+    element: str
+    subtype: str
+    pattern: str
+
+
+class IATemplateRow(BaseModel):
+    element: str
+    subtype: str
+    pattern: str
+    example: str | None = None
+
+
+class StylesheetSummary(BaseModel):
+    id: int
+    project_id: int
+    name: str
+    description: str | None = None
+    is_active: bool
+    created_at: datetime
+    created_by_id: int | None = None
+    selected_ia_rows: list[IARow] = Field(default_factory=list)
+
+
+class StylesheetCreateRequest(BaseModel):
+    name: str
+    description: str | None = None
+    selected_ia_rows: list[IARow] = Field(default_factory=list)
+
+
+class StylesheetCreateResponse(BaseModel):
+    status: Literal["ok"] = "ok"
+    stylesheet: StylesheetSummary
+
+
+class StylesheetUpdateRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    selected_ia_rows: list[IARow] | None = None
+
+
+class StylesheetUpdateResponse(BaseModel):
+    status: Literal["ok"] = "ok"
+    stylesheet: StylesheetSummary
+
+
+class StylesheetDeleteResponse(BaseModel):
+    status: Literal["ok"] = "ok"
+    deleted_id: int
+
+
+class StylesheetActivateResponse(BaseModel):
+    status: Literal["ok"] = "ok"
+    activated_id: int
+    deactivated_ids: list[int]
+
+
+class StylesheetsListResponse(BaseModel):
+    project_id: int
+    stylesheets: list[StylesheetSummary]
+    active_stylesheet: StylesheetSummary | None = None
+
+
+class IATemplateResponse(BaseModel):
+    rows: list[IATemplateRow]
+
+
+# ─── Stylesheet Analysis ──────────────────────────────────────────────────────
+
+
+class AnalyzeFilesRequest(BaseModel):
+    file_ids: list[int]
+
+
+class TriggeredIARule(BaseModel):
+    element: str
+    subtype: str
+    pattern: str
+    count: int
+    example_surfaces: list[str] = Field(default_factory=list)
+
+
+class AnalyzeFilesForStylesheetResponse(BaseModel):
+    analyzed_files: list[dict]
+    triggered_rules: list[TriggeredIARule]
+    total_findings: int
+
+
+# ─── WYSIWYG Editor XHTML Save ────────────────────────────────────────────────
+
+class XhtmlSaveRequest(BaseModel):
+    html_content: str
+
+
+class ReferenceValidationReviewResponse(BaseModel):
+    status: Literal["ok"] = "ok"
+    viewer: Viewer
+    file: FileRecord
+    content: str
+    filename: str
+    styles: list[str]
+    validation_logs: dict[str, Any]
+    save_endpoint: str
+    export_href: str
+    return_href: str | None = None
+
+
+class ReferenceValidateOnlyResponse(BaseModel):
+    validation_logs: dict[str, Any]
+    detected_style: str
+
+
+class ReferenceSaveResponse(BaseModel):
+    status: Literal["ok"] = "ok"
+    file_id: int
     target_filename: str

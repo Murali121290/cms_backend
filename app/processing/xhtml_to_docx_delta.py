@@ -1,0 +1,600 @@
+"""Run-anchored, structural-bookmarked XHTML → DOCX delta patch.
+
+Uses paragraph, run, table, cell, and footnote bookmarks to map editor HTML elements
+1-to-1 back to their source DOCX XML elements. Edits are applied strictly in-place,
+guaranteeing 100% formatting preservation.
+"""
+
+import base64
+import logging
+import os
+import re
+import uuid
+from datetime import datetime
+from pathlib import Path
+
+import lxml.html
+from docx import Document
+from docx.oxml import OxmlElement, parse_xml
+from docx.oxml.ns import qn
+from docx.text.run import Run
+from lxml import etree
+
+logger = logging.getLogger("app.processing.xhtml_to_docx_delta")
+
+
+# ─── Lookup Helpers ───────────────────────────────────────────────────────────
+
+def _get_unique_bookmark_id(doc) -> int:
+    """Finds a unique bookmark integer ID in the document."""
+    if not hasattr(doc, "_next_bookmark_id"):
+        used_ids = set()
+        for bm_start in doc.element.body.findall(f".//{qn('w:bookmarkStart')}"):
+            bm_id = bm_start.get(qn("w:id"))
+            if bm_id is not None:
+                try:
+                    used_ids.add(int(bm_id))
+                except ValueError:
+                    pass
+        
+        for rel_id, part in doc.part.related_parts.items():
+            if "footnotes" in part.partname or "endnotes" in part.partname:
+                try:
+                    for bm_start in part._element.findall(f".//{qn('w:bookmarkStart')}"):
+                        bm_id = bm_start.get(qn("w:id"))
+                        if bm_id is not None:
+                            try:
+                                used_ids.add(int(bm_id))
+                            except ValueError:
+                                pass
+                except Exception:
+                    pass
+        doc._next_bookmark_id = max(used_ids) + 1 if used_ids else 1
+
+    next_id = doc._next_bookmark_id
+    doc._next_bookmark_id += 1
+    return next_id
+
+
+def _find_para_by_bookmark(doc, bookmark_name: str):
+    """Finds a body paragraph or table cell paragraph containing the specified bookmark."""
+    # 1. Search in body paragraphs
+    for para in doc.paragraphs:
+        for child in para._p:
+            if child.tag == qn("w:bookmarkStart") and child.get(qn("w:name")) == bookmark_name:
+                return para
+
+    # 2. Search in table cell paragraphs
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for para in cell.paragraphs:
+                    for child in para._p:
+                        if child.tag == qn("w:bookmarkStart") and child.get(qn("w:name")) == bookmark_name:
+                            return para
+    return None
+
+
+def _find_note_para_by_bookmark(doc, bookmark_name: str):
+    """Finds a footnote or endnote definition paragraph containing the specified bookmark."""
+    for rel_id, part in doc.part.related_parts.items():
+        if "footnotes" in part.partname or "endnotes" in part.partname:
+            try:
+                for p_elem in part._element.findall(f".//{qn('w:p')}"):
+                    for child in p_elem:
+                        if child.tag == qn("w:bookmarkStart") and child.get(qn("w:name")) == bookmark_name:
+                            import docx
+                            return docx.text.paragraph.Paragraph(p_elem, doc)
+            except Exception:
+                pass
+    return None
+
+
+def _find_run_by_bookmark(para, bookmark_name: str):
+    """Finds the run element wrapped or preceded by the specified run bookmark."""
+    p_children = list(para._p)
+    for idx, child in enumerate(p_children):
+        if child.tag == qn("w:bookmarkStart") and child.get(qn("w:name")) == bookmark_name:
+            bm_id = child.get(qn("w:id"))
+            # The mapped run is immediately following the bookmark start
+            for next_idx in range(idx + 1, len(p_children)):
+                next_child = p_children[next_idx]
+                if next_child.tag == qn("w:r"):
+                    return Run(next_child, para)
+                elif next_child.tag == qn("w:bookmarkEnd") and next_child.get(qn("w:id")) == bm_id:
+                    break
+    return None
+
+
+# ─── Core Delta Saving Engine ────────────────────────────────────────────────
+
+class XhtmlToDocxDeltaEngine:
+    """Apply HTML edits back to the DOCX in-place using unique tracking bookmarks."""
+
+    def convert(self, html_path: str, out_docx_path: str, username: str = "WYSIWYG Editor") -> str:
+        if not os.path.exists(html_path):
+            raise RuntimeError(f"Input HTML not found: {html_path}")
+        if not os.path.exists(out_docx_path):
+            raise RuntimeError(f"Target DOCX not found: {out_docx_path}")
+
+        # Parse saved HTML content
+        with open(html_path, "r", encoding="utf-8") as f:
+            html_content = f.read()
+
+        root = lxml.html.fromstring(html_content)
+        doc = Document(out_docx_path)
+        patched = 0
+
+        # Find all HTML paragraphs, headings, list items, cell paragraphs, and page breaks
+        all_elements = root.xpath("//p | //h1 | //h2 | //h3 | //h4 | //h5 | //h6 | //li | //div[contains(@class, 'page-break')] | //hr[contains(@class, 'page-break')]")
+        
+        # Filter out li elements that contain p, h1, h2, h3, h4, h5, or h6 descendants
+        # to prevent parent-child double matching when list items contain styled paragraphs.
+        html_blocks = []
+        for el in all_elements:
+            if el.tag == "li":
+                has_nested_block = any(child.tag in ("p", "h1", "h2", "h3", "h4", "h5", "h6") for child in el.iterdescendants())
+                if has_nested_block:
+                    continue
+            html_blocks.append(el)
+
+        for idx, block_el in enumerate(html_blocks):
+            is_page_break = block_el.tag in ("div", "hr") and "page-break" in (block_el.get("class") or "")
+            if is_page_break:
+                # Find the nearest upcoming element that has a bookmark
+                target_para = None
+                for next_el in html_blocks[idx + 1:]:
+                    next_bm = next_el.get("data-bookmark")
+                    if next_bm:
+                        target_para = _find_para_by_bookmark(doc, next_bm) or _find_note_para_by_bookmark(doc, next_bm)
+                        if target_para:
+                            break
+                if target_para:
+                    try:
+                        from docx.enum.text import WD_BREAK
+                        p = target_para.insert_paragraph_before()
+                        p.add_run().add_break(WD_BREAK.PAGE)
+                        patched += 1
+                        logger.info("Inserted DOCX page break in delta engine successfully.")
+                    except Exception as e:
+                        logger.warning(f"Failed to insert page break in delta: {e}")
+                continue
+
+            bm_name = block_el.get("data-bookmark")
+            if not bm_name:
+                continue
+
+            new_style = block_el.get("data-style-label") or block_el.get("class", "")
+            new_style = new_style.split()[0] if new_style.strip() else "Normal"
+            if new_style in ("Normal", "MsoNormal", ""):
+                new_style = "Normal"
+
+            # 1. Retrieve the exact paragraph node in the body, table cells, or footnote parts
+            para = _find_para_by_bookmark(doc, bm_name)
+            if not para:
+                para = _find_note_para_by_bookmark(doc, bm_name)
+            
+            if not para:
+                logger.info(f"Bookmark {bm_name} not found in DOCX (might be a newly added paragraph, skip in-place)")
+                continue
+
+            # 2. Update paragraph-level style if changed
+            try:
+                if para.style.name != new_style:
+                    para.style = new_style
+            except Exception:
+                try:
+                    # Fallback to direct XML injection if style name is missing in document template
+                    pPr = para._p.get_or_add_pPr()
+                    for existing in pPr.findall(qn("w:pStyle")):
+                        pPr.remove(existing)
+                    pStyle = etree.SubElement(pPr, qn("w:pStyle"))
+                    pStyle.set(qn("w:val"), new_style)
+                    pPr.insert(0, pStyle)
+                except Exception:
+                    pass
+
+            # 3. Patch paragraph runs strictly in-place
+            try:
+                self._patch_paragraph_runs(para, block_el, doc, username)
+                patched += 1
+            except Exception as exc:
+                logger.warning(f"Failed to patch runs for paragraph bookmark {bm_name}: {exc}", exc_info=True)
+
+        logger.info(f"Lossless Bookmark Delta patch: {patched} paragraph(s) updated in-place.")
+
+        # Save atomically
+        tmp_path = out_docx_path + ".delta.tmp"
+        doc.save(tmp_path)
+        
+        # Ensure revision tracking is enabled
+        try:
+            from app.processing.manuscript_core.fixer import enable_track_revisions
+            enable_track_revisions(Path(tmp_path))
+        except Exception as exc:
+            logger.warning(f"Could not enable track revisions: {exc}")
+            
+        os.replace(tmp_path, out_docx_path)
+        logger.info(f"Lossless Delta-patched DOCX saved: {out_docx_path}")
+        return out_docx_path
+
+    def _patch_paragraph_runs(self, para, html_el, doc, username: str) -> None:
+        """Modifies and synchronizes runs inside `<w:p>` completely in-place by rebuilding them."""
+        import re
+        import uuid
+        from datetime import datetime
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        from lxml import etree
+        from docx.opc.constants import RELATIONSHIP_TYPE
+
+        # 1. Clear existing runs, ins, del, hyperlinks, and run-level bookmarks (r_bm_*)
+        p_elem = para._element
+        for child in list(p_elem):
+            tag_name = etree.QName(child.tag).localname
+            if tag_name in ('r', 'ins', 'del', 'hyperlink'):
+                p_elem.remove(child)
+            elif tag_name in ('bookmarkStart', 'bookmarkEnd'):
+                name = child.get(qn('w:name'), '')
+                if name.startswith('r_bm_'):
+                    p_elem.remove(child)
+
+        # ISO 8601 timestamp with UTC timezone
+        timestamp = datetime.utcnow().isoformat() + "Z"
+        
+        # Track unique revision/bookmark IDs
+        next_id = [_get_unique_bookmark_id(doc)]  # Use list to allow mutation
+
+        def parse_style(style_str):
+            if not style_str:
+                return {}
+            styles = {}
+            for pair in style_str.split(';'):
+                if ':' in pair:
+                    key, val = pair.split(':', 1)
+                    styles[key.strip().lower()] = val.strip()
+            return styles
+
+        def add_rich_run(parent_element, text, bold=False, italic=False, underline=False, color=None, bg_color=None, font_size=None, superscript=False, subscript=False, is_link=False, is_del=False, char_style=None):
+            if not text:
+                return
+            r = OxmlElement('w:r')
+
+            rPr = OxmlElement('w:rPr')
+            has_rPr = False
+
+            if bold:
+                b = OxmlElement('w:b')
+                rPr.append(b)
+                has_rPr = True
+            if italic:
+                i = OxmlElement('w:i')
+                rPr.append(i)
+                has_rPr = True
+            
+            final_underline = underline or is_link
+            final_color = color
+            if is_link and not final_color:
+                final_color = "0563C1"
+
+            if final_underline:
+                u = OxmlElement('w:u')
+                u.set(qn('w:val'), 'single')
+                rPr.append(u)
+                has_rPr = True
+            if final_color:
+                c = OxmlElement('w:color')
+                c.set(qn('w:val'), final_color.upper())
+                rPr.append(c)
+                has_rPr = True
+            if bg_color:
+                shd = OxmlElement('w:shd')
+                shd.set(qn('w:val'), 'clear')
+                shd.set(qn('w:color'), 'auto')
+                shd.set(qn('w:fill'), bg_color.upper())
+                rPr.append(shd)
+                has_rPr = True
+            if font_size:
+                sz_val = str(int(float(font_size) * 2))
+                sz = OxmlElement('w:sz')
+                sz.set(qn('w:val'), sz_val)
+                szCs = OxmlElement('w:szCs')
+                szCs.set(qn('w:val'), sz_val)
+                rPr.append(sz)
+                rPr.append(szCs)
+                has_rPr = True
+            if superscript:
+                va = OxmlElement('w:vertAlign')
+                va.set(qn('w:val'), 'superscript')
+                rPr.append(va)
+                has_rPr = True
+            elif subscript:
+                va = OxmlElement('w:vertAlign')
+                va.set(qn('w:val'), 'subscript')
+                rPr.append(va)
+                has_rPr = True
+            if char_style and char_style != "Default Paragraph Font":
+                rStyle = OxmlElement('w:rStyle')
+                rStyle.set(qn('w:val'), char_style)
+                rPr.append(rStyle)
+                has_rPr = True
+
+            if has_rPr:
+                r.append(rPr)
+
+            t = OxmlElement('w:delText' if is_del else 'w:t')
+            if text.startswith(' ') or text.endswith(' '):
+                t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+            t.text = text
+            r.append(t)
+
+            parent_element.append(r)
+
+        # Helper to wrap children in a bookmark Start/End
+        def wrap_in_bookmark(parent_xml, bm_name, process_content_fn):
+            bm_start = OxmlElement("w:bookmarkStart")
+            bm_start.set(qn("w:id"), str(next_id[0]))
+            bm_start.set(qn("w:name"), bm_name)
+
+            bm_end = OxmlElement("w:bookmarkEnd")
+            bm_end.set(qn("w:id"), str(next_id[0]))
+
+            next_id[0] += 1
+
+            parent_xml.append(bm_start)
+            process_content_fn(parent_xml)
+            parent_xml.append(bm_end)
+
+        def traverse(el, parent_xml, bold=False, italic=False, underline=False, color=None, bg_color=None, font_size=None, superscript=False, subscript=False, is_link=False, char_style=None):
+            tag = el.tag.split('}')[-1].lower() if isinstance(el.tag, str) else ""
+
+            style_str = el.get("style", "")
+            styles = parse_style(style_str)
+
+            has_bold_style = "font-weight" in styles and styles["font-weight"].strip().lower() in ("bold", "700")
+            has_underline_style = "text-decoration" in styles and "underline" in styles["text-decoration"].strip().lower()
+            has_italic_style = "font-style" in styles and styles["font-style"].strip().lower() == "italic"
+
+            node_color = color
+            if "color" in styles:
+                c_val = styles["color"].strip()
+                if c_val.startswith("#"):
+                    node_color = c_val.replace("#", "")
+            
+            node_bg = bg_color
+            if "background-color" in styles:
+                bg_val = styles["background-color"].strip()
+                if bg_val.startswith("#"):
+                    node_bg = bg_val.replace("#", "")
+            elif "background" in styles:
+                bg_val = styles["background"].strip()
+                if bg_val.startswith("#"):
+                    node_bg = bg_val.replace("#", "")
+
+            node_font_size = font_size
+            if "font-size" in styles:
+                sz_val = styles["font-size"].strip()
+                match = re.match(r"(\d+(\.\d+)?)\s*(pt|px)?", sz_val)
+                if match:
+                    val = float(match.group(1))
+                    unit = match.group(3)
+                    if unit == "px":
+                        node_font_size = round(val * 0.75, 1)
+                    else:
+                        node_font_size = val
+
+            # Parse character style from class (starts with bib_ or cite_)
+            node_char_style = char_style
+            classes = (el.get("class") or "").split()
+            style_match = next((c for c in classes if c.startswith("bib_") or c.startswith("cite_")), None)
+            if style_match:
+                node_char_style = style_match
+
+            current_bold = bold or tag in ('strong', 'b') or has_bold_style
+            current_italic = italic or tag in ('em', 'i') or has_italic_style
+            current_underline = underline or tag == 'u' or has_underline_style
+            current_super = superscript or tag == 'sup' or styles.get("vertical-align") == "super"
+            current_sub = subscript or tag == 'sub' or styles.get("vertical-align") == "sub"
+            current_link = is_link or tag == 'a'
+
+            current_xml_parent = parent_xml
+            is_del = False
+
+            replacement_text = el.get("data-replacement")
+            if tag == 'span' and replacement_text is not None:
+                author = el.get("data-author") or username
+                date = el.get("data-date") or timestamp
+                
+                # 1. Deletion
+                original_text = el.text or ""
+                for child in el:
+                    original_text += child.text or ""
+                    if child.tail:
+                        original_text += child.tail
+                
+                if original_text:
+                    del_node = OxmlElement('w:del')
+                    del_node.set(qn('w:id'), str(next_id[0]))
+                    del_node.set(qn('w:author'), author)
+                    del_node.set(qn('w:date'), date)
+                    next_id[0] += 1
+                    
+                    add_rich_run(
+                        del_node, original_text,
+                        bold=current_bold, italic=current_italic, underline=current_underline,
+                        color=node_color, bg_color=None, font_size=node_font_size,
+                        superscript=current_super, subscript=current_sub, is_link=current_link,
+                        is_del=True, char_style=node_char_style
+                    )
+                    current_xml_parent.append(del_node)
+                
+                # 2. Insertion
+                if replacement_text:
+                    ins_node = OxmlElement('w:ins')
+                    ins_node.set(qn('w:id'), str(next_id[0]))
+                    ins_node.set(qn('w:author'), author)
+                    ins_node.set(qn('w:date'), date)
+                    next_id[0] += 1
+                    
+                    add_rich_run(
+                        ins_node, replacement_text,
+                        bold=current_bold, italic=current_italic, underline=current_underline,
+                        color=node_color, bg_color=None, font_size=node_font_size,
+                        superscript=current_super, subscript=current_sub, is_link=current_link,
+                        is_del=False, char_style=node_char_style
+                    )
+                    current_xml_parent.append(ins_node)
+                
+                # 3. Handle tail text of the span element
+                if el.tail:
+                    add_rich_run(
+                        parent_xml, el.tail,
+                        bold=bold, italic=italic, underline=underline,
+                        color=color, bg_color=bg_color, font_size=font_size,
+                        superscript=superscript, subscript=subscript, is_link=is_link,
+                        is_del=False, char_style=char_style
+                    )
+                return
+
+            if tag == 'ins':
+                author = el.get("data-author") or username
+                date = el.get("data-date") or timestamp
+                ins_node = OxmlElement('w:ins')
+                ins_node.set(qn('w:id'), str(next_id[0]))
+                ins_node.set(qn('w:author'), author)
+                ins_node.set(qn('w:date'), date)
+                next_id[0] += 1
+                parent_xml.append(ins_node)
+                current_xml_parent = ins_node
+            elif tag == 'del':
+                author = el.get("data-author") or username
+                date = el.get("data-date") or timestamp
+                del_node = OxmlElement('w:del')
+                del_node.set(qn('w:id'), str(next_id[0]))
+                del_node.set(qn('w:author'), author)
+                del_node.set(qn('w:date'), date)
+                next_id[0] += 1
+                parent_xml.append(del_node)
+                current_xml_parent = del_node
+                is_del = True
+            elif tag == 'a':
+                href = el.get("href", "")
+                if href:
+                    try:
+                        r_id = para.part.relate_to(href, RELATIONSHIP_TYPE.HYPERLINK, is_external=True)
+                        link_node = OxmlElement('w:hyperlink')
+                        link_node.set(qn('r:id'), r_id)
+                        parent_xml.append(link_node)
+                        current_xml_parent = link_node
+                    except Exception as link_err:
+                        logger.warning(f"Could not build hyperlink in python-docx: {link_err}")
+
+            if tag == 'math' or el.get("data-latex"):
+                try:
+                    import latex2mathml.converter
+                    import mathml2omml
+                    
+                    if tag == 'math':
+                        # Serialize the element to MathML string
+                        mathml_str = etree.tostring(el, encoding="utf-8").decode("utf-8")
+                    else:
+                        latex_str = el.get("data-latex")
+                        mathml_str = latex2mathml.converter.convert(latex_str)
+                    
+                    omml_str = mathml2omml.convert(mathml_str)
+                    if "xmlns:m=" not in omml_str:
+                        omml_str = omml_str.replace("<m:oMath", '<m:oMath xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"', 1)
+                    
+                    omml_el = etree.fromstring(omml_str)
+                    current_xml_parent.append(omml_el)
+                except Exception as math_err:
+                    logger.warning(f"Failed to convert math to OMML: {math_err}")
+                    if el.text:
+                        add_rich_run(
+                            current_xml_parent, el.text,
+                            bold=current_bold, italic=current_italic, underline=current_underline,
+                            color=node_color, bg_color=node_bg, font_size=node_font_size,
+                            superscript=current_super, subscript=current_sub, is_link=current_link,
+                            is_del=is_del, char_style=node_char_style
+                        )
+                
+                if el.tail:
+                    add_rich_run(
+                        parent_xml, el.tail,
+                        bold=bold, italic=italic, underline=underline,
+                        color=color, bg_color=bg_color, font_size=font_size,
+                        superscript=superscript, subscript=subscript, is_link=is_link,
+                        is_del=False, char_style=char_style
+                    )
+                return
+
+            bm_name = el.get("data-bookmark")
+            # Auto-generate a bookmark name if it's a span and doesn't have one
+            if tag == 'span' and not bm_name:
+                unique_id = uuid.uuid4().hex[:8]
+                bm_name = f"r_bm_{unique_id}"
+                el.set("data-bookmark", bm_name)
+
+            def process_text_and_children(xml_parent):
+                if el.text:
+                    add_rich_run(
+                        xml_parent, el.text,
+                        bold=current_bold, italic=current_italic, underline=current_underline,
+                        color=node_color, bg_color=node_bg, font_size=node_font_size,
+                        superscript=current_super, subscript=current_sub, is_link=current_link,
+                        is_del=is_del, char_style=node_char_style
+                    )
+                for child in el:
+                    traverse(
+                        child, xml_parent,
+                        bold=current_bold, italic=current_italic, underline=current_underline,
+                        color=node_color, bg_color=node_bg, font_size=node_font_size,
+                        superscript=current_super, subscript=current_sub, is_link=current_link,
+                        char_style=node_char_style
+                    )
+
+            if bm_name and bm_name.startswith("r_bm_"):
+                wrap_in_bookmark(current_xml_parent, bm_name, process_text_and_children)
+            else:
+                process_text_and_children(current_xml_parent)
+
+            if el.tail:
+                add_rich_run(
+                    parent_xml, el.tail,
+                    bold=bold, italic=italic, underline=underline,
+                    color=color, bg_color=bg_color, font_size=font_size,
+                    superscript=superscript, subscript=subscript, is_link=is_link,
+                    is_del=False, char_style=char_style
+                )
+
+        # Parse root element's initial styles (if any)
+        root_style = html_el.get("style", "")
+        root_styles = parse_style(root_style)
+        root_color = None
+        if "color" in root_styles:
+            c_val = root_styles["color"].strip()
+            if c_val.startswith("#"):
+                root_color = c_val.replace("#", "")
+        root_bg = None
+        if "background-color" in root_styles:
+            bg_val = root_styles["background-color"].strip()
+            if bg_val.startswith("#"):
+                root_bg = bg_val.replace("#", "")
+        root_font_size = None
+        if "font-size" in root_styles:
+            sz_val = root_styles["font-size"].strip()
+            match = re.match(r"(\d+(\.\d+)?)\s*(pt|px)?", sz_val)
+            if match:
+                val = float(match.group(1))
+                unit = match.group(3)
+                if unit == "px":
+                    root_font_size = round(val * 0.75, 1)
+                else:
+                    root_font_size = val
+
+        # Begin traversal
+        if html_el.text:
+            add_rich_run(p_elem, html_el.text, color=root_color, bg_color=root_bg, font_size=root_font_size)
+
+        for child in html_el:
+            traverse(child, p_elem, color=root_color, bg_color=root_bg, font_size=root_font_size)

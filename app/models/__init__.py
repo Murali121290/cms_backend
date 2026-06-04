@@ -50,10 +50,13 @@ class Project(Base):
     xml_standard = Column(String)
     status = Column(String, default="RECEIVED")
     team_id = Column(Integer, ForeignKey("teams.id"))
+    workflow_type = Column(String, nullable=True)  # e.g. "WF-01" .. "WF-08"
+    workflow_stage_no = Column(String, nullable=True)  # current stage number, e.g. "03"
     
     team = relationship("Team", back_populates="projects")
     files = relationship("File", back_populates="project")
     chapters = relationship("Chapter", back_populates="project", cascade="all, delete-orphan")
+    stylesheets = relationship("ProjectStylesheet", back_populates="project", cascade="all, delete-orphan")
 
 class Chapter(Base):
     __tablename__ = "chapters"
@@ -96,7 +99,21 @@ class FileVersion(Base):
     path = Column(String)
     uploaded_at = Column(DateTime, default=datetime.utcnow)
     uploaded_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    
+
     original_file = relationship("File", back_populates="versions")
     uploaded_by = relationship("User")
+
+class ProjectStylesheet(Base):
+    __tablename__ = "project_stylesheets"
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    selected_ia_rows = Column(String, nullable=False, default="[]")
+    is_active = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    project = relationship("Project", back_populates="stylesheets")
+    created_by = relationship("User", foreign_keys=[created_by_id])
 

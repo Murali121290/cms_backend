@@ -27,6 +27,7 @@ from app.services import (
     processing_service,
     session_service,
     structuring_review_service,
+    stylesheet_service,
     technical_editor_service,
     version_service,
 )
@@ -44,6 +45,12 @@ from app.processing.xml_engine import XMLEngine
 from app.processing.structuring_lib.doc_utils import extract_document_structure, update_document_structure
 from app.processing.structuring_lib.rules_loader import get_rules_loader
 from app.integrations.collabora.config import COLLABORA_PUBLIC_URL, WOPI_BASE_URL
+from app.integrations.onlyoffice import (
+    ONLYOFFICE_PUBLIC_URL,
+    ONLYOFFICE_JWT_ENABLED,
+    sign_config,
+    verify_callback_token,
+)
 from app.integrations.wopi import service as wopi_service
 
 settings = get_settings()
@@ -52,6 +59,9 @@ logger = logging.getLogger("app.processing")
 logger.setLevel(logging.INFO)
 
 _STANDARD_FILE_ACTIONS = ["download", "delete", "edit", "technical_edit"]
+
+# Valid production workflow ids (mirrors frontend workflowDefinitions.ts WF-01 … WF-08).
+_WORKFLOW_TYPE_IDS = {f"WF-{n:02d}" for n in range(1, 9)}
 
 
 def _error_response(
@@ -158,6 +168,8 @@ def _serialize_project_summary(project: models.Project):
         team_id=project.team_id,
         chapter_count=len(project.chapters),
         file_count=len(project.files),
+        workflow_type=getattr(project, "workflow_type", None),
+        workflow_stage_no=getattr(project, "workflow_stage_no", None),
     )
 
 
@@ -304,6 +316,7 @@ def _api_v2_background_processing_task(
     user_id: int,
     user_username: str,
     mode: str = "style",
+    options: dict[str, Any] | None = None,
 ):
     return processing_service.background_processing_task(
         file_id=file_id,
@@ -311,6 +324,7 @@ def _api_v2_background_processing_task(
         user_id=user_id,
         user_username=user_username,
         mode=mode,
+        options=options,
         logger=logger,
         inject_publisher_styles_func=inject_publisher_styles,
         permissions_engine_cls=PermissionsEngine,
@@ -696,6 +710,7 @@ def api_v2_project_bootstrap(
     client_name: str | None = Form(None),
     xml_standard: str = Form(...),
     chapter_count: int = Form(...),
+    workflow_type: str | None = Form(None),
     files: list[UploadFile] | None = FastAPIFile(None),
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
@@ -706,6 +721,13 @@ def api_v2_project_bootstrap(
             status_code=status.HTTP_401_UNAUTHORIZED,
             code="AUTH_REQUIRED",
             message="Authentication required.",
+        )
+
+    if workflow_type and workflow_type not in _WORKFLOW_TYPE_IDS:
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="INVALID_WORKFLOW_TYPE",
+            message=f"Unknown workflow type: {workflow_type}",
         )
 
     try:
@@ -738,6 +760,10 @@ def api_v2_project_bootstrap(
         .order_by(models.File.id.asc())
         .all()
     )
+    if workflow_type:
+        project.workflow_type = workflow_type
+        project.workflow_stage_no = "01"
+        db.commit()
     db.refresh(project)
     return schemas_v2.ProjectBootstrapResponse(
         project=_serialize_project_summary(project),
@@ -782,6 +808,51 @@ def api_v2_delete_project(
         ),
         redirect_to="/dashboard?msg=Book+Deleted",
     )
+
+
+@router.patch("/projects/{project_id}/workflow", response_model=schemas_v2.ProjectWorkflowUpdateResponse)
+def api_v2_update_project_workflow(
+    project_id: int,
+    payload: schemas_v2.ProjectWorkflowUpdateRequest,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+
+    if payload.workflow_type is not None and payload.workflow_type not in _WORKFLOW_TYPE_IDS:
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="INVALID_WORKFLOW_TYPE",
+            message=f"Unknown workflow type: {payload.workflow_type}",
+        )
+
+    # Setting a workflow type (when none was set) seeds the first stage.
+    if payload.workflow_type is not None:
+        is_new_assignment = project.workflow_type != payload.workflow_type
+        project.workflow_type = payload.workflow_type
+        if is_new_assignment and payload.workflow_stage_no is None:
+            project.workflow_stage_no = "01"
+
+    if payload.workflow_stage_no is not None:
+        project.workflow_stage_no = payload.workflow_stage_no
+
+    db.commit()
+    db.refresh(project)
+    return schemas_v2.ProjectWorkflowUpdateResponse(project=_serialize_project_summary(project))
 
 
 @router.post("/projects/{project_id}/chapters", response_model=schemas_v2.ChapterCreateResponse)
@@ -899,6 +970,318 @@ def api_v2_delete_chapter(
     )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# STYLESHEET ENDPOINTS
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/ia-template", response_model=schemas_v2.IATemplateResponse)
+def api_v2_ia_template(
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+    from app.data.ia_template_rows import IA_TEMPLATE_ROWS
+    return schemas_v2.IATemplateResponse(
+        rows=[
+            schemas_v2.IATemplateRow(
+                element=row[0], subtype=row[1], pattern=row[2], example=row[3]
+            )
+            for row in IA_TEMPLATE_ROWS
+        ]
+    )
+
+
+@router.get(
+    "/projects/{project_id}/stylesheets",
+    response_model=schemas_v2.StylesheetsListResponse,
+)
+def api_v2_list_stylesheets(
+    project_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+    result = stylesheet_service.get_stylesheets_for_project(db, project_id=project_id)
+    serialized = [stylesheet_service._serialize_stylesheet(s) for s in result["stylesheets"]]
+    active = stylesheet_service._serialize_stylesheet(result["active"]) if result["active"] else None
+    return schemas_v2.StylesheetsListResponse(
+        project_id=project_id,
+        stylesheets=serialized,
+        active_stylesheet=active,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/stylesheets",
+    response_model=schemas_v2.StylesheetCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def api_v2_create_stylesheet(
+    project_id: int,
+    payload: schemas_v2.StylesheetCreateRequest,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+    ss = stylesheet_service.create_stylesheet(
+        db,
+        project_id=project_id,
+        name=payload.name,
+        description=payload.description,
+        selected_ia_rows=payload.selected_ia_rows,
+        created_by_id=viewer.id,
+    )
+    return schemas_v2.StylesheetCreateResponse(
+        stylesheet=stylesheet_service._serialize_stylesheet(ss)
+    )
+
+
+@router.patch(
+    "/projects/{project_id}/stylesheets/{stylesheet_id}",
+    response_model=schemas_v2.StylesheetUpdateResponse,
+)
+def api_v2_update_stylesheet(
+    project_id: int,
+    stylesheet_id: int,
+    payload: schemas_v2.StylesheetUpdateRequest,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+    ss = stylesheet_service.update_stylesheet(
+        db,
+        stylesheet_id=stylesheet_id,
+        project_id=project_id,
+        name=payload.name,
+        description=payload.description,
+        selected_ia_rows=payload.selected_ia_rows,
+    )
+    if not ss:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="STYLESHEET_NOT_FOUND",
+            message="Stylesheet not found.",
+        )
+    return schemas_v2.StylesheetUpdateResponse(
+        stylesheet=stylesheet_service._serialize_stylesheet(ss)
+    )
+
+
+@router.delete(
+    "/projects/{project_id}/stylesheets/{stylesheet_id}",
+    response_model=schemas_v2.StylesheetDeleteResponse,
+)
+def api_v2_delete_stylesheet(
+    project_id: int,
+    stylesheet_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+    deleted = stylesheet_service.delete_stylesheet(
+        db, stylesheet_id=stylesheet_id, project_id=project_id
+    )
+    if not deleted:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="STYLESHEET_NOT_FOUND",
+            message="Stylesheet not found.",
+        )
+    return schemas_v2.StylesheetDeleteResponse(deleted_id=stylesheet_id)
+
+
+@router.post(
+    "/projects/{project_id}/stylesheets/{stylesheet_id}/activate",
+    response_model=schemas_v2.StylesheetActivateResponse,
+)
+def api_v2_activate_stylesheet(
+    project_id: int,
+    stylesheet_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+    result = stylesheet_service.activate_stylesheet(
+        db, stylesheet_id=stylesheet_id, project_id=project_id
+    )
+    if not result:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="STYLESHEET_NOT_FOUND",
+            message="Stylesheet not found.",
+        )
+    return schemas_v2.StylesheetActivateResponse(**result)
+
+
+@router.post(
+    "/projects/{project_id}/analyze-files-for-stylesheet",
+    response_model=schemas_v2.AnalyzeFilesForStylesheetResponse,
+)
+def api_v2_analyze_files_for_stylesheet(
+    project_id: int,
+    payload: schemas_v2.AnalyzeFilesRequest,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    logger.info(f"Analyze files endpoint called with project_id={project_id}, file_ids={payload.file_ids}")
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    # Validate project exists
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+
+    try:
+        _processing_check_permission(viewer, "technical")
+    except HTTPException as exc:
+        return _error_response(
+            status_code=exc.status_code,
+            code="PERMISSION_DENIED",
+            message="Permission denied.",
+        )
+
+    # Validate all files belong to the project
+    file_ids = payload.file_ids
+    if not file_ids:
+        return schemas_v2.AnalyzeFilesForStylesheetResponse(
+            analyzed_files=[],
+            triggered_rules=[],
+            total_findings=0,
+        )
+
+    files = db.query(models.File).filter(
+        models.File.id.in_(file_ids),
+        models.File.project_id == project_id,
+    ).all()
+
+    if len(files) != len(file_ids):
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="INVALID_FILE_IDS",
+            message="Some file IDs do not belong to this project.",
+        )
+
+    # Run analysis on each file and aggregate findings
+    all_findings = []
+    analyzed_files = []
+
+    for file_record in files:
+        try:
+            raw_scan = technical_editor_service.scan_errors(
+                db,
+                file_id=file_record.id,
+                logger=logger,
+                technical_editor_cls=TechnicalEditor,
+            )
+            findings = raw_scan.get("findings", [])
+            all_findings.extend(findings)
+            analyzed_files.append({"id": file_record.id, "filename": file_record.filename})
+        except Exception as e:
+            logger.error(f"Failed to analyze file {file_record.id}: {e}")
+            continue
+
+    # Aggregate findings by IA rule
+    triggered_rules_map = {}  # key: (element, subtype, pattern), value: {count, example_surfaces}
+
+    try:
+        from manuscript_core.ia_mapping import RULE_ID_TO_IA
+    except ImportError:
+        RULE_ID_TO_IA = {}
+
+    for finding in all_findings:
+        rule_id = finding.get("rule_id")
+        if rule_id and rule_id in RULE_ID_TO_IA:
+            ia_row = RULE_ID_TO_IA[rule_id]
+            # ia_row should be a tuple (element, subtype, pattern) or similar
+            if isinstance(ia_row, (tuple, list)) and len(ia_row) >= 3:
+                key = (ia_row[0], ia_row[1], ia_row[2])
+                if key not in triggered_rules_map:
+                    triggered_rules_map[key] = {"count": 0, "example_surfaces": []}
+                triggered_rules_map[key]["count"] += 1
+                # Collect up to 3 example surfaces
+                surface = finding.get("surface", "")
+                if surface and len(triggered_rules_map[key]["example_surfaces"]) < 3:
+                    triggered_rules_map[key]["example_surfaces"].append(surface)
+
+    # Convert to list of TriggeredIARule, sorted by count DESC
+    triggered_rules = [
+        schemas_v2.TriggeredIARule(
+            element=key[0],
+            subtype=key[1],
+            pattern=key[2],
+            count=data["count"],
+            example_surfaces=data["example_surfaces"],
+        )
+        for key, data in triggered_rules_map.items()
+    ]
+    triggered_rules.sort(key=lambda x: x.count, reverse=True)
+
+    return schemas_v2.AnalyzeFilesForStylesheetResponse(
+        analyzed_files=analyzed_files,
+        triggered_rules=triggered_rules,
+        total_findings=len(all_findings),
+    )
+
+
 @router.get("/projects/{project_id}/chapters/{chapter_id}/package")
 def api_v2_download_chapter_package(
     project_id: int,
@@ -945,6 +1328,70 @@ def api_v2_download_chapter_package(
         media_type="application/zip",
         filename=zip_filename,
         headers={"Content-Disposition": f"attachment; filename={zip_filename}"},
+    )
+
+
+@router.get("/files", response_model=schemas_v2.FilesListResponse)
+def api_v2_list_files(
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    category: str | None = Query(None),
+    q: str | None = Query(None),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    base_query = db.query(models.File)
+    if category:
+        base_query = base_query.filter(models.File.category == category)
+    if q:
+        base_query = base_query.filter(models.File.filename.ilike(f"%{q}%"))
+
+    total = base_query.count()
+    files = (
+        base_query.order_by(models.File.uploaded_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+    # Resolve project/chapter context in bulk to avoid per-row lazy loads.
+    project_ids = {f.project_id for f in files if f.project_id is not None}
+    chapter_ids = {f.chapter_id for f in files if f.chapter_id is not None}
+    projects = {
+        p.id: p
+        for p in db.query(models.Project).filter(models.Project.id.in_(project_ids)).all()
+    } if project_ids else {}
+    chapters = {
+        c.id: c
+        for c in db.query(models.Chapter).filter(models.Chapter.id.in_(chapter_ids)).all()
+    } if chapter_ids else {}
+
+    items = []
+    for file_record in files:
+        base = _serialize_file_record(file_record, viewer=viewer)
+        project = projects.get(file_record.project_id)
+        chapter = chapters.get(file_record.chapter_id)
+        items.append(
+            schemas_v2.FileListItem(
+                **base.model_dump(),
+                project_code=project.code if project else None,
+                project_title=project.title if project else None,
+                chapter_number=chapter.number if chapter else None,
+                chapter_title=chapter.title if chapter else None,
+            )
+        )
+
+    return schemas_v2.FilesListResponse(
+        files=items,
+        pagination=schemas_v2.ProjectsPagination(offset=offset, limit=limit, total=total),
     )
 
 
@@ -1168,6 +1615,144 @@ def api_v2_file_editor(
             message=str(e),
         )
 
+@router.get("/files/{file_id}/onlyoffice-config")
+def api_v2_onlyoffice_config(
+    file_id: int,
+    mode: str = "original",
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    file_record = db.query(models.File).filter(models.File.id == file_id).first()
+    if not file_record:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="FILE_NOT_FOUND",
+            message="File not found.",
+        )
+
+    file_path, filename = wopi_service.get_target_path(file_record, mode=mode)
+    if not os.path.exists(file_path):
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="FILE_NOT_FOUND",
+            message="Physical file not found.",
+        )
+
+    # Compute key
+    import hashlib
+    with open(file_path, "rb") as f:
+        version_key = hashlib.sha256(f.read()).hexdigest()[:16]
+
+    # Document download URL (OnlyOffice container must reach this)
+    if mode == "structuring":
+        doc_url = f"{WOPI_BASE_URL}/wopi/files/{file_id}/structuring/contents"
+    else:
+        doc_url = f"{WOPI_BASE_URL}/wopi/files/{file_id}/contents"
+
+    callback_url = f"{WOPI_BASE_URL}/api/v2/onlyoffice/callback/{file_id}?mode={mode}"
+
+    config = {
+        "document": {
+            "fileType": "docx",
+            "key": version_key,
+            "title": filename,
+            "url": doc_url,
+        },
+        "documentType": "word",
+        "editorConfig": {
+            "mode": "edit",
+            "callbackUrl": callback_url,
+            "user": {
+                "id": str(viewer.id),
+                "name": viewer.username,
+            },
+            "lang": "en",
+            "customization": {
+                "autosave": True,
+                "chat": False,
+                "comments": True,
+                "compactHeader": True,
+                "compactToolbar": True,
+                "feedback": {"url": ""},
+                "forcesave": True,
+                "help": False,
+                "plugins": False,
+                "goback": {"url": ""},
+            },
+        },
+    }
+
+    if ONLYOFFICE_JWT_ENABLED:
+        config["token"] = sign_config(config)
+
+    return {
+        "config": config,
+        "onlyoffice_public_url": ONLYOFFICE_PUBLIC_URL,
+    }
+
+@router.post("/onlyoffice/callback/{file_id}")
+async def api_v2_onlyoffice_callback(
+    file_id: int,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    mode: str = "original",
+    db: Session = Depends(database.get_db),
+):
+    body = await request.json()
+    
+    # Verify JWT if enabled
+    verified_body = verify_callback_token(dict(request.headers), body)
+    if verified_body is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid JWT signature in OnlyOffice callback.",
+        )
+        
+    status_code = verified_body.get("status")
+    if status_code in (2, 6):
+        download_url = verified_body.get("url")
+        if not download_url:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Download URL missing in OnlyOffice callback.",
+            )
+            
+        import requests
+        try:
+            response = requests.get(download_url, timeout=30)
+            response.raise_for_status()
+            docx_bytes = response.content
+        except Exception as e:
+            logger.error(f"Failed to download edited file from OnlyOffice: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to download edited file: {str(e)}",
+            )
+            
+        # Re-use wopi_service.write_file_bytes
+        wopi_service.write_file_bytes(
+            db,
+            file_id=file_id,
+            mode=mode,
+            body=docx_bytes,
+            logger=logger,
+        )
+        
+        # Trigger background task for XHTML regeneration if in structuring mode
+        if mode == "structuring":
+            from app.integrations.wopi.router import _regen_xhtml_background
+            background_tasks.add_task(_regen_xhtml_background, file_id=file_id)
+
+    return {"error": 0}
+
 @router.get("/files/{file_id}/versions", response_model=schemas_v2.FileVersionsResponse)
 def api_v2_file_versions(
     file_id: int,
@@ -1259,6 +1844,7 @@ def api_v2_start_processing(
             upload_dir=file_service.UPLOAD_DIR,
             logger=logger,
             background_task_callable=_api_v2_background_processing_task,
+            options=payload.options,
         )
     except HTTPException as exc:
         code = "PROCESSING_START_FAILED"
@@ -1311,15 +1897,18 @@ def api_v2_processing_status(
             message="Not authenticated",
         )
 
-    if process_type != "structuring":
+    if process_type not in ("structuring", "reference_validation", "reference_structuring"):
         return _error_response(
             status_code=status.HTTP_400_BAD_REQUEST,
             code="STATUS_UNSUPPORTED",
-            message="Only structuring status is currently supported.",
+            message="Only structuring, reference_validation and reference_structuring statuses are currently supported.",
         )
 
     try:
-        status_payload = processing_service.get_structuring_status(db, file_id=file_id, user=viewer)
+        if process_type in ("reference_validation", "reference_structuring"):
+            status_payload = processing_service.get_reference_validation_status(db, file_id=file_id, user=viewer)
+        else:
+            status_payload = processing_service.get_structuring_status(db, file_id=file_id, user=viewer)
     except HTTPException as exc:
         code = "PROCESSING_STATUS_FAILED"
         if exc.status_code == 401:
@@ -1354,6 +1943,7 @@ def api_v2_processing_status(
 @router.get("/files/{file_id}/technical-review", response_model=schemas_v2.TechnicalScanResponse)
 def api_v2_technical_scan(
     file_id: int,
+    stylesheet_id: int | None = None,
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -1388,10 +1978,237 @@ def api_v2_technical_scan(
         )
 
     file_record = db.query(models.File).filter(models.File.id == file_id).first()
+    
+    # Generate Collabora URL if available
+    collabora_url = None
+    try:
+        editor_state = wopi_service.build_editor_page_state(
+            db,
+            file_id=file_id,
+            collabora_public_url=COLLABORA_PUBLIC_URL,
+            wopi_base_url=WOPI_BASE_URL,
+        )
+        collabora_url = editor_state.get("collabora_url")
+    except Exception as e:
+        logger.warning(f"Failed to generate Collabora launch URL: {e}")
+
+    # Attach active stylesheet for this project
+    active_stylesheet = None
+    if file_record and file_record.project_id:
+        active_ss = stylesheet_service.get_active_stylesheet_for_project(
+            db, project_id=file_record.project_id
+        )
+        if active_ss:
+            active_stylesheet = stylesheet_service._serialize_stylesheet(active_ss)
+
+    # Annotate findings with stylesheet matching if stylesheet_id provided
+    findings = raw_scan.get("findings", [])
+    if stylesheet_id and findings:
+        selected_stylesheet = db.query(models.ProjectStylesheet).filter(
+            models.ProjectStylesheet.id == stylesheet_id,
+            models.ProjectStylesheet.project_id == file_record.project_id,
+        ).first()
+
+        if selected_stylesheet:
+            # Build set of (element, subtype, pattern) tuples from stylesheet
+            stylesheet_ia_rows = set()
+            import json
+            try:
+                selected_rows = json.loads(selected_stylesheet.selected_ia_rows)
+                for row in selected_rows:
+                    stylesheet_ia_rows.add((row.get("element"), row.get("subtype"), row.get("pattern")))
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+            # Build category-level set for fallback matching
+            try:
+                selected_rows_list = json.loads(selected_stylesheet.selected_ia_rows)
+            except (json.JSONDecodeError, TypeError):
+                selected_rows_list = []
+            stylesheet_subtypes = {
+                row.get("subtype", "").lower()
+                for row in selected_rows_list
+                if row.get("subtype")
+            }
+
+            # Use rule_id_to_ia already embedded in cached scan result (no import needed)
+            rule_id_to_ia = raw_scan.get("ia_report", {}).get("rule_id_to_ia", {})
+
+            # Fall back to module import only if not in cached result
+            if not rule_id_to_ia:
+                try:
+                    from app.processing.manuscript_core.ia_mapping import RULE_ID_TO_IA as rule_id_to_ia
+                except ImportError:
+                    try:
+                        from manuscript_core.ia_mapping import RULE_ID_TO_IA as rule_id_to_ia
+                    except ImportError:
+                        rule_id_to_ia = {}
+
+            # Annotate in_stylesheet for each finding
+            for finding in findings:
+                rule_id = finding.get("rule_id")
+                matched = False
+                if rule_id and rule_id in rule_id_to_ia:
+                    ia_row = rule_id_to_ia[rule_id]
+                    if isinstance(ia_row, (tuple, list)) and len(ia_row) >= 3:
+                        matched = (ia_row[0], ia_row[1], ia_row[2]) in stylesheet_ia_rows
+                if not matched:
+                    # Fallback: category-level match (finding.category == ia_row.subtype)
+                    cat = finding.get("category", "").lower()
+                    matched = bool(cat and cat in stylesheet_subtypes)
+                finding["in_stylesheet"] = matched
+
+            # Apply dynamic replacement overrides for range and thousand-separator rules
+            import re as regex_module
+            preferred_patterns: dict = {}
+            for row in selected_rows_list:
+                el = row.get("element", "")
+                pat = row.get("pattern", "")
+                if el and pat:
+                    preferred_patterns.setdefault(el, set()).add(pat)
+
+            range_rule_ids = {"range_to", "range_endash", "range_hyphen"}
+            thous_rule_ids = {"thous_sep_missing", "thous_sep_comma", "thous_sep_space", "thous_sep_nbsp"}
+
+            for finding in findings:
+                rule_id = finding.get("rule_id", "")
+                surface = finding.get("surface", "")
+
+                if rule_id in range_rule_ids:
+                    prefs = preferred_patterns.get("Ranges", set())
+                    if prefs:
+                        pref = next(iter(prefs))
+                        nums = regex_module.findall(r'\d+', surface)
+                        if len(nums) >= 2:
+                            if "to" in pref.lower():
+                                finding["replacement"] = f"{nums[0]} to {nums[1]}"
+                            elif "en dash" in pref.lower():
+                                finding["replacement"] = f"{nums[0]}–{nums[1]}"
+                            elif "hyphen" in pref.lower():
+                                finding["replacement"] = f"{nums[0]}-{nums[1]}"
+
+                elif rule_id in thous_rule_ids:
+                    prefs = preferred_patterns.get("Thousand separator (use/non-use)", set())
+                    if prefs:
+                        pref = next(iter(prefs))
+                        clean = regex_module.sub(r'[,\s ]', '', surface)
+                        try:
+                            n = int(clean)
+                            if "comma" in pref.lower() and "no comma" not in pref.lower():
+                                finding["replacement"] = f"{n:,}"
+                            elif "no comma" in pref.lower():
+                                finding["replacement"] = clean
+                        except ValueError:
+                            pass
+
+    # Ensure inconsistencies is a dict (convert list to dict if needed)
+    inconsistencies_data = raw_scan.get("inconsistencies", {})
+    if isinstance(inconsistencies_data, list):
+        inconsistencies_data = {}
+
     return schemas_v2.TechnicalScanResponse(
         file=_serialize_file_record(file_record, viewer=viewer),
-        issues=[_serialize_technical_issue(key, issue_data) for key, issue_data in raw_scan.items()],
-        raw_scan=raw_scan,
+        issues=raw_scan.get("issues", []),
+        raw_scan=raw_scan.get("raw_scan", raw_scan),
+        onlyoffice_available=bool(ONLYOFFICE_PUBLIC_URL),
+        collabora_url=collabora_url,
+        findings=raw_scan.get("findings", []),
+        inconsistencies=inconsistencies_data,
+        spelling_summary=raw_scan.get("spelling_summary", {}),
+        ia_report=raw_scan.get("ia_report", {}),
+        stats=raw_scan.get("stats", {}),
+        active_stylesheet=active_stylesheet,
+    )
+
+
+# Excel export endpoints
+@router.get("/files/{file_id}/technical-review/export/excel")
+def api_v2_technical_export_excel(
+    file_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    from app.processing.manuscript_core.exporters import build_combined_excel
+    from starlette.responses import Response
+
+    file_record = db.query(models.File).filter(models.File.id == file_id).first()
+    if not file_record:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    scan_data = technical_editor_service.scan_errors(
+        db,
+        file_id=file_id,
+        logger=logger,
+        technical_editor_cls=TechnicalEditor,
+    )
+
+    excel_bytes = build_combined_excel(scan_data, job_id=str(file_id))
+    filename = f"{Path(file_record.filename).stem}_consistency_report.xlsx"
+
+    return Response(
+        content=excel_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/files/{file_id}/technical-review/export/ia-excel")
+def api_v2_technical_export_ia_excel(
+    file_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    from app.processing.manuscript_core.exporters import build_ia_excel
+    from starlette.responses import Response
+
+    file_record = db.query(models.File).filter(models.File.id == file_id).first()
+    if not file_record:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    scan_data = technical_editor_service.scan_errors(
+        db,
+        file_id=file_id,
+        logger=logger,
+        technical_editor_cls=TechnicalEditor,
+    )
+
+    excel_bytes = build_ia_excel(scan_data, job_id=str(file_id))
+    filename = f"{Path(file_record.filename).stem}_ia_report.xlsx"
+
+    return Response(
+        content=excel_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/files/{file_id}/technical-review/export/html")
+def api_v2_technical_export_html(
+    file_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    from app.utils.html_dashboard import build_html_dashboard
+    from starlette.responses import Response
+
+    file_record = db.query(models.File).filter(models.File.id == file_id).first()
+    if not file_record:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    scan_data = technical_editor_service.scan_errors(
+        db,
+        file_id=file_id,
+        logger=logger,
+        technical_editor_cls=TechnicalEditor,
+    )
+
+    html_content = build_html_dashboard(scan_data, file_record.filename)
+    filename = f"{Path(file_record.filename).stem}_dashboard.html"
+
+    return Response(
+        content=html_content,
+        media_type="text/html",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
@@ -1416,6 +2233,8 @@ def api_v2_technical_apply(
             db,
             file_id=file_id,
             replacements=payload.replacements,
+            selected_findings=payload.selected_findings,
+            highlight_findings=payload.highlight_findings,
             username=viewer.username,
             logger=logger,
             technical_editor_cls=TechnicalEditor,
@@ -1439,6 +2258,299 @@ def api_v2_technical_apply(
         source_file_id=file_id,
         new_file_id=apply_result["new_file_id"],
         new_file=_serialize_file_record(new_file, viewer=viewer),
+    )
+
+
+@router.get("/files/{file_id}/xhtml")
+def api_v2_get_file_xhtml(
+    file_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+
+    file_record = db.query(models.File).filter(models.File.id == file_id).first()
+    if not file_record:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="FILE_NOT_FOUND",
+            message="File not found",
+        )
+
+    file_path = os.path.abspath(file_record.path)
+    if not os.path.exists(file_path):
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PHYSICAL_FILE_MISSING",
+            message="Physical file missing on disk",
+        )
+
+    dir_name = os.path.dirname(file_path)
+    base_name = os.path.splitext(os.path.basename(file_path))[0]
+    xhtml_dir = os.path.join(dir_name, "xhtml")
+    xhtml_path = os.path.join(xhtml_dir, f"{base_name}.html")
+
+    # Always force a fresh conversion to ensure the editor shows the latest text/formatting
+    from app.processing.docx_to_xhtml import DocxToXhtmlEngine
+    try:
+        os.makedirs(os.path.dirname(xhtml_path), exist_ok=True)
+        engine = DocxToXhtmlEngine()
+        engine.convert(file_path, xhtml_path)
+    except Exception as e:
+        return _error_response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            code="XHTML_GENERATION_FAILED",
+            message=f"Failed to generate XHTML representation: {str(e)}",
+        )
+
+    try:
+        with open(xhtml_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except Exception as e:
+        return _error_response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            code="XHTML_READ_FAILED",
+            message=f"Failed to read converted XHTML: {str(e)}",
+        )
+
+    return {"content": content, "filename": file_record.filename}
+
+
+@router.post("/files/{file_id}/xhtml/save")
+def api_v2_save_file_xhtml(
+    file_id: int,
+    payload: schemas_v2.XhtmlSaveRequest,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+    try:
+        result = structuring_review_service.save_xhtml_and_convert(
+            db,
+            file_id=file_id,
+            html_content=payload.html_content,
+            username=viewer.username,
+            logger=logger,
+        )
+        return {"status": "ok", "file_id": result["file_id"]}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Unexpected error saving XHTML: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/files/{file_id}/xhtml-runs")
+def api_v2_get_file_xhtml_runs(
+    file_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Run-anchored XHTML for the formatting-preserving WYSIWYG editor."""
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+    try:
+        result = structuring_review_service.get_file_xhtml_runs(db, file_id=file_id, logger=logger)
+        return {"content": result["content"], "filename": result["filename"]}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return _error_response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            code="XHTML_RUNS_GENERATION_FAILED",
+            message=str(exc),
+        )
+
+
+@router.post("/files/{file_id}/xhtml-runs/save")
+def api_v2_save_file_xhtml_runs(
+    file_id: int,
+    payload: schemas_v2.XhtmlSaveRequest,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Delta-patch save: apply only changed runs/marks back into a new DOCX version."""
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+    try:
+        result = structuring_review_service.save_xhtml_delta_and_convert(
+            db,
+            file_id=file_id,
+            html_content=payload.html_content,
+            username=viewer.username,
+            logger=logger,
+        )
+        # Invalidate the reference review cache so next load is fresh
+        structuring_review_service.invalidate_ref_review_cache(
+            structuring_review_service.resolve_processed_target(db, file_id=file_id)["processed_path"],
+            logger=logger,
+        )
+        return {"status": "ok", "file_id": result["file_id"]}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Unexpected error in delta save: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+def _para_to_html(para) -> str:
+    """Convert a docx paragraph to HTML string."""
+    import html
+    result = []
+    for run in para.runs:
+        text = run.text
+        if not text:
+            continue
+        tag = "span"
+        if run.bold:
+            tag = "strong"
+        elif run.italic:
+            tag = "em"
+        elif run.underline:
+            tag = "u"
+        result.append(f"<{tag}>{html.escape(text)}</{tag}>")
+    if not result:
+        return f"<p>{html.escape(para.text)}</p>"
+    return f"<p>{''.join(result)}</p>"
+
+
+def _table_to_html(table) -> str:
+    """Convert a docx table to HTML string."""
+    import html
+    rows = []
+    for row in table.rows:
+        cells = []
+        for cell in row.cells:
+            text = "".join(p.text for p in cell.paragraphs)
+            cells.append(f"<td>{html.escape(text)}</td>")
+        rows.append(f"<tr>{''.join(cells)}</tr>")
+    return f"<table><tbody>{''.join(rows)}</tbody></table>"
+
+
+def _extract_structured_blocks_from_docx(file_path: str) -> tuple[list[dict], list[str]]:
+    """
+    Extract structured blocks from DOCX with style names.
+    Returns: (blocks, available_styles)
+    """
+    import docx
+    from lxml import etree
+
+    doc = docx.Document(file_path)
+    blocks = []
+    available_styles_set = set()
+    idx = 0
+
+    # Extract paragraphs and tables from body
+    for elem in doc.element.body:
+        tag = etree.QName(elem.tag).localname
+        if tag == "p":
+            para = docx.text.paragraph.Paragraph(elem, doc)
+            style_name = para.style.name if para.style else "Normal"
+            available_styles_set.add(style_name)
+            html = _para_to_html(para)
+            blocks.append({
+                "index": idx,
+                "type": "paragraph",
+                "style": style_name,
+                "html": html,
+                "ref_index": None,
+            })
+            idx += 1
+        elif tag == "tbl":
+            table = docx.table.Table(elem, doc)
+            available_styles_set.add("Table Grid")
+            html = _table_to_html(table)
+            blocks.append({
+                "index": idx,
+                "type": "table",
+                "style": "Table Grid",
+                "html": html,
+                "ref_index": None,
+            })
+            idx += 1
+
+    # Extract footnotes if present (simplified - skip for now due to python-docx limitations)
+    # Footnotes in python-docx require accessing internal XML structures
+    # For MVP, we'll skip footnotes - can be added later with proper extraction
+
+    # Extract endnotes if present (simplified - skip for now due to python-docx limitations)
+    # Endnotes in python-docx require accessing internal XML structures
+    # For MVP, we'll skip endnotes - can be added later with proper extraction
+
+    # Get all available style names from document
+    available_styles = sorted(list(available_styles_set))
+
+    return blocks, available_styles
+
+
+@router.get(
+    "/files/{file_id}/structured-content",
+    response_model=schemas_v2.StructuredContentResponse,
+)
+def api_v2_get_structured_content(
+    file_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+
+    file_record = db.query(models.File).filter(models.File.id == file_id).first()
+    if not file_record:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="FILE_NOT_FOUND",
+            message="File not found",
+        )
+
+    file_path = os.path.abspath(file_record.path)
+    if not os.path.exists(file_path):
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PHYSICAL_FILE_MISSING",
+            message="Physical file missing on disk",
+        )
+
+    try:
+        blocks, available_styles = _extract_structured_blocks_from_docx(file_path)
+    except Exception as e:
+        return _error_response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            code="EXTRACTION_FAILED",
+            message=f"Failed to extract document structure: {str(e)}",
+        )
+
+    return schemas_v2.StructuredContentResponse(
+        filename=file_record.filename,
+        blocks=[schemas_v2.StructuredBlock(**b) for b in blocks],
+        available_styles=available_styles,
     )
 
 
@@ -1497,7 +2609,10 @@ def api_v2_structuring_review(
         viewer=_serialize_viewer(viewer),
         file=_serialize_file_record(file_record, viewer=viewer),
         processed_file=schemas_v2.StructuringProcessedFile(filename=page_state["filename"]),
-        editor=schemas_v2.StructuringReviewEditor(collabora_url=page_state["collabora_url"]),
+        editor=schemas_v2.StructuringReviewEditor(
+            onlyoffice_available=bool(ONLYOFFICE_PUBLIC_URL),
+            collabora_url=page_state.get("collabora_url")
+        ),
         actions=schemas_v2.StructuringReviewActions(
             save_endpoint=f"/api/v2/files/{file_id}/structuring-review/save",
             export_href=f"/api/v2/files/{file_id}/structuring-review/export",
@@ -1590,6 +2705,538 @@ def api_v2_structuring_export(
         filename=export_payload["filename"],
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
+
+
+@router.get(
+    "/files/{file_id}/reference-review",
+    response_model=schemas_v2.ReferenceValidationReviewResponse,
+)
+def api_v2_reference_review(
+    file_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+
+    try:
+        page_state = structuring_review_service.build_reference_review_page_state(
+            db,
+            file_id=file_id,
+            logger=logger,
+        )
+    except HTTPException as exc:
+        code = "REFERENCE_REVIEW_FAILED"
+        if exc.status_code == 404:
+            code = "FILE_NOT_FOUND"
+        return _error_response(
+            status_code=exc.status_code,
+            code=code,
+            message=str(exc.detail),
+        )
+    except Exception as exc:
+        return _error_response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            code="REFERENCE_REVIEW_FAILED",
+            message=f"Error loading reference review: {str(exc)}",
+        )
+
+    if page_state["status"] == "error":
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROCESSED_FILE_MISSING",
+            message=page_state["error_message"],
+        )
+
+    file_record = page_state["file"]
+    return schemas_v2.ReferenceValidationReviewResponse(
+        viewer=_serialize_viewer(viewer),
+        file=_serialize_file_record(file_record, viewer=viewer),
+        content=page_state["content"],
+        filename=page_state["filename"],
+        styles=page_state["styles"],
+        validation_logs=page_state["validation_logs"],
+        save_endpoint=f"/files/{file_id}/reference-review/save",
+        export_href=f"/api/v2/files/{file_id}/reference-review/export",
+    )
+
+
+@router.post(
+    "/files/{file_id}/reference-review/save",
+    response_model=schemas_v2.ReferenceSaveResponse,
+)
+def api_v2_reference_save(
+    file_id: int,
+    payload: schemas_v2.XhtmlSaveRequest,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Unauthorized",
+        )
+
+    try:
+        resolved = structuring_review_service.resolve_processed_target(db, file_id=file_id)
+        structuring_review_service.save_xhtml_delta_and_convert(
+            db,
+            file_id=file_id,
+            html_content=payload.html_content,
+            username=viewer.username,
+            logger=logger,
+        )
+        # Invalidate the reference review cache so next load is fresh
+        structuring_review_service.invalidate_ref_review_cache(
+            resolved["processed_path"],
+            logger=logger,
+        )
+    except HTTPException as exc:
+        code = "REFERENCE_SAVE_FAILED"
+        detail_message = str(exc.detail)
+        if exc.status_code == 404:
+            code = "PROCESSED_FILE_MISSING" if "Processed file not found" in detail_message else "FILE_NOT_FOUND"
+        return _error_response(
+            status_code=exc.status_code,
+            code=code,
+            message=detail_message,
+        )
+    except Exception as exc:
+        return _error_response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            code="REFERENCE_SAVE_FAILED",
+            message=f"Failed to save references: {str(exc)}",
+        )
+
+    return schemas_v2.ReferenceSaveResponse(
+        file_id=file_id,
+        target_filename=resolved["processed_filename"],
+    )
+
+
+@router.get("/files/{file_id}/reference-review/export")
+def api_v2_reference_export(
+    file_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+
+    try:
+        export_payload = structuring_review_service.get_export_payload(
+            db,
+            file_id=file_id,
+            logger=logger,
+        )
+    except HTTPException as exc:
+        code = "REFERENCE_EXPORT_FAILED"
+        detail_message = str(exc.detail)
+        if exc.status_code == 404:
+            code = "PROCESSED_FILE_MISSING" if "Processed file not found" in detail_message else "FILE_NOT_FOUND"
+        return _error_response(
+            status_code=exc.status_code,
+            code=code,
+            message=detail_message,
+        )
+
+    return FileResponse(
+        path=export_payload["path"],
+        filename=export_payload["filename"],
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+
+
+@router.get("/files/{file_id}/reference-review/validate-only", response_model=schemas_v2.ReferenceValidateOnlyResponse)
+def api_v2_reference_validate_only(
+    file_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+
+    try:
+        result = structuring_review_service.run_validation_only(
+            db,
+            file_id=file_id,
+            logger=logger,
+        )
+        return result
+    except HTTPException as exc:
+        code = "VALIDATION_FAILED"
+        detail_message = str(exc.detail)
+        if exc.status_code == 404:
+            code = "FILE_NOT_FOUND"
+        return _error_response(
+            status_code=exc.status_code,
+            code=code,
+            message=detail_message,
+        )
+
+
+@router.post("/files/{file_id}/citation-candidates")
+def api_v2_citation_candidates(
+    file_id: int,
+    request: dict,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Find candidate references for a missing citation."""
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+
+    try:
+        from app.processing.citation_matching import find_citation_candidates
+
+        citation_text = request.get("citation_text", "")
+        author = request.get("author", "")
+        year = request.get("year")
+
+        result = structuring_review_service.run_validation_only(
+            db,
+            file_id=file_id,
+            logger=logger,
+        )
+
+        validation_logs = result.get("validation_logs", {})
+        reference_entries = validation_logs.get("reference_entries", [])
+
+        # Build bibliography dict for matching
+        bibliography = {}
+        for idx, ref_entry in enumerate(reference_entries):
+            bibliography[idx] = {
+                "full_author": ref_entry.get("text", "").split("(")[0].strip(),
+                "year": year,
+                "raw_text": ref_entry.get("text", ""),
+                "text": ref_entry.get("text", ""),
+            }
+
+        candidates = find_citation_candidates(author or citation_text, year, bibliography)
+
+        return {
+            "status": "ok",
+            "citation_text": citation_text,
+            "candidates": candidates,
+        }
+    except HTTPException as exc:
+        return _error_response(
+            status_code=exc.status_code,
+            code="VALIDATION_FAILED",
+            message=str(exc.detail),
+        )
+    except Exception as e:
+        logger.error(f"Citation candidates error: {e}")
+        return _error_response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            code="INTERNAL_ERROR",
+            message=str(e),
+        )
+
+
+@router.post("/files/{file_id}/reference-candidates")
+def api_v2_reference_candidates(
+    file_id: int,
+    request: dict,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Find candidate citations for an unused reference."""
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+
+    try:
+        from app.processing.citation_matching import find_reference_candidates
+
+        ref_text = request.get("ref_text", "")
+        ref_idx = request.get("ref_idx")
+
+        result = structuring_review_service.run_validation_only(
+            db,
+            file_id=file_id,
+            logger=logger,
+        )
+
+        validation_logs = result.get("validation_logs", {})
+        citation_pairs = validation_logs.get("citation_pairs", [])
+
+        # Build citations list for reverse matching
+        citations_in_doc = []
+        for pair in citation_pairs:
+            citations_in_doc.append({
+                "text": pair.get("citation", ""),
+                "author": pair.get("author", ""),
+                "year": pair.get("year", ""),
+                "para_idx": pair.get("para_idx"),
+            })
+
+        candidates = find_reference_candidates(ref_text, citations_in_doc)
+
+        return {
+            "status": "ok",
+            "reference_key": f"ref_{ref_idx}",
+            "candidates": candidates,
+        }
+    except HTTPException as exc:
+        return _error_response(
+            status_code=exc.status_code,
+            code="VALIDATION_FAILED",
+            message=str(exc.detail),
+        )
+    except Exception as e:
+        logger.error(f"Reference candidates error: {e}")
+        return _error_response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            code="INTERNAL_ERROR",
+            message=str(e),
+        )
+
+
+@router.post("/files/{file_id}/link-citation-to-reference")
+def api_v2_link_citation(
+    file_id: int,
+    request: dict,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Create a bidirectional link between citation and reference."""
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+
+    try:
+        from app.services.citation_linking_service import add_link, add_comment
+        from app.services.file_service import get_processed_docx_path
+
+        citation_key = request.get("citation_key", "")
+        citation_text = request.get("citation_text", "")
+        para_idx = request.get("para_idx")
+        ref_idx = request.get("ref_idx")
+        ref_text = request.get("ref_text", "")
+        match_type = request.get("match_type", "user_selected")
+        confidence = request.get("confidence", 0.85)
+        link_flags = request.get("link_flags", {})
+
+        # Get processed DOCX path
+        processed_path = get_processed_docx_path(db, file_id, logger)
+        if not processed_path:
+            return _error_response(
+                status_code=status.HTTP_404_NOT_FOUND,
+                code="FILE_NOT_FOUND",
+                message="Processed file not found",
+            )
+
+        # Add link to reflinks.json
+        link_id = add_link(
+            processed_path,
+            citation_key=citation_key,
+            citation_text=citation_text,
+            para_idx=para_idx,
+            ref_idx=ref_idx,
+            ref_text=ref_text,
+            match_type=match_type,
+            confidence=confidence,
+            linked_by=viewer.username if viewer else None,
+            link_flags=link_flags,
+        )
+
+        # Add automatic comment about the link
+        comment_text = f"[LINKED] Matched citation to reference [{ref_idx}]: {ref_text[:100]}"
+        comment_id = add_comment(
+            processed_path,
+            target_type="citation",
+            comment_text=comment_text,
+            citation_key=citation_key,
+            para_idx=para_idx,
+            ref_idx=ref_idx,
+            created_by=viewer.username if viewer else None,
+            flags=["auto_linked"],
+        )
+
+        return {
+            "status": "ok",
+            "link_id": link_id,
+            "citation_key": citation_key,
+            "ref_idx": ref_idx,
+            "comment_id": comment_id,
+        }
+    except HTTPException as exc:
+        return _error_response(
+            status_code=exc.status_code,
+            code="LINKING_FAILED",
+            message=str(exc.detail),
+        )
+    except Exception as e:
+        logger.error(f"Link citation error: {e}")
+        return _error_response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            code="INTERNAL_ERROR",
+            message=str(e),
+        )
+
+
+@router.get("/files/{file_id}/citation-comments")
+def api_v2_citation_comments(
+    file_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Fetch all comments on citations and references."""
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+
+    try:
+        from app.services.citation_linking_service import get_all_links_and_comments
+        from app.services.file_service import get_processed_docx_path
+
+        # Get processed DOCX path
+        processed_path = get_processed_docx_path(db, file_id, logger)
+        if not processed_path:
+            return _error_response(
+                status_code=status.HTTP_404_NOT_FOUND,
+                code="FILE_NOT_FOUND",
+                message="Processed file not found",
+            )
+
+        # Get links and comments
+        data = get_all_links_and_comments(processed_path)
+
+        return {
+            "status": "ok",
+            "links": data.get("links", []),
+            "comments": data.get("comments", []),
+        }
+    except HTTPException as exc:
+        return _error_response(
+            status_code=exc.status_code,
+            code="FETCH_FAILED",
+            message=str(exc.detail),
+        )
+    except Exception as e:
+        logger.error(f"Citation comments error: {e}")
+        return _error_response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            code="INTERNAL_ERROR",
+            message=str(e),
+        )
+
+
+@router.post("/files/{file_id}/citation-comments")
+def api_v2_add_citation_comment(
+    file_id: int,
+    request: dict,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Add a comment to a citation or reference."""
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+
+    try:
+        from app.services.citation_linking_service import add_comment
+        from app.services.file_service import get_processed_docx_path
+
+        target_type = request.get("target_type", "citation")  # citation or reference
+        comment_text = request.get("comment_text", "")
+        citation_key = request.get("citation_key")
+        para_idx = request.get("para_idx")
+        ref_idx = request.get("ref_idx")
+        flags = request.get("flags", [])
+
+        if not comment_text.strip():
+            return _error_response(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="INVALID_INPUT",
+                message="Comment text cannot be empty",
+            )
+
+        # Get processed DOCX path
+        processed_path = get_processed_docx_path(db, file_id, logger)
+        if not processed_path:
+            return _error_response(
+                status_code=status.HTTP_404_NOT_FOUND,
+                code="FILE_NOT_FOUND",
+                message="Processed file not found",
+            )
+
+        # Add comment
+        comment_id = add_comment(
+            processed_path,
+            target_type=target_type,
+            comment_text=comment_text,
+            citation_key=citation_key,
+            para_idx=para_idx,
+            ref_idx=ref_idx,
+            created_by=viewer.username if viewer else None,
+            flags=flags,
+        )
+
+        return {
+            "status": "ok",
+            "comment_id": comment_id,
+            "created_at": datetime.utcnow().isoformat(),
+        }
+    except HTTPException as exc:
+        return _error_response(
+            status_code=exc.status_code,
+            code="COMMENT_FAILED",
+            message=str(exc.detail),
+        )
+    except Exception as e:
+        logger.error(f"Add comment error: {e}")
+        return _error_response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            code="INTERNAL_ERROR",
+            message=str(e),
+        )
+
+
+@router.get("/paragraph-styles", response_model=list[str])
+def api_v2_get_paragraph_styles():
+    """Return the list of all publisher paragraph styles."""
+    from app.utils.inject_styles import PUBLISHER_STYLES
+    return sorted(PUBLISHER_STYLES)
 
 
 @router.get("/admin/dashboard", response_model=schemas_v2.AdminDashboardResponse)

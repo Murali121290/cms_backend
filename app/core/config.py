@@ -24,8 +24,20 @@ class Settings(BaseSettings):
     AI_STRUCTURING_MAX_WAIT_SECONDS: int = 900
     AI_STRUCTURING_REQUEST_TIMEOUT_SECONDS: int = 30
 
+    # External PPH Server processing integration settings
+    PPH_ENABLED: bool = False
+    PPH_BASE_URL: str = "http://[IP_ADDRESS]"
+    PPH_USERNAME: str = "admin"
+    PPH_PASSWORD: str = "Murali@12"
+    PPH_MAX_WAIT_SECONDS: int = 1800
+
+    # PPH Reference Conversion settings (for reference_structuring process type)
+    REF_SOURCE_STYLE: str = "Auto"  # Auto, AMA, APA, CGRN
+    REF_TARGET_STYLE: str = "APA"   # AMA, APA, CGRN
+
     class Config:
         env_file = ".env"
+        extra = "ignore"
 
 @lru_cache()
 def get_settings():

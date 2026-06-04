@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/Button";
 import { UploadZone } from "@/components/ui/UploadZone";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { uiPaths } from "@/utils/appPaths";
+import { WORKFLOW_DEFINITIONS } from "@/features/workflow/workflowDefinitions";
 
 /* ─── Zod schema ───────────────────────────────────────────────────────────── */
 
@@ -26,6 +27,7 @@ const schema = z.object({
     .int()
     .min(1, "At least 1 chapter is required")
     .max(999),
+  workflow_type: z.string().optional(),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -68,6 +70,7 @@ export function ProjectCreatePage() {
       client_name: "",
       xml_standard: "NLM / JATS",
       chapter_count: 1,
+      workflow_type: "",
     },
   });
 
@@ -86,6 +89,7 @@ export function ProjectCreatePage() {
     if (values.client_name?.trim()) fd.append("client_name", values.client_name.trim());
     fd.append("xml_standard", values.xml_standard);
     fd.append("chapter_count", String(values.chapter_count));
+    if (values.workflow_type) fd.append("workflow_type", values.workflow_type);
     files.forEach((f) => fd.append("files", f));
 
     try {
@@ -249,6 +253,29 @@ export function ProjectCreatePage() {
                   {errors.chapter_count.message}
                 </p>
               ) : null}
+            </div>
+
+            {/* Production Workflow */}
+            <div className="sm:col-span-2">
+              <label htmlFor="workflow_type" className={labelClass}>
+                Production Workflow
+              </label>
+              <select
+                id="workflow_type"
+                {...register("workflow_type")}
+                className={inputClass}
+                disabled={isSubmitting}
+              >
+                <option value="">None (assign later)</option>
+                {WORKFLOW_DEFINITIONS.map((wf) => (
+                  <option key={wf.id} value={wf.id}>
+                    {wf.id} · {wf.title} — {wf.short}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-navy-400 mt-1">
+                Determines the production stage track for this project.
+              </p>
             </div>
           </div>
         </section>

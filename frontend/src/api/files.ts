@@ -2,9 +2,29 @@ import { apiClient } from "@/api/client";
 import type {
   FileCheckoutResponse,
   FileDeleteResponse,
+  FilesListResponse,
   FileUploadResponse,
   FileVersionsResponse,
 } from "@/types/api";
+
+export interface ListFilesParams {
+  offset?: number;
+  limit?: number;
+  category?: string;
+  q?: string;
+}
+
+export async function listFiles(params: ListFilesParams = {}) {
+  const response = await apiClient.get<FilesListResponse>("/files", {
+    params: {
+      offset: params.offset ?? 0,
+      limit: params.limit ?? 50,
+      ...(params.category ? { category: params.category } : {}),
+      ...(params.q ? { q: params.q } : {}),
+    },
+  });
+  return response.data;
+}
 
 function getDownloadFilename(contentDisposition: string | undefined, fallbackFilename: string) {
   if (!contentDisposition) {

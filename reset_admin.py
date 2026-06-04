@@ -1,6 +1,6 @@
+import bcrypt
 from app.database import SessionLocal
 from app.models import Role, User
-from app.auth import pwd_context
 
 def reset_admin():
     db = SessionLocal()
@@ -15,11 +15,11 @@ def reset_admin():
                 db.add(role)
         db.commit()
 
-        # Create Admin
+        # Hash password using bcrypt
         admin_email = "admin@example.com"
-        # Explicitly hash using the context
-        password_hash = pwd_context.hash("admin123")
-        
+        password = b"admin123"
+        password_hash = bcrypt.hashpw(password, bcrypt.gensalt()).decode('utf-8')
+
         admin = db.query(User).filter(User.email == admin_email).first()
         if admin:
             db.delete(admin)
@@ -36,10 +36,14 @@ def reset_admin():
         new_admin.roles.append(admin_role)
         db.add(new_admin)
         db.commit()
-        print(f"Admin reset. Hash: {password_hash}")
-        
+        print(f"✓ Admin reset successfully")
+        print(f"  Email: {admin_email}")
+        print(f"  Password: admin123")
+
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"✗ Error: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         db.close()
 

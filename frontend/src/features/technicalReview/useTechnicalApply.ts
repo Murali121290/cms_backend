@@ -22,8 +22,21 @@ export function useTechnicalApply({
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const applyMutation = useMutation({
-    mutationFn: (replacements: Record<string, string>) =>
-      applyTechnicalReview(fileId as number, replacements),
+    mutationFn: ({
+      replacements,
+      selectedFindings,
+      highlightFindings,
+    }: {
+      replacements: Record<string, string> | null;
+      selectedFindings?: any[];
+      highlightFindings?: any[];
+    }) =>
+      applyTechnicalReview(
+        fileId as number,
+        replacements,
+        selectedFindings,
+        highlightFindings,
+      ),
   });
 
   async function refreshReadState() {
@@ -62,13 +75,21 @@ export function useTechnicalApply({
     ]);
   }
 
-  async function apply(replacements: Record<string, string>) {
+  async function apply(
+    replacements: Record<string, string> | null,
+    selectedFindings?: any[],
+    highlightFindings?: any[],
+  ) {
     setResult(null);
     setErrorMessage(null);
     setStatusMessage("Applying technical review changes...");
 
     try {
-      const response = await applyMutation.mutateAsync(replacements);
+      const response = await applyMutation.mutateAsync({
+        replacements,
+        selectedFindings,
+        highlightFindings,
+      });
       await refreshReadState();
       setResult(response);
       setStatusMessage(`Technical review applied. Created ${response.new_file.filename}.`);

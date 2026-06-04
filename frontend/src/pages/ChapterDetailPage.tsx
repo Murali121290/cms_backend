@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useParams, useSearchParams, useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
   ArrowLeft,
@@ -11,6 +12,8 @@ import {
 
 import { getApiErrorMessage } from "@/api/client";
 import { downloadChapterPackage } from "@/api/files";
+import { startProcessingJob, getProcessingStatus } from "@/api/processing";
+import { useToast } from "@/components/ui/useToast";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonTable } from "@/components/ui/SkeletonLoader";
 import {
@@ -269,6 +272,9 @@ function SectionFileView({
 export function ChapterDetailPage() {
   const { projectId, chapterId } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const { addToast, updateToast } = useToast();
+  const queryClient = useQueryClient();
 
   const parsedProjectId = Number.parseInt(projectId ?? "", 10);
   const parsedChapterId = Number.parseInt(chapterId ?? "", 10);
@@ -316,6 +322,15 @@ export function ChapterDetailPage() {
   /* Upload panel */
   const [uploadCategory, setUploadCategory] = useState<string | null>(null);
 
+  /* Processing job state */
+  const [processingJob, setProcessingJob] = useState<{
+    fileId: number;
+    processType: string;
+    toastId: string | null;
+  } | null>(null);
+  const processingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const processingStartTimeRef = useRef<number | null>(null);
+
   function openUpload(category: string) {
     setUploadCategory(category);
     // If a different section is active, navigate to it
@@ -352,6 +367,126 @@ export function ChapterDetailPage() {
       setUploadCategory(null);
     }
   }, [chapterUpload.result, uploadCategory]);
+
+  /* Invalidate cached chapter files on page mount to ensure latest versions are loaded */
+  useEffect(() => {
+    if (normalizedProjectId !== null && normalizedChapterId !== null) {
+      void queryClient.invalidateQueries({
+        queryKey: ["chapter-files", normalizedProjectId, normalizedChapterId],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["chapter-detail", normalizedProjectId, normalizedChapterId],
+      });
+    }
+  }, [normalizedProjectId, normalizedChapterId, queryClient]);
+
+  /* Poll for processing job completion and redirect when done */
+  useEffect(() => {
+    if (!processingJob) return;
+    const job = processingJob;
+
+    const POLL_INTERVAL_MS = 5_000;
+    const TIMEOUT_MS = 600_000;
+
+    let cancelled = false;
+
+    async function tick() {
+      if (cancelled) return;
+
+      if (
+        processingStartTimeRef.current !== null &&
+        Date.now() - processingStartTimeRef.current >= TIMEOUT_MS
+      ) {
+        if (job.toastId) {
+          updateToast(job.toastId, {
+            title: `${job.processType} timed out`,
+            description: "Processing took too long. Check server logs.",
+            variant: "timeout",
+            duration: 0,
+          });
+        }
+        setProcessingJob(null);
+        return;
+      }
+
+      try {
+        const status = await getProcessingStatus(job.fileId, job.processType);
+        if (cancelled) return;
+
+        if (status.status === "completed") {
+          if (job.toastId) {
+            updateToast(job.toastId, {
+              title: `${job.processType} complete`,
+              description: status.derived_filename ?? "Processing finished",
+              variant: "success",
+              duration: 6000,
+            });
+          }
+          if (normalizedProjectId !== null && normalizedChapterId !== null && status.derived_file_id) {
+            if (job.processType === "structuring") {
+              navigate(uiPaths.structuringReview(normalizedProjectId, normalizedChapterId, status.derived_file_id));
+            } else if (job.processType === "technical_edit") {
+              navigate(uiPaths.technicalReview(normalizedProjectId, normalizedChapterId, status.derived_file_id));
+            } else if (job.processType === "reference_validation" || job.processType === "reference_structuring") {
+              navigate(uiPaths.referenceReview(normalizedProjectId, normalizedChapterId, status.derived_file_id));
+            }
+          }
+          void queryClient.invalidateQueries({ queryKey: ["chapter-files", normalizedProjectId, normalizedChapterId] });
+          setProcessingJob(null);
+          return;
+        }
+      } catch {
+        // Ignore transient poll errors; timeout handles unresponsive jobs
+      }
+
+      if (!cancelled) {
+        processingTimerRef.current = setTimeout(tick, POLL_INTERVAL_MS);
+      }
+    }
+
+    processingTimerRef.current = setTimeout(tick, POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      if (processingTimerRef.current !== null) {
+        clearTimeout(processingTimerRef.current);
+        processingTimerRef.current = null;
+      }
+    };
+  }, [
+    processingJob,
+    navigate,
+    normalizedProjectId,
+    normalizedChapterId,
+    updateToast,
+    queryClient,
+  ]);
+
+  /* Start processing job */
+  const handleStartProcessing = useCallback(
+    async (fileId: number, processType: string, mode = "style") => {
+      const toastId = addToast({
+        title: `${processType} in progress`,
+        description: "Processing file…",
+        variant: "processing",
+        duration: 0,
+      });
+
+      try {
+        await startProcessingJob(fileId, processType, mode);
+        setProcessingJob({ fileId, processType, toastId });
+        processingStartTimeRef.current = Date.now();
+      } catch (err) {
+        updateToast(toastId, {
+          title: `${processType} failed to start`,
+          description: getApiErrorMessage(err, "Unexpected error"),
+          variant: "error",
+          duration: 6000,
+        });
+      }
+    },
+    [addToast, updateToast],
+  );
 
   /* ── Invalid params ─────────────────────────────────────────── */
   if (normalizedProjectId === null || normalizedChapterId === null) {
@@ -614,6 +749,7 @@ export function ChapterDetailPage() {
                 projectId={normalizedProjectId}
                 searchQuery=""
                 selectedSection={activeSection}
+                onStartProcessing={handleStartProcessing}
               />
             </SectionFileView>
           )}

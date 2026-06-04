@@ -19,6 +19,7 @@ interface UseProcessingJobResult {
   isPolling: boolean;
   isComplete: boolean;
   isTimeout: boolean;
+  derivedFileId: number | null;
   startJob: (processType: string, mode?: string) => Promise<void>;
   reset: () => void;
 }
@@ -35,6 +36,7 @@ export function useProcessingJob({
   const [isPolling, setIsPolling] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
   const [isTimeout, setIsTimeout] = useState(false);
+  const [derivedFileId, setDerivedFileId] = useState<number | null>(null);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const toastIdRef = useRef<string | null>(null);
@@ -58,6 +60,7 @@ export function useProcessingJob({
     setIsPolling(false);
     setIsComplete(false);
     setIsTimeout(false);
+    setDerivedFileId(null);
   }, []);
 
   // Cleanup on unmount
@@ -120,6 +123,9 @@ export function useProcessingJob({
             clearPolling();
             setIsPolling(false);
             setIsComplete(true);
+            if (status.derived_file_id) {
+              setDerivedFileId(status.derived_file_id);
+            }
             updateToast(toastId, {
               title: `${processType} complete`,
               description: status.derived_filename ?? "Processing finished",
@@ -141,5 +147,5 @@ export function useProcessingJob({
     [fileId, projectId, chapterId, addToast, updateToast, queryClient]
   );
 
-  return { isStarting, isPolling, isComplete, isTimeout, startJob, reset };
+  return { isStarting, isPolling, isComplete, isTimeout, derivedFileId, startJob, reset };
 }

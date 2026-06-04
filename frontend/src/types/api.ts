@@ -83,6 +83,8 @@ export interface ProjectSummary {
   team_id: number | null;
   chapter_count: number;
   file_count: number;
+  workflow_type: string | null;
+  workflow_stage_no: string | null;
 }
 
 export interface ChapterSummary {
@@ -112,6 +114,23 @@ export interface ProjectsPagination {
 export interface ProjectsListResponse {
   projects: ProjectSummary[];
   pagination: ProjectsPagination;
+}
+
+export interface FileListItem extends FileRecord {
+  project_code: string | null;
+  project_title: string | null;
+  chapter_number: string | null;
+  chapter_title: string | null;
+}
+
+export interface FilesListResponse {
+  files: FileListItem[];
+  pagination: ProjectsPagination;
+}
+
+export interface ProjectWorkflowUpdateResponse {
+  status: "ok";
+  project: ProjectSummary;
 }
 
 export interface ProjectDetail extends ProjectSummary {
@@ -257,6 +276,14 @@ export interface TechnicalScanResponse {
   file: FileRecord;
   issues: TechnicalIssue[];
   raw_scan: Record<string, unknown>;
+  onlyoffice_available: boolean;
+  collabora_url?: string | null;
+  findings?: any[];
+  inconsistencies?: any;
+  spelling_summary?: any;
+  ia_report?: any;
+  stats?: any;
+  active_stylesheet?: StylesheetSummary | null;
 }
 
 export interface TechnicalApplyResponse {
@@ -271,9 +298,25 @@ export interface StructuringProcessedFile {
   exists: true;
 }
 
+export interface StructuredBlock {
+  index: number;
+  type: "paragraph" | "table" | "footnote" | "endnote";
+  style: string;
+  html: string;
+  ref_index: number | null;
+}
+
+export interface StructuredContentResponse {
+  status: "ok";
+  filename: string;
+  blocks: StructuredBlock[];
+  available_styles: string[];
+}
+
 export interface StructuringReviewEditor {
   mode: "structuring";
-  collabora_url: string | null;
+  onlyoffice_available: boolean;
+  collabora_url?: string | null;
   wopi_mode: "structuring";
   save_mode: "wopi_autosave";
 }
@@ -520,4 +563,92 @@ export interface ActivitiesSummary {
 export interface ActivitiesResponse {
   summary: ActivitiesSummary;
   activities: ActivityItem[];
+}
+
+// ─── Editorial Stylesheets ───────────────────────────────────────────────────
+
+export interface IARow {
+  element: string;
+  subtype: string;
+  pattern: string;
+}
+
+export interface IATemplateRow {
+  element: string;
+  subtype: string;
+  pattern: string;
+  example: string | null;
+}
+
+export interface StylesheetSummary {
+  id: number;
+  project_id: number;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  created_at: string;
+  created_by_id: number | null;
+  selected_ia_rows: IARow[];
+}
+
+export interface StylesheetsListResponse {
+  project_id: number;
+  stylesheets: StylesheetSummary[];
+  active_stylesheet: StylesheetSummary | null;
+}
+
+export interface StylesheetCreateRequest {
+  name: string;
+  description?: string | null;
+  selected_ia_rows: IARow[];
+}
+
+export interface StylesheetCreateResponse {
+  status: "ok";
+  stylesheet: StylesheetSummary;
+}
+
+export interface StylesheetUpdateRequest {
+  name?: string | null;
+  description?: string | null;
+  selected_ia_rows?: IARow[] | null;
+}
+
+export interface StylesheetUpdateResponse {
+  status: "ok";
+  stylesheet: StylesheetSummary;
+}
+
+export interface StylesheetDeleteResponse {
+  status: "ok";
+  deleted_id: number;
+}
+
+export interface StylesheetActivateResponse {
+  status: "ok";
+  activated_id: number;
+  deactivated_ids: number[];
+}
+
+export interface IATemplateResponse {
+  rows: IATemplateRow[];
+}
+
+export interface TriggeredIARule {
+  element: string;
+  subtype: string;
+  pattern: string;
+  count: number;
+  example_surfaces: string[];
+}
+
+export interface AnalyzeFilesForStylesheetResponse {
+  analyzed_files: { id: number; filename: string }[];
+  triggered_rules: TriggeredIARule[];
+  total_findings: number;
+}
+
+export interface XhtmlSaveResponse {
+  status: "ok";
+  file_id: number;
 }
