@@ -233,3 +233,47 @@ def test_technical_apply_updates_file_in_place_and_archives_previous_version(
     )
     assert version_entry is not None
     assert Path(version_entry.path).exists()
+
+
+def test_background_processing_manual_structuring_success_uses_correct_library(
+    monkeypatch,
+    admin_user,
+    file_record,
+    db_session,
+):
+    from app.routers.processing import background_processing_task
+
+    output_path = Path(file_record.path).with_name(f"{Path(file_record.filename).stem}_Processed.docx")
+    output_path.write_bytes(b"manual-processed-docx-bytes")
+
+    called_manual_process = []
+
+    def _fake_manual_process_docx(input_path, output_path, mode):
+        assert Path(input_path) == Path(file_record.path).resolve()
+        assert mode == "style"
+        called_manual_process.append(True)
+        Path(output_path).write_bytes(b"manual-processed-docx-bytes")
+        return {"success": True, "paragraphs_processed": 10, "errors": []}
+
+    monkeypatch.setattr("app.utils.utils.structuring_lib.styler.process_docx", _fake_manual_process_docx)
+
+    file_record.is_checked_out = True
+    file_record.checked_out_by_id = admin_user.id
+    db_session.commit()
+
+    background_processing_task(
+        file_id=file_record.id,
+        process_type="structuring",
+        user_id=admin_user.id,
+        user_username=admin_user.username,
+        options={"structuring_method": "manual"},
+    )
+
+    db_session.refresh(file_record)
+    assert file_record.is_checked_out is False
+    assert file_record.checked_out_by_id is None
+    assert file_record.checked_out_at is None
+
+    assert called_manual_process == [True]
+    assert Path(file_record.path).read_bytes() == b"manual-processed-docx-bytes"
+

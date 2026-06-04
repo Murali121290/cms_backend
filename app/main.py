@@ -8,6 +8,8 @@ from app.domains.auth import api_v1 as users
 from app.domains.files import api_v1 as files
 from app.domains.projects import api_v1 as projects
 from app.domains.projects import teams_api_v1 as teams
+from app.domains.clients import api_v1 as clients
+from app.domains.workflow import api_v1 as workflow
 from app.legacy import web
 from app.routers import api_v2
 from app.core.config import get_settings
@@ -44,6 +46,10 @@ app.include_router(structuring.router, prefix=f"{settings.API_V1_STR}", tags=["S
 # WOPI Router (LibreOffice Online / Collabora)
 from app.integrations.wopi import router as wopi
 app.include_router(wopi.router, tags=["WOPI"])
+
+# Workflow & Clients Routers (WMS Integration)
+app.include_router(clients.router, tags=["Clients"])
+app.include_router(workflow.router, tags=["Workflow"])
 
 @app.get("/")
 def read_root():

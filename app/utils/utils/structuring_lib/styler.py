@@ -34,11 +34,11 @@ def tag_tables(doc: Document, mode: Literal["style", "tag"] = "style") -> None:
     
     rules_loader = get_rules_loader()
     table_config = rules_loader.get_table_config()
-    header_style_name = table_config.get("header_style", "TBCH")
-    body_style_name = table_config.get("body_style", "TB")
+    header_style_name = table_config.get("header_style", "T2")
+    body_style_name = table_config.get("body_style", "T")
     bullet_style_name = table_config.get("bullet_style", "TBL-MID")
     number_style_name = table_config.get("number_style", "TNL-MID")
-    roman_style_name = table_config.get("roman_style", "TRL-MID")
+    roman_style_name = table_config.get("roman_style", "TOL-MID")
     header_threshold = table_config.get("header_threshold", 1.0)
     doc_processor = DocumentProcessor()
 
@@ -61,17 +61,17 @@ def tag_tables(doc: Document, mode: Literal["style", "tag"] = "style") -> None:
                             tag = "TNL-MID"
                             style = number_style_name
                         elif list_kind == "roman":
-                            tag = "TRL-MID"
+                            tag = "TOL-MID"
                             style = roman_style_name
                         else:
                             score = doc_processor.detect_table_header_smart(
                                 text, row_idx, cell_idx, len(table.rows)
                             )
                             if score >= header_threshold:
-                                tag = "TBCH"
+                                tag = "T2"
                                 style = header_style_name
                             else:
-                                tag = "TB"
+                                tag = "T"
                                 style = body_style_name
                         
                         if mode == "style":

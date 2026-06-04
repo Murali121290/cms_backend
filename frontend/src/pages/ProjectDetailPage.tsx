@@ -14,9 +14,10 @@ import { useProjectDetailQuery } from "@/features/projects/useProjectDetailQuery
 import { ProjectWorkflowPanel } from "@/features/workflow/ProjectWorkflowPanel";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { uiPaths } from "@/utils/appPaths";
+import { StylesheetsPage } from "./StylesheetsPage";
 import type { ChapterSummary } from "@/types/api";
 
-type ActiveTab = "chapters" | "overview";
+type ActiveTab = "chapters" | "overview" | "stylesheets";
 
 export function ProjectDetailPage() {
   const { projectId } = useParams();
@@ -110,6 +111,7 @@ export function ProjectDetailPage() {
 
   const tabs: { id: ActiveTab; label: string }[] = [
     { id: "chapters", label: "Chapters" },
+    { id: "stylesheets", label: "Stylesheets" },
     { id: "overview", label: "Overview" },
   ];
 
@@ -211,6 +213,11 @@ export function ProjectDetailPage() {
         existingChapters={chapters}
         editingChapter={editingChapter}
       />
+
+      {/* Stylesheets tab */}
+      {activeTab === "stylesheets" && (
+        <StylesheetsPage />
+      )}
 
       {/* Overview tab */}
       {activeTab === "overview" && (

@@ -464,7 +464,7 @@ export function ChapterDetailPage() {
 
   /* Start processing job */
   const handleStartProcessing = useCallback(
-    async (fileId: number, processType: string, mode = "style") => {
+    async (fileId: number, processType: string, mode = "style", options?: Record<string, any>) => {
       const toastId = addToast({
         title: `${processType} in progress`,
         description: "Processing file…",
@@ -473,7 +473,7 @@ export function ChapterDetailPage() {
       });
 
       try {
-        await startProcessingJob(fileId, processType, mode);
+        await startProcessingJob(fileId, processType, mode, options);
         setProcessingJob({ fileId, processType, toastId });
         processingStartTimeRef.current = Date.now();
       } catch (err) {

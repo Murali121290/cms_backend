@@ -149,8 +149,33 @@ def background_processing_task(
                 success_msg = f"References processing completed ({process_type})"
 
             elif process_type == "structuring":
-                generated_files = structuring_engine_cls().process_document(file_path, mode=mode)
-                success_msg = f"Structuring completed (mode: {mode})"
+                structuring_method = "ai"
+                if options and isinstance(options, dict):
+                    structuring_method = options.get("structuring_method", "ai")
+
+                if structuring_method == "manual":
+                    logger.info(f"Starting manual structuring (mode={mode}) using app.utils.utils.structuring_lib for: {os.path.basename(file_path)}")
+                    from app.utils.utils.structuring_lib.styler import process_docx as manual_process_docx
+                    dir_name = os.path.dirname(file_path)
+                    base_name = os.path.basename(file_path)
+                    name_only = os.path.splitext(base_name)[0]
+                    output_filename = f"{name_only}_Processed.docx"
+                    output_path = os.path.join(dir_name, output_filename)
+                    
+                    result = manual_process_docx(
+                        input_path=file_path,
+                        output_path=output_path,
+                        mode=mode
+                    )
+                    if not result.get("success", False):
+                        error_msg = "; ".join(result.get("errors", ["Unknown structuring error"]))
+                        logger.error(f"Manual structuring failed: {error_msg}")
+                        raise Exception(f"Manual structuring failed: {error_msg}")
+                    generated_files = [output_path]
+                    success_msg = f"Manual structuring completed (mode: {mode})"
+                else:
+                    generated_files = structuring_engine_cls().process_document(file_path, mode=mode)
+                    success_msg = f"Structuring completed (mode: {mode})"
 
             elif process_type == "bias_scan":
                 generated_files = bias_engine_cls().process_document(file_path)

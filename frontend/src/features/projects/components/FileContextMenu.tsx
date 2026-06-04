@@ -39,7 +39,7 @@ export interface FileContextMenuProps {
   onCancelCheckout: () => void;
   onDelete: () => void;
   onOpenReferenceCheck: () => void;
-  onStartProcessing?: (fileId: number, processType: string, mode?: string) => Promise<void>;
+  onStartProcessing?: (fileId: number, processType: string, mode?: string, options?: Record<string, any>) => Promise<void>;
 }
 
 // ─── Position helper ──────────────────────────────────────────────────────────
@@ -275,6 +275,7 @@ export function FileContextMenu({
     processType: string;
     mode: string;
     actionName: string;
+    isStructuringChoice?: boolean;
   } | null>(null);
 
   const [mounted, setMounted] = useState(false);
@@ -366,69 +367,166 @@ export function FileContextMenu({
       >
         {/* ── Confirmation step ─────────────────────────────── */}
         {confirmStep !== null ? (
-          <div style={{ padding: "12px" }}>
-            <p style={{ fontSize: "12px", color: "#6B6560", marginBottom: "6px" }}>
-              {confirmStep.actionName} on:
-            </p>
-            <p
-              style={{
-                fontFamily: "ui-monospace, monospace",
-                fontSize: "12px",
-                color: "#1A1714",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-                marginBottom: "12px",
-              }}
-              title={file.filename}
-            >
-              {file.filename}
-            </p>
-            <div style={{ display: "flex", gap: "8px" }}>
-              <button
-                type="button"
-                onClick={() => setConfirmStep(null)}
+          confirmStep.isStructuringChoice ? (
+            <div style={{ padding: "12px" }}>
+              <p style={{ fontSize: "12px", color: "#6B6560", marginBottom: "8px" }}>
+                Select Structuring Method:
+              </p>
+              <p
                 style={{
-                  flex: 1,
-                  padding: "6px 0",
-                  fontSize: "13px",
-                  color: "#6B6560",
-                  backgroundColor: "#F5F4F1",
-                  border: "none",
-                  borderRadius: "6px",
-                  cursor: "pointer",
+                  fontFamily: "ui-monospace, monospace",
+                  fontSize: "11px",
+                  color: "#9C9590",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  marginBottom: "12px",
                 }}
+                title={file.filename}
               >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const { processType, mode } = confirmStep;
-                  setConfirmStep(null);
-                  void onStartProcessing?.(file.id, processType, mode);
-                  onClose();
-                }}
-                style={{
-                  flex: 1,
-                  padding: "6px 0",
-                  fontSize: "13px",
-                  color: "#FFFFFF",
-                  backgroundColor: "#C9821A",
-                  border: "none",
-                  borderRadius: "6px",
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: "4px",
-                }}
-              >
-                Confirm
-                <ChevronRight size={13} aria-hidden />
-              </button>
+                {file.filename}
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const { processType, mode } = confirmStep;
+                    setConfirmStep(null);
+                    void onStartProcessing?.(file.id, processType, mode, { structuring_method: "ai" });
+                    onClose();
+                  }}
+                  style={{
+                    padding: "8px 12px",
+                    fontSize: "13.5px",
+                    color: "#FFFFFF",
+                    backgroundColor: "#C9821A",
+                    border: "none",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    display: "flex",
+                    flexDirection: "column",
+                    width: "100%",
+                    transition: "background-color 100ms",
+                  }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = "#B5731A"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = "#C9821A"; }}
+                >
+                  <span style={{ fontWeight: 600 }}>AI Structuring</span>
+                  <span style={{ fontSize: "10.5px", opacity: 0.85 }}>Standard automated process</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const { processType, mode } = confirmStep;
+                    setConfirmStep(null);
+                    void onStartProcessing?.(file.id, processType, mode, { structuring_method: "manual" });
+                    onClose();
+                  }}
+                  style={{
+                    padding: "8px 12px",
+                    fontSize: "13.5px",
+                    color: "#1A1714",
+                    backgroundColor: "#F5F4F1",
+                    border: "1px solid #E2DDD6",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    display: "flex",
+                    flexDirection: "column",
+                    width: "100%",
+                    transition: "background-color 100ms",
+                  }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = "#E8E3DD"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = "#F5F4F1"; }}
+                >
+                  <span style={{ fontWeight: 600 }}>Manual Structuring</span>
+                  <span style={{ fontSize: "10.5px", color: "#6B6560" }}>Rules-based styler lib</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmStep(null)}
+                  style={{
+                    padding: "6px 0",
+                    fontSize: "12px",
+                    color: "#9C9590",
+                    backgroundColor: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                    textDecoration: "underline",
+                    textAlign: "center",
+                    width: "100%",
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div style={{ padding: "12px" }}>
+              <p style={{ fontSize: "12px", color: "#6B6560", marginBottom: "6px" }}>
+                {confirmStep.actionName} on:
+              </p>
+              <p
+                style={{
+                  fontFamily: "ui-monospace, monospace",
+                  fontSize: "12px",
+                  color: "#1A1714",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  marginBottom: "12px",
+                }}
+                title={file.filename}
+              >
+                {file.filename}
+              </p>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button
+                  type="button"
+                  onClick={() => setConfirmStep(null)}
+                  style={{
+                    flex: 1,
+                    padding: "6px 0",
+                    fontSize: "13px",
+                    color: "#6B6560",
+                    backgroundColor: "#F5F4F1",
+                    border: "none",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const { processType, mode } = confirmStep;
+                    setConfirmStep(null);
+                    void onStartProcessing?.(file.id, processType, mode);
+                    onClose();
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: "6px 0",
+                    fontSize: "13px",
+                    color: "#FFFFFF",
+                    backgroundColor: "#C9821A",
+                    border: "none",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "4px",
+                  }}
+                >
+                  Confirm
+                  <ChevronRight size={13} aria-hidden />
+                </button>
+              </div>
+            </div>
+          )
         ) : (
           <>
             {/* ── Group 1: Primary actions ─────────────────────────── */}
@@ -488,7 +586,7 @@ export function FileContextMenu({
               icon={Layers}
               label="Structuring"
               iconStyle={ICON_GOLD}
-              onClick={() => setConfirmStep({ processType: "structuring", mode: "style", actionName: "Structuring" })}
+              onClick={() => setConfirmStep({ processType: "structuring", mode: "style", actionName: "Structuring", isStructuringChoice: true })}
             />
             <MenuItem
               icon={Languages}

@@ -24,6 +24,8 @@ import { ReportsPage } from "@/pages/ReportsPage";
 import { QualityControlPage } from "@/pages/QualityControlPage";
 import { FilesPage } from "@/pages/FilesPage";
 import { WorkflowPage } from "@/pages/WorkflowPage";
+import ClientsPage from "@/pages/ClientsPage";
+import WorkflowStagesPage from "@/pages/WorkflowStagesPage";
 import { uiPaths } from "@/utils/appPaths";
 
 function UiRouteLayout() {
@@ -108,6 +110,8 @@ export const router = createBrowserRouter([
         element: <DocxEditorPage />,
       },
       { path: "workflow", element: <WorkflowPage /> },
+      { path: "workflow/stages", element: <WorkflowStagesPage /> },
+      { path: "clients", element: <ClientsPage /> },
       { path: "files", element: <FilesPage /> },
       { path: "quality-control", element: <QualityControlPage /> },
       { path: "reports", element: <ReportsPage /> },

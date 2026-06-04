@@ -560,7 +560,7 @@ interface ChapterFilesTableProps {
   onCheckout: (file: FileRecord) => void | Promise<void>;
   onCancelCheckout: (file: FileRecord) => void | Promise<void>;
   onDelete: (file: FileRecord) => void | Promise<void>;
-  onStartProcessing?: (fileId: number, processType: string, mode?: string) => Promise<void>;
+  onStartProcessing?: (fileId: number, processType: string, mode?: string, options?: Record<string, any>) => Promise<void>;
 }
 
 export function ChapterFilesTable({
