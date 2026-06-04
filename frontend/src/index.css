@@ -1,82 +1,60 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Libre+Bodoni:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&display=swap");
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 @import "tailwindcss";
 
-/* ─────────────────────────────────────────────────────────────
-   DESIGN TOKENS — Tailwind v4 @theme
-   ───────────────────────────────────────────────────────────── */
+:root {
+  --color-sidebar:        #022B3A;
+  --color-sidebar-hover:  #0a3d50;
+  --color-sidebar-text:   #94a3b8;
+  --color-sidebar-active: #ffffff;
+  --color-primary:        #1F7A8C;
+  --color-primary-hover:  #165f6e;
+  --color-accent:         #BFDBF7;
+  --color-background:     #F8FAFC;
+  --color-card:           #FFFFFF;
+  --color-border:         #E2E8F0;
+  --color-text:           #1E293B;
+  --color-muted:          #64748B;
+  --color-success:        #22C55E;
+  --color-warning:        #F59E0B;
+  --color-danger:         #EF4444;
+  --color-info:           #3B82F6;
+}
+
 @theme {
-  /* Fonts */
-  --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
-  --font-serif: "Libre Bodoni", "Georgia", serif;
-  --font-mono: "JetBrains Mono", "Fira Code", monospace;
-
-  /* Navy palette — primary */
-  --color-navy-950: #04090f;
-  --color-navy-900: #0f1b2d;
-  --color-navy-800: #162338;
-  --color-navy-700: #1f3145;
-  --color-navy-600: #284056;
-  --color-navy-500: #395671;
-  --color-navy-400: #5a7b9c;
-  --color-navy-300: #8aa5be;
-  --color-navy-200: #bfd0de;
-  --color-navy-100: #e0e9f1;
-  --color-navy-50:  #f2f6fa;
-
-  /* Gold/Amber palette — accent */
-  --color-gold-900: #6b3d06;
-  --color-gold-800: #8c5209;
-  --color-gold-700: #a06515;
-  --color-gold-600: #c9821a;
-  --color-gold-500: #d99530;
-  --color-gold-400: #e8aa48;
-  --color-gold-300: #f2c06a;
-  --color-gold-200: #f8d99a;
-  --color-gold-100: #fdf0cc;
-  --color-gold-50:  #fffbf0;
-
-  /* Sidebar */
-  --color-sidebar-bg:    #1a1714;
-  --color-sidebar-text:  #d4cfc9;
-  --color-sidebar-muted: #6b6560;
-
-  /* Surface / Warm off-white */
-  --color-surface-100: #f9f7f4;
-  --color-surface-200: #f4f2ef;
-  --color-surface-300: #ede8e3;
-  --color-surface-400: #e2ddd8;
-  --color-surface-500: #c9c4be;
-
-  /* Semantic */
-  --color-success-600: #16a34a;
-  --color-success-500: #22c55e;
-  --color-success-100: #dcfce7;
-  --color-warning-600: #d97706;
-  --color-warning-500: #f59e0b;
-  --color-warning-100: #fef3c7;
-  --color-error-600:   #dc2626;
-  --color-error-500:   #ef4444;
-  --color-error-100:   #fee2e2;
-  --color-info-600:    #2563eb;
-  --color-info-500:    #3b82f6;
-  --color-info-100:    #dbeafe;
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --color-sidebar:        var(--color-sidebar);
+  --color-sidebar-hover:  var(--color-sidebar-hover);
+  --color-sidebar-text:   var(--color-sidebar-text);
+  --color-sidebar-active: var(--color-sidebar-active);
+  --color-primary:        var(--color-primary);
+  --color-primary-hover:  var(--color-primary-hover);
+  --color-accent:         var(--color-accent);
+  --color-background:     var(--color-background);
+  --color-card:           var(--color-card);
+  --color-border:         var(--color-border);
+  --color-text:           var(--color-text);
+  --color-muted:          var(--color-muted);
+  --color-success:        var(--color-success);
+  --color-warning:        var(--color-warning);
+  --color-danger:         var(--color-danger);
+  --color-info:           var(--color-info);
 
   /* Border radius */
   --radius-xs:   0.1875rem; /* 3px  */
-  --radius-sm:   0.25rem;   /* 4px  — inputs, chips */
-  --radius-md:   0.5rem;    /* 8px  — cards */
-  --radius-lg:   0.75rem;   /* 12px — modals */
+  --radius-sm:   0.25rem;   /* 4px  */
+  --radius-md:   0.5rem;    /* 8px  */
+  --radius-lg:   0.75rem;   /* 12px */
   --radius-xl:   1rem;
   --radius-full: 9999px;
 
-  /* Shadows — 3 levels */
+  /* Shadows */
   --shadow-subtle: 0 1px 2px 0 rgb(15 27 45 / 0.06);
   --shadow-card:   0 1px 3px 0 rgb(15 27 45 / 0.08), 0 1px 2px -1px rgb(15 27 45 / 0.06);
   --shadow-hover:  0 4px 12px 0 rgb(15 27 45 / 0.12), 0 2px 4px -1px rgb(15 27 45 / 0.08);
   --shadow-strong: 0 20px 40px -8px rgb(15 27 45 / 0.18), 0 8px 16px -4px rgb(15 27 45 / 0.10);
   --shadow-modal:  0 24px 48px -8px rgb(15 27 45 / 0.24), 0 12px 24px -6px rgb(15 27 45 / 0.14);
 
-  /* Z-index scale */
+  /* Z-index */
   --z-base:     0;
   --z-sticky:   10;
   --z-dropdown: 20;
@@ -115,8 +93,8 @@ body {
   font-size: 1rem;
   line-height: 1.5;
   font-weight: 400;
-  color: var(--color-navy-900);
-  background-color: var(--color-surface-200);
+  color: var(--color-text);
+  background-color: var(--color-background);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -143,7 +121,7 @@ svg {
    FOCUS VISIBLE — global
    ───────────────────────────────────────────────────────────── */
 :focus-visible {
-  outline: 2px solid var(--color-gold-600);
+  outline: 2px solid var(--color-primary);
   outline-offset: 2px;
   border-radius: 2px;
 }
@@ -159,11 +137,11 @@ svg {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background-color: var(--color-surface-400);
+  background-color: var(--color-border);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background-color: var(--color-surface-500);
+  background-color: var(--color-muted);
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -190,9 +168,9 @@ svg {
 .skeleton-shimmer {
   background: linear-gradient(
     90deg,
-    var(--color-surface-300) 25%,
-    var(--color-surface-200) 50%,
-    var(--color-surface-300) 75%
+    var(--color-background) 25%,
+    var(--color-accent) 50%,
+    var(--color-background) 75%
   );
   background-size: 800px 100%;
   animation: shimmer 1.5s infinite linear;
