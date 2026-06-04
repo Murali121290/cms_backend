@@ -1,0 +1,60 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+/* ── Default theme CSS variables ────────────────────────────────────────────── */
+:root {
+  --color-sidebar:        #022B3A;
+  --color-sidebar-hover:  #0a3d50;
+  --color-sidebar-text:   #94a3b8;
+  --color-sidebar-active: #ffffff;
+  --color-primary:        #1F7A8C;
+  --color-primary-hover:  #165f6e;
+  --color-accent:         #BFDBF7;
+  --color-background:     #F8FAFC;
+  --color-card:           #FFFFFF;
+  --color-border:         #E2E8F0;
+  --color-text:           #1E293B;
+  --color-muted:          #64748B;
+  --color-success:        #22C55E;
+  --color-warning:        #F59E0B;
+  --color-danger:         #EF4444;
+  --color-info:           #3B82F6;
+}
+
+/* ── Tailwind custom theme tokens ───────────────────────────────────────────── */
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+
+  --color-sidebar:        var(--color-sidebar);
+  --color-sidebar-hover:  var(--color-sidebar-hover);
+  --color-sidebar-text:   var(--color-sidebar-text);
+  --color-sidebar-active: var(--color-sidebar-active);
+  --color-primary:        var(--color-primary);
+  --color-primary-hover:  var(--color-primary-hover);
+  --color-accent:         var(--color-accent);
+  --color-background:     var(--color-background);
+  --color-card:           var(--color-card);
+  --color-border:         var(--color-border);
+  --color-text:           var(--color-text);
+  --color-muted:          var(--color-muted);
+  --color-success:        var(--color-success);
+  --color-warning:        var(--color-warning);
+  --color-danger:         var(--color-danger);
+  --color-info:           var(--color-info);
+}
+
+/* ── Base ───────────────────────────────────────────────────────────────────── */
+* { box-sizing: border-box; }
+
+body {
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  background-color: var(--color-background);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-muted); }

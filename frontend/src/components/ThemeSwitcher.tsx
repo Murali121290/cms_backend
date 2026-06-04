@@ -1,6 +1,6 @@
 import { Palette } from 'lucide-react'
 import { themes } from '@/theme/themes'
-import { useThemeStore } from '@/stores/useThemeStore'
+import { useThemeStore } from '@/store/useThemeStore'
 import { cn } from '@/utils/cn'
 
 export function ThemeSwitcher() {

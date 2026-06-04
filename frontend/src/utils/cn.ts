@@ -1,27 +1,6 @@
-/**
- * Lightweight className utility — merges conditional class strings.
- * No external dependencies; sufficient for Tailwind v4 class merging.
- */
-type ClassValue =
-  | string
-  | undefined
-  | null
-  | false
-  | 0
-  | ClassValue[];
+import { clsx, type ClassValue } from 'clsx'
+import { twMerge } from 'tailwind-merge'
 
-export function cn(...inputs: ClassValue[]): string {
-  const classes: string[] = [];
-
-  for (const input of inputs) {
-    if (!input) continue;
-    if (typeof input === "string") {
-      classes.push(input);
-    } else if (Array.isArray(input)) {
-      const inner = cn(...input);
-      if (inner) classes.push(inner);
-    }
-  }
-
-  return classes.join(" ");
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs))
 }

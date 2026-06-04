@@ -1,32 +1,36 @@
-import axios, { AxiosError } from "axios";
+import axios from 'axios'
 
-import type { ErrorResponse } from "@/types/api";
+const api = axios.create({
+  baseURL: '/api/v2',
+  headers: { 'Content-Type': 'application/json' },
+  withCredentials: true, // enables cookie-based auth for cms_backend
+})
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "/api/v2";
-
-export const apiClient = axios.create({
-  baseURL: apiBaseUrl,
-  withCredentials: true,
-  headers: {
-    Accept: "application/json",
-  },
-});
-
-export function getApiErrorMessage(error: unknown, fallback = "Request failed") {
-  if (error instanceof AxiosError) {
-    const payload = error.response?.data as ErrorResponse | undefined;
-    if (payload?.message) {
-      return payload.message;
+// ── Response: on 401 redirect to login ──────────────────────────────────────────
+api.interceptors.response.use(
+  (res) => res,
+  (error) => {
+    if (error.response?.status === 401) {
+      if (window.location.pathname !== '/login') {
+        window.location.replace('/login')
+      }
     }
+    return Promise.reject(error)
+  }
+)
 
-    if (error.message) {
-      return error.message;
+export const getApiErrorMessage = (error: unknown, fallback?: string): string => {
+  if (axios.isAxiosError(error) && error.response?.data) {
+    const data = error.response.data as any
+    if (typeof data === 'object' && data !== null) {
+      if ('message' in data) return data.message
+      if ('detail' in data) return data.detail
+      if ('error' in data) return data.error
     }
   }
-
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return fallback;
+  if (fallback) return fallback
+  return error instanceof Error ? error.message : 'An error occurred'
 }
+
+export const apiClient = api
+export default api

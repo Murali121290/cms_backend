@@ -1,760 +1,153 @@
-﻿import { useEffect, useRef, useState, useCallback } from "react";
-import { Link, useParams, useSearchParams, useNavigate } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
-import {
-  AlertCircle,
-  ArrowLeft,
-  CheckCircle2,
-  FolderOpen,
-  Upload,
-  X,
-} from "lucide-react";
+import { useState, useEffect } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
+import { chaptersApi } from '@/api/chapters'
+import { projectsApi } from '@/api/projects'
+import { workflowsApi } from '@/api/workflows'
+import type { WorkflowStage } from '@/api/workflows'
+import { stageDetailsApi } from '@/api/stageDetails'
+import { ChapterFilePage } from '@/pages/ChapterFilePage'
+import { FullPageSpinner } from '@/components/ui/Spinner'
+import { toast } from '@/store/useToastStore'
 
-import { getApiErrorMessage } from "@/api/client";
-import { downloadChapterPackage } from "@/api/files";
-import { startProcessingJob, getProcessingStatus } from "@/api/processing";
-import { useToast } from "@/components/ui/useToast";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { SkeletonTable } from "@/components/ui/SkeletonLoader";
-import {
-  CHAPTER_SECTIONS,
-  ChapterSectionCards,
-  SECTION_BY_KEY,
-  SECTION_BY_PARAM,
-} from "@/features/projects/components/ChapterCategorySummary";
-import { ChapterFilesTable } from "@/features/projects/components/ChapterFilesTable";
-import {
-  ChapterToolbar,
-  type ViewMode,
-} from "@/features/projects/components/ChapterToolbar";
-import { ChapterUploadPanel } from "@/features/projects/components/ChapterUploadPanel";
-import { useChapterDetailQuery } from "@/features/projects/useChapterDetailQuery";
-import { useChapterFileActions } from "@/features/projects/useChapterFileActions";
-import { useChapterFilesQuery } from "@/features/projects/useChapterFilesQuery";
-import { useChapterUpload } from "@/features/projects/useChapterUpload";
-import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import type { ChapterCategoryCounts } from "@/types/api";
-import { uiPaths } from "@/utils/appPaths";
-import { cn } from "@/utils/cn";
-
-/* â”€â”€â”€ Loading skeleton â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-
-function ChapterDetailSkeleton() {
-  return (
-    <div className="-m-6 flex h-[calc(100vh-3.5rem)] overflow-hidden">
-      {/* Sidebar skeleton */}
-      <div className="w-52 flex-shrink-0 bg-white border-r border-border p-4 space-y-3">
-        <div className="skeleton-shimmer rounded h-5 w-32 mb-4" />
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="skeleton-shimmer rounded h-8 w-full" />
-        ))}
-      </div>
-      {/* Main skeleton */}
-      <div className="flex-1 p-6 space-y-4">
-        <div className="skeleton-shimmer rounded h-4 w-64 mb-6" />
-        <div className="grid grid-cols-3 xl:grid-cols-6 gap-4">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="skeleton-shimmer rounded-lg h-28" />
-          ))}
-        </div>
-        <div className="bg-white rounded-lg shadow-card overflow-hidden">
-          <SkeletonTable rows={5} cols={5} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* â”€â”€â”€ Error card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-
-function ChapterDetailError({
-  message,
-  onRetry,
-  backTo,
-}: {
-  message: string;
-  onRetry: () => void;
-  backTo: string;
-}) {
-  return (
-    <div className="flex items-center justify-center min-h-[60vh]">
-      <div className="bg-white rounded-lg shadow-card p-8 max-w-md w-full text-center">
-        <div className="w-12 h-12 bg-danger/10 rounded-full flex items-center justify-center mx-auto mb-4">
-          <AlertCircle className="w-6 h-6 text-danger" />
-        </div>
-        <p className="text-sm text-muted mb-6">{message}</p>
-        <div className="flex items-center justify-center gap-3">
-          <button
-            type="button"
-            className="text-sm font-medium text-primary hover:text-primary transition-colors"
-            onClick={onRetry}
-          >
-            Retry
-          </button>
-          <Link className="text-sm text-muted hover:text-text font-medium" to={backTo}>
-            Back to project
-          </Link>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* â”€â”€â”€ Status banner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-
-const BANNER_STYLES = {
-  success: {
-    bg: "#F0FDF4", border: "1px solid #BBF7D0", borderLeft: "4px solid #16A34A",
-    iconColor: "#16A34A", textColor: "#15803D", Icon: CheckCircle2,
-  },
-  error: {
-    bg: "#FEF2F2", border: "1px solid #FECACA", borderLeft: "4px solid #DC2626",
-    iconColor: "#DC2626", textColor: "#B91C1C", Icon: AlertCircle,
-  },
-  pending: {
-    bg: "#F0F9FF", border: "1px solid #BAE6FD", borderLeft: "4px solid #0284C7",
-    iconColor: "#0284C7", textColor: "#0369A1", Icon: AlertCircle,
-  },
-} as const;
-
-function StatusBanner({
-  tone,
-  message,
-  onDismiss,
-}: {
-  tone: "pending" | "success" | "error";
-  message: string;
-  onDismiss?: () => void;
-}) {
-  const [fading, setFading] = useState(false);
-  const s = BANNER_STYLES[tone];
-
-  // Auto-dismiss success/error after 5s (fade starts at 4.5s)
-  useEffect(() => {
-    if (tone === "pending") return;
-    const fadeTimer   = setTimeout(() => setFading(true),       4500);
-    const dismissTimer = setTimeout(() => onDismiss?.(),        5000);
-    return () => { clearTimeout(fadeTimer); clearTimeout(dismissTimer); };
-  }, [tone, onDismiss]);
-
-  function handleDismiss() {
-    setFading(true);
-    setTimeout(() => onDismiss?.(), 300);
+function orderStages(stages: WorkflowStage[]): WorkflowStage[] {
+  const byName = new Map(stages.map(s => [s.stage_name, s]))
+  const first  = stages.find(s => !s.previous_stage)
+  if (!first) return stages
+  const result: WorkflowStage[] = []
+  const visited = new Set<string>()
+  let cur: WorkflowStage | undefined = first
+  while (cur && !visited.has(cur.stage_name)) {
+    visited.add(cur.stage_name)
+    result.push(cur)
+    cur = cur.next_stage ? byName.get(cur.next_stage) : undefined
   }
-
-  return (
-    <div
-      role="status"
-      aria-live="polite"
-      style={{
-        display: "flex", alignItems: "center", gap: "10px",
-        padding: "10px 16px",
-        background: s.bg,
-        border: s.border,
-        borderLeft: s.borderLeft,
-        borderRadius: "6px",
-        opacity: fading ? 0 : 1,
-        transition: "opacity 300ms ease",
-      }}
-    >
-      <s.Icon
-        style={{ width: "16px", height: "16px", color: s.iconColor, flexShrink: 0 }}
-        aria-hidden="true"
-      />
-      <span style={{ flex: 1, fontSize: "13px", fontWeight: 500, color: s.textColor }}>
-        {message}
-      </span>
-      {onDismiss && (
-        <button
-          type="button"
-          aria-label="Dismiss"
-          onClick={handleDismiss}
-          style={{
-            display: "flex", alignItems: "center", justifyContent: "center",
-            width: "20px", height: "20px", padding: 0, border: "none",
-            background: "transparent", cursor: "pointer",
-            color: "#6B6560", borderRadius: "4px",
-            flexShrink: 0,
-          }}
-        >
-          <X style={{ width: "12px", height: "12px" }} aria-hidden />
-        </button>
-      )}
-    </div>
-  );
+  stages.forEach(s => { if (!visited.has(s.stage_name)) result.push(s) })
+  return result
 }
 
-/* â”€â”€â”€ Section file view â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-
-function SectionFileView({
-  section,
-  count,
-  projectId,
-  chapterId,
-  viewMode,
-  onBack,
-  onUpload,
-  children,
-}: {
-  section: (typeof CHAPTER_SECTIONS)[number];
-  count: number;
-  projectId: number;
-  chapterId: number;
-  viewMode: ViewMode;
-  onBack: () => void;
-  onUpload: (category: string) => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex flex-col gap-4">
-      {/* Back link */}
-      <button
-        type="button"
-        className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-text transition-colors w-fit"
-        onClick={onBack}
-      >
-        <ArrowLeft className="w-4 h-4" aria-hidden="true" />
-        Chapter Files
-      </button>
-
-      {/* Section header */}
-      <div
-        className="flex items-center justify-between gap-4 pb-3"
-        style={{ borderBottom: "1px solid #E2DDD6" }}
-      >
-        <div className="flex items-center gap-3">
-          <div
-            style={{
-              width: "36px", height: "36px", borderRadius: "8px",
-              backgroundColor: section.bg,
-              display: "flex", alignItems: "center", justifyContent: "center",
-              flexShrink: 0,
-            }}
-          >
-            <section.Icon style={{ width: "18px", height: "18px", color: section.color }} aria-hidden="true" />
-          </div>
-          <div className="flex items-baseline gap-2">
-            <h2 style={{ fontSize: "15px", fontWeight: 600, color: "#1A1714", margin: 0 }}>
-              {section.label} Files
-            </h2>
-            <span style={{ fontSize: "12px", color: "#9C9590" }} className="tabular-nums">
-              {count} {count === 1 ? "file" : "files"}
-            </span>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => onUpload(section.key)}
-          style={{
-            display: "inline-flex", alignItems: "center", gap: "6px",
-            padding: "8px 12px", borderRadius: "6px", border: "none",
-            backgroundColor: "#C9821A", color: "#ffffff",
-            fontSize: "13px", fontWeight: 500,
-            cursor: "pointer", transition: "background-color 150ms",
-          }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = "#B5731A"; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = "#C9821A"; }}
-        >
-          <Upload style={{ width: "14px", height: "14px" }} aria-hidden="true" />
-          Upload {section.label}
-        </button>
-      </div>
-
-      {/* File content â€” no overflow-hidden so portaled tooltips/popovers render freely */}
-      <div className="bg-white rounded-lg shadow-card">{children}</div>
-    </div>
-  );
+type ChapterFolder = {
+  chapter_name: string
+  folder:       string
+  files:        Record<string, Array<{
+    file_name:   string
+    path:        string
+    file_size:   string
+    size_bytes:  number
+    uploaded_by: string
+    uploaded_on: string
+  }>>
 }
-
-/* â”€â”€â”€ Main page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 export function ChapterDetailPage() {
-  const { projectId, chapterId } = useParams();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const navigate = useNavigate();
-  const { addToast, updateToast } = useToast();
-  const queryClient = useQueryClient();
+  const { clientId, projectId, chapterId } = useParams<{
+    clientId?:  string
+    projectId:  string
+    chapterId:  string
+  }>()
+  const navigate = useNavigate()
 
-  const parsedProjectId = Number.parseInt(projectId ?? "", 10);
-  const parsedChapterId = Number.parseInt(chapterId ?? "", 10);
-  const hasValidProjectId = Number.isInteger(parsedProjectId) && parsedProjectId > 0;
-  const hasValidChapterId = Number.isInteger(parsedChapterId) && parsedChapterId > 0;
-  const normalizedProjectId = hasValidProjectId ? parsedProjectId : null;
-  const normalizedChapterId = hasValidChapterId ? parsedChapterId : null;
+  const [chapter,        setChapter]        = useState<import('@/api/chapters').Chapter | null>(null)
+  const [project,        setProject]        = useState<import('@/api/projects').Project | null>(null)
+  const [orderedStages,  setOrderedStages]  = useState<WorkflowStage[]>([])
+  type FileEntry = ChapterFolder['files'][string][number]
+  const [backupFiles, setBackupFiles] = useState<FileEntry[]>([])
+  const [loading,        setLoading]        = useState(true)
+  const [error,          setError]          = useState<string | null>(null)
+  const [proceedLoading, setProceedLoading] = useState(false)
+  const [refreshKey,     setRefreshKey]     = useState(0)
 
-  /* URL-driven section state */
-  const sectionParam = searchParams.get("section") ?? "";
-  const activeSectionDef = SECTION_BY_PARAM[sectionParam] ?? null;
-  const activeSection = activeSectionDef?.key ?? null;
-
-  function setSection(section: keyof ChapterCategoryCounts | null) {
-    if (section === null) {
-      setSearchParams({}, { replace: true });
-    } else {
-      const def = SECTION_BY_KEY[section];
-      setSearchParams({ section: def.paramKey }, { replace: true });
-    }
-  }
-
-  /* View mode â€” persisted in localStorage */
-  const [viewMode, setViewModeRaw] = useState<ViewMode>(() => {
-    try {
-      const stored = localStorage.getItem("chapter-files-view");
-      return stored === "grid" || stored === "list" ? stored : "list";
-    } catch {
-      return "list";
-    }
-  });
-
-  const setViewMode = useCallback((mode: ViewMode) => {
-    setViewModeRaw(mode);
-    try {
-      localStorage.setItem("chapter-files-view", mode);
-    } catch {
-      // ignore storage errors
-    }
-  }, []);
-
-  /* Download state */
-  const [isDownloading, setIsDownloading] = useState(false);
-
-  /* Upload panel */
-  const [uploadCategory, setUploadCategory] = useState<string | null>(null);
-
-  /* Processing job state */
-  const [processingJob, setProcessingJob] = useState<{
-    fileId: number;
-    processType: string;
-    toastId: string | null;
-  } | null>(null);
-  const processingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const processingStartTimeRef = useRef<number | null>(null);
-
-  function openUpload(category: string) {
-    setUploadCategory(category);
-    // If a different section is active, navigate to it
-    const matchingDef = CHAPTER_SECTIONS.find((s) => s.key === category);
-    if (matchingDef && activeSection !== matchingDef.key) {
-      setSection(matchingDef.key as keyof ChapterCategoryCounts);
-    }
-  }
-
-  /* Data queries */
-  const chapterDetailQuery = useChapterDetailQuery(normalizedProjectId, normalizedChapterId);
-  const chapterFilesQuery = useChapterFilesQuery(normalizedProjectId, normalizedChapterId);
-  const fileActions = useChapterFileActions({
-    projectId: normalizedProjectId,
-    chapterId: normalizedChapterId,
-  });
-  const chapterUpload = useChapterUpload({
-    projectId: normalizedProjectId,
-    chapterId: normalizedChapterId,
-  });
-  const hasInitializedSection = useRef(false);
-
-  useDocumentTitle(
-    normalizedChapterId === null
-      ? "Chapters â€” S4 Carlisle CMS"
-      : chapterDetailQuery.data?.chapter.title
-        ? `${chapterDetailQuery.data.chapter.title} â€” S4 Carlisle CMS`
-        : `Chapter ${normalizedChapterId} â€” S4 Carlisle CMS`,
-  );
-
-  /* Close upload panel after successful upload */
   useEffect(() => {
-    if (chapterUpload.result && uploadCategory) {
-      setUploadCategory(null);
-    }
-  }, [chapterUpload.result, uploadCategory]);
-
-  /* Invalidate cached chapter files on page mount to ensure latest versions are loaded */
-  useEffect(() => {
-    if (normalizedProjectId !== null && normalizedChapterId !== null) {
-      void queryClient.invalidateQueries({
-        queryKey: ["chapter-files", normalizedProjectId, normalizedChapterId],
-      });
-      void queryClient.invalidateQueries({
-        queryKey: ["chapter-detail", normalizedProjectId, normalizedChapterId],
-      });
-    }
-  }, [normalizedProjectId, normalizedChapterId, queryClient]);
-
-  /* Poll for processing job completion and redirect when done */
-  useEffect(() => {
-    if (!processingJob) return;
-    const job = processingJob;
-
-    const POLL_INTERVAL_MS = 5_000;
-    const TIMEOUT_MS = 600_000;
-
-    let cancelled = false;
-
-    async function tick() {
-      if (cancelled) return;
-
-      if (
-        processingStartTimeRef.current !== null &&
-        Date.now() - processingStartTimeRef.current >= TIMEOUT_MS
-      ) {
-        if (job.toastId) {
-          updateToast(job.toastId, {
-            title: `${job.processType} timed out`,
-            description: "Processing took too long. Check server logs.",
-            variant: "timeout",
-            duration: 0,
-          });
+    if (!chapterId || !projectId) return
+    setLoading(true)
+    Promise.all([
+      chaptersApi.getById(Number(chapterId)),
+      projectsApi.getById(Number(projectId)),
+    ])
+      .then(async ([ch, proj]) => {
+        setChapter(ch)
+        setProject(proj)
+        if (proj.workflow_name) {
+          const stages = await workflowsApi.getWorkflow(proj.workflow_name).catch(() => [])
+          setOrderedStages(orderStages(stages))
         }
-        setProcessingJob(null);
-        return;
-      }
-
-      try {
-        const status = await getProcessingStatus(job.fileId, job.processType);
-        if (cancelled) return;
-
-        if (status.status === "completed") {
-          if (job.toastId) {
-            updateToast(job.toastId, {
-              title: `${job.processType} complete`,
-              description: status.derived_filename ?? "Processing finished",
-              variant: "success",
-              duration: 6000,
-            });
-          }
-          if (normalizedProjectId !== null && normalizedChapterId !== null && status.derived_file_id) {
-            if (job.processType === "structuring") {
-              navigate(uiPaths.structuringReview(normalizedProjectId, normalizedChapterId, status.derived_file_id));
-            } else if (job.processType === "technical_edit") {
-              navigate(uiPaths.technicalReview(normalizedProjectId, normalizedChapterId, status.derived_file_id));
-            } else if (job.processType === "reference_validation" || job.processType === "reference_structuring") {
-              navigate(uiPaths.referenceReview(normalizedProjectId, normalizedChapterId, status.derived_file_id));
-            }
-          }
-          void queryClient.invalidateQueries({ queryKey: ["chapter-files", normalizedProjectId, normalizedChapterId] });
-          setProcessingJob(null);
-          return;
+        // Fetch backup files for this chapter
+        const chNo = ch.chapters.match(/\d+/)?.[0]
+        if (chNo) {
+          import('@/api/client').then(({ default: api }) =>
+            api.get(`/uploads/${projectId}/chapter/chapter-${chNo}/backup-list`)
+              .then(r => setBackupFiles(r.data.files ?? []))
+              .catch(() => setBackupFiles([]))
+          )
         }
-      } catch {
-        // Ignore transient poll errors; timeout handles unresponsive jobs
-      }
+      })
+      .catch(() => setError('Failed to load chapter'))
+      .finally(() => setLoading(false))
+  }, [chapterId, projectId, refreshKey])
 
-      if (!cancelled) {
-        processingTimerRef.current = setTimeout(tick, POLL_INTERVAL_MS);
-      }
-    }
+  // Proceed: same logic as the old ChapterDetailModal's confirmProceed
+  async function handleProceed() {
+    if (!chapter || !project?.project_code) return
+    const stageIdx = orderedStages.findIndex(s => s.stage_name === chapter.stage_name)
+    const nextStage = stageIdx >= 0 && stageIdx < orderedStages.length - 1
+      ? orderedStages[stageIdx + 1].stage_name : null
+    if (!nextStage) { toast.error('Already on the last stage'); return }
 
-    processingTimerRef.current = setTimeout(tick, POLL_INTERVAL_MS);
-
-    return () => {
-      cancelled = true;
-      if (processingTimerRef.current !== null) {
-        clearTimeout(processingTimerRef.current);
-        processingTimerRef.current = null;
-      }
-    };
-  }, [
-    processingJob,
-    navigate,
-    normalizedProjectId,
-    normalizedChapterId,
-    updateToast,
-    queryClient,
-  ]);
-
-  /* Start processing job */
-  const handleStartProcessing = useCallback(
-    async (fileId: number, processType: string, mode = "style", options?: Record<string, any>) => {
-      const toastId = addToast({
-        title: `${processType} in progress`,
-        description: "Processing fileâ€¦",
-        variant: "processing",
-        duration: 0,
-      });
-
-      try {
-        await startProcessingJob(fileId, processType, mode, options);
-        setProcessingJob({ fileId, processType, toastId });
-        processingStartTimeRef.current = Date.now();
-      } catch (err) {
-        updateToast(toastId, {
-          title: `${processType} failed to start`,
-          description: getApiErrorMessage(err, "Unexpected error"),
-          variant: "error",
-          duration: 6000,
-        });
-      }
-    },
-    [addToast, updateToast],
-  );
-
-  /* â”€â”€ Invalid params â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-  if (normalizedProjectId === null || normalizedChapterId === null) {
-    return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="bg-white rounded-lg shadow-card p-8 text-center">
-          <p className="text-sm text-muted mb-4">
-            The selected project or chapter identifier is not valid.
-          </p>
-          <Link className="text-sm text-primary hover:text-primary font-medium" to={uiPaths.projects}>
-            Back to projects
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
-  /* â”€â”€ Loading â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-  if (chapterDetailQuery.isPending || chapterFilesQuery.isPending) {
-    return <ChapterDetailSkeleton />;
-  }
-
-  /* â”€â”€ Error â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-  if (chapterDetailQuery.isError || chapterFilesQuery.isError) {
-    const error = chapterDetailQuery.error ?? chapterFilesQuery.error;
-    return (
-      <ChapterDetailError
-        message={getApiErrorMessage(error, "The chapter detail page could not be loaded.")}
-        onRetry={() => {
-          void chapterDetailQuery.refetch();
-          void chapterFilesQuery.refetch();
-        }}
-        backTo={uiPaths.projectDetail(normalizedProjectId)}
-      />
-    );
-  }
-
-  /* â”€â”€ No data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-  if (!chapterDetailQuery.data || !chapterFilesQuery.data) {
-    return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="bg-white rounded-lg shadow-card p-8 text-center">
-          <p className="text-sm text-muted mb-4">No chapter data was returned.</p>
-          <Link
-            className="text-sm text-primary hover:text-primary font-medium"
-            to={uiPaths.projectDetail(normalizedProjectId)}
-          >
-            Back to project
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
-  const { project, chapter } = chapterDetailQuery.data;
-  const files = chapterFilesQuery.data.files;
-  const categoryCounts = chapter.category_counts;
-
-  /* Chapter package download */
-  async function handleDownloadPackage() {
-    if (isDownloading || normalizedProjectId === null || normalizedChapterId === null) return;
-    setIsDownloading(true);
+    setProceedLoading(true)
     try {
-      const { blob, filename } = await downloadChapterPackage(
-        normalizedProjectId,
-        normalizedChapterId,
-        `chapter-${normalizedChapterId}-package.zip`,
-      );
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(url);
+      const result = await stageDetailsApi.stageTransition(
+        project.project_code, chapter.chapters, chapter.stage_name!, nextStage
+      )
+      await chaptersApi.update(chapter.id, {
+        stage_name:            nextStage,
+        current_assignee_name: null,
+        due_date:              result?.planned_end_date ? result.planned_end_date.split('T')[0] : chapter.due_date,
+      })
+      toast.success(`Moved to ${nextStage}`)
+      navigate(-1)
+    } catch {
+      toast.error('Failed to proceed')
     } finally {
-      setIsDownloading(false);
+      setProceedLoading(false)
     }
   }
 
-  /* Status banners */
-  const banners: Array<{
-    tone: "pending" | "success" | "error";
-    message: string;
-    onDismiss?: () => void;
-  }> = [];
-  if (fileActions.status) {
-    banners.push({
-      tone: fileActions.status.tone,
-      message: fileActions.status.message,
-      onDismiss: fileActions.clearStatus,
-    });
-  }
-  if (uploadCategory === null && chapterUpload.errorMessage) {
-    banners.push({ tone: "error", message: chapterUpload.errorMessage });
-  } else if (uploadCategory === null && chapterUpload.statusMessage) {
-    banners.push({
-      tone: chapterUpload.isPending ? "pending" : "success",
-      message: chapterUpload.statusMessage,
-    });
-  }
+  // Derive chapter folder data from project.file_details, merging in backup files
+  const chapterFolderData: ChapterFolder | null = (() => {
+    if (!chapter || !project?.file_details) return null
+    const chNo = chapter.chapters.match(/\d+/)?.[0]
+    if (!chNo) return null
+    const cf = (project.file_details as { chapter_folders?: { chapters?: ChapterFolder[] } }).chapter_folders
+    const base = cf?.chapters?.find(c => c.chapter_name === `chapter-${chNo}`) ?? null
+    if (!base) return null
+    return {
+      ...base,
+      files: { ...base.files, Backup: backupFiles },
+    }
+  })()
 
-  /* â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-  return (
-    <div className="-m-6 flex h-[calc(100vh-3.5rem)] overflow-hidden">
-      {/* â”€â”€ Left sidebar: section nav â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-      <aside
-        className="w-52 flex-shrink-0 bg-white border-r border-border flex flex-col overflow-y-auto"
-        aria-label="Chapter file sections"
-      >
-        {/* Header */}
-        <div className="flex items-center gap-2.5 px-4 py-3.5 border-b border-border">
-          <FolderOpen className="w-5 h-5 text-primary flex-shrink-0" aria-hidden="true" />
-          <span className="text-sm font-semibold text-text">Chapter Files</span>
-        </div>
-
-        {/* Overview nav item */}
-        <nav className="flex-1 py-1.5" aria-label="File type sections">
-          <button
-            type="button"
-            className={cn(
-              "w-full flex items-center gap-2.5 px-4 py-2 text-sm transition-colors duration-100",
-              activeSection === null
-                ? "bg-background border-l-2 border-l-gold-600 text-text font-medium"
-                : "text-text hover:bg-background hover:text-text"
-            )}
-            onClick={() => setSection(null)}
-          >
-            <FolderOpen className="w-4 h-4 flex-shrink-0 text-muted" aria-hidden="true" />
-            <span className="flex-1 text-left">All Files</span>
-            <span className="text-[10px] tabular-nums text-muted bg-background px-1.5 py-0.5 rounded-full">
-              {Object.values(categoryCounts).reduce((a, b) => a + b, 0)}
-            </span>
-          </button>
-
-          {/* Section items */}
-          {CHAPTER_SECTIONS.map((s) => {
-            const isActive = activeSection === s.key;
-            return (
-              <button
-                key={s.key}
-                type="button"
-                className={cn(
-                  "w-full flex items-center gap-2.5 px-4 py-2 text-sm transition-colors duration-100",
-                  isActive
-                    ? "bg-background border-l-2 border-l-gold-600 text-text font-medium"
-                    : "text-text hover:bg-background hover:text-text"
-                )}
-                onClick={() => setSection(s.key)}
-              >
-                <s.Icon
-                  className="w-4 h-4 flex-shrink-0"
-                  style={{ color: isActive ? s.color : undefined }}
-                  aria-hidden="true"
-                />
-                <span className="flex-1 text-left">{s.label}</span>
-                <span className="text-[10px] tabular-nums text-muted bg-background px-1.5 py-0.5 rounded-full">
-                  {categoryCounts[s.key]}
-                </span>
-              </button>
-            );
-          })}
-        </nav>
-
-      </aside>
-
-      {/* â”€â”€ Main content â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-      <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-        {/* Breadcrumb bar */}
-        <div className="flex items-center gap-1.5 px-5 py-2.5 bg-white border-b border-border text-xs text-muted shrink-0">
-          <Link to={uiPaths.projects} className="hover:text-text transition-colors">
-            Projects
-          </Link>
-          <span aria-hidden="true" className="text-border">â€º</span>
-          <Link
-            to={uiPaths.projectDetail(project.id)}
-            className="hover:text-text transition-colors max-w-[10rem] truncate"
-          >
-            {project.title}
-          </Link>
-          <span aria-hidden="true" className="text-border">â€º</span>
-          <span className="font-medium text-text" aria-current="page">
-            {chapter.title || `Chapter ${chapter.number}`}
-          </span>
-        </div>
-
-        {/* Status banners */}
-        {banners.length > 0 && (
-          <div className="px-6 pt-4 space-y-2">
-            {banners.map((b) => (
-              <StatusBanner
-                key={b.message}
-                tone={b.tone}
-                message={b.message}
-                onDismiss={b.onDismiss}
-              />
-            ))}
-          </div>
-        )}
-
-        {/* Toolbar */}
-        <ChapterToolbar
-          viewMode={viewMode}
-          onViewModeChange={setViewMode}
-          onUpload={openUpload}
-          onDownload={() => void handleDownloadPackage()}
-          isDownloading={isDownloading}
-        />
-
-        {/* Scrollable content */}
-        <div className="flex-1 overflow-y-auto p-5">
-          {/* Upload panel (inline above content when open) */}
-          {uploadCategory !== null && (
-            <div className="bg-white rounded-lg shadow-card p-5 mb-4">
-              <ChapterUploadPanel
-                activeTab={uploadCategory}
-                errorMessage={chapterUpload.errorMessage}
-                isPending={chapterUpload.isPending}
-                onClearResult={chapterUpload.clearResult}
-                onClose={() => setUploadCategory(null)}
-                onUpload={chapterUpload.submitUpload}
-                result={chapterUpload.result}
-                statusMessage={chapterUpload.statusMessage}
-              />
-            </div>
-          )}
-
-          {activeSection === null ? (
-            /* â”€â”€ Overview: card grid â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-            <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                <FolderOpen className="w-6 h-6 text-primary" aria-hidden="true" />
-                <h1 className="text-lg font-semibold text-text">
-                  {chapter.title || `Chapter ${chapter.number}`}
-                </h1>
-              </div>
-
-              <ChapterSectionCards
-                counts={categoryCounts}
-                onSelect={(section) => setSection(section)}
-              />
-            </div>
-          ) : (
-            /* â”€â”€ Section file view â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-            <SectionFileView
-              section={activeSectionDef!}
-              count={categoryCounts[activeSection]}
-              projectId={normalizedProjectId}
-              chapterId={normalizedChapterId}
-              viewMode={viewMode}
-              onBack={() => setSection(null)}
-              onUpload={openUpload}
-            >
-              <ChapterFilesTable
-                chapterId={normalizedChapterId}
-                files={files}
-                isActionPending={(fileId, action) => fileActions.isPending(fileId, action)}
-                onCancelCheckout={(file) => fileActions.handleCancelCheckout(file)}
-                onCheckout={(file) => fileActions.handleCheckout(file)}
-                onDelete={(file) => fileActions.handleDelete(file)}
-                projectId={normalizedProjectId}
-                searchQuery=""
-                selectedSection={activeSection}
-                onStartProcessing={handleStartProcessing}
-              />
-            </SectionFileView>
-          )}
-        </div>
+  if (loading) return <FullPageSpinner/>
+  if (error || !chapter || !project) {
+    return (
+      <div className="flex items-center justify-center h-64 text-muted text-sm">
+        {error ?? 'Chapter not found'}
       </div>
-    </div>
-  );
+    )
+  }
+
+  return (
+    <ChapterFilePage
+      chapterFolderData={chapterFolderData}
+      projectId={project.id}
+      chapterId={chapter.id}
+      chapterName={chapter.chapters}
+      chapterTitle={chapter.chapter_title}
+      clientId={clientId}
+      clientName={project.customer_name ?? undefined}
+      projectName={project.project_title ?? project.project_code ?? undefined}
+      stageName={chapter.stage_name ?? ''}
+      isAssigned={!!chapter.current_assignee_name}
+      onRefresh={() => setRefreshKey(k => k + 1)}
+      onProceed={proceedLoading ? undefined : handleProceed}
+    />
+  )
 }

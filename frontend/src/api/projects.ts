@@ -1,95 +1,90 @@
-import { apiClient } from "@/api/client";
-import type {
-  ChapterCreateRequest,
-  ChapterCreateResponse,
-  ChapterDeleteResponse,
-  ChapterDetailResponse,
-  ChapterFilesResponse,
-  ChapterRenameRequest,
-  ChapterRenameResponse,
-  ProjectBootstrapResponse,
-  ProjectChaptersResponse,
-  ProjectDetailResponse,
-  ProjectsListResponse,
-  ProjectWorkflowUpdateResponse,
-} from "@/types/api";
+import api from './client'
 
-export async function createProject(formData: FormData) {
-  const response = await apiClient.post<ProjectBootstrapResponse>(
-    "/projects/bootstrap",
-    formData,
-    { headers: { "Content-Type": "multipart/form-data" } },
-  );
-  return response.data;
+export interface Project {
+  id: number
+  client_id: number | null
+  project_code: string | null
+  customer_name: string | null
+  division_code: string | null
+  customer_contact: string | null
+  category: string | null
+  composition: string | null
+  workflow_name: string | null
+  status: string | null
+  project_manager: string | null
+  sales_person: string | null
+  priority: string | null
+  project_title: string | null
+  edition: string | null
+  color: string | null
+  trim_size: string | null
+  copyright_year: number | null
+  manuscript_pages: number | null
+  estimated_pages: number | null
+  actual_pages: number
+  chapter_count: number | null
+  isbn_no: string | null
+  billing_location: string | null
+  due_date: string | null
+  file_details: Record<string, unknown> | null
+  created_at: string
+  updated_at: string
 }
 
-export async function getProjects(offset = 0, limit = 100) {
-  const response = await apiClient.get<ProjectsListResponse>("/projects", {
-    params: { offset, limit },
-  });
-  return response.data;
+export interface ProjectCreate {
+  client_id?: number | null
+  project_code?: string | null
+  customer_name?: string | null
+  division_code?: string | null
+  customer_contact?: string | null
+  category?: string | null
+  composition?: string | null
+  workflow_name?: string | null
+  status?: string | null
+  project_manager?: string | null
+  sales_person?: string | null
+  priority?: string | null
+  project_title?: string | null
+  edition?: string | null
+  color?: string | null
+  trim_size?: string | null
+  copyright_year?: number | null
+  manuscript_pages?: number | null
+  estimated_pages?: number | null
+  actual_pages?: number
+  chapter_count?: number | null
+  isbn_no?: string | null
+  billing_location?: string | null
+  due_date?: string | null
 }
 
-export async function getProjectDetail(projectId: number) {
-  const response = await apiClient.get<ProjectDetailResponse>(`/projects/${projectId}`);
-  return response.data;
+export interface ProjectUpdate {
+  project_manager?: string | null
+  priority?: string | null
+  status?: string | null
+  composition?: string | null
+  workflow_name?: string | null
+  edition?: string | null
+  color?: string | null
+  trim_size?: string | null
+  copyright_year?: number | null
+  actual_pages?: number
+  due_date?: string | null
 }
 
-export async function getProjectChapters(projectId: number) {
-  const response = await apiClient.get<ProjectChaptersResponse>(`/projects/${projectId}/chapters`);
-  return response.data;
-}
+export const projectsApi = {
+  list: () =>
+    api.get<Project[]>('/projects/').then(r => r.data),
 
-export async function getChapterDetail(projectId: number, chapterId: number) {
-  const response = await apiClient.get<ChapterDetailResponse>(
-    `/projects/${projectId}/chapters/${chapterId}`,
-  );
-  return response.data;
-}
+  getByClient: (clientId: number) =>
+    api.get<Project[]>(`/projects/client/${clientId}`).then(r => r.data),
 
-export async function getChapterFiles(projectId: number, chapterId: number) {
-  const response = await apiClient.get<ChapterFilesResponse>(
-    `/projects/${projectId}/chapters/${chapterId}/files`,
-  );
-  return response.data;
-}
+  getById: (id: number) =>
+    api.get<Project>(`/projects/${id}`).then(r => r.data),
 
-export async function createChapter(projectId: number, payload: ChapterCreateRequest) {
-  const response = await apiClient.post<ChapterCreateResponse>(`/projects/${projectId}/chapters`, payload);
-  return response.data;
-}
+  create: (data: ProjectCreate) =>
+    api.post<Project>('/projects/', data).then(r => r.data),
 
-export async function renameChapter(
-  projectId: number,
-  chapterId: number,
-  payload: ChapterRenameRequest,
-) {
-  const response = await apiClient.patch<ChapterRenameResponse>(
-    `/projects/${projectId}/chapters/${chapterId}`,
-    payload,
-  );
-  return response.data;
-}
-
-export async function deleteChapter(projectId: number, chapterId: number) {
-  const response = await apiClient.delete<ChapterDeleteResponse>(
-    `/projects/${projectId}/chapters/${chapterId}`,
-  );
-  return response.data;
-}
-
-export async function deleteProject(projectId: number) {
-  const response = await apiClient.delete(`/projects/${projectId}`);
-  return response.data;
-}
-
-export async function updateProjectWorkflow(
-  projectId: number,
-  payload: { workflow_type?: string | null; workflow_stage_no?: string | null },
-) {
-  const response = await apiClient.patch<ProjectWorkflowUpdateResponse>(
-    `/projects/${projectId}/workflow`,
-    payload,
-  );
-  return response.data;
+  update: (id: number, data: ProjectUpdate) =>
+    api.put<Project>(`/projects/${id}`, data).then(r => r.data),
 }

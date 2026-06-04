@@ -1,76 +1,29 @@
-import { create } from "zustand";
+import { useAuthStore } from '@/store/useAuthStore'
 
-import type { SessionGetResponse, Viewer } from "@/types/api";
-
-export type SessionStatus = "idle" | "loading" | "authenticated" | "anonymous" | "error";
-
-interface SessionStore {
-  status: SessionStatus;
-  viewer: Viewer | null;
-  authMode: "cookie" | "bearer" | null;
-  expiresAt: string | null;
-  errorMessage: string | null;
-  handoffStarted: boolean;
-  setLoading: () => void;
-  setAuthenticated: (payload: SessionGetResponse) => void;
-  setAnonymous: () => void;
-  setError: (message: string) => void;
-  startHandoff: () => void;
-  clear: () => void;
+interface Viewer {
+  username: string
+  roles: Array<{ name: string } | string>
 }
 
-export const useSessionStore = create<SessionStore>((set) => ({
-  status: "idle",
-  viewer: null,
-  authMode: null,
-  expiresAt: null,
-  errorMessage: null,
-  handoffStarted: false,
-  setLoading: () =>
-    set((state) => ({
-      ...state,
-      status: "loading",
-      errorMessage: null,
-    })),
-  setAuthenticated: (payload) =>
-    set({
-      status: "authenticated",
-      viewer: payload.viewer,
-      authMode: payload.auth.mode,
-      expiresAt: payload.auth.expires_at,
-      errorMessage: null,
-      handoffStarted: false,
-    }),
-  setAnonymous: () =>
-    set({
-      status: "anonymous",
-      viewer: null,
-      authMode: null,
-      expiresAt: null,
-      errorMessage: null,
-      handoffStarted: false,
-    }),
-  setError: (message) =>
-    set({
-      status: "error",
-      viewer: null,
-      authMode: null,
-      expiresAt: null,
-      errorMessage: message,
-      handoffStarted: false,
-    }),
-  startHandoff: () =>
-    set((state) => ({
-      ...state,
-      handoffStarted: true,
-    })),
-  clear: () =>
-    set({
-      status: "idle",
-      viewer: null,
-      authMode: null,
-      expiresAt: null,
-      errorMessage: null,
-      handoffStarted: false,
-    }),
-}));
+interface SessionStore {
+  viewer: Viewer | null
+}
+
+// Bridge from WMS useAuthStore to cms_backend useSessionStore interface
+// Review pages use useSessionStore((s) => s.viewer) to get the current user
+export const useSessionStore = <T>(
+  selector: (s: SessionStore) => T
+): T => {
+  const user = useAuthStore((s) => s.user)
+
+  const sessionStore: SessionStore = {
+    viewer: user
+      ? {
+          username: user.username || user.email || 'User',
+          roles: user.roles || [],
+        }
+      : null,
+  }
+
+  return selector(sessionStore)
+}
