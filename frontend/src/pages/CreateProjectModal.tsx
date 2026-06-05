@@ -373,16 +373,29 @@ export function CreateProjectModal({ open, onClose, onCreated, defaultClientId }
       onClose()
     } catch (err: unknown) {
       let msg = 'Failed to create project'
-      const errData = (err as any)?.response?.data
-      if (errData?.detail) {
-        msg = errData.detail
-      } else if (errData?.message) {
-        msg = errData.message
-      } else if (Array.isArray(errData?.detail)) {
-        // Handle Pydantic validation errors
-        msg = errData.detail.map((e: any) => `${e.loc?.join('.')}: ${e.msg}`).join('; ')
+      try {
+        const errData = (err as any)?.response?.data
+        if (typeof errData?.detail === 'string') {
+          msg = errData.detail
+        } else if (typeof errData?.message === 'string') {
+          msg = errData.message
+        } else if (Array.isArray(errData?.detail)) {
+          // Handle Pydantic validation errors
+          const details = errData.detail
+            .filter((e: any) => e && typeof e === 'object')
+            .map((e: any) => {
+              const field = Array.isArray(e.loc) ? e.loc.join('.') : String(e.loc || 'unknown')
+              const error = typeof e.msg === 'string' ? e.msg : 'validation error'
+              return `${field}: ${error}`
+            })
+          if (details.length > 0) {
+            msg = details.join('; ')
+          }
+        }
+      } catch {
+        // If anything goes wrong extracting the error, use default message
       }
-      toast.error(msg)
+      toast.error(String(msg))
     } finally {
       setSaving(false)
     }
