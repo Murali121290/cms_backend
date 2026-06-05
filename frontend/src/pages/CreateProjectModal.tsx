@@ -37,6 +37,7 @@ function validate(f: Partial<ProjectCreate>): Record<string, string> {
   if (!f.project_code?.trim())   e.project_code  = 'Project Code is required'
   if (!f.project_title?.trim())  e.project_title = 'Project Title is required'
   if (!f.workflow_name?.trim())  e.workflow_name = 'Workflow is required'
+  if (!f.xml_standard?.trim())   e.xml_standard  = 'XML Standard is required'
   if (f.isbn_no?.trim() && !/^[0-9]{9}[0-9X]$|^[0-9]{13}$/i.test(f.isbn_no.trim()))
     e.isbn_no = 'ISBN must be 10 or 13 characters'
   return e
@@ -202,6 +203,7 @@ export function CreateProjectModal({ open, onClose, onCreated, defaultClientId }
     priority: 'Normal',
     actual_pages: 0,
     client_id: defaultClientId ?? undefined,
+    xml_standard: 'NLM',
   }
 
   const [form,    setForm]    = useState<Partial<ProjectCreate>>(INIT)
@@ -218,11 +220,24 @@ export function CreateProjectModal({ open, onClose, onCreated, defaultClientId }
   useEffect(() => {
     if (!open) return
     // Reset immediately so the form is clean while data loads
-    setForm({ status: 'Planning', priority: 'Normal', actual_pages: 0, client_id: defaultClientId ?? undefined })
+    setForm({ status: 'Planning', priority: 'Normal', actual_pages: 0, client_id: defaultClientId ?? undefined, xml_standard: 'NLM' })
     setErrors({})
     setZipFile(null)
     setInitLoad(true)
-    Promise.all([clientsApi.list(), usersApi.list(), workflowsApi.getAllStages()])
+    const clientsPromise = clientsApi.list().catch((err) => {
+      console.error('Failed to load clients:', err)
+      return []
+    })
+    const usersPromise = usersApi.list().catch((err) => {
+      console.error('Failed to load users:', err)
+      return []
+    })
+    const workflowsPromise = workflowsApi.getAllStages().catch((err) => {
+      console.error('Failed to load workflows:', err)
+      return []
+    })
+
+    Promise.all([clientsPromise, usersPromise, workflowsPromise])
       .then(([c, u, ws]) => {
         setClients(c)
         setUsers(u)
@@ -306,24 +321,68 @@ export function CreateProjectModal({ open, onClose, onCreated, defaultClientId }
     if (Object.keys(errs).length) { setErrors(errs); return }
     setSaving(true)
     try {
-      const project = await projectsApi.create(form as ProjectCreate)
+      const formData = new FormData()
+      formData.append('code', form.project_code ?? '')
+      formData.append('title', form.project_title ?? '')
+      if (form.customer_name) {
+        formData.append('client_name', form.customer_name)
+      }
+      formData.append('xml_standard', form.xml_standard ?? 'NLM')
+      formData.append('chapter_count', String(form.chapter_count ?? 1))
+      if (form.workflow_name) {
+        formData.append('workflow_type', form.workflow_name)
+      }
 
-      if (zipFile && project.project_code) {
+      const response = await projectsApi.create(formData)
+
+      if (zipFile && response.project.code) {
         const customerCode = form.division_code || form.customer_name || 'unknown'
         try {
-          const result = await uploadsApi.uploadZip(customerCode, project.project_code, project.id, zipFile)
+          const result = await uploadsApi.uploadZip(customerCode, response.project.code, response.project.id, zipFile)
           toast.success(`ZIP processed — ${result.total_chapters} chapter(s) detected`)
         } catch {
           toast.error('Project created but ZIP upload failed')
         }
       }
 
-      toast.success(`Project "${project.project_title ?? project.project_code}" created`)
-      onCreated(project)
+      // Sync other fields that are editable in WMS (e.g. project_manager, priority, etc.)
+      const updatePayload: any = {}
+      if (form.project_manager) updatePayload.project_manager = form.project_manager
+      if (form.priority) updatePayload.priority = form.priority
+      if (form.status) updatePayload.status = form.status
+      if (form.composition) updatePayload.composition = form.composition
+      if (form.edition) updatePayload.edition = form.edition
+      if (form.color) updatePayload.color = form.color
+      if (form.trim_size) updatePayload.trim_size = form.trim_size
+      if (form.copyright_year) updatePayload.copyright_year = form.copyright_year
+      if (form.actual_pages) updatePayload.actual_pages = form.actual_pages
+      if (form.estimated_pages) updatePayload.estimated_pages = form.estimated_pages
+      if (form.due_date) updatePayload.due_date = form.due_date
+
+      let finalProject = response.project as unknown as Project
+      if (Object.keys(updatePayload).length > 0) {
+        try {
+          finalProject = await projectsApi.update(response.project.id, updatePayload)
+        } catch {
+          // Ignore secondary metadata sync failures
+        }
+      }
+
+      toast.success(`Project "${response.project.title ?? response.project.code}" created`)
+      onCreated(finalProject)
       onClose()
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      toast.error(msg ?? 'Failed to create project')
+      let msg = 'Failed to create project'
+      const errData = (err as any)?.response?.data
+      if (errData?.detail) {
+        msg = errData.detail
+      } else if (errData?.message) {
+        msg = errData.message
+      } else if (Array.isArray(errData?.detail)) {
+        // Handle Pydantic validation errors
+        msg = errData.detail.map((e: any) => `${e.loc?.join('.')}: ${e.msg}`).join('; ')
+      }
+      toast.error(msg)
     } finally {
       setSaving(false)
     }
@@ -461,6 +520,20 @@ export function CreateProjectModal({ open, onClose, onCreated, defaultClientId }
           <Input label="Edition"    value={form.edition    ?? ''} onChange={e => set('edition',    e.target.value)} placeholder="e.g. 3rd Edition" />
           <Input label="Color"      value={form.color      ?? ''} onChange={e => set('color',      e.target.value)} placeholder="e.g. 4-color, B&W" />
           <Input label="Trim Size"  value={form.trim_size  ?? ''} onChange={e => set('trim_size',  e.target.value)} placeholder="e.g. 8.5 x 11" />
+          <Select
+            label="XML Standard"
+            required
+            value={form.xml_standard ?? 'NLM'}
+            onChange={e => set('xml_standard', e.target.value)}
+            options={[
+              { value: 'NLM',     label: 'NLM / JATS' },
+              { value: 'BITS',    label: 'BITS (Book)' },
+              { value: 'DocBook', label: 'DocBook' },
+              { value: 'TEI',     label: 'TEI' },
+            ]}
+            placeholder="Select XML standard"
+            error={errors.xml_standard}
+          />
           <Input
             label="Copyright Year"
             required

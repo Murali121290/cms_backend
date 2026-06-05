@@ -3,7 +3,7 @@ import tempfile
 import zipfile
 from datetime import datetime
 import logging
-from typing import Any
+from typing import Any, List
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File as FastAPIFile, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse
@@ -133,6 +133,11 @@ def _has_admin_role(user: models.User):
     return "Admin" in [role.name for role in user.roles]
 
 
+def _has_admin_or_pm_role(user: models.User):
+    return any(role.name in ("Admin", "ProjectManager") for role in user.roles)
+
+
+
 def _serialize_admin_role(role: models.Role):
     return schemas_v2.AdminRole(id=role.id, name=role.name, description=role.description)
 
@@ -144,6 +149,7 @@ def _serialize_admin_user(user: models.User):
         email=user.email,
         is_active=user.is_active,
         roles=[schemas_v2.AdminUserRole(id=role.id, name=role.name) for role in user.roles],
+        team=user.team.name if user.team else None,
     )
 
 
@@ -162,6 +168,7 @@ def _serialize_project_summary(project: models.Project):
         id=project.id,
         code=project.code,
         title=project.title,
+        client_id=project.client_id,
         client_name=project.client_name,
         xml_standard=project.xml_standard,
         status=project.status,
@@ -213,6 +220,8 @@ def _serialize_file_record(file_record: models.File, *, viewer: models.User):
             actions.append("cancel_checkout")
     else:
         actions.append("checkout")
+    if file_record.category == "Manuscript":
+        actions.append("structuring_review")
     return schemas_v2.FileRecord(
         id=file_record.id,
         project_id=file_record.project_id,
@@ -495,6 +504,24 @@ def api_v2_projects(
     )
 
 
+@router.get("/projects/client/{client_id}")
+def api_v2_projects_by_client(
+    client_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    projects = db.query(models.Project).filter(models.Project.client_id == client_id).all()
+    return [_serialize_project_summary(p) for p in projects]
+
+
 @router.get("/projects/{project_id}", response_model=schemas_v2.ProjectDetailResponse)
 def api_v2_project_detail(
     project_id: int,
@@ -742,9 +769,17 @@ def api_v2_project_bootstrap(
             upload_dir=file_service.UPLOAD_DIR,
         )
     except project_service.ProjectBootstrapValidationError as exc:
+        logging.error(f"Project bootstrap validation error: {str(exc)}")
         return _error_response(
             status_code=status.HTTP_400_BAD_REQUEST,
             code="PROJECT_BOOTSTRAP_VALIDATION_ERROR",
+            message=str(exc),
+        )
+    except Exception as exc:
+        logging.error(f"Project bootstrap error: {type(exc).__name__}: {str(exc)}", exc_info=True)
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="PROJECT_BOOTSTRAP_ERROR",
             message=str(exc),
         )
 
@@ -771,6 +806,68 @@ def api_v2_project_bootstrap(
         ingested_files=[_serialize_file_record(file_record, viewer=viewer) for file_record in ingested_files],
         redirect_to="/dashboard",
     )
+
+
+@router.put("/projects/{project_id}", response_model=schemas_v2.ProjectSummary)
+def api_v2_update_project(
+    project_id: int,
+    payload: schemas_v2.ProjectUpdateRequest,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+
+    if payload.status is not None:
+        project.status = payload.status
+    if payload.workflow_name is not None:
+        project.workflow_type = payload.workflow_name
+
+    db.commit()
+    db.refresh(project)
+
+    # Update related chapter_details in workflow schema if they exist
+    from app.domains.workflow.models import ChapterInfo, ChapterDetailStage
+    from datetime import datetime
+
+    update_dict = {}
+    if payload.project_manager is not None:
+        update_dict[ChapterInfo.project_manager_name] = payload.project_manager
+    if payload.priority is not None:
+        update_dict[ChapterInfo.priority] = payload.priority
+    if payload.due_date is not None:
+        if payload.due_date:
+            try:
+                update_dict[ChapterInfo.due_date] = datetime.fromisoformat(payload.due_date.replace("Z", "+00:00"))
+            except ValueError:
+                pass
+        else:
+            update_dict[ChapterInfo.due_date] = None
+
+    if update_dict:
+        db.query(ChapterInfo).filter(ChapterInfo.project == project.code).update(update_dict, synchronize_session=False)
+        db.commit()
+
+    if payload.project_manager is not None:
+        db.query(ChapterDetailStage).filter(ChapterDetailStage.project == project.code).update({
+            ChapterDetailStage.project_manager_name: payload.project_manager
+        }, synchronize_session=False)
+        db.commit()
+
+    return _serialize_project_summary(project)
 
 
 @router.delete("/projects/{project_id}", response_model=schemas_v2.ProjectDeleteResponse)
@@ -810,7 +907,7 @@ def api_v2_delete_project(
     )
 
 
-@router.patch("/projects/{project_id}/workflow", response_model=schemas_v2.ProjectWorkflowUpdateResponse)
+@router.put("/projects/{project_id}/workflow", response_model=schemas_v2.ProjectWorkflowUpdateResponse)
 def api_v2_update_project_workflow(
     project_id: int,
     payload: schemas_v2.ProjectWorkflowUpdateRequest,
@@ -3278,11 +3375,11 @@ def api_v2_admin_users(
             code="AUTH_REQUIRED",
             message="Authentication required.",
         )
-    if not _has_admin_role(viewer):
+    if not _has_admin_or_pm_role(viewer):
         return _error_response(
             status_code=status.HTTP_403_FORBIDDEN,
             code="ADMIN_REQUIRED",
-            message="Admin access required.",
+            message="Admin or Project Manager access required.",
         )
 
     page_data = admin_user_service.get_admin_users_page_data(db)
@@ -3346,6 +3443,7 @@ def api_v2_admin_create_user(
             email=payload.email,
             password=payload.password,
             role_id=payload.role_id,
+            team_name=payload.team_name,
         )
     except ValueError as exc:
         return _error_response(
@@ -3383,7 +3481,7 @@ def api_v2_admin_update_user_role(
 
     target_user = db.query(models.User).filter(models.User.id == user_id).first()
     previous_role_ids = [role.id for role in target_user.roles] if target_user else []
-    result = admin_user_service.replace_user_role(db, user_id=user_id, role_id=payload.role_id)
+    result = admin_user_service.replace_user_role(db, user_id=user_id, role_id=payload.role_id, team_name=payload.team_name)
     if result["status"] == "invalid":
         return _error_response(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -3463,6 +3561,12 @@ def api_v2_admin_edit_user(
             code="AUTH_REQUIRED",
             message="Authentication required.",
         )
+    if not _has_admin_role(viewer):
+        return _error_response(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code="ADMIN_REQUIRED",
+            message="Admin access required.",
+        )
 
     try:
         target_user = admin_user_service.update_user_email(db, user_id=user_id, email=payload.email)
@@ -3532,6 +3636,12 @@ def api_v2_admin_delete_user(
             code="AUTH_REQUIRED",
             message="Authentication required.",
         )
+    if not _has_admin_role(viewer):
+        return _error_response(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code="ADMIN_REQUIRED",
+            message="Admin access required.",
+        )
 
     delete_result = admin_user_service.delete_user(db, user_id=user_id, actor_username=viewer.username)
     if delete_result["status"] == "not_found":
@@ -3551,3 +3661,81 @@ def api_v2_admin_delete_user(
         deleted=schemas_v2.AdminDeleteUser(user_id=user_id),
         redirect_to="/admin/users?msg=User+deleted",
     )
+
+
+# ── Standalone ChapterInfo (WMS Workflow Chapter details) Endpoints ───────────
+from pydantic import BaseModel
+from app.domains.workflow.models import ChapterInfo
+from app.domains.workflow.schemas import ChapterInfoResponse, ChapterInfoUpdate
+
+class BulkUpdatePriorityPayload(BaseModel):
+    priority: str
+
+class BulkUpdateStatusPayload(BaseModel):
+    status: str
+
+@router.get("/chapters/", response_model=List[ChapterInfoResponse])
+def api_v2_list_chapters(db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
+    _require_cookie_user(user)
+    from sqlalchemy import select
+    return list(db.execute(select(ChapterInfo)).scalars().all())
+
+@router.get("/chapters/{chapter_id}", response_model=ChapterInfoResponse)
+def api_v2_get_chapter_by_id(chapter_id: int, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
+    _require_cookie_user(user)
+    from sqlalchemy import select
+    chapter = db.execute(select(ChapterInfo).where(ChapterInfo.id == chapter_id)).scalars().first()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+    return chapter
+
+@router.get("/chapters/project/{project}", response_model=List[ChapterInfoResponse])
+def api_v2_get_chapters_by_project(project: str, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
+    _require_cookie_user(user)
+    from sqlalchemy import select
+    return list(db.execute(select(ChapterInfo).where(ChapterInfo.project == project)).scalars().all())
+
+@router.get("/chapters/client/{client}", response_model=List[ChapterInfoResponse])
+def api_v2_get_chapters_by_client(client: str, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
+    _require_cookie_user(user)
+    from sqlalchemy import select
+    return list(db.execute(select(ChapterInfo).where(ChapterInfo.client == client)).scalars().all())
+
+@router.put("/chapters/{chapter_id}", response_model=ChapterInfoResponse)
+def api_v2_update_chapter(chapter_id: int, payload: ChapterInfoUpdate, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
+    _require_cookie_user(user)
+    from sqlalchemy import select
+    chapter = db.execute(select(ChapterInfo).where(ChapterInfo.id == chapter_id)).scalars().first()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+    
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(chapter, field, value)
+    db.commit()
+    db.refresh(chapter)
+    return chapter
+
+@router.put("/chapters/project/{project}/priority")
+def api_v2_bulk_update_priority(project: str, payload: BulkUpdatePriorityPayload, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
+    _require_cookie_user(user)
+    from sqlalchemy import update
+    result = db.execute(
+        update(ChapterInfo)
+        .where(ChapterInfo.project == project)
+        .values(priority=payload.priority)
+    )
+    db.commit()
+    return {"updated": result.rowcount}
+
+@router.put("/chapters/project/{project}/status")
+def api_v2_bulk_update_status(project: str, payload: BulkUpdateStatusPayload, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
+    _require_cookie_user(user)
+    from sqlalchemy import update
+    result = db.execute(
+        update(ChapterInfo)
+        .where(ChapterInfo.project == project)
+        .values(status=payload.status)
+    )
+    db.commit()
+    return {"updated": result.rowcount}
+

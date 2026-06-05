@@ -1,16 +1,8 @@
-﻿import { useMemo, useState } from "react";
-import { UserPlus } from "lucide-react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { getApiErrorMessage } from "@/api/client";
-import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { Modal } from "@/components/ui/Modal";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { SearchInput } from "@/components/ui/SearchInput";
-import { SkeletonTable } from "@/components/ui/SkeletonLoader";
-import { SlideDrawer } from "@/components/ui/SlideDrawer";
 import { AdminCreateUserForm } from "@/features/admin/components/AdminCreateUserForm";
 import { AdminEditUserForm } from "@/features/admin/components/AdminEditUserForm";
 import { AdminPasswordForm } from "@/features/admin/components/AdminPasswordForm";
@@ -19,224 +11,166 @@ import { useAdminMutations } from "@/features/admin/useAdminMutations";
 import { useAdminUsersQuery } from "@/features/admin/useAdminUsersQuery";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import type { AdminUser } from "@/types/api";
-import { uiPaths } from "@/utils/appPaths";
+import { getSsrUrl, ssrPaths, uiPaths } from "@/utils/appPaths";
 
-type AdminDrawerState =
+type AdminModalState =
+  | { kind: "create" }
   | { kind: "edit"; user: AdminUser }
   | { kind: "password"; user: AdminUser }
   | null;
 
 export function AdminUsersPage() {
-  // â”€â”€ All hooks unconditionally at the top â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  useDocumentTitle("Users â€” S4 Carlisle CMS");
+  useDocumentTitle("CMS UI Admin Users");
   const usersQuery = useAdminUsersQuery(0, 100);
   const adminMutations = useAdminMutations();
-  const [createOpen, setCreateOpen] = useState(false);
-  const [drawerState, setDrawerState] = useState<AdminDrawerState>(null);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [modalState, setModalState] = useState<AdminModalState>(null);
 
-  // useMemo must be here â€” before any early returns â€” to keep hook call order stable
-  const users = usersQuery.data?.users ?? [];
-  const roles = usersQuery.data?.roles ?? [];
-  const pagination = usersQuery.data?.pagination ?? { total: 0 };
-
-  const filteredUsers = useMemo(() => {
-    if (!searchQuery.trim()) return users;
-    const q = searchQuery.toLowerCase();
-    return users.filter(
-      (u) => u.username.toLowerCase().includes(q) || u.email.toLowerCase().includes(q),
-    );
-  }, [users, searchQuery]);
-
-  // â”€â”€ Early returns AFTER all hooks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (usersQuery.isPending) {
     return (
-      <main className="page-enter min-h-screen bg-background p-6">
-        <div className="max-w-6xl mx-auto space-y-6">
-          <div className="h-14 skeleton-shimmer rounded-md" aria-hidden="true" />
-          <div className="bg-white rounded-lg shadow-card overflow-hidden">
-            <SkeletonTable rows={6} cols={5} />
-          </div>
-        </div>
+      <main className="page admin-users-page admin-users-page--state">
+        <section className="panel admin-users-state-card">
+          <div className="admin-users-state-card__icon">...</div>
+          <h1 className="admin-users-state-card__title">Loading admin users</h1>
+          <p className="admin-users-state-card__message">
+            Fetching the current /api/v2 admin users contract.
+          </p>
+        </section>
       </main>
     );
   }
 
   if (usersQuery.isError) {
     return (
-      <main className="page-enter min-h-screen bg-background p-6 flex items-center justify-center">
-        <div className="bg-white rounded-lg shadow-card p-10 max-w-md w-full text-center space-y-4">
-          <EmptyState
-            title="Admin users unavailable"
-            description={getApiErrorMessage(
+      <main className="page admin-users-page admin-users-page--state">
+        <section className="panel admin-users-state-card admin-users-state-card--error">
+          <div className="admin-users-state-card__icon">!</div>
+          <h1 className="admin-users-state-card__title">Admin users unavailable</h1>
+          <p className="admin-users-state-card__message">
+            {getApiErrorMessage(
               usersQuery.error,
               "The frontend shell could not load the admin users contract.",
             )}
-          />
-          <div className="flex items-center justify-center gap-3 pt-2">
-            <Button variant="primary" onClick={() => void usersQuery.refetch()}>
+          </p>
+          <div className="admin-users-state-card__actions">
+            <button className="button" onClick={() => void usersQuery.refetch()} type="button">
               Retry
-            </Button>
-            <Link to={uiPaths.adminDashboard}>
-              <Button variant="secondary">Back to Admin</Button>
+            </button>
+            <Link className="button button--secondary" to={uiPaths.adminDashboard}>
+              Back to admin
             </Link>
+            <a className="button button--secondary" href={getSsrUrl(ssrPaths.adminUsers)}>
+              Open SSR admin users
+            </a>
           </div>
-        </div>
+        </section>
       </main>
     );
   }
 
-  return (
-    <main className="page-enter min-h-screen bg-background p-6">
-      <div className="max-w-6xl mx-auto space-y-6">
-        {/* Page Header */}
-        <PageHeader
-          title="Users"
-          subtitle={`${pagination.total} user${pagination.total === 1 ? "" : "s"}`}
-          primaryAction={
-            <Button
-              variant="primary"
-              leftIcon={<UserPlus />}
-              onClick={() => setCreateOpen(true)}
-            >
-              New User
-            </Button>
-          }
-        />
+  const { users, roles, pagination } = usersQuery.data;
 
-        {/* Status banner */}
+  return (
+    <main className="page admin-users-page">
+      <div className="admin-users-shell">
+        <div className="admin-users-header">
+          <div>
+            <h1>User Management</h1>
+            <p>Manage system users, roles, and permissions</p>
+          </div>
+          <div className="admin-users-header__actions">
+            <Link className="admin-users-header__back" to={uiPaths.adminDashboard}>
+              Back
+            </Link>
+            <button className="button" type="button" onClick={() => setModalState({ kind: "create" })}>
+              Create New User
+            </button>
+          </div>
+        </div>
+
+        <div className="admin-users-shell__meta">
+          <span className="helper-text">
+            {pagination.total} user{pagination.total === 1 ? "" : "s"} loaded from /api/v2/admin/users.
+          </span>
+          <a className="link-inline" href={getSsrUrl(ssrPaths.adminUsers)}>
+            Open SSR admin users
+          </a>
+        </div>
+
         {adminMutations.status ? (
-          <div
-            className={`px-4 py-3 rounded-md text-sm font-medium border ${
-              adminMutations.status.tone === "success"
-                ? "bg-success-100 border-success-100 text-success-600"
-                : adminMutations.status.tone === "error"
-                  ? "bg-danger/10 border-danger/20 text-danger"
-                  : "bg-info-100 border-info-100 text-info-600"
-            }`}
-          >
+          <div className={`status-banner status-banner--${adminMutations.status.tone}`}>
             {adminMutations.status.message}
           </div>
         ) : null}
 
-        {/* Filter bar */}
-        <div className="flex items-center gap-3">
-          <SearchInput
-            value={searchQuery}
-            onChange={setSearchQuery}
-            placeholder="Search by username or emailâ€¦"
-            className="max-w-xs"
+        {users.length === 0 ? (
+          <EmptyState
+            title="No users found"
+            message="The current admin users contract returned an empty list."
           />
-          {searchQuery && (
-            <Badge variant="default" size="sm">
-              {filteredUsers.length} result{filteredUsers.length === 1 ? "" : "s"}
-            </Badge>
-          )}
-        </div>
-
-        {/* Users table */}
-        {filteredUsers.length === 0 ? (
-          <div className="bg-white rounded-lg shadow-card p-10">
-            <EmptyState
-              title={searchQuery ? "No users match your search" : "No users found"}
-              description={
-                searchQuery
-                  ? "Try a different username or email address."
-                  : "The current admin users contract returned an empty list."
-              }
-            />
-          </div>
         ) : (
           <AdminUsersTable
             isPending={adminMutations.isPending}
             onDeleteUser={adminMutations.deleteUser}
-            onOpenEditUser={(user) => setDrawerState({ kind: "edit", user })}
-            onOpenPasswordUser={(user) => setDrawerState({ kind: "password", user })}
+            onOpenEditUser={(user) => setModalState({ kind: "edit", user })}
+            onOpenPasswordUser={(user) => setModalState({ kind: "password", user })}
             onToggleStatus={adminMutations.toggleStatus}
             onUpdateRole={adminMutations.updateRole}
             roles={roles}
-            users={filteredUsers}
+            users={users}
           />
         )}
       </div>
 
-      {/* Create User Modal */}
-      <Modal
-        isOpen={createOpen}
-        onClose={() => setCreateOpen(false)}
-        title="Create New User"
-        description="Add a new user account to the system."
-        size="md"
-      >
-        <AdminCreateUserForm
-          isPending={adminMutations.isPending("create")}
-          onCancel={() => setCreateOpen(false)}
-          onSubmit={async (payload) => {
-            await adminMutations.createUser({
-              username: payload.username,
-              email: payload.email,
-              password: payload.password,
-              role_id: payload.roleId,
-            });
-            setCreateOpen(false);
-          }}
-          roles={roles}
-        />
-      </Modal>
+      {modalState ? (
+        <div className="admin-dialog-backdrop" role="presentation">
+          <div className="admin-dialog" role="dialog">
+            {modalState.kind === "create" ? (
+              <AdminCreateUserForm
+                isPending={adminMutations.isPending("create")}
+                onCancel={() => setModalState(null)}
+                onSubmit={async (payload) => {
+                  await adminMutations.createUser({
+                    username: payload.username,
+                    email: payload.email,
+                    password: payload.password,
+                    role_id: payload.roleId,
+                  });
+                  setModalState(null);
+                }}
+                roles={roles}
+              />
+            ) : null}
 
-      {/* Edit User â€” SlideDrawer */}
-      <SlideDrawer
-        isOpen={drawerState?.kind === "edit"}
-        onClose={() => setDrawerState(null)}
-        title={drawerState?.kind === "edit" ? `Edit: ${drawerState.user.username}` : "Edit User"}
-        description="Update the user's email address."
-        width="sm"
-      >
-        {drawerState?.kind === "edit" ? (
-          <AdminEditUserForm
-            isPending={adminMutations.isPending("edit", drawerState.user.id)}
-            onCancel={() => setDrawerState(null)}
-            onSubmit={async (email) => {
-              await adminMutations.editUser(
-                drawerState.user.id,
-                email,
-                drawerState.user.username,
-              );
-              setDrawerState(null);
-            }}
-            user={drawerState.user}
-          />
-        ) : null}
-      </SlideDrawer>
+            {modalState?.kind === "edit" ? (
+              <AdminEditUserForm
+                isPending={adminMutations.isPending("edit", modalState.user.id)}
+                onCancel={() => setModalState(null)}
+                onSubmit={async (email) => {
+                  await adminMutations.editUser(modalState.user.id, email, modalState.user.username);
+                  setModalState(null);
+                }}
+                user={modalState.user}
+              />
+            ) : null}
 
-      {/* Password â€” SlideDrawer */}
-      <SlideDrawer
-        isOpen={drawerState?.kind === "password"}
-        onClose={() => setDrawerState(null)}
-        title={
-          drawerState?.kind === "password"
-            ? `Change Password: ${drawerState.user.username}`
-            : "Change Password"
-        }
-        description="Set a new password for this user."
-        width="sm"
-      >
-        {drawerState?.kind === "password" ? (
-          <AdminPasswordForm
-            isPending={adminMutations.isPending("password", drawerState.user.id)}
-            onCancel={() => setDrawerState(null)}
-            onSubmit={async (password) => {
-              await adminMutations.updatePassword(
-                drawerState.user.id,
-                password,
-                drawerState.user.username,
-              );
-              setDrawerState(null);
-            }}
-            user={drawerState.user}
-          />
-        ) : null}
-      </SlideDrawer>
+            {modalState?.kind === "password" ? (
+              <AdminPasswordForm
+                isPending={adminMutations.isPending("password", modalState.user.id)}
+                onCancel={() => setModalState(null)}
+                onSubmit={async (password) => {
+                  await adminMutations.updatePassword(
+                    modalState.user.id,
+                    password,
+                    modalState.user.username,
+                  );
+                  setModalState(null);
+                }}
+                user={modalState.user}
+              />
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

@@ -1,153 +1,428 @@
-import { useState, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { chaptersApi } from '@/api/chapters'
-import { projectsApi } from '@/api/projects'
-import { workflowsApi } from '@/api/workflows'
-import type { WorkflowStage } from '@/api/workflows'
-import { stageDetailsApi } from '@/api/stageDetails'
-import { ChapterFilePage } from '@/pages/ChapterFilePage'
-import { FullPageSpinner } from '@/components/ui/Spinner'
-import { toast } from '@/store/useToastStore'
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useParams } from "react-router-dom";
 
-function orderStages(stages: WorkflowStage[]): WorkflowStage[] {
-  const byName = new Map(stages.map(s => [s.stage_name, s]))
-  const first  = stages.find(s => !s.previous_stage)
-  if (!first) return stages
-  const result: WorkflowStage[] = []
-  const visited = new Set<string>()
-  let cur: WorkflowStage | undefined = first
-  while (cur && !visited.has(cur.stage_name)) {
-    visited.add(cur.stage_name)
-    result.push(cur)
-    cur = cur.next_stage ? byName.get(cur.next_stage) : undefined
+import { getApiErrorMessage } from "@/api/client";
+import {
+  ChapterCategorySummary,
+  type ChapterSection,
+} from "@/features/projects/components/ChapterCategorySummary";
+import { ChapterFilesTable } from "@/features/projects/components/ChapterFilesTable";
+import { ChapterMetadataPanel } from "@/features/projects/components/ChapterMetadataPanel";
+import { ChapterUploadPanel } from "@/features/projects/components/ChapterUploadPanel";
+import { useChapterFileActions } from "@/features/projects/useChapterFileActions";
+import { useChapterDetailQuery } from "@/features/projects/useChapterDetailQuery";
+import { useChapterFilesQuery } from "@/features/projects/useChapterFilesQuery";
+import { useChapterUpload } from "@/features/projects/useChapterUpload";
+import { ProcessingStatusPanel } from "@/features/processing/components/ProcessingStatusPanel";
+import { useStructuringProcessing } from "@/features/processing/useStructuringProcessing";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import type { ChapterCategoryCounts } from "@/types/api";
+import { getSsrUrl, ssrPaths, uiPaths } from "@/utils/appPaths";
+
+const categoryOrder: Array<keyof ChapterCategoryCounts> = [
+  "Manuscript",
+  "Art",
+  "InDesign",
+  "Proof",
+  "XML",
+  "Miscellaneous",
+];
+
+function normalizeSection(value: string | null | undefined): ChapterSection {
+  if (!value) {
+    return "Overview";
   }
-  stages.forEach(s => { if (!visited.has(s.stage_name)) result.push(s) })
-  return result
+
+  if (value === "Overview") {
+    return "Overview";
+  }
+
+  if (categoryOrder.includes(value as keyof ChapterCategoryCounts)) {
+    return value as keyof ChapterCategoryCounts;
+  }
+
+  return "Overview";
 }
 
-type ChapterFolder = {
-  chapter_name: string
-  folder:       string
-  files:        Record<string, Array<{
-    file_name:   string
-    path:        string
-    file_size:   string
-    size_bytes:  number
-    uploaded_by: string
-    uploaded_on: string
-  }>>
+function getPreferredCategory(value: string | null | undefined): keyof ChapterCategoryCounts {
+  const normalized = normalizeSection(value);
+  if (normalized === "Overview") {
+    return "Manuscript";
+  }
+
+  return normalized;
 }
 
 export function ChapterDetailPage() {
-  const { clientId, projectId, chapterId } = useParams<{
-    clientId?:  string
-    projectId:  string
-    chapterId:  string
-  }>()
-  const navigate = useNavigate()
+  const { projectId, chapterId } = useParams();
+  const parsedProjectId = Number.parseInt(projectId ?? "", 10);
+  const parsedChapterId = Number.parseInt(chapterId ?? "", 10);
+  const hasValidProjectId = Number.isInteger(parsedProjectId) && parsedProjectId > 0;
+  const hasValidChapterId = Number.isInteger(parsedChapterId) && parsedChapterId > 0;
+  const normalizedProjectId = hasValidProjectId ? parsedProjectId : null;
+  const normalizedChapterId = hasValidChapterId ? parsedChapterId : null;
+  const chapterDetailQuery = useChapterDetailQuery(normalizedProjectId, normalizedChapterId);
+  const chapterFilesQuery = useChapterFilesQuery(normalizedProjectId, normalizedChapterId);
+  const fileActions = useChapterFileActions({
+    projectId: normalizedProjectId,
+    chapterId: normalizedChapterId,
+  });
+  const chapterUpload = useChapterUpload({
+    projectId: normalizedProjectId,
+    chapterId: normalizedChapterId,
+  });
+  const structuringProcessing = useStructuringProcessing({
+    projectId: normalizedProjectId,
+    chapterId: normalizedChapterId,
+  });
+  const [selectedSection, setSelectedSection] = useState<ChapterSection>("Overview");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const hasInitializedSection = useRef(false);
+  const filePaneRef = useRef<HTMLDivElement | null>(null);
 
-  const [chapter,        setChapter]        = useState<import('@/api/chapters').Chapter | null>(null)
-  const [project,        setProject]        = useState<import('@/api/projects').Project | null>(null)
-  const [orderedStages,  setOrderedStages]  = useState<WorkflowStage[]>([])
-  type FileEntry = ChapterFolder['files'][string][number]
-  const [backupFiles, setBackupFiles] = useState<FileEntry[]>([])
-  const [loading,        setLoading]        = useState(true)
-  const [error,          setError]          = useState<string | null>(null)
-  const [proceedLoading, setProceedLoading] = useState(false)
-  const [refreshKey,     setRefreshKey]     = useState(0)
+  useDocumentTitle(
+    normalizedChapterId === null ? "CMS UI Chapter" : `CMS UI Chapter ${normalizedChapterId}`,
+  );
+
+  const activeTab = chapterDetailQuery.data?.active_tab ?? "Manuscript";
+  const preferredCategory = getPreferredCategory(activeTab);
 
   useEffect(() => {
-    if (!chapterId || !projectId) return
-    setLoading(true)
-    Promise.all([
-      chaptersApi.getById(Number(chapterId)),
-      projectsApi.getById(Number(projectId)),
-    ])
-      .then(async ([ch, proj]) => {
-        setChapter(ch)
-        setProject(proj)
-        if (proj.workflow_name) {
-          const stages = await workflowsApi.getWorkflow(proj.workflow_name).catch(() => [])
-          setOrderedStages(orderStages(stages))
-        }
-        // Fetch backup files for this chapter
-        const chNo = ch.chapters.match(/\d+/)?.[0]
-        if (chNo) {
-          import('@/api/client').then(({ default: api }) =>
-            api.get(`/uploads/${projectId}/chapter/chapter-${chNo}/backup-list`)
-              .then(r => setBackupFiles(r.data.files ?? []))
-              .catch(() => setBackupFiles([]))
-          )
-        }
-      })
-      .catch(() => setError('Failed to load chapter'))
-      .finally(() => setLoading(false))
-  }, [chapterId, projectId, refreshKey])
-
-  // Proceed: same logic as the old ChapterDetailModal's confirmProceed
-  async function handleProceed() {
-    if (!chapter || !project?.project_code) return
-    const stageIdx = orderedStages.findIndex(s => s.stage_name === chapter.stage_name)
-    const nextStage = stageIdx >= 0 && stageIdx < orderedStages.length - 1
-      ? orderedStages[stageIdx + 1].stage_name : null
-    if (!nextStage) { toast.error('Already on the last stage'); return }
-
-    setProceedLoading(true)
-    try {
-      const result = await stageDetailsApi.stageTransition(
-        project.project_code, chapter.chapters, chapter.stage_name!, nextStage
-      )
-      await chaptersApi.update(chapter.id, {
-        stage_name:            nextStage,
-        current_assignee_name: null,
-        due_date:              result?.planned_end_date ? result.planned_end_date.split('T')[0] : chapter.due_date,
-      })
-      toast.success(`Moved to ${nextStage}`)
-      navigate(-1)
-    } catch {
-      toast.error('Failed to proceed')
-    } finally {
-      setProceedLoading(false)
+    if (!chapterDetailQuery.data || hasInitializedSection.current) {
+      return;
     }
-  }
 
-  // Derive chapter folder data from project.file_details, merging in backup files
-  const chapterFolderData: ChapterFolder | null = (() => {
-    if (!chapter || !project?.file_details) return null
-    const chNo = chapter.chapters.match(/\d+/)?.[0]
-    if (!chNo) return null
-    const cf = (project.file_details as { chapter_folders?: { chapters?: ChapterFolder[] } }).chapter_folders
-    const base = cf?.chapters?.find(c => c.chapter_name === `chapter-${chNo}`) ?? null
-    if (!base) return null
-    return {
-      ...base,
-      files: { ...base.files, Backup: backupFiles },
+    setSelectedSection(preferredCategory);
+    hasInitializedSection.current = true;
+  }, [chapterDetailQuery.data, preferredCategory]);
+
+  const statusBanners = useMemo(() => {
+    const items: Array<{ tone: "pending" | "success" | "error"; message: string }> = [];
+
+    if (fileActions.status) {
+      items.push({
+        tone: fileActions.status.tone,
+        message: fileActions.status.message,
+      });
     }
-  })()
 
-  if (loading) return <FullPageSpinner/>
-  if (error || !chapter || !project) {
+    if (chapterUpload.errorMessage && !isUploadOpen) {
+      items.push({
+        tone: "error",
+        message: chapterUpload.errorMessage,
+      });
+    } else if (chapterUpload.statusMessage && !isUploadOpen) {
+      items.push({
+        tone: chapterUpload.isPending ? "pending" : "success",
+        message: chapterUpload.statusMessage,
+      });
+    }
+
+    return items;
+  }, [
+    chapterUpload.errorMessage,
+    chapterUpload.isPending,
+    chapterUpload.statusMessage,
+    fileActions.status,
+    isUploadOpen,
+  ]);
+
+  if (normalizedProjectId === null || normalizedChapterId === null) {
     return (
-      <div className="flex items-center justify-center h-64 text-muted text-sm">
-        {error ?? 'Chapter not found'}
-      </div>
-    )
+      <main className="page chapter-detail-page chapter-detail-page--state">
+        <section className="panel chapter-detail-state-card chapter-detail-state-card--error">
+          <div className="chapter-detail-state-card__icon">!</div>
+          <h1 className="chapter-detail-state-card__title">Invalid chapter route</h1>
+          <p className="chapter-detail-state-card__message">
+            The selected project or chapter identifier is not valid.
+          </p>
+          <div className="chapter-detail-state-card__actions">
+            <Link className="button" to={uiPaths.projects}>
+              Back to projects
+            </Link>
+          </div>
+        </section>
+      </main>
+    );
   }
+
+  if (chapterDetailQuery.isPending || chapterFilesQuery.isPending) {
+    return (
+      <main className="page chapter-detail-page chapter-detail-page--state">
+        <section className="panel chapter-detail-state-card">
+          <div className="chapter-detail-state-card__icon">...</div>
+          <h1 className="chapter-detail-state-card__title">Loading chapter</h1>
+          <p className="chapter-detail-state-card__message">
+            Fetching the chapter details and files.
+          </p>
+        </section>
+      </main>
+    );
+  }
+
+  if (chapterDetailQuery.isError || chapterFilesQuery.isError) {
+    const error = chapterDetailQuery.error ?? chapterFilesQuery.error;
+
+    return (
+      <main className="page chapter-detail-page chapter-detail-page--state">
+        <section className="panel chapter-detail-state-card chapter-detail-state-card--error">
+          <div className="chapter-detail-state-card__icon">!</div>
+          <h1 className="chapter-detail-state-card__title">Chapter detail unavailable</h1>
+          <p className="chapter-detail-state-card__message">
+            {getApiErrorMessage(
+              error,
+              "The chapter detail page could not be loaded.",
+            )}
+          </p>
+          <div className="chapter-detail-state-card__actions">
+            <button
+              className="button"
+              onClick={() => {
+                void chapterDetailQuery.refetch();
+                void chapterFilesQuery.refetch();
+              }}
+              type="button"
+            >
+              Retry
+            </button>
+            <Link className="button button--secondary" to={uiPaths.projectDetail(normalizedProjectId)}>
+              Back to project
+            </Link>
+            <a
+              className="button button--secondary"
+              href={getSsrUrl(ssrPaths.chapterDetail(normalizedProjectId, normalizedChapterId))}
+            >
+              Open fallback chapter page
+            </a>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
+  if (!chapterDetailQuery.data || !chapterFilesQuery.data) {
+    return (
+      <main className="page chapter-detail-page chapter-detail-page--state">
+        <section className="panel chapter-detail-state-card chapter-detail-state-card--error">
+          <div className="chapter-detail-state-card__icon">!</div>
+          <h1 className="chapter-detail-state-card__title">Chapter detail unavailable</h1>
+          <p className="chapter-detail-state-card__message">
+            No chapter detail data was returned for this view.
+          </p>
+          <div className="chapter-detail-state-card__actions">
+            <Link className="button" to={uiPaths.projectDetail(normalizedProjectId)}>
+              Back to project
+            </Link>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
+  const { project, chapter } = chapterDetailQuery.data;
+  const files = chapterFilesQuery.data.files;
+  const totalFiles = files.length;
+  const filePaneLabel =
+    selectedSection === "Overview" ? "Overview" : `${selectedSection} folder`;
 
   return (
-    <ChapterFilePage
-      chapterFolderData={chapterFolderData}
-      projectId={project.id}
-      chapterId={chapter.id}
-      chapterName={chapter.chapters}
-      chapterTitle={chapter.chapter_title}
-      clientId={clientId}
-      clientName={project.customer_name ?? undefined}
-      projectName={project.project_title ?? project.project_code ?? undefined}
-      stageName={chapter.stage_name ?? ''}
-      isAssigned={!!chapter.current_assignee_name}
-      onRefresh={() => setRefreshKey(k => k + 1)}
-      onProceed={proceedLoading ? undefined : handleProceed}
-    />
-  )
+    <main className="page chapter-detail-page">
+      <div className="chapter-detail-shell">
+        <div className="chapter-detail-commandbar">
+          <div className="chapter-detail-commandbar__group">
+            <button
+              className="chapter-detail-commandbar__button chapter-detail-commandbar__button--primary"
+              type="button"
+              onClick={() => setIsUploadOpen(true)}
+            >
+              <span>Upload</span>
+              <span className="chapter-detail-commandbar__chevron">v</span>
+            </button>
+          </div>
+
+          <div className="chapter-detail-commandbar__group">
+            <button className="chapter-detail-commandbar__button" disabled type="button">
+              Delete
+            </button>
+            <button
+              className="chapter-detail-commandbar__button"
+              type="button"
+              onClick={() => filePaneRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            >
+              Automate
+            </button>
+          </div>
+        </div>
+
+        <div className="chapter-detail-addressbar">
+          <div className="chapter-detail-addressbar__nav">
+            <Link className="chapter-detail-addressbar__nav-button" to={uiPaths.projectDetail(project.id)}>
+              Back
+            </Link>
+            <button
+              className="chapter-detail-addressbar__nav-button"
+              type="button"
+              onClick={() => window.location.reload()}
+            >
+              Reload
+            </button>
+          </div>
+
+          <div className="chapter-detail-addressbar__path">
+            <div className="chapter-detail-addressbar__segments">
+              <Link className="chapter-detail-addressbar__link" to={uiPaths.projects}>
+                Projects
+              </Link>
+              <span className="chapter-detail-addressbar__separator">/</span>
+              <Link
+                className="chapter-detail-addressbar__link"
+                to={uiPaths.projectDetail(project.id)}
+              >
+                {project.code}
+              </Link>
+              <span className="chapter-detail-addressbar__separator">/</span>
+              <span className="chapter-detail-addressbar__link">Chapter {chapter.number}</span>
+              {selectedSection !== "Overview" ? (
+                <>
+                  <span className="chapter-detail-addressbar__separator">/</span>
+                  <span>{selectedSection}</span>
+                </>
+              ) : null}
+            </div>
+          </div>
+
+          <label className="chapter-detail-addressbar__search">
+            <span className="visually-hidden">Search chapter files</span>
+            <input
+              placeholder={`Search Chapter ${chapter.number}`}
+              type="search"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+            />
+          </label>
+        </div>
+
+        <div className="chapter-detail-explorer">
+          <aside className="chapter-detail-sidebar">
+            <div className="chapter-detail-sidebar__section-label">Chapter sections</div>
+            <button
+              className={`chapter-detail-sidebar__item${
+                selectedSection === "Overview" ? " chapter-detail-sidebar__item--active" : ""
+              }`}
+              aria-pressed={selectedSection === "Overview"}
+              type="button"
+              onClick={() => setSelectedSection("Overview")}
+            >
+              <span>Overview</span>
+            </button>
+            {categoryOrder.map((category) => (
+              <button
+                className={`chapter-detail-sidebar__item${
+                  selectedSection === category ? " chapter-detail-sidebar__item--active" : ""
+                }`}
+                aria-pressed={selectedSection === category}
+                key={category}
+                type="button"
+                onClick={() => setSelectedSection(category)}
+              >
+                <span>{category}</span>
+                <span className="chapter-detail-sidebar__count">
+                  {chapter.category_counts[category]}
+                </span>
+              </button>
+            ))}
+          </aside>
+
+          <section className="chapter-detail-main">
+            <div className="chapter-detail-main__header">
+              <div>
+                <p className="chapter-detail-main__eyebrow">Chapter workspace</p>
+                <h1 className="chapter-detail-main__title">
+                  Chapter {chapter.number} - {chapter.title}
+                </h1>
+                <p className="chapter-detail-main__subtitle">
+                  {project.code} / {filePaneLabel}
+                </p>
+              </div>
+            </div>
+
+            {statusBanners.length > 0 ? (
+              <div className="chapter-detail-alerts">
+                {statusBanners.map((status, index) => (
+                  <div className={`status-banner status-banner--${status.tone}`} key={`${status.tone}-${index}`}>
+                    {status.message}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            <div className="chapter-detail-main__section">
+              <ChapterMetadataPanel
+                chapter={chapter}
+                currentSection={selectedSection}
+                projectCode={project.code}
+                totalFiles={totalFiles}
+              />
+            </div>
+
+            <div className="chapter-detail-main__section">
+              <div className="chapter-detail-section-title">
+                <div>
+                  <h2>Folders</h2>
+                  <p>Folder counts stay in view here. Use the left sidebar to change folders.</p>
+                </div>
+              </div>
+              <ChapterCategorySummary
+                counts={chapter.category_counts}
+                selectedSection={selectedSection}
+              />
+            </div>
+
+            <div className="chapter-detail-main__section">
+              <ProcessingStatusPanel sectionLabel={filePaneLabel} status={structuringProcessing.status} />
+            </div>
+
+            <div className="chapter-detail-main__section" ref={filePaneRef}>
+              <ChapterFilesTable
+                chapterId={chapter.id}
+                files={files}
+                isActionPending={(fileId, action) => fileActions.isPending(fileId, action)}
+                isProcessingPending={(fileId) => structuringProcessing.isPending(fileId)}
+                onCancelCheckout={(file) => fileActions.handleCancelCheckout(file)}
+                onCheckout={(file) => fileActions.handleCheckout(file)}
+                onDelete={(file) => fileActions.handleDelete(file)}
+                onDownload={(file) => fileActions.handleDownload(file)}
+                onRunStructuring={(file) => structuringProcessing.startStructuring(file)}
+                projectId={project.id}
+                searchQuery={searchQuery}
+                selectedSection={selectedSection}
+              />
+            </div>
+          </section>
+        </div>
+      </div>
+
+      {isUploadOpen ? (
+        <div className="chapter-detail-modal-backdrop" role="presentation">
+          <div
+            aria-label="Upload files"
+            className="chapter-detail-modal"
+            role="dialog"
+          >
+            <ChapterUploadPanel
+              activeTab={selectedSection === "Overview" ? preferredCategory : selectedSection}
+              errorMessage={chapterUpload.errorMessage}
+              isPending={chapterUpload.isPending}
+              onClearResult={chapterUpload.clearResult}
+              onClose={() => setIsUploadOpen(false)}
+              onUpload={chapterUpload.submitUpload}
+              result={chapterUpload.result}
+              statusMessage={chapterUpload.statusMessage}
+            />
+          </div>
+        </div>
+      ) : null}
+    </main>
+  );
 }
