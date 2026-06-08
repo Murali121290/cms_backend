@@ -27,7 +27,7 @@ export function useSessionBootstrap() {
     }
 
     if (query.isPending) {
-      setLoading();
+      setLoading(true);
       return;
     }
 

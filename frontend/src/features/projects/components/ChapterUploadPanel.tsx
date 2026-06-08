@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Upload, CheckCircle2, AlertCircle } from "lucide-react";
 
 import type { FileUploadResponse } from "@/types/api";
@@ -228,7 +228,9 @@ export function ChapterUploadPanel({
                     key={`${item.code}-${item.filename}`}
                     className="text-xs text-muted"
                   >
-                    <span className="font-medium">{item.filename}</span> â€” {item.message}
+                    <span className="font-medium">{item.filename}</span>{" "}
+                    <span className="font-mono text-[10px] bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300 px-1 py-0.5 rounded ml-1 mr-1">{item.code}</span>
+                    — <span>{item.message}</span>
                   </li>
                 ))}
               </ul>

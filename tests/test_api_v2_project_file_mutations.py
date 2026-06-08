@@ -320,3 +320,71 @@ def test_api_v2_cancel_checkout_by_non_owner_preserves_forgiving_noop_behavior(
     db_session.refresh(file_record)
     assert file_record.is_checked_out is True
     assert file_record.checked_out_by_id == admin_user.id
+
+
+def test_api_v2_project_bootstrap_empty_files_and_zip_upload(
+    auth_cookie_client,
+    admin_user,
+    db_session,
+    temp_upload_root,
+):
+    client = auth_cookie_client(admin_user)
+
+    # 1. Bootstrap project with zero initial files
+    response = client.post(
+        "/api/v2/projects/bootstrap",
+        data={
+            "code": "V2BOOKZIP",
+            "title": "ZIP Upload Book",
+            "client_name": "Client A",
+            "xml_standard": "NLM",
+            "chapter_count": "2",
+            "workflow_type": "WF-01",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["project"]["code"] == "V2BOOKZIP"
+    assert [chapter["number"] for chapter in body["chapters"]] == ["01", "02"]
+    assert len(body["ingested_files"]) == 0
+
+    project = db_session.query(models.Project).filter(models.Project.code == "V2BOOKZIP").first()
+    assert project is not None
+    assert project.workflow_type == "WF-01"
+
+    # 2. Prepare a ZIP file in memory
+    zip_buffer = BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        zip_file.writestr("ch01/ch01_intro.docx", b"chapter 1 content")
+        zip_file.writestr("ch02/ch02_body.docx", b"chapter 2 content")
+        zip_file.writestr("images/ch01_fig1.png", b"fake image content")
+        zip_file.writestr("project_settings.xml", b"<xml>settings</xml>")
+
+    zip_buffer.seek(0)
+
+    # 3. Post ZIP file to the uploads endpoint
+    upload_response = client.post(
+        "/api/v2/uploads/ClientA/V2BOOKZIP",
+        data={"project_id": project.id},
+        files={"file": ("V2BOOKZIP.zip", zip_buffer, "application/zip")},
+    )
+
+    assert upload_response.status_code == 200
+    upload_body = upload_response.json()
+
+    assert upload_body["total_chapters"] == 2
+    assert len(upload_body["chapters"]) == 3  # ch01_intro.docx, ch02_body.docx, ch01_fig1.png
+    assert len(upload_body["images"]) == 1
+    assert len(upload_body["xml"]) == 1
+    assert len(upload_body["docs"]) == 2
+
+    # Verify database records
+    files_in_db = db_session.query(models.File).filter(models.File.project_id == project.id).all()
+    filenames = {f.filename for f in files_in_db}
+    assert "ch01_intro.docx" in filenames
+    assert "ch02_body.docx" in filenames
+    assert "ch01_fig1.png" in filenames
+    assert "project_settings.xml" in filenames
+

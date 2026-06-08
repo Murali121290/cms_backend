@@ -20,8 +20,8 @@ describe("AdminDashboardPage", () => {
     getAdminDashboard.mockResolvedValueOnce(createAdminDashboardResponse());
 
     renderRoute({
-      path: "/ui/admin",
-      initialEntry: "/ui/admin",
+      path: "/admin",
+      initialEntry: "/admin",
       element: <AdminDashboardPage />,
     });
 
@@ -29,11 +29,11 @@ describe("AdminDashboardPage", () => {
     expect(screen.getByText("4")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Manage Users Create, edit, delete users" })).toHaveAttribute(
       "href",
-      "/ui/admin/users",
+      "/admin/users",
     );
     expect(screen.getByRole("link", { name: "Back to User Dashboard" })).toHaveAttribute(
       "href",
-      "/ui/dashboard",
+      "/dashboard",
     );
   });
 
@@ -46,8 +46,8 @@ describe("AdminDashboardPage", () => {
     );
 
     renderRoute({
-      path: "/ui/admin",
-      initialEntry: "/ui/admin",
+      path: "/admin",
+      initialEntry: "/admin",
       element: <AdminDashboardPage />,
     });
 

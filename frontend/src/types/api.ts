@@ -77,6 +77,7 @@ export interface ProjectSummary {
   id: number;
   code: string;
   title: string;
+  client_id: number | null;
   client_name: string | null;
   xml_standard: string;
   status: string;
@@ -85,6 +86,32 @@ export interface ProjectSummary {
   file_count: number;
   workflow_type: string | null;
   workflow_stage_no: string | null;
+  // WMS aliases
+  project_code?: string | null;
+  project_title?: string | null;
+  workflow_name?: string | null;
+  customer_name?: string | null;
+  // WMS project fields
+  division_code?: string | null;
+  customer_contact?: string | null;
+  category?: string | null;
+  composition?: string | null;
+  project_manager?: string | null;
+  sales_person?: string | null;
+  priority?: string | null;
+  edition?: string | null;
+  color?: string | null;
+  trim_size?: string | null;
+  copyright_year?: number | null;
+  manuscript_pages?: number | null;
+  estimated_pages?: number | null;
+  actual_pages?: number | null;
+  isbn_no?: string | null;
+  billing_location?: string | null;
+  due_date?: string | null;
+  file_details?: Record<string, unknown> | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 }
 
 export interface ChapterSummary {

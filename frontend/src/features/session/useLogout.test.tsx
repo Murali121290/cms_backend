@@ -57,7 +57,8 @@ describe("useLogout", () => {
 
     expect(await screen.findByText("Frontend login route")).toBeInTheDocument();
     expect(router.state.location.pathname).toBe(uiPaths.login);
-    expect(useSessionStore.getState().status).toBe("idle");
+    expect(useSessionStore.getState().authenticated).toBe(false);
+    expect(useSessionStore.getState().viewer).toBeNull();
     await waitFor(() => {
       expect(queryClient.getQueryData(["session"])).toBeUndefined();
     });

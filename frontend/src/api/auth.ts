@@ -8,7 +8,7 @@ export interface AuthUser {
 }
 
 export interface LoginPayload {
-  email:    string
+  username: string
   password: string
 }
 
@@ -17,7 +17,7 @@ export interface LoginResponse {
 }
 
 export const authApi = {
-  login: (payload: { email: string; password: string }) =>
+  login: (payload: { username: string; password: string }) =>
     api.post<LoginResponse>('/session/login', payload).then(r => r.data),
 
   me: () =>

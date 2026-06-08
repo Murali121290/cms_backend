@@ -32,15 +32,15 @@ describe("ProjectDetailPage", () => {
     getProjectChapters.mockResolvedValueOnce(createProjectChaptersResponse());
 
     renderRoute({
-      path: "/ui/projects/:projectId",
-      initialEntry: "/ui/projects/10",
+      path: "/projects/:projectId",
+      initialEntry: "/projects/10",
       element: <ProjectDetailPage />,
     });
 
     expect(await screen.findByRole("heading", { name: "Book 100" })).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "Chapter 01 - Chapter One" }),
-    ).toHaveAttribute("href", "/ui/projects/10/chapters/20");
+    ).toHaveAttribute("href", "/projects/10/chapters/20");
     expect(screen.getByRole("link", { name: "Download ZIP" })).toHaveAttribute(
       "href",
       "/api/v2/projects/10/chapters/20/package",
@@ -71,8 +71,8 @@ describe("ProjectDetailPage", () => {
     });
 
     renderRoute({
-      path: "/ui/projects/:projectId",
-      initialEntry: "/ui/projects/10",
+      path: "/projects/:projectId",
+      initialEntry: "/projects/10",
       element: <ProjectDetailPage />,
     });
 

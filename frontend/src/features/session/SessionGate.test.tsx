@@ -5,6 +5,7 @@ import { Route, Routes } from "react-router-dom";
 import { SessionGate } from "@/features/session/SessionGate";
 import { useSessionStore } from "@/stores/sessionStore";
 import { renderRoute } from "@/test/testUtils";
+import { uiPaths } from "@/utils/appPaths";
 
 const mockUseSessionBootstrap = vi.fn();
 
@@ -28,19 +29,19 @@ describe("SessionGate", () => {
     });
 
     renderRoute({
-      path: "/ui/*",
+      path: "/*",
       initialEntry: "/ui/dashboard",
       element: (
         <Routes>
           <Route
-            path="dashboard"
+            path="/ui/dashboard"
             element={
               <SessionGate>
                 <div>Protected shell</div>
               </SessionGate>
             }
           />
-          <Route path="login" element={<div>Frontend login route</div>} />
+          <Route path={uiPaths.login} element={<div>Frontend login route</div>} />
         </Routes>
       ),
     });

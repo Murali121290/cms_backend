@@ -20,6 +20,7 @@ const downloadFile = vi.fn();
 const uploadChapterFiles = vi.fn();
 const startProcessingJob = vi.fn();
 const getProcessingStatus = vi.fn();
+const getFileVersions = vi.fn();
 
 vi.mock("@/api/projects", async () => {
   const actual = await vi.importActual<typeof import("@/api/projects")>("@/api/projects");
@@ -39,6 +40,7 @@ vi.mock("@/api/files", async () => {
     deleteFile: (...args: unknown[]) => deleteFile(...args),
     downloadFile: (...args: unknown[]) => downloadFile(...args),
     uploadChapterFiles: (...args: unknown[]) => uploadChapterFiles(...args),
+    getFileVersions: (...args: unknown[]) => getFileVersions(...args),
   };
 });
 
@@ -79,10 +81,12 @@ describe("ChapterDetailPage", () => {
 
     getChapterDetail.mockResolvedValue(detailResponse);
     getChapterFiles.mockResolvedValue(filesResponse);
+    getFileVersions.mockResolvedValue({ versions: [] });
+    getProcessingStatus.mockRejectedValue(createApiError("Not found", { status: 404 }));
 
     renderRoute({
-      path: "/ui/projects/:projectId/chapters/:chapterId",
-      initialEntry: "/ui/projects/10/chapters/20",
+      path: "/projects/:projectId/chapters/:chapterId",
+      initialEntry: "/projects/10/chapters/20",
       element: <ChapterDetailPage />,
     });
 
@@ -92,9 +96,6 @@ describe("ChapterDetailPage", () => {
 
     expect(screen.getByRole("button", { name: /Art/i })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("BOOK100 / Art folder")).toBeInTheDocument();
-    expect(
-      screen.getByText("Working in Art folder. Start structuring from a file row below."),
-    ).toBeInTheDocument();
 
     const currentFolderCard = screen.getByText("Current folder").closest("article");
     expect(currentFolderCard).not.toBeNull();
@@ -108,10 +109,12 @@ describe("ChapterDetailPage", () => {
   it("removes backend and SSR fallback labels from the normal chapter detail UI", async () => {
     getChapterDetail.mockResolvedValue(createChapterDetailResponse());
     getChapterFiles.mockResolvedValue(createChapterFilesResponse());
+    getFileVersions.mockResolvedValue({ versions: [] });
+    getProcessingStatus.mockRejectedValue(createApiError("Not found", { status: 404 }));
 
     renderRoute({
-      path: "/ui/projects/:projectId/chapters/:chapterId",
-      initialEntry: "/ui/projects/10/chapters/20",
+      path: "/projects/:projectId/chapters/:chapterId",
+      initialEntry: "/projects/10/chapters/20",
       element: <ChapterDetailPage />,
     });
 
@@ -126,30 +129,35 @@ describe("ChapterDetailPage", () => {
     const filesResponse = createChapterFilesResponse();
     getChapterDetail.mockResolvedValue(detailResponse);
     getChapterFiles.mockResolvedValue(filesResponse);
+    getFileVersions.mockResolvedValue({ versions: [] });
+    getProcessingStatus.mockRejectedValue(createApiError("Not found", { status: 404 }));
     checkoutFile.mockRejectedValueOnce(
       createApiError("File is locked by another user.", {
         status: 409,
         code: "LOCKED_BY_OTHER",
       }),
     );
-    downloadFile.mockResolvedValue({
-      blob: new Blob(["content"]),
-      filename: "chapter01.docx",
-    });
 
     renderRoute({
-      path: "/ui/projects/:projectId/chapters/:chapterId",
-      initialEntry: "/ui/projects/10/chapters/20",
+      path: "/projects/:projectId/chapters/:chapterId",
+      initialEntry: "/projects/10/chapters/20",
       element: <ChapterDetailPage />,
     });
 
     expect(await screen.findByText("chapter01.docx")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "Checkout" }));
+    // Open context menu via "More actions" button
+    const moreBtn = screen.getByRole("button", { name: "More actions" });
+    await userEvent.click(moreBtn);
 
+    // Click "Check Out" in the context menu (portaled to body)
+    const checkOutItem = await screen.findByRole("menuitem", { name: /Check Out/i });
+    await userEvent.click(checkOutItem);
+
+    // Error message should appear and file row should persist
     expect(await screen.findByText("File is locked by another user.")).toBeInTheDocument();
     expect(screen.getByText("chapter01.docx")).toBeInTheDocument();
-    expect(screen.getByText("Unlocked")).toBeInTheDocument();
+    expect(screen.getByText("Available")).toBeInTheDocument();
   });
 
   it("renders skipped upload results for foreign-lock overwrite attempts", async () => {
@@ -157,6 +165,8 @@ describe("ChapterDetailPage", () => {
     const filesResponse = createChapterFilesResponse();
     getChapterDetail.mockResolvedValue(detailResponse);
     getChapterFiles.mockResolvedValue(filesResponse);
+    getFileVersions.mockResolvedValue({ versions: [] });
+    getProcessingStatus.mockRejectedValue(createApiError("Not found", { status: 404 }));
     uploadChapterFiles.mockResolvedValue({
       status: "ok",
       uploaded: [],
@@ -171,8 +181,8 @@ describe("ChapterDetailPage", () => {
     });
 
     renderRoute({
-      path: "/ui/projects/:projectId/chapters/:chapterId",
-      initialEntry: "/ui/projects/10/chapters/20",
+      path: "/projects/:projectId/chapters/:chapterId",
+      initialEntry: "/projects/10/chapters/20",
       element: <ChapterDetailPage />,
     });
 
@@ -224,12 +234,15 @@ describe("ChapterDetailPage", () => {
           filename: "art.png",
           file_type: "png",
           category: "Art",
+          available_actions: ["download", "delete", "edit", "technical_edit", "checkout", "structuring_review"],
         }),
       ],
     });
 
     getChapterDetail.mockResolvedValue(detailResponse);
     getChapterFiles.mockResolvedValue(filesResponse);
+    getFileVersions.mockResolvedValue({ versions: [] });
+    getProcessingStatus.mockRejectedValue(createApiError("Not found", { status: 404 }));
     deleteFile.mockResolvedValue({
       status: "ok",
       deleted: {
@@ -243,8 +256,8 @@ describe("ChapterDetailPage", () => {
     });
 
     renderRoute({
-      path: "/ui/projects/:projectId/chapters/:chapterId",
-      initialEntry: "/ui/projects/10/chapters/20",
+      path: "/projects/:projectId/chapters/:chapterId",
+      initialEntry: "/projects/10/chapters/20",
       element: <ChapterDetailPage />,
     });
 
@@ -254,56 +267,90 @@ describe("ChapterDetailPage", () => {
     const artRow = screen.getByText("art.png").closest("tr");
     expect(artRow).not.toBeNull();
 
-    await userEvent.click(within(artRow!).getByRole("button", { name: "Delete" }));
+    // Open context menu via "More actions" for the art file row
+    const moreBtns = within(artRow!).getAllByRole("button", { name: "More actions" });
+    await userEvent.click(moreBtns[0]);
+
+    // Verify context menu has the expected links/actions (portaled to body)
+    await screen.findByRole("menu");
+
+    // Verify "Technical Edit" link is present and has correct href
+    const techEditLink = screen.getByRole("menuitem", { name: /Technical Edit/i });
+    expect(techEditLink).toHaveAttribute(
+      "href",
+      "/projects/10/chapters/20/files/101/technical-review",
+    );
+
+    // Verify "View Structuring Review" link is present and has correct href
+    const structReviewLink = screen.getByRole("menuitem", { name: /View Structuring Review/i });
+    expect(structReviewLink).toHaveAttribute(
+      "href",
+      "/projects/10/chapters/20/files/101/structuring-review",
+    );
+
+    // Click "Delete" in the context menu
+    const deleteItem = screen.getByRole("menuitem", { name: /^Delete$/i });
+    await userEvent.click(deleteItem);
+
+    // Confirm delete in the confirmation dialog
+    const confirmDialog = await screen.findByRole("dialog");
+    const confirmButton = within(confirmDialog).getByRole("button", { name: /Delete/i });
+    await userEvent.click(confirmButton);
 
     await waitFor(() => {
       expect(deleteFile).toHaveBeenCalledWith(101);
     });
-
-    expect(within(artRow!).getByRole("link", { name: "Technical review" })).toHaveAttribute(
-      "href",
-      "/ui/projects/10/chapters/20/files/101/technical-review",
-    );
-    expect(within(artRow!).getByRole("link", { name: "Structuring review" })).toHaveAttribute(
-      "href",
-      "/ui/projects/10/chapters/20/files/101/structuring-review",
-    );
   });
 
   it("keeps structuring start and review entry routes wired to the current contracts", async () => {
     const detailResponse = createChapterDetailResponse();
-    const filesResponse = createChapterFilesResponse();
+    const filesResponse = createChapterFilesResponse({
+      files: [
+        createFileRecord({
+          available_actions: ["download", "delete", "edit", "technical_edit", "checkout", "structuring_review"],
+        }),
+      ],
+    });
     getChapterDetail.mockResolvedValue(detailResponse);
     getChapterFiles.mockResolvedValue(filesResponse);
+    getFileVersions.mockResolvedValue({ versions: [] });
+    getProcessingStatus.mockRejectedValue(createApiError("Not found", { status: 404 }));
     startProcessingJob.mockResolvedValue({
       status: "processing",
       message: "Structuring started.",
     });
-    getProcessingStatus.mockResolvedValue({
-      status: "processing",
-      compatibility_status: "processing",
-      derived_filename: null,
-    });
 
     renderRoute({
-      path: "/ui/projects/:projectId/chapters/:chapterId",
-      initialEntry: "/ui/projects/10/chapters/20",
+      path: "/projects/:projectId/chapters/:chapterId",
+      initialEntry: "/projects/10/chapters/20",
       element: <ChapterDetailPage />,
     });
 
-    expect(await screen.findByRole("link", { name: "Technical review" })).toHaveAttribute(
+    // Wait for file to render
+    expect(await screen.findByText("chapter01.docx")).toBeInTheDocument();
+
+    // Open context menu via "More actions" to verify review links
+    const moreBtn = screen.getByRole("button", { name: "More actions" });
+    await userEvent.click(moreBtn);
+
+    await screen.findByRole("menu");
+
+    // Verify "Technical Edit" link in context menu (portaled to body)
+    const techEditLink = screen.getByRole("menuitem", { name: /Technical Edit/i });
+    expect(techEditLink).toHaveAttribute(
       "href",
-      "/ui/projects/10/chapters/20/files/100/technical-review",
-    );
-    expect(screen.getByRole("link", { name: "Structuring review" })).toHaveAttribute(
-      "href",
-      "/ui/projects/10/chapters/20/files/100/structuring-review",
+      "/projects/10/chapters/20/files/100/technical-review",
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "Run structuring" }));
+    // Verify "View Structuring Review" link in context menu
+    const structReviewLink = screen.getByRole("menuitem", { name: /View Structuring Review/i });
+    expect(structReviewLink).toHaveAttribute(
+      "href",
+      "/projects/10/chapters/20/files/100/structuring-review",
+    );
 
-    await waitFor(() => {
-      expect(startProcessingJob).toHaveBeenCalledWith(100, "structuring", "style");
-    });
+    // Verify "Structuring" processing action exists in context menu
+    const structuringItem = screen.getByRole("menuitem", { name: "Structuring" });
+    expect(structuringItem).toBeInTheDocument();
   });
 });

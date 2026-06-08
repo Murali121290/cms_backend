@@ -1,4 +1,4 @@
-﻿import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -7,18 +7,19 @@ import { ArrowLeft, FolderPlus } from "lucide-react";
 
 import { getApiErrorMessage } from "@/api/client";
 import { createProject } from "@/api/projects";
+import { clientsApi, type Client } from "@/api/clients";
+import { workflowsApi } from "@/api/workflows";
 import { Button } from "@/components/ui/Button";
 import { UploadZone } from "@/components/ui/UploadZone";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { uiPaths } from "@/utils/appPaths";
-import { WORKFLOW_DEFINITIONS } from "@/features/workflow/workflowDefinitions";
 
-/* â”€â”€â”€ Zod schema â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─── Zod schema ─────────────────────────────────────────────────────────── */
 
 const schema = z.object({
   code: z.string().min(1, "Project code is required").max(64),
   title: z.string().min(1, "Project title is required").max(256),
-  client_name: z.string().max(128).optional(),
+  client_id: z.coerce.number().optional(),
   xml_standard: z.enum(["NLM / JATS", "BITS", "Custom"] as const, {
     error: "Select a valid XML standard",
   }),
@@ -27,12 +28,25 @@ const schema = z.object({
     .int()
     .min(1, "At least 1 chapter is required")
     .max(999),
-  workflow_type: z.string().optional(),
+  workflow_name: z.string().optional(),
+  project_manager: z.string().max(128).optional(),
+  priority: z.string().optional(),
+  category: z.string().max(128).optional(),
+  composition: z.string().max(128).optional(),
+  edition: z.string().max(64).optional(),
+  color: z.string().max(64).optional(),
+  trim_size: z.string().max(64).optional(),
+  copyright_year: z.coerce.number().int().min(1900).max(2099).optional().or(z.literal("")),
+  manuscript_pages: z.coerce.number().int().min(0).optional().or(z.literal("")),
+  estimated_pages: z.coerce.number().int().min(0).optional().or(z.literal("")),
+  isbn_no: z.string().max(64).optional(),
+  billing_location: z.string().max(128).optional(),
+  due_date: z.string().optional(),
 });
 
 type FormValues = z.infer<typeof schema>;
 
-/* â”€â”€â”€ Style constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─── Style constants ─────────────────────────────────────────────────────── */
 
 const labelClass =
   "block text-[11px] font-medium uppercase tracking-wide text-muted mb-1.5";
@@ -49,14 +63,21 @@ const fieldErrorClass = "text-xs text-danger mt-1";
 
 const requiredAsterisk = <span className="text-primary ml-0.5">*</span>;
 
-/* â”€â”€â”€ Page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─── Page ─────────────────────────────────────────────────────────────────── */
 
 export function ProjectCreatePage() {
-  useDocumentTitle("Create New Project â€” S4 Carlisle CMS");
+  useDocumentTitle("Create New Project – S4 Carlisle CMS");
 
   const navigate = useNavigate();
   const [files, setFiles] = useState<File[]>([]);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [workflowNames, setWorkflowNames] = useState<string[]>([]);
+
+  useEffect(() => {
+    clientsApi.list().then(setClients).catch(() => undefined);
+    workflowsApi.listNames().then(setWorkflowNames).catch(() => undefined);
+  }, []);
 
   const {
     register,
@@ -67,10 +88,23 @@ export function ProjectCreatePage() {
     defaultValues: {
       code: "",
       title: "",
-      client_name: "",
+      client_id: undefined,
       xml_standard: "NLM / JATS",
       chapter_count: 1,
-      workflow_type: "",
+      workflow_name: "",
+      project_manager: "",
+      priority: "",
+      category: "",
+      composition: "",
+      edition: "",
+      color: "",
+      trim_size: "",
+      copyright_year: "",
+      manuscript_pages: "",
+      estimated_pages: "",
+      isbn_no: "",
+      billing_location: "",
+      due_date: "",
     },
   });
 
@@ -86,10 +120,23 @@ export function ProjectCreatePage() {
     const fd = new FormData();
     fd.append("code", values.code.trim());
     fd.append("title", values.title.trim());
-    if (values.client_name?.trim()) fd.append("client_name", values.client_name.trim());
     fd.append("xml_standard", values.xml_standard);
     fd.append("chapter_count", String(values.chapter_count));
-    if (values.workflow_type) fd.append("workflow_type", values.workflow_type);
+    if (values.client_id) fd.append("client_id", String(values.client_id));
+    if (values.workflow_name) fd.append("workflow_name", values.workflow_name);
+    if (values.project_manager?.trim()) fd.append("project_manager", values.project_manager.trim());
+    if (values.priority) fd.append("priority", values.priority);
+    if (values.category?.trim()) fd.append("category", values.category.trim());
+    if (values.composition?.trim()) fd.append("composition", values.composition.trim());
+    if (values.edition?.trim()) fd.append("edition", values.edition.trim());
+    if (values.color?.trim()) fd.append("color", values.color.trim());
+    if (values.trim_size?.trim()) fd.append("trim_size", values.trim_size.trim());
+    if (values.copyright_year) fd.append("copyright_year", String(values.copyright_year));
+    if (values.manuscript_pages) fd.append("manuscript_pages", String(values.manuscript_pages));
+    if (values.estimated_pages) fd.append("estimated_pages", String(values.estimated_pages));
+    if (values.isbn_no?.trim()) fd.append("isbn_no", values.isbn_no.trim());
+    if (values.billing_location?.trim()) fd.append("billing_location", values.billing_location.trim());
+    if (values.due_date) fd.append("due_date", values.due_date);
     files.forEach((f) => fd.append("files", f));
 
     try {
@@ -101,7 +148,7 @@ export function ProjectCreatePage() {
   }
 
   return (
-    <main className="page-enter px-6 py-8 max-w-3xl mx-auto w-full">
+    <main className="page-enter px-6 py-8 max-w-4xl mx-auto w-full">
       {/* Page title row */}
       <div className="mb-6">
         <Link
@@ -130,13 +177,13 @@ export function ProjectCreatePage() {
         noValidate
         className="bg-white border border-border rounded-lg p-8 shadow-sm space-y-8"
       >
-        {/* â”€â”€ Section 1: Project Details â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+        {/* ── Section 1: Project Details ──────────────────────────────── */}
         <section aria-labelledby="section-details">
           <h2 id="section-details" className={sectionHeadingClass}>
             Project Details
           </h2>
 
-          <div className="space-y-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
             {/* Project Code */}
             <div>
               <label htmlFor="code" className={labelClass}>
@@ -162,27 +209,6 @@ export function ProjectCreatePage() {
               ) : null}
             </div>
 
-            {/* Client Name */}
-            <div>
-              <label htmlFor="client_name" className={labelClass}>
-                Client Name
-              </label>
-              <input
-                id="client_name"
-                {...register("client_name")}
-                type="text"
-                className={inputClass}
-                placeholder="e.g. Oxford University Press"
-                disabled={isSubmitting}
-                autoComplete="organization"
-              />
-              {errors.client_name ? (
-                <p className={fieldErrorClass} role="alert">
-                  {errors.client_name.message}
-                </p>
-              ) : null}
-            </div>
-
             {/* Project Title */}
             <div>
               <label htmlFor="title" className={labelClass}>
@@ -203,10 +229,156 @@ export function ProjectCreatePage() {
                 </p>
               ) : null}
             </div>
+
+            {/* Client */}
+            <div>
+              <label htmlFor="client_id" className={labelClass}>
+                Client
+              </label>
+              <select
+                id="client_id"
+                {...register("client_id")}
+                className={inputClass}
+                disabled={isSubmitting}
+              >
+                <option value="">— Select client —</option>
+                {clients.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.company || `${c.first_name ?? ""} ${c.surname ?? ""}`.trim()}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Priority */}
+            <div>
+              <label htmlFor="priority" className={labelClass}>
+                Priority
+              </label>
+              <select
+                id="priority"
+                {...register("priority")}
+                className={inputClass}
+                disabled={isSubmitting}
+              >
+                <option value="">— Select —</option>
+                <option value="High">High</option>
+                <option value="Medium">Medium</option>
+                <option value="Low">Low</option>
+              </select>
+            </div>
+
+            {/* Category */}
+            <div>
+              <label htmlFor="category" className={labelClass}>
+                Category
+              </label>
+              <input
+                id="category"
+                {...register("category")}
+                type="text"
+                className={inputClass}
+                placeholder="e.g. Textbook"
+                disabled={isSubmitting}
+              />
+            </div>
+
+            {/* Composition */}
+            <div>
+              <label htmlFor="composition" className={labelClass}>
+                Composition
+              </label>
+              <input
+                id="composition"
+                {...register("composition")}
+                type="text"
+                className={inputClass}
+                placeholder="e.g. Author"
+                disabled={isSubmitting}
+              />
+            </div>
+
+            {/* Project Manager */}
+            <div>
+              <label htmlFor="project_manager" className={labelClass}>
+                Project Manager
+              </label>
+              <input
+                id="project_manager"
+                {...register("project_manager")}
+                type="text"
+                className={inputClass}
+                placeholder="Username"
+                disabled={isSubmitting}
+              />
+            </div>
+
+            {/* Due Date */}
+            <div>
+              <label htmlFor="due_date" className={labelClass}>
+                Due Date
+              </label>
+              <input
+                id="due_date"
+                {...register("due_date")}
+                type="date"
+                className={inputClass}
+                disabled={isSubmitting}
+              />
+            </div>
           </div>
         </section>
 
-        {/* â”€â”€ Section 2: Configuration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+        {/* ── Section 2: Publishing Details ──────────────────────────── */}
+        <section aria-labelledby="section-publishing">
+          <h2 id="section-publishing" className={sectionHeadingClass}>
+            Publishing Details
+          </h2>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+            <div>
+              <label htmlFor="edition" className={labelClass}>Edition</label>
+              <input id="edition" {...register("edition")} type="text" className={inputClass} placeholder="e.g. 3rd" disabled={isSubmitting} />
+            </div>
+
+            <div>
+              <label htmlFor="color" className={labelClass}>Color</label>
+              <input id="color" {...register("color")} type="text" className={inputClass} placeholder="e.g. 4C" disabled={isSubmitting} />
+            </div>
+
+            <div>
+              <label htmlFor="trim_size" className={labelClass}>Trim Size</label>
+              <input id="trim_size" {...register("trim_size")} type="text" className={inputClass} placeholder='e.g. 8.5"×11"' disabled={isSubmitting} />
+            </div>
+
+            <div>
+              <label htmlFor="copyright_year" className={labelClass}>Copyright Year</label>
+              <input id="copyright_year" {...register("copyright_year")} type="number" min={1900} max={2099} className={inputClass} placeholder="2024" disabled={isSubmitting} />
+            </div>
+
+            <div>
+              <label htmlFor="manuscript_pages" className={labelClass}>Manuscript Pages</label>
+              <input id="manuscript_pages" {...register("manuscript_pages")} type="number" min={0} className={inputClass} disabled={isSubmitting} />
+            </div>
+
+            <div>
+              <label htmlFor="estimated_pages" className={labelClass}>Estimated Pages</label>
+              <input id="estimated_pages" {...register("estimated_pages")} type="number" min={0} className={inputClass} disabled={isSubmitting} />
+            </div>
+
+            <div>
+              <label htmlFor="isbn_no" className={labelClass}>ISBN</label>
+              <input id="isbn_no" {...register("isbn_no")} type="text" className={inputClass} placeholder="978-0-000-00000-0" disabled={isSubmitting} />
+            </div>
+
+            <div>
+              <label htmlFor="billing_location" className={labelClass}>Billing Location</label>
+              <input id="billing_location" {...register("billing_location")} type="text" className={inputClass} disabled={isSubmitting} />
+            </div>
+          </div>
+        </section>
+
+        {/* ── Section 3: Configuration ──────────────────────────────── */}
         <section aria-labelledby="section-config">
           <h2 id="section-config" className={sectionHeadingClass}>
             Configuration
@@ -257,19 +429,19 @@ export function ProjectCreatePage() {
 
             {/* Production Workflow */}
             <div className="sm:col-span-2">
-              <label htmlFor="workflow_type" className={labelClass}>
+              <label htmlFor="workflow_name" className={labelClass}>
                 Production Workflow
               </label>
               <select
-                id="workflow_type"
-                {...register("workflow_type")}
+                id="workflow_name"
+                {...register("workflow_name")}
                 className={inputClass}
                 disabled={isSubmitting}
               >
                 <option value="">None (assign later)</option>
-                {WORKFLOW_DEFINITIONS.map((wf) => (
-                  <option key={wf.id} value={wf.id}>
-                    {wf.id} Â· {wf.title} â€” {wf.short}
+                {workflowNames.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
                   </option>
                 ))}
               </select>
@@ -280,7 +452,7 @@ export function ProjectCreatePage() {
           </div>
         </section>
 
-        {/* â”€â”€ Section 3: Initial Files â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+        {/* ── Section 4: Initial Files ──────────────────────────────── */}
         <section aria-labelledby="section-files">
           <h2 id="section-files" className={sectionHeadingClass}>
             Initial Files
@@ -313,7 +485,7 @@ export function ProjectCreatePage() {
                     className="text-muted hover:text-danger transition-colors ml-2 shrink-0"
                     onClick={() => setFiles((prev) => prev.filter((_, idx) => idx !== i))}
                   >
-                    Ã—
+                    ×
                   </button>
                 </li>
               ))}
@@ -321,7 +493,7 @@ export function ProjectCreatePage() {
           ) : null}
         </section>
 
-        {/* â”€â”€ Form actions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+        {/* ── Form actions ────────────────────────────────────────────── */}
         <div className="flex items-center justify-end gap-3 pt-2 border-t border-border">
           <Button
             variant="ghost"

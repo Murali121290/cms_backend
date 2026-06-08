@@ -1,4 +1,4 @@
-﻿import { useEffect } from "react";
+import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -83,9 +83,10 @@ export function AdminCreateUserForm({
       ) : null}
 
       <div>
-        <label className="block text-sm font-medium text-text mb-1.5">Username</label>
+        <label className="block text-sm font-medium text-text mb-1.5" htmlFor="username">Username</label>
         <input
           {...register("username")}
+          id="username"
           className={inputClass}
           disabled={isPending}
           placeholder="e.g. john_doe"
@@ -98,9 +99,10 @@ export function AdminCreateUserForm({
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-text mb-1.5">Email</label>
+        <label className="block text-sm font-medium text-text mb-1.5" htmlFor="email">Email</label>
         <input
           {...register("email")}
+          id="email"
           className={inputClass}
           disabled={isPending}
           placeholder="e.g. john@example.com"
@@ -113,9 +115,10 @@ export function AdminCreateUserForm({
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-text mb-1.5">Password</label>
+        <label className="block text-sm font-medium text-text mb-1.5" htmlFor="password">Password</label>
         <input
           {...register("password")}
+          id="password"
           className={inputClass}
           disabled={isPending}
           placeholder="Min. 8 characters"
@@ -128,16 +131,17 @@ export function AdminCreateUserForm({
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-text mb-1.5">Role</label>
+        <label className="block text-sm font-medium text-text mb-1.5" htmlFor="roleId">Role</label>
         <select
           {...register("roleId", { valueAsNumber: true })}
+          id="roleId"
           className={inputClass}
           disabled={isPending || roles.length === 0}
         >
           {roles.map((role) => (
             <option key={role.id} value={role.id}>
               {role.name}
-              {role.description ? ` â€” ${role.description}` : ""}
+              {role.description ? ` — ${role.description}` : ""}
             </option>
           ))}
         </select>

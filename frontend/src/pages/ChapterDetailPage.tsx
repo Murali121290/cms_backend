@@ -1,3 +1,4 @@
+import '@/styles/chapter-detail.css'
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
@@ -369,7 +370,7 @@ export function ChapterDetailPage() {
             <div className="chapter-detail-main__section">
               <div className="chapter-detail-section-title">
                 <div>
-                  <h2>Folders</h2>
+                  <h2>{filePaneLabel}</h2>
                   <p>Folder counts stay in view here. Use the left sidebar to change folders.</p>
                 </div>
               </div>
@@ -388,12 +389,17 @@ export function ChapterDetailPage() {
                 chapterId={chapter.id}
                 files={files}
                 isActionPending={(fileId, action) => fileActions.isPending(fileId, action)}
-                isProcessingPending={(fileId) => structuringProcessing.isPending(fileId)}
                 onCancelCheckout={(file) => fileActions.handleCancelCheckout(file)}
                 onCheckout={(file) => fileActions.handleCheckout(file)}
                 onDelete={(file) => fileActions.handleDelete(file)}
-                onDownload={(file) => fileActions.handleDownload(file)}
-                onRunStructuring={(file) => structuringProcessing.startStructuring(file)}
+                onStartProcessing={async (fileId, processType) => {
+                  if (processType === "structuring") {
+                    const file = files.find((f) => f.id === fileId);
+                    if (file) {
+                      await structuringProcessing.startStructuring(file);
+                    }
+                  }
+                }}
                 projectId={project.id}
                 searchQuery={searchQuery}
                 selectedSection={selectedSection}

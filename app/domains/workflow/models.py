@@ -4,6 +4,12 @@ from sqlalchemy import (
     Integer, String, Text, UniqueConstraint
 )
 from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.ext.compiler import compiles
+
+@compiles(ARRAY, "sqlite")
+def compile_array_sqlite(element, compiler, **kw):
+    return "TEXT"
+
 from sqlalchemy.sql import func
 
 from app.database import Base

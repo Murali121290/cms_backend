@@ -1,242 +1,84 @@
-﻿import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { FolderPlus, FolderOpen, ExternalLink, Trash2 } from "lucide-react";
+import { Link } from "react-router-dom";
 
-import { PageHeader } from "@/components/ui/PageHeader";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { StatusBadge } from "@/components/ui/StatusBadge";
-import { SkeletonTable } from "@/components/ui/SkeletonLoader";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { SearchInput } from "@/components/ui/SearchInput";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { deleteProject } from "@/api/projects";
+import { ProjectsTable } from "@/features/projects/components/ProjectsTable";
 import { useProjectsQuery } from "@/features/projects/useProjectsQuery";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import { uiPaths } from "@/utils/appPaths";
-import { useSessionStore } from "@/stores/sessionStore";
+import { getSsrUrl, ssrPaths, uiPaths } from "@/utils/appPaths";
 
 export function ProjectsPage() {
-  useDocumentTitle("Projects â€” S4 Carlisle CMS");
-  const navigate = useNavigate();
+  useDocumentTitle("CMS UI Projects");
   const projectsQuery = useProjectsQuery(0, 100);
-  const queryClient = useQueryClient();
-  const viewer = useSessionStore((s) => s.viewer);
-  const canDelete = viewer?.roles?.some((r) => ["Admin", "ProjectManager"].includes(r)) ?? false;
 
-  const deleteMutation = useMutation({
-    mutationFn: (projectId: number) => deleteProject(projectId),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["projects"] }),
-    onError: () => alert("Failed to delete project."),
-  });
+  if (projectsQuery.isPending) {
+    return (
+      <main className="page projects-page projects-page--state">
+        <section className="panel projects-state-card">
+          <div className="projects-state-card__icon">📚</div>
+          <h1 className="projects-state-card__title">Loading projects</h1>
+          <p className="projects-state-card__message">
+            Fetching the projects list from /api/v2/projects.
+          </p>
+        </section>
+      </main>
+    );
+  }
 
-  const handleDelete = (e: React.MouseEvent, projectId: number, title: string) => {
-    e.stopPropagation();
-    setDeleteTarget({ id: projectId, title });
-  };
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [deleteTarget, setDeleteTarget] = useState<{ id: number; title: string } | null>(null);
-
-  const projects = projectsQuery.data?.projects ?? [];
-  const total = projectsQuery.data?.pagination.total ?? 0;
-
-  const filteredProjects = projects.filter((project) => {
-    const matchesSearch =
-      !searchQuery ||
-      project.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      project.code.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = !statusFilter || project.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
-
-  const uniqueStatuses = Array.from(new Set(projects.map((p) => p.status))).sort();
-
-  return (
-    <main className="page-enter page px-6 py-6 max-w-7xl mx-auto">
-      <PageHeader
-        title="Projects"
-        subtitle={`${total} project${total === 1 ? "" : "s"}`}
-        primaryAction={
-          <Link
-            to={uiPaths.projectCreate}
-            className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md bg-primary text-white hover:bg-primary active:bg-primary border border-primary shadow-subtle transition-all duration-150"
-          >
-            <FolderPlus className="w-4 h-4" aria-hidden="true" />
-            New Project
-          </Link>
-        }
-      />
-
-      {/* Filter bar */}
-      <div className="flex flex-wrap gap-3 mb-6 mt-6">
-        <SearchInput
-          value={searchQuery}
-          onChange={setSearchQuery}
-          placeholder="Search by title or codeâ€¦"
-          className="w-64"
-        />
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="border border-border rounded-md px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-gold-600 focus:outline-none text-text"
-        >
-          <option value="">All statuses</option>
-          {uniqueStatuses.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* Table card */}
-      <div className="bg-white rounded-lg shadow-card overflow-hidden">
-        {projectsQuery.isPending ? (
-          <SkeletonTable rows={8} cols={7} />
-        ) : projectsQuery.isError ? (
-          <div className="p-8 text-center text-sm text-muted">
-            Failed to load projects.{" "}
-            <button
-              className="text-primary underline hover:text-primary"
-              onClick={() => void projectsQuery.refetch()}
-              type="button"
-            >
+  if (projectsQuery.isError) {
+    return (
+      <main className="page projects-page projects-page--state">
+        <section className="panel projects-state-card projects-state-card--error">
+          <div className="projects-state-card__icon">!</div>
+          <h1 className="projects-state-card__title">Projects unavailable</h1>
+          <p className="projects-state-card__message">
+            The frontend shell could not load the projects list contract.
+          </p>
+          <div className="projects-state-card__actions">
+            <button className="button" onClick={() => projectsQuery.refetch()}>
               Retry
             </button>
+            <a className="button button--secondary" href={getSsrUrl(ssrPaths.projects)}>
+              Open SSR projects
+            </a>
           </div>
-        ) : filteredProjects.length === 0 ? (
-          <EmptyState
-            icon={FolderOpen}
-            title="No projects yet"
-            description="Create your first project to get started"
-            action={
-              <Link
-                to={uiPaths.projectCreate}
-                className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md bg-primary text-white hover:bg-primary border border-primary shadow-subtle transition-all duration-150"
-              >
-                <FolderPlus className="w-4 h-4" aria-hidden="true" />
-                New Project
-              </Link>
-            }
-          />
-        ) : (
-          <table className="w-full border-collapse">
-            <thead className="bg-background border-b border-border">
-              <tr>
-                <th className="text-xs font-semibold text-muted uppercase tracking-wide px-4 py-3 text-left">
-                  Project Title / Code
-                </th>
-                <th className="text-xs font-semibold text-muted uppercase tracking-wide px-4 py-3 text-left">
-                  Publisher
-                </th>
-                <th className="text-xs font-semibold text-muted uppercase tracking-wide px-4 py-3 text-left">
-                  XML Standard
-                </th>
-                <th className="text-xs font-semibold text-muted uppercase tracking-wide px-4 py-3 text-left">
-                  Chapters
-                </th>
-                <th className="text-xs font-semibold text-muted uppercase tracking-wide px-4 py-3 text-left">
-                  Files
-                </th>
-                <th className="text-xs font-semibold text-muted uppercase tracking-wide px-4 py-3 text-left">
-                  Status
-                </th>
-                <th className="text-xs font-semibold text-muted uppercase tracking-wide px-4 py-3 text-left">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredProjects.map((project) => (
-                <tr
-                  key={project.id}
-                  className="group border-b border-border hover:bg-background transition-colors duration-120 cursor-pointer"
-                  onClick={() => navigate(uiPaths.projectDetail(project.id))}
-                >
-                  {/* Title / Code */}
-                  <td className="px-4 py-3.5 text-sm">
-                    <div className="text-[14px] font-semibold text-text group-hover:text-primary transition-colors duration-120">
-                      {project.title}
-                    </div>
-                    <div style={{ color: '#6B6560' }} className="text-[12px] mt-0.5 font-mono">
-                      {project.code}
-                    </div>
-                  </td>
+        </section>
+      </main>
+    );
+  }
 
-                  {/* Publisher */}
-                  <td className="px-4 py-3.5 text-sm text-text">
-                    {project.client_name ?? "â€”"}
-                  </td>
+  return (
+    <main className="page projects-page">
+      <section className="projects-shell">
+        <header className="projects-shell__header">
+          <div className="projects-shell__breadcrumbs">
+            <Link className="projects-shell__breadcrumb-link" to={uiPaths.dashboard}>
+              Dashboard
+            </Link>
+            <span className="projects-shell__breadcrumb-separator">›</span>
+            <h1 className="projects-shell__title">Projects</h1>
+          </div>
 
-                  {/* XML Standard */}
-                  <td className="px-4 py-3.5 text-sm text-text">
-                    {project.xml_standard}
-                  </td>
+          <div className="projects-shell__actions">
+            <a className="button projects-shell__create-button" href={getSsrUrl(ssrPaths.projectCreate)}>
+              <span aria-hidden="true">＋</span>
+              <span>New Project</span>
+            </a>
+          </div>
+        </header>
 
-                  {/* Chapters */}
-                  <td className="px-4 py-3.5 text-sm text-text tabular-nums">
-                    {project.chapter_count}
-                  </td>
-
-                  {/* Files */}
-                  <td className="px-4 py-3.5 text-sm text-text tabular-nums">
-                    {project.file_count}
-                  </td>
-
-                  {/* Status */}
-                  <td className="px-4 py-3.5 text-sm">
-                    <StatusBadge status={project.status} size="sm" />
-                  </td>
-
-                  {/* Actions â€” stopPropagation so row onClick doesn't fire */}
-                  <td
-                    className="px-4 py-3.5 text-sm"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        title="View project"
-                        className="w-7 h-7 rounded flex items-center justify-center text-muted hover:bg-background hover:text-text transition-colors"
-                        onClick={() => navigate(uiPaths.projectDetail(project.id))}
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
-                        <span className="sr-only">View {project.title}</span>
-                      </button>
-                      {canDelete && (
-                        <button
-                          type="button"
-                          title="Delete project"
-                          className="w-7 h-7 rounded flex items-center justify-center text-muted hover:bg-red-50 hover:text-red-600 transition-colors"
-                          onClick={(e) => handleDelete(e, project.id, project.title)}
-                          disabled={deleteMutation.isPending}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-                          <span className="sr-only">Delete {project.title}</span>
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-          <ConfirmDialog
-        isOpen={deleteTarget !== null}
-        onClose={() => setDeleteTarget(null)}
-        onConfirm={() => {
-          if (deleteTarget) deleteMutation.mutate(deleteTarget.id);
-          setDeleteTarget(null);
-        }}
-        title="Delete Project"
-        description={`Are you sure you want to delete "${deleteTarget?.title}"? This will permanently remove all chapters and files.`}
-        confirmLabel="Delete"
-        cancelLabel="Cancel"
-        variant="danger"
-        isLoading={deleteMutation.isPending}
-      />
+        <div className="projects-shell__content">
+          {projectsQuery.data.projects.length === 0 ? (
+            <div className="projects-empty">
+              <div className="projects-empty__icon">📘</div>
+              <p className="projects-empty__title">No projects found</p>
+              <a className="projects-empty__link" href={getSsrUrl(ssrPaths.projectCreate)}>
+                Create your first project
+              </a>
+            </div>
+          ) : (
+            <ProjectsTable projects={projectsQuery.data.projects} />
+          )}
+        </div>
+      </section>
     </main>
   );
 }

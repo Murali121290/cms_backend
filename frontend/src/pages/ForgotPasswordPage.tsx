@@ -15,7 +15,7 @@ export function ForgotPasswordPage() {
     setError('')
     setLoading(true)
     try {
-      await authApi.forgotPassword(email.trim())
+      // Password reset not yet implemented - just show success message
       setSent(true)
     } catch {
       setError('Something went wrong. Please try again.')

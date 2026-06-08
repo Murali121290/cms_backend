@@ -9,9 +9,18 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     
-    # Database
     DATABASE_URL: str = "postgresql://user:password@localhost/cms_db"
     REDIS_URL: str = "redis://localhost:6379/0"
+    ALLOWED_ORIGINS: list[str] = [
+        "http://localhost:8085",
+        "http://localhost:8080",
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:8085",
+        "http://127.0.0.1:8080",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:3000",
+    ]
 
     # Optional external AI Structuring service integration (disabled by default)
     # When AI_STRUCTURING_BASE_URL is set, the StructuringEngine can offload structuring
@@ -36,7 +45,7 @@ class Settings(BaseSettings):
     REF_TARGET_STYLE: str = "APA"   # AMA, APA, CGRN
 
     class Config:
-        env_file = ".env"
+        env_file = (".env", ".env.local")  # .env.local overrides .env (last wins in pydantic-settings v2)
         extra = "ignore"
 
 @lru_cache()

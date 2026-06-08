@@ -94,21 +94,21 @@ function SectionCard({ title, accent, children }: { title: string; accent: strin
 const EMPTY: Partial<ClientPayload> = { active_status: true }
 
 interface FormModalProps {
-  open: boolean
+  isOpen: boolean
   onClose: () => void
   onSaved: (c: Client, mode: 'create' | 'edit') => void
   clients: Client[]
   editCustomer?: Client | null
 }
 
-function CustomerFormModal({ open, onClose, onSaved, clients, editCustomer }: FormModalProps) {
+function CustomerFormModal({ isOpen, onClose, onSaved, clients, editCustomer }: FormModalProps) {
   const [form, setForm] = useState<Partial<ClientPayload>>(EMPTY)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const isEdit = !!editCustomer
 
   useEffect(() => {
-    if (!open) return
+    if (!isOpen) return
     setErrors({})
     if (editCustomer) {
       setForm({
@@ -143,13 +143,13 @@ function CustomerFormModal({ open, onClose, onSaved, clients, editCustomer }: Fo
         setForm(draft ? JSON.parse(draft) : EMPTY)
       } catch { setForm(EMPTY) }
     }
-  }, [open, editCustomer])
+  }, [isOpen, editCustomer])
 
   // Auto-save draft (create only)
   useEffect(() => {
-    if (!open || isEdit) return
+    if (!isOpen || isEdit) return
     try { localStorage.setItem(DRAFT_KEY, JSON.stringify(form)) } catch {}
-  }, [form, open, isEdit])
+  }, [form, isOpen, isEdit])
 
   function set<K extends keyof ClientPayload>(key: K, value: ClientPayload[K]) {
     setForm(f => ({ ...f, [key]: value }))
@@ -178,7 +178,7 @@ function CustomerFormModal({ open, onClose, onSaved, clients, editCustomer }: Fo
 
   return (
     <Modal
-      open={open}
+      isOpen={isOpen}
       onClose={onClose}
       title={isEdit ? `Edit — ${getDisplayName(editCustomer!)}` : 'Create New Customer'}
       size="xl"
@@ -285,8 +285,8 @@ function CustomerFormModal({ open, onClose, onSaved, clients, editCustomer }: Fo
 }
 
 // ── View Customer Modal ───────────────────────────────────────────────────────
-function ViewCustomerModal({ open, onClose, customer, onEdit }: {
-  open: boolean; onClose: () => void; customer: Client | null; onEdit: () => void
+function ViewCustomerModal({ isOpen, onClose, customer, onEdit }: {
+  isOpen: boolean; onClose: () => void; customer: Client | null; onEdit: () => void
 }) {
   if (!customer) return null
 
@@ -311,7 +311,7 @@ function ViewCustomerModal({ open, onClose, customer, onEdit }: {
   }
 
   return (
-    <Modal open={open} onClose={onClose} title={`Customer — ${getDisplayName(customer)}`} size="xl"
+    <Modal isOpen={isOpen} onClose={onClose} title={`Customer — ${getDisplayName(customer)}`} size="xl"
       footer={
         <>
           <button onClick={onClose}
@@ -688,17 +688,17 @@ export function CustomerManagement() {
 
       {/* Modals */}
       <CustomerFormModal
-        open={createOpen} onClose={() => setCreateOpen(false)}
+        isOpen={createOpen} onClose={() => setCreateOpen(false)}
         onSaved={handleSaved} clients={clients} />
       <CustomerFormModal
-        open={!!editCustomer} onClose={() => setEditCustomer(null)}
+        isOpen={!!editCustomer} onClose={() => setEditCustomer(null)}
         onSaved={handleSaved} clients={clients} editCustomer={editCustomer} />
       <ViewCustomerModal
-        open={!!viewCustomer} onClose={() => setViewCustomer(null)}
+        isOpen={!!viewCustomer} onClose={() => setViewCustomer(null)}
         customer={viewCustomer}
         onEdit={() => { setEditCustomer(viewCustomer); setViewCustomer(null) }} />
       <ConfirmDialog
-        open={!!confirmItem} onClose={() => setConfirmItem(null)}
+        isOpen={!!confirmItem} onClose={() => setConfirmItem(null)}
         onConfirm={async () => { if (confirmItem) { await doStatusChange(confirmItem, false); setConfirmItem(null) } }}
         title="Deactivate Customer"
         message={`Deactivate "${confirmItem ? getDisplayName(confirmItem) : ''}"? They will be hidden from active lists.`}

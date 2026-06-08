@@ -2,8 +2,10 @@ import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft, Search, FolderOpen, BookOpen,
-  Layers, Zap, CheckCircle2, Clock, Plus, Info, Edit2, CalendarDays
+  Layers, Zap, CheckCircle2, Clock, Plus, Info, Edit2, CalendarDays, ChevronRight
 } from 'lucide-react'
+import { ViewSwitcher } from '@/components/ui/ViewSwitcher'
+import { useViewMode } from '@/hooks/useViewMode'
 import { clientsApi, type Client } from '@/api/clients'
 import { projectsApi, type Project } from '@/api/projects'
 import { chaptersApi, type Chapter } from '@/api/chapters'
@@ -99,7 +101,6 @@ function StageBreakdown({ chapters }: { chapters: Chapter[] }) {
 
 interface ProjectCardProps {
   project: Project
-  chapters: Chapter[]
   pmUsers: User[]
   onProjectUpdate: (updated: Project) => void
   onViewInfo: () => void
@@ -108,16 +109,27 @@ interface ProjectCardProps {
   onOpenPlanning: () => void
 }
 
-function ProjectCard({ project, chapters, pmUsers, onProjectUpdate, onViewInfo, onEditInfo, onOpenWorkflow, onOpenPlanning }: ProjectCardProps) {
+function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo, onOpenWorkflow, onOpenPlanning }: ProjectCardProps) {
   const { canAccess } = useRBAC()
   const canEdit = canAccess(['admin', 'manager'])
+  const isFastTrack = project.priority === 'Fast Track'
+
+  const [chapters, setChapters] = useState<Chapter[]>([])
+  const [chLoading, setChLoading] = useState(true)
+  const [ftLoading, setFtLoading]   = useState(false)
+  const [pmLoading, setPmLoading]   = useState(false)
+
+  useEffect(() => {
+    if (!project.project_code) { setChLoading(false); return }
+    chaptersApi.getByProject(project.project_code)
+      .then(setChapters)
+      .catch(() => {})
+      .finally(() => setChLoading(false))
+  }, [project.project_code])
+
   const completed = chapters.filter(c => c.status === 'complete').length
   const total     = chapters.length
   const pct       = total > 0 ? Math.round((completed / total) * 100) : 0
-  const isFastTrack = project.priority === 'Fast Track'
-
-  const [ftLoading, setFtLoading]   = useState(false)
-  const [pmLoading, setPmLoading]   = useState(false)
 
   const statusV = project.status
     ? statusToBadge(project.status.toLowerCase())
@@ -294,16 +306,20 @@ function ProjectCard({ project, chapters, pmUsers, onProjectUpdate, onViewInfo, 
           </div>
         )}
 
-        <StageBreakdown chapters={chapters} />
+        {chLoading ? (
+          <div className="mt-2 h-3 bg-surface animate-pulse rounded w-32" />
+        ) : (
+          <StageBreakdown chapters={chapters} />
+        )}
       </div>
 
       {/* Footer: pages */}
-      {(project.estimated_pages != null || project.actual_pages > 0) && (
+      {(project.estimated_pages != null || (project.actual_pages ?? 0) > 0) && (
         <div className="px-5 py-2.5 border-t border-border flex gap-3">
           {project.estimated_pages != null && (
             <span className="text-xs text-muted">Est. {project.estimated_pages}pp</span>
           )}
-          {project.actual_pages > 0 && (
+          {(project.actual_pages ?? 0) > 0 && (
             <span className="text-xs text-muted">Actual {project.actual_pages}pp</span>
           )}
         </div>
@@ -322,13 +338,14 @@ export function ClientProjects() {
 
   const [client,   setClient]   = useState<Client | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
-  const [chaptersMap, setChaptersMap] = useState<Map<string, Chapter[]>>(new Map())
   const [pmUsers,  setPmUsers]  = useState<User[]>([])
   const [loading,    setLoading]    = useState(true)
   const [createOpen,      setCreateOpen]      = useState(false)
   const [infoProject,     setInfoProject]     = useState<Project | null>(null)
   const [editProject,     setEditProject]     = useState<Project | null>(null)
   const [planningProjectId, setPlanningProjectId] = useState<number | null>(null)
+
+  const [viewMode, setViewMode] = useViewMode('view:client-projects', 'large')
 
   const [search,           setSearch]           = useState('')
   const [filterWorkflow,   setFilterWorkflow]   = useState('')
@@ -342,36 +359,18 @@ export function ClientProjects() {
     Promise.all([
       clientsApi.getById(id),
       projectsApi.getByClient(id),
-      usersApi.list(),
+      usersApi.list().catch(() => []),
     ])
-      .then(async ([c, ps, users]) => {
+      .then(([c, ps, users]) => {
         setClient(c)
         setProjects(ps)
-        setPmUsers(users.filter(u =>
+        setPmUsers((users || []).filter(u =>
           u.active_status && u.role.toLowerCase().replace(" ","").includes('projectmanager')
         ))
-
-        // Fetch chapters for each project
-        const entries = await Promise.all(
-          ps.map(async p => {
-            if (!p.project_code) return [p.project_code ?? '', []] as [string, Chapter[]]
-            try {
-              const chs = await chaptersApi.getByProject(p.project_code)
-              return [p.project_code, chs] as [string, Chapter[]]
-            } catch {
-              return [p.project_code, []] as [string, Chapter[]]
-            }
-          })
-        )
-        setChaptersMap(new Map(entries))
       })
       .catch(() => toast.error('Failed to load projects'))
       .finally(() => setLoading(false))
   }, [id])
-
-  const allChapters = useMemo(() =>
-    Array.from(chaptersMap.values()).flat()
-  , [chaptersMap])
 
   // Derive filter options
   const workflowOptions = useMemo(() => {
@@ -379,18 +378,15 @@ export function ClientProjects() {
     return Array.from(set).sort().map(w => ({ value: w, label: w }))
   }, [projects])
 
-  // Summary stats
+  // Summary stats (chapter stats loaded lazily per card)
   const stats = useMemo(() => {
     const total     = projects.length
     const active    = projects.filter(p => p.status === 'Active').length
     const delayed   = projects.filter(p => p.status === 'Planning').length
     const completed = projects.filter(p => p.status === 'Completed').length
     const fastTrack = projects.filter(p => p.priority === 'Fast Track').length
-    const totalChs  = allChapters.length
-    const doneChs   = allChapters.filter(c => c.status === 'complete').length
-    const chPct     = totalChs > 0 ? Math.round((doneChs / totalChs) * 100) : 0
-    return { total, active, delayed, completed, fastTrack, chPct, totalChs }
-  }, [projects, allChapters])
+    return { total, active, delayed, completed, fastTrack }
+  }, [projects])
 
   const STATUS_ORDER: Record<string, number> = { Planning: 0, Active: 1, Completed: 2 }
 
@@ -484,6 +480,10 @@ export function ClientProjects() {
             Clear filters
           </button>
         )}
+
+        <div className="ml-auto flex-shrink-0">
+          <ViewSwitcher mode={viewMode} onChange={setViewMode} />
+        </div>
       </div>
 
       {/* View Info Modal */}
@@ -531,7 +531,7 @@ export function ClientProjects() {
         }}
       />
 
-      {/* Projects grid */}
+      {/* Projects — 4 view modes */}
       {filtered.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-2 text-muted py-20">
           <FolderOpen size={40} className="opacity-30" />
@@ -540,29 +540,122 @@ export function ClientProjects() {
             : 'No projects found for this client.'}</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {filtered.map(project => (
-            <ProjectCard
-              key={project.id}
-              project={project}
-              chapters={chaptersMap.get(project.project_code ?? '') ?? []}
-              pmUsers={pmUsers}
-              onProjectUpdate={updated =>
-                setProjects(ps => ps.map(p => p.id === updated.id ? updated : p))
-              }
-              onViewInfo={() => setInfoProject(project)}
-              onEditInfo={() => setEditProject(project)}
-              onOpenWorkflow={() => {
-                if (project.status === 'Planning') {
-                  toast.error('Planning not approved yet. Please review and approve the project planning first.')
-                  return
-                }
-                navigate(`/clients/${clientId}/projects/${project.id}`)
-              }}
-              onOpenPlanning={() => setPlanningProjectId(project.id)}
-            />
-          ))}
-        </div>
+        <>
+          {/* Large — full cards (default) */}
+          {viewMode === 'large' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {filtered.map(project => (
+                <ProjectCard key={project.id} project={project} pmUsers={pmUsers}
+                  onProjectUpdate={u => setProjects(ps => ps.map(p => p.id === u.id ? u : p))}
+                  onViewInfo={() => setInfoProject(project)}
+                  onEditInfo={() => setEditProject(project)}
+                  onOpenWorkflow={() => {
+                    if (project.status === 'Planning') { toast.error('Planning not approved yet.'); return }
+                    navigate(`/clients/${clientId}/projects/${project.id}`)
+                  }}
+                  onOpenPlanning={() => setPlanningProjectId(project.id)} />
+              ))}
+            </div>
+          )}
+
+          {/* Medium — compact cards 4-col */}
+          {viewMode === 'medium' && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+              {filtered.map(project => {
+                const statusV = project.status ? statusToBadge(project.status.toLowerCase()) : 'default'
+                return (
+                  <div key={project.id}
+                    onClick={() => { if (project.status === 'Planning') { toast.error('Planning not approved yet.'); return } navigate(`/clients/${clientId}/projects/${project.id}`) }}
+                    className="bg-card rounded-xl border border-border shadow-sm hover:shadow-md hover:border-primary/30 transition-all cursor-pointer flex flex-col gap-2 p-4">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-mono text-muted truncate">{project.project_code}</p>
+                        <p className="text-sm font-semibold text-text truncate leading-snug">{projectLabel(project)}</p>
+                      </div>
+                      {project.status && <Badge variant={statusV} className="flex-shrink-0 text-[10px]">{project.status}</Badge>}
+                    </div>
+                    {project.workflow_name && (
+                      <span className="text-[10px] bg-accent text-primary border border-primary/20 rounded-md px-2 py-0.5 font-medium w-fit">{project.workflow_name}</span>
+                    )}
+                    <div className="flex items-center justify-between text-xs text-muted mt-auto pt-1 border-t border-border">
+                      {project.project_manager
+                        ? <span className="truncate">PM: {project.project_manager}</span>
+                        : <span className="italic">No PM</span>}
+                      {project.due_date && <span className="flex-shrink-0 flex items-center gap-0.5"><CalendarDays size={10}/> {new Date(project.due_date).toLocaleDateString('en-GB',{day:'2-digit',month:'short'})}</span>}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* List — single-column rows */}
+          {viewMode === 'list' && (
+            <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
+              {filtered.map((project, i) => {
+                const statusV = project.status ? statusToBadge(project.status.toLowerCase()) : 'default'
+                return (
+                  <div key={project.id}
+                    onClick={() => { if (project.status === 'Planning') { toast.error('Planning not approved yet.'); return } navigate(`/clients/${clientId}/projects/${project.id}`) }}
+                    className={`flex items-center gap-4 px-5 py-3 cursor-pointer hover:bg-surface transition-colors ${i > 0 ? 'border-t border-border' : ''}`}>
+                    <div className="min-w-0 flex-1 flex items-center gap-3">
+                      <span className="text-[10px] font-mono text-muted w-24 flex-shrink-0 truncate">{project.project_code}</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-text truncate">{projectLabel(project)}</p>
+                        {project.workflow_name && <p className="text-xs text-muted">{project.workflow_name}</p>}
+                      </div>
+                    </div>
+                    {project.status && <Badge variant={statusV} className="flex-shrink-0">{project.status}</Badge>}
+                    <div className="flex items-center gap-4 text-xs text-muted flex-shrink-0">
+                      {project.project_manager && <span>PM: {project.project_manager}</span>}
+                      {project.due_date && <span className="flex items-center gap-1"><CalendarDays size={11}/> {new Date(project.due_date).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})}</span>}
+                    </div>
+                    <ChevronRight size={14} className="text-muted flex-shrink-0" />
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Details — full table */}
+          {viewMode === 'details' && (
+            <div className="bg-card rounded-xl border border-border shadow-sm overflow-x-auto">
+              <table className="w-full text-sm border-collapse min-w-max">
+                <thead>
+                  <tr className="border-b border-border bg-surface">
+                    {['Code','Title','Status','Workflow','PM','Due Date','Chapters','Pages'].map(h => (
+                      <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((project, i) => {
+                    const statusV = project.status ? statusToBadge(project.status.toLowerCase()) : 'default'
+                    return (
+                      <tr key={project.id}
+                        onClick={() => { if (project.status === 'Planning') { toast.error('Planning not approved yet.'); return } navigate(`/clients/${clientId}/projects/${project.id}`) }}
+                        className={`cursor-pointer hover:bg-surface transition-colors ${i > 0 ? 'border-t border-border' : ''}`}>
+                        <td className="px-4 py-3 font-mono text-xs text-muted whitespace-nowrap">{project.project_code ?? '—'}</td>
+                        <td className="px-4 py-3 font-semibold text-text max-w-xs truncate">{projectLabel(project)}</td>
+                        <td className="px-4 py-3"><Badge variant={statusV}>{project.status ?? '—'}</Badge></td>
+                        <td className="px-4 py-3 text-xs text-muted whitespace-nowrap">{project.workflow_name ?? '—'}</td>
+                        <td className="px-4 py-3 text-xs text-muted whitespace-nowrap">{project.project_manager ?? '—'}</td>
+                        <td className="px-4 py-3 text-xs text-muted whitespace-nowrap">
+                          {project.due_date ? new Date(project.due_date).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}) : '—'}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-center text-text font-medium">{(project as any).chapter_count ?? '—'}</td>
+                        <td className="px-4 py-3 text-xs text-muted whitespace-nowrap">
+                          {project.estimated_pages != null ? `Est. ${project.estimated_pages}` : '—'}
+                          {(project.actual_pages ?? 0) > 0 ? ` / ${project.actual_pages} act.` : ''}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
     </div>
   )

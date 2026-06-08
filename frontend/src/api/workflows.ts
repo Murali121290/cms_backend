@@ -34,30 +34,31 @@ export interface WorkflowUpdate {
 
 export const workflowsApi = {
   listNames: () =>
-    api.get<string[]>('/workflows/').then(r => r.data),
+    api.get<string[]>('/api/v1/workflows').then(r => r.data),
 
   getAllStages: () =>
-    api.get<WorkflowStage[]>('/workflows/all').then(r => r.data),
+    api.get<WorkflowStage[]>('/api/v1/workflows/all').then(r => r.data),
 
   getWorkflow: (workflowName: string) =>
-    api.get<WorkflowStage[]>(`/workflows/${encodeURIComponent(workflowName)}`).then(r => r.data),
+    api.get<WorkflowStage[]>(`/api/v1/workflows/${encodeURIComponent(workflowName)}`).then(r => r.data),
 
   create: (data: WorkflowCreate) =>
-    api.post<WorkflowStage[]>('/workflows/', data).then(r => r.data),
+    api.post<WorkflowStage[]>('/api/v1/workflows', data).then(r => r.data),
 
   update: (workflowName: string, data: WorkflowUpdate) =>
-    api.put<WorkflowStage[]>(`/workflows/${encodeURIComponent(workflowName)}`, data).then(r => r.data),
+    api.put<WorkflowStage[]>(`/api/v1/workflows/${encodeURIComponent(workflowName)}`, data).then(r => r.data),
 
   delete: (workflowName: string) =>
-    api.delete(`/workflows/${encodeURIComponent(workflowName)}`),
+    api.delete(`/api/v1/workflows/${encodeURIComponent(workflowName)}`),
 
   getNextStage: (workflowName: string, stageName: string) =>
     api.get<{ next_stage: string | null }>(
-      `/workflows/${encodeURIComponent(workflowName)}/next/${encodeURIComponent(stageName)}`
+      `/api/v1/workflows/${encodeURIComponent(workflowName)}/next/${encodeURIComponent(stageName)}`
     ).then(r => r.data),
 
   getPreviousStage: (workflowName: string, stageName: string) =>
     api.get<{ previous_stage: string | null }>(
-      `/workflows/${encodeURIComponent(workflowName)}/previous/${encodeURIComponent(stageName)}`
+      `/api/v1/workflows/${encodeURIComponent(workflowName)}/previous/${encodeURIComponent(stageName)}`
     ).then(r => r.data),
 }
+

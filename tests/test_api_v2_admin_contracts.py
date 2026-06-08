@@ -184,11 +184,10 @@ def test_api_v2_admin_edit_user_preserves_current_logged_in_auth_gap(
         json={"email": "admin-updated@example.com"},
     )
 
-    assert response.status_code == 200
-    assert response.json()["status"] == "ok"
-    assert response.json()["redirect_to"] == "/admin/users?msg=User+updated"
+    assert response.status_code == 403
+    assert response.json()["code"] == "ADMIN_REQUIRED"
     db_session.refresh(admin_user)
-    assert admin_user.email == "admin-updated@example.com"
+    assert admin_user.email == "admin@example.com"
 
 
 def test_api_v2_admin_password_preserves_current_no_min_length_validation(
@@ -224,15 +223,11 @@ def test_api_v2_admin_delete_preserves_current_logged_in_delete_auth_gap(
     client = auth_cookie_client(viewer_user)
 
     self_delete = client.delete(f"/api/v2/admin/users/{viewer_user.id}")
-    assert self_delete.status_code == 409
-    assert self_delete.json()["code"] == "SELF_DELETE_BLOCKED"
+    assert self_delete.status_code == 403
+    assert self_delete.json()["code"] == "ADMIN_REQUIRED"
     assert db_session.query(models.User).filter(models.User.id == viewer_user.id).first() is not None
 
     other_delete = client.delete(f"/api/v2/admin/users/{admin_user.id}")
-    assert other_delete.status_code == 200
-    assert other_delete.json() == {
-        "status": "ok",
-        "deleted": {"user_id": admin_user.id},
-        "redirect_to": "/admin/users?msg=User+deleted",
-    }
-    assert db_session.query(models.User).filter(models.User.id == admin_user.id).first() is None
+    assert other_delete.status_code == 403
+    assert other_delete.json()["code"] == "ADMIN_REQUIRED"
+    assert db_session.query(models.User).filter(models.User.id == admin_user.id).first() is not None

@@ -34,7 +34,10 @@ export function ChapterEditorPage() {
       chaptersApi.getById(Number(chapterId)),
       projectsApi.getById(Number(projectId)),
     ])
-      .then(([ch, proj]) => { setChapter(ch); setProject(proj) })
+      .then(([ch, proj]) => {
+        setChapter(ch)
+        setProject((proj as any).project as { file_details: Record<string, unknown> | null })
+      })
       .catch(() => toast.error('Failed to load chapter'))
       .finally(() => setLoading(false))
   }, [chapterId, projectId])

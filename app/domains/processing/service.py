@@ -7,8 +7,34 @@ from typing import Optional, Dict, Any
 from app import database, models
 
 import os
+import io
+import zipfile
 import shutil
 import traceback
+
+
+def _run_via_pph(file_path: str, endpoint: str, extra_data: dict = None, file_field: str = "files") -> list:
+    """Submit a single file to a PPH endpoint and return extracted output file paths."""
+    from app.integrations.pph.client import PPHClient
+    client = PPHClient()
+    with open(file_path, "rb") as f:
+        files = {
+            file_field: (
+                os.path.basename(file_path),
+                f.read(),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        }
+    zip_bytes = client.submit_and_wait(endpoint=endpoint, files=files, data=extra_data or {})
+    folder = os.path.dirname(file_path)
+    generated_files = []
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
+        z.extractall(folder)
+        for name in z.namelist():
+            full_path = os.path.join(folder, os.path.basename(name))
+            if os.path.isfile(full_path):
+                generated_files.append(full_path)
+    return generated_files
 
 
 PROCESS_PERMISSIONS = {
@@ -81,8 +107,17 @@ def background_processing_task(
                 success_msg = "Permissions Log generated successfully"
 
             elif process_type == "ppd":
-                generated_files = ppd_engine_cls().process_document(file_path, user_username)
-                success_msg = "PPD processing completed"
+                if os.environ.get("PPH_ENABLED", "false").lower() in ("true", "1", "yes"):
+                    book_title = os.path.splitext(os.path.basename(file_path))[0]
+                    generated_files = _run_via_pph(
+                        file_path, "/ppd",
+                        {"book_title": book_title, "combined_dashboard": "false"},
+                        file_field="docfiles",
+                    )
+                    success_msg = "PPD processing completed via PPH"
+                else:
+                    generated_files = ppd_engine_cls().process_document(file_path, user_username)
+                    success_msg = "PPD processing completed"
 
             elif process_type == "technical":
                 generated_files = technical_engine_cls().process_document(file_path)
@@ -178,16 +213,28 @@ def background_processing_task(
                     success_msg = f"Structuring completed (mode: {mode})"
 
             elif process_type == "bias_scan":
-                generated_files = bias_engine_cls().process_document(file_path)
-                success_msg = "Bias Scan completed successfully"
+                if os.environ.get("PPH_ENABLED", "false").lower() in ("true", "1", "yes"):
+                    generated_files = _run_via_pph(file_path, "/bias-scan")
+                    success_msg = "Bias Scan completed via PPH"
+                else:
+                    generated_files = bias_engine_cls().process_document(file_path)
+                    success_msg = "Bias Scan completed successfully"
 
             elif process_type == "credit_extractor_ai":
-                generated_files = ai_extractor_engine_cls().process_document(file_path)
-                success_msg = "AI Credit Extraction completed"
+                if os.environ.get("PPH_ENABLED", "false").lower() in ("true", "1", "yes"):
+                    generated_files = _run_via_pph(file_path, "/credit-extractor")
+                    success_msg = "AI Credit Extraction completed via PPH"
+                else:
+                    generated_files = ai_extractor_engine_cls().process_document(file_path)
+                    success_msg = "AI Credit Extraction completed"
 
             elif process_type == "word_to_xml":
-                generated_files = xml_engine_cls().process_document(file_path)
-                success_msg = "Word to XML conversion completed"
+                if os.environ.get("PPH_ENABLED", "false").lower() in ("true", "1", "yes"):
+                    generated_files = _run_via_pph(file_path, "/word-to-xml")
+                    success_msg = "Word to XML conversion completed via PPH"
+                else:
+                    generated_files = xml_engine_cls().process_document(file_path)
+                    success_msg = "Word to XML conversion completed"
 
             else:
                 raise HTTPException(

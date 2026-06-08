@@ -1,20 +1,21 @@
 import { useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { useAuthStore } from '@/store/useAuthStore'
+import { useSessionStore } from '@/stores/sessionStore'
 
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const isAuthenticated = useAuthStore(s => s.isAuthenticated)
+  const isAuthenticated = useSessionStore(s => s.authenticated)
+  const isLoading       = useSessionStore(s => s.loading)
   const navigate        = useNavigate()
   const location        = useLocation()
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!isLoading && !isAuthenticated) {
       navigate('/login', { state: { from: location }, replace: true })
     }
-  }, [isAuthenticated, navigate, location])
+  }, [isAuthenticated, isLoading, navigate, location])
 
-  // Render nothing while redirecting; render children once authenticated
-  if (!isAuthenticated) return null
+  // Show nothing while loading or redirecting
+  if (isLoading || !isAuthenticated) return null
 
   return <>{children}</>
 }

@@ -3,11 +3,13 @@ import axios from "axios";
 import { apiClient } from "@/api/client";
 import type { ProcessingStartResponse, ProcessingStatusResponse } from "@/types/api";
 
+// ── Generic base functions ──────────────────────────────────────────────────
+
 export async function startProcessingJob(
   fileId: number,
   processType = "structuring",
   mode = "style",
-  options: Record<string, any> = {},
+  options: Record<string, unknown> = {},
 ) {
   const response = await apiClient.post<ProcessingStartResponse>(`/files/${fileId}/processing-jobs`, {
     process_type: processType,
@@ -24,13 +26,7 @@ export async function getProcessingStatus(fileId: number, processType = "structu
   return response.data;
 }
 
-/**
- * Fires a processing job via the legacy v1 endpoint.
- * Supports: language, reference_validation, ppd, permissions,
- *           credit_extractor_ai, bias_scan, word_to_xml, etc.
- * The v1 prefix /api/v1/processing is NOT the same base as apiClient (/api/v2),
- * so we use a raw axios call with the absolute path.
- */
+// v1 endpoint — absolute path, different base from apiClient (/api/v2)
 export async function startV1ProcessingJob(
   fileId: number,
   processType: string,
@@ -42,3 +38,34 @@ export async function startV1ProcessingJob(
   );
   return response.data;
 }
+
+// ── Named wrappers — one per processing action ──────────────────────────────
+// v2: POST /api/v2/files/{id}/processing-jobs
+// v1: POST /api/v1/processing/files/{id}/process/{type}
+
+export const startStructuring = (fileId: number, method: "ai" | "manual" = "ai") =>
+  startProcessingJob(fileId, "structuring", "style", { structuring_method: method });
+
+// Language edit is not yet implemented in v2 — use v1 endpoint
+export const startLanguageEdit = (fileId: number) =>
+  startV1ProcessingJob(fileId, "language");
+
+// Reference validation is v1 only
+export const startReferenceCheck = (fileId: number) =>
+  startV1ProcessingJob(fileId, "reference_validation");
+
+export const startPpdGeneration = (fileId: number) =>
+  startProcessingJob(fileId, "ppd", "style");
+
+// Permissions has no PPH endpoint — stays on v1 local
+export const startPermissionsCheck = (fileId: number) =>
+  startV1ProcessingJob(fileId, "permissions");
+
+export const startCreditExtraction = (fileId: number) =>
+  startProcessingJob(fileId, "credit_extractor_ai", "style");
+
+export const startBiasScan = (fileId: number) =>
+  startProcessingJob(fileId, "bias_scan", "style");
+
+export const startWordToXml = (fileId: number) =>
+  startProcessingJob(fileId, "word_to_xml", "style");

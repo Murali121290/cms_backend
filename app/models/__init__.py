@@ -1,4 +1,5 @@
-from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, DateTime, Enum as SQLEnum
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, DateTime, Date, JSON, Enum as SQLEnum
+from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database import Base
@@ -21,7 +22,10 @@ class Team(Base):
     __tablename__ = "teams"
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, index=True)
-    users = relationship("User", back_populates="team")
+    description = Column(String, nullable=True)
+    owner_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    
+    users = relationship("User", back_populates="team", foreign_keys="[User.team_id]")
     projects = relationship("Project", back_populates="team")
 
 class User(Base):
@@ -32,8 +36,9 @@ class User(Base):
     password_hash = Column(String)
     is_active = Column(Boolean, default=True)
     team_id = Column(Integer, ForeignKey("teams.id"), nullable=True)
-    
-    team = relationship("Team", back_populates="users")
+    customer_access = Column(PG_ARRAY(String), nullable=True, default=list)
+
+    team = relationship("Team", back_populates="users", foreign_keys=[team_id])
     roles = relationship("Role", secondary="user_roles", back_populates="users")
 
 class UserRole(Base):
@@ -46,13 +51,36 @@ class Project(Base):
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String, index=True)
     code = Column(String, unique=True, index=True)
-    client_name = Column(String, nullable=True)  # Client/Publisher name
+    client_id = Column(Integer, ForeignKey("clients.id", ondelete="SET NULL"), nullable=True)
+    client_name = Column(String, nullable=True)
     xml_standard = Column(String)
     status = Column(String, default="RECEIVED")
     team_id = Column(Integer, ForeignKey("teams.id"))
-    workflow_type = Column(String, nullable=True)  # e.g. "WF-01" .. "WF-08"
-    workflow_stage_no = Column(String, nullable=True)  # current stage number, e.g. "03"
-    
+    workflow_type = Column(String, nullable=True)
+    workflow_stage_no = Column(String, nullable=True)
+    # WMS project fields
+    division_code = Column(String, nullable=True)
+    customer_contact = Column(String, nullable=True)
+    category = Column(String, nullable=True)
+    composition = Column(String, nullable=True)
+    project_manager = Column(String, nullable=True)
+    sales_person = Column(String, nullable=True)
+    priority = Column(String, nullable=True)
+    edition = Column(String, nullable=True)
+    color = Column(String, nullable=True)
+    trim_size = Column(String, nullable=True)
+    copyright_year = Column(Integer, nullable=True)
+    manuscript_pages = Column(Integer, nullable=True)
+    estimated_pages = Column(Integer, nullable=True)
+    actual_pages = Column(Integer, nullable=True)
+    chapter_count_wms = Column(Integer, nullable=True)
+    isbn_no = Column(String, nullable=True)
+    billing_location = Column(String, nullable=True)
+    due_date = Column(Date, nullable=True)
+    file_details = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
+
     team = relationship("Team", back_populates="projects")
     files = relationship("File", back_populates="project")
     chapters = relationship("Chapter", back_populates="project", cascade="all, delete-orphan")
@@ -61,7 +89,7 @@ class Project(Base):
 class Chapter(Base):
     __tablename__ = "chapters"
     id = Column(Integer, primary_key=True, index=True)
-    project_id = Column(Integer, ForeignKey("projects.id"))
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     number = Column(String, index=True)
     title = Column(String)
     
@@ -71,8 +99,8 @@ class Chapter(Base):
 class File(Base):
     __tablename__ = "files"
     id = Column(Integer, primary_key=True, index=True)
-    project_id = Column(Integer, ForeignKey("projects.id"))
-    chapter_id = Column(Integer, ForeignKey("chapters.id"), nullable=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    chapter_id = Column(Integer, ForeignKey("chapters.id", ondelete="CASCADE"), nullable=True, index=True)
     filename = Column(String, index=True)
     file_type = Column(String)
     category = Column(String, default="Manuscript") # Art, Manuscript, InDesign, Proof, XML
@@ -85,7 +113,7 @@ class File(Base):
     
     # Checkout Logic
     is_checked_out = Column(Boolean, default=False)
-    checked_out_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    checked_out_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     checked_out_at = Column(DateTime, nullable=True)
     
     checked_out_by = relationship("User", foreign_keys=[checked_out_by_id])
@@ -94,11 +122,11 @@ class File(Base):
 class FileVersion(Base):
     __tablename__ = "file_versions"
     id = Column(Integer, primary_key=True, index=True)
-    file_id = Column(Integer, ForeignKey("files.id"))
+    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), index=True)
     version_num = Column(Integer)
     path = Column(String)
     uploaded_at = Column(DateTime, default=datetime.utcnow)
-    uploaded_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
 
     original_file = relationship("File", back_populates="versions")
     uploaded_by = relationship("User")
@@ -106,14 +134,28 @@ class FileVersion(Base):
 class ProjectStylesheet(Base):
     __tablename__ = "project_stylesheets"
     id = Column(Integer, primary_key=True, index=True)
-    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     name = Column(String, nullable=False)
     description = Column(String, nullable=True)
     selected_ia_rows = Column(String, nullable=False, default="[]")
     is_active = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
 
     project = relationship("Project", back_populates="stylesheets")
     created_by = relationship("User", foreign_keys=[created_by_id])
+
+
+# Import all other domain models to register them in Base.metadata for foreign keys
+from app.domains.clients.models import Client  # noqa: F401
+from app.domains.workflow.models import (  # noqa: F401
+    RolesMaster,
+    StageActivityMaster,
+    StageMaster,
+    StageDetail,
+    WorkflowMaster,
+    ChapterInfo,
+)
+
+
 

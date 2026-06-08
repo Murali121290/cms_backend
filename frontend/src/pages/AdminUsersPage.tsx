@@ -105,7 +105,7 @@ export function AdminUsersPage() {
         {users.length === 0 ? (
           <EmptyState
             title="No users found"
-            message="The current admin users contract returned an empty list."
+            description="The current admin users contract returned an empty list."
           />
         ) : (
           <AdminUsersTable

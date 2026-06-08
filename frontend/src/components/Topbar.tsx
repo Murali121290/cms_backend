@@ -6,10 +6,14 @@ import { useSidebarStore } from '@/store/useSidebarStore'
 import { authApi } from '@/api/auth'
 import { toast } from '@/store/useToastStore'
 import { cn } from '@/utils/cn'
+import { useQueryClient } from '@tanstack/react-query'
+import { useSessionStore } from '@/stores/sessionStore'
 
 export function Topbar() {
   const navigate                       = useNavigate()
-  const { user, clearAuth, isLoggingOut, setLoggingOut } = useAuthStore()
+  const queryClient                    = useQueryClient()
+  const { clearAuth, isLoggingOut, setLoggingOut } = useAuthStore()
+  const viewer                         = useSessionStore(state => state.viewer)
   const { toggle }                     = useSidebarStore()
   const [notifications]                = useState(3)
   const [open, setOpen]                = useState(false)
@@ -43,13 +47,22 @@ export function Topbar() {
       await authApi.logout()
     } catch { /* ignore — backend logout is best-effort */ }
     clearAuth()
+    useSessionStore.getState().clear()
+    queryClient.clear()
     toast.success('Signed out successfully')
     navigate('/login', { replace: true })
   }
 
-  const initials = user?.user_name
-    ? user.user_name.slice(0, 2).toUpperCase()
+  const initials = viewer?.username
+    ? viewer.username.slice(0, 2).toUpperCase()
     : 'A'
+
+  // Normalize roles: convert {name: string} | string to string
+  const getFirstRole = () => {
+    if (!viewer?.roles?.length) return ''
+    const role = viewer.roles[0] as any
+    return typeof role === 'string' ? role : (role?.name ?? '')
+  }
 
   return (
     <header className="h-16 bg-card border-b border-border flex items-center px-4 md:px-6 gap-3 flex-shrink-0 sticky top-0 z-30">
@@ -95,13 +108,13 @@ export function Topbar() {
                 : <span className="text-[11px] font-bold text-white">{initials}</span>
               }
             </div>
-            {/* Name + team */}
+            {/* Name + role */}
             <div className="hidden md:block text-left">
               <p className="text-xs font-semibold text-text leading-tight">
-                {user?.user_name ?? 'User'}
+                {viewer?.username ?? 'User'}
               </p>
               <p className="text-[10px] text-muted leading-tight capitalize">
-                {user?.team ?? user?.role ?? ''}
+                {getFirstRole()}
               </p>
             </div>
             <ChevronDown
@@ -125,11 +138,11 @@ export function Topbar() {
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-text truncate">
-                      {user?.user_name ?? 'User'}
+                      {viewer?.username ?? 'User'}
                     </p>
-                    <p className="text-[11px] text-muted truncate">{user?.email ?? ''}</p>
+                    <p className="text-[11px] text-muted truncate">{viewer?.email ?? ''}</p>
                     <p className="text-[10px] text-muted capitalize mt-0.5">
-                      {user?.role ?? ''} · {user?.team ?? ''}
+                      {getFirstRole()}
                     </p>
                   </div>
                 </div>

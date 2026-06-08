@@ -1,48 +1,35 @@
 import { useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuthStore, getTokenExpiryMs, isTokenExpired } from '@/store/useAuthStore'
+import { useAuthStore } from '@/store/useAuthStore'
+import { useSessionStore } from '@/stores/sessionStore'
+import { useQueryClient } from '@tanstack/react-query'
 import { authApi } from '@/api/auth'
 import { toast } from '@/store/useToastStore'
 
+// Cookie-based auth: session managed server-side. This hook handles 401 responses
+// (caught by api/client interceptor) and verifies session on tab focus.
 export function useAutoLogout() {
-  const { token, isAuthenticated, clearAuth } = useAuthStore()
+  const isAuthenticated = useSessionStore(state => state.authenticated)
+  const clearSession = useSessionStore(state => state.clear)
+  const { clearAuth } = useAuthStore()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
 
   const forceLogout = useCallback((reason = 'Your session has expired. Please sign in again.') => {
     authApi.logout().catch(() => null)
     clearAuth()
+    clearSession()
+    queryClient.clear()
     toast.error(reason)
     navigate('/login', { replace: true })
-  }, [clearAuth, navigate])
-
-  // ── Auto-logout when token expires ───────────────────────────────────────────
-  useEffect(() => {
-    if (!token || !isAuthenticated) return
-
-    // Already expired on mount
-    if (isTokenExpired(token)) {
-      forceLogout()
-      return
-    }
-
-    const expiryMs = getTokenExpiryMs(token)
-    if (!expiryMs) return
-
-    const delay = expiryMs - Date.now()
-    const timer = setTimeout(() => forceLogout(), delay)
-
-    return () => clearTimeout(timer)
-  }, [token, isAuthenticated, forceLogout])
+  }, [clearAuth, clearSession, queryClient, navigate])
 
   // ── Re-check on window focus (tab switching, wake from sleep) ────────────────
   useEffect(() => {
     if (!isAuthenticated) return
 
     function onFocus() {
-      const { token } = useAuthStore.getState()
-      if (token && isTokenExpired(token)) {
-        forceLogout()
-      }
+      authApi.me().catch(() => forceLogout())
     }
 
     window.addEventListener('focus', onFocus)

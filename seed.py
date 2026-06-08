@@ -15,15 +15,23 @@ from sqlalchemy.exc import IntegrityError
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from app.init_db import SessionLocal, create_tables
-from app.models.user import User
-from app.models.roles_master import RolesMaster
-from app.models.client import Client
-from app.models.project import Project
-from app.models.stage_master import StageMaster
-from app.models.stage_activity_master import StageActivityMaster
-from app.models.chapter_info import ChapterInfo
-from app.models.stage_detail import StageDetail
+from app.database import SessionLocal
+from app.models import User, Project
+from app.domains.clients.models import Client
+from app.domains.workflow.models import (
+    RolesMaster,
+    StageMaster,
+    StageActivityMaster,
+    ChapterInfo,
+    StageDetail,
+)
+
+def create_tables():
+    from app.database import Base, engine
+    from app import models as cms_models
+    from app.domains.clients.models import Client as _Client
+    from app.domains.workflow.models import RolesMaster as _RolesMaster
+    Base.metadata.create_all(bind=engine)
 
 
 def hash_pw(plain: str) -> str:
@@ -562,6 +570,7 @@ def seed_roles(db):
 
 def seed_users(db):
     from sqlalchemy import select
+    from app.models import Role, Team
     inserted = skipped = 0
     for data in SAMPLE_USERS:
         # Validate role exists before inserting
@@ -569,24 +578,65 @@ def seed_users(db):
             select(RolesMaster).where(
                 RolesMaster.role_name == data["role"],
                 RolesMaster.team == data["team"],
-                RolesMaster.active_status == True,  # noqa: E712
             )
         ).scalars().first()
         if not role:
-            print(f"  ERROR {data['user_name']} — role '{data['role']}' in team '{data['team']}' not found in roles_master, skipping")
-            skipped += 1
-            continue
-        exists = db.execute(select(User).where((User.user_name == data["user_name"]) | (User.email == data["email"]))).scalars().first()
+            role = RolesMaster(
+                role_name=data["role"],
+                team=data["team"],
+                description=f"Auto-generated role for {data['role']} in {data['team']}",
+                active_status=True
+            )
+            db.add(role)
+            try:
+                db.commit()
+                db.refresh(role)
+            except IntegrityError:
+                db.rollback()
+                role = db.execute(
+                    select(RolesMaster).where(
+                        RolesMaster.role_name == data["role"],
+                        RolesMaster.team == data["team"],
+                    )
+                ).scalars().first()
+        exists = db.execute(select(User).where((User.username == data["user_name"]) | (User.email == data["email"]))).scalars().first()
         if exists:
             print(f"  SKIP  {data['user_name']} (already exists)")
             skipped += 1
             continue
-        db.add(User(
-            user_name=data["user_name"], email=data["email"],
-            password=hash_pw(data["password"]), role=data["role"],
-            team=data["team"], customer_access=data["customer_access"],
-            active_status=data["active_status"],
-        ))
+
+        # Map role string to CMS role
+        cms_role_name = "Editor"
+        if data["role"] == "admin":
+            cms_role_name = "Admin"
+        elif data["role"] in ["manager", "operations_manager"]:
+            cms_role_name = "ProjectManager"
+            
+        role_obj = db.execute(select(Role).where(Role.name == cms_role_name)).scalars().first()
+        if not role_obj:
+            role_obj = Role(name=cms_role_name, description=f"{cms_role_name} Role")
+            db.add(role_obj)
+            db.commit()
+            db.refresh(role_obj)
+
+        # Get or create Team
+        team_name = data["team"]
+        team_obj = db.execute(select(Team).where(Team.name == team_name)).scalars().first()
+        if not team_obj:
+            team_obj = Team(name=team_name)
+            db.add(team_obj)
+            db.commit()
+            db.refresh(team_obj)
+
+        db_user = User(
+            username=data["user_name"],
+            email=data["email"],
+            password_hash=hash_pw(data["password"]),
+            is_active=data["active_status"],
+            team_id=team_obj.id
+        )
+        db_user.roles.append(role_obj)
+        db.add(db_user)
         try:
             db.commit()
             print(f"  OK    {data['user_name']}")
@@ -601,7 +651,7 @@ def seed_users(db):
 def seed_clients(db):
     from sqlalchemy import select
     # Resolve created_by to the admin user's id
-    admin = db.execute(select(User).where(User.user_name == "admin_hema")).scalars().first()
+    admin = db.execute(select(User).where(User.username == "admin_hema")).scalars().first()
     admin_id = admin.id if admin else None
 
     inserted = skipped = 0
@@ -687,22 +737,39 @@ def seed_stages(db):
 
 def seed_projects(db):
     from sqlalchemy import select
+    from app.models import Project, Team
     inserted = skipped = 0
+    # Ensure default team exists
+    default_team = db.execute(select(Team).where(Team.name == "IT")).scalars().first()
+    if not default_team:
+        default_team = Team(name="IT")
+        db.add(default_team)
+        db.commit()
+        db.refresh(default_team)
+        
     for data in SAMPLE_PROJECTS:
         exists = db.execute(
-            select(Project).where(Project.project_code == data["project_code"])
+            select(Project).where(Project.code == data["project_code"])
         ).scalars().first()
         if exists:
             print(f"  SKIP  {data['project_code']} (already exists)")
             skipped += 1
             continue
-        # Resolve client_division → client_id
+        
+        # Resolve client_division -> client to get company name
         client = db.execute(
             select(Client).where(Client.division == data["client_division"])
         ).scalars().first()
-        client_id = client.id if client else None
-        row = {k: v for k, v in data.items() if k != "client_division"}
-        db.add(Project(**row, client_id=client_id))
+        
+        db_project = Project(
+            code=data["project_code"],
+            title=data["project_title"],
+            client_name=client.company if client else data["customer_name"],
+            status=data["status"],
+            xml_standard="NLM-2.3",
+            team_id=default_team.id
+        )
+        db.add(db_project)
         try:
             db.commit()
             print(f"  OK    {data['project_code']} — {data['project_title'][:50]}")
@@ -903,8 +970,12 @@ def seed_stage_details(db):
             skipped += 1
             continue
         row = dict(data)
-        start = dt.fromisoformat(row["start_date"]) if row.get("start_date") else None
-        end   = dt.fromisoformat(row["end_date"])   if row.get("end_date")   else None
+        start_val = row.pop("start_date", None)
+        end_val   = row.pop("end_date", None)
+        start = dt.fromisoformat(start_val) if start_val else None
+        end   = dt.fromisoformat(end_val)   if end_val else None
+        row["actual_start_date"] = start
+        row["actual_end_date"] = end
         row["total_time_taken"] = round((end - start).total_seconds() / 3600, 2) if start and end else None
         db.add(StageDetail(**row))
         try:
@@ -915,6 +986,68 @@ def seed_stage_details(db):
             db.rollback()
             print(f"  SKIP  {data['chapters']} / {data['stage_activity']} (integrity error)")
             skipped += 1
+    return inserted, skipped
+
+
+def seed_workflows(db):
+    from sqlalchemy import select
+    from app.domains.workflow.models import WorkflowMaster
+    
+    workflow_names = [
+        "Agile Sprint",
+        "DevOps Pipeline",
+        "CI/CD Workflow",
+        "Retail Workflow",
+        "Banking Workflow",
+        "HMS Workflow",
+        "Fleet Workflow",
+        "Content Workflow",
+        "LMS Workflow",
+        "Factory Workflow"
+    ]
+    
+    stages_chain = [
+        ("Initiation", None, "Planning"),
+        ("Planning", "Initiation", "Design"),
+        ("Design", "Planning", "Development"),
+        ("Development", "Design", "Testing"),
+        ("Testing", "Development", "Review"),
+        ("Review", "Testing", "Deployment"),
+        ("Deployment", "Review", "Closure"),
+        ("Closure", "Deployment", None)
+    ]
+    
+    inserted = skipped = 0
+    for name in workflow_names:
+        # Check if workflow already has entries in database
+        exists = db.execute(
+            select(WorkflowMaster).where(WorkflowMaster.workflow_name == name)
+        ).scalars().first()
+        
+        if exists:
+            print(f"  SKIP  Workflow: {name} (already exists)")
+            skipped += len(stages_chain)
+            continue
+            
+        print(f"  OK    Workflow: {name}")
+        for stage_name, prev, nxt in stages_chain:
+            wf_stage = WorkflowMaster(
+                workflow_name=name,
+                stage_name=stage_name,
+                previous_stage=prev,
+                next_stage=nxt,
+                description=f"Standard {stage_name} stage for {name}",
+                active_status=True
+            )
+            db.add(wf_stage)
+            inserted += 1
+            
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"Error seeding workflows: {e}")
+        
     return inserted, skipped
 
 
@@ -937,6 +1070,9 @@ def seed():
         print("\n-- stage_master -----------------------------------------")
         si, ss = seed_stages(db)
 
+        print("\n-- workflows --------------------------------------------")
+        wfi, wfs = seed_workflows(db)
+
         print("\n-- projects ---------------------------------------------")
         pi, ps = seed_projects(db)
 
@@ -949,8 +1085,8 @@ def seed():
         print(
             f"\nDone -- "
             f"roles: {ri}/{rs}  |  users: {ui}/{us}  |  clients: {ci}/{cs}  |  "
-            f"activities: {ai}/{as_}  |  stages: {si}/{ss}  |  projects: {pi}/{ps}  |  "
-            f"chapters: {chi}/{chs}  |  stage details: {sdi}/{sds}  "
+            f"activities: {ai}/{as_}  |  stages: {si}/{ss}  |  workflows: {wfi}/{wfs}  |  "
+            f"projects: {pi}/{ps}  |  chapters: {chi}/{chs}  |  stage details: {sdi}/{sds}  "
             f"(inserted/skipped)"
         )
     finally:

@@ -46,6 +46,33 @@ router = APIRouter()
 async def home(request: Request, user=Depends(get_current_user_from_cookie)):
     return session_service.get_home_redirect_response(user)
 
+@router.get("/api/metrics")
+async def get_metrics(db: Session = Depends(database.get_db)):
+    """API endpoint for real-time metrics (no auth required for login/register page)"""
+    try:
+        total_files = db.query(models.File).count()
+        total_projects = db.query(models.Project).count()
+        total_macro = total_projects * 2
+        active_jobs = 0
+        
+        metrics = {
+            'total_files': total_files,
+            'total_macro': total_macro,
+            'active_jobs': active_jobs
+        }
+        overview_stats = {
+            'total': total_files + total_macro,
+            'validation': 0
+        }
+    except Exception:
+        metrics = {'total_files': 0, 'total_macro': 0, 'active_jobs': 0}
+        overview_stats = {'total': 0, 'validation': 0}
+
+    return {
+        'metrics': metrics,
+        'overview_stats': overview_stats
+    }
+
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     return templates.TemplateResponse(request, "login.html", {"request": request})

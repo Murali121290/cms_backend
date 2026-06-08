@@ -60,17 +60,18 @@ export interface ClientPayload {
 
 export const clientsApi = {
   list: () =>
-    api.get<Client[]>('/clients/').then(r => r.data),
+    api.get<Client[]>('/api/v1/clients').then(r => r.data),
 
   getById: (id: number) =>
-    api.get<Client>(`/clients/${id}`).then(r => r.data),
+    api.get<Client>(`/api/v1/clients/${id}`).then(r => r.data),
 
   create: (data: ClientPayload) =>
-    api.post<Client>('/clients/', data).then(r => r.data),
+    api.post<Client>('/api/v1/clients', data).then(r => r.data),
 
   update: (id: number, data: Partial<ClientPayload>) =>
-    api.put<Client>(`/clients/${id}`, data).then(r => r.data),
+    api.put<Client>(`/api/v1/clients/${id}`, data).then(r => r.data),
 
   setStatus: (id: number, active_status: boolean) =>
-    api.patch<Client>(`/clients/${id}/status`, { active_status }).then(r => r.data),
+    api.patch<Client>(`/api/v1/clients/${id}/status`, { active_status }).then(r => r.data),
 }
+

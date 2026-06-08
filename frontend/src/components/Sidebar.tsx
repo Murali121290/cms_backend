@@ -1,7 +1,8 @@
+import { useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Users, BarChart3,
-  Settings, ChevronLeft, ChevronRight, GitBranch,
+  Settings, ChevronLeft, ChevronRight,
 } from 'lucide-react'
 import { useSidebarStore } from '@/store/useSidebarStore'
 import { useRBAC } from '@/hooks/useRBAC'
@@ -12,6 +13,7 @@ export function Sidebar() {
   const { collapsed, toggle } = useSidebarStore()
   const { canAccess }         = useRBAC()
   const location              = useLocation()
+  const [logoError, setLogoError] = useState(false)
 
   const navItems = [
     { to: '/',         icon: LayoutDashboard, label: 'Dashboard' },
@@ -30,14 +32,30 @@ export function Sidebar() {
     )}>
       {/* Logo */}
       <div className={cn(
-        'flex items-center h-16 px-4 border-b border-white/5 flex-shrink-0',
-        collapsed ? 'justify-center' : 'gap-3'
+        'flex items-center h-16 px-3 border-b border-white/5 flex-shrink-0',
+        collapsed ? 'justify-center' : 'gap-2'
       )}>
-        <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center flex-shrink-0">
-          <GitBranch size={16} className="text-white" />
-        </div>
-        {!collapsed && (
-          <span className="text-white font-semibold text-sm tracking-wide">WMS</span>
+        {collapsed ? (
+          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center flex-shrink-0 text-white font-bold text-[10px]">
+            S4
+          </div>
+        ) : !logoError ? (
+          <img
+            src="/logo.png"
+            alt="S4Carlisle"
+            className="h-10 w-auto object-contain"
+            onError={() => setLogoError(true)}
+          />
+        ) : (
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center flex-shrink-0 text-white font-bold text-[10px]">
+              S4
+            </div>
+            <div>
+              <p className="text-white font-bold text-xs leading-tight">S4Carlisle</p>
+              <p className="text-white/60 text-[10px] leading-tight">Production Suite</p>
+            </div>
+          </div>
         )}
       </div>
 

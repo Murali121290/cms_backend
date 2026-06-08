@@ -40,28 +40,29 @@ export interface StageActivityPayload {
 
 export const stagesApi = {
   list: () =>
-    api.get<Stage[]>('/stages/').then(r => r.data),
+    api.get<Stage[]>('/api/v1/stages').then(r => r.data),
 
   create: (data: StagePayload) =>
-    api.post<Stage>('/stages/', data).then(r => r.data),
+    api.post<Stage>('/api/v1/stages', data).then(r => r.data),
 
   update: (stageName: string, data: Partial<StagePayload>) =>
-    api.put<Stage>(`/stages/${encodeURIComponent(stageName)}`, data).then(r => r.data),
+    api.put<Stage>(`/api/v1/stages/${encodeURIComponent(stageName)}`, data).then(r => r.data),
 
   setStatus: (stageName: string, active_status: boolean) =>
-    api.patch<Stage>(`/stages/${encodeURIComponent(stageName)}/status`, { active_status }).then(r => r.data),
+    api.patch<Stage>(`/api/v1/stages/${encodeURIComponent(stageName)}/status`, { active_status }).then(r => r.data),
 }
 
 export const activitiesApi = {
   list: () =>
-    api.get<StageActivity[]>('/stage-activities/').then(r => r.data),
+    api.get<StageActivity[]>('/api/v1/stage-activities').then(r => r.data),
 
   create: (data: StageActivityPayload) =>
-    api.post<StageActivity>('/stage-activities/', data).then(r => r.data),
+    api.post<StageActivity>('/api/v1/stage-activities', data).then(r => r.data),
 
   update: (activityName: string, data: Partial<StageActivityPayload>) =>
-    api.put<StageActivity>(`/stage-activities/${encodeURIComponent(activityName)}`, data).then(r => r.data),
+    api.put<StageActivity>(`/api/v1/stage-activities/${encodeURIComponent(activityName)}`, data).then(r => r.data),
 
   setStatus: (activityName: string, active_status: boolean) =>
-    api.patch<StageActivity>(`/stage-activities/${encodeURIComponent(activityName)}/status`, { active_status }).then(r => r.data),
+    api.patch<StageActivity>(`/api/v1/stage-activities/${encodeURIComponent(activityName)}/status`, { active_status }).then(r => r.data),
 }
+

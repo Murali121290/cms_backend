@@ -106,7 +106,7 @@ export function DocxViewer({ src, editable = false, className = '' }: DocxViewer
   // Push converted HTML into editor once available
   useEffect(() => {
     if (editor && html !== null) {
-      editor.commands.setContent(html, false)
+      editor.commands.setContent(html, { emitUpdate: false })
     }
   }, [editor, html])
 

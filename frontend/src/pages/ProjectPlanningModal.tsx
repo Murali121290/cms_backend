@@ -49,6 +49,12 @@ interface StageSchedule {
   slaDays: number | null
 }
 
+function validDate(s: string | null | undefined): Date {
+  if (!s) return new Date()
+  const d = new Date(s)
+  return isNaN(d.getTime()) ? new Date() : d
+}
+
 /** Base schedule — same SLA for all chapters, derived from composition. */
 function buildBaseSchedule(
   orderedStages: WorkflowStage[],
@@ -57,7 +63,7 @@ function buildBaseSchedule(
   projectCreatedAt: string,
 ): StageSchedule[] {
   const result: StageSchedule[] = []
-  const cursor = new Date(projectCreatedAt)
+  const cursor = validDate(projectCreatedAt)
   cursor.setHours(0, 0, 0, 0)
   for (const ws of orderedStages) {
     const master  = masterMap.get(ws.stage_name)
@@ -83,7 +89,7 @@ function buildChapterSchedule(
   projectCreatedAt: string,
 ): StageSchedule[] {
   const result: StageSchedule[] = []
-  const cursor = new Date(projectCreatedAt)
+  const cursor = validDate(projectCreatedAt)
   cursor.setHours(0, 0, 0, 0)
   const chOverrides = cellSlas[chId] ?? {}
   for (const ws of orderedStages) {
@@ -132,17 +138,24 @@ export function ProjectPlanningModal({ projectId, open, onClose, onApproved }: P
     setStageMasters([])
     setCellSlas({})
     projectsApi.getById(projectId)
-      .then(async proj => {
+      .then(async response => {
+        const proj = response.project as unknown as Project
         setProject(proj)
         setPreviewComposition(proj.composition ?? 'Medium')
+        const projectCode = proj.code || proj.project_code || ''
+        const workflowName = proj.workflow_type || proj.workflow_name || ''
+
+        // Ensure WMS chapter_details are in sync with CMS chapters
+        await import('@/api/client').then(m => m.default.post(`/projects/${projectId}/sync-chapters`)).catch(() => undefined)
+
         const [chs, wf, masters, stageDetails] = await Promise.all([
-          chaptersApi.getByProject(proj.project_code ?? '').catch(() => [] as Chapter[]),
-          proj.workflow_name
-            ? workflowsApi.getWorkflow(proj.workflow_name).catch(() => [] as WorkflowStage[])
+          chaptersApi.getByProject(projectCode).catch(() => [] as Chapter[]),
+          workflowName
+            ? workflowsApi.getWorkflow(workflowName).catch(() => [] as WorkflowStage[])
             : Promise.resolve([] as WorkflowStage[]),
           stagesApi.list().catch(() => [] as Stage[]),
-          proj.project_code
-            ? stageDetailsApi.listByProject(proj.project_code).catch(() => [])
+          projectCode
+            ? stageDetailsApi.listByProject(projectCode).catch(() => [])
             : Promise.resolve([]),
         ])
         setChapters(chs)
@@ -215,7 +228,7 @@ export function ProjectPlanningModal({ projectId, open, onClose, onApproved }: P
   // Base schedule — composition-level SLA, same for all chapters
   const baseSchedule = useMemo((): StageSchedule[] => {
     if (!project || orderedStages.length === 0) return []
-    return buildBaseSchedule(orderedStages, masterMap, previewComposition, project.created_at)
+    return buildBaseSchedule(orderedStages, masterMap, previewComposition, project.created_at || '')
   }, [project, orderedStages, masterMap, previewComposition])
 
   // Quick lookup: stageName → default SLA days (from base schedule)
@@ -230,7 +243,7 @@ export function ProjectPlanningModal({ projectId, open, onClose, onApproved }: P
     if (!project || chapters.length === 0 || orderedStages.length === 0) return new Map<number, StageSchedule[]>()
     const result = new Map<number, StageSchedule[]>()
     for (const ch of chapters) {
-      result.set(ch.id, buildChapterSchedule(ch.id, orderedStages, baseSlaMap, cellSlas, project.created_at))
+      result.set(ch.id, buildChapterSchedule(ch.id, orderedStages, baseSlaMap, cellSlas, project.created_at || ''))
     }
     return result
   }, [project, chapters, orderedStages, baseSlaMap, cellSlas])
@@ -290,9 +303,11 @@ export function ProjectPlanningModal({ projectId, open, onClose, onApproved }: P
     }
 
     // Steps 2-5 run independently — a failure in one does not block the rest
-    if (project.project_code) {
+    const prjCode = project.code || project.project_code
+    const wfName = project.workflow_type || project.workflow_name
+    if (prjCode) {
       // Step 2 — chapters → In-progress
-      chaptersApi.bulkUpdateStatus(project.project_code, 'In-progress')
+      chaptersApi.bulkUpdateStatus(prjCode, 'In-progress')
         .catch(e => console.error('[Planning step 2]', e))
 
       if (chapters.length > 0) {
@@ -317,10 +332,10 @@ export function ProjectPlanningModal({ projectId, open, onClose, onApproved }: P
         try {
           await stageDetailsApi.createPlanningRows({
             client:               project.division_code ?? '',
-            project:              project.project_code,
-            workflow:             project.workflow_name ?? '',
+            project:              prjCode,
+            workflow:             wfName ?? '',
             complexity_level:     previewComposition,
-            project_manager_name: project.project_manager,
+            project_manager_name: project.project_manager ?? null,
             items,
           })
         } catch (err: unknown) {
@@ -389,12 +404,12 @@ export function ProjectPlanningModal({ projectId, open, onClose, onApproved }: P
           <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-border">
             <div>
               <p className="font-semibold text-text text-sm">
-                {project.project_title || project.project_code || `Project #${project.id}`}
+                {project.project_title || project.title || project.code || project.project_code || `Project #${project.id}`}
               </p>
               <div className="flex items-center gap-2 mt-1">
-                {project.workflow_name && (
+                {(project.workflow_type || project.workflow_name) && (
                   <span className="inline-flex items-center gap-1 text-xs bg-accent text-primary border border-primary/20 rounded-md px-2 py-0.5 font-medium">
-                    <Layers size={10} /> {project.workflow_name}
+                    <Layers size={10} /> {project.workflow_type || project.workflow_name}
                   </span>
                 )}
                 <span className="text-xs text-muted">{chapters.length} chapter{chapters.length !== 1 ? 's' : ''}</span>
@@ -445,8 +460,8 @@ export function ProjectPlanningModal({ projectId, open, onClose, onApproved }: P
               <p className="text-sm">No workflow stages found. Assign a workflow to this project first.</p>
             </div>
           ) : (
-            <div className="-mx-6 overflow-x-auto">
-              <table className="w-full border-collapse text-sm">
+            <div className="overflow-x-auto -mx-6">
+              <table className="min-w-max w-full border-collapse text-sm">
                 <thead>
                   <tr className="border-b-2 border-border">
                     <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-0 z-20 bg-card whitespace-nowrap min-w-[9rem] border-r border-border">

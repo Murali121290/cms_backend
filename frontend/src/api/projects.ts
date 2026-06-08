@@ -108,14 +108,15 @@ export const projectsApi = {
     api.get<ProjectsListResponse>('/projects', { params: { offset, limit } }).then(r => r.data),
 
   getByClient: (clientId: number) =>
-    api.get<ProjectsListResponse>('/projects', { params: { offset: 0, limit: 1000 } })
-      .then(r => (r.data.projects as unknown as Project[]).filter(p => p.client_id === clientId)),
+    api.get<Project[]>(`/projects/client/${clientId}`).then(r => r.data),
 
   getById: (id: number) =>
     api.get<ProjectDetailResponse>(`/projects/${id}`).then(r => r.data),
 
   create: (formData: FormData) =>
-    api.post<ProjectBootstrapResponse>('/projects/bootstrap', formData).then(r => r.data),
+    api.post<ProjectBootstrapResponse>('/projects/bootstrap', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data),
 
   update: (id: number, data: ProjectUpdate) =>
     api.put<Project>(`/projects/${id}`, data).then(r => r.data),

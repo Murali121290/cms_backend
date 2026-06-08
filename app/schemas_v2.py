@@ -90,6 +90,13 @@ class ProjectSummary(BaseModel):
     id: int
     code: str
     title: str
+    # WMS aliases
+    project_code: str | None = None
+    project_title: str | None = None
+    workflow_name: str | None = None
+    customer_name: str | None = None
+    # CMS fields
+    client_id: int | None = None
     client_name: str | None = None
     xml_standard: str
     status: str
@@ -98,6 +105,27 @@ class ProjectSummary(BaseModel):
     file_count: int
     workflow_type: str | None = None
     workflow_stage_no: str | None = None
+    # WMS project fields
+    division_code: str | None = None
+    customer_contact: str | None = None
+    category: str | None = None
+    composition: str | None = None
+    project_manager: str | None = None
+    sales_person: str | None = None
+    priority: str | None = None
+    edition: str | None = None
+    color: str | None = None
+    trim_size: str | None = None
+    copyright_year: int | None = None
+    manuscript_pages: int | None = None
+    estimated_pages: int | None = None
+    actual_pages: int | None = None
+    isbn_no: str | None = None
+    billing_location: str | None = None
+    due_date: str | None = None
+    file_details: dict | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 class ChapterSummary(BaseModel):
@@ -154,18 +182,7 @@ class FilesListResponse(BaseModel):
     pagination: ProjectsPagination
 
 
-class ProjectDetail(BaseModel):
-    id: int
-    code: str
-    title: str
-    client_name: str | None = None
-    xml_standard: str
-    status: str
-    team_id: int | None = None
-    chapter_count: int
-    file_count: int
-    workflow_type: str | None = None
-    workflow_stage_no: str | None = None
+class ProjectDetail(ProjectSummary):
     chapters: list[ChapterSummary] = Field(default_factory=list)
 
 
@@ -290,6 +307,8 @@ class AdminUser(BaseModel):
     email: str
     is_active: bool
     roles: list[AdminUserRole]
+    team: str | None = None
+    customer_access: list[str] = []
 
 
 class AdminUsersPagination(BaseModel):
@@ -317,6 +336,8 @@ class AdminCreateUserRequest(BaseModel):
     email: str
     password: str
     role_id: int
+    team_name: str | None = None
+    customer_access: list[str] = []
 
 
 class AdminCreateUserResponse(BaseModel):
@@ -327,6 +348,7 @@ class AdminCreateUserResponse(BaseModel):
 
 class AdminUpdateRoleRequest(BaseModel):
     role_id: int
+    team_name: str | None = None
 
 
 class AdminUpdateRoleResponse(BaseModel):
@@ -353,6 +375,7 @@ class AdminUpdateStatusResponse(BaseModel):
 
 class AdminEditUserRequest(BaseModel):
     email: str | None = None
+    customer_access: list[str] | None = None
 
 
 class AdminEditUserResponse(BaseModel):
@@ -753,3 +776,50 @@ class ReferenceSaveResponse(BaseModel):
     status: Literal["ok"] = "ok"
     file_id: int
     target_filename: str
+
+
+class ProjectUpdateRequest(BaseModel):
+    status: str | None = None
+    workflow_type: str | None = None
+    workflow_stage_no: str | None = None
+    client_id: int | None = None
+    workflow_name: str | None = None
+    project_manager: str | None = None
+    priority: str | None = None
+    composition: str | None = None
+    category: str | None = None
+    edition: str | None = None
+    color: str | None = None
+    trim_size: str | None = None
+    copyright_year: int | None = None
+    actual_pages: int | None = None
+    due_date: str | None = None
+    division_code: str | None = None
+    customer_contact: str | None = None
+    sales_person: str | None = None
+    isbn_no: str | None = None
+    billing_location: str | None = None
+
+
+class UploadZipChapterEntry(BaseModel):
+    chapter_no: int | None = None
+    file_name: str
+    path: str
+
+
+class UploadZipFileEntry(BaseModel):
+    file_name: str
+    path: str
+
+
+class UploadZipResponse(BaseModel):
+    zip_path: str
+    extracted_path: str
+    total_chapters: int
+    chapters: list[UploadZipChapterEntry]
+    images: list[UploadZipFileEntry]
+    xml: list[UploadZipFileEntry]
+    docs: list[UploadZipFileEntry]
+    chapters_inserted: int
+
+

@@ -82,11 +82,19 @@ def build_review_page_state(
     # though the template does not currently consume the result directly.
     extract_document_structure_func(processed_path)
 
-    # Derive the paragraph styles ACTUALLY applied in this Word document so the
-    # "Styles Applied" list reflects the real DOCX, not the static rules catalogue
-    # (which returns the same list for every file). Falls back to the catalogue
-    # if the document cannot be read or no styles are found.
-    applied_styles: set[str] = set()
+    # Build styles list by starting with the static rules catalogue,
+    # and then adding any paragraph styles actually applied in the document.
+    styles = set()
+    try:
+        for rule in get_rules_loader_func().get_paragraphs():
+            if "style" in rule:
+                styles.add(rule["style"])
+    except Exception:
+        pass
+    styles.add("Normal")
+    styles.add("Body Text")
+    styles.update(ADDITIONAL_REVIEW_STYLES)
+
     try:
         from docx import Document
 
@@ -96,7 +104,7 @@ def build_review_page_state(
             for para in paragraphs:
                 name = getattr(getattr(para, "style", None), "name", None)
                 if name:
-                    applied_styles.add(name)
+                    styles.add(name)
 
         _collect(doc.paragraphs)
         for table in doc.tables:
@@ -106,18 +114,7 @@ def build_review_page_state(
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("Could not read applied styles from %s: %s", processed_path, exc)
 
-    if applied_styles:
-        style_list = sorted(applied_styles)
-    else:
-        # Fallback: static rules catalogue
-        styles = set()
-        for rule in get_rules_loader_func().get_paragraphs():
-            if "style" in rule:
-                styles.add(rule["style"])
-        styles.add("Normal")
-        styles.add("Body Text")
-        styles.update(ADDITIONAL_REVIEW_STYLES)
-        style_list = sorted(styles)
+    style_list = sorted(styles)
 
     wopi_src = f"{wopi_base_url}/wopi/files/{file_id}/structuring"
     wopi_src_encoded = urllib.parse.quote(wopi_src, safe="")

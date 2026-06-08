@@ -59,6 +59,9 @@ const pulseDotVariantClasses: Record<NonNullable<BadgeVariant>, string> = {
   info: "bg-info",
   navy: "bg-white",
   outline: "bg-muted",
+  planning: "bg-info",
+  hold: "bg-warning",
+  "in-progress": "bg-info",
 };
 
 export function StatusBadge({ status, size = "md", className }: StatusBadgeProps) {

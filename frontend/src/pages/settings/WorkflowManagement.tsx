@@ -43,7 +43,7 @@ function buildLinkedList(names: string[]): StageEntry[] {
 // ── WorkflowModal ─────────────────────────────────────────────────────────────
 
 interface WorkflowModalProps {
-  open:          boolean
+  isOpen:        boolean
   onClose:       () => void
   onSaved:       (name: string, stages: WorkflowStage[]) => void
   editName:      string | null   // null = create mode
@@ -54,7 +54,7 @@ interface WorkflowModalProps {
 }
 
 function WorkflowModal({
-  open, onClose, onSaved,
+  isOpen, onClose, onSaved,
   editName, editStages, initName,
   masterStages, usageCount,
 }: WorkflowModalProps) {
@@ -73,7 +73,7 @@ function WorkflowModal({
   // ── Initialise on open ──────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (!open) return
+    if (!isOpen) return
     const src = editName ? editStages : (initName ? editStages : [])
     const ordered = orderStages(src)
     setWorkflowName(editName ?? initName ?? '')
@@ -215,13 +215,13 @@ function WorkflowModal({
 
   return (
     <Modal
-      open={open}
+      isOpen={isOpen}
       onClose={onClose}
       title={modalTitle}
       size="xl"
       footer={
         <>
-          <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button>
           <Button onClick={handleSave} disabled={saving}>
             {saving
               ? <><Spinner size="sm" /> Saving…</>
@@ -464,7 +464,7 @@ export function WorkflowManagement() {
     Promise.all([
       workflowsApi.getAllStages().catch(() => [] as WorkflowStage[]),
       stagesApi.list().catch(() => { toast.error('Failed to load stages from stage master'); return [] as Stage[] }),
-      projectsApi.list().catch(() => []),
+      projectsApi.list().then(res => res.projects).catch(() => []),
     ]).then(([allStages, stages, projects]) => {
       const map = new Map<string, WorkflowStage[]>()
       for (const s of allStages) {
@@ -477,8 +477,9 @@ export function WorkflowManagement() {
 
       const usage = new Map<string, number>()
       for (const p of projects) {
-        if (p.workflow_name) {
-          usage.set(p.workflow_name, (usage.get(p.workflow_name) ?? 0) + 1)
+        const wfType = p.workflow_type || (p as any).workflow_name
+        if (wfType) {
+          usage.set(wfType, (usage.get(wfType) ?? 0) + 1)
         }
       }
       setProjectUsage(usage)
@@ -656,7 +657,7 @@ export function WorkflowManagement() {
 
       {/* Workflow modal */}
       <WorkflowModal
-        open={modalOpen}
+        isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
         onSaved={handleSaved}
         editName={editName}
@@ -668,7 +669,7 @@ export function WorkflowManagement() {
 
       {/* Delete confirm */}
       <ConfirmDialog
-        open={confirmDelete !== null}
+        isOpen={confirmDelete !== null}
         title="Delete Workflow"
         message={`Delete "${confirmDelete}" and all its stages? This cannot be undone.${
           (projectUsage.get(confirmDelete ?? '') ?? 0) > 0

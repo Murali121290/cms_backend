@@ -1,4 +1,4 @@
-﻿import { useEffect } from "react";
+import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -63,9 +63,10 @@ export function AdminEditUserForm({
       ) : null}
 
       <div>
-        <label className="block text-sm font-medium text-text mb-1.5">Email</label>
+        <label className="block text-sm font-medium text-text mb-1.5" htmlFor="email">Email</label>
         <input
           {...register("email")}
+          id="email"
           className={inputClass}
           disabled={isPending}
           type="email"

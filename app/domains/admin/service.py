@@ -24,7 +24,7 @@ def get_available_roles(db: Session):
     return db.query(models.Role).all()
 
 
-def create_admin_user(db: Session, *, username: str, email: str, password: str, role_id: int):
+def create_admin_user(db: Session, *, username: str, email: str, password: str, role_id: int, team_name: str | None = None, customer_access: list[str] | None = None):
     existing_user = db.query(models.User).filter(
         (models.User.username == username) | (models.User.email == email)
     ).first()
@@ -36,7 +36,17 @@ def create_admin_user(db: Session, *, username: str, email: str, password: str, 
         email=email,
         password_hash=hash_password(password),
         is_active=True,
+        customer_access=customer_access or [],
     )
+
+    if team_name:
+        team_obj = db.query(models.Team).filter(models.Team.name == team_name).first()
+        if not team_obj:
+            team_obj = models.Team(name=team_name)
+            db.add(team_obj)
+            db.commit()
+            db.refresh(team_obj)
+        new_user.team_id = team_obj.id
 
     target_role = db.query(models.Role).filter(models.Role.id == role_id).first()
     if target_role:
@@ -47,7 +57,7 @@ def create_admin_user(db: Session, *, username: str, email: str, password: str, 
     return new_user
 
 
-def replace_user_role(db: Session, *, user_id: int, role_id: int):
+def replace_user_role(db: Session, *, user_id: int, role_id: int, team_name: str | None = None):
     target_user = db.query(models.User).filter(models.User.id == user_id).first()
     new_role = db.query(models.Role).filter(models.Role.id == role_id).first()
     if not target_user or not new_role:
@@ -61,6 +71,15 @@ def replace_user_role(db: Session, *, user_id: int, role_id: int):
             return {"status": "last_admin_blocked"}
 
     target_user.roles = [new_role]
+    if team_name:
+        team_obj = db.query(models.Team).filter(models.Team.name == team_name).first()
+        if not team_obj:
+            team_obj = models.Team(name=team_name)
+            db.add(team_obj)
+            db.commit()
+            db.refresh(team_obj)
+        target_user.team_id = team_obj.id
+    
     db.commit()
     return {"status": "updated"}
 
@@ -73,13 +92,15 @@ def toggle_user_status(db: Session, *, user_id: int, actor_user_id: int):
     return target_user
 
 
-def update_user_email(db: Session, *, user_id: int, email: str | None):
+def update_user_email(db: Session, *, user_id: int, email: str | None, customer_access: list[str] | None = None):
     target_user = db.query(models.User).filter(models.User.id == user_id).first()
     if not target_user:
         raise LookupError("User not found")
 
     if email:
         target_user.email = email
+    if customer_access is not None:
+        target_user.customer_access = customer_access
     db.commit()
     return target_user
 

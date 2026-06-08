@@ -5,6 +5,7 @@ export const uiPaths = {
   dashboard: "/dashboard",
   adminDashboard: "/admin",
   adminUsers: "/admin/users",
+  settings: "/settings",
   projects: "/projects",
   projectCreate: "/projects/create",
   projectDetail: (projectId: number | string) => `/projects/${projectId}`,
@@ -13,33 +14,45 @@ export const uiPaths = {
   technicalReview: (
     projectId: number | string,
     chapterId: number | string,
-    fileId: number | string,
-  ) => `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/technical-review`,
+    fileId?: number | string,
+  ) => fileId
+    ? `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/technical-review`
+    : `/projects/${projectId}/chapters/${chapterId}/technical-review`,
   technicalEditor: (
     projectId: number | string,
     chapterId: number | string,
-    fileId: number | string,
-  ) => `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/technical-editor`,
+    fileId?: number | string,
+  ) => fileId
+    ? `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/technical-editor`
+    : `/projects/${projectId}/chapters/${chapterId}/technical-editor`,
   structuringReview: (
     projectId: number | string,
     chapterId: number | string,
-    fileId: number | string,
-  ) => `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/structuring-review`,
+    fileId?: number | string,
+  ) => fileId
+    ? `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/structuring-review`
+    : `/projects/${projectId}/chapters/${chapterId}/structuring-review`,
   referenceReview: (
     projectId: number | string,
     chapterId: number | string,
-    fileId: number | string,
-  ) => `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/reference-review`,
+    fileId?: number | string,
+  ) => fileId
+    ? `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/reference-review`
+    : `/projects/${projectId}/chapters/${chapterId}/reference-review`,
   fileEditor: (
     projectId: number | string,
     chapterId: number | string,
-    fileId: number | string,
-  ) => `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/edit`,
+    fileId?: number | string,
+  ) => fileId
+    ? `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/edit`
+    : `/projects/${projectId}/chapters/${chapterId}/edit`,
   docxEditor: (
     projectId: number | string,
     chapterId: number | string,
-    fileId: number | string,
-  ) => `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/wysiwyg`,
+    fileId?: number | string,
+  ) => fileId
+    ? `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/wysiwyg`
+    : `/projects/${projectId}/chapters/${chapterId}/wysiwyg`,
   projectStylesheets: (projectId: number | string) =>
     `/projects/${projectId}/stylesheets`,
 } as const;

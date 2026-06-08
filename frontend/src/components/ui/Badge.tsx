@@ -8,7 +8,10 @@ type BadgeVariant =
   | "error"
   | "info"
   | "navy"
-  | "outline";
+  | "outline"
+  | "planning"
+  | "hold"
+  | "in-progress";
 type BadgeSize = "sm" | "md";
 
 interface BadgeProps {
@@ -33,6 +36,12 @@ const variantClasses: Record<BadgeVariant, string> = {
     "bg-sidebar text-white border border-sidebar",
   outline:
     "bg-transparent text-text border border-border",
+  planning:
+    "bg-info/15 text-info border border-info/30",
+  hold:
+    "bg-warning/15 text-warning border border-warning/30",
+  "in-progress":
+    "bg-info/15 text-info border border-info/30",
 };
 
 const sizeClasses: Record<BadgeSize, string> = {
@@ -58,4 +67,14 @@ export function Badge({
       {children}
     </span>
   );
+}
+
+// WMS compatibility: map status strings to badge variants
+export const statusToBadge = (status: string): BadgeVariant => {
+  const lower = status.toLowerCase()
+  if (lower.includes('success') || lower.includes('active')) return 'success'
+  if (lower.includes('error') || lower.includes('failed')) return 'error'
+  if (lower.includes('warning') || lower.includes('pending')) return 'warning'
+  if (lower.includes('info')) return 'info'
+  return 'default'
 }

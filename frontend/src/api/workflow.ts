@@ -141,31 +141,16 @@ export interface ChapterInfo {
   updated_at: string;
 }
 
-// Clients API
-export const clientsApi = {
-  list: () =>
-    apiClient.get<Client[]>("/api/v1/clients/").then((r) => r.data),
-
-  getById: (id: number) =>
-    apiClient.get<Client>(`/api/v1/clients/${id}`).then((r) => r.data),
-
-  create: (data: ClientPayload) =>
-    apiClient.post<Client>("/api/v1/clients/", data).then((r) => r.data),
-
-  update: (id: number, data: Partial<ClientPayload>) =>
-    apiClient.put<Client>(`/api/v1/clients/${id}`, data).then((r) => r.data),
-
-  delete: (id: number) =>
-    apiClient.delete(`/api/v1/clients/${id}`),
-
-  setStatus: (id: number, active_status: boolean) =>
-    apiClient.patch<Client>(`/api/v1/clients/${id}/status`, { active_status }).then((r) => r.data),
-};
+// Clients API — re-exported from clients.ts for backward compatibility
+export { clientsApi } from "./clients";
 
 // Roles API
 export const rolesApi = {
   list: () =>
     apiClient.get<RolesMaster[]>("/api/v1/roles-master").then((r) => r.data),
+
+  listActive: () =>
+    apiClient.get<RolesMaster[]>("/api/v1/roles-master").then((r) => r.data.filter((x) => x.active_status)),
 
   getById: (id: number) =>
     apiClient.get<RolesMaster>(`/api/v1/roles-master/${id}`).then((r) => r.data),
@@ -175,6 +160,9 @@ export const rolesApi = {
 
   update: (id: number, data: Partial<Omit<RolesMaster, "id" | "created_at">>) =>
     apiClient.put<RolesMaster>(`/api/v1/roles-master/${id}`, data).then((r) => r.data),
+
+  setStatus: (id: number, active_status: boolean) =>
+    apiClient.put<RolesMaster>(`/api/v1/roles-master/${id}`, { active_status }).then((r) => r.data),
 
   delete: (id: number) =>
     apiClient.delete(`/api/v1/roles-master/${id}`),

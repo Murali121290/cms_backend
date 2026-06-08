@@ -9,16 +9,21 @@ import ReactDOM from "react-dom";
 import { X } from "lucide-react";
 import { cn } from "@/utils/cn";
 
-type ModalSize = "sm" | "md" | "lg" | "xl";
+type ModalSize = "sm" | "md" | "lg" | "xl" | "2xl";
 
 interface ModalProps {
-  isOpen: boolean;
+  isOpen?: boolean;
+  open?: boolean; // WMS compatibility
   onClose: () => void;
+  onConfirm?: () => void; // WMS compatibility - some modals use this instead of just onClose
   title?: string;
   description?: string;
-  children: ReactNode;
+  message?: string; // WMS compatibility - alias for description
+  children?: ReactNode;
   footer?: ReactNode;
   size?: ModalSize;
+  confirmLabel?: string;
+  loading?: boolean;
 }
 
 const sizeClasses: Record<ModalSize, string> = {
@@ -26,6 +31,7 @@ const sizeClasses: Record<ModalSize, string> = {
   md: "max-w-md",
   lg: "max-w-lg",
   xl: "max-w-2xl",
+  "2xl": "max-w-4xl",
 };
 
 const FOCUSABLE_SELECTORS =
@@ -33,20 +39,28 @@ const FOCUSABLE_SELECTORS =
 
 export function Modal({
   isOpen,
+  open,
   onClose,
+  onConfirm,
   title,
   description,
+  message,
   children,
   footer,
   size = "md",
+  confirmLabel = "Confirm",
 }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const titleId = useRef(`modal-title-${Math.random().toString(36).slice(2)}`).current;
 
+  // Support both isOpen and open props (WMS compatibility)
+  const isModalOpen = isOpen ?? open ?? false;
+  const desc = description ?? message;
+
   // Save and restore focus
   useEffect(() => {
-    if (isOpen) {
+    if (isModalOpen) {
       previousFocusRef.current = document.activeElement as HTMLElement;
       // Focus the dialog after paint
       requestAnimationFrame(() => {
@@ -64,14 +78,14 @@ export function Modal({
 
   // Lock body scroll
   useEffect(() => {
-    if (isOpen) {
+    if (isModalOpen) {
       const originalOverflow = document.body.style.overflow;
       document.body.style.overflow = "hidden";
       return () => {
         document.body.style.overflow = originalOverflow;
       };
     }
-  }, [isOpen]);
+  }, [isModalOpen]);
 
   // ESC key handler
   const handleKeyDown = useCallback(
@@ -108,12 +122,12 @@ export function Modal({
     [onClose]
   );
 
-  if (!isOpen) return null;
+  if (!isModalOpen) return null;
 
   return ReactDOM.createPortal(
     <div
       className="fixed inset-0 z-[30] flex items-center justify-center p-4"
-      aria-hidden={!isOpen}
+      aria-hidden={!isModalOpen}
     >
       {/* Overlay */}
       <div
@@ -133,12 +147,12 @@ export function Modal({
         className={cn(
           "relative z-10 w-full bg-card rounded-2xl shadow-lg",
           "animate-[modal-in_150ms_ease-out]",
-          "flex flex-col max-h-[90vh]",
+          "flex flex-col max-h-[90vh] overflow-hidden",
           sizeClasses[size]
         )}
       >
         {/* Header */}
-        {(title || description) && (
+        {(title || desc) && (
           <div className="px-6 pt-6 pb-4 border-b border-border shrink-0">
             {title && (
               <div className="flex items-start justify-between gap-4">
@@ -157,12 +171,12 @@ export function Modal({
                 </button>
               </div>
             )}
-            {description && (
+            {desc && (
               <p
                 id={`${titleId}-desc`}
                 className="mt-1.5 text-sm text-muted leading-relaxed"
               >
-                {description}
+                {desc}
               </p>
             )}
           </div>
@@ -180,16 +194,39 @@ export function Modal({
         )}
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-6 py-5">{children}</div>
+        <div className="flex-1 overflow-auto px-6 py-5 min-h-0">{children}</div>
 
         {/* Footer */}
-        {footer && (
+        {(footer || onConfirm) && (
           <div className="px-6 py-4 border-t border-border bg-background shrink-0 rounded-b-2xl">
             {footer}
+            {onConfirm && !footer && (
+              <div className="flex gap-3 justify-end">
+                <button
+                  onClick={onClose}
+                  className="px-4 py-2 text-sm font-medium text-text bg-background border border-border rounded-lg hover:bg-surface transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={onConfirm}
+                  className="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
+                >
+                  {confirmLabel}
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
     </div>,
     document.body
   );
+}
+
+// WMS compatibility exports
+export const ConfirmDialog = Modal  // WMS ConfirmDialog is just Modal
+export function WMSModal(props: ModalProps & { open?: boolean }) {
+  const { open, isOpen, ...rest } = props
+  return <Modal isOpen={open ?? isOpen ?? false} {...rest} />
 }

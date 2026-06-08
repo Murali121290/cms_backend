@@ -1,4 +1,4 @@
-﻿import { useEffect } from "react";
+import { useEffect } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Eye, EyeOff } from "lucide-react";
@@ -116,10 +116,11 @@ export function AdminPasswordForm({
       ) : null}
 
       <div>
-        <label className="block text-sm font-medium text-text mb-1.5">New Password</label>
+        <label className="block text-sm font-medium text-text mb-1.5" htmlFor="password">New Password</label>
         <div className="relative">
           <input
             {...register("password")}
+            id="password"
             className={inputClass}
             disabled={isPending}
             type={showPassword ? "text" : "password"}

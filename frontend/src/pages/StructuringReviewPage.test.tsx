@@ -8,10 +8,15 @@ import { renderRoute } from "@/test/testUtils";
 
 const getStructuringReview = vi.fn();
 const saveStructuringReview = vi.fn();
+const mockUseFileXhtmlRunsQuery = vi.fn();
 
 vi.mock("@/api/structuringReview", () => ({
   getStructuringReview: (...args: unknown[]) => getStructuringReview(...args),
   saveStructuringReview: (...args: unknown[]) => saveStructuringReview(...args),
+}));
+
+vi.mock("@/features/technicalReview/useFileXhtmlRunsQuery", () => ({
+  useFileXhtmlRunsQuery: () => mockUseFileXhtmlRunsQuery(),
 }));
 
 describe("StructuringReviewPage", () => {
@@ -22,6 +27,10 @@ describe("StructuringReviewPage", () => {
         code: "PROCESSED_FILE_MISSING",
       }),
     );
+    mockUseFileXhtmlRunsQuery.mockReturnValue({
+      isPending: true,
+      data: null,
+    });
 
     renderRoute({
       path: "/ui/projects/:projectId/chapters/:chapterId/files/:fileId/structuring-review",
@@ -35,6 +44,10 @@ describe("StructuringReviewPage", () => {
 
   it("renders the dashboard overview and wired actions successfully", async () => {
     getStructuringReview.mockResolvedValueOnce(createStructuringReviewResponse());
+    mockUseFileXhtmlRunsQuery.mockReturnValue({
+      isPending: true,
+      data: null,
+    });
 
     renderRoute({
       path: "/ui/projects/:projectId/chapters/:chapterId/files/:fileId/structuring-review",

@@ -2,36 +2,35 @@ import api from './client'
 
 export interface Role {
   id: number
-  role_name: string
-  team: string
+  name: string
   description: string | null
-  active_status: boolean
-  created_at: string
 }
 
 export interface RolePayload {
-  role_name: string
-  team: string
+  name: string
   description?: string
-  active_status?: boolean
+}
+
+interface AdminRolesResponse {
+  roles: Role[]
 }
 
 export const rolesApi = {
   list: () =>
-    api.get<Role[]>('/roles/').then(r => r.data),
+    api.get<AdminRolesResponse>('/admin/roles').then(r => r.data.roles),
 
   listActive: () =>
-    api.get<Role[]>('/roles/active').then(r => r.data),
+    api.get<AdminRolesResponse>('/admin/roles').then(r => r.data.roles),
 
   create: (data: RolePayload) =>
-    api.post<Role>('/roles/', data).then(r => r.data),
+    api.post<AdminRolesResponse>('/admin/roles', data).then(r => r.data.roles[0]),
 
   update: (id: number, data: Partial<RolePayload>) =>
-    api.put<Role>(`/roles/${id}`, data).then(r => r.data),
+    api.put<AdminRolesResponse>(`/admin/roles/${id}`, data).then(r => r.data.roles[0]),
 
   setStatus: (id: number, active_status: boolean) =>
-    api.patch<Role>(`/roles/${id}/status`, { active_status }).then(r => r.data),
+    api.patch<AdminRolesResponse>(`/admin/roles/${id}/status`, { active_status }).then(r => r.data.roles[0]),
 
   remove: (id: number) =>
-    api.delete(`/roles/${id}`),
+    api.delete(`/admin/roles/${id}`),
 }

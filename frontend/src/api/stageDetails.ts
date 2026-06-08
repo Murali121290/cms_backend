@@ -47,14 +47,14 @@ export interface PlanningPayload {
 export const stageDetailsApi = {
   /** Insert one row per chapter × stage when planning is approved. */
   createPlanningRows: (payload: PlanningPayload) =>
-    api.post<StageDetail[]>('/stage-details/plan', payload).then(r => r.data),
+    api.post<StageDetail[]>('/api/v1/stage-details/plan', payload).then(r => r.data),
 
   listByProject: (project: string) =>
-    api.get<StageDetail[]>(`/stage-details/project/${encodeURIComponent(project)}`).then(r => r.data),
+    api.get<StageDetail[]>(`/api/v1/stage-details/project/${encodeURIComponent(project)}`).then(r => r.data),
 
   listByChapter: (project: string, chapters: string) =>
     api.get<StageDetail[]>(
-      `/stage-details/project/${encodeURIComponent(project)}/chapter/${encodeURIComponent(chapters)}`
+      `/api/v1/stage-details/project/${encodeURIComponent(project)}/chapter/${encodeURIComponent(chapters)}`
     ).then(r => r.data),
 
   /**
@@ -63,7 +63,7 @@ export const stageDetailsApi = {
    */
   assignToStage: (project: string, chapters: string, stageName: string, assigneeName: string | null) =>
     api.post<StageDetail | null>(
-      `/stage-details/project/${encodeURIComponent(project)}/chapter/${encodeURIComponent(chapters)}/stage/${encodeURIComponent(stageName)}/assign`,
+      `/api/v1/stage-details/project/${encodeURIComponent(project)}/chapter/${encodeURIComponent(chapters)}/stage/${encodeURIComponent(stageName)}/assign`,
       { assignee_name: assigneeName, dt: new Date().toISOString() },
     ).then(r => r.data),
 
@@ -73,7 +73,7 @@ export const stageDetailsApi = {
    */
   stageTransition: (project: string, chapters: string, fromStage: string, toStage: string) =>
     api.post<StageDetail | null>(
-      `/stage-details/project/${encodeURIComponent(project)}/chapter/${encodeURIComponent(chapters)}/stage-transition`,
+      `/api/v1/stage-details/project/${encodeURIComponent(project)}/chapter/${encodeURIComponent(chapters)}/stage-transition`,
       { from_stage: fromStage, to_stage: toStage, dt: new Date().toISOString() },
     ).then(r => r.data),
 
@@ -83,7 +83,8 @@ export const stageDetailsApi = {
    */
   shiftPlannedDates: (project: string, chapters: string, stageNames: string[], days: number) =>
     api.post<{ ok: boolean }>(
-      `/stage-details/project/${encodeURIComponent(project)}/shift-planned-dates`,
+      `/api/v1/stage-details/project/${encodeURIComponent(project)}/shift-planned-dates`,
       { chapters, stage_names: stageNames, days },
     ).then(r => r.data),
 }
+

@@ -79,6 +79,41 @@ def create_project_with_initial_files(
     files: list[UploadFile] | None,
     upload_dir: str,
 ):
+    valid_uploads = [upload for upload in files or [] if upload.filename]
+    if not valid_uploads:
+        new_project = schemas.ProjectCreate(
+            title=title,
+            code=code,
+            xml_standard=xml_standard,
+            team_id=1,
+        )
+        db_project = create_project(db, new_project)
+
+        if client_name:
+            db_project.client_name = client_name
+            db.commit()
+            db.refresh(db_project)
+
+        base_path = f"{upload_dir}/{code}"
+        os.makedirs(base_path, exist_ok=True)
+
+        for i in range(1, chapter_count + 1):
+            chapter_number = f"{i:02d}"
+            chapter = models.Chapter(
+                project_id=db_project.id,
+                number=chapter_number,
+                title=f"Chapter {chapter_number}",
+            )
+            db.add(chapter)
+            db.commit()
+            db.refresh(chapter)
+
+            chapter_base_path = f"{base_path}/{chapter_number}"
+            for category in _CHAPTER_CATEGORIES:
+                os.makedirs(f"{chapter_base_path}/{category}", exist_ok=True)
+
+        return db_project
+
     upload_plan = _build_project_bootstrap_upload_plan(
         chapter_count=chapter_count,
         files=files,
@@ -137,6 +172,7 @@ def create_project_with_initial_files(
 
     return db_project
 
+
 def update_project_status(db: Session, project_id: int, status: str):
     project = db.query(models.Project).filter(models.Project.id == project_id).first()
     if project:
@@ -149,35 +185,18 @@ def get_projects(db: Session, skip: int = 0, limit: int = 100):
     return db.query(models.Project).offset(skip).limit(limit).all()
 
 def delete_project(db, project_id: int):
-    from app.models import Project, Chapter, File
-    project = db.query(Project).filter(Project.id == project_id).first()
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
     if not project:
         return None
-    # Delete in correct order respecting foreign keys
-    for chapter in db.query(Chapter).filter(Chapter.project_id == project_id).all():
-        for file in db.query(File).filter(File.chapter_id == chapter.id).all():
-            db.execute(db.bind.connect().execution_options(autocommit=True) if False else __import__('sqlalchemy').text("DELETE FROM file_versions WHERE file_id = :fid"), {"fid": file.id})
-            db.execute(__import__('sqlalchemy').text("DELETE FROM processing_results WHERE file_id = :fid"), {"fid": file.id})
-        db.query(File).filter(File.chapter_id == chapter.id).delete()
-    db.query(Chapter).filter(Chapter.project_id == project_id).delete()
     db.delete(project)
     db.commit()
     return True
 
 
 def delete_project_v2(db, project_id: int):
-    from app.models import Project, Chapter, File
-    from sqlalchemy import text
-    project = db.query(Project).filter(Project.id == project_id).first()
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
     if not project:
         return None
-    for chapter in db.query(Chapter).filter(Chapter.project_id == project_id).all():
-        for file in db.query(File).filter(File.chapter_id == chapter.id).all():
-            db.execute(text("DELETE FROM file_versions WHERE file_id = :fid"), {"fid": file.id})
-            db.delete(file)
-        db.flush()
-        db.delete(chapter)
-    db.flush()
     db.delete(project)
     db.commit()
     return True

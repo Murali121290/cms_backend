@@ -51,10 +51,17 @@ def build_user_context(user, *, include_email: bool = False):
 
 
 def set_access_token_cookie(response, access_token: str):
+    import os
+    env = os.getenv("ENVIRONMENT", "development").lower()
+    secure_cookie = env in ("production", "staging")
     response.set_cookie(
         key=ACCESS_TOKEN_COOKIE_NAME,
         value=format_access_token_cookie_value(access_token),
         httponly=True,
+        secure=secure_cookie,
+        samesite="lax",
+        path="/",
+        domain=None,  # Let browser use the request domain (localhost or production domain)
     )
 
 

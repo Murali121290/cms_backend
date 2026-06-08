@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { ArrowLeft, Plus, Search, Filter, RefreshCw } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { rolesApi, type Role } from '@/api/roles'
+import { rolesApi, type RolesMaster as Role } from '@/api/workflow'
 import { toast } from '@/store/useToastStore'
 import { Badge } from '@/components/ui/Badge'
 import { Toggle } from '@/components/ui/Toggle'
@@ -17,14 +17,14 @@ const PAGE_SIZE = 8
 
 // ── Create Role Modal ─────────────────────────────────────────────────────────
 interface CreateRoleModalProps {
-  open: boolean
+  isOpen: boolean
   onClose: () => void
   onCreated: (r: Role) => void
   existingTeams: string[]
   existingRoleNames: string[]
 }
 
-function CreateRoleModal({ open, onClose, onCreated, existingTeams, existingRoleNames }: CreateRoleModalProps) {
+function CreateRoleModal({ isOpen, onClose, onCreated, existingTeams, existingRoleNames }: CreateRoleModalProps) {
   const [form, setForm]     = useState({ role_name: '', team: '', newTeam: '', description: '', active_status: true })
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(false)
@@ -32,13 +32,13 @@ function CreateRoleModal({ open, onClose, onCreated, existingTeams, existingRole
   const [isNewRole, setIsNewRole]   = useState(false)
 
   useEffect(() => {
-    if (open) {
+    if (isOpen) {
       setForm({ role_name: '', team: '', newTeam: '', description: '', active_status: true })
       setErrors({})
       setIsNewTeam(false)
       setIsNewRole(existingRoleNames.length === 0)
     }
-  }, [open, existingRoleNames.length])
+  }, [isOpen, existingRoleNames.length])
 
   function set(key: string, value: string | boolean) {
     setForm(f => ({ ...f, [key]: value }))
@@ -73,9 +73,9 @@ function CreateRoleModal({ open, onClose, onCreated, existingTeams, existingRole
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Create New Role" footer={
+    <Modal isOpen={isOpen} onClose={onClose} title="Create New Role" footer={
       <>
-        <Button variant="outline" onClick={onClose} disabled={loading}>Cancel</Button>
+        <Button variant="secondary" onClick={onClose} disabled={loading}>Cancel</Button>
         <Button onClick={handleSubmit} disabled={loading}>
           {loading ? <><Spinner size="sm" />Saving…</> : 'Save Role'}
         </Button>
@@ -152,13 +152,13 @@ function CreateRoleModal({ open, onClose, onCreated, existingTeams, existingRole
 
 // ── Edit Role Modal ───────────────────────────────────────────────────────────
 interface EditRoleModalProps {
-  open: boolean
+  isOpen: boolean
   onClose: () => void
   onUpdated: (r: Role) => void
   role: Role | null
 }
 
-function EditRoleModal({ open, onClose, onUpdated, role }: EditRoleModalProps) {
+function EditRoleModal({ isOpen, onClose, onUpdated, role }: EditRoleModalProps) {
   const [form, setForm] = useState({ description: '', active_status: true })
   const [loading, setLoading] = useState(false)
 
@@ -184,9 +184,9 @@ function EditRoleModal({ open, onClose, onUpdated, role }: EditRoleModalProps) {
   }
 
   return (
-    <Modal open={open} onClose={onClose} title={`Edit Role — ${role?.role_name ?? ''}`} footer={
+    <Modal isOpen={isOpen} onClose={onClose} title={`Edit Role — ${role?.role_name ?? ''}`} footer={
       <>
-        <Button variant="outline" onClick={onClose} disabled={loading}>Cancel</Button>
+        <Button variant="secondary" onClick={onClose} disabled={loading}>Cancel</Button>
         <Button onClick={handleSubmit} disabled={loading}>
           {loading ? <><Spinner size="sm" />Saving…</> : 'Save Changes'}
         </Button>
@@ -431,20 +431,20 @@ export function RolesManagement() {
 
       {/* Modals */}
       <CreateRoleModal
-        open={createOpen}
+        isOpen={createOpen}
         onClose={() => setCreateOpen(false)}
         onCreated={r => setRoles(rs => [...rs, r])}
         existingTeams={allTeams}
         existingRoleNames={allRoleNames}
       />
       <EditRoleModal
-        open={!!editRole}
+        isOpen={!!editRole}
         onClose={() => setEditRole(null)}
         onUpdated={r => setRoles(rs => rs.map(x => x.id === r.id ? r : x))}
         role={editRole}
       />
       <ConfirmDialog
-        open={!!confirmRole}
+        isOpen={!!confirmRole}
         onClose={() => setConfirmRole(null)}
         onConfirm={async () => {
           if (confirmRole) {

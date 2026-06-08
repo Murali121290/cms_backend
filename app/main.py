@@ -10,7 +10,8 @@ from app.domains.projects import api_v1 as projects
 from app.domains.projects import teams_api_v1 as teams
 from app.domains.clients import api_v1 as clients
 from app.domains.workflow import api_v1 as workflow
-from app.legacy import web
+from app.legacy import web as legacy_web
+from app.routers import web as routers_web
 from app.routers import api_v2
 from app.core.config import get_settings
 
@@ -22,14 +23,14 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# UI Router (Root)
-app.include_router(web.router, tags=["Web UI"])
+# UI Router (Root) - Legacy SSR pages
+app.include_router(legacy_web.router, tags=["Web UI"])
 
 # API Routers
 app.include_router(api_v2.router, prefix="/api/v2", tags=["API v2"])
@@ -57,6 +58,14 @@ def read_root():
 
 @app.on_event("startup")
 def init_data():
+    import os
+    env = os.getenv("ENVIRONMENT", "development").lower()
+    if env in ("production", "staging") and settings.SECRET_KEY in (
+        "changeme_in_production_secret_key_12345",
+        "dev-secret-key-please-change-in-production"
+    ):
+        raise ValueError("SECRET_KEY must be changed from the default value in production/staging environments!")
+
     from app.database import SessionLocal
     from app import models
     db = SessionLocal()

@@ -8,6 +8,7 @@ import {
   FileCode,
   FileOutput,
   FilePen,
+  Info,
   Languages,
   Layers,
   LogIn,
@@ -40,6 +41,7 @@ export interface FileContextMenuProps {
   onDelete: () => void;
   onOpenReferenceCheck: () => void;
   onStartProcessing?: (fileId: number, processType: string, mode?: string, options?: Record<string, any>) => Promise<void>;
+  onViewDetails?: () => void;
 }
 
 // ─── Position helper ──────────────────────────────────────────────────────────
@@ -268,6 +270,7 @@ export function FileContextMenu({
   onDelete,
   onOpenReferenceCheck,
   onStartProcessing,
+  onViewDetails,
 }: FileContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -610,7 +613,7 @@ export function FileContextMenu({
             />
             <MenuItem
               icon={FileOutput}
-              label="PPD Generation"
+              label="Manuscript Anaylsis"
               onClick={() => setConfirmStep({ processType: "ppd", mode: "style", actionName: "PPD Generation" })}
             />
             <MenuItem
@@ -660,6 +663,16 @@ export function FileContextMenu({
               label="Delete"
               isDestructive
               onClick={() => { onClose(); onDelete(); }}
+            />
+
+            {/* ── Group 4: Details ────────────────────────────── */}
+            <MenuSeparator />
+            <MenuGroupLabel label="Details" />
+            <MenuItem
+              icon={Info}
+              label="View Meta & Version Details"
+              disabled={!onViewDetails}
+              onClick={() => { onViewDetails?.(); onClose(); }}
             />
 
             {/* Scroll fade */}

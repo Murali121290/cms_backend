@@ -1,29 +1,58 @@
-import { useAuthStore } from '@/store/useAuthStore'
+import type { Viewer, SessionGetResponse } from '@/types/api'
 
-interface Viewer {
-  username: string
-  roles: Array<{ name: string } | string>
-}
-
-interface SessionStore {
+export interface SessionStore {
+  // State
+  authenticated: boolean
   viewer: Viewer | null
+  loading: boolean
+  error: string | null
+  handoffStarted: boolean
+
+  // Actions
+  setAuthenticated: (session: SessionGetResponse) => void
+  setLoading: (loading: boolean) => void
+  setAnonymous: () => void
+  setError: (error: string | null) => void
+  clear: () => void
 }
 
-// Bridge from WMS useAuthStore to cms_backend useSessionStore interface
-// Review pages use useSessionStore((s) => s.viewer) to get the current user
-export const useSessionStore = <T>(
-  selector: (s: SessionStore) => T
-): T => {
-  const user = useAuthStore((s) => s.user)
+// Zustand store that bridges WMS session features to cms_backend auth
+import { create } from 'zustand'
 
-  const sessionStore: SessionStore = {
-    viewer: user
-      ? {
-          username: user.username || user.email || 'User',
-          roles: user.roles || [],
-        }
-      : null,
-  }
+export const useSessionStore = create<SessionStore>((set) => ({
+  // Initial state
+  authenticated: false,
+  viewer: null,
+  loading: false,
+  error: null,
+  handoffStarted: false,
 
-  return selector(sessionStore)
-}
+  // Actions
+  setAuthenticated: (session: SessionGetResponse) => {
+    set({
+      authenticated: true,
+      viewer: session.viewer,
+      loading: false,
+      error: null,
+    })
+  },
+
+  setLoading: (loading: boolean) => set({ loading }),
+
+  setAnonymous: () => set({
+    authenticated: false,
+    viewer: null,
+    error: null,
+  }),
+
+  setError: (error: string | null) => set({ error }),
+
+  clear: () => {
+    set({
+      authenticated: false,
+      viewer: null,
+      loading: false,
+      error: null,
+    })
+  },
+}))

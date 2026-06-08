@@ -5,6 +5,8 @@ import {
   Calendar, Clock, Zap, BookOpen, AlertCircle, CheckCircle2,
   RotateCcw, Layers, User,
 } from 'lucide-react'
+import { ViewSwitcher } from '@/components/ui/ViewSwitcher'
+import { useViewMode } from '@/hooks/useViewMode'
 import { projectsApi } from '@/api/projects'
 import type { Project } from '@/api/projects'
 import { chaptersApi } from '@/api/chapters'
@@ -279,8 +281,12 @@ export function ProjectWorkflow() {
   const [workflowStages,  setWorkflowStages]  = useState<WorkflowStage[]>([])
   const [users,           setUsers]           = useState<AppUser[]>([])
   const [plannedDueDates, setPlannedDueDates] = useState<Map<string, StageInfo>>(new Map())
+  // Maps WMS chapter number (e.g. "01") → CMS chapter DB id for correct navigation
+  const [cmsChapterIdMap, setCmsChapterIdMap] = useState<Map<string, number>>(new Map())
   const [loading,         setLoading]         = useState(true)
 
+
+  const [viewMode, setViewMode] = useViewMode('view:chapters', 'large')
 
   const [filterAssignee, setFilterAssignee] = useState('')
   const [filterStage,    setFilterStage]    = useState('')
@@ -289,22 +295,38 @@ export function ProjectWorkflow() {
   useEffect(() => {
     if (!id) return
     setLoading(true)
+
+    // Load users in background — don't block the main page render
+    usersApi.list().then(setUsers).catch(() => {})
+
     projectsApi.getById(id)
-      .then(async proj => {
-        setProject(proj)
-        const [chs, stages, usrs, details] = await Promise.all([
-          chaptersApi.getByProject(proj.project_code ?? '').catch(() => [] as Chapter[]),
-          proj.workflow_name
-            ? workflowsApi.getWorkflow(proj.workflow_name).catch(() => [] as WorkflowStage[])
+      .then(async response => {
+        const p = response.project as unknown as Project
+        setProject(p)
+        const projectCode = p.code || p.project_code || ''
+        const workflowName = p.workflow_type || p.workflow_name || ''
+        const [chs, stages, details, cmsChapters] = await Promise.all([
+          chaptersApi.getByProject(projectCode).catch(() => [] as Chapter[]),
+          workflowName
+            ? workflowsApi.getWorkflow(workflowName).catch(() => [] as WorkflowStage[])
             : Promise.resolve([] as WorkflowStage[]),
-          usersApi.list().catch(() => [] as AppUser[]),
-          proj.project_code
-            ? stageDetailsApi.listByProject(proj.project_code).catch(() => [])
+          projectCode
+            ? stageDetailsApi.listByProject(projectCode).catch(() => [])
             : Promise.resolve([]),
+          projectsApi.getProjectChapters(id).catch(() => ({ project: null, chapters: [] })),
         ])
         setChapters(chs)
         setWorkflowStages(stages)
-        setUsers(usrs)
+        // Build number → CMS chapter id map with multiple normalizations for robust matching
+        // WMS uses "01", CMS might use "1" or "01" — store all variants
+        const idMap = new Map<string, number>()
+        for (const c of cmsChapters.chapters ?? []) {
+          if (!c.number) continue
+          idMap.set(c.number, c.id)
+          idMap.set(parseInt(c.number, 10).toString(), c.id)
+          idMap.set(c.number.padStart(2, '0'), c.id)
+        }
+        setCmsChapterIdMap(idMap)
         // Build lookup: "chapterLabel||stageName" → planned_end_date from stage_details
         // Use planned_end_date as the authoritative due date for each stage.
         // Take the first row that has a planned_end_date (oldest creation wins so planning
@@ -377,6 +399,13 @@ export function ProjectWorkflow() {
     </div>
   )
 
+  function openChapter(ch: Chapter) {
+    const num = ch.chapters
+    const cmsId = cmsChapterIdMap.get(num) ?? cmsChapterIdMap.get(parseInt(num,10).toString()) ?? cmsChapterIdMap.get(num.padStart(2,'0')) ?? null
+    if (!cmsId) { toast.error(`Chapter "${num}" has no files yet.`); return }
+    navigate(`${clientId ? `/clients/${clientId}/projects/${projectId}` : `/projects/${projectId}`}/chapters/${cmsId}`)
+  }
+
   return (
     <div className="flex flex-col min-h-full relative">
 
@@ -392,7 +421,7 @@ export function ProjectWorkflow() {
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-lg font-bold text-text">
-                {project.project_title || project.project_code || `Project #${project.id}`}
+                {project.project_title || project.title || project.code || project.project_code || `Project #${project.id}`}
               </h1>
               {project.status && (
                 <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${statusMeta(project.status).cls}`}>
@@ -406,10 +435,10 @@ export function ProjectWorkflow() {
               )}
             </div>
             <div className="flex items-center gap-3 mt-1 flex-wrap text-xs text-muted">
-              {project.project_code && <span>{project.project_code}</span>}
-              {project.workflow_name && (
+              {(project.code || project.project_code) && <span>{project.code || project.project_code}</span>}
+              {(project.workflow_type || project.workflow_name) && (
                 <span className="inline-flex items-center gap-1">
-                  <Layers size={11} /> {project.workflow_name}
+                  <Layers size={11} /> {project.workflow_type || project.workflow_name}
                 </span>
               )}
               {project.project_manager && (
@@ -482,9 +511,10 @@ export function ProjectWorkflow() {
           <span className="ml-auto text-xs text-muted">
             {filtered.length} of {summary.total} chapter{summary.total !== 1 ? 's' : ''}
           </span>
+          <ViewSwitcher mode={viewMode} onChange={setViewMode} />
         </div>
 
-        {/* ── Chapter Cards ── */}
+        {/* ── Chapter views ── */}
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-muted">
             <BookOpen size={36} className="mb-3 opacity-25" />
@@ -492,33 +522,142 @@ export function ProjectWorkflow() {
               {hasFilters ? 'No chapters match your filters' : 'No chapters found for this project'}
             </p>
             {hasFilters && (
-              <button
-                onClick={() => { setFilterAssignee(''); setFilterStage(''); setFilterStatus('') }}
-                className="mt-3 text-xs text-primary hover:underline flex items-center gap-1"
-              >
+              <button onClick={() => { setFilterAssignee(''); setFilterStage(''); setFilterStatus('') }}
+                className="mt-3 text-xs text-primary hover:underline flex items-center gap-1">
                 <RotateCcw size={11} /> Clear filters
               </button>
             )}
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filtered.map(ch => (
-              <ChapterCard
-                key={ch.id}
-                chapter={ch}
-                users={users}
-                projectCode={project.project_code}
-                plannedDueDates={plannedDueDates}
-                onUpdate={handleChapterUpdate}
-                onViewDetails={ch => {
-                  const base = clientId
-                    ? `/clients/${clientId}/projects/${projectId}`
-                    : `/projects/${projectId}`
-                  navigate(`${base}/chapters/${ch.id}`)
-                }}
-              />
-            ))}
-          </div>
+          <>
+            {/* Large — full chapter cards (default) */}
+            {viewMode === 'large' && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filtered.map(ch => (
+                  <ChapterCard key={ch.id} chapter={ch} users={users}
+                    projectCode={project.code || project.project_code || null}
+                    plannedDueDates={plannedDueDates}
+                    onUpdate={handleChapterUpdate}
+                    onViewDetails={openChapter} />
+                ))}
+              </div>
+            )}
+
+            {/* Medium — compact 4-col cards */}
+            {viewMode === 'medium' && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                {filtered.map(ch => {
+                  const sm = statusMeta(ch.status)
+                  const info = ch.stage_name ? plannedDueDates.get(`${ch.chapters}||${ch.stage_name}`) : undefined
+                  const due = info?.due ?? ch.due_date
+                  const delayed = !!due && ch.status !== 'complete' && new Date(due) < new Date()
+                  return (
+                    <div key={ch.id} onClick={() => openChapter(ch)} className={`bg-card rounded-xl border border-border shadow-sm hover:shadow-md transition-all flex flex-col gap-1.5 p-3 cursor-pointer ${cardBorderCls(ch)}`}>
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-xs font-bold text-primary uppercase">{ch.chapters}</span>
+                        <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${sm.cls}`}>{sm.label}</span>
+                      </div>
+                      <p className="text-xs font-medium text-text line-clamp-2 leading-snug">{ch.chapter_title || ch.chapters}</p>
+                      {ch.stage_name && <span className="text-[9px] bg-primary/10 text-primary rounded px-1.5 py-0.5 w-fit font-semibold">{ch.stage_name}</span>}
+                      <div className="flex items-center justify-between text-[10px] text-muted mt-auto pt-1 border-t border-border">
+                        <span className="truncate">{ch.current_assignee_name ?? 'Unassigned'}</span>
+                        <span className={delayed ? 'text-red-500 font-semibold' : ''}>{formatDate(due)}</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* List — single-column rows */}
+            {viewMode === 'list' && (
+              <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
+                {filtered.map((ch, i) => {
+                  const sm = statusMeta(ch.status)
+                  const info = ch.stage_name ? plannedDueDates.get(`${ch.chapters}||${ch.stage_name}`) : undefined
+                  const due = info?.due ?? ch.due_date
+                  const delayed = !!due && ch.status !== 'complete' && new Date(due) < new Date()
+                  return (
+                    <div key={ch.id} onClick={() => openChapter(ch)}
+                      className={`flex items-center gap-4 px-5 py-3 cursor-pointer hover:bg-surface transition-colors ${i > 0 ? 'border-t border-border' : ''} ${cardBorderCls(ch).replace('border-l-4','border-l-[3px]')}`}>
+                      <span className="text-xs font-bold text-primary uppercase w-8 flex-shrink-0">{ch.chapters}</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-text truncate">{ch.chapter_title || ch.chapters}</p>
+                      </div>
+                      {ch.stage_name && <span className="text-[10px] bg-primary/10 text-primary rounded px-2 py-0.5 font-semibold whitespace-nowrap flex-shrink-0">{ch.stage_name}</span>}
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${sm.cls}`}>{sm.label}</span>
+                      <div className="relative flex items-center flex-shrink-0 w-28" onClick={e => e.stopPropagation()}>
+                        <select value={ch.current_assignee_name ?? ''}
+                          onChange={e => handleChapterUpdate(ch.id, { current_assignee_name: e.target.value || null } as any)}
+                          className="text-[11px] bg-background border border-border rounded-md pl-2 pr-5 py-0.5 text-text focus:outline-none appearance-none cursor-pointer w-full truncate">
+                          <option value="">— Unassigned —</option>
+                          {users.filter(u => u.active_status).map(u => <option key={u.id} value={u.user_name}>{u.user_name}</option>)}
+                        </select>
+                        <span className="pointer-events-none absolute right-1.5 text-muted text-[9px]">▾</span>
+                      </div>
+                      <span className={`text-xs flex-shrink-0 ${delayed ? 'text-red-600 font-semibold' : 'text-muted'}`}>{formatDate(due)}</span>
+                      <ChevronRight size={14} className="text-muted flex-shrink-0" />
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* Details — full table */}
+            {viewMode === 'details' && (
+              <div className="bg-card rounded-xl border border-border shadow-sm overflow-x-auto">
+                <table className="w-full text-sm border-collapse min-w-max">
+                  <thead>
+                    <tr className="border-b border-border bg-surface">
+                      {['#','Title','Stage','Status','Assignee','Due Date','MS Pages','Delayed'].map(h => (
+                        <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((ch, i) => {
+                      const sm = statusMeta(ch.status)
+                      const info = ch.stage_name ? plannedDueDates.get(`${ch.chapters}||${ch.stage_name}`) : undefined
+                      const due = info?.due ?? ch.due_date
+                      const delayed = !!due && ch.status !== 'complete' && new Date(due) < new Date()
+                      return (
+                        <tr key={ch.id} onClick={() => openChapter(ch)} className={`cursor-pointer hover:bg-surface transition-colors ${i > 0 ? 'border-t border-border' : ''}`}>
+                          <td className="px-4 py-3 font-bold text-primary text-xs uppercase">{ch.chapters}</td>
+                          <td className="px-4 py-3 font-semibold text-text max-w-xs truncate">{ch.chapter_title || ch.chapters}</td>
+                          <td className="px-4 py-3 text-xs">
+                            {ch.stage_name
+                              ? <span className="bg-primary/10 text-primary rounded px-2 py-0.5 font-semibold">{ch.stage_name}</span>
+                              : <span className="text-muted">—</span>}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${sm.cls}`}>{sm.label}</span>
+                          </td>
+                          <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                            <div className="relative flex items-center w-28">
+                              <select value={ch.current_assignee_name ?? ''}
+                                onChange={e => handleChapterUpdate(ch.id, { current_assignee_name: e.target.value || null } as any)}
+                                className="text-[11px] bg-background border border-border rounded-md pl-2 pr-5 py-0.5 text-text focus:outline-none appearance-none cursor-pointer w-full truncate">
+                                <option value="">— Unassigned —</option>
+                                {users.filter(u => u.active_status).map(u => <option key={u.id} value={u.user_name}>{u.user_name}</option>)}
+                              </select>
+                              <span className="pointer-events-none absolute right-1.5 text-muted text-[9px]">▾</span>
+                            </div>
+                          </td>
+                          <td className={`px-4 py-3 text-xs whitespace-nowrap ${delayed ? 'text-red-600 font-semibold' : 'text-muted'}`}>{formatDate(due)}</td>
+                          <td className="px-4 py-3 text-xs text-center text-muted">{ch.manuscript_pages ?? '—'}</td>
+                          <td className="px-4 py-3 text-center">
+                            {delayed
+                              ? <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200">Delayed</span>
+                              : <span className="text-[10px] text-muted">—</span>}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
         )}
       </div>
 

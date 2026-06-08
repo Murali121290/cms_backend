@@ -53,6 +53,7 @@ export function createProjectSummary(overrides: Partial<ProjectSummary> = {}): P
     id: 10,
     code: "BOOK100",
     title: "Book 100",
+    client_id: null,
     client_name: "Client A",
     xml_standard: "NLM",
     status: "In Progress",

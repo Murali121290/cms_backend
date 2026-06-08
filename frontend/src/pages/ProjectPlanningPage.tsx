@@ -89,12 +89,19 @@ export function ProjectPlanningPage() {
     if (!id) return
     setLoading(true)
     projectsApi.getById(id)
-      .then(async proj => {
+      .then(async response => {
+        const proj = response.project as unknown as Project
         setProject(proj)
+        const projectCode = proj.code || proj.project_code || ''
+        const workflowName = proj.workflow_type || proj.workflow_name || ''
+
+        // Ensure WMS chapter_details exist for this project
+        await import('@/api/client').then(m => m.default.post(`/projects/${id}/sync-chapters`)).catch(() => undefined)
+
         const [chs, wf, masters] = await Promise.all([
-          chaptersApi.getByProject(proj.project_code ?? '').catch(() => [] as Chapter[]),
-          proj.workflow_name
-            ? workflowsApi.getWorkflow(proj.workflow_name).catch(() => [] as WorkflowStage[])
+          chaptersApi.getByProject(projectCode).catch(() => [] as Chapter[]),
+          workflowName
+            ? workflowsApi.getWorkflow(workflowName).catch(() => [] as WorkflowStage[])
             : Promise.resolve([] as WorkflowStage[]),
           stagesApi.list().catch(() => [] as Stage[]),
         ])
@@ -117,7 +124,7 @@ export function ProjectPlanningPage() {
 
   const schedule = useMemo((): StageSchedule[] => {
     if (!project || orderedStages.length === 0) return []
-    return buildSchedule(orderedStages, masterMap, previewComposition, project.created_at)
+    return buildSchedule(orderedStages, masterMap, previewComposition, project.created_at || '')
   }, [project, orderedStages, masterMap, previewComposition])
 
   async function handleApprove() {
@@ -127,8 +134,9 @@ export function ProjectPlanningPage() {
       const lastDue    = schedule[schedule.length - 1].due
       const dueDateStr = lastDue.toISOString().split('T')[0]
       await projectsApi.update(project.id, { status: 'Active', due_date: dueDateStr })
-      if (project.project_code) {
-        await chaptersApi.bulkUpdateStatus(project.project_code, 'In-progress')
+      const prjCode = project.code || project.project_code
+      if (prjCode) {
+        await chaptersApi.bulkUpdateStatus(prjCode, 'In-progress')
       }
       toast.success('Planning approved — project is now Active')
       navigate(-1)
@@ -160,11 +168,11 @@ export function ProjectPlanningPage() {
           </button>
           <div>
             <h1 className="text-lg font-bold text-text">
-              {project.project_title || project.project_code || `Project #${project.id}`}
+              {project.project_title || project.title || project.code || project.project_code || `Project #${project.id}`}
             </h1>
             <p className="text-xs text-muted flex items-center gap-1.5 mt-0.5">
               <Layers size={11} />
-              {project.workflow_name || 'No workflow'} · Project Planning
+              {project.workflow_type || project.workflow_name || 'No workflow'} · Project Planning
             </p>
           </div>
         </div>

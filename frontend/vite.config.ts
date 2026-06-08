@@ -11,11 +11,9 @@ export default defineConfig(({ mode }) => {
   const currentDir = dirname(fileURLToPath(import.meta.url));
 
   return {
-    // In production the SPA is served under /ui/ by nginx.
-    // The base path ensures all asset references in index.html are prefixed
-    // with /ui/ so nginx can find them at /var/www/ui/assets/*.
-    // In development (npm run dev) the Vite server serves from root, so
-    // base stays "/" to keep the dev experience unchanged.
+    // In production (Docker) the SPA is served from / by nginx.
+    // In development (npm run dev) the Vite server also serves from root.
+    // Both use base: "/" so asset paths are consistent.
     base: "/",
 
     plugins: [tailwindcss(), react()],
@@ -49,6 +47,7 @@ export default defineConfig(({ mode }) => {
       css: false,
       restoreMocks: true,
       clearMocks: true,
+      exclude: ["e2e/**", "node_modules/**"],
     },
 
     server: {

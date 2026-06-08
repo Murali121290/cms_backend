@@ -100,7 +100,7 @@ function MiniActivityModal({ onCreated, onClose }: MiniActivityModalProps) {
 // ── Stage Modal ────────────────────────────────────────────────────────────────
 
 interface StageModalProps {
-  open: boolean
+  isOpen: boolean
   onClose: () => void
   onSaved: () => void
   initial?: Stage | null
@@ -123,7 +123,7 @@ const EMPTY_FORM: StageForm = {
   description: '', active_status: true, activity_ids: [],
 }
 
-function StageModal({ open, onClose, onSaved, initial, allActivities, onActivitiesRefresh }: StageModalProps) {
+function StageModal({ isOpen, onClose, onSaved, initial, allActivities, onActivitiesRefresh }: StageModalProps) {
   const [form, setForm] = useState<StageForm>(EMPTY_FORM)
   const [errors, setErrors] = useState<Partial<Record<keyof StageForm | 'general', string>>>({})
   const [saving, setSaving] = useState(false)
@@ -138,7 +138,7 @@ function StageModal({ open, onClose, onSaved, initial, allActivities, onActiviti
   useEffect(() => { setActivities(allActivities) }, [allActivities])
 
   useEffect(() => {
-    if (!open) return
+    if (!isOpen) return
     if (initial) {
       setForm({
         stage_name:  initial.stage_name,
@@ -155,7 +155,7 @@ function StageModal({ open, onClose, onSaved, initial, allActivities, onActiviti
     setErrors({})
     setActSearch('')
     setActDropOpen(false)
-  }, [open, initial])
+  }, [isOpen, initial])
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -253,7 +253,7 @@ function StageModal({ open, onClose, onSaved, initial, allActivities, onActiviti
     a.stage_activity_name.toLowerCase().includes(actSearch.toLowerCase()) && a.active_status
   )
 
-  if (!open) return null
+  if (!isOpen) return null
 
   return (
     <>
@@ -495,13 +495,13 @@ function StageModal({ open, onClose, onSaved, initial, allActivities, onActiviti
 // ── Activity Modal ─────────────────────────────────────────────────────────────
 
 interface ActivityModalProps {
-  open: boolean
+  isOpen: boolean
   onClose: () => void
   onSaved: () => void
   initial?: StageActivity | null
 }
 
-function ActivityModal({ open, onClose, onSaved, initial }: ActivityModalProps) {
+function ActivityModal({ isOpen, onClose, onSaved, initial }: ActivityModalProps) {
   const [name, setName] = useState('')
   const [desc, setDesc] = useState('')
   const [active, setActive] = useState(true)
@@ -509,13 +509,13 @@ function ActivityModal({ open, onClose, onSaved, initial }: ActivityModalProps) 
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    if (open) {
+    if (isOpen) {
       setName(initial?.stage_activity_name ?? '')
       setDesc(initial?.description ?? '')
       setActive(initial?.active_status ?? true)
       setErr('')
     }
-  }, [open, initial])
+  }, [isOpen, initial])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -541,7 +541,7 @@ function ActivityModal({ open, onClose, onSaved, initial }: ActivityModalProps) 
     }
   }
 
-  if (!open) return null
+  if (!isOpen) return null
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
@@ -1097,7 +1097,7 @@ export function StageManagement() {
 
       {/* ── Modals ── */}
       <StageModal
-        open={stageModalOpen}
+        isOpen={stageModalOpen}
         onClose={() => setStageModalOpen(false)}
         onSaved={loadAll}
         initial={editingStage}
@@ -1105,7 +1105,7 @@ export function StageManagement() {
         onActivitiesRefresh={loadActivities}
       />
       <ActivityModal
-        open={actModalOpen}
+        isOpen={actModalOpen}
         onClose={() => setActModalOpen(false)}
         onSaved={loadAll}
         initial={editingActivity}

@@ -478,8 +478,11 @@ export function StructuringReviewPage() {
         {/* ── TAB 2: EDITOR WORKSPACE ────────────────────────────── */}
         {(activeTab === "editor" || isFullscreen) && activeTab !== "onlyoffice" && (
           <div className="flex-1 flex flex-col min-h-0 page-enter">
-            <WysiwygEditor
-              ref={editorRef}
+            {xhtmlQuery.isPending ? (
+              <div style={{ padding: "24px", textAlign: "center" }}>Loading document…</div>
+            ) : (
+              <WysiwygEditor
+                ref={editorRef}
               key={`editor-${normalizedFileId}`}
               initialContent={xhtmlQuery.data?.content ?? ""}
               onSave={async (html) => {
@@ -548,6 +551,7 @@ export function StructuringReviewPage() {
                 </div>
               }
             />
+          )}
           </div>
         )}
 

@@ -11,6 +11,7 @@ import {
   LayoutDashboard,
   Loader2,
   LogOut,
+  Settings,
   ShieldCheck,
   Users,
 } from "lucide-react";
@@ -161,6 +162,11 @@ function Sidebar({
       to: uiPaths.adminUsers,
       icon: <Users className="w-[18px] h-[18px] flex-shrink-0" />,
     },
+    {
+      label: "Settings",
+      to: uiPaths.settings,
+      icon: <Settings className="w-[18px] h-[18px] flex-shrink-0" />,
+    },
   ];
 
   return (
@@ -171,19 +177,31 @@ function Sidebar({
       aria-label="Application sidebar"
     >
       {/* Logo area */}
-      <div className="h-16 px-4 border-b border-white/10 flex items-center justify-center">
-        {!collapsed && !logoError ? (
-          <img
-            alt="PubCMS logo"
-            className="h-6 w-auto object-contain"
-            src="/logo.png"
-            onError={() => setLogoError(true)}
-          />
-        ) : !collapsed ? (
-          <span className="font-semibold text-sm text-white">PubCMS</span>
+      <div className="h-16 px-3 border-b border-white/10 flex items-center">
+        {!collapsed ? (
+          <div className="flex items-center gap-2 min-w-0">
+            {!logoError ? (
+              <img
+                alt="S4Carlisle logo"
+                className="h-9 w-auto object-contain flex-shrink-0"
+                src="/logo.png"
+                onError={() => setLogoError(true)}
+              />
+            ) : (
+              <>
+                <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center text-white font-bold text-[10px] flex-shrink-0">
+                  S4
+                </div>
+                <div className="min-w-0">
+                  <p className="text-white font-bold text-xs leading-tight truncate">S4Carlisle</p>
+                  <p className="text-white/60 text-[10px] leading-tight truncate">Production Suite</p>
+                </div>
+              </>
+            )}
+          </div>
         ) : (
-          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-white font-bold text-xs">
-            P
+          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-white font-bold text-[10px] mx-auto">
+            S4
           </div>
         )}
       </div>

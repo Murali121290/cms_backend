@@ -4,7 +4,7 @@ import {
   X, Upload, File, CheckCircle2, AlertCircle,
   Loader2, AlertTriangle,
 } from 'lucide-react'
-import apiClient from '@/api/client'
+import apiClient, { getApiErrorMessage } from '@/api/client'
 import { toast } from '@/store/useToastStore'
 import { fileTypeIcon } from '@/config/fileManagerConfig'
 
@@ -149,8 +149,7 @@ export function BulkUploadModal({
           f.id === uf.id ? { ...f, status: 'success', progress: 100 } : f
         ))
       } catch (err: unknown) {
-        const detail = (err as { response?: { data?: { detail?: string } } })
-          ?.response?.data?.detail ?? (isDuplicate ? 'Replace failed' : 'Upload failed')
+        const detail = getApiErrorMessage(err, isDuplicate ? 'Replace failed' : 'Upload failed')
         setFiles(prev => prev.map(f =>
           f.id === uf.id ? { ...f, status: 'error', error: detail } : f
         ))

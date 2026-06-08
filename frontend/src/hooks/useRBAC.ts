@@ -1,9 +1,9 @@
-import { useAuthStore } from '@/store/useAuthStore'
+import { useSessionStore } from '@/stores/sessionStore'
 
 /**
  * Role-Based Access Control hook.
  *
- * Roles are checked dynamically against the user's role from the auth store —
+ * Roles are checked dynamically against the user's role from the session store —
  * no hardcoded role lists here. Allowed roles per route/page are defined at
  * the call site (e.g. in routes or RoleGuard), so adding a new role in the DB
  * never requires changing this file.
@@ -13,23 +13,27 @@ import { useAuthStore } from '@/store/useAuthStore'
  *   canAccess(['admin', 'manager'])  // true if user role is in that list
  */
 export function useRBAC() {
-  const user = useAuthStore(s => s.user)
-  const role = user?.role?.toLowerCase() ?? null
+  const viewer = useSessionStore(s => s.viewer)
+  const roleArray = viewer?.roles ?? []
 
-  /** True if the current user's role matches any of the given roles (case-insensitive). */
+  // Normalize roles: convert {name: string} | string to string[]
+  const roles = roleArray.map((r: any) => typeof r === 'string' ? r : r.name).filter(Boolean)
+
+  /** True if the current user has any of the given roles (case-insensitive). */
   function canAccess(allowedRoles: string[]): boolean {
-    if (!role) return false
-    return allowedRoles.map(r => r.toLowerCase()).includes(role)
+    if (!roles.length) return false
+    const allowed = allowedRoles.map(r => r.toLowerCase())
+    return roles.some(r => allowed.includes(r.toLowerCase()))
   }
 
-  /** True if the user has exactly this single role. */
+  /** True if the user has this role. */
   function hasRole(r: string): boolean {
-    return role === r.toLowerCase()
+    return roles.map(x => x.toLowerCase()).includes(r.toLowerCase())
   }
 
   return {
-    user,
-    role,
+    viewer,
+    roles,
     canAccess,
     hasRole,
     isAdmin:   hasRole('admin'),

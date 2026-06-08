@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { ArrowLeft, Plus, Search, Filter, Edit2, RefreshCw } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { usersApi, type User, type CreateUserPayload, type UpdateUserPayload } from '@/api/users'
-import { rolesApi, type Role } from '@/api/roles'
+import { rolesApi, type RolesMaster as Role } from '@/api/workflow'
 import { clientsApi } from '@/api/clients'
 import { toast } from '@/store/useToastStore'
 import { Badge, statusToBadge } from '@/components/ui/Badge'
@@ -40,7 +40,7 @@ function validateEdit(f: Partial<UpdateUserPayload>) {
 
 // ── Create User Modal ─────────────────────────────────────────────────────────
 interface CreateModalProps {
-  open: boolean
+  isOpen: boolean
   onClose: () => void
   onCreated: (u: User) => void
   roles: Role[]
@@ -49,7 +49,7 @@ interface CreateModalProps {
   customerOptions: { value: string; label: string }[]
 }
 
-function CreateUserModal({ open, onClose, onCreated, roles, users, teams, customerOptions }: CreateModalProps) {
+function CreateUserModal({ isOpen, onClose, onCreated, roles, users, teams, customerOptions }: CreateModalProps) {
   const [form, setForm] = useState<Partial<CreateUserPayload>>({ customer_access: [], active_status: true })
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(false)
@@ -90,9 +90,9 @@ function CreateUserModal({ open, onClose, onCreated, roles, users, teams, custom
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Create New User" size="lg" footer={
+    <Modal isOpen={isOpen} onClose={onClose} title="Create New User" size="lg" footer={
       <>
-        <Button variant="outline" onClick={onClose} disabled={loading}>Cancel</Button>
+        <Button variant="secondary" onClick={onClose} disabled={loading}>Cancel</Button>
         <Button onClick={handleSubmit} disabled={loading}>
           {loading ? <><Spinner size="sm" />Creating...</> : 'Save User'}
         </Button>
@@ -117,7 +117,7 @@ function CreateUserModal({ open, onClose, onCreated, roles, users, teams, custom
 
 // ── Edit User Modal ───────────────────────────────────────────────────────────
 interface EditModalProps {
-  open: boolean
+  isOpen: boolean
   onClose: () => void
   onUpdated: (u: User) => void
   user: User | null
@@ -126,7 +126,7 @@ interface EditModalProps {
   customerOptions: { value: string; label: string }[]
 }
 
-function EditUserModal({ open, onClose, onUpdated, user, roles, teams, customerOptions }: EditModalProps) {
+function EditUserModal({ isOpen, onClose, onUpdated, user, roles, teams, customerOptions }: EditModalProps) {
   const [form, setForm] = useState<Partial<UpdateUserPayload>>({})
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(false)
@@ -173,9 +173,9 @@ function EditUserModal({ open, onClose, onUpdated, user, roles, teams, customerO
   }
 
   return (
-    <Modal open={open} onClose={onClose} title={`Edit User — ${user?.user_name ?? ''}`} size="lg" footer={
+    <Modal isOpen={isOpen} onClose={onClose} title={`Edit User — ${user?.user_name ?? ''}`} size="lg" footer={
       <>
-        <Button variant="outline" onClick={onClose} disabled={loading}>Cancel</Button>
+        <Button variant="secondary" onClick={onClose} disabled={loading}>Cancel</Button>
         <Button onClick={handleSubmit} disabled={loading}>
           {loading ? <><Spinner size="sm" />Saving...</> : 'Save Changes'}
         </Button>
@@ -448,19 +448,19 @@ export function UserManagement() {
 
       {/* Modals */}
       <CreateUserModal
-        open={createOpen} onClose={() => setCreateOpen(false)}
+        isOpen={createOpen} onClose={() => setCreateOpen(false)}
         onCreated={u => setUsers(us => [u, ...us])}
         roles={roles} users={users}
         teams={teamOptions} customerOptions={customerOptions}
       />
       <EditUserModal
-        open={!!editUser} onClose={() => setEditUser(null)}
+        isOpen={!!editUser} onClose={() => setEditUser(null)}
         onUpdated={u => setUsers(us => us.map(x => x.id === u.id ? u : x))}
         user={editUser} roles={roles}
         teams={teamOptions} customerOptions={customerOptions}
       />
       <ConfirmDialog
-        open={!!confirmUser}
+        isOpen={!!confirmUser}
         onClose={() => setConfirmUser(null)}
         onConfirm={async () => {
           if (confirmUser) {

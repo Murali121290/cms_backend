@@ -1,4 +1,5 @@
 import os
+import shutil
 import tempfile
 import zipfile
 from datetime import datetime
@@ -150,6 +151,7 @@ def _serialize_admin_user(user: models.User):
         is_active=user.is_active,
         roles=[schemas_v2.AdminUserRole(id=role.id, name=role.name) for role in user.roles],
         team=user.team.name if user.team else None,
+        customer_access=user.customer_access or [],
     )
 
 
@@ -164,19 +166,49 @@ def _serialize_viewer(user: models.User):
 
 
 def _serialize_project_summary(project: models.Project):
+    from datetime import datetime as _dt
+    due = project.due_date.isoformat() if getattr(project, "due_date", None) else None
+    # Fall back to today for projects created before the created_at column was added
+    _cat_raw = getattr(project, "created_at", None)
+    cat = _cat_raw.isoformat() if _cat_raw else _dt.utcnow().date().isoformat()
+    uat = project.updated_at.isoformat() if getattr(project, "updated_at", None) else None
     return schemas_v2.ProjectSummary(
         id=project.id,
         code=project.code,
         title=project.title,
+        project_code=project.code,
+        project_title=project.title,
         client_id=project.client_id,
         client_name=project.client_name,
-        xml_standard=project.xml_standard,
+        customer_name=project.client_name,
+        xml_standard=project.xml_standard or "",
         status=project.status,
         team_id=project.team_id,
         chapter_count=len(project.chapters),
         file_count=len(project.files),
         workflow_type=getattr(project, "workflow_type", None),
+        workflow_name=getattr(project, "workflow_type", None),
         workflow_stage_no=getattr(project, "workflow_stage_no", None),
+        division_code=getattr(project, "division_code", None),
+        customer_contact=getattr(project, "customer_contact", None),
+        category=getattr(project, "category", None),
+        composition=getattr(project, "composition", None),
+        project_manager=getattr(project, "project_manager", None),
+        sales_person=getattr(project, "sales_person", None),
+        priority=getattr(project, "priority", None),
+        edition=getattr(project, "edition", None),
+        color=getattr(project, "color", None),
+        trim_size=getattr(project, "trim_size", None),
+        copyright_year=getattr(project, "copyright_year", None),
+        manuscript_pages=getattr(project, "manuscript_pages", None),
+        estimated_pages=getattr(project, "estimated_pages", None),
+        actual_pages=getattr(project, "actual_pages", None),
+        isbn_no=getattr(project, "isbn_no", None),
+        billing_location=getattr(project, "billing_location", None),
+        due_date=due,
+        file_details=getattr(project, "file_details", None),
+        created_at=cat,
+        updated_at=uat,
     )
 
 
@@ -518,7 +550,29 @@ def api_v2_projects_by_client(
             message="Authentication required.",
         )
 
-    projects = db.query(models.Project).filter(models.Project.client_id == client_id).all()
+    from sqlalchemy import or_
+    from app.domains.clients.models import Client as _Client
+
+    # Resolve client name for fallback match (projects created before client_id FK was stored)
+    client_obj = db.query(_Client).filter(_Client.id == client_id).first()
+    client_name = client_obj.company if client_obj else None
+
+    if client_name:
+        projects = db.query(models.Project).filter(
+            or_(
+                models.Project.client_id == client_id,
+                models.Project.client_name == client_name,
+            )
+        ).all()
+    else:
+        projects = db.query(models.Project).filter(models.Project.client_id == client_id).all()
+
+    # Back-fill client_id on projects that matched by name only
+    for p in projects:
+        if p.client_id != client_id:
+            p.client_id = client_id
+    db.commit()
+
     return [_serialize_project_summary(p) for p in projects]
 
 
@@ -734,10 +788,28 @@ def api_v2_activities(
 def api_v2_project_bootstrap(
     code: str = Form(...),
     title: str = Form(...),
+    client_id: int | None = Form(None),
     client_name: str | None = Form(None),
     xml_standard: str = Form(...),
     chapter_count: int = Form(...),
     workflow_type: str | None = Form(None),
+    workflow_name: str | None = Form(None),
+    division_code: str | None = Form(None),
+    customer_contact: str | None = Form(None),
+    category: str | None = Form(None),
+    composition: str | None = Form(None),
+    project_manager: str | None = Form(None),
+    sales_person: str | None = Form(None),
+    priority: str | None = Form(None),
+    edition: str | None = Form(None),
+    color: str | None = Form(None),
+    trim_size: str | None = Form(None),
+    copyright_year: int | None = Form(None),
+    manuscript_pages: int | None = Form(None),
+    estimated_pages: int | None = Form(None),
+    isbn_no: str | None = Form(None),
+    billing_location: str | None = Form(None),
+    due_date: str | None = Form(None),
     files: list[UploadFile] | None = FastAPIFile(None),
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
@@ -750,12 +822,14 @@ def api_v2_project_bootstrap(
             message="Authentication required.",
         )
 
-    if workflow_type and workflow_type not in _WORKFLOW_TYPE_IDS:
-        return _error_response(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            code="INVALID_WORKFLOW_TYPE",
-            message=f"Unknown workflow type: {workflow_type}",
-        )
+    if workflow_type:
+        db_workflows = {w.workflow_name for w in db.query(models.WorkflowMaster).all()}
+        if workflow_type not in db_workflows and workflow_type not in _WORKFLOW_TYPE_IDS:
+            return _error_response(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="INVALID_WORKFLOW_TYPE",
+                message=f"Unknown workflow type: {workflow_type}",
+            )
 
     try:
         project = project_service.create_project_with_initial_files(
@@ -795,11 +869,59 @@ def api_v2_project_bootstrap(
         .order_by(models.File.id.asc())
         .all()
     )
-    if workflow_type:
-        project.workflow_type = workflow_type
+    effective_workflow = workflow_name or workflow_type
+    if effective_workflow:
+        project.workflow_type = effective_workflow
         project.workflow_stage_no = "01"
-        db.commit()
+
+    if client_id is not None:
+        project.client_id = client_id
+        from app.domains.clients.models import Client as _Client
+        c = db.query(_Client).filter(_Client.id == client_id).first()
+        if c:
+            project.client_name = c.company
+
+    for _f in ("division_code", "customer_contact", "category", "composition",
+               "project_manager", "sales_person", "priority", "edition", "color",
+               "trim_size", "copyright_year", "manuscript_pages", "estimated_pages",
+               "isbn_no", "billing_location"):
+        _v = locals().get(_f)
+        if _v is not None:
+            setattr(project, _f, _v)
+
+    if due_date:
+        try:
+            from datetime import date as _date
+            project.due_date = _date.fromisoformat(due_date)
+        except ValueError:
+            pass
+
+    db.commit()
     db.refresh(project)
+
+    # Sync CMS chapters → WMS ChapterInfo records so planning page has data
+    from app.domains.workflow.models import ChapterInfo as _ChapterInfo
+    _existing_ci = {
+        ci.chapters for ci in db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code).all()
+    }
+    for _ch in chapters:
+        if _ch.number and _ch.number not in _existing_ci:
+            db.add(_ChapterInfo(
+                client=project.client_name or "",
+                project=project.code,
+                chapters=_ch.number,
+                chapter_title=_ch.title or f"Chapter {_ch.number}",
+                workflow=getattr(project, "workflow_type", None) or "",
+                status="Received",
+                complexity_level=getattr(project, "composition", None) or "Medium",
+                stage_level=1,
+                published_status="Draft",
+                priority=getattr(project, "priority", None) or "Normal",
+                project_manager_name=getattr(project, "project_manager", None) or None,
+            ))
+            _existing_ci.add(_ch.number)
+    db.commit()
+
     return schemas_v2.ProjectBootstrapResponse(
         project=_serialize_project_summary(project),
         chapters=[_serialize_chapter_summary(chapter) for chapter in chapters],
@@ -833,14 +955,41 @@ def api_v2_update_project(
 
     if payload.status is not None:
         project.status = payload.status
+    if payload.workflow_type is not None:
+        project.workflow_type = payload.workflow_type
+    if payload.workflow_stage_no is not None:
+        project.workflow_stage_no = payload.workflow_stage_no
     if payload.workflow_name is not None:
         project.workflow_type = payload.workflow_name
+    if payload.client_id is not None:
+        project.client_id = payload.client_id
+        from app.domains.clients.models import Client as _Client
+        c = db.query(_Client).filter(_Client.id == payload.client_id).first()
+        if c:
+            project.client_name = c.company
+
+    for _f in ("project_manager", "priority", "composition", "category", "edition",
+               "color", "trim_size", "copyright_year", "actual_pages", "division_code",
+               "customer_contact", "sales_person", "isbn_no", "billing_location"):
+        _v = getattr(payload, _f, None)
+        if _v is not None:
+            setattr(project, _f, _v)
+
+    if payload.due_date is not None:
+        if payload.due_date:
+            try:
+                from datetime import date as _date
+                project.due_date = _date.fromisoformat(payload.due_date)
+            except ValueError:
+                pass
+        else:
+            project.due_date = None
 
     db.commit()
     db.refresh(project)
 
     # Update related chapter_details in workflow schema if they exist
-    from app.domains.workflow.models import ChapterInfo, ChapterDetailStage
+    from app.domains.workflow.models import ChapterInfo, StageDetail
     from datetime import datetime
 
     update_dict = {}
@@ -862,8 +1011,8 @@ def api_v2_update_project(
         db.commit()
 
     if payload.project_manager is not None:
-        db.query(ChapterDetailStage).filter(ChapterDetailStage.project == project.code).update({
-            ChapterDetailStage.project_manager_name: payload.project_manager
+        db.query(StageDetail).filter(StageDetail.project == project.code).update({
+            StageDetail.project_manager_name: payload.project_manager
         }, synchronize_session=False)
         db.commit()
 
@@ -930,12 +1079,14 @@ def api_v2_update_project_workflow(
             message="Project not found.",
         )
 
-    if payload.workflow_type is not None and payload.workflow_type not in _WORKFLOW_TYPE_IDS:
-        return _error_response(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            code="INVALID_WORKFLOW_TYPE",
-            message=f"Unknown workflow type: {payload.workflow_type}",
-        )
+    if payload.workflow_type is not None:
+        db_workflows = {w.workflow_name for w in db.query(models.WorkflowMaster).all()}
+        if payload.workflow_type not in db_workflows and payload.workflow_type not in _WORKFLOW_TYPE_IDS:
+            return _error_response(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="INVALID_WORKFLOW_TYPE",
+                message=f"Unknown workflow type: {payload.workflow_type}",
+            )
 
     # Setting a workflow type (when none was set) seeds the first stage.
     if payload.workflow_type is not None:
@@ -1673,6 +1824,222 @@ def api_v2_upload_chapter_files(
     )
 
 
+@router.post(
+    "/uploads/{customer_code}/{project_code}",
+    response_model=schemas_v2.UploadZipResponse,
+)
+def api_v2_upload_zip(
+    customer_code: str,
+    project_code: str,
+    project_id: int = Form(...),
+    file: UploadFile = FastAPIFile(...),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+
+    temp_dir = tempfile.mkdtemp()
+    try:
+        zip_path = os.path.join(temp_dir, file.filename)
+        with open(zip_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        zip_archive_dir = os.path.join(file_service.UPLOAD_DIR, project.code)
+        os.makedirs(zip_archive_dir, exist_ok=True)
+        zip_archive_path = os.path.join(zip_archive_dir, f"{project.code}_manuscript.zip")
+        shutil.copy2(zip_path, zip_archive_path)
+
+        with zipfile.ZipFile(zip_path, "r") as z:
+            z.extractall(temp_dir)
+
+        import re
+        def extract_chapter_number(name: str) -> str | None:
+            name_lower = name.lower()
+            m = re.search(r'(?:chapter|chap|ch)[_\s-]*(\d+)', name_lower)
+            if m:
+                return f"{int(m.group(1)):02d}"
+            base = os.path.splitext(os.path.basename(name))[0]
+            m = re.match(r'^(\d+)', base)
+            if m:
+                return f"{int(m.group(1)):02d}"
+            m = re.search(r'(\d+)$', base)
+            if m:
+                return f"{int(m.group(1)):02d}"
+            m = re.search(r'(\d+)', base)
+            if m:
+                return f"{int(m.group(1)):02d}"
+            return None
+
+        def determine_category_and_type(name: str) -> tuple[str, str]:
+            ext = name.split(".")[-1].lower() if "." in name else ""
+            if ext in ["xml", "html", "xhtml"]:
+                return "XML", ext
+            elif ext in ["png", "jpg", "jpeg", "gif", "tiff", "tif", "svg", "eps"]:
+                return "Art", ext
+            elif ext in ["indd"]:
+                return "InDesign", ext
+            elif ext in ["pdf"] and "proof" in name.lower():
+                return "Proof", ext
+            else:
+                return "Manuscript", ext
+
+        chapters_list = []
+        images_list = []
+        xml_list = []
+        docs_list = []
+        
+        initial_chapters_count = db.query(models.Chapter).filter(models.Chapter.project_id == project.id).count()
+
+        for root, _, filenames in os.walk(temp_dir):
+            for fname in filenames:
+                if fname == file.filename or "__MACOSX" in root or fname.startswith("."):
+                    continue
+
+                full_path = os.path.join(root, fname)
+                rel_path = os.path.relpath(full_path, temp_dir)
+                category, ext = determine_category_and_type(fname)
+
+                chapter_no_str = extract_chapter_number(fname)
+                if not chapter_no_str:
+                    path_parts = rel_path.replace("\\", "/").split("/")
+                    for part in path_parts[:-1]:
+                        chapter_no_str = extract_chapter_number(part)
+                        if chapter_no_str:
+                            break
+
+                chapter = None
+                if chapter_no_str:
+                    chapter = db.query(models.Chapter).filter(
+                        models.Chapter.project_id == project.id,
+                        models.Chapter.number == chapter_no_str,
+                    ).first()
+                    if not chapter:
+                        chapter = models.Chapter(
+                            project_id=project.id,
+                            number=chapter_no_str,
+                            title=f"Chapter {chapter_no_str}",
+                        )
+                        db.add(chapter)
+                        db.commit()
+                        db.refresh(chapter)
+
+
+                if chapter:
+                    dest_dir = os.path.join(file_service.UPLOAD_DIR, project.code, chapter.number, category)
+                else:
+                    dest_dir = os.path.join(file_service.UPLOAD_DIR, project.code, "project_files", category)
+
+                os.makedirs(dest_dir, exist_ok=True)
+                dest_path = os.path.join(dest_dir, fname)
+                shutil.copy2(full_path, dest_path)
+
+                existing_file = db.query(models.File).filter(
+                    models.File.project_id == project.id,
+                    models.File.chapter_id == (chapter.id if chapter else None),
+                    models.File.category == category,
+                    models.File.filename == fname,
+                ).first()
+
+                if existing_file:
+                    version_service.archive_existing_file(
+                        db,
+                        existing_file=existing_file,
+                        base_path=dest_dir,
+                        uploaded_by_id=viewer.id,
+                    )
+                    existing_file.version += 1
+                    existing_file.uploaded_at = now_ist_naive()
+                    checkout_service.reset_checkout_after_overwrite(existing_file)
+                else:
+                    db_file = models.File(
+                        project_id=project.id,
+                        chapter_id=chapter.id if chapter else None,
+                        filename=fname,
+                        file_type=ext,
+                        category=category,
+                        path=dest_path,
+                        version=1,
+                        uploaded_at=now_ist_naive(),
+                    )
+                    db.add(db_file)
+
+                file_entry = {"file_name": fname, "path": dest_path}
+                if category == "Art":
+                    images_list.append(schemas_v2.UploadZipFileEntry(**file_entry))
+                elif category == "XML":
+                    xml_list.append(schemas_v2.UploadZipFileEntry(**file_entry))
+                elif category == "Manuscript":
+                    docs_list.append(schemas_v2.UploadZipFileEntry(**file_entry))
+                elif category == "Proof" or category == "InDesign":
+                    docs_list.append(schemas_v2.UploadZipFileEntry(**file_entry))
+
+                if chapter_no_str:
+                    chapter_no_int = int(chapter_no_str)
+                    chapters_list.append(
+                        schemas_v2.UploadZipChapterEntry(
+                            chapter_no=chapter_no_int,
+                            file_name=fname,
+                            path=dest_path,
+                        )
+                    )
+
+        db.commit()
+
+        # Sync: ensure every CMS chapter has a matching WMS ChapterInfo record
+        from app.domains.workflow.models import ChapterInfo as _ChapterInfo
+        all_cms_chapters = db.query(models.Chapter).filter(models.Chapter.project_id == project.id).all()
+        existing_ci_nums = {
+            ci.chapters for ci in db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code).all()
+        }
+        for _ch in all_cms_chapters:
+            if _ch.number and _ch.number not in existing_ci_nums:
+                db.add(_ChapterInfo(
+                    client=project.client_name or "",
+                    project=project.code,
+                    chapters=_ch.number,
+                    chapter_title=_ch.title or f"Chapter {_ch.number}",
+                    workflow=getattr(project, "workflow_type", None) or "",
+                    status="Received",
+                    complexity_level=getattr(project, "composition", None) or "Medium",
+                    stage_level=1,
+                    published_status="Draft",
+                    priority=getattr(project, "priority", None) or "Normal",
+                    project_manager_name=getattr(project, "project_manager", None) or None,
+                ))
+                existing_ci_nums.add(_ch.number)
+        db.commit()
+
+        final_chapters_count = db.query(models.Chapter).filter(models.Chapter.project_id == project.id).count()
+        chapters_inserted = final_chapters_count - initial_chapters_count
+        unique_extracted_chapters = len({c.chapter_no for c in chapters_list if c.chapter_no is not None})
+
+        return schemas_v2.UploadZipResponse(
+            zip_path=zip_archive_path,
+            extracted_path=os.path.abspath(zip_archive_dir),
+            total_chapters=unique_extracted_chapters,
+            chapters=chapters_list,
+            images=images_list,
+            xml=xml_list,
+            docs=docs_list,
+            chapters_inserted=chapters_inserted,
+        )
+
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 @router.get("/files/{file_id}/editor")
@@ -3444,6 +3811,7 @@ def api_v2_admin_create_user(
             password=payload.password,
             role_id=payload.role_id,
             team_name=payload.team_name,
+            customer_access=payload.customer_access,
         )
     except ValueError as exc:
         return _error_response(
@@ -3569,7 +3937,7 @@ def api_v2_admin_edit_user(
         )
 
     try:
-        target_user = admin_user_service.update_user_email(db, user_id=user_id, email=payload.email)
+        target_user = admin_user_service.update_user_email(db, user_id=user_id, email=payload.email, customer_access=payload.customer_access)
     except LookupError:
         return _error_response(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -3738,4 +4106,37 @@ def api_v2_bulk_update_status(project: str, payload: BulkUpdateStatusPayload, db
     )
     db.commit()
     return {"updated": result.rowcount}
+
+
+@router.post("/projects/{project_id}/sync-chapters")
+def api_v2_sync_chapters(project_id: int, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
+    """Sync CMS chapters → WMS chapter_details for projects created before auto-sync was added."""
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(status_code=status.HTTP_401_UNAUTHORIZED, code="AUTH_REQUIRED", message="Authentication required.")
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="PROJECT_NOT_FOUND", message="Project not found.")
+    cms_chapters = db.query(models.Chapter).filter(models.Chapter.project_id == project.id).all()
+    existing_nums = {ci.chapters for ci in db.query(ChapterInfo).filter(ChapterInfo.project == project.code).all()}
+    created = 0
+    for ch in cms_chapters:
+        if ch.number and ch.number not in existing_nums:
+            db.add(ChapterInfo(
+                client=project.client_name or "",
+                project=project.code,
+                chapters=ch.number,
+                chapter_title=ch.title or f"Chapter {ch.number}",
+                workflow=getattr(project, "workflow_type", None) or "",
+                status="Received",
+                complexity_level=getattr(project, "composition", None) or "Medium",
+                stage_level=1,
+                published_status="Draft",
+                priority=getattr(project, "priority", None) or "Normal",
+                project_manager_name=getattr(project, "project_manager", None) or None,
+            ))
+            existing_nums.add(ch.number)
+            created += 1
+    db.commit()
+    return {"synced": created, "total_chapters": len(cms_chapters)}
 
