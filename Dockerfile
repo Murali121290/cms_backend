@@ -42,6 +42,8 @@ COPY app ./app
 RUN pip install --no-build-isolation -e /app/app/processing/manuscript_core/
 COPY alembic ./alembic
 COPY migrations ./migrations
+COPY entrypoint.sh ./
+RUN chmod +x /app/entrypoint.sh
 
 RUN mkdir -p \
     /opt/cms_runtime/data/uploads \
@@ -55,6 +57,7 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=5 \
     CMD curl -fsS http://localhost:8000/ > /dev/null || exit 1
 
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["gunicorn", \
     "--workers", "4", \
     "--worker-class", "uvicorn.workers.UvicornWorker", \
