@@ -41,7 +41,6 @@ COPY alembic.ini ./
 COPY app ./app
 RUN pip install --no-build-isolation -e /app/app/processing/manuscript_core/
 COPY alembic ./alembic
-COPY migrations ./migrations
 COPY seed.py ./
 COPY entrypoint.sh ./
 RUN chmod +x /app/entrypoint.sh
