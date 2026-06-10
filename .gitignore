@@ -45,7 +45,6 @@ desktop.ini
 cms.db
 *.sqlite
 *.db
-data/
 uploads/
 outputs/
 temp_reports/
