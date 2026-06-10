@@ -164,10 +164,13 @@ class XhtmlToDocxDeltaEngine:
             if not bm_name:
                 continue
 
-            new_style = block_el.get("data-style-label") or block_el.get("class", "")
-            new_style = new_style.split()[0] if new_style.strip() else "Normal"
-            if new_style in ("Normal", "MsoNormal", ""):
-                new_style = "Normal"
+            if block_el.tag == "li":
+                new_style = _determine_list_style(block_el)
+            else:
+                new_style = block_el.get("data-style-label") or block_el.get("class", "")
+                new_style = new_style.split()[0] if new_style.strip() else "Normal"
+                if new_style in ("Normal", "MsoNormal", ""):
+                    new_style = "Normal"
 
             # 1. Retrieve the exact paragraph node in the body, table cells, or footnote parts
             para = _find_para_by_bookmark(doc, bm_name)
@@ -202,6 +205,12 @@ class XhtmlToDocxDeltaEngine:
                 logger.warning(f"Failed to patch runs for paragraph bookmark {bm_name}: {exc}", exc_info=True)
 
         logger.info(f"Lossless Bookmark Delta patch: {patched} paragraph(s) updated in-place.")
+
+        # Apply final manuscript formatting (Times New Roman, 12pt, double spacing)
+        try:
+            apply_final_docx_formatting(doc)
+        except Exception as fmt_err:
+            logger.warning(f"Failed to apply final document formatting in delta: {fmt_err}")
 
         # Save atomically
         tmp_path = out_docx_path + ".delta.tmp"
@@ -255,7 +264,7 @@ class XhtmlToDocxDeltaEngine:
                     styles[key.strip().lower()] = val.strip()
             return styles
 
-        def add_rich_run(parent_element, text, bold=False, italic=False, underline=False, color=None, bg_color=None, font_size=None, superscript=False, subscript=False, is_link=False, is_del=False, char_style=None):
+        def add_rich_run(parent_element, text, bold=False, italic=False, underline=False, color=None, bg_color=None, font_size=None, font_name=None, superscript=False, subscript=False, is_link=False, is_del=False, char_style=None):
             if not text:
                 return
             r = OxmlElement('w:r')
@@ -303,6 +312,13 @@ class XhtmlToDocxDeltaEngine:
                 rPr.append(sz)
                 rPr.append(szCs)
                 has_rPr = True
+            if font_name:
+                rFonts = OxmlElement('w:rFonts')
+                rFonts.set(qn('w:ascii'), font_name)
+                rFonts.set(qn('w:hAnsi'), font_name)
+                rFonts.set(qn('w:cs'), font_name)
+                rPr.append(rFonts)
+                has_rPr = True
             if superscript:
                 va = OxmlElement('w:vertAlign')
                 va.set(qn('w:val'), 'superscript')
@@ -345,7 +361,7 @@ class XhtmlToDocxDeltaEngine:
             process_content_fn(parent_xml)
             parent_xml.append(bm_end)
 
-        def traverse(el, parent_xml, bold=False, italic=False, underline=False, color=None, bg_color=None, font_size=None, superscript=False, subscript=False, is_link=False, char_style=None):
+        def traverse(el, parent_xml, bold=False, italic=False, underline=False, color=None, bg_color=None, font_size=None, font_name=None, superscript=False, subscript=False, is_link=False, char_style=None):
             tag = el.tag.split('}')[-1].lower() if isinstance(el.tag, str) else ""
 
             style_str = el.get("style", "")
@@ -406,6 +422,11 @@ class XhtmlToDocxDeltaEngine:
                 date = el.get("data-date") or timestamp
                 
                 # 1. Deletion
+                # Parse font-family
+                node_font_name = font_name
+                if "font-family" in styles:
+                    node_font_name = styles["font-family"].strip().replace("'", "").replace('"', '')
+
                 original_text = el.text or ""
                 for child in el:
                     original_text += child.text or ""
@@ -422,7 +443,7 @@ class XhtmlToDocxDeltaEngine:
                     add_rich_run(
                         del_node, original_text,
                         bold=current_bold, italic=current_italic, underline=current_underline,
-                        color=node_color, bg_color=None, font_size=node_font_size,
+                        color=node_color, bg_color=None, font_size=node_font_size, font_name=node_font_name,
                         superscript=current_super, subscript=current_sub, is_link=current_link,
                         is_del=True, char_style=node_char_style
                     )
@@ -439,7 +460,7 @@ class XhtmlToDocxDeltaEngine:
                     add_rich_run(
                         ins_node, replacement_text,
                         bold=current_bold, italic=current_italic, underline=current_underline,
-                        color=node_color, bg_color=None, font_size=node_font_size,
+                        color=node_color, bg_color=None, font_size=node_font_size, font_name=node_font_name,
                         superscript=current_super, subscript=current_sub, is_link=current_link,
                         is_del=False, char_style=node_char_style
                     )
@@ -450,7 +471,7 @@ class XhtmlToDocxDeltaEngine:
                     add_rich_run(
                         parent_xml, el.tail,
                         bold=bold, italic=italic, underline=underline,
-                        color=color, bg_color=bg_color, font_size=font_size,
+                        color=color, bg_color=bg_color, font_size=font_size, font_name=font_name,
                         superscript=superscript, subscript=subscript, is_link=is_link,
                         is_del=False, char_style=char_style
                     )
@@ -513,7 +534,7 @@ class XhtmlToDocxDeltaEngine:
                         add_rich_run(
                             current_xml_parent, el.text,
                             bold=current_bold, italic=current_italic, underline=current_underline,
-                            color=node_color, bg_color=node_bg, font_size=node_font_size,
+                            color=node_color, bg_color=node_bg, font_size=node_font_size, font_name=node_font_name,
                             superscript=current_super, subscript=current_sub, is_link=current_link,
                             is_del=is_del, char_style=node_char_style
                         )
@@ -522,7 +543,7 @@ class XhtmlToDocxDeltaEngine:
                     add_rich_run(
                         parent_xml, el.tail,
                         bold=bold, italic=italic, underline=underline,
-                        color=color, bg_color=bg_color, font_size=font_size,
+                        color=color, bg_color=bg_color, font_size=font_size, font_name=font_name,
                         superscript=superscript, subscript=subscript, is_link=is_link,
                         is_del=False, char_style=char_style
                     )
@@ -535,12 +556,17 @@ class XhtmlToDocxDeltaEngine:
                 bm_name = f"r_bm_{unique_id}"
                 el.set("data-bookmark", bm_name)
 
+            # Parse font-family
+            node_font_name = font_name
+            if "font-family" in styles:
+                node_font_name = styles["font-family"].strip().replace("'", "").replace('"', '')
+
             def process_text_and_children(xml_parent):
                 if el.text:
                     add_rich_run(
                         xml_parent, el.text,
                         bold=current_bold, italic=current_italic, underline=current_underline,
-                        color=node_color, bg_color=node_bg, font_size=node_font_size,
+                        color=node_color, bg_color=node_bg, font_size=node_font_size, font_name=node_font_name,
                         superscript=current_super, subscript=current_sub, is_link=current_link,
                         is_del=is_del, char_style=node_char_style
                     )
@@ -548,7 +574,7 @@ class XhtmlToDocxDeltaEngine:
                     traverse(
                         child, xml_parent,
                         bold=current_bold, italic=current_italic, underline=current_underline,
-                        color=node_color, bg_color=node_bg, font_size=node_font_size,
+                        color=node_color, bg_color=node_bg, font_size=node_font_size, font_name=node_font_name,
                         superscript=current_super, subscript=current_sub, is_link=current_link,
                         char_style=node_char_style
                     )
@@ -562,7 +588,7 @@ class XhtmlToDocxDeltaEngine:
                 add_rich_run(
                     parent_xml, el.tail,
                     bold=bold, italic=italic, underline=underline,
-                    color=color, bg_color=bg_color, font_size=font_size,
+                    color=color, bg_color=bg_color, font_size=font_size, font_name=font_name,
                     superscript=superscript, subscript=subscript, is_link=is_link,
                     is_del=False, char_style=char_style
                 )
@@ -580,6 +606,10 @@ class XhtmlToDocxDeltaEngine:
             bg_val = root_styles["background-color"].strip()
             if bg_val.startswith("#"):
                 root_bg = bg_val.replace("#", "")
+        elif "background" in root_styles:
+            bg_val = root_styles["background"].strip()
+            if bg_val.startswith("#"):
+                root_bg = bg_val.replace("#", "")
         root_font_size = None
         if "font-size" in root_styles:
             sz_val = root_styles["font-size"].strip()
@@ -591,10 +621,75 @@ class XhtmlToDocxDeltaEngine:
                     root_font_size = round(val * 0.75, 1)
                 else:
                     root_font_size = val
+        root_font_name = None
+        if "font-family" in root_styles:
+            root_font_name = root_styles["font-family"].strip().replace("'", "").replace('"', '')
 
         # Begin traversal
         if html_el.text:
-            add_rich_run(p_elem, html_el.text, color=root_color, bg_color=root_bg, font_size=root_font_size)
+            add_rich_run(p_elem, html_el.text, color=root_color, bg_color=root_bg, font_size=root_font_size, font_name=root_font_name)
 
         for child in html_el:
-            traverse(child, p_elem, color=root_color, bg_color=root_bg, font_size=root_font_size)
+            traverse(child, p_elem, color=root_color, bg_color=root_bg, font_size=root_font_size, font_name=root_font_name)
+
+
+def _determine_list_style(li_el) -> str:
+    # Walk up ancestors to count list containers
+    parent = li_el.getparent()
+    list_containers = []
+    while parent is not None:
+        if parent.tag in ("ul", "ol"):
+            list_containers.append(parent.tag)
+        parent = parent.getparent()
+    
+    if not list_containers:
+        return "Normal"
+    
+    # The immediate list container is the first one in the list
+    immediate_type = "bullet" if list_containers[0] == "ul" else "number"
+    depth = len(list_containers)
+    
+    base_style = "List Bullet" if immediate_type == "bullet" else "List Number"
+    if depth == 1:
+        return base_style
+    else:
+        return f"{base_style} {depth}"
+
+
+def apply_final_docx_formatting(doc):
+    from docx.shared import Pt
+    # 1. Update Normal style
+    try:
+        normal_style = doc.styles['Normal']
+        normal_style.font.name = 'Times New Roman'
+        normal_style.font.size = Pt(12)
+        normal_style.paragraph_format.line_spacing = 2.0
+    except Exception as e:
+        logger.warning(f"Could not set Normal style formatting in delta: {e}")
+
+    # 2. Iterate over all paragraphs (body + tables)
+    # Ensure they are Times New Roman, 12pt, double spacing, unless they have explicit overrides
+    for para in doc.paragraphs:
+        style_name = para.style.name if para.style else "Normal"
+        
+        is_list = "list" in style_name.lower() or "bullet" in style_name.lower() or "number" in style_name.lower()
+        is_extract = any(x in style_name.lower() for x in ("extract", "quote", "ex"))
+        
+        if not is_list and not is_extract:
+            para.paragraph_format.line_spacing = 2.0
+            
+        for run in para.runs:
+            if not run.font.name:
+                run.font.name = 'Times New Roman'
+            if not run.font.size:
+                run.font.size = Pt(12)
+
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for para in cell.paragraphs:
+                    for run in para.runs:
+                        if not run.font.name:
+                            run.font.name = 'Times New Roman'
+                        if not run.font.size:
+                            run.font.size = Pt(12)

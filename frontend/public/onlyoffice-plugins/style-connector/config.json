@@ -1,0 +1,21 @@
+{
+  "guid": "asc.{4c1b92a4-793d-4251-ba23-1451e06eeafd}",
+  "name": "Style Connector",
+  "variations": [
+    {
+      "description": "Style Connector Plugin",
+      "url": "index.html",
+      "icons": [
+        "icon.png",
+        "icon@2x.png"
+      ],
+      "isViewer": false,
+      "isVisual": false,
+      "isModal": false,
+      "isInsideMode": true,
+      "initDataType": "none",
+      "initData": "",
+      "buttons": []
+    }
+  ]
+}

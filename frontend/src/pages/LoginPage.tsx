@@ -398,7 +398,7 @@ export function LoginPage() {
   }
 
   if (sessionQuery.data?.authenticated) {
-    return <Navigate replace to={uiPaths.dashboard} />
+    return <Navigate replace to={from} />
   }
 
   const errorMsg = loginMutation.isError

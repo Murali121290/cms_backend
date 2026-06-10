@@ -1,1097 +1,777 @@
 """
-Seed script — inserts sample data into the database.
-Run with:  python seed.py   (from the backend/ directory)
-
-Safe to re-run: skips rows that already exist.
+Auto-generated seed script containing a dump of the current database.
+Run with: python seed.py
 """
 
-import sys
 import os
+import sys
+import datetime
 
 sys.stdout.reconfigure(encoding="utf-8")
-
-import bcrypt
-from sqlalchemy.exc import IntegrityError
-
 sys.path.insert(0, os.path.dirname(__file__))
 
-from app.database import SessionLocal
-from app.models import User, Project
+from app.database import SessionLocal, Base, engine
+from app.models import Role, Team, User, UserRole, Project, Chapter, File, FileVersion, ProjectStylesheet
 from app.domains.clients.models import Client
-from app.domains.workflow.models import (
-    RolesMaster,
-    StageMaster,
-    StageActivityMaster,
-    ChapterInfo,
-    StageDetail,
-)
+from app.domains.workflow.models import RolesMaster, StageActivityMaster, StageMaster, StageDetail, WorkflowMaster, ChapterInfo
 
 def create_tables():
-    from app.database import Base, engine
-    from app import models as cms_models
-    from app.domains.clients.models import Client as _Client
-    from app.domains.workflow.models import RolesMaster as _RolesMaster
     Base.metadata.create_all(bind=engine)
 
-
-def hash_pw(plain: str) -> str:
-    return bcrypt.hashpw(plain.encode(), bcrypt.gensalt()).decode()
-
-
-# ── Sample data ───────────────────────────────────────────────────────────────
-SAMPLE_ROLES = [
-    # Admin Team
-    {"role_name": "admin",                 "team": "Admin Team",          "description": "Full system access — all modules and settings",                   "active_status": True},
-    # Preediting Team
-    {"role_name": "manager",               "team": "Preediting Team",     "description": "Team and project management for the pre-editing workflow",         "active_status": True},
-    {"role_name": "pereditor",             "team": "Preediting Team",     "description": "Pre-editing review and content preparation",                       "active_status": True},
-    # Copyediting Team  (manager role reused in a different team)
-    {"role_name": "manager",               "team": "Copyediting Team",    "description": "Team and project management for the copyediting workflow",         "active_status": True},
-    {"role_name": "copyeditor",            "team": "Copyediting Team",    "description": "Language and style editing of manuscript content",                 "active_status": True},
-    {"role_name": "technical_copyeditor",  "team": "Copyediting Team",    "description": "Technical accuracy review and domain-specific copyediting",        "active_status": True},
-    # Typesetting Team
-    {"role_name": "manager",               "team": "Typesetting Team",    "description": "Team and project management for the typesetting workflow",         "active_status": True},
-    {"role_name": "typesetter",            "team": "Typesetting Team",    "description": "Page layout, formatting and typesetting of final manuscripts",     "active_status": True},
-    # QA Team
-    {"role_name": "manager",               "team": "QA Team",             "description": "Team and project management for quality assurance",                "active_status": True},
-    {"role_name": "qa_reviewer",           "team": "QA Team",             "description": "Quality assurance review and sign-off on deliverables",            "active_status": True},
-    # Operations Team
-    {"role_name": "operations_manager",    "team": "Operations Team",     "description": "Operations oversight — workflows, scheduling and capacity",        "active_status": True},
-    # Finance Team
-    {"role_name": "finance_analyst",       "team": "Finance Team",        "description": "Finance module — read/write access to billing and invoicing data", "active_status": True},
-    # Support Team
-    {"role_name": "support",               "team": "Support Team",        "description": "Customer support — ticket handling and client communication",      "active_status": True},
-    # General
-    {"role_name": "viewer",                "team": "General",             "description": "Read-only access across all permitted modules",                    "active_status": False},
-]
-
-SAMPLE_USERS = [
-    {"user_name": "admin_hema",     "email": "hema.admin@wms.com",     "password": "Admin@1234",    "role": "admin",    "team": "IT",          "customer_access": ["CUST001", "CUST002", "CUST003", "CUST004", "CUST005"], "active_status": True},
-    {"user_name": "john_doe",       "email": "john.doe@wms.com",       "password": "John@5678",     "role": "manager",  "team": "Sales",       "customer_access": ["CUST001", "CUST002"],                                   "active_status": True},
-    {"user_name": "jane_smith",     "email": "jane.smith@wms.com",     "password": "Jane@9012",     "role": "developer","team": "Engineering", "customer_access": ["CUST002"],                                              "active_status": True},
-    {"user_name": "bob_wilson",     "email": "bob.wilson@wms.com",     "password": "Bob@3456",      "role": "analyst",  "team": "Data",        "customer_access": ["CUST003"],                                              "active_status": True},
-    {"user_name": "alice_johnson",  "email": "alice.johnson@wms.com",  "password": "Alice@7890",    "role": "developer","team": "Engineering", "customer_access": ["CUST001"],                                              "active_status": True},
-    {"user_name": "charlie_brown",  "email": "charlie.brown@wms.com",  "password": "Charlie@2345",  "role": "manager",  "team": "Operations",  "customer_access": ["CUST001", "CUST002", "CUST003"],                        "active_status": True},
-    {"user_name": "diana_prince",   "email": "diana.prince@wms.com",   "password": "Diana@6789",    "role": "analyst",  "team": "Finance",     "customer_access": ["CUST004"],                                              "active_status": False},
-    {"user_name": "evan_rogers",    "email": "evan.rogers@wms.com",    "password": "Evan@1357",     "role": "developer","team": "Engineering", "customer_access": ["CUST002", "CUST003"],                                   "active_status": True},
-    {"user_name": "fiona_apple",    "email": "fiona.apple@wms.com",    "password": "Fiona@2468",    "role": "designer", "team": "UX",          "customer_access": ["CUST001", "CUST003"],                                   "active_status": True},
-    {"user_name": "george_martin",  "email": "george.martin@wms.com",  "password": "George@1122",   "role": "manager",  "team": "HR",          "customer_access": ["CUST001", "CUST002", "CUST003", "CUST004"],             "active_status": True},
-]
-
-SAMPLE_PROJECTS = [
-    {
-        "client_division": "CUST001", "project_code": "PRJ-001",
-        "customer_name": "Acme Corporation",    "division_code": "CUST001",
-        "customer_contact": "Alice Turner",     "category": "Software Development",
-        "workflow_name": "Agile Sprint",        "status": "Active",
-        "project_manager": "john_doe",          "sales_person": "John Doe",
-        "priority": "High",                     "project_title": "Enterprise ERP Integration Platform",
-        "edition": "1st",  "color": "Full Color",  "trim_size": "8.5x11",
-        "copyright_year": 2024, "manuscript_pages": 300, "estimated_pages": 320, "actual_pages": 150,
-        "isbn_10": "1234567890", "isbn_13": "9781234567897", "billing_location": "San Francisco, CA",
-    },
-    {
-        "client_division": "CUST001", "project_code": "PRJ-002",
-        "customer_name": "Acme Corporation",    "division_code": "CUST001",
-        "customer_contact": "Alice Turner",     "category": "Cloud Migration",
-        "workflow_name": "DevOps Pipeline",     "status": "Planning",
-        "project_manager": "charlie_brown",     "sales_person": "Jane Smith",
-        "priority": "Medium",                   "project_title": "Cloud Infrastructure Migration Phase 2",
-        "edition": "2nd",  "color": "Black & White",  "trim_size": "6x9",
-        "copyright_year": 2024, "manuscript_pages": 150, "estimated_pages": 160, "actual_pages": 0,
-        "isbn_10": "2345678901", "isbn_13": "9782345678904", "billing_location": "San Francisco, CA",
-    },
-    {
-        "client_division": "CUST002", "project_code": "PRJ-003",
-        "customer_name": "Beta Technologies",   "division_code": "CUST002",
-        "customer_contact": "Brian Scott",      "category": "DevOps",
-        "workflow_name": "CI/CD Workflow",      "status": "Active",
-        "project_manager": "charlie_brown",     "sales_person": "Charlie Brown",
-        "priority": "High",                     "project_title": "Automated Deployment Pipeline Setup",
-        "edition": "1st",  "color": "Full Color",  "trim_size": "7x10",
-        "copyright_year": 2024, "manuscript_pages": 200, "estimated_pages": 210, "actual_pages": 180,
-        "isbn_10": "3456789012", "isbn_13": "9783456789011", "billing_location": "Austin, TX",
-    },
-    {
-        "client_division": "CUST003", "project_code": "PRJ-004",
-        "customer_name": "Gamma Retail Group",  "division_code": "CUST003",
-        "customer_contact": "Catherine Wong",   "category": "E-commerce",
-        "workflow_name": "Retail Workflow",     "status": "Active",
-        "project_manager": "john_doe",          "sales_person": "John Doe",
-        "priority": "High",                     "project_title": "Multi-Channel E-commerce Platform",
-        "edition": "1st",  "color": "Full Color",  "trim_size": "8.5x11",
-        "copyright_year": 2025, "manuscript_pages": 400, "estimated_pages": 420, "actual_pages": 200,
-        "isbn_10": "4567890123", "isbn_13": "9784567890128", "billing_location": "Chicago, IL",
-    },
-    {
-        "client_division": "CUST004", "project_code": "PRJ-005",
-        "customer_name": "Delta Finance Ltd",   "division_code": "CUST004",
-        "customer_contact": "David Patel",      "category": "Fintech",
-        "workflow_name": "Banking Workflow",    "status": "Active",
-        "project_manager": "george_martin",     "sales_person": "Alice Johnson",
-        "priority": "High",                     "project_title": "Core Banking System Modernisation",
-        "edition": "3rd",  "color": "Black & White",  "trim_size": "6x9",
-        "copyright_year": 2024, "manuscript_pages": 500, "estimated_pages": 520, "actual_pages": 510,
-        "isbn_10": "5678901234", "isbn_13": "9785678901235", "billing_location": "New York, NY",
-    },
-    {
-        "client_division": "CUST005", "project_code": "PRJ-006",
-        "customer_name": "Epsilon Healthcare",  "division_code": "CUST005",
-        "customer_contact": "Eva Martins",      "category": "Healthcare IT",
-        "workflow_name": "HMS Workflow",        "status": "Active",
-        "project_manager": "george_martin",     "sales_person": "George Martin",
-        "priority": "High",                     "project_title": "Hospital Management System Integration",
-        "edition": "2nd",  "color": "Full Color",  "trim_size": "8x10",
-        "copyright_year": 2025, "manuscript_pages": 350, "estimated_pages": 360, "actual_pages": 120,
-        "isbn_10": "6789012345", "isbn_13": "9786789012342", "billing_location": "Boston, MA",
-    },
-    {
-        "client_division": "CUST006", "project_code": "PRJ-007",
-        "customer_name": "Zeta Logistics",      "division_code": "CUST006",
-        "customer_contact": "Frank Nguyen",     "category": "Logistics",
-        "workflow_name": "Fleet Workflow",      "status": "Active",
-        "project_manager": "charlie_brown",     "sales_person": "Bob Wilson",
-        "priority": "Medium",                   "project_title": "Real-Time Fleet Tracking Dashboard",
-        "edition": "1st",  "color": "Full Color",  "trim_size": "11x8.5",
-        "copyright_year": 2025, "manuscript_pages": 180, "estimated_pages": 190, "actual_pages": 90,
-        "isbn_10": "7890123456", "isbn_13": "9787890123459", "billing_location": "Dallas, TX",
-    },
-    {
-        "client_division": "CUST007", "project_code": "PRJ-008",
-        "customer_name": "Eta Media Group",     "division_code": "CUST007",
-        "customer_contact": "Grace Kim",        "category": "Media",
-        "workflow_name": "Content Workflow",    "status": "Completed",
-        "project_manager": "john_doe",          "sales_person": "Fiona Apple",
-        "priority": "Low",                      "project_title": "Streaming Platform Content Management System",
-        "edition": "1st",  "color": "Full Color",  "trim_size": "6x9",
-        "copyright_year": 2023, "manuscript_pages": 220, "estimated_pages": 230, "actual_pages": 230,
-        "isbn_10": "8901234567", "isbn_13": "9788901234566", "billing_location": "Los Angeles, CA",
-    },
-    {
-        "client_division": "CUST009", "project_code": "PRJ-009",
-        "customer_name": "Iota Education Hub",  "division_code": "CUST009",
-        "customer_contact": "Isla Fernandez",   "category": "EdTech",
-        "workflow_name": "LMS Workflow",        "status": "Planning",
-        "project_manager": "george_martin",     "sales_person": "Diana Prince",
-        "priority": "Medium",                   "project_title": "Learning Management System with AI Tutor",
-        "edition": "1st",  "color": "Full Color",  "trim_size": "8.5x11",
-        "copyright_year": 2025, "manuscript_pages": 250, "estimated_pages": 270, "actual_pages": 0,
-        "isbn_10": "9012345678", "isbn_13": "9789012345673", "billing_location": "Seattle, WA",
-    },
-    {
-        "client_division": "CUST010", "project_code": "PRJ-010",
-        "customer_name": "Kappa Manufacturing", "division_code": "CUST010",
-        "customer_contact": "Kevin Zhao",       "category": "IoT",
-        "workflow_name": "Factory Workflow",    "status": "Active",
-        "project_manager": "charlie_brown",     "sales_person": "Evan Rogers",
-        "priority": "High",                     "project_title": "Smart Factory IoT Automation System",
-        "edition": "1st",  "color": "Black & White",  "trim_size": "7x10",
-        "copyright_year": 2025, "manuscript_pages": 280, "estimated_pages": 290, "actual_pages": 60,
-        "isbn_10": "1023456789", "isbn_13": "9781023456780", "billing_location": "Detroit, MI",
-    },
-]
-
-SAMPLE_CLIENTS = [
-    # ── Organisations ──────────────────────────────────────────────────────────
-    {
-        "category_type": "organization", "contact_type": "Customer",
-        "name_company": "Acme Corporation",      "company": "Acme Corporation",      "division": "CUST001",
-        "designation": "CTO",                    "department": "Technology",
-        "email": "contact@acme.com",             "website": "https://acme.com",
-        "vendor_number": "VND001",
-        "address1": "100 Silicon Ave",           "address2": "Suite 400",
-        "city": "San Francisco",                 "state": "California",  "country": "USA", "zip_code": "94105",
-        "sub_specialisation": "Enterprise Software", "working_hours": "09:00-18:00", "contact_hours": "09:00-17:00",
-        "phone_main": "+1-415-555-0101",         "phone_additional": "+1-415-555-0102",
-        "active_status": True,
-    },
-    {
-        "category_type": "organization", "contact_type": "Customer",
-        "name_company": "Beta Technologies",     "company": "Beta Technologies",     "division": "CUST002",
-        "designation": "VP Engineering",         "department": "Engineering",
-        "email": "info@betatech.com",            "website": "https://betatech.com",
-        "vendor_number": "VND002",
-        "address1": "200 Cloud Street",          "address2": None,
-        "city": "Austin",                        "state": "Texas",       "country": "USA", "zip_code": "73301",
-        "sub_specialisation": "Cloud & DevOps",  "working_hours": "08:00-17:00", "contact_hours": "08:00-16:00",
-        "phone_main": "+1-512-555-0201",         "phone_additional": None,
-        "active_status": True,
-    },
-    {
-        "category_type": "organization", "contact_type": "Vendor",
-        "name_company": "Gamma Retail Group",    "company": "Gamma Retail",          "division": "CUST003",
-        "designation": "Head of IT",             "department": "IT",
-        "email": "it@gammaretail.com",           "website": "https://gammaretail.com",
-        "vendor_number": "VND003",
-        "address1": "300 Commerce Blvd",         "address2": "Floor 2",
-        "city": "Chicago",                       "state": "Illinois",    "country": "USA", "zip_code": "60601",
-        "sub_specialisation": "E-commerce",      "working_hours": "10:00-19:00", "contact_hours": "10:00-18:00",
-        "phone_main": "+1-312-555-0301",         "phone_additional": "+1-312-555-0302",
-        "active_status": True,
-    },
-    {
-        "category_type": "organization", "contact_type": "Customer",
-        "name_company": "Delta Finance Ltd",     "company": "Delta Finance",         "division": "CUST004",
-        "designation": "CIO",                    "department": "Finance",
-        "email": "cio@deltafinance.com",         "website": "https://deltafinance.com",
-        "vendor_number": "VND004",
-        "address1": "400 Banking Lane",          "address2": None,
-        "city": "New York",                      "state": "New York",    "country": "USA", "zip_code": "10001",
-        "sub_specialisation": "Fintech & Banking", "working_hours": "08:00-17:00", "contact_hours": "09:00-17:00",
-        "phone_main": "+1-212-555-0401",         "phone_additional": "+1-212-555-0402",
-        "active_status": True,
-    },
-    {
-        "category_type": "organization", "contact_type": "Customer",
-        "name_company": "Epsilon Healthcare",    "company": "Epsilon Health",        "division": "CUST005",
-        "designation": "Director IT",            "department": "Healthcare IT",
-        "email": "it@epsilonhealth.com",         "website": "https://epsilonhealth.com",
-        "vendor_number": "VND005",
-        "address1": "500 Medical Drive",         "address2": "Block B",
-        "city": "Boston",                        "state": "Massachusetts", "country": "USA", "zip_code": "02101",
-        "sub_specialisation": "Hospital Management", "working_hours": "07:00-19:00", "contact_hours": "08:00-18:00",
-        "phone_main": "+1-617-555-0501",         "phone_additional": None,
-        "active_status": True,
-    },
-    # ── Persons ────────────────────────────────────────────────────────────────
-    {
-        "category_type": "person",       "contact_type": "Customer",
-        "first_name": "Frank",           "surname": "Nguyen",
-        "company": "Zeta Logistics",     "division": "CUST006",
-        "designation": "Supply Chain Manager", "department": "Operations",
-        "email": "frank.nguyen@zetalog.com",   "website": "https://zetalogistics.com",
-        "vendor_number": "VND006",
-        "address1": "600 Freight Road",  "address2": None,
-        "city": "Dallas",                "state": "Texas",       "country": "USA", "zip_code": "75201",
-        "sub_specialisation": "Supply Chain", "working_hours": "08:00-17:00", "contact_hours": "09:00-16:00",
-        "phone_main": "+1-214-555-0601", "phone_additional": "+1-214-555-0602",
-        "active_status": True,
-    },
-    {
-        "category_type": "person",       "contact_type": "Vendor",
-        "first_name": "Grace",           "surname": "Kim",
-        "company": "Eta Media Group",    "division": "CUST007",
-        "designation": "Creative Director", "department": "Media",
-        "email": "grace.kim@etamedia.com",  "website": "https://etamedia.com",
-        "vendor_number": "VND007",
-        "address1": "700 Studio Street", "address2": "Suite 12",
-        "city": "Los Angeles",           "state": "California",  "country": "USA", "zip_code": "90001",
-        "sub_specialisation": "Digital Media", "working_hours": "10:00-18:00", "contact_hours": "10:00-17:00",
-        "phone_main": "+1-323-555-0701", "phone_additional": None,
-        "active_status": True,
-    },
-    {
-        "category_type": "person",       "contact_type": "Customer",
-        "first_name": "Henry",           "surname": "Osei",
-        "company": "Theta Construction", "division": "CUST008",
-        "designation": "Project Director", "department": "Construction",
-        "email": "henry.osei@thetabuild.com", "website": None,
-        "vendor_number": None,
-        "address1": "800 Builder Ave",   "address2": None,
-        "city": "Atlanta",               "state": "Georgia",     "country": "USA", "zip_code": "30301",
-        "sub_specialisation": "Civil Engineering", "working_hours": "07:00-16:00", "contact_hours": "08:00-15:00",
-        "phone_main": "+1-404-555-0801", "phone_additional": None,
-        "active_status": False,
-    },
-    {
-        "category_type": "person",       "contact_type": "Customer",
-        "first_name": "Isla",            "surname": "Fernandez",
-        "company": "Iota Education Hub", "division": "CUST009",
-        "designation": "Head of Learning", "department": "Education",
-        "email": "isla.fernandez@iotaedu.com", "website": "https://iotaedu.com",
-        "vendor_number": "VND009",
-        "address1": "900 Campus Lane",   "address2": "Building C",
-        "city": "Seattle",               "state": "Washington",  "country": "USA", "zip_code": "98101",
-        "sub_specialisation": "EdTech",  "working_hours": "09:00-17:00", "contact_hours": "09:00-16:00",
-        "phone_main": "+1-206-555-0901", "phone_additional": "+1-206-555-0902",
-        "active_status": True,
-    },
-    {
-        "category_type": "person",       "contact_type": "Vendor",
-        "first_name": "Kevin",           "surname": "Zhao",
-        "company": "Kappa Manufacturing", "division": "CUST010",
-        "designation": "Automation Engineer", "department": "Manufacturing",
-        "email": "kevin.zhao@kappamfg.com",   "website": "https://kappamfg.com",
-        "vendor_number": "VND010",
-        "address1": "1000 Factory Blvd", "address2": None,
-        "city": "Detroit",               "state": "Michigan",    "country": "USA", "zip_code": "48201",
-        "sub_specialisation": "IoT & Automation", "working_hours": "06:00-15:00", "contact_hours": "07:00-14:00",
-        "phone_main": "+1-313-555-1001", "phone_additional": None,
-        "active_status": True,
-    },
-]
-
-# Standalone activities — no stage ownership
-SAMPLE_STAGE_ACTIVITIES = [
-    # Initiation activities
-    {"stage_activity_name": "Requirement Gathering",     "description": "Collect and document all functional and non-functional requirements from stakeholders",  "active_status": True},
-    {"stage_activity_name": "Feasibility Study",         "description": "Assess technical, financial and operational feasibility of the proposed solution",        "active_status": True},
-    {"stage_activity_name": "Stakeholder Identification","description": "Identify and document all project stakeholders and their roles and expectations",         "active_status": True},
-    # Planning activities
-    {"stage_activity_name": "Project Planning",          "description": "Define milestones, deliverables, timeline and success criteria",                         "active_status": True},
-    {"stage_activity_name": "Resource Allocation",       "description": "Assign team members, tools and infrastructure to project workstreams",                   "active_status": True},
-    {"stage_activity_name": "Risk Assessment",           "description": "Identify, evaluate and document project risks with mitigation strategies",                "active_status": True},
-    # Design activities
-    {"stage_activity_name": "UI Design",                 "description": "Create wireframes, high-fidelity mockups and interactive design prototypes",              "active_status": True},
-    {"stage_activity_name": "Database Design",           "description": "Design relational schema, indexing strategy and data migration plan",                    "active_status": True},
-    {"stage_activity_name": "Architecture Review",       "description": "Review and approve system architecture, technology stack and integration patterns",       "active_status": True},
-    # Development activities
-    {"stage_activity_name": "Frontend Development",      "description": "Build user interface components, pages and client-side application logic",               "active_status": True},
-    {"stage_activity_name": "Backend Development",       "description": "Implement REST APIs, business logic, authentication and data access layer",               "active_status": True},
-    {"stage_activity_name": "Database Implementation",   "description": "Create tables, stored procedures, indexes and seed reference data in the target database","active_status": True},
-    # Testing activities
-    {"stage_activity_name": "Unit Testing",              "description": "Write and execute tests for individual functions, methods and components in isolation",   "active_status": True},
-    {"stage_activity_name": "Integration Testing",       "description": "Validate combined modules, API contracts and end-to-end data flows",                     "active_status": True},
-    {"stage_activity_name": "UAT",                       "description": "Facilitate user acceptance testing with client representatives on staging environment",  "active_status": True},
-    # Review activities
-    {"stage_activity_name": "Code Review",               "description": "Peer review of source code for quality, security standards and best practices",           "active_status": True},
-    {"stage_activity_name": "Client Review",             "description": "Present deliverables to client stakeholders and capture formal sign-off",                "active_status": True},
-    {"stage_activity_name": "Performance Review",        "description": "Profile application under load, identify bottlenecks and validate SLA targets",           "active_status": True},
-    # Deployment activities
-    {"stage_activity_name": "Production Deployment",     "description": "Execute deployment runbook to release application to production environment",             "active_status": True},
-    {"stage_activity_name": "Smoke Testing",             "description": "Run post-deployment sanity checks to confirm critical paths are operational",             "active_status": True},
-    {"stage_activity_name": "Rollback Planning",         "description": "Prepare and validate rollback procedures in case of critical deployment failure",         "active_status": True},
-    # Closure activities
-    {"stage_activity_name": "Documentation",             "description": "Write technical architecture, API and end-user documentation for all delivered features", "active_status": True},
-    {"stage_activity_name": "Project Handover",          "description": "Transfer ownership, credentials, runbooks and final deliverables to client or support",  "active_status": True},
-    {"stage_activity_name": "Lessons Learned",           "description": "Conduct retrospective to capture process improvements and knowledge for future projects", "active_status": True},
-]
-
-# activity names resolved to IDs at seed time
-SAMPLE_STAGES = [
-    {
-        "stage_name": "Initiation",
-        "description": "Project kick-off, stakeholder alignment, requirements gathering and feasibility assessment",
-        "activity_names": ["Requirement Gathering", "Stakeholder Identification", "Feasibility Study"],
-        "sla_level1": 1, "sla_level2": 2, "sla_level3": 3,
-        "roles": ["manager", "analyst"],
-        "active_status": True,
-    },
-    {
-        "stage_name": "Planning",
-        "description": "Detailed project planning, resource allocation, risk assessment and scope definition",
-        "activity_names": ["Project Planning", "Resource Allocation", "Risk Assessment"],
-        "sla_level1": 3, "sla_level2": 5, "sla_level3": 7,
-        "roles": ["manager", "operations_manager"],
-        "active_status": True,
-    },
-    {
-        "stage_name": "Design",
-        "description": "System architecture, UI/UX design, database schema and integration design",
-        "activity_names": ["Architecture Review", "UI Design", "Database Design"],
-        "sla_level1": 5, "sla_level2": 7, "sla_level3": 10,
-        "roles": ["designer", "developer"],
-        "active_status": True,
-    },
-    {
-        "stage_name": "Development",
-        "description": "Full-stack implementation of frontend, backend and database layers",
-        "activity_names": ["Frontend Development", "Backend Development", "Database Implementation"],
-        "sla_level1": 14, "sla_level2": 21, "sla_level3": 28,
-        "roles": ["developer"],
-        "active_status": True,
-    },
-    {
-        "stage_name": "Testing",
-        "description": "Comprehensive testing including unit, integration and user acceptance testing",
-        "activity_names": ["Unit Testing", "Integration Testing", "UAT"],
-        "sla_level1": 5, "sla_level2": 7, "sla_level3": 10,
-        "roles": ["developer", "analyst"],
-        "active_status": True,
-    },
-    {
-        "stage_name": "Review",
-        "description": "Code quality review, performance validation and formal client sign-off",
-        "activity_names": ["Code Review", "Performance Review", "Client Review"],
-        "sla_level1": 2, "sla_level2": 3, "sla_level3": 5,
-        "roles": ["manager", "developer"],
-        "active_status": True,
-    },
-    {
-        "stage_name": "Deployment",
-        "description": "Production release, post-deployment validation and rollback readiness",
-        "activity_names": ["Rollback Planning", "Production Deployment", "Smoke Testing"],
-        "sla_level1": 1, "sla_level2": 2, "sla_level3": 3,
-        "roles": ["developer", "operations_manager"],
-        "active_status": True,
-    },
-    {
-        "stage_name": "Closure",
-        "description": "Documentation, knowledge transfer, handover and project retrospective",
-        "activity_names": ["Documentation", "Project Handover", "Lessons Learned"],
-        "sla_level1": 2, "sla_level2": 3, "sla_level3": 5,
-        "roles": ["manager", "analyst"],
-        "active_status": True,
-    },
-]
-
-
-SAMPLE_CHAPTERS = [
-    {
-        "client": "Acme Corporation",      "project": "Enterprise ERP Integration Platform",
-        "chapters": "CH-001",              "chapter_title": "Introduction and Scope",
-        "project_manager_name": "john_doe","due_date": "2024-03-15",
-        "stage_name": "Initiation",        "current_stage_activity": "Requirement Gathering",
-        "current_assignee_name": "alice_johnson",
-        "status": "In-progress",           "complexity_level": "High",
-        "stage_level": 1,                  "workflow": "Agile Sprint",
-        "published_status": "Draft",       "priority": "High",
-        "remarks": "Initial chapter covering project objectives and scope definition.",
-    },
-    {
-        "client": "Acme Corporation",      "project": "Enterprise ERP Integration Platform",
-        "chapters": "CH-002",              "chapter_title": "System Architecture Design",
-        "project_manager_name": "john_doe","due_date": "2024-04-10",
-        "stage_name": "Design",            "current_stage_activity": "Database Design",
-        "current_assignee_name": "jane_smith",
-        "status": "In-progress",           "complexity_level": "High",
-        "stage_level": 2,                  "workflow": "Agile Sprint",
-        "published_status": "Draft",       "priority": "High",
-        "remarks": None,
-    },
-    {
-        "client": "Acme Corporation",      "project": "Cloud Infrastructure Migration Phase 2",
-        "chapters": "CH-001",              "chapter_title": "Cloud Readiness Assessment",
-        "project_manager_name": "charlie_brown", "due_date": "2024-05-01",
-        "stage_name": "Planning",          "current_stage_activity": "Project Planning",
-        "current_assignee_name": "evan_rogers",
-        "status": "Hold",                  "complexity_level": "Medium",
-        "stage_level": 1,                  "workflow": "DevOps Pipeline",
-        "published_status": "Draft",       "priority": "Medium",
-        "remarks": "On hold pending client infrastructure audit completion.",
-    },
-    {
-        "client": "Beta Technologies",     "project": "Automated Deployment Pipeline Setup",
-        "chapters": "CH-001",              "chapter_title": "CI/CD Tool Evaluation",
-        "project_manager_name": "charlie_brown", "due_date": "2024-02-28",
-        "stage_name": "Development",       "current_stage_activity": "Backend Development",
-        "current_assignee_name": "evan_rogers",
-        "status": "complete",              "complexity_level": "Medium",
-        "stage_level": 3,                  "workflow": "CI/CD Workflow",
-        "published_status": "Ready for Publish", "priority": "High",
-        "remarks": None,
-    },
-    {
-        "client": "Beta Technologies",     "project": "Automated Deployment Pipeline Setup",
-        "chapters": "CH-002",              "chapter_title": "Pipeline Configuration and Testing",
-        "project_manager_name": "charlie_brown", "due_date": "2024-03-20",
-        "stage_name": "Testing",           "current_stage_activity": "Integration Testing",
-        "current_assignee_name": "jane_smith",
-        "status": "In-progress",           "complexity_level": "High",
-        "stage_level": 4,                  "workflow": "CI/CD Workflow",
-        "published_status": "Draft",       "priority": "High",
-        "remarks": "Integration test cases being written for all deployment stages.",
-    },
-    {
-        "client": "Gamma Retail Group",    "project": "Multi-Channel E-commerce Platform",
-        "chapters": "CH-001",              "chapter_title": "Platform Requirements and User Stories",
-        "project_manager_name": "john_doe","due_date": "2025-01-15",
-        "stage_name": "Initiation",        "current_stage_activity": "Feasibility Study",
-        "current_assignee_name": "bob_wilson",
-        "status": "complete",              "complexity_level": "Low",
-        "stage_level": 1,                  "workflow": "Retail Workflow",
-        "published_status": "Published",   "priority": "High",
-        "remarks": None,
-    },
-    {
-        "client": "Gamma Retail Group",    "project": "Multi-Channel E-commerce Platform",
-        "chapters": "CH-002",              "chapter_title": "Payment Gateway Integration",
-        "project_manager_name": "john_doe","due_date": "2025-03-01",
-        "stage_name": "Development",       "current_stage_activity": "Frontend Development",
-        "current_assignee_name": "fiona_apple",
-        "status": "In-progress",           "complexity_level": "High",
-        "stage_level": 3,                  "workflow": "Retail Workflow",
-        "published_status": "Draft",       "priority": "High",
-        "remarks": "Payment gateway sandbox testing in parallel.",
-    },
-    {
-        "client": "Delta Finance Ltd",     "project": "Core Banking System Modernisation",
-        "chapters": "CH-001",              "chapter_title": "Legacy System Analysis",
-        "project_manager_name": "george_martin", "due_date": "2024-06-30",
-        "stage_name": "Review",            "current_stage_activity": "Code Review",
-        "current_assignee_name": "bob_wilson",
-        "status": "In-query",              "complexity_level": "High",
-        "stage_level": 5,                  "workflow": "Banking Workflow",
-        "published_status": "Draft",       "priority": "High",
-        "remarks": "Client raised queries on data migration strategy for legacy accounts.",
-    },
-    {
-        "client": "Epsilon Healthcare",    "project": "Hospital Management System Integration",
-        "chapters": "CH-001",              "chapter_title": "HL7 FHIR Integration Design",
-        "project_manager_name": "george_martin", "due_date": "2025-02-20",
-        "stage_name": "Design",            "current_stage_activity": "UI Design",
-        "current_assignee_name": "fiona_apple",
-        "status": "In-progress",           "complexity_level": "High",
-        "stage_level": 2,                  "workflow": "HMS Workflow",
-        "published_status": "Draft",       "priority": "High",
-        "remarks": None,
-    },
-    {
-        "client": "Eta Media Group",       "project": "Streaming Platform Content Management System",
-        "chapters": "CH-001",              "chapter_title": "Content Delivery Architecture",
-        "project_manager_name": "john_doe","due_date": "2023-10-15",
-        "stage_name": "Closure",           "current_stage_activity": "Project Handover",
-        "current_assignee_name": "george_martin",
-        "status": "complete",              "complexity_level": "Medium",
-        "stage_level": 7,                  "workflow": "Content Workflow",
-        "published_status": "Published",   "priority": "Low",
-        "remarks": "Project completed and handed over to client operations team.",
-    },
-]
-
-
-# ── Seed functions ────────────────────────────────────────────────────────────
-def seed_roles(db):
-    from sqlalchemy import select
-    inserted = skipped = 0
-    for data in SAMPLE_ROLES:
-        exists = db.execute(
-            select(RolesMaster).where(
-                RolesMaster.role_name == data["role_name"],
-                RolesMaster.team == data["team"],
-            )
-        ).scalars().first()
-        label = f"{data['role_name']} @ {data['team']}"
-        if exists:
-            print(f"  SKIP  {label} (already exists)")
-            skipped += 1
-            continue
-        db.add(RolesMaster(**data))
-        try:
-            db.commit()
-            print(f"  OK    {label}")
-            inserted += 1
-        except IntegrityError:
-            db.rollback()
-            print(f"  SKIP  {label} (integrity error)")
-            skipped += 1
-    return inserted, skipped
-
-
-def seed_users(db):
-    from sqlalchemy import select
-    from app.models import Role, Team
-    inserted = skipped = 0
-    for data in SAMPLE_USERS:
-        # Validate role exists before inserting
-        role = db.execute(
-            select(RolesMaster).where(
-                RolesMaster.role_name == data["role"],
-                RolesMaster.team == data["team"],
-            )
-        ).scalars().first()
-        if not role:
-            role = RolesMaster(
-                role_name=data["role"],
-                team=data["team"],
-                description=f"Auto-generated role for {data['role']} in {data['team']}",
-                active_status=True
-            )
-            db.add(role)
-            try:
-                db.commit()
-                db.refresh(role)
-            except IntegrityError:
-                db.rollback()
-                role = db.execute(
-                    select(RolesMaster).where(
-                        RolesMaster.role_name == data["role"],
-                        RolesMaster.team == data["team"],
-                    )
-                ).scalars().first()
-        exists = db.execute(select(User).where((User.username == data["user_name"]) | (User.email == data["email"]))).scalars().first()
-        if exists:
-            print(f"  SKIP  {data['user_name']} (already exists)")
-            skipped += 1
-            continue
-
-        # Map role string to CMS role
-        cms_role_name = "Editor"
-        if data["role"] == "admin":
-            cms_role_name = "Admin"
-        elif data["role"] in ["manager", "operations_manager"]:
-            cms_role_name = "ProjectManager"
-            
-        role_obj = db.execute(select(Role).where(Role.name == cms_role_name)).scalars().first()
-        if not role_obj:
-            role_obj = Role(name=cms_role_name, description=f"{cms_role_name} Role")
-            db.add(role_obj)
-            db.commit()
-            db.refresh(role_obj)
-
-        # Get or create Team
-        team_name = data["team"]
-        team_obj = db.execute(select(Team).where(Team.name == team_name)).scalars().first()
-        if not team_obj:
-            team_obj = Team(name=team_name)
-            db.add(team_obj)
-            db.commit()
-            db.refresh(team_obj)
-
-        db_user = User(
-            username=data["user_name"],
-            email=data["email"],
-            password_hash=hash_pw(data["password"]),
-            is_active=data["active_status"],
-            team_id=team_obj.id
-        )
-        db_user.roles.append(role_obj)
-        db.add(db_user)
-        try:
-            db.commit()
-            print(f"  OK    {data['user_name']}")
-            inserted += 1
-        except IntegrityError:
-            db.rollback()
-            print(f"  SKIP  {data['user_name']} (integrity error)")
-            skipped += 1
-    return inserted, skipped
-
-
-def seed_clients(db):
-    from sqlalchemy import select
-    # Resolve created_by to the admin user's id
-    admin = db.execute(select(User).where(User.username == "admin_hema")).scalars().first()
-    admin_id = admin.id if admin else None
-
-    inserted = skipped = 0
-    for data in SAMPLE_CLIENTS:
-        label = data.get("name_company") or f"{data.get('first_name')} {data.get('surname')}"
-        exists = db.execute(
-            select(Client).where(Client.email == data["email"]) if data.get("email") else select(Client).where(False)
-        ).scalars().first()
-        if exists:
-            print(f"  SKIP  {label} (already exists)")
-            skipped += 1
-            continue
-        db.add(Client(**data, created_by=admin_id))
-        try:
-            db.commit()
-            print(f"  OK    {label} [{data['category_type']}]")
-            inserted += 1
-        except IntegrityError:
-            db.rollback()
-            print(f"  SKIP  {label} (integrity error)")
-            skipped += 1
-    return inserted, skipped
-
-
-def seed_stage_activities(db):
-    from sqlalchemy import select
-    inserted = skipped = 0
-    for data in SAMPLE_STAGE_ACTIVITIES:
-        exists = db.execute(select(StageActivityMaster).where(StageActivityMaster.stage_activity_name == data["stage_activity_name"])).scalars().first()
-        if exists:
-            print(f"  SKIP  {data['stage_activity_name']} (already exists)")
-            skipped += 1
-            continue
-        db.add(StageActivityMaster(**data))
-        try:
-            db.commit()
-            print(f"  OK    {data['stage_activity_name']}")
-            inserted += 1
-        except IntegrityError:
-            db.rollback()
-            print(f"  SKIP  {data['stage_activity_name']} (integrity error)")
-            skipped += 1
-    return inserted, skipped
-
-
-def seed_stages(db):
-    from sqlalchemy import select
-    inserted = skipped = 0
-    for data in SAMPLE_STAGES:
-        exists = db.execute(select(StageMaster).where(StageMaster.stage_name == data["stage_name"])).scalars().first()
-        if exists:
-            print(f"  SKIP  {data['stage_name']} (already exists)")
-            skipped += 1
-            continue
-        # Resolve activity names → IDs
-        activity_ids = []
-        for name in data["activity_names"]:
-            act = db.execute(select(StageActivityMaster).where(StageActivityMaster.stage_activity_name == name)).scalars().first()
-            if act:
-                activity_ids.append(act.id)
-            else:
-                print(f"  WARN  activity '{name}' not found — skipped from {data['stage_name']}")
-        db.add(StageMaster(
-            stage_name=data["stage_name"],
-            description=data["description"],
-            stage_activities=activity_ids,
-            sla_level1=data.get("sla_level1"),
-            sla_level2=data.get("sla_level2"),
-            sla_level3=data.get("sla_level3"),
-            roles=data.get("roles", []),
-            active_status=data["active_status"],
-        ))
-        try:
-            db.commit()
-            print(f"  OK    {data['stage_name']} (activities: {activity_ids})")
-            inserted += 1
-        except IntegrityError:
-            db.rollback()
-            print(f"  SKIP  {data['stage_name']} (integrity error)")
-            skipped += 1
-    return inserted, skipped
-
-
-def seed_projects(db):
-    from sqlalchemy import select
-    from app.models import Project, Team
-    inserted = skipped = 0
-    # Ensure default team exists
-    default_team = db.execute(select(Team).where(Team.name == "IT")).scalars().first()
-    if not default_team:
-        default_team = Team(name="IT")
-        db.add(default_team)
-        db.commit()
-        db.refresh(default_team)
-        
-    for data in SAMPLE_PROJECTS:
-        exists = db.execute(
-            select(Project).where(Project.code == data["project_code"])
-        ).scalars().first()
-        if exists:
-            print(f"  SKIP  {data['project_code']} (already exists)")
-            skipped += 1
-            continue
-        
-        # Resolve client_division -> client to get company name
-        client = db.execute(
-            select(Client).where(Client.division == data["client_division"])
-        ).scalars().first()
-        
-        db_project = Project(
-            code=data["project_code"],
-            title=data["project_title"],
-            client_name=client.company if client else data["customer_name"],
-            status=data["status"],
-            xml_standard="NLM-2.3",
-            team_id=default_team.id
-        )
-        db.add(db_project)
-        try:
-            db.commit()
-            print(f"  OK    {data['project_code']} — {data['project_title'][:50]}")
-            inserted += 1
-        except IntegrityError:
-            db.rollback()
-            print(f"  SKIP  {data['project_code']} (integrity error)")
-            skipped += 1
-    return inserted, skipped
-
-
-SAMPLE_STAGE_DETAILS = [
-    # ── Acme Corp / ERP Integration / CH-001 ──────────────────────────────────
-    {
-        "client": "Acme Corporation",      "project": "Enterprise ERP Integration Platform",
-        "chapters": "CH-001",              "project_manager_name": "john_doe",
-        "assignee_name": "alice_johnson",  "start_date": "2024-01-10 09:00:00",
-        "end_date": "2024-01-20 17:00:00", "stage_name": "Initiation",
-        "stage_activity": "Requirement Gathering",
-        "workflow": "Agile Sprint",        "complexity_level": "High",
-        "stage_level": 1,                  "sla": 120,
-        "stage_status": "complete",        "stage_activity_status": "complete",
-        "remarks": "All functional requirements documented and signed off.",
-    },
-    {
-        "client": "Acme Corporation",      "project": "Enterprise ERP Integration Platform",
-        "chapters": "CH-001",              "project_manager_name": "john_doe",
-        "assignee_name": "alice_johnson",  "start_date": "2024-01-21 09:00:00",
-        "end_date": None,                  "stage_name": "Initiation",
-        "stage_activity": "Feasibility Study",    
-        "workflow": "Agile Sprint",        "complexity_level": "High",
-        "stage_level": 1,                  "sla": 80,
-        "stage_status": "In-progress",     "stage_activity_status": "In-progress",
-        "remarks": None,
-    },
-    # ── Acme Corp / ERP Integration / CH-002 ──────────────────────────────────
-    {
-        "client": "Acme Corporation",      "project": "Enterprise ERP Integration Platform",
-        "chapters": "CH-002",              "project_manager_name": "john_doe",
-        "assignee_name": "jane_smith",     "start_date": "2024-02-01 09:00:00",
-        "end_date": "2024-02-15 18:00:00", "stage_name": "Design",
-        "stage_activity": "UI Design",
-        "workflow": "Agile Sprint",        "complexity_level": "High",
-        "stage_level": 2,                  "sla": 96,
-        "stage_status": "complete",        "stage_activity_status": "complete",
-        "remarks": None,
-    },
-    {
-        "client": "Acme Corporation",      "project": "Enterprise ERP Integration Platform",
-        "chapters": "CH-002",              "project_manager_name": "john_doe",
-        "assignee_name": "jane_smith",     "start_date": "2024-02-16 09:00:00",
-        "end_date": None,                  "stage_name": "Design",
-        "stage_activity": "Database Design",      
-        "workflow": "Agile Sprint",        "complexity_level": "High",
-        "stage_level": 2,                  "sla": 72,
-        "stage_status": "In-progress",     "stage_activity_status": "In-progress",
-        "remarks": "Schema design in review with architect team.",
-    },
-    # ── Acme Corp / Cloud Migration / CH-001 ──────────────────────────────────
-    {
-        "client": "Acme Corporation",      "project": "Cloud Infrastructure Migration Phase 2",
-        "chapters": "CH-001",              "project_manager_name": "charlie_brown",
-        "assignee_name": "evan_rogers",    "start_date": "2024-03-01 09:00:00",
-        "end_date": None,                  "stage_name": "Planning",
-        "stage_activity": "Project Planning",     
-        "workflow": "DevOps Pipeline",     "complexity_level": "Medium",
-        "stage_level": 1,                  "sla": 48,
-        "stage_status": "Hold",            "stage_activity_status": "Hold",
-        "remarks": "On hold — awaiting client infrastructure audit report.",
-    },
-    # ── Beta Technologies / Deployment Pipeline / CH-001 ──────────────────────
-    {
-        "client": "Beta Technologies",     "project": "Automated Deployment Pipeline Setup",
-        "chapters": "CH-001",              "project_manager_name": "charlie_brown",
-        "assignee_name": "evan_rogers",    "start_date": "2024-01-05 08:00:00",
-        "end_date": "2024-01-18 17:00:00", "stage_name": "Development",
-        "stage_activity": "Backend Development",
-        "workflow": "CI/CD Workflow",      "complexity_level": "Medium",
-        "stage_level": 3,                  "sla": 160,
-        "stage_status": "complete",        "stage_activity_status": "complete",
-        "remarks": "Pipeline scripts written and unit tested.",
-    },
-    # ── Beta Technologies / Deployment Pipeline / CH-002 ──────────────────────
-    {
-        "client": "Beta Technologies",     "project": "Automated Deployment Pipeline Setup",
-        "chapters": "CH-002",              "project_manager_name": "charlie_brown",
-        "assignee_name": "jane_smith",     "start_date": "2024-02-10 08:00:00",
-        "end_date": None,                  "stage_name": "Testing",
-        "stage_activity": "Integration Testing",  
-        "workflow": "CI/CD Workflow",      "complexity_level": "High",
-        "stage_level": 4,                  "sla": 64,
-        "stage_status": "In-progress",     "stage_activity_status": "In-progress",
-        "remarks": None,
-    },
-    # ── Gamma Retail / E-commerce / CH-001 ────────────────────────────────────
-    {
-        "client": "Gamma Retail Group",    "project": "Multi-Channel E-commerce Platform",
-        "chapters": "CH-001",              "project_manager_name": "john_doe",
-        "assignee_name": "bob_wilson",     "start_date": "2024-11-01 10:00:00",
-        "end_date": "2024-11-20 17:00:00", "stage_name": "Initiation",
-        "stage_activity": "Feasibility Study",
-        "workflow": "Retail Workflow",     "complexity_level": "Low",
-        "stage_level": 1,                  "sla": 56,
-        "stage_status": "complete",        "stage_activity_status": "complete",
-        "remarks": None,
-    },
-    # ── Gamma Retail / E-commerce / CH-002 ────────────────────────────────────
-    {
-        "client": "Gamma Retail Group",    "project": "Multi-Channel E-commerce Platform",
-        "chapters": "CH-002",              "project_manager_name": "john_doe",
-        "assignee_name": "fiona_apple",    "start_date": "2025-01-10 10:00:00",
-        "end_date": None,                  "stage_name": "Development",
-        "stage_activity": "Frontend Development", 
-        "workflow": "Retail Workflow",     "complexity_level": "High",
-        "stage_level": 3,                  "sla": 120,
-        "stage_status": "In-progress",     "stage_activity_status": "In-progress",
-        "remarks": "Payment UI components 60% complete.",
-    },
-    # ── Delta Finance / Core Banking / CH-001 ─────────────────────────────────
-    {
-        "client": "Delta Finance Ltd",     "project": "Core Banking System Modernisation",
-        "chapters": "CH-001",              "project_manager_name": "george_martin",
-        "assignee_name": "bob_wilson",     "start_date": "2024-04-01 08:00:00",
-        "end_date": None,                  "stage_name": "Review",
-        "stage_activity": "Code Review",          
-        "workflow": "Banking Workflow",    "complexity_level": "High",
-        "stage_level": 5,                  "sla": 48,
-        "stage_status": "In-query",        "stage_activity_status": "In-query",
-        "remarks": "Client raised queries on data migration strategy for legacy accounts.",
-    },
-    # ── Epsilon Healthcare / HMS / CH-001 ─────────────────────────────────────
-    {
-        "client": "Epsilon Healthcare",    "project": "Hospital Management System Integration",
-        "chapters": "CH-001",              "project_manager_name": "george_martin",
-        "assignee_name": "fiona_apple",    "start_date": "2025-01-15 07:00:00",
-        "end_date": None,                  "stage_name": "Design",
-        "stage_activity": "UI Design",            
-        "workflow": "HMS Workflow",        "complexity_level": "High",
-        "stage_level": 2,                  "sla": 96,
-        "stage_status": "In-progress",     "stage_activity_status": "In-progress",
-        "remarks": None,
-    },
-    # ── Eta Media / CMS / CH-001 ──────────────────────────────────────────────
-    {
-        "client": "Eta Media Group",       "project": "Streaming Platform Content Management System",
-        "chapters": "CH-001",              "project_manager_name": "john_doe",
-        "assignee_name": "george_martin",  "start_date": "2023-09-01 10:00:00",
-        "end_date": "2023-10-10 16:00:00", "stage_name": "Closure",
-        "stage_activity": "Project Handover",
-        "workflow": "Content Workflow",    "complexity_level": "Medium",
-        "stage_level": 7,                  "sla": 40,
-        "stage_status": "complete",        "stage_activity_status": "complete",
-        "remarks": "All deliverables handed over. Client sign-off received.",
-    },
-]
-
-
-def seed_chapters(db):
-    from sqlalchemy import select
-    inserted = skipped = 0
-    for data in SAMPLE_CHAPTERS:
-        exists = db.execute(
-            select(ChapterInfo).where(
-                ChapterInfo.project  == data["project"],
-                ChapterInfo.chapters == data["chapters"],
-            )
-        ).scalars().first()
-        if exists:
-            print(f"  SKIP  {data['project']} / {data['chapters']} (already exists)")
-            skipped += 1
-            continue
-        db.add(ChapterInfo(**data))
-        try:
-            db.commit()
-            print(f"  OK    {data['chapters']} — {data['chapter_title']}")
-            inserted += 1
-        except IntegrityError:
-            db.rollback()
-            print(f"  SKIP  {data['project']} / {data['chapters']} (integrity error)")
-            skipped += 1
-    return inserted, skipped
-
-
-def seed_stage_details(db):
-    from sqlalchemy import select
-    from datetime import datetime as dt
-    inserted = skipped = 0
-    for data in SAMPLE_STAGE_DETAILS:
-        exists = db.execute(
-            select(StageDetail).where(
-                StageDetail.project        == data["project"],
-                StageDetail.chapters       == data["chapters"],
-                StageDetail.stage_activity == data["stage_activity"],
-            )
-        ).scalars().first()
-        if exists:
-            print(f"  SKIP  {data['chapters']} / {data['stage_activity']} (already exists)")
-            skipped += 1
-            continue
-        row = dict(data)
-        start_val = row.pop("start_date", None)
-        end_val   = row.pop("end_date", None)
-        start = dt.fromisoformat(start_val) if start_val else None
-        end   = dt.fromisoformat(end_val)   if end_val else None
-        row["actual_start_date"] = start
-        row["actual_end_date"] = end
-        row["total_time_taken"] = round((end - start).total_seconds() / 3600, 2) if start and end else None
-        db.add(StageDetail(**row))
-        try:
-            db.commit()
-            print(f"  OK    {data['chapters']} — {data['stage_name']} / {data['stage_activity']}")
-            inserted += 1
-        except IntegrityError:
-            db.rollback()
-            print(f"  SKIP  {data['chapters']} / {data['stage_activity']} (integrity error)")
-            skipped += 1
-    return inserted, skipped
-
-
-def seed_workflows(db):
-    from sqlalchemy import select
-    from app.domains.workflow.models import WorkflowMaster
-    
-    workflow_names = [
-        "Agile Sprint",
-        "DevOps Pipeline",
-        "CI/CD Workflow",
-        "Retail Workflow",
-        "Banking Workflow",
-        "HMS Workflow",
-        "Fleet Workflow",
-        "Content Workflow",
-        "LMS Workflow",
-        "Factory Workflow"
-    ]
-    
-    stages_chain = [
-        ("Initiation", None, "Planning"),
-        ("Planning", "Initiation", "Design"),
-        ("Design", "Planning", "Development"),
-        ("Development", "Design", "Testing"),
-        ("Testing", "Development", "Review"),
-        ("Review", "Testing", "Deployment"),
-        ("Deployment", "Review", "Closure"),
-        ("Closure", "Deployment", None)
-    ]
-    
-    inserted = skipped = 0
-    for name in workflow_names:
-        # Check if workflow already has entries in database
-        exists = db.execute(
-            select(WorkflowMaster).where(WorkflowMaster.workflow_name == name)
-        ).scalars().first()
-        
-        if exists:
-            print(f"  SKIP  Workflow: {name} (already exists)")
-            skipped += len(stages_chain)
-            continue
-            
-        print(f"  OK    Workflow: {name}")
-        for stage_name, prev, nxt in stages_chain:
-            wf_stage = WorkflowMaster(
-                workflow_name=name,
-                stage_name=stage_name,
-                previous_stage=prev,
-                next_stage=nxt,
-                description=f"Standard {stage_name} stage for {name}",
-                active_status=True
-            )
-            db.add(wf_stage)
-            inserted += 1
-            
-    try:
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        print(f"Error seeding workflows: {e}")
-        
-    return inserted, skipped
+DUMPED_DATA = {
+    'Role': [
+        {'id': 1, 'name': 'Viewer', 'description': 'Read-only access'},
+        {'id': 2, 'name': 'Editor', 'description': 'General editing access'},
+        {'id': 3, 'name': 'ProjectManager', 'description': 'Can manage projects'},
+        {'id': 4, 'name': 'Admin', 'description': 'Full access'},
+        {'id': 5, 'name': 'Tagger', 'description': 'Responsible for XML/content tagging'},
+        {'id': 6, 'name': 'CopyEditor', 'description': 'Reviews and edits manuscripts'},
+        {'id': 7, 'name': 'GraphicDesigner', 'description': 'Manages art and visual assets'},
+        {'id': 8, 'name': 'Typesetter', 'description': 'Formats layout for publication'},
+        {'id': 9, 'name': 'QCPerson', 'description': 'Quality control assurance'},
+        {'id': 10, 'name': 'PPD', 'description': 'Pre-press and production'},
+        {'id': 11, 'name': 'PermissionsManager', 'description': 'Manages rights and permissions'},
+        {'id': 13, 'name': 'Author', 'description': 'Role for Author'},
+    ],
+    'Team': [
+        {'id': 1, 'name': 'Default Team', 'description': None, 'owner_id': None},
+        {'id': 2, 'name': 'IT', 'description': None, 'owner_id': None},
+        {'id': 3, 'name': 'Sales', 'description': None, 'owner_id': None},
+        {'id': 4, 'name': 'Engineering', 'description': None, 'owner_id': None},
+        {'id': 5, 'name': 'Data', 'description': None, 'owner_id': None},
+        {'id': 6, 'name': 'Operations', 'description': None, 'owner_id': None},
+        {'id': 7, 'name': 'Finance', 'description': None, 'owner_id': None},
+        {'id': 8, 'name': 'UX', 'description': None, 'owner_id': None},
+        {'id': 9, 'name': 'HR', 'description': None, 'owner_id': None},
+    ],
+    'User': [
+        {'id': 1, 'username': 'admin', 'email': 'admin@example.com', 'password_hash': '$2b$12$EOlIbYwM31gd/44QJo6EneQul4OLhCwuq/Ew5MValvUUSgkEhQo1.', 'is_active': True, 'team_id': None, 'customer_access': None},
+        {'id': 12, 'username': 'Murali', 'email': 'Muraliba@s4carlisle.com', 'password_hash': '$2b$12$sksmhJqzxADGKKLkzyQCUO9AtM1fQqixqqpSJHw6.glePDt6RAmPm', 'is_active': True, 'team_id': None, 'customer_access': None},
+        {'id': 2, 'username': 'admin_hema', 'email': 'hema.admin@wms.com', 'password_hash': '$2b$12$c0Ius.6gDz5wrph6gTVPauYIHsifMwykBhg87TgHUDTBTj/gpab.m', 'is_active': True, 'team_id': 2, 'customer_access': None},
+        {'id': 3, 'username': 'john_doe', 'email': 'john.doe@wms.com', 'password_hash': '$2b$12$Q1hbT2d5dLK00H7781/Nqe9bFaBksSelhKdGay2FRnHWZ.4k16fNG', 'is_active': True, 'team_id': 3, 'customer_access': None},
+        {'id': 4, 'username': 'jane_smith', 'email': 'jane.smith@wms.com', 'password_hash': '$2b$12$6w3uh0vcHqdVdJq279eIFOmCX.Qg7uZn.KvY1sbu.7ZkGCF.ypPt.', 'is_active': True, 'team_id': 4, 'customer_access': None},
+        {'id': 5, 'username': 'bob_wilson', 'email': 'bob.wilson@wms.com', 'password_hash': '$2b$12$wFIsmIK1AACxr3xs2APXvuCYaFmjHzGfgkhIztk/oubvrGePqgR9C', 'is_active': True, 'team_id': 5, 'customer_access': None},
+        {'id': 6, 'username': 'alice_johnson', 'email': 'alice.johnson@wms.com', 'password_hash': '$2b$12$ExeWcX7p55.zz383P0ueKu2FKwxBMAh1f7MHNQVlHk151wQtLPOZG', 'is_active': True, 'team_id': 4, 'customer_access': None},
+        {'id': 7, 'username': 'charlie_brown', 'email': 'charlie.brown@wms.com', 'password_hash': '$2b$12$KRjnaiIvTanjuwho7y7f5.BdErWZh.DnZwIDnl.k7opU9lbHZjNPW', 'is_active': True, 'team_id': 6, 'customer_access': None},
+        {'id': 8, 'username': 'diana_prince', 'email': 'diana.prince@wms.com', 'password_hash': '$2b$12$6CAnNzRC3n2H6wcZW1daOuKaNgKCRwdiv2K4doPtnfZan64qDJSDy', 'is_active': True, 'team_id': 7, 'customer_access': None},
+        {'id': 9, 'username': 'evan_rogers', 'email': 'evan.rogers@wms.com', 'password_hash': '$2b$12$rUMEbsgt51AnnOi/HiaGGunzq2gmTSCAHTnTolXdR9UszrBZTcFT6', 'is_active': True, 'team_id': 4, 'customer_access': None},
+        {'id': 10, 'username': 'fiona_apple', 'email': 'fiona.apple@wms.com', 'password_hash': '$2b$12$A6oVQsLzWC50br/udohOU.cIoQ312u6ta0fX12kqAxMzxPf/GFtv2', 'is_active': True, 'team_id': 8, 'customer_access': None},
+        {'id': 11, 'username': 'george_martin', 'email': 'george.martin@wms.com', 'password_hash': '$2b$12$i73ef6gfsJJpo3N3dIgkWu3P4CASKkvuLnwT3BgoOd97vh8IESc36', 'is_active': True, 'team_id': 9, 'customer_access': None},
+    ],
+    'UserRole': [
+        {'user_id': 1, 'role_id': 4},
+        {'user_id': 2, 'role_id': 4},
+        {'user_id': 3, 'role_id': 3},
+        {'user_id': 4, 'role_id': 2},
+        {'user_id': 5, 'role_id': 2},
+        {'user_id': 6, 'role_id': 2},
+        {'user_id': 7, 'role_id': 3},
+        {'user_id': 8, 'role_id': 2},
+        {'user_id': 9, 'role_id': 2},
+        {'user_id': 10, 'role_id': 2},
+        {'user_id': 11, 'role_id': 3},
+        {'user_id': 12, 'role_id': 4},
+    ],
+    'Client': [
+        {'id': 1, 'category_type': 'organization', 'contact_type': 'Customer', 'first_name': None, 'surname': None, 'name_company': 'Acme Corporation', 'company': 'Acme Corporation', 'division': 'CUST001', 'designation': 'CTO', 'department': 'Technology', 'email': 'contact@acme.com', 'website': 'https://acme.com', 'vendor_number': 'VND001', 'address1': '100 Silicon Ave', 'address2': 'Suite 400', 'city': 'San Francisco', 'state': 'California', 'country': 'USA', 'zip_code': '94105', 'sub_specialisation': 'Enterprise Software', 'working_hours': '09:00-18:00', 'contact_hours': '09:00-17:00', 'phone_main': '+1-415-555-0101', 'phone_additional': '+1-415-555-0102', 'active_status': True, 'created_by': None, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.595651+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.595651+00:00')},
+        {'id': 2, 'category_type': 'organization', 'contact_type': 'Customer', 'first_name': None, 'surname': None, 'name_company': 'Beta Technologies', 'company': 'Beta Technologies', 'division': 'CUST002', 'designation': 'VP Engineering', 'department': 'Engineering', 'email': 'info@betatech.com', 'website': 'https://betatech.com', 'vendor_number': 'VND002', 'address1': '200 Cloud Street', 'address2': None, 'city': 'Austin', 'state': 'Texas', 'country': 'USA', 'zip_code': '73301', 'sub_specialisation': 'Cloud & DevOps', 'working_hours': '08:00-17:00', 'contact_hours': '08:00-16:00', 'phone_main': '+1-512-555-0201', 'phone_additional': None, 'active_status': True, 'created_by': None, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.694443+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.694443+00:00')},
+        {'id': 3, 'category_type': 'organization', 'contact_type': 'Vendor', 'first_name': None, 'surname': None, 'name_company': 'Gamma Retail Group', 'company': 'Gamma Retail', 'division': 'CUST003', 'designation': 'Head of IT', 'department': 'IT', 'email': 'it@gammaretail.com', 'website': 'https://gammaretail.com', 'vendor_number': 'VND003', 'address1': '300 Commerce Blvd', 'address2': 'Floor 2', 'city': 'Chicago', 'state': 'Illinois', 'country': 'USA', 'zip_code': '60601', 'sub_specialisation': 'E-commerce', 'working_hours': '10:00-19:00', 'contact_hours': '10:00-18:00', 'phone_main': '+1-312-555-0301', 'phone_additional': '+1-312-555-0302', 'active_status': True, 'created_by': None, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.709272+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.709272+00:00')},
+        {'id': 4, 'category_type': 'organization', 'contact_type': 'Customer', 'first_name': None, 'surname': None, 'name_company': 'Delta Finance Ltd', 'company': 'Delta Finance', 'division': 'CUST004', 'designation': 'CIO', 'department': 'Finance', 'email': 'cio@deltafinance.com', 'website': 'https://deltafinance.com', 'vendor_number': 'VND004', 'address1': '400 Banking Lane', 'address2': None, 'city': 'New York', 'state': 'New York', 'country': 'USA', 'zip_code': '10001', 'sub_specialisation': 'Fintech & Banking', 'working_hours': '08:00-17:00', 'contact_hours': '09:00-17:00', 'phone_main': '+1-212-555-0401', 'phone_additional': '+1-212-555-0402', 'active_status': True, 'created_by': None, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.727755+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.727755+00:00')},
+        {'id': 5, 'category_type': 'organization', 'contact_type': 'Customer', 'first_name': None, 'surname': None, 'name_company': 'Epsilon Healthcare', 'company': 'Epsilon Health', 'division': 'CUST005', 'designation': 'Director IT', 'department': 'Healthcare IT', 'email': 'it@epsilonhealth.com', 'website': 'https://epsilonhealth.com', 'vendor_number': 'VND005', 'address1': '500 Medical Drive', 'address2': 'Block B', 'city': 'Boston', 'state': 'Massachusetts', 'country': 'USA', 'zip_code': '02101', 'sub_specialisation': 'Hospital Management', 'working_hours': '07:00-19:00', 'contact_hours': '08:00-18:00', 'phone_main': '+1-617-555-0501', 'phone_additional': None, 'active_status': True, 'created_by': None, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.745148+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.745148+00:00')},
+        {'id': 6, 'category_type': 'person', 'contact_type': 'Customer', 'first_name': 'Frank', 'surname': 'Nguyen', 'name_company': None, 'company': 'Zeta Logistics', 'division': 'CUST006', 'designation': 'Supply Chain Manager', 'department': 'Operations', 'email': 'frank.nguyen@zetalog.com', 'website': 'https://zetalogistics.com', 'vendor_number': 'VND006', 'address1': '600 Freight Road', 'address2': None, 'city': 'Dallas', 'state': 'Texas', 'country': 'USA', 'zip_code': '75201', 'sub_specialisation': 'Supply Chain', 'working_hours': '08:00-17:00', 'contact_hours': '09:00-16:00', 'phone_main': '+1-214-555-0601', 'phone_additional': '+1-214-555-0602', 'active_status': True, 'created_by': None, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.764606+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.764606+00:00')},
+        {'id': 7, 'category_type': 'person', 'contact_type': 'Vendor', 'first_name': 'Grace', 'surname': 'Kim', 'name_company': None, 'company': 'Eta Media Group', 'division': 'CUST007', 'designation': 'Creative Director', 'department': 'Media', 'email': 'grace.kim@etamedia.com', 'website': 'https://etamedia.com', 'vendor_number': 'VND007', 'address1': '700 Studio Street', 'address2': 'Suite 12', 'city': 'Los Angeles', 'state': 'California', 'country': 'USA', 'zip_code': '90001', 'sub_specialisation': 'Digital Media', 'working_hours': '10:00-18:00', 'contact_hours': '10:00-17:00', 'phone_main': '+1-323-555-0701', 'phone_additional': None, 'active_status': True, 'created_by': None, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.784593+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.784593+00:00')},
+        {'id': 9, 'category_type': 'person', 'contact_type': 'Customer', 'first_name': 'Isla', 'surname': 'Fernandez', 'name_company': None, 'company': 'Iota Education Hub', 'division': 'CUST009', 'designation': 'Head of Learning', 'department': 'Education', 'email': 'isla.fernandez@iotaedu.com', 'website': 'https://iotaedu.com', 'vendor_number': 'VND009', 'address1': '900 Campus Lane', 'address2': 'Building C', 'city': 'Seattle', 'state': 'Washington', 'country': 'USA', 'zip_code': '98101', 'sub_specialisation': 'EdTech', 'working_hours': '09:00-17:00', 'contact_hours': '09:00-16:00', 'phone_main': '+1-206-555-0901', 'phone_additional': '+1-206-555-0902', 'active_status': True, 'created_by': None, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.815403+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.815403+00:00')},
+        {'id': 10, 'category_type': 'person', 'contact_type': 'Vendor', 'first_name': 'Kevin', 'surname': 'Zhao', 'name_company': None, 'company': 'Kappa Manufacturing', 'division': 'CUST010', 'designation': 'Automation Engineer', 'department': 'Manufacturing', 'email': 'kevin.zhao@kappamfg.com', 'website': 'https://kappamfg.com', 'vendor_number': 'VND010', 'address1': '1000 Factory Blvd', 'address2': None, 'city': 'Detroit', 'state': 'Michigan', 'country': 'USA', 'zip_code': '48201', 'sub_specialisation': 'IoT & Automation', 'working_hours': '06:00-15:00', 'contact_hours': '07:00-14:00', 'phone_main': '+1-313-555-1001', 'phone_additional': None, 'active_status': True, 'created_by': None, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.835289+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.835289+00:00')},
+        {'id': 8, 'category_type': 'person', 'contact_type': 'Customer', 'first_name': 'Henry', 'surname': 'Osei', 'name_company': None, 'company': 'Theta Construction', 'division': 'CUST008', 'designation': 'Project Director', 'department': 'Construction', 'email': 'henry.osei@thetabuild.com', 'website': None, 'vendor_number': None, 'address1': '800 Builder Ave', 'address2': None, 'city': 'Atlanta', 'state': 'Georgia', 'country': 'USA', 'zip_code': '30301', 'sub_specialisation': 'Civil Engineering', 'working_hours': '07:00-16:00', 'contact_hours': '08:00-15:00', 'phone_main': '+1-404-555-0801', 'phone_additional': None, 'active_status': False, 'created_by': None, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.800138+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T08:58:47.177872+00:00')},
+    ],
+    'Project': [
+        {'id': 11, 'title': 'Automated Deployment Pipeline Setup', 'code': 'PRJ-003', 'client_id': 2, 'client_name': 'Beta Technologies', 'xml_standard': 'NLM-2.3', 'status': 'Active', 'team_id': 2, 'workflow_type': None, 'workflow_stage_no': None, 'division_code': None, 'customer_contact': None, 'category': None, 'composition': None, 'project_manager': 'john_doe', 'sales_person': None, 'priority': 'Normal', 'edition': None, 'color': None, 'trim_size': None, 'copyright_year': None, 'manuscript_pages': None, 'estimated_pages': None, 'actual_pages': None, 'chapter_count_wms': None, 'isbn_no': None, 'billing_location': None, 'due_date': None, 'file_details': None, 'created_at': None, 'updated_at': datetime.datetime.fromisoformat('2026-06-08T08:20:03.034726')},
+        {'id': 7, 'title': 'edwords', 'code': 'Edwards_188327', 'client_id': None, 'client_name': 'WKH', 'xml_standard': 'NLM / JATS', 'status': 'RECEIVED', 'team_id': 1, 'workflow_type': None, 'workflow_stage_no': None, 'division_code': None, 'customer_contact': None, 'category': None, 'composition': None, 'project_manager': None, 'sales_person': None, 'priority': None, 'edition': None, 'color': None, 'trim_size': None, 'copyright_year': None, 'manuscript_pages': None, 'estimated_pages': None, 'actual_pages': None, 'chapter_count_wms': None, 'isbn_no': None, 'billing_location': None, 'due_date': None, 'file_details': None, 'created_at': None, 'updated_at': None},
+        {'id': 8, 'title': 'The Psychiatric Interview of Children and Adolescents', 'code': 'Pataki_189071', 'client_id': None, 'client_name': 'WKH', 'xml_standard': 'NLM / JATS', 'status': 'RECEIVED', 'team_id': 1, 'workflow_type': None, 'workflow_stage_no': None, 'division_code': None, 'customer_contact': None, 'category': None, 'composition': None, 'project_manager': None, 'sales_person': None, 'priority': None, 'edition': None, 'color': None, 'trim_size': None, 'copyright_year': None, 'manuscript_pages': None, 'estimated_pages': None, 'actual_pages': None, 'chapter_count_wms': None, 'isbn_no': None, 'billing_location': None, 'due_date': None, 'file_details': None, 'created_at': None, 'updated_at': None},
+        {'id': 9, 'title': 'Enterprise ERP Integration Platform', 'code': 'PRJ-001', 'client_id': 1, 'client_name': 'Acme Corporation', 'xml_standard': 'NLM-2.3', 'status': 'Active', 'team_id': 2, 'workflow_type': None, 'workflow_stage_no': None, 'division_code': None, 'customer_contact': None, 'category': None, 'composition': None, 'project_manager': None, 'sales_person': None, 'priority': None, 'edition': None, 'color': None, 'trim_size': None, 'copyright_year': None, 'manuscript_pages': None, 'estimated_pages': None, 'actual_pages': None, 'chapter_count_wms': None, 'isbn_no': None, 'billing_location': None, 'due_date': None, 'file_details': None, 'created_at': None, 'updated_at': None},
+        {'id': 10, 'title': 'Cloud Infrastructure Migration Phase 2', 'code': 'PRJ-002', 'client_id': 1, 'client_name': 'Acme Corporation', 'xml_standard': 'NLM-2.3', 'status': 'Planning', 'team_id': 2, 'workflow_type': None, 'workflow_stage_no': None, 'division_code': None, 'customer_contact': None, 'category': None, 'composition': None, 'project_manager': None, 'sales_person': None, 'priority': None, 'edition': None, 'color': None, 'trim_size': None, 'copyright_year': None, 'manuscript_pages': None, 'estimated_pages': None, 'actual_pages': None, 'chapter_count_wms': None, 'isbn_no': None, 'billing_location': None, 'due_date': None, 'file_details': None, 'created_at': None, 'updated_at': None},
+        {'id': 12, 'title': 'Multi-Channel E-commerce Platform', 'code': 'PRJ-004', 'client_id': 3, 'client_name': 'Gamma Retail', 'xml_standard': 'NLM-2.3', 'status': 'Active', 'team_id': 2, 'workflow_type': None, 'workflow_stage_no': None, 'division_code': None, 'customer_contact': None, 'category': None, 'composition': None, 'project_manager': None, 'sales_person': None, 'priority': None, 'edition': None, 'color': None, 'trim_size': None, 'copyright_year': None, 'manuscript_pages': None, 'estimated_pages': None, 'actual_pages': None, 'chapter_count_wms': None, 'isbn_no': None, 'billing_location': None, 'due_date': None, 'file_details': None, 'created_at': None, 'updated_at': None},
+        {'id': 13, 'title': 'Core Banking System Modernisation', 'code': 'PRJ-005', 'client_id': 4, 'client_name': 'Delta Finance', 'xml_standard': 'NLM-2.3', 'status': 'Active', 'team_id': 2, 'workflow_type': None, 'workflow_stage_no': None, 'division_code': None, 'customer_contact': None, 'category': None, 'composition': None, 'project_manager': None, 'sales_person': None, 'priority': None, 'edition': None, 'color': None, 'trim_size': None, 'copyright_year': None, 'manuscript_pages': None, 'estimated_pages': None, 'actual_pages': None, 'chapter_count_wms': None, 'isbn_no': None, 'billing_location': None, 'due_date': None, 'file_details': None, 'created_at': None, 'updated_at': None},
+        {'id': 14, 'title': 'Hospital Management System Integration', 'code': 'PRJ-006', 'client_id': 5, 'client_name': 'Epsilon Health', 'xml_standard': 'NLM-2.3', 'status': 'Active', 'team_id': 2, 'workflow_type': None, 'workflow_stage_no': None, 'division_code': None, 'customer_contact': None, 'category': None, 'composition': None, 'project_manager': None, 'sales_person': None, 'priority': None, 'edition': None, 'color': None, 'trim_size': None, 'copyright_year': None, 'manuscript_pages': None, 'estimated_pages': None, 'actual_pages': None, 'chapter_count_wms': None, 'isbn_no': None, 'billing_location': None, 'due_date': None, 'file_details': None, 'created_at': None, 'updated_at': None},
+        {'id': 16, 'title': 'Streaming Platform Content Management System', 'code': 'PRJ-008', 'client_id': 7, 'client_name': 'Eta Media Group', 'xml_standard': 'NLM-2.3', 'status': 'Completed', 'team_id': 2, 'workflow_type': None, 'workflow_stage_no': None, 'division_code': None, 'customer_contact': None, 'category': None, 'composition': None, 'project_manager': None, 'sales_person': None, 'priority': None, 'edition': None, 'color': None, 'trim_size': None, 'copyright_year': None, 'manuscript_pages': None, 'estimated_pages': None, 'actual_pages': None, 'chapter_count_wms': None, 'isbn_no': None, 'billing_location': None, 'due_date': None, 'file_details': None, 'created_at': None, 'updated_at': None},
+        {'id': 17, 'title': 'Learning Management System with AI Tutor', 'code': 'PRJ-009', 'client_id': 9, 'client_name': 'Iota Education Hub', 'xml_standard': 'NLM-2.3', 'status': 'Planning', 'team_id': 2, 'workflow_type': None, 'workflow_stage_no': None, 'division_code': None, 'customer_contact': None, 'category': None, 'composition': None, 'project_manager': None, 'sales_person': None, 'priority': None, 'edition': None, 'color': None, 'trim_size': None, 'copyright_year': None, 'manuscript_pages': None, 'estimated_pages': None, 'actual_pages': None, 'chapter_count_wms': None, 'isbn_no': None, 'billing_location': None, 'due_date': None, 'file_details': None, 'created_at': None, 'updated_at': None},
+        {'id': 18, 'title': 'Smart Factory IoT Automation System', 'code': 'PRJ-010', 'client_id': 10, 'client_name': 'Kappa Manufacturing', 'xml_standard': 'NLM-2.3', 'status': 'Active', 'team_id': 2, 'workflow_type': None, 'workflow_stage_no': None, 'division_code': None, 'customer_contact': None, 'category': None, 'composition': None, 'project_manager': None, 'sales_person': None, 'priority': None, 'edition': None, 'color': None, 'trim_size': None, 'copyright_year': None, 'manuscript_pages': None, 'estimated_pages': None, 'actual_pages': None, 'chapter_count_wms': None, 'isbn_no': None, 'billing_location': None, 'due_date': None, 'file_details': None, 'created_at': None, 'updated_at': None},
+        {'id': 20, 'title': 'PRJJJ_1234', 'code': 'PRJJJ_1234', 'client_id': None, 'client_name': 'Zeta Logistics', 'xml_standard': 'BITS', 'status': 'Planning', 'team_id': 1, 'workflow_type': 'FRESH-1', 'workflow_stage_no': '01', 'division_code': None, 'customer_contact': None, 'category': None, 'composition': None, 'project_manager': None, 'sales_person': None, 'priority': None, 'edition': None, 'color': None, 'trim_size': None, 'copyright_year': None, 'manuscript_pages': None, 'estimated_pages': None, 'actual_pages': None, 'chapter_count_wms': None, 'isbn_no': None, 'billing_location': None, 'due_date': None, 'file_details': None, 'created_at': None, 'updated_at': None},
+        {'id': 15, 'title': 'Real-Time Fleet Tracking Dashboard', 'code': 'PRJ-007', 'client_id': 6, 'client_name': 'Zeta Logistics', 'xml_standard': 'NLM-2.3', 'status': 'Active', 'team_id': 2, 'workflow_type': None, 'workflow_stage_no': None, 'division_code': None, 'customer_contact': None, 'category': None, 'composition': None, 'project_manager': 'john_doe', 'sales_person': None, 'priority': None, 'edition': None, 'color': None, 'trim_size': None, 'copyright_year': None, 'manuscript_pages': None, 'estimated_pages': None, 'actual_pages': None, 'chapter_count_wms': None, 'isbn_no': None, 'billing_location': None, 'due_date': None, 'file_details': None, 'created_at': None, 'updated_at': datetime.datetime.fromisoformat('2026-06-06T02:44:12.515254')},
+        {'id': 21, 'title': 'Prjoo', 'code': 'PRJ-0009', 'client_id': 2, 'client_name': 'Beta Technologies', 'xml_standard': 'BITS', 'status': 'Active', 'team_id': 1, 'workflow_type': 'Agile Sprint', 'workflow_stage_no': '01', 'division_code': None, 'customer_contact': None, 'category': None, 'composition': 'Medium', 'project_manager': 'john_doe', 'sales_person': None, 'priority': 'Normal', 'edition': None, 'color': None, 'trim_size': None, 'copyright_year': 2026, 'manuscript_pages': None, 'estimated_pages': None, 'actual_pages': None, 'chapter_count_wms': None, 'isbn_no': None, 'billing_location': None, 'due_date': datetime.date.fromisoformat('2026-07-26'), 'file_details': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T02:45:21.496672'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:22.596350')},
+        {'id': 19, 'title': 'Projects', 'code': 'PRJ_123456', 'client_id': 2, 'client_name': 'Beta Technologies', 'xml_standard': 'BITS', 'status': 'Active', 'team_id': 1, 'workflow_type': 'Agile Sprint', 'workflow_stage_no': '01', 'division_code': None, 'customer_contact': None, 'category': None, 'composition': 'Medium', 'project_manager': 'john_doe', 'sales_person': None, 'priority': None, 'edition': None, 'color': None, 'trim_size': None, 'copyright_year': None, 'manuscript_pages': None, 'estimated_pages': None, 'actual_pages': None, 'chapter_count_wms': None, 'isbn_no': None, 'billing_location': None, 'due_date': None, 'file_details': None, 'created_at': None, 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:55.777823')},
+        {'id': 22, 'title': 'Edwords', 'code': 'Edwords_175757', 'client_id': 2, 'client_name': 'Beta Technologies', 'xml_standard': 'BITS', 'status': 'Active', 'team_id': 1, 'workflow_type': 'FRESH-1', 'workflow_stage_no': '01', 'division_code': None, 'customer_contact': None, 'category': None, 'composition': 'Medium', 'project_manager': 'john_doe', 'sales_person': None, 'priority': 'Normal', 'edition': None, 'color': None, 'trim_size': None, 'copyright_year': 2026, 'manuscript_pages': None, 'estimated_pages': None, 'actual_pages': None, 'chapter_count_wms': None, 'isbn_no': None, 'billing_location': None, 'due_date': datetime.date.fromisoformat('2026-07-26'), 'file_details': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:13.179394'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T07:26:44.112001')},
+    ],
+    'Chapter': [
+        {'id': 6, 'project_id': 7, 'number': '01', 'title': 'Edwards9781975219314-ch002'},
+        {'id': 7, 'project_id': 7, 'number': '02', 'title': 'Edwards9781975219314-ch003'},
+        {'id': 8, 'project_id': 8, 'number': '01', 'title': 'Pataki9781975239107-ch001'},
+        {'id': 9, 'project_id': 8, 'number': '02', 'title': 'Pataki9781975239107-ch002'},
+        {'id': 10, 'project_id': 8, 'number': '03', 'title': 'Pataki9781975239107-ch003'},
+        {'id': 11, 'project_id': 8, 'number': '04', 'title': 'Pataki9781975239107-ch004'},
+        {'id': 12, 'project_id': 8, 'number': '05', 'title': 'Pataki9781975239107-ch005'},
+        {'id': 13, 'project_id': 8, 'number': '06', 'title': 'Pataki9781975239107-ch006'},
+        {'id': 14, 'project_id': 8, 'number': '07', 'title': 'Pataki9781975239107-ch007'},
+        {'id': 15, 'project_id': 8, 'number': '08', 'title': 'Pataki9781975239107-ch008'},
+        {'id': 16, 'project_id': 8, 'number': '09', 'title': 'Pataki9781975239107-ch009'},
+        {'id': 17, 'project_id': 8, 'number': '10', 'title': 'Pataki9781975239107-ch010'},
+        {'id': 18, 'project_id': 8, 'number': '11', 'title': 'Pataki9781975239107-ch011'},
+        {'id': 19, 'project_id': 7, 'number': '3', 'title': 'test'},
+        {'id': 20, 'project_id': 7, 'number': '4', 'title': 'Ab'},
+        {'id': 21, 'project_id': 7, 'number': '5', 'title': 'Chapter 5'},
+        {'id': 22, 'project_id': 7, 'number': '6', 'title': 'rrr'},
+        {'id': 23, 'project_id': 19, 'number': '01', 'title': 'Chapter 01'},
+        {'id': 24, 'project_id': 19, 'number': '02', 'title': 'Chapter 02'},
+        {'id': 25, 'project_id': 19, 'number': '03', 'title': 'Chapter 03'},
+        {'id': 26, 'project_id': 19, 'number': '04', 'title': 'Chapter 04'},
+        {'id': 27, 'project_id': 19, 'number': '05', 'title': 'Chapter 05'},
+        {'id': 28, 'project_id': 19, 'number': '06', 'title': 'Chapter 06'},
+        {'id': 29, 'project_id': 19, 'number': '07', 'title': 'Chapter 07'},
+        {'id': 30, 'project_id': 19, 'number': '08', 'title': 'Chapter 08'},
+        {'id': 31, 'project_id': 19, 'number': '09', 'title': 'Chapter 09'},
+        {'id': 32, 'project_id': 19, 'number': '10', 'title': 'Chapter 10'},
+        {'id': 33, 'project_id': 19, 'number': '11', 'title': 'Chapter 11'},
+        {'id': 34, 'project_id': 20, 'number': '01', 'title': 'Chapter 01'},
+        {'id': 35, 'project_id': 20, 'number': '02', 'title': 'Chapter 02'},
+        {'id': 36, 'project_id': 20, 'number': '03', 'title': 'Chapter 03'},
+        {'id': 37, 'project_id': 20, 'number': '04', 'title': 'Chapter 04'},
+        {'id': 38, 'project_id': 20, 'number': '05', 'title': 'Chapter 05'},
+        {'id': 39, 'project_id': 20, 'number': '06', 'title': 'Chapter 06'},
+        {'id': 40, 'project_id': 20, 'number': '07', 'title': 'Chapter 07'},
+        {'id': 41, 'project_id': 20, 'number': '08', 'title': 'Chapter 08'},
+        {'id': 42, 'project_id': 20, 'number': '09', 'title': 'Chapter 09'},
+        {'id': 43, 'project_id': 20, 'number': '10', 'title': 'Chapter 10'},
+        {'id': 44, 'project_id': 20, 'number': '11', 'title': 'Chapter 11'},
+        {'id': 45, 'project_id': 21, 'number': '01', 'title': 'Chapter 01'},
+        {'id': 46, 'project_id': 21, 'number': '02', 'title': 'Chapter 02'},
+        {'id': 47, 'project_id': 21, 'number': '03', 'title': 'Chapter 03'},
+        {'id': 48, 'project_id': 21, 'number': '04', 'title': 'Chapter 04'},
+        {'id': 49, 'project_id': 21, 'number': '05', 'title': 'Chapter 05'},
+        {'id': 50, 'project_id': 21, 'number': '06', 'title': 'Chapter 06'},
+        {'id': 51, 'project_id': 21, 'number': '07', 'title': 'Chapter 07'},
+        {'id': 52, 'project_id': 21, 'number': '08', 'title': 'Chapter 08'},
+        {'id': 53, 'project_id': 21, 'number': '09', 'title': 'Chapter 09'},
+        {'id': 54, 'project_id': 21, 'number': '10', 'title': 'Chapter 10'},
+        {'id': 55, 'project_id': 21, 'number': '11', 'title': 'Chapter 11'},
+        {'id': 56, 'project_id': 22, 'number': '01', 'title': 'Chapter 01'},
+        {'id': 57, 'project_id': 22, 'number': '02', 'title': 'Chapter 02'},
+        {'id': 58, 'project_id': 22, 'number': '03', 'title': 'Chapter 03'},
+        {'id': 59, 'project_id': 22, 'number': '04', 'title': 'Chapter 04'},
+    ],
+    'File': [
+        {'id': 1, 'project_id': None, 'chapter_id': None, 'filename': 'Edwards9781975219314-ch002.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/WKH/Chapter 1 - Edwards9781975219314-ch002/Manuscript/Edwards9781975219314-ch002.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-21T05:19:49.877380'), 'version': 4, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 2, 'project_id': None, 'chapter_id': None, 'filename': 'Wheeler92516_Ch01-Tagged-Test.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/WKH/Chapter 2 - Wheeler92516_Ch01-Tagged-Test/Manuscript/Wheeler92516_Ch01-Tagged-Test.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-21T05:19:49.892616'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 3, 'project_id': None, 'chapter_id': None, 'filename': 'Edwards9781975219314-ch003.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/WKH/Chapter 3 - Edwards9781975219314-ch003/Manuscript/Edwards9781975219314-ch003.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-21T05:19:49.901597'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 11, 'project_id': None, 'chapter_id': None, 'filename': 'Edwards9781975219314-ch002.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/222/Chapter 1 - Edwards9781975219314-ch002/Manuscript/Edwards9781975219314-ch002.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-22T09:21:00.138591'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 12, 'project_id': None, 'chapter_id': None, 'filename': 'Edwards9781975219314-ch003.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/222/Chapter 2 - Edwards9781975219314-ch003/Manuscript/Edwards9781975219314-ch003.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-22T09:21:00.163848'), 'version': 17, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 68, 'project_id': 8, 'chapter_id': 14, 'filename': 'Pataki9781975239107-ch007.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/Chapter 7 - Pataki9781975239107-ch007/Manuscript/Pataki9781975239107-ch007.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-04T10:07:02.603750'), 'version': 2, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 122, 'project_id': 7, 'chapter_id': 19, 'filename': 'Wheeler92516_Ch01-Tagged-Test.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/3/Manuscript/Wheeler92516_Ch01-Tagged-Test.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-02T10:23:27.191753'), 'version': 5, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 63, 'project_id': 8, 'chapter_id': 9, 'filename': 'Pataki9781975239107-ch002.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/Chapter 2 - Pataki9781975239107-ch002/Manuscript/Pataki9781975239107-ch002.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-29T07:22:07.848886'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 64, 'project_id': 8, 'chapter_id': 10, 'filename': 'Pataki9781975239107-ch003.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/Chapter 3 - Pataki9781975239107-ch003/Manuscript/Pataki9781975239107-ch003.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-29T07:22:07.857007'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 62, 'project_id': 8, 'chapter_id': 8, 'filename': 'Pataki9781975239107-ch001.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/Chapter 1 - Pataki9781975239107-ch001/Manuscript/Pataki9781975239107-ch001.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T11:52:43.053122'), 'version': 9, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 66, 'project_id': 8, 'chapter_id': 12, 'filename': 'Pataki9781975239107-ch005.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/Chapter 5 - Pataki9781975239107-ch005/Manuscript/Pataki9781975239107-ch005.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T11:56:28.093400'), 'version': 5, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 71, 'project_id': 8, 'chapter_id': 17, 'filename': 'Pataki9781975239107-ch010.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/Chapter 10 - Pataki9781975239107-ch010/Manuscript/Pataki9781975239107-ch010.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-29T07:22:07.912998'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 72, 'project_id': 8, 'chapter_id': 18, 'filename': 'Pataki9781975239107-ch011.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/Chapter 11 - Pataki9781975239107-ch011/Manuscript/Pataki9781975239107-ch011.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-29T07:22:07.918469'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 32, 'project_id': 7, 'chapter_id': 7, 'filename': 'Edwards9781975219314-ch003.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/Chapter 2 - Edwards9781975219314-ch003/Manuscript/Edwards9781975219314-ch003.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T11:50:34.379488'), 'version': 17, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 69, 'project_id': 8, 'chapter_id': 15, 'filename': 'Pataki9781975239107-ch008.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/Chapter 8 - Pataki9781975239107-ch008/Manuscript/Pataki9781975239107-ch008.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-04T10:56:02.540246'), 'version': 7, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 70, 'project_id': 8, 'chapter_id': 16, 'filename': 'Pataki9781975239107-ch009.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/Chapter 9 - Pataki9781975239107-ch009/Manuscript/Pataki9781975239107-ch009.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-04T11:48:45.933470'), 'version': 2, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 136, 'project_id': 7, 'chapter_id': 21, 'filename': 'Edwards9781975219314-ch002.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/5/Manuscript/Edwards9781975219314-ch002.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T12:31:19.884203'), 'version': 4, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 139, 'project_id': 7, 'chapter_id': 22, 'filename': 'Zaidi04.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/6/Manuscript/Zaidi04.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T14:07:16.434568'), 'version': 3, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 93, 'project_id': 7, 'chapter_id': 6, 'filename': 'Edwards9781975219314-ch002.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Edwards9781975219314-ch002.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-04T09:57:10.858257'), 'version': 30, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 155, 'project_id': 20, 'chapter_id': 34, 'filename': 'Pataki9781975239107-ch001.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJJJ_1234/01/Manuscript/Pataki9781975239107-ch001.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T07:02:29.228831'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 156, 'project_id': 20, 'chapter_id': 44, 'filename': 'Pataki9781975239107-ch011.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJJJ_1234/11/Manuscript/Pataki9781975239107-ch011.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T07:02:29.268316'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 157, 'project_id': 20, 'chapter_id': 39, 'filename': 'Pataki9781975239107-ch006.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJJJ_1234/06/Manuscript/Pataki9781975239107-ch006.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T07:02:29.286246'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 158, 'project_id': 20, 'chapter_id': 36, 'filename': 'Pataki9781975239107-ch003.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJJJ_1234/03/Manuscript/Pataki9781975239107-ch003.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T07:02:29.303310'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 87, 'project_id': 8, 'chapter_id': 9, 'filename': 'Pataki9781975239107-ch002_TechEdited.docx', 'file_type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/Chapter 2 - Pataki9781975239107-ch002/Manuscript/Pataki9781975239107-ch002_TechEdited.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-01T05:02:41.586506'), 'version': 2, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 67, 'project_id': 8, 'chapter_id': 13, 'filename': 'Pataki9781975239107-ch006.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/Chapter 6 - Pataki9781975239107-ch006/Manuscript/Pataki9781975239107-ch006.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-01T12:08:56.650387'), 'version': 4, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 159, 'project_id': 20, 'chapter_id': 37, 'filename': 'Pataki9781975239107-ch004.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJJJ_1234/04/Manuscript/Pataki9781975239107-ch004.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T07:02:29.318720'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 160, 'project_id': 20, 'chapter_id': 42, 'filename': 'Pataki9781975239107-ch009.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJJJ_1234/09/Manuscript/Pataki9781975239107-ch009.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T07:02:29.343280'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 161, 'project_id': 20, 'chapter_id': 35, 'filename': 'Pataki9781975239107-ch002.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJJJ_1234/02/Manuscript/Pataki9781975239107-ch002.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T07:02:29.347901'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 65, 'project_id': 8, 'chapter_id': 11, 'filename': 'Pataki9781975239107-ch004.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/Chapter 4 - Pataki9781975239107-ch004/Manuscript/Pataki9781975239107-ch004.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-29T07:22:07.865085'), 'version': 2, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 88, 'project_id': 8, 'chapter_id': 11, 'filename': 'Pataki9781975239107-ch004_Processed.docx', 'file_type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/Chapter 4 - Pataki9781975239107-ch004/Manuscript/Pataki9781975239107-ch004_Processed.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-01T10:45:08.178940'), 'version': 2, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 162, 'project_id': 20, 'chapter_id': 41, 'filename': 'Pataki9781975239107-ch008.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJJJ_1234/08/Manuscript/Pataki9781975239107-ch008.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T07:02:29.372100'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 134, 'project_id': 8, 'chapter_id': 12, 'filename': 'Pataki9781975239107-ch005_Processed.docx', 'file_type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/Chapter 5 - Pataki9781975239107-ch005/Manuscript/Pataki9781975239107-ch005_Results/Pataki9781975239107-ch005_Processed.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T06:27:01.001471'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 135, 'project_id': 8, 'chapter_id': 12, 'filename': 'Pataki9781975239107-ch005_log.txt', 'file_type': 'text/plain', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/Chapter 5 - Pataki9781975239107-ch005/Manuscript/Pataki9781975239107-ch005_Results/Pataki9781975239107-ch005_log.txt', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T06:27:01.001474'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 137, 'project_id': 7, 'chapter_id': 21, 'filename': 'Edwards9781975219314-ch002_log.txt', 'file_type': 'text/plain', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/5/Manuscript/Edwards9781975219314-ch002_Results/Edwards9781975219314-ch002_log.txt', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T07:03:33.422118'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 138, 'project_id': 7, 'chapter_id': 21, 'filename': 'Edwards9781975219314-ch002_Processed.docx', 'file_type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/5/Manuscript/Edwards9781975219314-ch002_Results/Edwards9781975219314-ch002_Processed.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T12:38:49.924549'), 'version': 2, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 163, 'project_id': 20, 'chapter_id': 38, 'filename': 'Pataki9781975239107-ch005.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJJJ_1234/05/Manuscript/Pataki9781975239107-ch005.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T07:02:29.377746'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 164, 'project_id': 20, 'chapter_id': 40, 'filename': 'Pataki9781975239107-ch007.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJJJ_1234/07/Manuscript/Pataki9781975239107-ch007.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T07:02:29.401250'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 123, 'project_id': 7, 'chapter_id': 20, 'filename': 'Abuhamad9781975242831-ch002-Tagged.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/4/Manuscript/Abuhamad9781975242831-ch002-Tagged.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-02T10:23:45.111387'), 'version': 4, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 140, 'project_id': 7, 'chapter_id': 20, 'filename': 'Abuhamad9781975242831-ch002-Tagged_log.txt', 'file_type': 'text/plain', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/4/Manuscript/Abuhamad9781975242831-ch002-Tagged_Results/Abuhamad9781975242831-ch002-Tagged_log.txt', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T09:39:54.895990'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 165, 'project_id': 20, 'chapter_id': 43, 'filename': 'Pataki9781975239107-ch010.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJJJ_1234/10/Manuscript/Pataki9781975239107-ch010.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T07:02:29.410161'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 141, 'project_id': 7, 'chapter_id': 20, 'filename': 'Abuhamad9781975242831-ch002-Tagged_Processed.docx', 'file_type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/4/Manuscript/Abuhamad9781975242831-ch002-Tagged_Results/Abuhamad9781975242831-ch002-Tagged_Processed.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T16:50:34.785304'), 'version': 2, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 142, 'project_id': 7, 'chapter_id': 19, 'filename': 'Wheeler92516_Ch01-Tagged-Test_log.txt', 'file_type': 'text/plain', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/3/Manuscript/Wheeler92516_Ch01-Tagged-Test_Results/Wheeler92516_Ch01-Tagged-Test_log.txt', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-04T06:12:34.549836'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 143, 'project_id': 7, 'chapter_id': 19, 'filename': 'Wheeler92516_Ch01-Tagged-Test_Processed.docx', 'file_type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/3/Manuscript/Wheeler92516_Ch01-Tagged-Test_Results/Wheeler92516_Ch01-Tagged-Test_Processed.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-04T06:12:34.549839'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 145, 'project_id': 19, 'chapter_id': 33, 'filename': 'Pataki9781975239107-ch011.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJ_123456/11/Manuscript/Pataki9781975239107-ch011.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T06:55:06.330309'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 146, 'project_id': 19, 'chapter_id': 28, 'filename': 'Pataki9781975239107-ch006.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJ_123456/06/Manuscript/Pataki9781975239107-ch006.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T06:55:06.339922'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 147, 'project_id': 19, 'chapter_id': 25, 'filename': 'Pataki9781975239107-ch003.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJ_123456/03/Manuscript/Pataki9781975239107-ch003.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T06:55:06.358414'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 148, 'project_id': 19, 'chapter_id': 26, 'filename': 'Pataki9781975239107-ch004.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJ_123456/04/Manuscript/Pataki9781975239107-ch004.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T06:55:06.375919'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 149, 'project_id': 19, 'chapter_id': 31, 'filename': 'Pataki9781975239107-ch009.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJ_123456/09/Manuscript/Pataki9781975239107-ch009.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T06:55:06.385066'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 150, 'project_id': 19, 'chapter_id': 24, 'filename': 'Pataki9781975239107-ch002.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJ_123456/02/Manuscript/Pataki9781975239107-ch002.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T06:55:06.390220'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 151, 'project_id': 19, 'chapter_id': 30, 'filename': 'Pataki9781975239107-ch008.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJ_123456/08/Manuscript/Pataki9781975239107-ch008.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T06:55:06.392128'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 152, 'project_id': 19, 'chapter_id': 27, 'filename': 'Pataki9781975239107-ch005.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJ_123456/05/Manuscript/Pataki9781975239107-ch005.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T06:55:06.410040'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 153, 'project_id': 19, 'chapter_id': 29, 'filename': 'Pataki9781975239107-ch007.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJ_123456/07/Manuscript/Pataki9781975239107-ch007.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T06:55:06.414941'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 167, 'project_id': 21, 'chapter_id': 55, 'filename': 'Pataki9781975239107-ch011.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJ-0009/11/Manuscript/Pataki9781975239107-ch011.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T08:15:22.592904'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 168, 'project_id': 21, 'chapter_id': 50, 'filename': 'Pataki9781975239107-ch006.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJ-0009/06/Manuscript/Pataki9781975239107-ch006.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T08:15:22.598732'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 169, 'project_id': 21, 'chapter_id': 47, 'filename': 'Pataki9781975239107-ch003.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJ-0009/03/Manuscript/Pataki9781975239107-ch003.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T08:15:22.622213'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 170, 'project_id': 21, 'chapter_id': 48, 'filename': 'Pataki9781975239107-ch004.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJ-0009/04/Manuscript/Pataki9781975239107-ch004.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T08:15:22.629630'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 171, 'project_id': 21, 'chapter_id': 53, 'filename': 'Pataki9781975239107-ch009.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJ-0009/09/Manuscript/Pataki9781975239107-ch009.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T08:15:22.655735'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 172, 'project_id': 21, 'chapter_id': 46, 'filename': 'Pataki9781975239107-ch002.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJ-0009/02/Manuscript/Pataki9781975239107-ch002.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T08:15:22.659679'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 173, 'project_id': 21, 'chapter_id': 52, 'filename': 'Pataki9781975239107-ch008.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJ-0009/08/Manuscript/Pataki9781975239107-ch008.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T08:15:22.670669'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 174, 'project_id': 21, 'chapter_id': 49, 'filename': 'Pataki9781975239107-ch005.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJ-0009/05/Manuscript/Pataki9781975239107-ch005.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T08:15:22.684531'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 175, 'project_id': 21, 'chapter_id': 51, 'filename': 'Pataki9781975239107-ch007.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJ-0009/07/Manuscript/Pataki9781975239107-ch007.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T08:15:22.689571'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 176, 'project_id': 21, 'chapter_id': 54, 'filename': 'Pataki9781975239107-ch010.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJ-0009/10/Manuscript/Pataki9781975239107-ch010.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T08:15:22.706464'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 154, 'project_id': 19, 'chapter_id': 32, 'filename': 'Pataki9781975239107-ch010.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJ_123456/10/Manuscript/Pataki9781975239107-ch010.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-08T10:07:45.897616'), 'version': 2, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 144, 'project_id': 19, 'chapter_id': 23, 'filename': 'Pataki9781975239107-ch001.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJ_123456/01/Manuscript/Pataki9781975239107-ch001.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-08T10:14:56.661416'), 'version': 2, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 166, 'project_id': 21, 'chapter_id': 45, 'filename': 'Pataki9781975239107-ch001.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/PRJ-0009/01/Manuscript/Pataki9781975239107-ch001.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T10:05:58.259674'), 'version': 3, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 179, 'project_id': 22, 'chapter_id': 57, 'filename': 'Edwards9781975219314-ch002.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Edwords_175757/02/Manuscript/Edwards9781975219314-ch002.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T10:14:17.709180'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 178, 'project_id': 22, 'chapter_id': 58, 'filename': 'Edwards9781975219314-ch003.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Edwords_175757/03/Manuscript/Edwards9781975219314-ch003.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T10:14:17.700013'), 'version': 2, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 180, 'project_id': 22, 'chapter_id': 59, 'filename': 'Edwards9781975219314-ch004.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Edwords_175757/04/Manuscript/Edwards9781975219314-ch004.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-08T11:47:51.064041'), 'version': 4, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 193, 'project_id': 22, 'chapter_id': 59, 'filename': 'Edwards9781975219314-ch004_Processed.docx', 'file_type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Edwords_175757/04/Manuscript/Edwards9781975219314-ch004_Results/Edwards9781975219314-ch004_Processed.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-08T06:50:13.981644'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 194, 'project_id': 22, 'chapter_id': 59, 'filename': 'Edwards9781975219314-ch004_log.txt', 'file_type': 'text/plain', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Edwords_175757/04/Manuscript/Edwards9781975219314-ch004_Results/Edwards9781975219314-ch004_log.txt', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-08T06:50:13.981650'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 177, 'project_id': 22, 'chapter_id': 56, 'filename': 'Edwards9781975219314-ch001.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Edwords_175757/01/Manuscript/Edwards9781975219314-ch001.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-08T15:27:14.059549'), 'version': 15, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 199, 'project_id': 22, 'chapter_id': 56, 'filename': 'Edwards9781975219314-ch001_v1.docx', 'file_type': 'docx', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Edwords_175757/01/Manuscript/Edwards9781975219314-ch001_v1.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-08T10:18:45.608939'), 'version': 2, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 200, 'project_id': 22, 'chapter_id': 56, 'filename': 'Edwards9781975219314-ch001_v1_Processed.docx', 'file_type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Edwords_175757/01/Manuscript/Edwards9781975219314-ch001_v1_Results/Edwards9781975219314-ch001_v1_Processed.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-08T10:20:30.496623'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+        {'id': 201, 'project_id': 22, 'chapter_id': 56, 'filename': 'Edwards9781975219314-ch001_v1_log.txt', 'file_type': 'text/plain', 'category': 'Manuscript', 'path': '/opt/cms_runtime/data/uploads/Edwords_175757/01/Manuscript/Edwards9781975219314-ch001_v1_Results/Edwards9781975219314-ch001_v1_log.txt', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-08T10:20:30.496627'), 'version': 1, 'is_checked_out': False, 'checked_out_by_id': None, 'checked_out_at': None},
+    ],
+    'FileVersion': [
+        {'id': 1, 'file_id': 1, 'version_num': 1, 'path': '/opt/cms_runtime/data/uploads/WKH/01/Manuscript/Archive/Edwards9781975219314-ch002_v1.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-21T05:20:02.472814'), 'uploaded_by_id': 1},
+        {'id': 2, 'file_id': 1, 'version_num': 2, 'path': '/opt/cms_runtime/data/uploads/WKH/01/Manuscript/Archive/Edwards9781975219314-ch002_v2.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-21T05:24:16.753711'), 'uploaded_by_id': 1},
+        {'id': 3, 'file_id': 1, 'version_num': 3, 'path': '/opt/cms_runtime/data/uploads/WKH/01/Manuscript/Archive/Edwards9781975219314-ch002_v3.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-21T06:31:59.738006'), 'uploaded_by_id': 1},
+        {'id': 5, 'file_id': 12, 'version_num': 1, 'path': '/opt/cms_runtime/data/uploads/222/02/Manuscript/Archive/Edwards9781975219314-ch003_v1.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-25T08:22:42.564241'), 'uploaded_by_id': 1},
+        {'id': 6, 'file_id': 12, 'version_num': 2, 'path': '/opt/cms_runtime/data/uploads/222/02/Manuscript/Archive/Edwards9781975219314-ch003_v2.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-25T08:33:30.598671'), 'uploaded_by_id': 1},
+        {'id': 7, 'file_id': 12, 'version_num': 3, 'path': '/opt/cms_runtime/data/uploads/222/02/Manuscript/Archive/Edwards9781975219314-ch003_v3.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-25T08:39:42.008014'), 'uploaded_by_id': 1},
+        {'id': 8, 'file_id': 12, 'version_num': 4, 'path': '/opt/cms_runtime/data/uploads/222/02/Manuscript/Archive/Edwards9781975219314-ch003_v4.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-25T08:58:28.978827'), 'uploaded_by_id': 1},
+        {'id': 9, 'file_id': 12, 'version_num': 5, 'path': '/opt/cms_runtime/data/uploads/222/02/Manuscript/Archive/Edwards9781975219314-ch003_v5.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-25T09:33:00.110300'), 'uploaded_by_id': 1},
+        {'id': 10, 'file_id': 12, 'version_num': 6, 'path': '/opt/cms_runtime/data/uploads/222/02/Manuscript/Archive/Edwards9781975219314-ch003_v6.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-25T09:35:53.626373'), 'uploaded_by_id': 1},
+        {'id': 11, 'file_id': 12, 'version_num': 7, 'path': '/opt/cms_runtime/data/uploads/222/02/Manuscript/Archive/Edwards9781975219314-ch003_v7.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-25T09:45:03.752666'), 'uploaded_by_id': 1},
+        {'id': 12, 'file_id': 12, 'version_num': 8, 'path': '/opt/cms_runtime/data/uploads/222/02/Manuscript/Archive/Edwards9781975219314-ch003_v8.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-25T09:58:39.553795'), 'uploaded_by_id': 1},
+        {'id': 13, 'file_id': 12, 'version_num': 9, 'path': '/opt/cms_runtime/data/uploads/222/02/Manuscript/Archive/Edwards9781975219314-ch003_v9.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-25T10:02:29.484047'), 'uploaded_by_id': 1},
+        {'id': 14, 'file_id': 12, 'version_num': 10, 'path': '/opt/cms_runtime/data/uploads/222/02/Manuscript/Archive/Edwards9781975219314-ch003_v10.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-25T10:19:45.288509'), 'uploaded_by_id': 1},
+        {'id': 15, 'file_id': 12, 'version_num': 11, 'path': '/opt/cms_runtime/data/uploads/222/02/Manuscript/Archive/Edwards9781975219314-ch003_v11.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-25T10:26:07.297431'), 'uploaded_by_id': 1},
+        {'id': 16, 'file_id': 12, 'version_num': 12, 'path': '/opt/cms_runtime/data/uploads/222/02/Manuscript/Archive/Edwards9781975219314-ch003_v12.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-25T10:30:44.096935'), 'uploaded_by_id': 1},
+        {'id': 17, 'file_id': 12, 'version_num': 13, 'path': '/opt/cms_runtime/data/uploads/222/02/Manuscript/Archive/Edwards9781975219314-ch003_v13.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-25T11:13:49.068650'), 'uploaded_by_id': 1},
+        {'id': 18, 'file_id': 12, 'version_num': 14, 'path': '/opt/cms_runtime/data/uploads/222/02/Manuscript/Archive/Edwards9781975219314-ch003_v14.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-25T11:17:50.403891'), 'uploaded_by_id': 1},
+        {'id': 19, 'file_id': 12, 'version_num': 15, 'path': '/opt/cms_runtime/data/uploads/222/02/Manuscript/Archive/Edwards9781975219314-ch003_v15.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-25T11:20:35.312414'), 'uploaded_by_id': 1},
+        {'id': 20, 'file_id': 12, 'version_num': 16, 'path': '/opt/cms_runtime/data/uploads/222/02/Manuscript/Archive/Edwards9781975219314-ch003_v16.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-25T11:25:38.634443'), 'uploaded_by_id': 1},
+        {'id': 22, 'file_id': 32, 'version_num': 1, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/02/Manuscript/Archive/Edwards9781975219314-ch003_v1.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-26T04:53:21.157307'), 'uploaded_by_id': 1},
+        {'id': 27, 'file_id': 32, 'version_num': 2, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/02/Manuscript/Archive/Edwards9781975219314-ch003_v2.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-26T09:06:37.815937'), 'uploaded_by_id': 1},
+        {'id': 28, 'file_id': 32, 'version_num': 3, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/02/Manuscript/Archive/Edwards9781975219314-ch003_v3.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-26T09:09:44.906792'), 'uploaded_by_id': 1},
+        {'id': 29, 'file_id': 32, 'version_num': 4, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/02/Manuscript/Archive/Edwards9781975219314-ch003_v4.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-26T09:32:48.818405'), 'uploaded_by_id': 1},
+        {'id': 31, 'file_id': 32, 'version_num': 5, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/02/Manuscript/Archive/Edwards9781975219314-ch003_v5.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-26T09:44:33.109853'), 'uploaded_by_id': 1},
+        {'id': 32, 'file_id': 32, 'version_num': 6, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/02/Manuscript/Archive/Edwards9781975219314-ch003_v6.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-26T09:50:22.441031'), 'uploaded_by_id': 1},
+        {'id': 33, 'file_id': 32, 'version_num': 7, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/02/Manuscript/Archive/Edwards9781975219314-ch003_v7.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-26T09:51:31.501944'), 'uploaded_by_id': 1},
+        {'id': 35, 'file_id': 32, 'version_num': 8, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/02/Manuscript/Archive/Edwards9781975219314-ch003_v8.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-26T09:54:11.922944'), 'uploaded_by_id': 1},
+        {'id': 37, 'file_id': 32, 'version_num': 9, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/02/Manuscript/Archive/Edwards9781975219314-ch003_v9.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-27T10:10:31.669135'), 'uploaded_by_id': 1},
+        {'id': 39, 'file_id': 32, 'version_num': 10, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/02/Manuscript/Archive/Edwards9781975219314-ch003_v10.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-28T06:00:33.786580'), 'uploaded_by_id': 1},
+        {'id': 41, 'file_id': 32, 'version_num': 11, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/02/Manuscript/Archive/Edwards9781975219314-ch003_v11.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-28T06:06:09.781036'), 'uploaded_by_id': 1},
+        {'id': 42, 'file_id': 32, 'version_num': 12, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/02/Manuscript/Archive/Edwards9781975219314-ch003_v12.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-28T06:28:40.907953'), 'uploaded_by_id': 1},
+        {'id': 45, 'file_id': 62, 'version_num': 1, 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/01/Manuscript/Archive/Pataki9781975239107-ch001_v1.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-29T07:24:48.369961'), 'uploaded_by_id': 1},
+        {'id': 46, 'file_id': 62, 'version_num': 2, 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/01/Manuscript/Archive/Pataki9781975239107-ch001_v2.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-29T08:20:26.005442'), 'uploaded_by_id': 1},
+        {'id': 47, 'file_id': 62, 'version_num': 3, 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/01/Manuscript/Archive/Pataki9781975239107-ch001_v3.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-29T08:26:51.137229'), 'uploaded_by_id': 1},
+        {'id': 48, 'file_id': 62, 'version_num': 4, 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/01/Manuscript/Archive/Pataki9781975239107-ch001_v4.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-30T03:28:25.953947'), 'uploaded_by_id': 1},
+        {'id': 49, 'file_id': 62, 'version_num': 5, 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/01/Manuscript/Archive/Pataki9781975239107-ch001_v5.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-05-30T04:32:05.886159'), 'uploaded_by_id': 1},
+        {'id': 52, 'file_id': 62, 'version_num': 6, 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/01/Manuscript/Archive/Pataki9781975239107-ch001_v6.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-01T04:49:33.378875'), 'uploaded_by_id': 1},
+        {'id': 57, 'file_id': 65, 'version_num': 1, 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/04/Manuscript/Archive/Pataki9781975239107-ch004_v1.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-01T05:14:15.444835'), 'uploaded_by_id': 1},
+        {'id': 58, 'file_id': 88, 'version_num': 1, 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/Chapter 4 - Pataki9781975239107-ch004/Manuscript/Archive/Pataki9781975239107-ch004_Processed_v1.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-01T05:15:08.187889'), 'uploaded_by_id': 1},
+        {'id': 59, 'file_id': 62, 'version_num': 7, 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/01/Manuscript/Archive/Pataki9781975239107-ch001_v7.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-01T06:27:33.397815'), 'uploaded_by_id': 1},
+        {'id': 61, 'file_id': 67, 'version_num': 1, 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/06/Manuscript/Archive/Pataki9781975239107-ch006_v1.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-01T06:35:46.013386'), 'uploaded_by_id': 1},
+        {'id': 62, 'file_id': 67, 'version_num': 2, 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/Chapter 6 - Pataki9781975239107-ch006/Manuscript/Archive/Pataki9781975239107-ch006_v2.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-01T06:36:54.120413'), 'uploaded_by_id': 1},
+        {'id': 63, 'file_id': 67, 'version_num': 3, 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/Chapter 6 - Pataki9781975239107-ch006/Manuscript/Archive/Pataki9781975239107-ch006_v3.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-01T06:38:56.664248'), 'uploaded_by_id': 1},
+        {'id': 72, 'file_id': 93, 'version_num': 1, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Archive/Edwards9781975219314-ch002_v1.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-01T08:48:27.708842'), 'uploaded_by_id': 1},
+        {'id': 73, 'file_id': 93, 'version_num': 2, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Archive/Edwards9781975219314-ch002_v2.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-01T08:49:01.516732'), 'uploaded_by_id': 1},
+        {'id': 74, 'file_id': 93, 'version_num': 3, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Archive/Edwards9781975219314-ch002_v3.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-01T08:49:25.116580'), 'uploaded_by_id': 1},
+        {'id': 75, 'file_id': 93, 'version_num': 4, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Archive/Edwards9781975219314-ch002_v4.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-01T08:55:58.644926'), 'uploaded_by_id': 1},
+        {'id': 76, 'file_id': 93, 'version_num': 5, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Archive/Edwards9781975219314-ch002_v5.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-01T09:38:54.739351'), 'uploaded_by_id': 1},
+        {'id': 77, 'file_id': 93, 'version_num': 6, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Archive/Edwards9781975219314-ch002_v6.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-01T09:41:01.035017'), 'uploaded_by_id': 1},
+        {'id': 78, 'file_id': 93, 'version_num': 7, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Archive/Edwards9781975219314-ch002_v7.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-01T09:41:47.240076'), 'uploaded_by_id': 1},
+        {'id': 79, 'file_id': 93, 'version_num': 8, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Archive/Edwards9781975219314-ch002_v8.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-01T09:44:26.842744'), 'uploaded_by_id': 1},
+        {'id': 80, 'file_id': 93, 'version_num': 9, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Archive/Edwards9781975219314-ch002_v9.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-01T10:52:44.186435'), 'uploaded_by_id': 1},
+        {'id': 81, 'file_id': 93, 'version_num': 10, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Archive/Edwards9781975219314-ch002_v10.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-01T10:55:13.830830'), 'uploaded_by_id': 1},
+        {'id': 82, 'file_id': 93, 'version_num': 11, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Archive/Edwards9781975219314-ch002_v11.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-01T10:55:22.864928'), 'uploaded_by_id': 1},
+        {'id': 83, 'file_id': 93, 'version_num': 12, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Archive/Edwards9781975219314-ch002_v12.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-01T10:59:09.890863'), 'uploaded_by_id': 1},
+        {'id': 84, 'file_id': 93, 'version_num': 13, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Archive/Edwards9781975219314-ch002_v13.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-01T11:24:44.903675'), 'uploaded_by_id': 1},
+        {'id': 85, 'file_id': 93, 'version_num': 14, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Archive/Edwards9781975219314-ch002_v14.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-02T04:40:44.414885'), 'uploaded_by_id': 1},
+        {'id': 86, 'file_id': 93, 'version_num': 15, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Archive/Edwards9781975219314-ch002_v15.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-02T05:00:24.669061'), 'uploaded_by_id': 1},
+        {'id': 87, 'file_id': 93, 'version_num': 16, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Archive/Edwards9781975219314-ch002_v16.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-02T06:25:16.075379'), 'uploaded_by_id': 1},
+        {'id': 88, 'file_id': 93, 'version_num': 17, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Archive/Edwards9781975219314-ch002_v17.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-02T07:22:00.252139'), 'uploaded_by_id': 1},
+        {'id': 89, 'file_id': 93, 'version_num': 18, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Archive/Edwards9781975219314-ch002_v18.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-02T08:06:47.897557'), 'uploaded_by_id': 1},
+        {'id': 91, 'file_id': 93, 'version_num': 19, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Archive/Edwards9781975219314-ch002_v19.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-02T09:50:00.983615'), 'uploaded_by_id': 1},
+        {'id': 97, 'file_id': 122, 'version_num': 1, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/3/Manuscript/Archive/Wheeler92516_Ch01-Tagged-Test_v1.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-02T10:23:57.687886'), 'uploaded_by_id': 1},
+        {'id': 98, 'file_id': 123, 'version_num': 1, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/4/Manuscript/Archive/Abuhamad9781975242831-ch002-Tagged_v1.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-02T10:25:09.316771'), 'uploaded_by_id': 1},
+        {'id': 100, 'file_id': 123, 'version_num': 2, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/4/Manuscript/Archive/Abuhamad9781975242831-ch002-Tagged_v2.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-02T11:18:44.547331'), 'uploaded_by_id': 1},
+        {'id': 101, 'file_id': 122, 'version_num': 2, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/3/Manuscript/Archive/Wheeler92516_Ch01-Tagged-Test_v2.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-02T11:20:03.705980'), 'uploaded_by_id': 1},
+        {'id': 102, 'file_id': 93, 'version_num': 20, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Archive/Edwards9781975219314-ch002_v20.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T05:15:08.768826'), 'uploaded_by_id': 1},
+        {'id': 103, 'file_id': 93, 'version_num': 21, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Archive/Edwards9781975219314-ch002_v21.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T05:17:34.428338'), 'uploaded_by_id': 1},
+        {'id': 104, 'file_id': 93, 'version_num': 22, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Archive/Edwards9781975219314-ch002_v22.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T05:19:33.195481'), 'uploaded_by_id': 1},
+        {'id': 105, 'file_id': 93, 'version_num': 23, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Archive/Edwards9781975219314-ch002_v23.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T05:20:14.077107'), 'uploaded_by_id': 1},
+        {'id': 106, 'file_id': 32, 'version_num': 13, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/Chapter 2 - Edwards9781975219314-ch003/Manuscript/Archive/Edwards9781975219314-ch003_v13.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T05:21:21.748731'), 'uploaded_by_id': 1},
+        {'id': 108, 'file_id': 32, 'version_num': 14, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/Chapter 2 - Edwards9781975219314-ch003/Manuscript/Archive/Edwards9781975219314-ch003_v14.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T05:26:09.961269'), 'uploaded_by_id': 1},
+        {'id': 109, 'file_id': 32, 'version_num': 15, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/Chapter 2 - Edwards9781975219314-ch003/Manuscript/Archive/Edwards9781975219314-ch003_v15.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T05:27:15.949451'), 'uploaded_by_id': 1},
+        {'id': 110, 'file_id': 93, 'version_num': 24, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Archive/Edwards9781975219314-ch002_v24.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T06:14:26.606940'), 'uploaded_by_id': 1},
+        {'id': 111, 'file_id': 93, 'version_num': 25, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Archive/Edwards9781975219314-ch002_v25.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T06:15:10.991131'), 'uploaded_by_id': 1},
+        {'id': 112, 'file_id': 93, 'version_num': 26, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Archive/Edwards9781975219314-ch002_v26.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T06:15:55.755032'), 'uploaded_by_id': 1},
+        {'id': 113, 'file_id': 93, 'version_num': 27, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Archive/Edwards9781975219314-ch002_v27.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T06:18:44.613996'), 'uploaded_by_id': None},
+        {'id': 114, 'file_id': 32, 'version_num': 16, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/Chapter 2 - Edwards9781975219314-ch003/Manuscript/Archive/Edwards9781975219314-ch003_v16.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T06:20:34.430656'), 'uploaded_by_id': 1},
+        {'id': 115, 'file_id': 62, 'version_num': 8, 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/01/Manuscript/Archive/Pataki9781975239107-ch001_v8.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T06:22:42.607538'), 'uploaded_by_id': 1},
+        {'id': 116, 'file_id': 66, 'version_num': 1, 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/05/Manuscript/Archive/Pataki9781975239107-ch005_v1.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T06:23:43.722887'), 'uploaded_by_id': 1},
+        {'id': 117, 'file_id': 66, 'version_num': 2, 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/Chapter 5 - Pataki9781975239107-ch005/Manuscript/Archive/Pataki9781975239107-ch005_v2.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T06:24:49.934341'), 'uploaded_by_id': 1},
+        {'id': 119, 'file_id': 66, 'version_num': 4, 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/05/Manuscript/Archive/Pataki9781975239107-ch005_v4.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T06:26:44.612575'), 'uploaded_by_id': 1},
+        {'id': 118, 'file_id': 66, 'version_num': 3, 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/Chapter 5 - Pataki9781975239107-ch005/Manuscript/Archive/Pataki9781975239107-ch005_v3.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T06:26:28.111557'), 'uploaded_by_id': 1},
+        {'id': 120, 'file_id': 93, 'version_num': 28, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Archive/Edwards9781975219314-ch002_v28.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T06:56:02.682056'), 'uploaded_by_id': 1},
+        {'id': 124, 'file_id': 138, 'version_num': 1, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/5/Manuscript/Edwards9781975219314-ch002_Results/Archive/Edwards9781975219314-ch002_Processed_v1.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T07:08:49.966517'), 'uploaded_by_id': 1},
+        {'id': 121, 'file_id': 136, 'version_num': 1, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/5/Manuscript/Archive/Edwards9781975219314-ch002_v1.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T06:58:41.217848'), 'uploaded_by_id': 1},
+        {'id': 122, 'file_id': 136, 'version_num': 2, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/5/Manuscript/Archive/Edwards9781975219314-ch002_v2.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T07:01:19.892681'), 'uploaded_by_id': 1},
+        {'id': 123, 'file_id': 136, 'version_num': 3, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/5/Manuscript/Archive/Edwards9781975219314-ch002_v3.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T07:02:13.553680'), 'uploaded_by_id': 1},
+        {'id': 127, 'file_id': 139, 'version_num': 1, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/6/Manuscript/Archive/Zaidi04_v1.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T08:31:42.697535'), 'uploaded_by_id': 1},
+        {'id': 128, 'file_id': 139, 'version_num': 2, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/6/Manuscript/Archive/Zaidi04_v2.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T08:37:16.697233'), 'uploaded_by_id': None},
+        {'id': 129, 'file_id': 123, 'version_num': 3, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/4/Manuscript/Archive/Abuhamad9781975242831-ch002-Tagged_v3.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T09:37:44.290147'), 'uploaded_by_id': 1},
+        {'id': 131, 'file_id': 141, 'version_num': 1, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/4/Manuscript/Abuhamad9781975242831-ch002-Tagged_Results/Archive/Abuhamad9781975242831-ch002-Tagged_Processed_v1.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-03T11:20:34.829674'), 'uploaded_by_id': 1},
+        {'id': 132, 'file_id': 93, 'version_num': 29, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/01/Manuscript/Archive/Edwards9781975219314-ch002_v29.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-04T04:27:10.149365'), 'uploaded_by_id': 1},
+        {'id': 133, 'file_id': 68, 'version_num': 1, 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/07/Manuscript/Archive/Pataki9781975239107-ch007_v1.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-04T04:37:01.723865'), 'uploaded_by_id': 1},
+        {'id': 134, 'file_id': 69, 'version_num': 1, 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/08/Manuscript/Archive/Pataki9781975239107-ch008_v1.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-04T04:46:54.603542'), 'uploaded_by_id': 1},
+        {'id': 135, 'file_id': 69, 'version_num': 2, 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/08/Manuscript/Archive/Pataki9781975239107-ch008_v2.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-04T05:10:59.617001'), 'uploaded_by_id': 1},
+        {'id': 136, 'file_id': 69, 'version_num': 3, 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/Chapter 8 - Pataki9781975239107-ch008/Manuscript/Archive/Pataki9781975239107-ch008_v3.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-04T05:15:51.754187'), 'uploaded_by_id': 1},
+        {'id': 137, 'file_id': 69, 'version_num': 4, 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/Chapter 8 - Pataki9781975239107-ch008/Manuscript/Archive/Pataki9781975239107-ch008_v4.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-04T05:25:15.735341'), 'uploaded_by_id': 1},
+        {'id': 138, 'file_id': 69, 'version_num': 5, 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/Chapter 8 - Pataki9781975239107-ch008/Manuscript/Archive/Pataki9781975239107-ch008_v5.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-04T05:25:52.844129'), 'uploaded_by_id': 1},
+        {'id': 139, 'file_id': 69, 'version_num': 6, 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/Chapter 8 - Pataki9781975239107-ch008/Manuscript/Archive/Pataki9781975239107-ch008_v6.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-04T05:26:02.561828'), 'uploaded_by_id': 1},
+        {'id': 140, 'file_id': 122, 'version_num': 3, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/3/Manuscript/Archive/Wheeler92516_Ch01-Tagged-Test_v3.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-04T05:29:12.298780'), 'uploaded_by_id': 1},
+        {'id': 141, 'file_id': 122, 'version_num': 4, 'path': '/opt/cms_runtime/data/uploads/Edwards_188327/3/Manuscript/Archive/Wheeler92516_Ch01-Tagged-Test_v4.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-04T06:11:54.642277'), 'uploaded_by_id': 1},
+        {'id': 142, 'file_id': 70, 'version_num': 1, 'path': '/opt/cms_runtime/data/uploads/Pataki_189071/09/Manuscript/Archive/Pataki9781975239107-ch009_v1.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-04T06:18:45.278365'), 'uploaded_by_id': 1},
+        {'id': 143, 'file_id': 166, 'version_num': 1, 'path': '/opt/cms_runtime/data/uploads/PRJ-0009/01/Manuscript/Archive/Pataki9781975239107-ch001_v1.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T03:47:54.501721'), 'uploaded_by_id': 2},
+        {'id': 144, 'file_id': 166, 'version_num': 2, 'path': '/opt/cms_runtime/data/uploads/PRJ-0009/01/Manuscript/Archive/Pataki9781975239107-ch001_v2.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T04:35:58.353837'), 'uploaded_by_id': 2},
+        {'id': 145, 'file_id': 177, 'version_num': 1, 'path': '/opt/cms_runtime/data/uploads/Edwords_175757/01/Manuscript/Archive/Edwards9781975219314-ch001_v1.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T04:45:08.754852'), 'uploaded_by_id': 2},
+        {'id': 146, 'file_id': 177, 'version_num': 2, 'path': '/opt/cms_runtime/data/uploads/Edwords_175757/01/Manuscript/Archive/Edwards9781975219314-ch001_v2.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T06:35:36.196867'), 'uploaded_by_id': 1},
+        {'id': 147, 'file_id': 178, 'version_num': 1, 'path': '/opt/cms_runtime/data/uploads/Edwords_175757/03/Manuscript/Archive/Edwards9781975219314-ch003_v1.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T06:43:26.508685'), 'uploaded_by_id': 1},
+        {'id': 148, 'file_id': 177, 'version_num': 3, 'path': '/opt/cms_runtime/data/uploads/Edwords_175757/01/Manuscript/Archive/Edwards9781975219314-ch001_v3.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T08:37:01.436286'), 'uploaded_by_id': 1},
+        {'id': 149, 'file_id': 177, 'version_num': 4, 'path': '/opt/cms_runtime/data/uploads/Edwords_175757/01/Manuscript/Archive/Edwards9781975219314-ch001_v4.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T09:01:54.136574'), 'uploaded_by_id': 1},
+        {'id': 150, 'file_id': 177, 'version_num': 5, 'path': '/opt/cms_runtime/data/uploads/Edwords_175757/01/Manuscript/Archive/Edwards9781975219314-ch001_v5.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T09:03:24.856822'), 'uploaded_by_id': 1},
+        {'id': 151, 'file_id': 177, 'version_num': 6, 'path': '/opt/cms_runtime/data/uploads/Edwords_175757/01/Manuscript/Archive/Edwards9781975219314-ch001_v6.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T09:04:33.436635'), 'uploaded_by_id': 1},
+        {'id': 152, 'file_id': 177, 'version_num': 7, 'path': '/opt/cms_runtime/data/uploads/Edwords_175757/01/Manuscript/Archive/Edwards9781975219314-ch001_v7.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T09:04:52.252722'), 'uploaded_by_id': 1},
+        {'id': 153, 'file_id': 177, 'version_num': 8, 'path': '/opt/cms_runtime/data/uploads/Edwords_175757/01/Manuscript/Archive/Edwards9781975219314-ch001_v8.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T09:06:39.057481'), 'uploaded_by_id': 1},
+        {'id': 154, 'file_id': 177, 'version_num': 9, 'path': '/opt/cms_runtime/data/uploads/Edwords_175757/01/Manuscript/Archive/Edwards9781975219314-ch001_v9.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-06T09:42:05.627030'), 'uploaded_by_id': 1},
+        {'id': 155, 'file_id': 154, 'version_num': 1, 'path': '/opt/cms_runtime/data/uploads/PRJ_123456/10/Manuscript/Archive/Pataki9781975239107-ch010_v1.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-08T04:37:44.992099'), 'uploaded_by_id': 1},
+        {'id': 156, 'file_id': 144, 'version_num': 1, 'path': '/opt/cms_runtime/data/uploads/PRJ_123456/01/Manuscript/Archive/Pataki9781975239107-ch001_v1.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-08T04:44:55.996973'), 'uploaded_by_id': 1},
+        {'id': 157, 'file_id': 180, 'version_num': 1, 'path': '/opt/cms_runtime/data/uploads/Edwords_175757/04/Manuscript/Archive/Edwards9781975219314-ch004_v1.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-08T06:12:29.131121'), 'uploaded_by_id': 1},
+        {'id': 158, 'file_id': 180, 'version_num': 2, 'path': '/opt/cms_runtime/data/uploads/Edwords_175757/04/Manuscript/Archive/Edwards9781975219314-ch004_v2.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-08T06:17:51.136046'), 'uploaded_by_id': 1},
+        {'id': 159, 'file_id': 180, 'version_num': 3, 'path': '/opt/cms_runtime/data/uploads/Edwords_175757/04/Manuscript/Archive/Edwards9781975219314-ch004_v3.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-08T06:49:26.032797'), 'uploaded_by_id': 1},
+        {'id': 160, 'file_id': 177, 'version_num': 10, 'path': '/opt/cms_runtime/data/uploads/Edwords_175757/01/Manuscript/Archive/Edwards9781975219314-ch001_v10.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-08T06:54:28.164682'), 'uploaded_by_id': 1},
+        {'id': 161, 'file_id': 177, 'version_num': 11, 'path': '/opt/cms_runtime/data/uploads/Edwords_175757/01/Manuscript/Archive/Edwards9781975219314-ch001_v11.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-08T07:02:21.493465'), 'uploaded_by_id': 1},
+        {'id': 162, 'file_id': 177, 'version_num': 12, 'path': '/opt/cms_runtime/data/uploads/Edwords_175757/01/Manuscript/Archive/Edwards9781975219314-ch001_v12.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-08T09:56:46.224256'), 'uploaded_by_id': 1},
+        {'id': 163, 'file_id': 177, 'version_num': 13, 'path': '/opt/cms_runtime/data/uploads/Edwords_175757/01/Manuscript/Archive/Edwards9781975219314-ch001_v13.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-08T09:56:55.424754'), 'uploaded_by_id': 1},
+        {'id': 164, 'file_id': 177, 'version_num': 14, 'path': '/opt/cms_runtime/data/uploads/Edwords_175757/01/Manuscript/Archive/Edwards9781975219314-ch001_v14.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-08T09:57:14.135912'), 'uploaded_by_id': 1},
+        {'id': 165, 'file_id': 199, 'version_num': 1, 'path': '/opt/cms_runtime/data/uploads/Edwords_175757/01/Manuscript/Archive/Edwards9781975219314-ch001_v1_v1.docx', 'uploaded_at': datetime.datetime.fromisoformat('2026-06-08T10:18:52.824689'), 'uploaded_by_id': 1},
+    ],
+    'ProjectStylesheet': [
+        {'id': 4, 'project_id': 7, 'name': 'EDDD', 'description': None, 'selected_ia_rows': '[{"element": "Numbers", "subtype": "General", "pattern": "0 to 9 spelled out"}, {"element": "Figure", "subtype": "Caption", "pattern": "Figure ^#.^#"}, {"element": "Figure", "subtype": "Citation", "pattern": "Fig ^#.^#"}, {"element": "Percent", "subtype": "General", "pattern": "%"}, {"element": "Thousand separator (use/non-use)", "subtype": "General", "pattern": "1,000 (comma)"}, {"element": "Century", "subtype": "General", "pattern": "^#st/nd/rd/th century (numeric)"}, {"element": "Versus", "subtype": "General", "pattern": "versus"}]', 'analyzed_file_ids': '[]', 'is_active': True, 'created_at': datetime.datetime.fromisoformat('2026-05-26T07:32:24.396053'), 'created_by_id': 1},
+        {'id': 5, 'project_id': 8, 'name': 'Pataki_189071', 'description': None, 'selected_ia_rows': '[{"element": "Numbers", "subtype": "General", "pattern": "0 to 9 spelled out"}, {"element": "Abbreviations", "subtype": "General", "pattern": "<[A-Z]{2,}>"}, {"element": "Ranges", "subtype": "General", "pattern": "X-Y (hyphen)"}, {"element": "Periods", "subtype": "General", "pattern": "PM"}, {"element": "Ranges", "subtype": "General", "pattern": "X to Y"}, {"element": "Table", "subtype": "Citation", "pattern": "Table ^#.^#"}, {"element": "Table", "subtype": "Caption", "pattern": "Table ^#.^#"}]', 'analyzed_file_ids': '[]', 'is_active': True, 'created_at': datetime.datetime.fromisoformat('2026-05-29T07:24:01.991473'), 'created_by_id': 1},
+        {'id': 7, 'project_id': 22, 'name': 'Edwords', 'description': None, 'selected_ia_rows': '[{"element": "Numbers", "subtype": "General", "pattern": "0 to 9 spelled out"}, {"element": "Latin abbreviations", "subtype": "General", "pattern": "e.g."}, {"element": "Ranges", "subtype": "General", "pattern": "X to Y"}, {"element": "Table", "subtype": "Caption", "pattern": "Table ^#.^#"}]', 'analyzed_file_ids': '[177, 179, 178, 180]', 'is_active': True, 'created_at': datetime.datetime.fromisoformat('2026-06-08T09:55:09.535462'), 'created_by_id': 1},
+    ],
+    'RolesMaster': [
+        {'id': 1, 'role_name': 'admin', 'team': 'Admin Team', 'description': 'Full system access — all modules and settings', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.330174+00:00')},
+        {'id': 2, 'role_name': 'manager', 'team': 'Preediting Team', 'description': 'Team and project management for the pre-editing workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.415974+00:00')},
+        {'id': 3, 'role_name': 'pereditor', 'team': 'Preediting Team', 'description': 'Pre-editing review and content preparation', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.427382+00:00')},
+        {'id': 4, 'role_name': 'manager', 'team': 'Copyediting Team', 'description': 'Team and project management for the copyediting workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.438614+00:00')},
+        {'id': 5, 'role_name': 'copyeditor', 'team': 'Copyediting Team', 'description': 'Language and style editing of manuscript content', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.445525+00:00')},
+        {'id': 6, 'role_name': 'technical_copyeditor', 'team': 'Copyediting Team', 'description': 'Technical accuracy review and domain-specific copyediting', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.455996+00:00')},
+        {'id': 7, 'role_name': 'manager', 'team': 'Typesetting Team', 'description': 'Team and project management for the typesetting workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.467730+00:00')},
+        {'id': 8, 'role_name': 'typesetter', 'team': 'Typesetting Team', 'description': 'Page layout, formatting and typesetting of final manuscripts', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.478130+00:00')},
+        {'id': 9, 'role_name': 'manager', 'team': 'QA Team', 'description': 'Team and project management for quality assurance', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.490917+00:00')},
+        {'id': 10, 'role_name': 'qa_reviewer', 'team': 'QA Team', 'description': 'Quality assurance review and sign-off on deliverables', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.518650+00:00')},
+        {'id': 11, 'role_name': 'operations_manager', 'team': 'Operations Team', 'description': 'Operations oversight — workflows, scheduling and capacity', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.536156+00:00')},
+        {'id': 12, 'role_name': 'finance_analyst', 'team': 'Finance Team', 'description': 'Finance module — read/write access to billing and invoicing data', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.551490+00:00')},
+        {'id': 13, 'role_name': 'support', 'team': 'Support Team', 'description': 'Customer support — ticket handling and client communication', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.567090+00:00')},
+        {'id': 14, 'role_name': 'viewer', 'team': 'General', 'description': 'Read-only access across all permitted modules', 'active_status': False, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.579099+00:00')},
+        {'id': 15, 'role_name': 'admin', 'team': 'IT', 'description': 'Auto-generated role for admin in IT', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:40:55.050103+00:00')},
+        {'id': 16, 'role_name': 'manager', 'team': 'Sales', 'description': 'Auto-generated role for manager in Sales', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:40:55.414995+00:00')},
+        {'id': 17, 'role_name': 'developer', 'team': 'Engineering', 'description': 'Auto-generated role for developer in Engineering', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:40:55.691995+00:00')},
+        {'id': 18, 'role_name': 'analyst', 'team': 'Data', 'description': 'Auto-generated role for analyst in Data', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:40:55.951875+00:00')},
+        {'id': 19, 'role_name': 'manager', 'team': 'Operations', 'description': 'Auto-generated role for manager in Operations', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:40:56.547274+00:00')},
+        {'id': 20, 'role_name': 'analyst', 'team': 'Finance', 'description': 'Auto-generated role for analyst in Finance', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:40:57.321142+00:00')},
+        {'id': 21, 'role_name': 'designer', 'team': 'UX', 'description': 'Auto-generated role for designer in UX', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:40:58.819847+00:00')},
+        {'id': 22, 'role_name': 'manager', 'team': 'HR', 'description': 'Auto-generated role for manager in HR', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:40:59.525312+00:00')},
+    ],
+    'StageActivityMaster': [
+        {'id': 1, 'stage_activity_name': 'Requirement Gathering', 'description': 'Collect and document all functional and non-functional requirements from stakeholders', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.856985+00:00')},
+        {'id': 2, 'stage_activity_name': 'Feasibility Study', 'description': 'Assess technical, financial and operational feasibility of the proposed solution', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.886232+00:00')},
+        {'id': 3, 'stage_activity_name': 'Stakeholder Identification', 'description': 'Identify and document all project stakeholders and their roles and expectations', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.918581+00:00')},
+        {'id': 4, 'stage_activity_name': 'Project Planning', 'description': 'Define milestones, deliverables, timeline and success criteria', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.933287+00:00')},
+        {'id': 5, 'stage_activity_name': 'Resource Allocation', 'description': 'Assign team members, tools and infrastructure to project workstreams', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.951040+00:00')},
+        {'id': 6, 'stage_activity_name': 'Risk Assessment', 'description': 'Identify, evaluate and document project risks with mitigation strategies', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.964438+00:00')},
+        {'id': 7, 'stage_activity_name': 'UI Design', 'description': 'Create wireframes, high-fidelity mockups and interactive design prototypes', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:27.982676+00:00')},
+        {'id': 8, 'stage_activity_name': 'Database Design', 'description': 'Design relational schema, indexing strategy and data migration plan', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:28.015209+00:00')},
+        {'id': 9, 'stage_activity_name': 'Architecture Review', 'description': 'Review and approve system architecture, technology stack and integration patterns', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:28.039310+00:00')},
+        {'id': 10, 'stage_activity_name': 'Frontend Development', 'description': 'Build user interface components, pages and client-side application logic', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:28.053024+00:00')},
+        {'id': 11, 'stage_activity_name': 'Backend Development', 'description': 'Implement REST APIs, business logic, authentication and data access layer', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:28.069897+00:00')},
+        {'id': 12, 'stage_activity_name': 'Database Implementation', 'description': 'Create tables, stored procedures, indexes and seed reference data in the target database', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:28.089573+00:00')},
+        {'id': 13, 'stage_activity_name': 'Unit Testing', 'description': 'Write and execute tests for individual functions, methods and components in isolation', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:28.101660+00:00')},
+        {'id': 14, 'stage_activity_name': 'Integration Testing', 'description': 'Validate combined modules, API contracts and end-to-end data flows', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:28.113967+00:00')},
+        {'id': 15, 'stage_activity_name': 'UAT', 'description': 'Facilitate user acceptance testing with client representatives on staging environment', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:28.146837+00:00')},
+        {'id': 16, 'stage_activity_name': 'Code Review', 'description': 'Peer review of source code for quality, security standards and best practices', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:28.171678+00:00')},
+        {'id': 17, 'stage_activity_name': 'Client Review', 'description': 'Present deliverables to client stakeholders and capture formal sign-off', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:28.184653+00:00')},
+        {'id': 18, 'stage_activity_name': 'Performance Review', 'description': 'Profile application under load, identify bottlenecks and validate SLA targets', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:28.201874+00:00')},
+        {'id': 19, 'stage_activity_name': 'Production Deployment', 'description': 'Execute deployment runbook to release application to production environment', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:28.223947+00:00')},
+        {'id': 20, 'stage_activity_name': 'Smoke Testing', 'description': 'Run post-deployment sanity checks to confirm critical paths are operational', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:28.243690+00:00')},
+        {'id': 21, 'stage_activity_name': 'Rollback Planning', 'description': 'Prepare and validate rollback procedures in case of critical deployment failure', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:28.257286+00:00')},
+        {'id': 22, 'stage_activity_name': 'Documentation', 'description': 'Write technical architecture, API and end-user documentation for all delivered features', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:28.269878+00:00')},
+        {'id': 23, 'stage_activity_name': 'Project Handover', 'description': 'Transfer ownership, credentials, runbooks and final deliverables to client or support', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:28.280757+00:00')},
+        {'id': 24, 'stage_activity_name': 'Lessons Learned', 'description': 'Conduct retrospective to capture process improvements and knowledge for future projects', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:28.293338+00:00')},
+    ],
+    'StageMaster': [
+        {'id': 1, 'stage_name': 'Initiation', 'description': 'Project kick-off, stakeholder alignment, requirements gathering and feasibility assessment', 'stage_activities': [1, 3, 2], 'sla_level1': 1, 'sla_level2': 2, 'sla_level3': 3, 'roles': ['manager', 'analyst'], 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:28.306311+00:00')},
+        {'id': 2, 'stage_name': 'Planning', 'description': 'Detailed project planning, resource allocation, risk assessment and scope definition', 'stage_activities': [4, 5, 6], 'sla_level1': 3, 'sla_level2': 5, 'sla_level3': 7, 'roles': ['manager', 'operations_manager'], 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:28.341391+00:00')},
+        {'id': 3, 'stage_name': 'Design', 'description': 'System architecture, UI/UX design, database schema and integration design', 'stage_activities': [9, 7, 8], 'sla_level1': 5, 'sla_level2': 7, 'sla_level3': 10, 'roles': ['designer', 'developer'], 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:28.363440+00:00')},
+        {'id': 4, 'stage_name': 'Development', 'description': 'Full-stack implementation of frontend, backend and database layers', 'stage_activities': [10, 11, 12], 'sla_level1': 14, 'sla_level2': 21, 'sla_level3': 28, 'roles': ['developer'], 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:28.383002+00:00')},
+        {'id': 5, 'stage_name': 'Testing', 'description': 'Comprehensive testing including unit, integration and user acceptance testing', 'stage_activities': [13, 14, 15], 'sla_level1': 5, 'sla_level2': 7, 'sla_level3': 10, 'roles': ['developer', 'analyst'], 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:28.402398+00:00')},
+        {'id': 6, 'stage_name': 'Review', 'description': 'Code quality review, performance validation and formal client sign-off', 'stage_activities': [16, 18, 17], 'sla_level1': 2, 'sla_level2': 3, 'sla_level3': 5, 'roles': ['manager', 'developer'], 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:28.427376+00:00')},
+        {'id': 7, 'stage_name': 'Deployment', 'description': 'Production release, post-deployment validation and rollback readiness', 'stage_activities': [21, 19, 20], 'sla_level1': 1, 'sla_level2': 2, 'sla_level3': 3, 'roles': ['developer', 'operations_manager'], 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:28.449461+00:00')},
+        {'id': 8, 'stage_name': 'Closure', 'description': 'Documentation, knowledge transfer, handover and project retrospective', 'stage_activities': [22, 23, 24], 'sla_level1': 2, 'sla_level2': 3, 'sla_level3': 5, 'roles': ['manager', 'analyst'], 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:39:28.472911+00:00')},
+    ],
+    'StageDetail': [
+        {'id': 1, 'client': 'Acme Corporation', 'project': 'Enterprise ERP Integration Platform', 'chapters': 'CH-001', 'project_manager_name': 'john_doe', 'assignee_name': 'alice_johnson', 'planned_start_date': None, 'planned_end_date': None, 'actual_start_date': datetime.datetime.fromisoformat('2024-01-10T09:00:00+00:00'), 'actual_end_date': datetime.datetime.fromisoformat('2024-01-20T17:00:00+00:00'), 'stage_name': 'Initiation', 'stage_activity': 'Requirement Gathering', 'total_time_taken': 248.0, 'workflow': 'Agile Sprint', 'complexity_level': 'High', 'stage_level': 1, 'sla': 120, 'stage_status': 'complete', 'stage_activity_status': 'complete', 'delayed': False, 'delay_days': None, 'remarks': 'All functional requirements documented and signed off.', 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:41:04.939563+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:41:04.939563+00:00')},
+        {'id': 2, 'client': 'Acme Corporation', 'project': 'Enterprise ERP Integration Platform', 'chapters': 'CH-001', 'project_manager_name': 'john_doe', 'assignee_name': 'alice_johnson', 'planned_start_date': None, 'planned_end_date': None, 'actual_start_date': datetime.datetime.fromisoformat('2024-01-21T09:00:00+00:00'), 'actual_end_date': None, 'stage_name': 'Initiation', 'stage_activity': 'Feasibility Study', 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'High', 'stage_level': 1, 'sla': 80, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:41:26.199667+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:41:26.199667+00:00')},
+        {'id': 3, 'client': 'Acme Corporation', 'project': 'Enterprise ERP Integration Platform', 'chapters': 'CH-002', 'project_manager_name': 'john_doe', 'assignee_name': 'jane_smith', 'planned_start_date': None, 'planned_end_date': None, 'actual_start_date': datetime.datetime.fromisoformat('2024-02-01T09:00:00+00:00'), 'actual_end_date': datetime.datetime.fromisoformat('2024-02-15T18:00:00+00:00'), 'stage_name': 'Design', 'stage_activity': 'UI Design', 'total_time_taken': 345.0, 'workflow': 'Agile Sprint', 'complexity_level': 'High', 'stage_level': 2, 'sla': 96, 'stage_status': 'complete', 'stage_activity_status': 'complete', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:41:26.429746+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:41:26.429746+00:00')},
+        {'id': 4, 'client': 'Acme Corporation', 'project': 'Enterprise ERP Integration Platform', 'chapters': 'CH-002', 'project_manager_name': 'john_doe', 'assignee_name': 'jane_smith', 'planned_start_date': None, 'planned_end_date': None, 'actual_start_date': datetime.datetime.fromisoformat('2024-02-16T09:00:00+00:00'), 'actual_end_date': None, 'stage_name': 'Design', 'stage_activity': 'Database Design', 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'High', 'stage_level': 2, 'sla': 72, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': 'Schema design in review with architect team.', 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:41:26.441103+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:41:26.441103+00:00')},
+        {'id': 5, 'client': 'Acme Corporation', 'project': 'Cloud Infrastructure Migration Phase 2', 'chapters': 'CH-001', 'project_manager_name': 'charlie_brown', 'assignee_name': 'evan_rogers', 'planned_start_date': None, 'planned_end_date': None, 'actual_start_date': datetime.datetime.fromisoformat('2024-03-01T09:00:00+00:00'), 'actual_end_date': None, 'stage_name': 'Planning', 'stage_activity': 'Project Planning', 'total_time_taken': None, 'workflow': 'DevOps Pipeline', 'complexity_level': 'Medium', 'stage_level': 1, 'sla': 48, 'stage_status': 'Hold', 'stage_activity_status': 'Hold', 'delayed': False, 'delay_days': None, 'remarks': 'On hold — awaiting client infrastructure audit report.', 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:41:26.449590+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:41:26.449590+00:00')},
+        {'id': 6, 'client': 'Beta Technologies', 'project': 'Automated Deployment Pipeline Setup', 'chapters': 'CH-001', 'project_manager_name': 'charlie_brown', 'assignee_name': 'evan_rogers', 'planned_start_date': None, 'planned_end_date': None, 'actual_start_date': datetime.datetime.fromisoformat('2024-01-05T08:00:00+00:00'), 'actual_end_date': datetime.datetime.fromisoformat('2024-01-18T17:00:00+00:00'), 'stage_name': 'Development', 'stage_activity': 'Backend Development', 'total_time_taken': 321.0, 'workflow': 'CI/CD Workflow', 'complexity_level': 'Medium', 'stage_level': 3, 'sla': 160, 'stage_status': 'complete', 'stage_activity_status': 'complete', 'delayed': False, 'delay_days': None, 'remarks': 'Pipeline scripts written and unit tested.', 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:41:26.456474+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:41:26.456474+00:00')},
+        {'id': 7, 'client': 'Beta Technologies', 'project': 'Automated Deployment Pipeline Setup', 'chapters': 'CH-002', 'project_manager_name': 'charlie_brown', 'assignee_name': 'jane_smith', 'planned_start_date': None, 'planned_end_date': None, 'actual_start_date': datetime.datetime.fromisoformat('2024-02-10T08:00:00+00:00'), 'actual_end_date': None, 'stage_name': 'Testing', 'stage_activity': 'Integration Testing', 'total_time_taken': None, 'workflow': 'CI/CD Workflow', 'complexity_level': 'High', 'stage_level': 4, 'sla': 64, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:41:26.465691+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:41:26.465691+00:00')},
+        {'id': 8, 'client': 'Gamma Retail Group', 'project': 'Multi-Channel E-commerce Platform', 'chapters': 'CH-001', 'project_manager_name': 'john_doe', 'assignee_name': 'bob_wilson', 'planned_start_date': None, 'planned_end_date': None, 'actual_start_date': datetime.datetime.fromisoformat('2024-11-01T10:00:00+00:00'), 'actual_end_date': datetime.datetime.fromisoformat('2024-11-20T17:00:00+00:00'), 'stage_name': 'Initiation', 'stage_activity': 'Feasibility Study', 'total_time_taken': 463.0, 'workflow': 'Retail Workflow', 'complexity_level': 'Low', 'stage_level': 1, 'sla': 56, 'stage_status': 'complete', 'stage_activity_status': 'complete', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:41:26.473185+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:41:26.473185+00:00')},
+        {'id': 9, 'client': 'Gamma Retail Group', 'project': 'Multi-Channel E-commerce Platform', 'chapters': 'CH-002', 'project_manager_name': 'john_doe', 'assignee_name': 'fiona_apple', 'planned_start_date': None, 'planned_end_date': None, 'actual_start_date': datetime.datetime.fromisoformat('2025-01-10T10:00:00+00:00'), 'actual_end_date': None, 'stage_name': 'Development', 'stage_activity': 'Frontend Development', 'total_time_taken': None, 'workflow': 'Retail Workflow', 'complexity_level': 'High', 'stage_level': 3, 'sla': 120, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': 'Payment UI components 60% complete.', 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:41:26.480236+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:41:26.480236+00:00')},
+        {'id': 10, 'client': 'Delta Finance Ltd', 'project': 'Core Banking System Modernisation', 'chapters': 'CH-001', 'project_manager_name': 'george_martin', 'assignee_name': 'bob_wilson', 'planned_start_date': None, 'planned_end_date': None, 'actual_start_date': datetime.datetime.fromisoformat('2024-04-01T08:00:00+00:00'), 'actual_end_date': None, 'stage_name': 'Review', 'stage_activity': 'Code Review', 'total_time_taken': None, 'workflow': 'Banking Workflow', 'complexity_level': 'High', 'stage_level': 5, 'sla': 48, 'stage_status': 'In-query', 'stage_activity_status': 'In-query', 'delayed': False, 'delay_days': None, 'remarks': 'Client raised queries on data migration strategy for legacy accounts.', 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:41:26.486145+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:41:26.486145+00:00')},
+        {'id': 11, 'client': 'Epsilon Healthcare', 'project': 'Hospital Management System Integration', 'chapters': 'CH-001', 'project_manager_name': 'george_martin', 'assignee_name': 'fiona_apple', 'planned_start_date': None, 'planned_end_date': None, 'actual_start_date': datetime.datetime.fromisoformat('2025-01-15T07:00:00+00:00'), 'actual_end_date': None, 'stage_name': 'Design', 'stage_activity': 'UI Design', 'total_time_taken': None, 'workflow': 'HMS Workflow', 'complexity_level': 'High', 'stage_level': 2, 'sla': 96, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:41:26.493666+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:41:26.493666+00:00')},
+        {'id': 12, 'client': 'Eta Media Group', 'project': 'Streaming Platform Content Management System', 'chapters': 'CH-001', 'project_manager_name': 'john_doe', 'assignee_name': 'george_martin', 'planned_start_date': None, 'planned_end_date': None, 'actual_start_date': datetime.datetime.fromisoformat('2023-09-01T10:00:00+00:00'), 'actual_end_date': datetime.datetime.fromisoformat('2023-10-10T16:00:00+00:00'), 'stage_name': 'Closure', 'stage_activity': 'Project Handover', 'total_time_taken': 942.0, 'workflow': 'Content Workflow', 'complexity_level': 'Medium', 'stage_level': 7, 'sla': 40, 'stage_status': 'complete', 'stage_activity_status': 'complete', 'delayed': False, 'delay_days': None, 'remarks': 'All deliverables handed over. Client sign-off received.', 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:41:26.500192+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:41:26.500192+00:00')},
+        {'id': 13, 'client': '', 'project': 'PRJ-0009', 'chapters': '01', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-05T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Initiation', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 14, 'client': '', 'project': 'PRJ-0009', 'chapters': '01', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Planning', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 5, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 15, 'client': '', 'project': 'PRJ-0009', 'chapters': '01', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Design', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 16, 'client': '', 'project': 'PRJ-0009', 'chapters': '01', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Development', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 21, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 17, 'client': '', 'project': 'PRJ-0009', 'chapters': '01', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-17T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Testing', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 18, 'client': '', 'project': 'PRJ-0009', 'chapters': '01', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-17T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-20T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Review', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 19, 'client': '', 'project': 'PRJ-0009', 'chapters': '01', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-20T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-22T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Deployment', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 20, 'client': '', 'project': 'PRJ-0009', 'chapters': '01', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-22T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-25T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Closure', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 21, 'client': '', 'project': 'PRJ-0009', 'chapters': '02', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-05T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Initiation', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 22, 'client': '', 'project': 'PRJ-0009', 'chapters': '02', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Planning', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 5, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 23, 'client': '', 'project': 'PRJ-0009', 'chapters': '02', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Design', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 24, 'client': '', 'project': 'PRJ-0009', 'chapters': '02', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Development', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 21, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 25, 'client': '', 'project': 'PRJ-0009', 'chapters': '02', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-17T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Testing', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 26, 'client': '', 'project': 'PRJ-0009', 'chapters': '02', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-17T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-20T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Review', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 27, 'client': '', 'project': 'PRJ-0009', 'chapters': '02', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-20T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-22T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Deployment', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 28, 'client': '', 'project': 'PRJ-0009', 'chapters': '02', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-22T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-25T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Closure', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 29, 'client': '', 'project': 'PRJ-0009', 'chapters': '03', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-05T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Initiation', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 30, 'client': '', 'project': 'PRJ-0009', 'chapters': '03', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Planning', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 5, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 31, 'client': '', 'project': 'PRJ-0009', 'chapters': '03', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Design', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 32, 'client': '', 'project': 'PRJ-0009', 'chapters': '03', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Development', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 21, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 33, 'client': '', 'project': 'PRJ-0009', 'chapters': '03', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-17T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Testing', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 34, 'client': '', 'project': 'PRJ-0009', 'chapters': '03', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-17T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-20T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Review', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 35, 'client': '', 'project': 'PRJ-0009', 'chapters': '03', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-20T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-22T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Deployment', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 36, 'client': '', 'project': 'PRJ-0009', 'chapters': '03', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-22T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-25T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Closure', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 37, 'client': '', 'project': 'PRJ-0009', 'chapters': '04', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-05T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Initiation', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 38, 'client': '', 'project': 'PRJ-0009', 'chapters': '04', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Planning', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 5, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 39, 'client': '', 'project': 'PRJ-0009', 'chapters': '04', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Design', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 40, 'client': '', 'project': 'PRJ-0009', 'chapters': '04', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Development', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 21, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 41, 'client': '', 'project': 'PRJ-0009', 'chapters': '04', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-17T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Testing', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 42, 'client': '', 'project': 'PRJ-0009', 'chapters': '04', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-17T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-20T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Review', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 43, 'client': '', 'project': 'PRJ-0009', 'chapters': '04', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-20T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-22T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Deployment', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 44, 'client': '', 'project': 'PRJ-0009', 'chapters': '04', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-22T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-25T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Closure', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 45, 'client': '', 'project': 'PRJ-0009', 'chapters': '05', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-05T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Initiation', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 46, 'client': '', 'project': 'PRJ-0009', 'chapters': '05', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Planning', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 5, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 47, 'client': '', 'project': 'PRJ-0009', 'chapters': '05', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Design', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 48, 'client': '', 'project': 'PRJ-0009', 'chapters': '05', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Development', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 21, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 49, 'client': '', 'project': 'PRJ-0009', 'chapters': '05', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-17T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Testing', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 50, 'client': '', 'project': 'PRJ-0009', 'chapters': '05', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-17T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-20T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Review', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 51, 'client': '', 'project': 'PRJ-0009', 'chapters': '05', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-20T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-22T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Deployment', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 52, 'client': '', 'project': 'PRJ-0009', 'chapters': '05', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-22T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-25T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Closure', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 53, 'client': '', 'project': 'PRJ-0009', 'chapters': '06', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-05T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Initiation', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 54, 'client': '', 'project': 'PRJ-0009', 'chapters': '06', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Planning', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 5, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 55, 'client': '', 'project': 'PRJ-0009', 'chapters': '06', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Design', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 56, 'client': '', 'project': 'PRJ-0009', 'chapters': '06', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Development', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 21, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 57, 'client': '', 'project': 'PRJ-0009', 'chapters': '06', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-17T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Testing', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 58, 'client': '', 'project': 'PRJ-0009', 'chapters': '06', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-17T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-20T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Review', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 59, 'client': '', 'project': 'PRJ-0009', 'chapters': '06', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-20T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-22T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Deployment', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 60, 'client': '', 'project': 'PRJ-0009', 'chapters': '06', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-22T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-25T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Closure', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 61, 'client': '', 'project': 'PRJ-0009', 'chapters': '07', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-05T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Initiation', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 62, 'client': '', 'project': 'PRJ-0009', 'chapters': '07', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Planning', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 5, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 63, 'client': '', 'project': 'PRJ-0009', 'chapters': '07', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Design', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 64, 'client': '', 'project': 'PRJ-0009', 'chapters': '07', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Development', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 21, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 65, 'client': '', 'project': 'PRJ-0009', 'chapters': '07', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-17T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Testing', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 66, 'client': '', 'project': 'PRJ-0009', 'chapters': '07', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-17T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-20T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Review', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 67, 'client': '', 'project': 'PRJ-0009', 'chapters': '07', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-20T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-22T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Deployment', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 68, 'client': '', 'project': 'PRJ-0009', 'chapters': '07', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-22T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-25T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Closure', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 69, 'client': '', 'project': 'PRJ-0009', 'chapters': '08', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-05T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Initiation', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 70, 'client': '', 'project': 'PRJ-0009', 'chapters': '08', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Planning', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 5, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 71, 'client': '', 'project': 'PRJ-0009', 'chapters': '08', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Design', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 72, 'client': '', 'project': 'PRJ-0009', 'chapters': '08', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Development', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 21, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 73, 'client': '', 'project': 'PRJ-0009', 'chapters': '08', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-17T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Testing', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 74, 'client': '', 'project': 'PRJ-0009', 'chapters': '08', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-17T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-20T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Review', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 75, 'client': '', 'project': 'PRJ-0009', 'chapters': '08', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-20T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-22T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Deployment', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 76, 'client': '', 'project': 'PRJ-0009', 'chapters': '08', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-22T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-25T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Closure', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 77, 'client': '', 'project': 'PRJ-0009', 'chapters': '09', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-05T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Initiation', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 78, 'client': '', 'project': 'PRJ-0009', 'chapters': '09', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Planning', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 5, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 79, 'client': '', 'project': 'PRJ-0009', 'chapters': '09', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Design', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 80, 'client': '', 'project': 'PRJ-0009', 'chapters': '09', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Development', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 21, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 81, 'client': '', 'project': 'PRJ-0009', 'chapters': '09', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-17T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Testing', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 82, 'client': '', 'project': 'PRJ-0009', 'chapters': '09', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-17T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-20T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Review', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 83, 'client': '', 'project': 'PRJ-0009', 'chapters': '09', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-20T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-22T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Deployment', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 84, 'client': '', 'project': 'PRJ-0009', 'chapters': '09', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-22T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-25T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Closure', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 85, 'client': '', 'project': 'PRJ-0009', 'chapters': '10', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-05T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Initiation', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 86, 'client': '', 'project': 'PRJ-0009', 'chapters': '10', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Planning', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 5, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 87, 'client': '', 'project': 'PRJ-0009', 'chapters': '10', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Design', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 88, 'client': '', 'project': 'PRJ-0009', 'chapters': '10', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Development', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 21, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 89, 'client': '', 'project': 'PRJ-0009', 'chapters': '10', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-17T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Testing', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 90, 'client': '', 'project': 'PRJ-0009', 'chapters': '10', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-17T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-20T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Review', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 91, 'client': '', 'project': 'PRJ-0009', 'chapters': '10', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-20T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-22T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Deployment', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 92, 'client': '', 'project': 'PRJ-0009', 'chapters': '10', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-22T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-25T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Closure', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 93, 'client': '', 'project': 'PRJ-0009', 'chapters': '11', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-05T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Initiation', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 94, 'client': '', 'project': 'PRJ-0009', 'chapters': '11', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Planning', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 5, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 95, 'client': '', 'project': 'PRJ-0009', 'chapters': '11', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Design', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 96, 'client': '', 'project': 'PRJ-0009', 'chapters': '11', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Development', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 21, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 97, 'client': '', 'project': 'PRJ-0009', 'chapters': '11', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-17T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Testing', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 98, 'client': '', 'project': 'PRJ-0009', 'chapters': '11', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-17T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-20T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Review', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 99, 'client': '', 'project': 'PRJ-0009', 'chapters': '11', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-20T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-22T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Deployment', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 100, 'client': '', 'project': 'PRJ-0009', 'chapters': '11', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-22T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-25T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Closure', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'Agile Sprint', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.115550+00:00')},
+        {'id': 101, 'client': '', 'project': 'Edwords_175757', 'chapters': '01', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-05T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Initiation', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 102, 'client': '', 'project': 'Edwords_175757', 'chapters': '01', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Planning', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 5, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 103, 'client': '', 'project': 'Edwords_175757', 'chapters': '01', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Design', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 104, 'client': '', 'project': 'Edwords_175757', 'chapters': '01', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Development', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 21, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 105, 'client': '', 'project': 'Edwords_175757', 'chapters': '01', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-13T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Review', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 106, 'client': '', 'project': 'Edwords_175757', 'chapters': '01', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-13T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-15T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Deployment', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 107, 'client': '', 'project': 'Edwords_175757', 'chapters': '01', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-15T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-18T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Closure', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 108, 'client': '', 'project': 'Edwords_175757', 'chapters': '01', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-18T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-25T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Testing', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 109, 'client': '', 'project': 'Edwords_175757', 'chapters': '02', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-05T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Initiation', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 110, 'client': '', 'project': 'Edwords_175757', 'chapters': '02', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Planning', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 5, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 111, 'client': '', 'project': 'Edwords_175757', 'chapters': '02', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Design', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 112, 'client': '', 'project': 'Edwords_175757', 'chapters': '02', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Development', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 21, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 113, 'client': '', 'project': 'Edwords_175757', 'chapters': '02', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-13T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Review', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 114, 'client': '', 'project': 'Edwords_175757', 'chapters': '02', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-13T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-15T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Deployment', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 115, 'client': '', 'project': 'Edwords_175757', 'chapters': '02', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-15T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-18T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Closure', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 116, 'client': '', 'project': 'Edwords_175757', 'chapters': '02', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-18T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-25T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Testing', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 117, 'client': '', 'project': 'Edwords_175757', 'chapters': '03', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-05T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Initiation', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 118, 'client': '', 'project': 'Edwords_175757', 'chapters': '03', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Planning', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 5, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 119, 'client': '', 'project': 'Edwords_175757', 'chapters': '03', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Design', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 120, 'client': '', 'project': 'Edwords_175757', 'chapters': '03', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Development', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 21, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 121, 'client': '', 'project': 'Edwords_175757', 'chapters': '03', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-13T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Review', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 122, 'client': '', 'project': 'Edwords_175757', 'chapters': '03', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-13T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-15T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Deployment', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 123, 'client': '', 'project': 'Edwords_175757', 'chapters': '03', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-15T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-18T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Closure', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 124, 'client': '', 'project': 'Edwords_175757', 'chapters': '03', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-18T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-25T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Testing', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 125, 'client': '', 'project': 'Edwords_175757', 'chapters': '04', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-05T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Initiation', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 126, 'client': '', 'project': 'Edwords_175757', 'chapters': '04', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-07T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Planning', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 5, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 127, 'client': '', 'project': 'Edwords_175757', 'chapters': '04', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-12T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Design', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 128, 'client': '', 'project': 'Edwords_175757', 'chapters': '04', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-06-19T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Development', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 21, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 129, 'client': '', 'project': 'Edwords_175757', 'chapters': '04', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-10T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-13T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Review', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 130, 'client': '', 'project': 'Edwords_175757', 'chapters': '04', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-13T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-15T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Deployment', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 2, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 131, 'client': '', 'project': 'Edwords_175757', 'chapters': '04', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-15T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-18T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Closure', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 3, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+        {'id': 132, 'client': '', 'project': 'Edwords_175757', 'chapters': '04', 'project_manager_name': 'john_doe', 'assignee_name': None, 'planned_start_date': datetime.datetime.fromisoformat('2026-07-18T18:30:00+00:00'), 'planned_end_date': datetime.datetime.fromisoformat('2026-07-25T18:30:00+00:00'), 'actual_start_date': None, 'actual_end_date': None, 'stage_name': 'Testing', 'stage_activity': None, 'total_time_taken': None, 'workflow': 'FRESH-1', 'complexity_level': 'Medium', 'stage_level': None, 'sla': 7, 'stage_status': 'In-progress', 'stage_activity_status': 'In-progress', 'delayed': False, 'delay_days': None, 'remarks': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T04:44:27.634156+00:00')},
+    ],
+    'WorkflowMaster': [
+        {'id': 1, 'workflow_name': 'Agile Sprint', 'stage_name': 'Initiation', 'previous_stage': None, 'next_stage': 'Planning', 'description': 'Standard Initiation stage for Agile Sprint', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 2, 'workflow_name': 'Agile Sprint', 'stage_name': 'Planning', 'previous_stage': 'Initiation', 'next_stage': 'Design', 'description': 'Standard Planning stage for Agile Sprint', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 3, 'workflow_name': 'Agile Sprint', 'stage_name': 'Design', 'previous_stage': 'Planning', 'next_stage': 'Development', 'description': 'Standard Design stage for Agile Sprint', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 4, 'workflow_name': 'Agile Sprint', 'stage_name': 'Development', 'previous_stage': 'Design', 'next_stage': 'Testing', 'description': 'Standard Development stage for Agile Sprint', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 5, 'workflow_name': 'Agile Sprint', 'stage_name': 'Testing', 'previous_stage': 'Development', 'next_stage': 'Review', 'description': 'Standard Testing stage for Agile Sprint', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 6, 'workflow_name': 'Agile Sprint', 'stage_name': 'Review', 'previous_stage': 'Testing', 'next_stage': 'Deployment', 'description': 'Standard Review stage for Agile Sprint', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 7, 'workflow_name': 'Agile Sprint', 'stage_name': 'Deployment', 'previous_stage': 'Review', 'next_stage': 'Closure', 'description': 'Standard Deployment stage for Agile Sprint', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 8, 'workflow_name': 'Agile Sprint', 'stage_name': 'Closure', 'previous_stage': 'Deployment', 'next_stage': None, 'description': 'Standard Closure stage for Agile Sprint', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 9, 'workflow_name': 'DevOps Pipeline', 'stage_name': 'Initiation', 'previous_stage': None, 'next_stage': 'Planning', 'description': 'Standard Initiation stage for DevOps Pipeline', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 10, 'workflow_name': 'DevOps Pipeline', 'stage_name': 'Planning', 'previous_stage': 'Initiation', 'next_stage': 'Design', 'description': 'Standard Planning stage for DevOps Pipeline', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 11, 'workflow_name': 'DevOps Pipeline', 'stage_name': 'Design', 'previous_stage': 'Planning', 'next_stage': 'Development', 'description': 'Standard Design stage for DevOps Pipeline', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 12, 'workflow_name': 'DevOps Pipeline', 'stage_name': 'Development', 'previous_stage': 'Design', 'next_stage': 'Testing', 'description': 'Standard Development stage for DevOps Pipeline', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 13, 'workflow_name': 'DevOps Pipeline', 'stage_name': 'Testing', 'previous_stage': 'Development', 'next_stage': 'Review', 'description': 'Standard Testing stage for DevOps Pipeline', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 14, 'workflow_name': 'DevOps Pipeline', 'stage_name': 'Review', 'previous_stage': 'Testing', 'next_stage': 'Deployment', 'description': 'Standard Review stage for DevOps Pipeline', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 15, 'workflow_name': 'DevOps Pipeline', 'stage_name': 'Deployment', 'previous_stage': 'Review', 'next_stage': 'Closure', 'description': 'Standard Deployment stage for DevOps Pipeline', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 16, 'workflow_name': 'DevOps Pipeline', 'stage_name': 'Closure', 'previous_stage': 'Deployment', 'next_stage': None, 'description': 'Standard Closure stage for DevOps Pipeline', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 17, 'workflow_name': 'CI/CD Workflow', 'stage_name': 'Initiation', 'previous_stage': None, 'next_stage': 'Planning', 'description': 'Standard Initiation stage for CI/CD Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 18, 'workflow_name': 'CI/CD Workflow', 'stage_name': 'Planning', 'previous_stage': 'Initiation', 'next_stage': 'Design', 'description': 'Standard Planning stage for CI/CD Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 19, 'workflow_name': 'CI/CD Workflow', 'stage_name': 'Design', 'previous_stage': 'Planning', 'next_stage': 'Development', 'description': 'Standard Design stage for CI/CD Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 20, 'workflow_name': 'CI/CD Workflow', 'stage_name': 'Development', 'previous_stage': 'Design', 'next_stage': 'Testing', 'description': 'Standard Development stage for CI/CD Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 21, 'workflow_name': 'CI/CD Workflow', 'stage_name': 'Testing', 'previous_stage': 'Development', 'next_stage': 'Review', 'description': 'Standard Testing stage for CI/CD Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 22, 'workflow_name': 'CI/CD Workflow', 'stage_name': 'Review', 'previous_stage': 'Testing', 'next_stage': 'Deployment', 'description': 'Standard Review stage for CI/CD Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 23, 'workflow_name': 'CI/CD Workflow', 'stage_name': 'Deployment', 'previous_stage': 'Review', 'next_stage': 'Closure', 'description': 'Standard Deployment stage for CI/CD Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 24, 'workflow_name': 'CI/CD Workflow', 'stage_name': 'Closure', 'previous_stage': 'Deployment', 'next_stage': None, 'description': 'Standard Closure stage for CI/CD Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 25, 'workflow_name': 'Retail Workflow', 'stage_name': 'Initiation', 'previous_stage': None, 'next_stage': 'Planning', 'description': 'Standard Initiation stage for Retail Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 26, 'workflow_name': 'Retail Workflow', 'stage_name': 'Planning', 'previous_stage': 'Initiation', 'next_stage': 'Design', 'description': 'Standard Planning stage for Retail Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 27, 'workflow_name': 'Retail Workflow', 'stage_name': 'Design', 'previous_stage': 'Planning', 'next_stage': 'Development', 'description': 'Standard Design stage for Retail Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 28, 'workflow_name': 'Retail Workflow', 'stage_name': 'Development', 'previous_stage': 'Design', 'next_stage': 'Testing', 'description': 'Standard Development stage for Retail Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 29, 'workflow_name': 'Retail Workflow', 'stage_name': 'Testing', 'previous_stage': 'Development', 'next_stage': 'Review', 'description': 'Standard Testing stage for Retail Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 30, 'workflow_name': 'Retail Workflow', 'stage_name': 'Review', 'previous_stage': 'Testing', 'next_stage': 'Deployment', 'description': 'Standard Review stage for Retail Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 31, 'workflow_name': 'Retail Workflow', 'stage_name': 'Deployment', 'previous_stage': 'Review', 'next_stage': 'Closure', 'description': 'Standard Deployment stage for Retail Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 32, 'workflow_name': 'Retail Workflow', 'stage_name': 'Closure', 'previous_stage': 'Deployment', 'next_stage': None, 'description': 'Standard Closure stage for Retail Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 33, 'workflow_name': 'Banking Workflow', 'stage_name': 'Initiation', 'previous_stage': None, 'next_stage': 'Planning', 'description': 'Standard Initiation stage for Banking Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 34, 'workflow_name': 'Banking Workflow', 'stage_name': 'Planning', 'previous_stage': 'Initiation', 'next_stage': 'Design', 'description': 'Standard Planning stage for Banking Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 35, 'workflow_name': 'Banking Workflow', 'stage_name': 'Design', 'previous_stage': 'Planning', 'next_stage': 'Development', 'description': 'Standard Design stage for Banking Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 36, 'workflow_name': 'Banking Workflow', 'stage_name': 'Development', 'previous_stage': 'Design', 'next_stage': 'Testing', 'description': 'Standard Development stage for Banking Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 37, 'workflow_name': 'Banking Workflow', 'stage_name': 'Testing', 'previous_stage': 'Development', 'next_stage': 'Review', 'description': 'Standard Testing stage for Banking Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 38, 'workflow_name': 'Banking Workflow', 'stage_name': 'Review', 'previous_stage': 'Testing', 'next_stage': 'Deployment', 'description': 'Standard Review stage for Banking Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 39, 'workflow_name': 'Banking Workflow', 'stage_name': 'Deployment', 'previous_stage': 'Review', 'next_stage': 'Closure', 'description': 'Standard Deployment stage for Banking Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 40, 'workflow_name': 'Banking Workflow', 'stage_name': 'Closure', 'previous_stage': 'Deployment', 'next_stage': None, 'description': 'Standard Closure stage for Banking Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 41, 'workflow_name': 'HMS Workflow', 'stage_name': 'Initiation', 'previous_stage': None, 'next_stage': 'Planning', 'description': 'Standard Initiation stage for HMS Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 42, 'workflow_name': 'HMS Workflow', 'stage_name': 'Planning', 'previous_stage': 'Initiation', 'next_stage': 'Design', 'description': 'Standard Planning stage for HMS Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 43, 'workflow_name': 'HMS Workflow', 'stage_name': 'Design', 'previous_stage': 'Planning', 'next_stage': 'Development', 'description': 'Standard Design stage for HMS Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 44, 'workflow_name': 'HMS Workflow', 'stage_name': 'Development', 'previous_stage': 'Design', 'next_stage': 'Testing', 'description': 'Standard Development stage for HMS Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 45, 'workflow_name': 'HMS Workflow', 'stage_name': 'Testing', 'previous_stage': 'Development', 'next_stage': 'Review', 'description': 'Standard Testing stage for HMS Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 46, 'workflow_name': 'HMS Workflow', 'stage_name': 'Review', 'previous_stage': 'Testing', 'next_stage': 'Deployment', 'description': 'Standard Review stage for HMS Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 47, 'workflow_name': 'HMS Workflow', 'stage_name': 'Deployment', 'previous_stage': 'Review', 'next_stage': 'Closure', 'description': 'Standard Deployment stage for HMS Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 48, 'workflow_name': 'HMS Workflow', 'stage_name': 'Closure', 'previous_stage': 'Deployment', 'next_stage': None, 'description': 'Standard Closure stage for HMS Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 49, 'workflow_name': 'Fleet Workflow', 'stage_name': 'Initiation', 'previous_stage': None, 'next_stage': 'Planning', 'description': 'Standard Initiation stage for Fleet Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 50, 'workflow_name': 'Fleet Workflow', 'stage_name': 'Planning', 'previous_stage': 'Initiation', 'next_stage': 'Design', 'description': 'Standard Planning stage for Fleet Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 51, 'workflow_name': 'Fleet Workflow', 'stage_name': 'Design', 'previous_stage': 'Planning', 'next_stage': 'Development', 'description': 'Standard Design stage for Fleet Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 52, 'workflow_name': 'Fleet Workflow', 'stage_name': 'Development', 'previous_stage': 'Design', 'next_stage': 'Testing', 'description': 'Standard Development stage for Fleet Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 53, 'workflow_name': 'Fleet Workflow', 'stage_name': 'Testing', 'previous_stage': 'Development', 'next_stage': 'Review', 'description': 'Standard Testing stage for Fleet Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 54, 'workflow_name': 'Fleet Workflow', 'stage_name': 'Review', 'previous_stage': 'Testing', 'next_stage': 'Deployment', 'description': 'Standard Review stage for Fleet Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 55, 'workflow_name': 'Fleet Workflow', 'stage_name': 'Deployment', 'previous_stage': 'Review', 'next_stage': 'Closure', 'description': 'Standard Deployment stage for Fleet Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 56, 'workflow_name': 'Fleet Workflow', 'stage_name': 'Closure', 'previous_stage': 'Deployment', 'next_stage': None, 'description': 'Standard Closure stage for Fleet Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 57, 'workflow_name': 'Content Workflow', 'stage_name': 'Initiation', 'previous_stage': None, 'next_stage': 'Planning', 'description': 'Standard Initiation stage for Content Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 58, 'workflow_name': 'Content Workflow', 'stage_name': 'Planning', 'previous_stage': 'Initiation', 'next_stage': 'Design', 'description': 'Standard Planning stage for Content Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 59, 'workflow_name': 'Content Workflow', 'stage_name': 'Design', 'previous_stage': 'Planning', 'next_stage': 'Development', 'description': 'Standard Design stage for Content Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 60, 'workflow_name': 'Content Workflow', 'stage_name': 'Development', 'previous_stage': 'Design', 'next_stage': 'Testing', 'description': 'Standard Development stage for Content Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 61, 'workflow_name': 'Content Workflow', 'stage_name': 'Testing', 'previous_stage': 'Development', 'next_stage': 'Review', 'description': 'Standard Testing stage for Content Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 62, 'workflow_name': 'Content Workflow', 'stage_name': 'Review', 'previous_stage': 'Testing', 'next_stage': 'Deployment', 'description': 'Standard Review stage for Content Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 63, 'workflow_name': 'Content Workflow', 'stage_name': 'Deployment', 'previous_stage': 'Review', 'next_stage': 'Closure', 'description': 'Standard Deployment stage for Content Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 64, 'workflow_name': 'Content Workflow', 'stage_name': 'Closure', 'previous_stage': 'Deployment', 'next_stage': None, 'description': 'Standard Closure stage for Content Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 65, 'workflow_name': 'LMS Workflow', 'stage_name': 'Initiation', 'previous_stage': None, 'next_stage': 'Planning', 'description': 'Standard Initiation stage for LMS Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 66, 'workflow_name': 'LMS Workflow', 'stage_name': 'Planning', 'previous_stage': 'Initiation', 'next_stage': 'Design', 'description': 'Standard Planning stage for LMS Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 67, 'workflow_name': 'LMS Workflow', 'stage_name': 'Design', 'previous_stage': 'Planning', 'next_stage': 'Development', 'description': 'Standard Design stage for LMS Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 68, 'workflow_name': 'LMS Workflow', 'stage_name': 'Development', 'previous_stage': 'Design', 'next_stage': 'Testing', 'description': 'Standard Development stage for LMS Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 69, 'workflow_name': 'LMS Workflow', 'stage_name': 'Testing', 'previous_stage': 'Development', 'next_stage': 'Review', 'description': 'Standard Testing stage for LMS Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 70, 'workflow_name': 'LMS Workflow', 'stage_name': 'Review', 'previous_stage': 'Testing', 'next_stage': 'Deployment', 'description': 'Standard Review stage for LMS Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 71, 'workflow_name': 'LMS Workflow', 'stage_name': 'Deployment', 'previous_stage': 'Review', 'next_stage': 'Closure', 'description': 'Standard Deployment stage for LMS Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 72, 'workflow_name': 'LMS Workflow', 'stage_name': 'Closure', 'previous_stage': 'Deployment', 'next_stage': None, 'description': 'Standard Closure stage for LMS Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 73, 'workflow_name': 'Factory Workflow', 'stage_name': 'Initiation', 'previous_stage': None, 'next_stage': 'Planning', 'description': 'Standard Initiation stage for Factory Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 74, 'workflow_name': 'Factory Workflow', 'stage_name': 'Planning', 'previous_stage': 'Initiation', 'next_stage': 'Design', 'description': 'Standard Planning stage for Factory Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 75, 'workflow_name': 'Factory Workflow', 'stage_name': 'Design', 'previous_stage': 'Planning', 'next_stage': 'Development', 'description': 'Standard Design stage for Factory Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 76, 'workflow_name': 'Factory Workflow', 'stage_name': 'Development', 'previous_stage': 'Design', 'next_stage': 'Testing', 'description': 'Standard Development stage for Factory Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 77, 'workflow_name': 'Factory Workflow', 'stage_name': 'Testing', 'previous_stage': 'Development', 'next_stage': 'Review', 'description': 'Standard Testing stage for Factory Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 78, 'workflow_name': 'Factory Workflow', 'stage_name': 'Review', 'previous_stage': 'Testing', 'next_stage': 'Deployment', 'description': 'Standard Review stage for Factory Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 79, 'workflow_name': 'Factory Workflow', 'stage_name': 'Deployment', 'previous_stage': 'Review', 'next_stage': 'Closure', 'description': 'Standard Deployment stage for Factory Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 80, 'workflow_name': 'Factory Workflow', 'stage_name': 'Closure', 'previous_stage': 'Deployment', 'next_stage': None, 'description': 'Standard Closure stage for Factory Workflow', 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:25:43.344396+00:00')},
+        {'id': 81, 'workflow_name': 'FRESH-1', 'stage_name': 'Initiation', 'previous_stage': None, 'next_stage': 'Planning', 'description': None, 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:38:25.714808+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:38:25.714808+00:00')},
+        {'id': 82, 'workflow_name': 'FRESH-1', 'stage_name': 'Planning', 'previous_stage': 'Initiation', 'next_stage': 'Design', 'description': None, 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:38:25.714808+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:38:25.714808+00:00')},
+        {'id': 83, 'workflow_name': 'FRESH-1', 'stage_name': 'Design', 'previous_stage': 'Planning', 'next_stage': 'Development', 'description': None, 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:38:25.714808+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:38:25.714808+00:00')},
+        {'id': 84, 'workflow_name': 'FRESH-1', 'stage_name': 'Development', 'previous_stage': 'Design', 'next_stage': 'Review', 'description': None, 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:38:25.714808+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:38:25.714808+00:00')},
+        {'id': 85, 'workflow_name': 'FRESH-1', 'stage_name': 'Review', 'previous_stage': 'Development', 'next_stage': 'Deployment', 'description': None, 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:38:25.714808+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:38:25.714808+00:00')},
+        {'id': 86, 'workflow_name': 'FRESH-1', 'stage_name': 'Deployment', 'previous_stage': 'Review', 'next_stage': 'Closure', 'description': None, 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:38:25.714808+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:38:25.714808+00:00')},
+        {'id': 87, 'workflow_name': 'FRESH-1', 'stage_name': 'Closure', 'previous_stage': 'Deployment', 'next_stage': 'Testing', 'description': None, 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:38:25.714808+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:38:25.714808+00:00')},
+        {'id': 88, 'workflow_name': 'FRESH-1', 'stage_name': 'Testing', 'previous_stage': 'Closure', 'next_stage': None, 'description': None, 'active_status': True, 'created_at': datetime.datetime.fromisoformat('2026-06-05T09:38:25.714808+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-05T09:38:25.714808+00:00')},
+    ],
+    'ChapterInfo': [
+        {'id': 11, 'client': 'Acme Corporation', 'project': 'Enterprise ERP Integration Platform', 'chapters': 'CH-001', 'chapter_title': 'Introduction and Scope', 'project_manager_name': 'john_doe', 'due_date': datetime.datetime.fromisoformat('2024-03-15T00:00:00+00:00'), 'stage_name': 'Initiation', 'current_stage_activity': 'Requirement Gathering', 'current_assignee_name': 'alice_johnson', 'status': 'In-progress', 'complexity_level': 'High', 'stage_level': 1, 'workflow': 'Agile Sprint', 'published_status': 'Draft', 'remarks': 'Initial chapter covering project objectives and scope definition.', 'manuscript_pages': None, 'priority': 'High', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:41:00.546687+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:41:00.546687+00:00')},
+        {'id': 12, 'client': 'Acme Corporation', 'project': 'Enterprise ERP Integration Platform', 'chapters': 'CH-002', 'chapter_title': 'System Architecture Design', 'project_manager_name': 'john_doe', 'due_date': datetime.datetime.fromisoformat('2024-04-10T00:00:00+00:00'), 'stage_name': 'Design', 'current_stage_activity': 'Database Design', 'current_assignee_name': 'jane_smith', 'status': 'In-progress', 'complexity_level': 'High', 'stage_level': 2, 'workflow': 'Agile Sprint', 'published_status': 'Draft', 'remarks': None, 'manuscript_pages': None, 'priority': 'High', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:41:04.728898+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:41:04.728898+00:00')},
+        {'id': 13, 'client': 'Acme Corporation', 'project': 'Cloud Infrastructure Migration Phase 2', 'chapters': 'CH-001', 'chapter_title': 'Cloud Readiness Assessment', 'project_manager_name': 'charlie_brown', 'due_date': datetime.datetime.fromisoformat('2024-05-01T00:00:00+00:00'), 'stage_name': 'Planning', 'current_stage_activity': 'Project Planning', 'current_assignee_name': 'evan_rogers', 'status': 'Hold', 'complexity_level': 'Medium', 'stage_level': 1, 'workflow': 'DevOps Pipeline', 'published_status': 'Draft', 'remarks': 'On hold pending client infrastructure audit completion.', 'manuscript_pages': None, 'priority': 'Medium', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:41:04.764980+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:41:04.764980+00:00')},
+        {'id': 14, 'client': 'Beta Technologies', 'project': 'Automated Deployment Pipeline Setup', 'chapters': 'CH-001', 'chapter_title': 'CI/CD Tool Evaluation', 'project_manager_name': 'charlie_brown', 'due_date': datetime.datetime.fromisoformat('2024-02-28T00:00:00+00:00'), 'stage_name': 'Development', 'current_stage_activity': 'Backend Development', 'current_assignee_name': 'evan_rogers', 'status': 'complete', 'complexity_level': 'Medium', 'stage_level': 3, 'workflow': 'CI/CD Workflow', 'published_status': 'Ready for Publish', 'remarks': None, 'manuscript_pages': None, 'priority': 'High', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:41:04.786846+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:41:04.786846+00:00')},
+        {'id': 15, 'client': 'Beta Technologies', 'project': 'Automated Deployment Pipeline Setup', 'chapters': 'CH-002', 'chapter_title': 'Pipeline Configuration and Testing', 'project_manager_name': 'charlie_brown', 'due_date': datetime.datetime.fromisoformat('2024-03-20T00:00:00+00:00'), 'stage_name': 'Testing', 'current_stage_activity': 'Integration Testing', 'current_assignee_name': 'jane_smith', 'status': 'In-progress', 'complexity_level': 'High', 'stage_level': 4, 'workflow': 'CI/CD Workflow', 'published_status': 'Draft', 'remarks': 'Integration test cases being written for all deployment stages.', 'manuscript_pages': None, 'priority': 'High', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:41:04.809705+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:41:04.809705+00:00')},
+        {'id': 16, 'client': 'Gamma Retail Group', 'project': 'Multi-Channel E-commerce Platform', 'chapters': 'CH-001', 'chapter_title': 'Platform Requirements and User Stories', 'project_manager_name': 'john_doe', 'due_date': datetime.datetime.fromisoformat('2025-01-15T00:00:00+00:00'), 'stage_name': 'Initiation', 'current_stage_activity': 'Feasibility Study', 'current_assignee_name': 'bob_wilson', 'status': 'complete', 'complexity_level': 'Low', 'stage_level': 1, 'workflow': 'Retail Workflow', 'published_status': 'Published', 'remarks': None, 'manuscript_pages': None, 'priority': 'High', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:41:04.828699+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:41:04.828699+00:00')},
+        {'id': 17, 'client': 'Gamma Retail Group', 'project': 'Multi-Channel E-commerce Platform', 'chapters': 'CH-002', 'chapter_title': 'Payment Gateway Integration', 'project_manager_name': 'john_doe', 'due_date': datetime.datetime.fromisoformat('2025-03-01T00:00:00+00:00'), 'stage_name': 'Development', 'current_stage_activity': 'Frontend Development', 'current_assignee_name': 'fiona_apple', 'status': 'In-progress', 'complexity_level': 'High', 'stage_level': 3, 'workflow': 'Retail Workflow', 'published_status': 'Draft', 'remarks': 'Payment gateway sandbox testing in parallel.', 'manuscript_pages': None, 'priority': 'High', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:41:04.847362+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:41:04.847362+00:00')},
+        {'id': 18, 'client': 'Delta Finance Ltd', 'project': 'Core Banking System Modernisation', 'chapters': 'CH-001', 'chapter_title': 'Legacy System Analysis', 'project_manager_name': 'george_martin', 'due_date': datetime.datetime.fromisoformat('2024-06-30T00:00:00+00:00'), 'stage_name': 'Review', 'current_stage_activity': 'Code Review', 'current_assignee_name': 'bob_wilson', 'status': 'In-query', 'complexity_level': 'High', 'stage_level': 5, 'workflow': 'Banking Workflow', 'published_status': 'Draft', 'remarks': 'Client raised queries on data migration strategy for legacy accounts.', 'manuscript_pages': None, 'priority': 'High', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:41:04.858798+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:41:04.858798+00:00')},
+        {'id': 19, 'client': 'Epsilon Healthcare', 'project': 'Hospital Management System Integration', 'chapters': 'CH-001', 'chapter_title': 'HL7 FHIR Integration Design', 'project_manager_name': 'george_martin', 'due_date': datetime.datetime.fromisoformat('2025-02-20T00:00:00+00:00'), 'stage_name': 'Design', 'current_stage_activity': 'UI Design', 'current_assignee_name': 'fiona_apple', 'status': 'In-progress', 'complexity_level': 'High', 'stage_level': 2, 'workflow': 'HMS Workflow', 'published_status': 'Draft', 'remarks': None, 'manuscript_pages': None, 'priority': 'High', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:41:04.881489+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:41:04.881489+00:00')},
+        {'id': 20, 'client': 'Eta Media Group', 'project': 'Streaming Platform Content Management System', 'chapters': 'CH-001', 'chapter_title': 'Content Delivery Architecture', 'project_manager_name': 'john_doe', 'due_date': datetime.datetime.fromisoformat('2023-10-15T00:00:00+00:00'), 'stage_name': 'Closure', 'current_stage_activity': 'Project Handover', 'current_assignee_name': 'george_martin', 'status': 'complete', 'complexity_level': 'Medium', 'stage_level': 7, 'workflow': 'Content Workflow', 'published_status': 'Published', 'remarks': 'Project completed and handed over to client operations team.', 'manuscript_pages': None, 'priority': 'Low', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-04T10:41:04.900910+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-04T10:41:04.900910+00:00')},
+        {'id': 33, 'client': 'Beta Technologies', 'project': 'PRJ-0009', 'chapters': '02', 'chapter_title': 'Chapter 02', 'project_manager_name': 'john_doe', 'due_date': datetime.datetime.fromisoformat('2026-06-08T00:00:00+00:00'), 'stage_name': None, 'current_stage_activity': None, 'current_assignee_name': None, 'status': 'In-progress', 'complexity_level': 'Medium', 'stage_level': 1, 'workflow': 'Agile Sprint', 'published_status': 'Draft', 'remarks': None, 'manuscript_pages': None, 'priority': 'Normal', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:19.318500+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.348379+00:00')},
+        {'id': 35, 'client': 'Beta Technologies', 'project': 'PRJ-0009', 'chapters': '04', 'chapter_title': 'Chapter 04', 'project_manager_name': 'john_doe', 'due_date': datetime.datetime.fromisoformat('2026-06-08T00:00:00+00:00'), 'stage_name': None, 'current_stage_activity': None, 'current_assignee_name': None, 'status': 'In-progress', 'complexity_level': 'Medium', 'stage_level': 1, 'workflow': 'Agile Sprint', 'published_status': 'Draft', 'remarks': None, 'manuscript_pages': None, 'priority': 'Normal', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:19.318500+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.370854+00:00')},
+        {'id': 34, 'client': 'Beta Technologies', 'project': 'PRJ-0009', 'chapters': '03', 'chapter_title': 'Chapter 03', 'project_manager_name': 'john_doe', 'due_date': datetime.datetime.fromisoformat('2026-06-08T00:00:00+00:00'), 'stage_name': None, 'current_stage_activity': None, 'current_assignee_name': None, 'status': 'In-progress', 'complexity_level': 'Medium', 'stage_level': 1, 'workflow': 'Agile Sprint', 'published_status': 'Draft', 'remarks': None, 'manuscript_pages': None, 'priority': 'Normal', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:19.318500+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.349154+00:00')},
+        {'id': 36, 'client': 'Beta Technologies', 'project': 'PRJ-0009', 'chapters': '05', 'chapter_title': 'Chapter 05', 'project_manager_name': 'john_doe', 'due_date': datetime.datetime.fromisoformat('2026-06-08T00:00:00+00:00'), 'stage_name': None, 'current_stage_activity': None, 'current_assignee_name': None, 'status': 'In-progress', 'complexity_level': 'Medium', 'stage_level': 1, 'workflow': 'Agile Sprint', 'published_status': 'Draft', 'remarks': None, 'manuscript_pages': None, 'priority': 'Normal', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:19.318500+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.372067+00:00')},
+        {'id': 22, 'client': 'Beta Technologies', 'project': 'PRJ_123456', 'chapters': '02', 'chapter_title': 'Chapter 02', 'project_manager_name': 'john_doe', 'due_date': None, 'stage_name': None, 'current_stage_activity': None, 'current_assignee_name': None, 'status': 'In-progress', 'complexity_level': 'Medium', 'stage_level': 1, 'workflow': 'Agile Sprint', 'published_status': 'Draft', 'remarks': None, 'manuscript_pages': None, 'priority': 'Normal', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:05:42.779975+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:55.784690+00:00')},
+        {'id': 23, 'client': 'Beta Technologies', 'project': 'PRJ_123456', 'chapters': '03', 'chapter_title': 'Chapter 03', 'project_manager_name': 'john_doe', 'due_date': None, 'stage_name': None, 'current_stage_activity': None, 'current_assignee_name': None, 'status': 'In-progress', 'complexity_level': 'Medium', 'stage_level': 1, 'workflow': 'Agile Sprint', 'published_status': 'Draft', 'remarks': None, 'manuscript_pages': None, 'priority': 'Normal', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:05:42.779975+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:55.784690+00:00')},
+        {'id': 21, 'client': 'Beta Technologies', 'project': 'PRJ_123456', 'chapters': '01', 'chapter_title': 'Chapter 01', 'project_manager_name': 'john_doe', 'due_date': None, 'stage_name': None, 'current_stage_activity': None, 'current_assignee_name': 'admin_hema', 'status': 'In-progress', 'complexity_level': 'Medium', 'stage_level': 1, 'workflow': 'Agile Sprint', 'published_status': 'Draft', 'remarks': None, 'manuscript_pages': None, 'priority': 'Normal', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:05:42.779975+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:09:10.934842+00:00')},
+        {'id': 32, 'client': 'Beta Technologies', 'project': 'PRJ-0009', 'chapters': '01', 'chapter_title': 'Chapter 01', 'project_manager_name': 'john_doe', 'due_date': datetime.datetime.fromisoformat('2026-06-08T00:00:00+00:00'), 'stage_name': None, 'current_stage_activity': None, 'current_assignee_name': 'admin_hema', 'status': 'In-progress', 'complexity_level': 'Medium', 'stage_level': 1, 'workflow': 'Agile Sprint', 'published_status': 'Draft', 'remarks': None, 'manuscript_pages': None, 'priority': 'Normal', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:19.318500+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:11:48.248284+00:00')},
+        {'id': 37, 'client': 'Beta Technologies', 'project': 'PRJ-0009', 'chapters': '06', 'chapter_title': 'Chapter 06', 'project_manager_name': 'john_doe', 'due_date': datetime.datetime.fromisoformat('2026-06-08T00:00:00+00:00'), 'stage_name': None, 'current_stage_activity': None, 'current_assignee_name': None, 'status': 'In-progress', 'complexity_level': 'Medium', 'stage_level': 1, 'workflow': 'Agile Sprint', 'published_status': 'Draft', 'remarks': None, 'manuscript_pages': None, 'priority': 'Normal', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:19.318500+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.371724+00:00')},
+        {'id': 38, 'client': 'Beta Technologies', 'project': 'PRJ-0009', 'chapters': '07', 'chapter_title': 'Chapter 07', 'project_manager_name': 'john_doe', 'due_date': datetime.datetime.fromisoformat('2026-06-08T00:00:00+00:00'), 'stage_name': None, 'current_stage_activity': None, 'current_assignee_name': None, 'status': 'In-progress', 'complexity_level': 'Medium', 'stage_level': 1, 'workflow': 'Agile Sprint', 'published_status': 'Draft', 'remarks': None, 'manuscript_pages': None, 'priority': 'Normal', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:19.318500+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.431450+00:00')},
+        {'id': 39, 'client': 'Beta Technologies', 'project': 'PRJ-0009', 'chapters': '08', 'chapter_title': 'Chapter 08', 'project_manager_name': 'john_doe', 'due_date': datetime.datetime.fromisoformat('2026-06-08T00:00:00+00:00'), 'stage_name': None, 'current_stage_activity': None, 'current_assignee_name': None, 'status': 'In-progress', 'complexity_level': 'Medium', 'stage_level': 1, 'workflow': 'Agile Sprint', 'published_status': 'Draft', 'remarks': None, 'manuscript_pages': None, 'priority': 'Normal', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:19.318500+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.473935+00:00')},
+        {'id': 40, 'client': 'Beta Technologies', 'project': 'PRJ-0009', 'chapters': '09', 'chapter_title': 'Chapter 09', 'project_manager_name': 'john_doe', 'due_date': datetime.datetime.fromisoformat('2026-06-08T00:00:00+00:00'), 'stage_name': None, 'current_stage_activity': None, 'current_assignee_name': None, 'status': 'In-progress', 'complexity_level': 'Medium', 'stage_level': 1, 'workflow': 'Agile Sprint', 'published_status': 'Draft', 'remarks': None, 'manuscript_pages': None, 'priority': 'Normal', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:19.318500+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.499166+00:00')},
+        {'id': 41, 'client': 'Beta Technologies', 'project': 'PRJ-0009', 'chapters': '10', 'chapter_title': 'Chapter 10', 'project_manager_name': 'john_doe', 'due_date': datetime.datetime.fromisoformat('2026-06-08T00:00:00+00:00'), 'stage_name': None, 'current_stage_activity': None, 'current_assignee_name': None, 'status': 'In-progress', 'complexity_level': 'Medium', 'stage_level': 1, 'workflow': 'Agile Sprint', 'published_status': 'Draft', 'remarks': None, 'manuscript_pages': None, 'priority': 'Normal', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:19.318500+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.510593+00:00')},
+        {'id': 42, 'client': 'Beta Technologies', 'project': 'PRJ-0009', 'chapters': '11', 'chapter_title': 'Chapter 11', 'project_manager_name': 'john_doe', 'due_date': datetime.datetime.fromisoformat('2026-06-08T00:00:00+00:00'), 'stage_name': None, 'current_stage_activity': None, 'current_assignee_name': None, 'status': 'In-progress', 'complexity_level': 'Medium', 'stage_level': 1, 'workflow': 'Agile Sprint', 'published_status': 'Draft', 'remarks': None, 'manuscript_pages': None, 'priority': 'Normal', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:08:19.318500+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:23.518873+00:00')},
+        {'id': 24, 'client': 'Beta Technologies', 'project': 'PRJ_123456', 'chapters': '04', 'chapter_title': 'Chapter 04', 'project_manager_name': 'john_doe', 'due_date': None, 'stage_name': None, 'current_stage_activity': None, 'current_assignee_name': None, 'status': 'In-progress', 'complexity_level': 'Medium', 'stage_level': 1, 'workflow': 'Agile Sprint', 'published_status': 'Draft', 'remarks': None, 'manuscript_pages': None, 'priority': 'Normal', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:05:42.779975+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:55.784690+00:00')},
+        {'id': 25, 'client': 'Beta Technologies', 'project': 'PRJ_123456', 'chapters': '05', 'chapter_title': 'Chapter 05', 'project_manager_name': 'john_doe', 'due_date': None, 'stage_name': None, 'current_stage_activity': None, 'current_assignee_name': None, 'status': 'In-progress', 'complexity_level': 'Medium', 'stage_level': 1, 'workflow': 'Agile Sprint', 'published_status': 'Draft', 'remarks': None, 'manuscript_pages': None, 'priority': 'Normal', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:05:42.779975+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:55.784690+00:00')},
+        {'id': 26, 'client': 'Beta Technologies', 'project': 'PRJ_123456', 'chapters': '06', 'chapter_title': 'Chapter 06', 'project_manager_name': 'john_doe', 'due_date': None, 'stage_name': None, 'current_stage_activity': None, 'current_assignee_name': None, 'status': 'In-progress', 'complexity_level': 'Medium', 'stage_level': 1, 'workflow': 'Agile Sprint', 'published_status': 'Draft', 'remarks': None, 'manuscript_pages': None, 'priority': 'Normal', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:05:42.779975+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:55.784690+00:00')},
+        {'id': 27, 'client': 'Beta Technologies', 'project': 'PRJ_123456', 'chapters': '07', 'chapter_title': 'Chapter 07', 'project_manager_name': 'john_doe', 'due_date': None, 'stage_name': None, 'current_stage_activity': None, 'current_assignee_name': None, 'status': 'In-progress', 'complexity_level': 'Medium', 'stage_level': 1, 'workflow': 'Agile Sprint', 'published_status': 'Draft', 'remarks': None, 'manuscript_pages': None, 'priority': 'Normal', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:05:42.779975+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:55.784690+00:00')},
+        {'id': 28, 'client': 'Beta Technologies', 'project': 'PRJ_123456', 'chapters': '08', 'chapter_title': 'Chapter 08', 'project_manager_name': 'john_doe', 'due_date': None, 'stage_name': None, 'current_stage_activity': None, 'current_assignee_name': None, 'status': 'In-progress', 'complexity_level': 'Medium', 'stage_level': 1, 'workflow': 'Agile Sprint', 'published_status': 'Draft', 'remarks': None, 'manuscript_pages': None, 'priority': 'Normal', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:05:42.779975+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:55.784690+00:00')},
+        {'id': 29, 'client': 'Beta Technologies', 'project': 'PRJ_123456', 'chapters': '09', 'chapter_title': 'Chapter 09', 'project_manager_name': 'john_doe', 'due_date': None, 'stage_name': None, 'current_stage_activity': None, 'current_assignee_name': None, 'status': 'In-progress', 'complexity_level': 'Medium', 'stage_level': 1, 'workflow': 'Agile Sprint', 'published_status': 'Draft', 'remarks': None, 'manuscript_pages': None, 'priority': 'Normal', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:05:42.779975+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:55.784690+00:00')},
+        {'id': 30, 'client': 'Beta Technologies', 'project': 'PRJ_123456', 'chapters': '10', 'chapter_title': 'Chapter 10', 'project_manager_name': 'john_doe', 'due_date': None, 'stage_name': None, 'current_stage_activity': None, 'current_assignee_name': None, 'status': 'In-progress', 'complexity_level': 'Medium', 'stage_level': 1, 'workflow': 'Agile Sprint', 'published_status': 'Draft', 'remarks': None, 'manuscript_pages': None, 'priority': 'Normal', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:05:42.779975+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:55.784690+00:00')},
+        {'id': 31, 'client': 'Beta Technologies', 'project': 'PRJ_123456', 'chapters': '11', 'chapter_title': 'Chapter 11', 'project_manager_name': 'john_doe', 'due_date': None, 'stage_name': None, 'current_stage_activity': None, 'current_assignee_name': None, 'status': 'In-progress', 'complexity_level': 'Medium', 'stage_level': 1, 'workflow': 'Agile Sprint', 'published_status': 'Draft', 'remarks': None, 'manuscript_pages': None, 'priority': 'Normal', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T03:05:42.779975+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T03:08:55.784690+00:00')},
+        {'id': 43, 'client': 'Beta Technologies', 'project': 'Edwords_175757', 'chapters': '01', 'chapter_title': 'Chapter 01', 'project_manager_name': 'john_doe', 'due_date': datetime.datetime.fromisoformat('2026-06-08T00:00:00+00:00'), 'stage_name': None, 'current_stage_activity': None, 'current_assignee_name': 'admin_hema', 'status': 'In-progress', 'complexity_level': 'Medium', 'stage_level': 1, 'workflow': 'FRESH-1', 'published_status': 'Draft', 'remarks': None, 'manuscript_pages': None, 'priority': 'Normal', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:16.649472+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-08T10:08:38.931379+00:00')},
+        {'id': 44, 'client': 'Beta Technologies', 'project': 'Edwords_175757', 'chapters': '02', 'chapter_title': 'Chapter 02', 'project_manager_name': 'john_doe', 'due_date': datetime.datetime.fromisoformat('2026-06-08T00:00:00+00:00'), 'stage_name': None, 'current_stage_activity': None, 'current_assignee_name': 'admin_hema', 'status': 'In-progress', 'complexity_level': 'Medium', 'stage_level': 1, 'workflow': 'FRESH-1', 'published_status': 'Draft', 'remarks': None, 'manuscript_pages': None, 'priority': 'Normal', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:16.649472+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T08:35:12.215280+00:00')},
+        {'id': 45, 'client': 'Beta Technologies', 'project': 'Edwords_175757', 'chapters': '03', 'chapter_title': 'Chapter 03', 'project_manager_name': 'john_doe', 'due_date': datetime.datetime.fromisoformat('2026-06-08T00:00:00+00:00'), 'stage_name': None, 'current_stage_activity': None, 'current_assignee_name': 'admin_hema', 'status': 'In-progress', 'complexity_level': 'Medium', 'stage_level': 1, 'workflow': 'FRESH-1', 'published_status': 'Draft', 'remarks': None, 'manuscript_pages': None, 'priority': 'Normal', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:16.649472+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T08:35:14.054947+00:00')},
+        {'id': 46, 'client': 'Beta Technologies', 'project': 'Edwords_175757', 'chapters': '04', 'chapter_title': 'Chapter 04', 'project_manager_name': 'john_doe', 'due_date': datetime.datetime.fromisoformat('2026-06-08T00:00:00+00:00'), 'stage_name': None, 'current_stage_activity': None, 'current_assignee_name': 'admin_hema', 'status': 'In-progress', 'complexity_level': 'Medium', 'stage_level': 1, 'workflow': 'FRESH-1', 'published_status': 'Draft', 'remarks': None, 'manuscript_pages': None, 'priority': 'Normal', 'delayed_stages': None, 'created_at': datetime.datetime.fromisoformat('2026-06-06T04:44:16.649472+00:00'), 'updated_at': datetime.datetime.fromisoformat('2026-06-06T08:35:17.283398+00:00')},
+    ],
+}
 
 
 def seed():
     create_tables()
     db = SessionLocal()
+    
+    # Disable foreign keys for seeding to prevent circular reference errors
     try:
-        print("-- roles_master -----------------------------------------")
-        ri, rs = seed_roles(db)
+        from sqlalchemy import text
+        db.execute(text("PRAGMA foreign_keys = OFF;"))
+    except Exception:
+        pass
 
-        print("\n-- users ------------------------------------------------")
-        ui, us = seed_users(db)
+    # Clean existing data to allow safe rerun / refresh
+    print("Cleaning existing database data...")
+    for model_name, model_cls in reversed([
+        ("Role", Role),
+        ("Team", Team),
+        ("User", User),
+        ("UserRole", UserRole),
+        ("Client", Client),
+        ("Project", Project),
+        ("Chapter", Chapter),
+        ("File", File),
+        ("FileVersion", FileVersion),
+        ("ProjectStylesheet", ProjectStylesheet),
+        ("RolesMaster", RolesMaster),
+        ("StageActivityMaster", StageActivityMaster),
+        ("StageMaster", StageMaster),
+        ("StageDetail", StageDetail),
+        ("WorkflowMaster", WorkflowMaster),
+        ("ChapterInfo", ChapterInfo),
+    ]):
+        try:
+            db.query(model_cls).delete()
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            print(f"Error cleaning {model_name}: {e}")
 
-        print("\n-- clients ----------------------------------------------")
-        ci, cs = seed_clients(db)
+    # Insert dumped data
+    print("Seeding database...")
+    for model_name, model_cls in [
+        ("Role", Role),
+        ("Team", Team),
+        ("User", User),
+        ("UserRole", UserRole),
+        ("Client", Client),
+        ("Project", Project),
+        ("Chapter", Chapter),
+        ("File", File),
+        ("FileVersion", FileVersion),
+        ("ProjectStylesheet", ProjectStylesheet),
+        ("RolesMaster", RolesMaster),
+        ("StageActivityMaster", StageActivityMaster),
+        ("StageMaster", StageMaster),
+        ("StageDetail", StageDetail),
+        ("WorkflowMaster", WorkflowMaster),
+        ("ChapterInfo", ChapterInfo),
+    ]:
+        rows = DUMPED_DATA[model_name]
+        inserted = 0
+        for row in rows:
+            instance = model_cls(**row)
+            db.add(instance)
+            inserted += 1
+        try:
+            db.commit()
+            print(f"  OK    Seeded {inserted} rows for {model_name}")
+        except Exception as e:
+            db.rollback()
+            print(f"  ERROR Seeding {model_name}: {e}")
 
-        print("\n-- stage_activity_master --------------------------------")
-        ai, as_ = seed_stage_activities(db)
-
-        print("\n-- stage_master -----------------------------------------")
-        si, ss = seed_stages(db)
-
-        print("\n-- workflows --------------------------------------------")
-        wfi, wfs = seed_workflows(db)
-
-        print("\n-- projects ---------------------------------------------")
-        pi, ps = seed_projects(db)
-
-        print("\n-- chapter_details --------------------------------------")
-        chi, chs = seed_chapters(db)
-
-        print("\n-- stages_details ---------------------------------------")
-        sdi, sds = seed_stage_details(db)
-
-        print(
-            f"\nDone -- "
-            f"roles: {ri}/{rs}  |  users: {ui}/{us}  |  clients: {ci}/{cs}  |  "
-            f"activities: {ai}/{as_}  |  stages: {si}/{ss}  |  workflows: {wfi}/{wfs}  |  "
-            f"projects: {pi}/{ps}  |  chapters: {chi}/{chs}  |  stage details: {sdi}/{sds}  "
-            f"(inserted/skipped)"
-        )
-    finally:
-        db.close()
-
+    # Re-enable foreign keys
+    try:
+        from sqlalchemy import text
+        db.execute(text("PRAGMA foreign_keys = ON;"))
+    except Exception:
+        pass
+    
+    db.close()
+    print("Database seeding completed successfully!")
 
 if __name__ == "__main__":
     seed()

@@ -17,7 +17,7 @@ vi.mock("@/api/admin", async () => {
 
 describe("AdminDashboardPage", () => {
   it("renders the current admin dashboard contract and preserved navigation links", async () => {
-    getAdminDashboard.mockResolvedValueOnce(createAdminDashboardResponse());
+    getAdminDashboard.mockResolvedValue(createAdminDashboardResponse());
 
     renderRoute({
       path: "/admin",

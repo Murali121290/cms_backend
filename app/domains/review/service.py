@@ -1,7 +1,7 @@
 import logging
 import os
 import urllib.parse
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -537,7 +537,7 @@ def _ref_review_cache_path(processed_path: str) -> str:
     return os.path.join(dir_name, f".{base_name}.refcache.json")
 
 
-def build_reference_review_page_state(db: Session, *, file_id: int, logger) -> Dict[str, Any]:
+def build_reference_review_page_state(db: Session, *, file_id: int, style: Optional[str] = None, logger) -> Dict[str, Any]:
     import json
     resolved = resolve_processed_target(db, file_id=file_id)
     file_record = resolved["file_record"]
@@ -558,17 +558,19 @@ def build_reference_review_page_state(db: Session, *, file_id: int, logger) -> D
             with open(cache_path, "r", encoding="utf-8") as cf:
                 cached = json.load(cf)
             if cached.get("mtime") == docx_mtime:
-                logger.info(f"Reference review cache HIT for file {file_id}")
-                # Styles list (static, cheap to rebuild)
-                styles = _ref_review_styles()
-                return {
-                    "status": "ok",
-                    "file": file_record,
-                    "filename": cached["filename"],
-                    "content": cached["content"],
-                    "styles": styles,
-                    "validation_logs": cached["validation_logs"],
-                }
+                cached_style = cached.get("validation_logs", {}).get("detected_style")
+                if style is None or cached_style == style:
+                    logger.info(f"Reference review cache HIT for file {file_id}")
+                    # Styles list (static, cheap to rebuild)
+                    styles = _ref_review_styles()
+                    return {
+                        "status": "ok",
+                        "file": file_record,
+                        "filename": cached["filename"],
+                        "content": cached["content"],
+                        "styles": styles,
+                        "validation_logs": cached["validation_logs"],
+                    }
         except Exception as e:
             logger.warning(f"Reference review cache read failed (will regenerate): {e}")
 
@@ -604,19 +606,21 @@ def build_reference_review_page_state(db: Session, *, file_id: int, logger) -> D
         from docx import Document
         doc = Document(processed_path)
         
-        # Detect the style based on paragraph style names
-        is_ama = False
-        is_apa = False
-        for p in doc.paragraphs:
-            style_name = (p.style.name or "") if p.style else ""
-            if "REF-N" in style_name:
-                is_ama = True
-            elif "REF-U" in style_name:
-                is_apa = True
+        detected_style = style
+        if not detected_style:
+            # Detect the style based on paragraph style names
+            is_ama = False
+            is_apa = False
+            for p in doc.paragraphs:
+                style_name = (p.style.name or "") if p.style else ""
+                if "REF-N" in style_name:
+                    is_ama = True
+                elif "REF-U" in style_name:
+                    is_apa = True
 
-        detected_style = "AMA"
-        if is_apa and not is_ama:
-            detected_style = "APA"
+            detected_style = "AMA"
+            if is_apa and not is_ama:
+                detected_style = "APA"
             
         validation_logs["detected_style"] = detected_style
         
@@ -803,7 +807,7 @@ def build_reference_review_page_state(db: Session, *, file_id: int, logger) -> D
     }
 
 
-def run_validation_only(db: Session, *, file_id: int, logger=None) -> Dict[str, Any]:
+def run_validation_only(db: Session, *, file_id: int, style: Optional[str] = None, logger=None) -> Dict[str, Any]:
     """
     Run validation-only (no XHTML conversion, no re-structuring).
     Returns only validation_logs and detected_style.
@@ -832,17 +836,19 @@ def run_validation_only(db: Session, *, file_id: int, logger=None) -> Dict[str, 
         from docx import Document
         doc = Document(processed_path)
 
-        # Detect style: REF-N -> AMA, REF-U -> APA
-        is_ama = False
-        is_apa = False
-        for p in doc.paragraphs:
-            style_name = (p.style.name or "") if p.style else ""
-            if "REF-N" in style_name:
-                is_ama = True
-            elif "REF-U" in style_name:
-                is_apa = True
+        detected_style = style
+        if not detected_style:
+            # Detect style: REF-N -> AMA, REF-U -> APA
+            is_ama = False
+            is_apa = False
+            for p in doc.paragraphs:
+                style_name = (p.style.name or "") if p.style else ""
+                if "REF-N" in style_name:
+                    is_ama = True
+                elif "REF-U" in style_name:
+                    is_apa = True
 
-        detected_style = "AMA" if is_ama and not is_apa else ("APA" if is_apa else "AMA")
+            detected_style = "AMA" if is_ama and not is_apa else ("APA" if is_apa else "AMA")
         validation_logs["detected_style"] = detected_style
 
         if detected_style == "AMA":

@@ -80,10 +80,9 @@ export interface ReferenceValidateOnlyResponse {
   detected_style: "AMA" | "APA";
 }
 
-export async function getReferenceReview(fileId: number) {
-  const response = await apiClient.get<ReferenceValidationReviewResponse>(
-    `/files/${fileId}/reference-review`
-  );
+export async function getReferenceReview(fileId: number, style?: string) {
+  const url = style ? `/files/${fileId}/reference-review?style=${style}` : `/files/${fileId}/reference-review`;
+  const response = await apiClient.get<ReferenceValidationReviewResponse>(url);
   return response.data;
 }
 
@@ -95,10 +94,9 @@ export async function saveReferenceReview(saveEndpoint: string, htmlContent: str
   return response.data;
 }
 
-export async function validateReferenceOnly(fileId: number) {
-  const response = await apiClient.get<ReferenceValidateOnlyResponse>(
-    `/files/${fileId}/reference-review/validate-only`
-  );
+export async function validateReferenceOnly(fileId: number, style?: string) {
+  const url = style ? `/files/${fileId}/reference-review/validate-only?style=${style}` : `/files/${fileId}/reference-review/validate-only`;
+  const response = await apiClient.get<ReferenceValidateOnlyResponse>(url);
   return response.data;
 }
 

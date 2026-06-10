@@ -132,7 +132,8 @@ def background_processing_task(
                 "reference_structuring",
             ]:
                 # Define defaults based on process type to prevent UnboundLocalError
-                run_struct = True
+                run_struct = False
+                run_conversion = False
                 run_num = True
                 run_apa = True
                 report_only = False
@@ -140,27 +141,37 @@ def background_processing_task(
                 citation_format = "auto"
 
                 if process_type == "reference_structuring":
-                    run_struct = True
+                    # Only run AI Conversion (Gemini); legacy ReferencesStructing.py is OFF
+                    run_struct = False
+                    run_conversion = True
                     run_num = False
                     run_apa = False
                 elif process_type == "reference_number_validation":
                     run_struct = False
+                    run_conversion = False
                     run_num = True
                     run_apa = False
                 elif process_type == "reference_apa_chicago_validation":
                     run_struct = False
+                    run_conversion = False
                     run_num = False
                     run_apa = True
                 elif process_type == "reference_report_only":
                     run_struct = False
+                    run_conversion = False
                     run_num = True
                     run_apa = True
                     report_only = True
+                elif process_type in ("macro_processing", "reference_validation"):
+                    run_struct = False
+                    run_conversion = bool((options or {}).get("run_conversion", False))
 
                 # Dynamic overrides from options dictionary if provided
                 if options:
                     if "run_structuring" in options:
                         run_struct = bool(options["run_structuring"])
+                    if "run_conversion" in options:
+                        run_conversion = bool(options["run_conversion"])
                     if "run_validation" in options:
                         run_num = bool(options["run_validation"])
                     if "run_name_year_validation" in options:
@@ -172,9 +183,15 @@ def background_processing_task(
                     if "citation_format" in options:
                         citation_format = str(options["citation_format"])
 
+                logger.info(
+                    f"[reference job] type={process_type} "
+                    f"run_struct={run_struct} run_conversion={run_conversion} "
+                    f"run_num={run_num} run_apa={run_apa} report_only={report_only}"
+                )
                 generated_files = references_engine_cls().process_document(
                     file_path,
                     run_structuring=run_struct,
+                    run_conversion=run_conversion,
                     run_num_validation=run_num,
                     run_apa_validation=run_apa,
                     report_only=report_only,

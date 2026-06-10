@@ -48,7 +48,7 @@ describe("DashboardPage", () => {
   });
 
   it("shows admin shortcuts only when the dashboard viewer has the Admin role", async () => {
-    getDashboard.mockResolvedValueOnce(
+    getDashboard.mockResolvedValue(
       createDashboardResponse({
         viewer: createViewer({ roles: ["Viewer"] }),
       }),
@@ -60,7 +60,7 @@ describe("DashboardPage", () => {
       element: <DashboardPage />,
     });
 
-    expect(await screen.findByText("S4carlisle Production Dashboard")).toBeInTheDocument();
+    expect(await screen.findByText("S4Carlisle Production Suite")).toBeInTheDocument();
     expect(screen.queryByText("Admin Shortcuts")).not.toBeInTheDocument();
   });
 });

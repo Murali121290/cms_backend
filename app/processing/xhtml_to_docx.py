@@ -17,6 +17,7 @@ import os
 import shutil
 import subprocess
 import logging
+import re
 from pathlib import Path
 
 logger = logging.getLogger("app.processing.xhtml_to_docx")
@@ -120,6 +121,8 @@ class XhtmlToDocxEngine:
 
             if is_page_break:
                 style_label = "PageBreak"
+            elif el.tag == "li":
+                style_label = _determine_list_style(el)
             else:
                 # Prefer explicit data-style-label, fall back to class, then "Normal"
                 style_label = (
@@ -273,6 +276,12 @@ class XhtmlToDocxEngine:
         if table_cells_processed > 0:
             logger.info(f"Table cell formatting: {table_cells_processed} cell(s) updated")
 
+        # 4. ── Apply final manuscript formatting (Times New Roman, 12pt, double spacing) ──
+        try:
+            apply_final_docx_formatting(doc)
+        except Exception as fmt_err:
+            logger.warning(f"Failed to apply final document formatting: {fmt_err}")
+
         # 4. ── Save atomically ────────────────────────────────────────────────
         tmp_path = docx_path + ".stylepatch.tmp"
         doc.save(tmp_path)
@@ -354,7 +363,7 @@ class XhtmlToDocxEngine:
             return styles
 
         # Helper to add a run with formatting
-        def add_rich_run(parent_element, text, bold=False, italic=False, underline=False, color=None, bg_color=None, font_size=None, superscript=False, subscript=False, is_link=False, is_del=False):
+        def add_rich_run(parent_element, text, bold=False, italic=False, underline=False, color=None, bg_color=None, font_size=None, font_name=None, superscript=False, subscript=False, is_link=False, is_del=False):
             if not text:
                 return
             r = OxmlElement('w:r')
@@ -405,6 +414,13 @@ class XhtmlToDocxEngine:
                 rPr.append(sz)
                 rPr.append(szCs)
                 has_rPr = True
+            if font_name:
+                rFonts = OxmlElement('w:rFonts')
+                rFonts.set(qn('w:ascii'), font_name)
+                rFonts.set(qn('w:hAnsi'), font_name)
+                rFonts.set(qn('w:cs'), font_name)
+                rPr.append(rFonts)
+                has_rPr = True
             if superscript:
                 va = OxmlElement('w:vertAlign')
                 va.set(qn('w:val'), 'superscript')
@@ -429,7 +445,7 @@ class XhtmlToDocxEngine:
             parent_element.append(r)
 
         # 2. Traverse HTML element children and text recursively
-        def traverse(el, parent_xml, bold=False, italic=False, underline=False, color=None, bg_color=None, font_size=None, superscript=False, subscript=False, is_link=False):
+        def traverse(el, parent_xml, bold=False, italic=False, underline=False, color=None, bg_color=None, font_size=None, font_name=None, superscript=False, subscript=False, is_link=False):
             tag = el.tag.split('}')[-1].lower() if isinstance(el.tag, str) else ""
 
             style_str = el.get("style", "")
@@ -513,12 +529,17 @@ class XhtmlToDocxEngine:
                     except Exception as link_err:
                         logger.warning(f"Could not build hyperlink in python-docx: {link_err}")
 
+            # Parse font-family
+            node_font_name = font_name
+            if "font-family" in styles:
+                node_font_name = styles["font-family"].strip().replace("'", "").replace('"', '')
+
             # Append direct text
             if el.text:
                 add_rich_run(
                     current_xml_parent, el.text,
                     bold=current_bold, italic=current_italic, underline=current_underline,
-                    color=node_color, bg_color=node_bg, font_size=node_font_size,
+                    color=node_color, bg_color=node_bg, font_size=node_font_size, font_name=node_font_name,
                     superscript=current_super, subscript=current_sub, is_link=current_link,
                     is_del=is_del
                 )
@@ -528,7 +549,7 @@ class XhtmlToDocxEngine:
                 traverse(
                     child, current_xml_parent,
                     bold=current_bold, italic=current_italic, underline=current_underline,
-                    color=node_color, bg_color=node_bg, font_size=node_font_size,
+                    color=node_color, bg_color=node_bg, font_size=node_font_size, font_name=node_font_name,
                     superscript=current_super, subscript=current_sub, is_link=current_link
                 )
 
@@ -537,7 +558,7 @@ class XhtmlToDocxEngine:
                 add_rich_run(
                     parent_xml, el.tail,
                     bold=bold, italic=italic, underline=underline,
-                    color=color, bg_color=bg_color, font_size=font_size,
+                    color=color, bg_color=bg_color, font_size=font_size, font_name=font_name,
                     superscript=superscript, subscript=subscript, is_link=is_link,
                     is_del=False
                 )
@@ -570,13 +591,16 @@ class XhtmlToDocxEngine:
                     root_font_size = round(val * 0.75, 1)
                 else:
                     root_font_size = val
+        root_font_name = None
+        if "font-family" in root_styles:
+            root_font_name = root_styles["font-family"].strip().replace("'", "").replace('"', '')
 
         # Begin traversal
         if html_el.text:
-            add_rich_run(p_elem, html_el.text, color=root_color, bg_color=root_bg, font_size=root_font_size)
+            add_rich_run(p_elem, html_el.text, color=root_color, bg_color=root_bg, font_size=root_font_size, font_name=root_font_name)
 
         for child in html_el:
-            traverse(child, p_elem, color=root_color, bg_color=root_bg, font_size=root_font_size)
+            traverse(child, p_elem, color=root_color, bg_color=root_bg, font_size=root_font_size, font_name=root_font_name)
 
     # -------------------------------------------------------------------------
     # Legacy fallback — full HTML → DOCX conversion via external tools
@@ -653,3 +677,65 @@ class XhtmlToDocxEngine:
             raise RuntimeError("LibreOffice conversion timed out (>120s)")
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"LibreOffice failed: {e.stderr}")
+
+
+def _determine_list_style(li_el) -> str:
+    # Walk up ancestors to count list containers
+    parent = li_el.getparent()
+    list_containers = []
+    while parent is not None:
+        if parent.tag in ("ul", "ol"):
+            list_containers.append(parent.tag)
+        parent = parent.getparent()
+    
+    if not list_containers:
+        return "Normal"
+    
+    # The immediate list container is the first one in the list
+    immediate_type = "bullet" if list_containers[0] == "ul" else "number"
+    depth = len(list_containers)
+    
+    base_style = "List Bullet" if immediate_type == "bullet" else "List Number"
+    if depth == 1:
+        return base_style
+    else:
+        return f"{base_style} {depth}"
+
+
+def apply_final_docx_formatting(doc):
+    from docx.shared import Pt
+    # 1. Update Normal style
+    try:
+        normal_style = doc.styles['Normal']
+        normal_style.font.name = 'Times New Roman'
+        normal_style.font.size = Pt(12)
+        normal_style.paragraph_format.line_spacing = 2.0
+    except Exception as e:
+        logger.warning(f"Could not set Normal style formatting: {e}")
+
+    # 2. Iterate over all paragraphs (body + tables)
+    # Ensure they are Times New Roman, 12pt, double spacing, unless they have explicit overrides
+    for para in doc.paragraphs:
+        style_name = para.style.name if para.style else "Normal"
+        
+        is_list = "list" in style_name.lower() or "bullet" in style_name.lower() or "number" in style_name.lower()
+        is_extract = any(x in style_name.lower() for x in ("extract", "quote", "ex"))
+        
+        if not is_list and not is_extract:
+            para.paragraph_format.line_spacing = 2.0
+            
+        for run in para.runs:
+            if not run.font.name:
+                run.font.name = 'Times New Roman'
+            if not run.font.size:
+                run.font.size = Pt(12)
+
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for para in cell.paragraphs:
+                    for run in para.runs:
+                        if not run.font.name:
+                            run.font.name = 'Times New Roman'
+                        if not run.font.size:
+                            run.font.size = Pt(12)

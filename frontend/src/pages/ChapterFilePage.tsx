@@ -54,6 +54,10 @@ export interface FileRow {
   uploaded_by: string
   uploaded_on: string
   path:        string
+  // Lock / processing status — sourced from FileRecord.lock
+  isLocked?:   boolean
+  lockedBy?:   string | null
+  lockedAt?:   string | null
   pageCount?:        number
   dpi?:              number
   width?:            number
@@ -540,6 +544,9 @@ export function ChapterFilePage({
           uploaded_by: '—',
           uploaded_on: f.uploaded_at,
           path:        '',
+          isLocked:    f.lock?.is_checked_out ?? false,
+          lockedBy:    f.lock?.checked_out_by_username ?? null,
+          lockedAt:    f.lock?.checked_out_at ?? null,
         }))
     }
 
@@ -716,6 +723,52 @@ export function ChapterFilePage({
     col.accessor('uploaded_on', {
       header: 'Uploaded On',
       cell: i => <span className="text-muted text-[11px] whitespace-nowrap">{i.getValue() ? fmtDate(i.getValue()) : '—'}</span>,
+    }),
+    // ── Status column ─────────────────────────────────────────────────────
+    col.display({
+      id: 'status',
+      header: 'Status',
+      size: 120,
+      cell: ({ row }) => {
+        const { isLocked } = row.original
+        if (isLocked) {
+          return (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 whitespace-nowrap">
+              <Loader2 size={9} className="animate-spin flex-shrink-0"/>
+              Processing…
+            </span>
+          )
+        }
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 whitespace-nowrap">
+            <CheckCircle2 size={9} className="flex-shrink-0"/>
+            Ready
+          </span>
+        )
+      },
+    }),
+    // ── Lock column ───────────────────────────────────────────────────────
+    col.display({
+      id: 'lock',
+      header: 'Lock',
+      size: 130,
+      cell: ({ row }) => {
+        const { isLocked, lockedBy, lockedAt } = row.original
+        if (!isLocked) {
+          return <span className="text-muted text-[11px]">—</span>
+        }
+        return (
+          <div className="flex flex-col gap-0.5">
+            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 whitespace-nowrap">
+              <LogOut size={9} className="flex-shrink-0"/>
+              {lockedBy ?? 'Unknown'}
+            </span>
+            {lockedAt && (
+              <span className="text-[10px] text-muted whitespace-nowrap">{fmtDate(lockedAt)}</span>
+            )}
+          </div>
+        )
+      },
     }),
     ...dynamicCols,
     ...(activeFolder !== 'backup' ? [col.display({
@@ -1055,6 +1108,7 @@ export function ChapterFilePage({
         open={showBulkUpload}
         onClose={() => setShowBulkUpload(false)}
         projectId={pid}
+        chapterId={cid}
         chapterName={chapterFolderData?.chapter_name ?? resolvedChapterLabel}
         subfolder={FOLDER_CONFIG[activeFolder].label}
         stageName={resolvedStageName}

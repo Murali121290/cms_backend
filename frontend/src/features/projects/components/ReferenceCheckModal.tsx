@@ -38,7 +38,7 @@ export function ReferenceCheckModal({ file, isOpen, onClose }: ReferenceCheckMod
   const pipelineSteps: string[] = [];
   if (runValidation) pipelineSteps.push("① Number Validation");
   if (runNameYear) pipelineSteps.push("② Name & Year Validation (APA)");
-  if (runStructuring) pipelineSteps.push("③ Structuring & Conversion");
+  if (runStructuring) pipelineSteps.push("③ AI Reference Conversion");
 
   async function handleSubmit() {
     setErrorMsg(null);
@@ -59,7 +59,8 @@ export function ReferenceCheckModal({ file, isOpen, onClose }: ReferenceCheckMod
       const options = {
         run_validation: runValidation,
         run_name_year_validation: runNameYear,
-        run_structuring: runStructuring,
+        run_structuring: false,          // legacy ReferencesStructing.py — always off
+        run_conversion: runStructuring,  // Gemini AI conversion — controlled by Step 3
         citation_format: citationFormat,
         target_style: targetStyle,
         report_only: reportOnly,
@@ -225,7 +226,7 @@ export function ReferenceCheckModal({ file, isOpen, onClose }: ReferenceCheckMod
             </div>
           </label>
 
-          {/* Step 3: Structuring & Conversion */}
+          {/* Step 3: AI Reference Conversion */}
           <label className="flex items-start gap-3 cursor-pointer p-3 rounded-lg border-2 border-transparent hover:border-blue-300 transition-colors"
             onMouseDown={() => setRunStructuring(!runStructuring)}>
             <span
@@ -240,9 +241,9 @@ export function ReferenceCheckModal({ file, isOpen, onClose }: ReferenceCheckMod
               {runStructuring && <Check size={14} color="#FFFFFF" strokeWidth={3} />}
             </span>
             <div className="flex-1">
-              <div className="text-sm font-semibold text-text">Step 3 — Structuring & Conversion</div>
+              <div className="text-sm font-semibold text-text">Step 3 — AI Reference Conversion</div>
               <div className="text-xs text-text mt-1">
-                Restructures and converts references between APA ↔ AMA formats with URL validation.
+                Converts references between APA ↔ AMA formats using Gemini AI. Does not run legacy re-structuring.
               </div>
               <div className="text-xs text-blue-600 font-medium mt-2">
                 📝 Output: .docx with track changes (format conversions)

@@ -135,3 +135,62 @@ def test_reference_review_detected_style_apa(
     data = response.json()
     assert data["status"] == "ok"
     assert data["validation_logs"]["detected_style"] == "APA"
+
+
+def test_reference_review_style_override(
+    db_session,
+    temp_upload_root,
+    project_record,
+    chapter_record,
+    auth_cookie_client,
+    admin_user,
+):
+    file_path = temp_upload_root / project_record.code / chapter_record.number / "Manuscript"
+    file_path.mkdir(parents=True, exist_ok=True)
+    
+    # Create an AMA/Numerical document with REF-N style
+    filename = "chapter03_Processed.docx"
+    paragraphs = [
+        ("Some text with a citation [1].", "Normal"),
+        ("1. Smith J. Reference 1.", "REF-N"),
+    ]
+    docx_file = _build_docx_with_styles(file_path / filename, paragraphs)
+    
+    file_record = models.File(
+        project_id=project_record.id,
+        chapter_id=chapter_record.id,
+        filename=filename,
+        file_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        category="Manuscript",
+        path=str(docx_file),
+        version=1,
+    )
+    db_session.add(file_record)
+    db_session.commit()
+    db_session.refresh(file_record)
+
+    client = auth_cookie_client(admin_user)
+    
+    # 1. Check default auto-detection (should be AMA)
+    response = client.get(f"/api/v2/files/{file_record.id}/reference-review")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["validation_logs"]["detected_style"] == "AMA"
+    
+    # 2. Check override with APA
+    response = client.get(f"/api/v2/files/{file_record.id}/reference-review?style=APA")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["validation_logs"]["detected_style"] == "APA"
+    
+    # 3. Check validate-only endpoint override with APA
+    response = client.get(f"/api/v2/files/{file_record.id}/reference-review/validate-only?style=APA")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["detected_style"] == "APA"
+
+    # 4. Check validate-only endpoint override with AMA
+    response = client.get(f"/api/v2/files/{file_record.id}/reference-review/validate-only?style=AMA")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["detected_style"] == "AMA"

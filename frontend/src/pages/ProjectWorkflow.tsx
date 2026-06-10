@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, ChevronRight,
   Calendar, Clock, Zap, BookOpen, AlertCircle, CheckCircle2,
-  RotateCcw, Layers, User,
+  RotateCcw, Layers, User, BookMarked,
 } from 'lucide-react'
 import { ViewSwitcher } from '@/components/ui/ViewSwitcher'
 import { useViewMode } from '@/hooks/useViewMode'
@@ -18,6 +18,8 @@ import type { User as AppUser } from '@/api/users'
 import { stageDetailsApi } from '@/api/stageDetails'
 import { toast } from '@/store/useToastStore'
 import { FullPageSpinner, Spinner } from '@/components/ui/Spinner'
+import { uiPaths } from '@/utils/appPaths'
+import { useStylesheetsQuery } from '@/features/stylesheets/useStylesheetsQuery'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -286,6 +288,10 @@ export function ProjectWorkflow() {
   const [loading,         setLoading]         = useState(true)
 
 
+  const stylesheetsQuery = useStylesheetsQuery(id || null)
+  const activeStylesheet = stylesheetsQuery.data?.active_stylesheet
+  const stylesheetCount = stylesheetsQuery.data?.stylesheets?.length ?? 0
+
   const [viewMode, setViewMode] = useViewMode('view:chapters', 'large')
 
   const [filterAssignee, setFilterAssignee] = useState('')
@@ -450,7 +456,7 @@ export function ProjectWorkflow() {
           </div>
         </div>
 
-        {/* Chapter counts */}
+        {/* Chapter counts + Stylesheets button */}
         <div className="flex items-center gap-3 flex-shrink-0 text-xs text-muted">
           <span className="flex items-center gap-1">
             <BookOpen size={12} /> {summary.total} chapters
@@ -460,6 +466,20 @@ export function ProjectWorkflow() {
               <CheckCircle2 size={12} /> {summary.complete} done
             </span>
           )}
+          <button
+            onClick={() => navigate(uiPaths.projectStylesheets(id))}
+            title={activeStylesheet ? `Active: ${activeStylesheet.name}` : 'No active stylesheet'}
+            className="relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-surface text-text font-medium transition-colors"
+          >
+            <BookMarked size={12} />
+            Stylesheets
+            {stylesheetCount > 0 && (
+              <span className="text-[10px] bg-primary/10 text-primary px-1 rounded font-bold">{stylesheetCount}</span>
+            )}
+            {activeStylesheet && (
+              <span className="w-2 h-2 rounded-full bg-emerald-500 absolute -top-0.5 -right-0.5 ring-1 ring-white" />
+            )}
+          </button>
         </div>
       </div>
 

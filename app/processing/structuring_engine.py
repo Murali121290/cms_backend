@@ -4,7 +4,7 @@ import tempfile
 import shutil
 from typing import List
 
-from app.processing.structuring_lib.styler import process_docx
+from app.utils.utils.structuring_lib.styler import process_docx
 from app.core.config import get_settings
 from app.services.ai_structuring_client import AIStructuringClient, AIStructuringSettings
 

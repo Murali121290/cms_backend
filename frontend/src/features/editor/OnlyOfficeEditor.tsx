@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useRef, useImperativeHandle, forwardRef, useState } from "react";
+import React, { useEffect, useRef, useImperativeHandle, forwardRef, useState } from "react";
 import { useOnlyOfficeConfig } from "./useOnlyOfficeConfig";
 import { useOnlyOfficeScript } from "./useOnlyOfficeScript";
 
@@ -76,14 +76,28 @@ export const OnlyOfficeEditor = forwardRef<OnlyOfficeEditorHandle, OnlyOfficeEdi
               if (pollId) window.clearInterval(pollId);
               if (stopId) window.clearTimeout(stopId);
             }
-          } catch {
-            // Not ready yet â€” the poll below will retry.
+          } catch (e) {
+            console.warn("Failed to acquire OnlyOffice connector (will retry):", e);
           }
         }
       };
 
       const editorConfig = {
         ...cfg,
+        editorConfig: {
+          ...(cfg.editorConfig || {}),
+          plugins: {
+            ...(cfg.editorConfig?.plugins || {}),
+            autostart: [
+              ...(cfg.editorConfig?.plugins?.autostart || []),
+              "asc.{4c1b92a4-793d-4251-ba23-1451e06eeafd}"
+            ],
+            pluginsData: [
+              ...(cfg.editorConfig?.plugins?.pluginsData || []),
+              window.location.origin + "/onlyoffice-plugins/style-connector/config.json"
+            ]
+          }
+        },
         events: {
           ...(cfg.events || {}),
           onDocumentReady: () => {

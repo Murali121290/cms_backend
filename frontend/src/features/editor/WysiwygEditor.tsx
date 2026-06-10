@@ -1,4 +1,4 @@
-﻿import { useEditor, EditorContent } from "@tiptap/react";
+import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Bold as TiptapBold } from "@tiptap/extension-bold";
 import { Italic as TiptapItalic } from "@tiptap/extension-italic";
@@ -1483,73 +1483,101 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         }
         /* Occurrence highlights */
         .occurrence-highlight {
-          background-color: rgba(234, 88, 12, 0.35) !important;
-          border-bottom: 3px solid rgba(234, 88, 12, 1) !important;
-          color: inherit !important;
           padding: 1px 3px !important;
           border-radius: 2px !important;
           cursor: pointer !important;
           transition: all 0.18s ease-in-out !important;
         }
-        .occurrence-highlight:hover {
-          background-color: rgba(234, 88, 12, 0.18) !important;
-          border-bottom: 2px solid rgba(234, 88, 12, 0.9) !important;
-          opacity: 1 !important;
-          transform: scale(1.005) !important;
+
+        /* --- Active Selection (Vivid Focus Pulsating Highlights) --- */
+        @keyframes green-highlight-pulse {
+          0% { box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.3); }
+          50% { box-shadow: 0 0 0 5px rgba(34, 197, 94, 0.55); }
+          100% { box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.3); }
+        }
+        @keyframes orange-highlight-pulse {
+          0% { box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.3); }
+          50% { box-shadow: 0 0 0 5px rgba(249, 115, 22, 0.55); }
+          100% { box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.3); }
         }
 
-        /* All category highlights unified to orange */
+        /* 1. Green highlights (Compliance / Rules / Stylesheet) */
         .occurrence-stylesheet,
+        .occurrence-te_point {
+          background-color: rgba(34, 197, 94, 0.20) !important;
+          border-bottom: 3px solid rgba(34, 197, 94, 0.85) !important;
+          color: inherit !important;
+          font-weight: inherit !important;
+        }
+        .occurrence-stylesheet:hover,
+        .occurrence-te_point:hover {
+          background-color: rgba(34, 197, 94, 0.12) !important;
+          border-bottom: 2px solid rgba(34, 197, 94, 0.9) !important;
+        }
+        .occurrence-stylesheet-selected,
+        .occurrence-te_point-selected {
+          background-color: rgba(34, 197, 94, 0.40) !important;
+          border-bottom: 2.5px solid rgba(34, 197, 94, 0.95) !important;
+          color: #14532d !important;
+          font-weight: 700 !important;
+          padding: 2px 3px !important;
+          border-radius: 3px !important;
+          animation: green-highlight-pulse 2s infinite ease-in-out !important;
+          transition: all 0.18s ease-in-out !important;
+          opacity: 1 !important;
+        }
+
+        /* 2. Orange highlights (Language anomalies: spelling, grammar, style, consistency, bias, hyphenation) */
         .occurrence-spelling,
         .occurrence-consistency,
         .occurrence-grammar,
         .occurrence-style,
         .occurrence-hyphenation,
-        .occurrence-bias,
-        .occurrence-te_point {
-          background-color: rgba(234, 88, 12, 0.25) !important;
-          border-bottom: 3px solid rgba(234, 88, 12, 0.85) !important;
+        .occurrence-bias {
+          background-color: rgba(249, 115, 22, 0.20) !important;
+          border-bottom: 3px solid rgba(249, 115, 22, 0.85) !important;
           color: inherit !important;
           font-weight: inherit !important;
         }
-        .occurrence-stylesheet:hover,
         .occurrence-spelling:hover,
         .occurrence-consistency:hover,
         .occurrence-grammar:hover,
         .occurrence-style:hover,
         .occurrence-hyphenation:hover,
-        .occurrence-bias:hover,
-        .occurrence-te_point:hover {
-          background-color: rgba(234, 88, 12, 0.18) !important;
-          border-bottom: 2px solid rgba(234, 88, 12, 0.9) !important;
+        .occurrence-bias:hover {
+          background-color: rgba(249, 115, 22, 0.12) !important;
+          border-bottom: 2px solid rgba(249, 115, 22, 0.9) !important;
         }
-
-        /* --- Active Selection (Vivid Focus Pulsating Highlight) --- */
-        @keyframes highlight-pulse {
-          0% { box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.3); }
-          50% { box-shadow: 0 0 0 5px rgba(22, 163, 74, 0.55); }
-          100% { box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.3); }
-        }
-
-        .occurrence-highlight-selected,
-        .occurrence-stylesheet-selected,
         .occurrence-spelling-selected,
         .occurrence-consistency-selected,
         .occurrence-grammar-selected,
         .occurrence-style-selected,
         .occurrence-hyphenation-selected,
-        .occurrence-bias-selected,
-        .occurrence-te_point-selected {
+        .occurrence-bias-selected {
+          background-color: rgba(249, 115, 22, 0.40) !important;
+          border-bottom: 2.5px solid rgba(249, 115, 22, 0.95) !important;
+          color: #7c2d12 !important;
+          font-weight: 700 !important;
+          padding: 2px 3px !important;
+          border-radius: 3px !important;
+          animation: orange-highlight-pulse 2s infinite ease-in-out !important;
+          transition: all 0.18s ease-in-out !important;
+          opacity: 1 !important;
+        }
+
+        /* Fallbacks for generic occurrence classes */
+        .occurrence-highlight-selected {
           background-color: rgba(22, 163, 74, 0.40) !important;
           border-bottom: 2.5px solid rgba(22, 163, 74, 0.95) !important;
           color: #14532d !important;
           font-weight: 700 !important;
           padding: 2px 3px !important;
           border-radius: 3px !important;
-          animation: highlight-pulse 2s infinite ease-in-out !important;
+          animation: green-highlight-pulse 2s infinite ease-in-out !important;
           transition: all 0.18s ease-in-out !important;
           opacity: 1 !important;
         }
+
 
         /* Style indicators on the Left Margin */
         .ProseMirror h1,
@@ -1634,6 +1662,16 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           margin-top: 0.5rem !important;
           margin-bottom: 0.5rem !important;
         }
+        .ProseMirror ul ul {
+          list-style-type: circle !important;
+        }
+        .ProseMirror ul ul ul {
+          list-style-type: square !important;
+        }
+        .ProseMirror ul ul ul ul {
+          list-style-type: disc !important;
+        }
+
         .ProseMirror ol {
           list-style-type: decimal !important;
           margin-left: 2rem !important;
@@ -1641,9 +1679,49 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           margin-top: 0.5rem !important;
           margin-bottom: 0.5rem !important;
         }
+        .ProseMirror ol ol {
+          list-style-type: lower-alpha !important;
+        }
+        .ProseMirror ol ol ol {
+          list-style-type: lower-roman !important;
+        }
+        .ProseMirror ol ol ol ol {
+          list-style-type: upper-alpha !important;
+        }
+        .ProseMirror ol ol ol ol ol {
+          list-style-type: upper-roman !important;
+        }
+
         .ProseMirror li {
           margin-bottom: 0.25rem !important;
           line-height: 1.8 !important;
+        }
+
+        /* Extracts and BlockQuotes Styling (Word-like indents) */
+        .ProseMirror blockquote,
+        .ProseMirror p.EXT-FIRST,
+        .ProseMirror p.EXT-MID,
+        .ProseMirror p.EXT-LAST,
+        .ProseMirror p.EXT-ONLY,
+        .ProseMirror p.Extract,
+        .ProseMirror p.Quote,
+        .ProseMirror p.BlockQuote,
+        .ProseMirror p[data-style-label="EXT-FIRST"],
+        .ProseMirror p[data-style-label="EXT-MID"],
+        .ProseMirror p[data-style-label="EXT-LAST"],
+        .ProseMirror p[data-style-label="EXT-ONLY"],
+        .ProseMirror p[data-style-label="Extract"],
+        .ProseMirror p[data-style-label="Quote"],
+        .ProseMirror p[data-style-label="BlockQuote"],
+        .ProseMirror p[data-style-label="Block Quote"] {
+          margin-left: 3rem !important;
+          margin-right: 3rem !important;
+          font-size: 0.95em !important;
+          border-left: 3px solid #cbd5e1 !important;
+          padding-left: 1rem !important;
+          margin-top: 0.5rem !important;
+          margin-bottom: 0.5rem !important;
+          line-height: 1.6 !important;
         }
 
         /* Custom Page Break Node Styling */
@@ -1841,6 +1919,271 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         .ProseMirror span.search-result-active {
           background-color: #f97316 !important;
           color: white !important;
+        }
+
+        /* ── Structured Bullet List Styles (Word-like lists converted to flat <p> elements) ── */
+        .ProseMirror p[data-style-label="BL-FIRST"],
+        .ProseMirror p[data-style-label="BL-MID"],
+        .ProseMirror p[data-style-label="BL-LAST"],
+        .ProseMirror p[data-style-label="BX1-BL-FIRST"],
+        .ProseMirror p[data-style-label="BX1-BL-MID"],
+        .ProseMirror p[data-style-label="BX1-BL-LAST"],
+        .ProseMirror p[data-style-label="BX1-UL-FIRST"],
+        .ProseMirror p[data-style-label="BX1-UL-MID"],
+        .ProseMirror p[data-style-label="BX1-UL-LAST"],
+        .ProseMirror p[data-style-label="FN-BL-FIRST"],
+        .ProseMirror p[data-style-label="FN-BL-MID"],
+        .ProseMirror p[data-style-label="FN-BL-LAST"],
+        .ProseMirror p[data-style-label="KP-BL-FIRST"],
+        .ProseMirror p[data-style-label="KP-BL-LAST"],
+        .ProseMirror p[data-style-label="KP-BL-MID"],
+        .ProseMirror p[data-style-label="KT-BL-FIRST"],
+        .ProseMirror p[data-style-label="KT-BL-LAST"],
+        .ProseMirror p[data-style-label="KT-BL-MID"],
+        .ProseMirror p[data-style-label="NBX-BL-FIRST"],
+        .ProseMirror p[data-style-label="NBX-BL-MID"],
+        .ProseMirror p[data-style-label="NBX-BL-LAST"],
+        .ProseMirror p[data-style-label="OBJ-BL-FIRST"],
+        .ProseMirror p[data-style-label="OBJ-BL-LAST"],
+        .ProseMirror p[data-style-label="OBJ-BL-MID"],
+        .ProseMirror p[data-style-label="OBJ-UL-FIRST"],
+        .ProseMirror p[data-style-label="OBJ-UL-LAST"],
+        .ProseMirror p[data-style-label="OBJ-UL-MID"],
+        .ProseMirror p[data-style-label="SBBL-FIRST"],
+        .ProseMirror p[data-style-label="SBBL-LAST"],
+        .ProseMirror p[data-style-label="SBBL-MID"],
+        .ProseMirror p[data-style-label="SBUL-FIRST"],
+        .ProseMirror p[data-style-label="SBUL"],
+        .ProseMirror p[data-style-label="TFN-BL-FIRST"],
+        .ProseMirror p[data-style-label="TFN-BL-MID"],
+        .ProseMirror p[data-style-label="TFN-BL-LAST"],
+        .ProseMirror p[data-style-label="TUL-FIRST"],
+        .ProseMirror p[data-style-label="TUL-MID"],
+        .ProseMirror p[data-style-label="UL-FIRST"],
+        .ProseMirror p[data-style-label="UL-LAST"],
+        .ProseMirror p[data-style-label="UL-MID"],
+        .ProseMirror p[data-style-label="UNBX-BL"],
+        .ProseMirror p[data-style-label="UNBX-UL"],
+        .ProseMirror p[data-style-label="UNT-BL"],
+        .ProseMirror p[data-style-label="UNT-UL"],
+        .ProseMirror p[data-style-label="GLOS-BL-FIRST"],
+        .ProseMirror p[data-style-label="GLOS-BL-MID"] {
+          position: relative !important;
+          margin-left: 2rem !important;
+          padding-left: 0.5rem !important;
+          margin-top: 0.25rem !important;
+          margin-bottom: 0.25rem !important;
+        }
+
+        .ProseMirror p[data-style-label="BL-FIRST"]::before,
+        .ProseMirror p[data-style-label="BL-MID"]::before,
+        .ProseMirror p[data-style-label="BL-LAST"]::before,
+        .ProseMirror p[data-style-label="BX1-BL-FIRST"]::before,
+        .ProseMirror p[data-style-label="BX1-BL-MID"]::before,
+        .ProseMirror p[data-style-label="BX1-BL-LAST"]::before,
+        .ProseMirror p[data-style-label="BX1-UL-FIRST"]::before,
+        .ProseMirror p[data-style-label="BX1-UL-MID"]::before,
+        .ProseMirror p[data-style-label="BX1-UL-LAST"]::before,
+        .ProseMirror p[data-style-label="FN-BL-FIRST"]::before,
+        .ProseMirror p[data-style-label="FN-BL-MID"]::before,
+        .ProseMirror p[data-style-label="FN-BL-LAST"]::before,
+        .ProseMirror p[data-style-label="KP-BL-FIRST"]::before,
+        .ProseMirror p[data-style-label="KP-BL-LAST"]::before,
+        .ProseMirror p[data-style-label="KP-BL-MID"]::before,
+        .ProseMirror p[data-style-label="KT-BL-FIRST"]::before,
+        .ProseMirror p[data-style-label="KT-BL-LAST"]::before,
+        .ProseMirror p[data-style-label="KT-BL-MID"]::before,
+        .ProseMirror p[data-style-label="NBX-BL-FIRST"]::before,
+        .ProseMirror p[data-style-label="NBX-BL-MID"]::before,
+        .ProseMirror p[data-style-label="NBX-BL-LAST"]::before,
+        .ProseMirror p[data-style-label="OBJ-BL-FIRST"]::before,
+        .ProseMirror p[data-style-label="OBJ-BL-LAST"]::before,
+        .ProseMirror p[data-style-label="OBJ-BL-MID"]::before,
+        .ProseMirror p[data-style-label="OBJ-UL-FIRST"]::before,
+        .ProseMirror p[data-style-label="OBJ-UL-LAST"]::before,
+        .ProseMirror p[data-style-label="OBJ-UL-MID"]::before,
+        .ProseMirror p[data-style-label="SBBL-FIRST"]::before,
+        .ProseMirror p[data-style-label="SBBL-LAST"]::before,
+        .ProseMirror p[data-style-label="SBBL-MID"]::before,
+        .ProseMirror p[data-style-label="SBUL-FIRST"]::before,
+        .ProseMirror p[data-style-label="SBUL"]::before,
+        .ProseMirror p[data-style-label="TFN-BL-FIRST"]::before,
+        .ProseMirror p[data-style-label="TFN-BL-MID"]::before,
+        .ProseMirror p[data-style-label="TFN-BL-LAST"]::before,
+        .ProseMirror p[data-style-label="TUL-FIRST"]::before,
+        .ProseMirror p[data-style-label="TUL-MID"]::before,
+        .ProseMirror p[data-style-label="UL-FIRST"]::before,
+        .ProseMirror p[data-style-label="UL-LAST"]::before,
+        .ProseMirror p[data-style-label="UL-MID"]::before,
+        .ProseMirror p[data-style-label="UNBX-BL"]::before,
+        .ProseMirror p[data-style-label="UNBX-UL"]::before,
+        .ProseMirror p[data-style-label="UNT-BL"]::before,
+        .ProseMirror p[data-style-label="UNT-UL"]::before,
+        .ProseMirror p[data-style-label="GLOS-BL-FIRST"]::before,
+        .ProseMirror p[data-style-label="GLOS-BL-MID"]::before {
+          content: "•" !important;
+          position: absolute !important;
+          left: -1rem !important;
+          top: 0 !important;
+          font-weight: bold !important;
+          color: inherit !important;
+        }
+
+        /* Level 2 Bullet List Styles */
+        .ProseMirror p[data-style-label="BL2-MID"],
+        .ProseMirror p[data-style-label="BX1-BL2-MID"],
+        .ProseMirror p[data-style-label="NBX-BL2-MID"] {
+          position: relative !important;
+          margin-left: 3.5rem !important;
+          padding-left: 0.5rem !important;
+          margin-top: 0.25rem !important;
+          margin-bottom: 0.25rem !important;
+        }
+        .ProseMirror p[data-style-label="BL2-MID"]::before,
+        .ProseMirror p[data-style-label="BX1-BL2-MID"]::before,
+        .ProseMirror p[data-style-label="NBX-BL2-MID"]::before {
+          content: "◦" !important;
+          position: absolute !important;
+          left: -1rem !important;
+          top: 0 !important;
+          font-weight: bold !important;
+          color: inherit !important;
+        }
+
+        /* Level 3 Bullet List Styles */
+        .ProseMirror p[data-style-label="BL3-MID"] {
+          position: relative !important;
+          margin-left: 5rem !important;
+          padding-left: 0.5rem !important;
+          margin-top: 0.25rem !important;
+          margin-bottom: 0.25rem !important;
+        }
+        .ProseMirror p[data-style-label="BL3-MID"]::before {
+          content: "▪" !important;
+          position: absolute !important;
+          left: -1rem !important;
+          top: 0 !important;
+          font-weight: bold !important;
+          color: inherit !important;
+        }
+
+        /* Levels 4, 5, 6 Bullet List Styles */
+        .ProseMirror p[data-style-label="BL4-MID"] {
+          position: relative !important;
+          margin-left: 6.5rem !important;
+          padding-left: 0.5rem !important;
+          margin-top: 0.25rem !important;
+          margin-bottom: 0.25rem !important;
+        }
+        .ProseMirror p[data-style-label="BL4-MID"]::before {
+          content: "•" !important;
+          position: absolute !important;
+          left: -1rem !important;
+          top: 0 !important;
+          font-weight: bold !important;
+          color: inherit !important;
+        }
+
+        .ProseMirror p[data-style-label="BL5-MID"] {
+          position: relative !important;
+          margin-left: 8rem !important;
+          padding-left: 0.5rem !important;
+          margin-top: 0.25rem !important;
+          margin-bottom: 0.25rem !important;
+        }
+        .ProseMirror p[data-style-label="BL5-MID"]::before {
+          content: "◦" !important;
+          position: absolute !important;
+          left: -1rem !important;
+          top: 0 !important;
+          font-weight: bold !important;
+          color: inherit !important;
+        }
+
+        .ProseMirror p[data-style-label="BL6-MID"] {
+          position: relative !important;
+          margin-left: 9.5rem !important;
+          padding-left: 0.5rem !important;
+          margin-top: 0.25rem !important;
+          margin-bottom: 0.25rem !important;
+        }
+        .ProseMirror p[data-style-label="BL6-MID"]::before {
+          content: "▪" !important;
+          position: absolute !important;
+          left: -1rem !important;
+          top: 0 !important;
+          font-weight: bold !important;
+          color: inherit !important;
+        }
+
+        /* Numbered List Styles Indentation */
+        .ProseMirror p[data-style-label="NL-FIRST"],
+        .ProseMirror p[data-style-label="NL-MID"],
+        .ProseMirror p[data-style-label="NL-LAST"],
+        .ProseMirror p[data-style-label="BX1-NL-FIRST"],
+        .ProseMirror p[data-style-label="BX1-NL-MID"],
+        .ProseMirror p[data-style-label="BX1-NL-LAST"],
+        .ProseMirror p[data-style-label="NBX-NL-FIRST"],
+        .ProseMirror p[data-style-label="NBX-NL-MID"],
+        .ProseMirror p[data-style-label="NBX-NL-LAST"],
+        .ProseMirror p[data-style-label="OBJ-NL-FIRST"],
+        .ProseMirror p[data-style-label="OBJ-NL-MID"],
+        .ProseMirror p[data-style-label="OBJ-NL-LAST"],
+        .ProseMirror p[data-style-label="EX-NL-FIRST"],
+        .ProseMirror p[data-style-label="EX-NL-MID"],
+        .ProseMirror p[data-style-label="EX-NL-LAST"],
+        .ProseMirror p[data-style-label="KP-NL-FIRST"],
+        .ProseMirror p[data-style-label="KP-NL-MID"],
+        .ProseMirror p[data-style-label="KP-NL-LAST"],
+        .ProseMirror p[data-style-label="KT-NL-FIRST"],
+        .ProseMirror p[data-style-label="KT-NL-MID"],
+        .ProseMirror p[data-style-label="KT-NL-LAST"],
+        .ProseMirror p[data-style-label="RQ-NL-FIRST"],
+        .ProseMirror p[data-style-label="RQ-NL-MID"],
+        .ProseMirror p[data-style-label="RQ-NL-LAST"],
+        .ProseMirror p[data-style-label="GLOS-NL-FIRST"],
+        .ProseMirror p[data-style-label="GLOS-NL-MID"],
+        .ProseMirror p[data-style-label="UNBX-NL"],
+        .ProseMirror p[data-style-label^="EXER-"][data-style-label*="-NL-"] {
+          position: relative !important;
+          margin-left: 2rem !important;
+          padding-left: 0.5rem !important;
+          margin-top: 0.25rem !important;
+          margin-bottom: 0.25rem !important;
+        }
+
+        /* Numbered List Auto-numbering */
+        .ProseMirror {
+          counter-reset: structured-num-list;
+        }
+
+        /* Reset the counter for a new sequence of consecutive numbered list items */
+        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]) + p[data-style-label^="NL-"],
+        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]) + p[data-style-label*="-NL-"],
+        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]) + p[data-style-label$="-NL"],
+        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]) + p[data-style-label^="EXER-"][data-style-label*="-NL-"] {
+          counter-reset: structured-num-list;
+        }
+
+        /* Increment counter for each list item */
+        .ProseMirror p[data-style-label^="NL-"],
+        .ProseMirror p[data-style-label*="-NL-"],
+        .ProseMirror p[data-style-label$="-NL"],
+        .ProseMirror p[data-style-label^="EXER-"][data-style-label*="-NL-"] {
+          counter-increment: structured-num-list;
+        }
+
+        /* Display the counter value */
+        .ProseMirror p[data-style-label^="NL-"]::before,
+        .ProseMirror p[data-style-label*="-NL-"]::before,
+        .ProseMirror p[data-style-label$="-NL"]::before,
+        .ProseMirror p[data-style-label^="EXER-"][data-style-label*="-NL-"]::before {
+          content: counter(structured-num-list) ". " !important;
+          position: absolute !important;
+          left: -1rem !important;
+          top: 0 !important;
+          font-weight: bold !important;
+          color: inherit !important;
         }
       `}</style>
       </div>

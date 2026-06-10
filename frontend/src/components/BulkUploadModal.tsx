@@ -25,6 +25,7 @@ export interface BulkUploadModalProps {
   open:              boolean
   onClose:           () => void
   projectId:         number
+  chapterId:         number
   chapterName:       string
   subfolder:         string
   stageName?:        string
@@ -50,7 +51,7 @@ function FileStatusIcon({ status }: { status: FileStatus }) {
 // ── Component ──────────────────────────────────────────────────────────────
 
 export function BulkUploadModal({
-  open, onClose, projectId, chapterName, subfolder, stageName = '', existingFileNames, onComplete,
+  open, onClose, projectId, chapterId, chapterName, subfolder, stageName = '', existingFileNames, onComplete,
 }: BulkUploadModalProps) {
   const [files,      setFiles]      = useState<UploadFile[]>([])
   const [step,       setStep]       = useState<Step>('select')
@@ -122,11 +123,10 @@ export function BulkUploadModal({
 
       const isDuplicate = existingLower.has(uf.file.name.toLowerCase())
       const fd = new FormData()
-      fd.append('file', uf.file)
+      fd.append('category', subfolder)
+      fd.append('files', uf.file)
 
-      const url = isDuplicate
-        ? `/uploads/${projectId}/chapter/${chapterName}/${subfolder}/${encodeURIComponent(uf.file.name)}/replace`
-        : `/uploads/${projectId}/chapter/${chapterName}/${subfolder}/upload`
+      const url = `/projects/${projectId}/chapters/${chapterId}/files/upload`
 
       if (isDuplicate) {
         fd.append('replaced_by', 'user')

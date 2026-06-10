@@ -10,6 +10,10 @@ from sqlalchemy.ext.compiler import compiles
 def compile_array_sqlite(element, compiler, **kw):
     return "TEXT"
 
+@compiles(BigInteger, "sqlite")
+def compile_bigint_sqlite(element, compiler, **kw):
+    return "INTEGER"
+
 from sqlalchemy.sql import func
 
 from app.database import Base

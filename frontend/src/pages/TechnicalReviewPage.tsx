@@ -594,36 +594,6 @@ export function TechnicalReviewPage() {
                   Export DOCX
                 </Button>
               </a>,
-              <a
-                key="export-excel"
-                href={`/api/v2/files/${normalizedFileId}/technical-review/export/excel`}
-                className="no-underline"
-                download
-              >
-                <Button variant="secondary" leftIcon={<FileSpreadsheet className="w-4 h-4" />}>
-                  Export Excel Report
-                </Button>
-              </a>,
-              <a
-                key="export-ia"
-                href={`/api/v2/files/${normalizedFileId}/technical-review/export/ia-excel`}
-                className="no-underline"
-                download
-              >
-                <Button variant="secondary" leftIcon={<Table2 className="w-4 h-4" />}>
-                  Export IA Report
-                </Button>
-              </a>,
-              <a
-                key="export-html"
-                href={`/api/v2/files/${normalizedFileId}/technical-review/export/html`}
-                className="no-underline"
-                download
-              >
-                <Button variant="secondary" leftIcon={<Globe className="w-4 h-4" />}>
-                  Export HTML Dashboard
-                </Button>
-              </a>,
               <Button
                 key="back"
                 variant="secondary"

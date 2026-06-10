@@ -12,6 +12,13 @@ def _deserialize_ia_rows(raw: str) -> list[schemas_v2.IARow]:
         return []
 
 
+def _deserialize_file_ids(raw: str | None) -> list[int]:
+    try:
+        return json.loads(raw or "[]")
+    except Exception:
+        return []
+
+
 def _serialize_stylesheet(ss: models.ProjectStylesheet) -> schemas_v2.StylesheetSummary:
     return schemas_v2.StylesheetSummary(
         id=ss.id,
@@ -22,6 +29,7 @@ def _serialize_stylesheet(ss: models.ProjectStylesheet) -> schemas_v2.Stylesheet
         created_at=ss.created_at,
         created_by_id=ss.created_by_id,
         selected_ia_rows=_deserialize_ia_rows(ss.selected_ia_rows),
+        analyzed_file_ids=_deserialize_file_ids(ss.analyzed_file_ids),
     )
 
 
@@ -62,12 +70,14 @@ def create_stylesheet(
     description: str | None,
     selected_ia_rows: list[schemas_v2.IARow],
     created_by_id: int | None,
+    analyzed_file_ids: list[int] | None = None,
 ) -> models.ProjectStylesheet:
     ss = models.ProjectStylesheet(
         project_id=project_id,
         name=name,
         description=description,
         selected_ia_rows=json.dumps([r.model_dump() for r in selected_ia_rows]),
+        analyzed_file_ids=json.dumps(analyzed_file_ids or []),
         is_active=False,
         created_at=datetime.utcnow(),
         created_by_id=created_by_id,
@@ -86,6 +96,7 @@ def update_stylesheet(
     name: str | None,
     description: str | None,
     selected_ia_rows: list[schemas_v2.IARow] | None,
+    analyzed_file_ids: list[int] | None = None,
 ) -> models.ProjectStylesheet | None:
     ss = (
         db.query(models.ProjectStylesheet)
@@ -103,6 +114,8 @@ def update_stylesheet(
         ss.description = description
     if selected_ia_rows is not None:
         ss.selected_ia_rows = json.dumps([r.model_dump() for r in selected_ia_rows])
+    if analyzed_file_ids is not None:
+        ss.analyzed_file_ids = json.dumps(analyzed_file_ids)
     db.commit()
     db.refresh(ss)
     return ss

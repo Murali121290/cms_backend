@@ -1,4 +1,4 @@
-﻿import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import {
   ArrowLeft,
   BookOpen,
@@ -9,6 +9,9 @@ import {
   LayoutDashboard,
   Maximize2,
   Minimize2,
+  BookMarked,
+  AlertTriangle,
+  ArrowRight,
 } from "lucide-react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
@@ -27,6 +30,9 @@ import { useParagraphStyles } from "@/features/editor/useParagraphStyles";
 import { CollaboraSidePanel } from "@/features/editor/CollaboraSidePanel";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { uiPaths } from "@/utils/appPaths";
+import { useStylesheetsQuery } from "@/features/stylesheets/useStylesheetsQuery";
+import type { Occurrence } from "@/features/editor/OccurrenceHighlight";
+import type { StylesheetSummary } from "@/types/api";
 
 export function TechnicalEditorPage() {
   const navigate = useNavigate();
@@ -42,10 +48,13 @@ export function TechnicalEditorPage() {
     Number.isInteger(parsedFileId) && parsedFileId > 0 ? parsedFileId : null;
 
   const editorRef = useRef<WysiwygEditorHandle>(null);
-  const reviewQuery = useTechnicalReviewQuery(normalizedFileId);
+  const stylesheetsQuery = useStylesheetsQuery(normalizedProjectId);
+  const activeStylesheet = stylesheetsQuery.data?.active_stylesheet;
+  const reviewQuery = useTechnicalReviewQuery(normalizedFileId, activeStylesheet?.id);
   const xhtmlQuery = useFileXhtmlQuery(normalizedFileId);
   const editorSave = useEditorSave(normalizedFileId);
   const stylesQuery = useParagraphStyles();
+  const [selectedFindingIndex, setSelectedFindingIndex] = useState(-1);
 
   const [searchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
@@ -80,7 +89,7 @@ export function TechnicalEditorPage() {
   }
 
   // â”€â”€ Loading â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  if (reviewQuery.isPending) {
+  if (reviewQuery.isPending || stylesheetsQuery.isPending) {
     return (
       <main className="page-enter min-h-screen bg-background p-6">
         <div className="max-w-6xl mx-auto space-y-6">
@@ -130,6 +139,21 @@ export function TechnicalEditorPage() {
     ...customStyles,
   ].sort();
   const hasCollabora = !!collabora_url;
+
+  // Map technical-review findings to Occurrence objects for editor highlighting
+  const findings: any[] = review.findings || [];
+  const occurrences: Occurrence[] = useMemo(() =>
+    findings.map((f) => ({
+      para_index: f.para_index ?? 0,
+      match_start: f.match_start ?? 0,
+      match_end: f.match_end ?? (f.surface?.length ?? 0),
+      surface: f.surface ?? "",
+      category: "stylesheet",
+      in_stylesheet: true,
+    })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [review.findings]
+  );
 
   const handleAddStyle = (style: string) => {
     if (!customStyles.includes(style)) {
@@ -300,10 +324,40 @@ export function TechnicalEditorPage() {
               height={isFullscreen ? "calc(100vh - 20px)" : "calc(100vh - 260px)"}
               styles={allStyles}
               onAddStyle={handleAddStyle}
+              occurrences={occurrences}
+              selectedOccurrenceIndex={selectedFindingIndex}
+              onOccurrenceClick={setSelectedFindingIndex}
               sidePanel={
-                <div className="flex flex-col gap-4 h-full min-h-0">
-                  <div className="flex-1 min-h-0">
-                    <StylesPanel styles={allStyles} editorRef={editorRef} />
+                <div className="flex flex-col h-full min-h-0 divide-y divide-border">
+                  {/* Stylesheet occurrences panel */}
+                  <StylesheetOccurrencesPanel
+                    activeStylesheet={activeStylesheet}
+                    findings={findings}
+                    selectedIndex={selectedFindingIndex}
+                    onSelect={(i) => {
+                      setSelectedFindingIndex(i);
+                      const f = findings[i];
+                      if (f?.surface) {
+                        editorRef.current?.editor?.commands?.setSearchTerm(f.surface);
+                      }
+                    }}
+                    onReplace={(i) => {
+                      const f = findings[i];
+                      if (f?.replacement && editorRef.current?.editor) {
+                        editorRef.current.editor.commands.setSearchTerm(f.surface ?? "");
+                        editorRef.current.editor.commands.replaceCurrent(f.replacement);
+                      }
+                    }}
+                    onReplaceAll={(i) => {
+                      const f = findings[i];
+                      if (f?.replacement && editorRef.current?.editor) {
+                        editorRef.current.editor.commands.setSearchTerm(f.surface ?? "");
+                        editorRef.current.editor.commands.replaceAll(f.replacement);
+                      }
+                    }}
+                  />
+                  <div className="flex-1 min-h-0 overflow-hidden">
+                    <StylesPanel styles={allStyles} editorRef={editorRef} onAddStyle={handleAddStyle} />
                   </div>
                   <div className="flex-shrink-0">
                     <VersionHistoryPanel
@@ -373,5 +427,107 @@ export function TechnicalEditorPage() {
         </div>
       )}
     </main>
+  );
+}
+
+// ── Stylesheet Occurrences Panel ───────────────────────────────────────────────
+
+interface StylesheetOccurrencesPanelProps {
+  activeStylesheet: StylesheetSummary | null | undefined;
+  findings: any[];
+  selectedIndex: number;
+  onSelect: (i: number) => void;
+  onReplace: (i: number) => void;
+  onReplaceAll: (i: number) => void;
+}
+
+function StylesheetOccurrencesPanel({
+  activeStylesheet,
+  findings,
+  selectedIndex,
+  onSelect,
+  onReplace,
+  onReplaceAll,
+}: StylesheetOccurrencesPanelProps) {
+  if (!activeStylesheet) {
+    return (
+      <div className="px-3 py-4 text-center">
+        <BookMarked className="w-5 h-5 text-muted mx-auto mb-1.5 opacity-40" />
+        <p className="text-xs text-muted">No active stylesheet</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col max-h-64 min-h-0">
+      {/* Header */}
+      <div className="px-3 py-2 bg-gold-50 border-b border-gold-200 flex items-center gap-2 flex-shrink-0">
+        <BookMarked className="w-3.5 h-3.5 text-gold-700 flex-shrink-0" />
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-semibold text-gold-800 truncate">{activeStylesheet.name}</p>
+          <p className="text-[10px] text-gold-600">
+            {findings.length === 0 ? "No occurrences" : `${findings.length} occurrence${findings.length !== 1 ? "s" : ""}`}
+          </p>
+        </div>
+      </div>
+
+      {findings.length === 0 ? (
+        <div className="px-3 py-3 text-center">
+          <p className="text-xs text-muted">All clear — no matches found</p>
+        </div>
+      ) : (
+        <div className="overflow-y-auto flex-1">
+          {findings.map((finding, i) => {
+            const isSelected = selectedIndex === i;
+            return (
+              <button
+                key={i}
+                type="button"
+                onClick={() => onSelect(i)}
+                className={`w-full text-left px-3 py-2 transition-colors border-l-2 ${
+                  isSelected
+                    ? "bg-gold-50 border-l-gold-500"
+                    : "border-l-transparent hover:bg-surface"
+                }`}
+              >
+                <p className="text-xs font-mono text-text truncate">{finding.surface}</p>
+                <div className="flex items-center justify-between mt-0.5">
+                  <span className="text-[10px] text-muted truncate max-w-[60%]">{finding.rule_id}</span>
+                  {finding.count > 0 && (
+                    <span className="text-[10px] bg-gold-100 text-gold-700 px-1.5 py-0.5 rounded font-semibold">
+                      ×{finding.count}
+                    </span>
+                  )}
+                </div>
+                {finding.replacement && (
+                  <div className="flex items-center gap-1 mt-1">
+                    <ArrowRight className="w-3 h-3 text-emerald-600 flex-shrink-0" />
+                    <span className="text-[10px] font-mono text-emerald-700 truncate flex-1">{finding.replacement}</span>
+                    {isSelected && (
+                      <div className="flex gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          onClick={() => onReplace(i)}
+                          className="text-[10px] px-1.5 py-0.5 bg-emerald-600 text-white rounded hover:bg-emerald-700 transition-colors"
+                        >
+                          Replace
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onReplaceAll(i)}
+                          className="text-[10px] px-1.5 py-0.5 bg-emerald-100 text-emerald-800 rounded hover:bg-emerald-200 transition-colors"
+                        >
+                          All
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }

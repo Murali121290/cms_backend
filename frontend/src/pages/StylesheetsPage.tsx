@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { BookOpen, Edit2, Trash2, Check, ChevronDown, ChevronRight, Loader } from "lucide-react";
+import { BookOpen, Edit2, Trash2, Check, ChevronDown, ChevronRight, Loader, FileSpreadsheet, Table2, Globe, Download } from "lucide-react";
 
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SkeletonCard } from "@/components/ui/SkeletonLoader";
@@ -171,6 +171,7 @@ export function StylesheetsPage() {
           subtype: r.subtype,
           pattern: r.pattern,
         })),
+        analyzed_file_ids: Array.from(selectedFileIds),
       },
       {
         onSuccess: () => {
@@ -327,6 +328,7 @@ export function StylesheetsPage() {
                 });
               }}
               onNext={() => setWorkflowStep("saving")}
+              projectId={normalizedProjectId}
             />
           )}
 
@@ -434,6 +436,44 @@ function StylesheetCard({
                   +{stylesheet.selected_ia_rows.length - 5} more rules
                 </p>
               )}
+            </div>
+          )}
+
+          {/* Consolidated exports — only shown when the stylesheet has stored file IDs */}
+          {stylesheet.analyzed_file_ids && stylesheet.analyzed_file_ids.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-navy-100">
+              <p className="text-[10px] font-semibold text-navy-500 uppercase tracking-wider mb-2">
+                Download Reports ({stylesheet.analyzed_file_ids.length} file{stylesheet.analyzed_file_ids.length !== 1 ? "s" : ""})
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <a
+                  href={`/api/v2/projects/${stylesheet.project_id}/stylesheets/${stylesheet.id}/export?format=excel`}
+                  className="no-underline"
+                  download
+                >
+                  <button type="button" className="inline-flex items-center gap-1.5 h-7 px-2.5 text-[11px] font-semibold rounded bg-white border border-navy-200 text-navy-700 hover:bg-navy-50 shadow-sm transition-all">
+                    <FileSpreadsheet className="w-3 h-3 text-navy-500" /> Excel
+                  </button>
+                </a>
+                <a
+                  href={`/api/v2/projects/${stylesheet.project_id}/stylesheets/${stylesheet.id}/export?format=ia-excel`}
+                  className="no-underline"
+                  download
+                >
+                  <button type="button" className="inline-flex items-center gap-1.5 h-7 px-2.5 text-[11px] font-semibold rounded bg-white border border-navy-200 text-navy-700 hover:bg-navy-50 shadow-sm transition-all">
+                    <Table2 className="w-3 h-3 text-navy-500" /> IA Excel
+                  </button>
+                </a>
+                <a
+                  href={`/api/v2/projects/${stylesheet.project_id}/stylesheets/${stylesheet.id}/export?format=html`}
+                  className="no-underline"
+                  download
+                >
+                  <button type="button" className="inline-flex items-center gap-1.5 h-7 px-2.5 text-[11px] font-semibold rounded bg-white border border-navy-200 text-navy-700 hover:bg-navy-50 shadow-sm transition-all">
+                    <Globe className="w-3 h-3 text-navy-500" /> HTML
+                  </button>
+                </a>
+              </div>
             </div>
           )}
         </div>
@@ -592,6 +632,7 @@ interface ReviewRulesStepProps {
   selectedRuleKeys: Set<string>;
   onToggleRule: (key: string) => void;
   onNext: () => void;
+  projectId: number;
 }
 
 function ReviewRulesStep({
@@ -599,6 +640,7 @@ function ReviewRulesStep({
   selectedRuleKeys,
   onToggleRule,
   onNext,
+  projectId,
 }: ReviewRulesStepProps) {
   return (
     <div className="bg-white rounded-lg shadow-card p-6">
@@ -606,6 +648,96 @@ function ReviewRulesStep({
       <p className="text-xs text-navy-500 mb-4">
         Analyzed {analyzeResult.analyzed_files.length} files · {analyzeResult.total_findings} findings · {analyzeResult.triggered_rules.length} unique rules triggered
       </p>
+
+      {/* Consolidated export — all files merged into one download */}
+      <div className="mb-4 p-4 bg-gold-50 rounded-lg border border-gold-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold text-gold-900">Export All Files (Consolidated)</p>
+          <p className="text-[10px] text-gold-700 mt-0.5">Merges all {analyzeResult.analyzed_files.length} files into a single report</p>
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          {analyzeResult.analyzed_files.length > 0 && (() => {
+            const fileIdsCsv = analyzeResult.analyzed_files.map((f: any) => f.id).join(",");
+            const base = `/api/v2/projects/${projectId}/technical-review/export?file_ids=${fileIdsCsv}`;
+            return (
+              <>
+                <a href={`${base}&format=excel`} className="no-underline" download>
+                  <button type="button" className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-semibold rounded bg-gold-600 text-white hover:bg-gold-700 shadow-sm transition-all">
+                    <Download className="w-3.5 h-3.5" /> Excel (All)
+                  </button>
+                </a>
+                <a href={`${base}&format=ia-excel`} className="no-underline" download>
+                  <button type="button" className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-semibold rounded bg-white border border-navy-200 text-navy-700 hover:bg-navy-50 shadow-sm transition-all">
+                    <Download className="w-3.5 h-3.5" /> IA Excel (All)
+                  </button>
+                </a>
+                <a href={`${base}&format=html`} className="no-underline" download>
+                  <button type="button" className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-semibold rounded bg-navy-700 text-white hover:bg-navy-800 shadow-sm transition-all">
+                    <Download className="w-3.5 h-3.5" /> HTML (All)
+                  </button>
+                </a>
+              </>
+            );
+          })()}
+        </div>
+      </div>
+
+      {/* Export Reports section — per-file */}
+      <div className="mb-6 p-4 bg-navy-50 rounded-lg border border-navy-100">
+        <h4 className="text-xs font-semibold text-navy-800 uppercase tracking-wider mb-3">
+          Export Per-File Reports
+        </h4>
+        <div className="space-y-3">
+          {analyzeResult.analyzed_files.map((file: any) => (
+            <div key={file.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2 bg-white rounded border border-navy-100">
+              <span className="text-xs font-medium text-navy-700 truncate max-w-md" title={file.filename}>
+                {file.filename}
+              </span>
+              <div className="flex flex-wrap gap-2">
+                <a
+                  href={`/api/v2/files/${file.id}/technical-review/export/excel`}
+                  className="no-underline"
+                  download
+                >
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-semibold rounded bg-white hover:bg-navy-50 border border-navy-200 text-navy-700 shadow-sm transition-all"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-navy-500" />
+                    Export Excel
+                  </button>
+                </a>
+                <a
+                  href={`/api/v2/files/${file.id}/technical-review/export/ia-excel`}
+                  className="no-underline"
+                  download
+                >
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-semibold rounded bg-white hover:bg-navy-50 border border-navy-200 text-navy-700 shadow-sm transition-all"
+                  >
+                    <Table2 className="w-3.5 h-3.5 text-navy-500" />
+                    Export IA
+                  </button>
+                </a>
+                <a
+                  href={`/api/v2/files/${file.id}/technical-review/export/html`}
+                  className="no-underline"
+                  download
+                >
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-semibold rounded bg-white hover:bg-navy-50 border border-navy-200 text-navy-700 shadow-sm transition-all"
+                  >
+                    <Globe className="w-3.5 h-3.5 text-navy-500" />
+                    Export HTML
+                  </button>
+                </a>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
 
       <div className="flex items-center justify-between mb-4">
         <span className="text-xs font-medium text-navy-700">Select Rules to Include</span>

@@ -9,6 +9,7 @@ import html
 import logging
 import uuid
 import os
+import re
 
 import docx
 from docx import Document
@@ -559,6 +560,117 @@ def _footnote_endnote_to_html(doc, findings_by_para=None) -> str:
     return "\n".join(blocks)
 
 
+def _get_list_info(para) -> tuple[bool, str, int]:
+    """
+    Determine if a paragraph is a list item, its type (bullet/number), and level (0-indexed).
+    """
+    style_name = para.style.name if para.style else "Normal"
+    pPr = para._p.pPr
+    ilvl = 0
+    numId = None
+    
+    if pPr is not None:
+        numPr = pPr.find(qn("w:numPr"))
+        if numPr is not None:
+            ilvl_el = numPr.find(qn("w:ilvl"))
+            numId_el = numPr.find(qn("w:numId"))
+            if ilvl_el is not None:
+                try:
+                    ilvl = int(ilvl_el.get(qn("w:val")))
+                except ValueError:
+                    pass
+            if numId_el is not None:
+                numId = numId_el.get(qn("w:val"))
+                
+    is_list = False
+    list_type = "bullet"
+    
+    if numId is not None:
+        is_list = True
+        if any(x in style_name.lower() for x in ("number", "num", "enum", "ordered")):
+            list_type = "number"
+    elif any(x in style_name.lower() for x in ("bullet", "listbullet")):
+        is_list = True
+        list_type = "bullet"
+        match = re.search(r"List Bullet\s*(\d+)", style_name, re.IGNORECASE)
+        if match:
+            ilvl = int(match.group(1)) - 1
+    elif any(x in style_name.lower() for x in ("number", "num", "enum", "ordered")):
+        is_list = True
+        list_type = "number"
+        match = re.search(r"(List Number|List Num|Number)\s*(\d+)", style_name, re.IGNORECASE)
+        if match:
+            ilvl = int(match.group(2)) - 1
+            
+    if ilvl < 0:
+        ilvl = 0
+        
+    return is_list, list_type, ilvl
+
+
+def _nested_list_to_html(list_items, doc, findings_by_para=None) -> str:
+    if not list_items:
+        return ""
+    
+    html_parts = []
+    stack = []
+    
+    for para, para_idx, list_type, ilvl in list_items:
+        target_tag = "ul" if list_type == "bullet" else "ol"
+        
+        if not stack:
+            html_parts.append(f"<{target_tag}>")
+            stack.append((target_tag, 0))
+        
+        current_level = len(stack) - 1
+        
+        if ilvl > current_level:
+            while len(stack) - 1 < ilvl:
+                html_parts.append(f"<{target_tag}>")
+                stack.append((target_tag, len(stack)))
+        elif ilvl < current_level:
+            while len(stack) - 1 > ilvl:
+                closed_tag, _ = stack.pop()
+                html_parts.append(f"</li></{closed_tag}>")
+            if stack and stack[-1][0] != target_tag:
+                closed_tag, _ = stack.pop()
+                html_parts.append(f"</li></{closed_tag}>")
+                html_parts.append(f"<{target_tag}>")
+                stack.append((target_tag, ilvl))
+            else:
+                html_parts.append("</li>")
+        else:
+            if stack[-1][0] != target_tag:
+                closed_tag, _ = stack.pop()
+                html_parts.append(f"</li></{closed_tag}>")
+                html_parts.append(f"<{target_tag}>")
+                stack.append((target_tag, ilvl))
+            else:
+                html_parts.append("</li>")
+                
+        style_name = para.style.name if para.style else "Normal"
+        label = html.escape(style_name, quote=True)
+        bm_name = _get_or_create_para_bookmark(para, doc)
+        
+        all_runs = _get_all_paragraph_runs(para)
+        para_findings = findings_by_para.get(para_idx, []) if findings_by_para else []
+        runs_html = "".join(_run_to_html(run, para, doc, track_change_element=tc_elem, para_findings=para_findings)
+                            for run, tc_elem in all_runs)
+        if not runs_html:
+            runs_html = "<br>"
+            
+        html_parts.append(
+            f'<li class="{label}" data-style-label="{label}" data-para-idx="{para_idx}" data-bookmark="{bm_name}">'
+            f'{runs_html}'
+        )
+        
+    while stack:
+        closed_tag, _ = stack.pop()
+        html_parts.append(f"</li></{closed_tag}>")
+        
+    return "\n".join(html_parts)
+
+
 # ─── Core Converter Engine ───────────────────────────────────────────────────
 
 class DocxToXhtmlRunsEngine:
@@ -593,16 +705,33 @@ class DocxToXhtmlRunsEngine:
             body_p_map[p_elem] = idx
 
         blocks = []
+        current_list = []
+
         # Export standard body body blocks
         for element in doc.element.body:
             tag = etree.QName(element.tag).localname
             if tag == "p":
                 para = docx.text.paragraph.Paragraph(element, doc)
                 para_idx = body_p_map.get(element, 0)
-                blocks.append(_paragraph_to_html(para, para_idx, doc, findings_by_para=findings_by_para))
+
+                is_list, list_type, ilvl = _get_list_info(para)
+                if is_list:
+                    current_list.append((para, para_idx, list_type, ilvl))
+                else:
+                    if current_list:
+                        blocks.append(_nested_list_to_html(current_list, doc, findings_by_para=findings_by_para))
+                        current_list = []
+                    blocks.append(_paragraph_to_html(para, para_idx, doc, findings_by_para=findings_by_para))
             elif tag == "tbl":
+                if current_list:
+                    blocks.append(_nested_list_to_html(current_list, doc, findings_by_para=findings_by_para))
+                    current_list = []
                 table = docx.table.Table(element, doc)
                 blocks.append(_table_to_html(table, doc, body_p_map=body_p_map, findings_by_para=findings_by_para))
+
+        # Flush any remaining lists
+        if current_list:
+            blocks.append(_nested_list_to_html(current_list, doc, findings_by_para=findings_by_para))
 
         # Append Footnote and Endnote definition contents
         notes_html = _footnote_endnote_to_html(doc, findings_by_para=findings_by_para)

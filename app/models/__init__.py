@@ -1,9 +1,18 @@
-from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, DateTime, Date, JSON, Enum as SQLEnum
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, DateTime, Date, JSON, Enum as SQLEnum, TypeDecorator
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database import Base
 import enum
+
+class DialectArray(TypeDecorator):
+    impl = JSON
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(PG_ARRAY(String))
+        return dialect.type_descriptor(JSON)
 
 class WorkflowStatus(str, enum.Enum):
     RECEIVED = "RECEIVED"
@@ -36,7 +45,7 @@ class User(Base):
     password_hash = Column(String)
     is_active = Column(Boolean, default=True)
     team_id = Column(Integer, ForeignKey("teams.id"), nullable=True)
-    customer_access = Column(PG_ARRAY(String), nullable=True, default=list)
+    customer_access = Column(DialectArray, nullable=True, default=list)
 
     team = relationship("Team", back_populates="users", foreign_keys=[team_id])
     roles = relationship("Role", secondary="user_roles", back_populates="users")
@@ -138,6 +147,7 @@ class ProjectStylesheet(Base):
     name = Column(String, nullable=False)
     description = Column(String, nullable=True)
     selected_ia_rows = Column(String, nullable=False, default="[]")
+    analyzed_file_ids = Column(String, nullable=True, default="[]")  # JSON list of file IDs used to build this stylesheet
     is_active = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)

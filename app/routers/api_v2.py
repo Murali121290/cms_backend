@@ -4,7 +4,7 @@ import tempfile
 import zipfile
 from datetime import datetime
 import logging
-from typing import Any, List
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File as FastAPIFile, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse
@@ -43,8 +43,8 @@ from app.processing.structuring_engine import StructuringEngine
 from app.processing.bias_engine import BiasEngine
 from app.processing.ai_extractor_engine import AIExtractorEngine
 from app.processing.xml_engine import XMLEngine
-from app.processing.structuring_lib.doc_utils import extract_document_structure, update_document_structure
-from app.processing.structuring_lib.rules_loader import get_rules_loader
+from app.utils.utils.structuring_lib.doc_utils import extract_document_structure, update_document_structure
+from app.utils.utils.structuring_lib.rules_loader import get_rules_loader
 from app.integrations.collabora.config import COLLABORA_PUBLIC_URL, WOPI_BASE_URL
 from app.integrations.onlyoffice import (
     ONLYOFFICE_PUBLIC_URL,
@@ -1309,6 +1309,7 @@ def api_v2_create_stylesheet(
         description=payload.description,
         selected_ia_rows=payload.selected_ia_rows,
         created_by_id=viewer.id,
+        analyzed_file_ids=payload.analyzed_file_ids,
     )
     return schemas_v2.StylesheetCreateResponse(
         stylesheet=stylesheet_service._serialize_stylesheet(ss)
@@ -1340,6 +1341,7 @@ def api_v2_update_stylesheet(
         name=payload.name,
         description=payload.description,
         selected_ia_rows=payload.selected_ia_rows,
+        analyzed_file_ids=payload.analyzed_file_ids,
     )
     if not ss:
         return _error_response(
@@ -2676,6 +2678,203 @@ def api_v2_technical_export_html(
     )
 
 
+@router.get("/projects/{project_id}/technical-review/export")
+def api_v2_bulk_export_analysis(
+    project_id: int,
+    file_ids: str = "",  # comma-separated list e.g. "1,2,3"
+    format: str = "excel",  # "excel" | "ia-excel" | "html"
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Pre-save consolidated export for a list of file IDs (no stylesheet required)."""
+    from app.processing.manuscript_core.exporters import build_combined_excel, build_ia_excel
+    from app.utils.html_dashboard import build_html_dashboard
+    from starlette.responses import Response
+
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    ids = [int(x.strip()) for x in file_ids.split(",") if x.strip().isdigit()]
+    if not ids:
+        raise HTTPException(status_code=400, detail="No valid file_ids provided.")
+
+    all_scan_data: list[dict] = []
+    for fid in ids:
+        file_record = db.query(models.File).filter(models.File.id == fid).first()
+        if not file_record:
+            continue
+        try:
+            scan_data = technical_editor_service.scan_errors(
+                db, file_id=fid, logger=logger, technical_editor_cls=TechnicalEditor
+            )
+            all_scan_data.append(scan_data)
+        except Exception:
+            pass
+
+    if not all_scan_data:
+        raise HTTPException(status_code=422, detail="Could not scan any of the provided files.")
+
+    merged = _merge_stylesheet_scan_data(all_scan_data)
+
+    if format == "html":
+        html_content = build_html_dashboard(merged, f"consolidated_{len(ids)}_files")
+        return Response(
+            content=html_content,
+            media_type="text/html",
+            headers={"Content-Disposition": 'attachment; filename="consolidated_dashboard.html"'},
+        )
+    elif format == "ia-excel":
+        excel_bytes = build_ia_excel(merged, job_id=f"bulk_{project_id}")
+        return Response(
+            content=excel_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": 'attachment; filename="consolidated_ia_report.xlsx"'},
+        )
+    else:
+        excel_bytes = build_combined_excel(merged, job_id=f"bulk_{project_id}")
+        return Response(
+            content=excel_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": 'attachment; filename="consolidated_consistency_report.xlsx"'},
+        )
+
+
+@router.get("/projects/{project_id}/stylesheets/{stylesheet_id}/export")
+def api_v2_export_stylesheet_report(
+    project_id: int,
+    stylesheet_id: int,
+    format: str = "excel",  # "excel" | "ia-excel" | "html"
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Merged export across all files that were used to build a stylesheet."""
+    from app.processing.manuscript_core.exporters import build_combined_excel, build_ia_excel
+    from app.utils.html_dashboard import build_html_dashboard
+    from starlette.responses import Response
+
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    ss = (
+        db.query(models.ProjectStylesheet)
+        .filter(
+            models.ProjectStylesheet.id == stylesheet_id,
+            models.ProjectStylesheet.project_id == project_id,
+        )
+        .first()
+    )
+    if not ss:
+        raise HTTPException(status_code=404, detail="Stylesheet not found.")
+
+    import json as _json
+    file_ids: list[int] = _json.loads(ss.analyzed_file_ids or "[]")
+    if not file_ids:
+        raise HTTPException(status_code=404, detail="No analyzed files stored for this stylesheet.")
+
+    # Scan each file and collect results
+    all_scan_data: list[dict] = []
+    filenames: list[str] = []
+    for fid in file_ids:
+        file_record = db.query(models.File).filter(models.File.id == fid).first()
+        if not file_record:
+            continue
+        filenames.append(file_record.filename)
+        try:
+            scan_data = technical_editor_service.scan_errors(
+                db, file_id=fid, logger=logger, technical_editor_cls=TechnicalEditor
+            )
+            all_scan_data.append(scan_data)
+        except Exception:
+            pass
+
+    if not all_scan_data:
+        raise HTTPException(status_code=422, detail="Could not scan any of the stored files.")
+
+    # Merge all scan results into one combined dict
+    merged = _merge_stylesheet_scan_data(all_scan_data)
+    stylesheet_name = ss.name.replace(" ", "_")
+
+    if format == "html":
+        combined_filename = ", ".join(filenames)
+        html_content = build_html_dashboard(merged, combined_filename)
+        return Response(
+            content=html_content,
+            media_type="text/html",
+            headers={"Content-Disposition": f'attachment; filename="{stylesheet_name}_dashboard.html"'},
+        )
+    elif format == "ia-excel":
+        excel_bytes = build_ia_excel(merged, job_id=str(stylesheet_id))
+        return Response(
+            content=excel_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{stylesheet_name}_ia_report.xlsx"'},
+        )
+    else:
+        excel_bytes = build_combined_excel(merged, job_id=str(stylesheet_id))
+        return Response(
+            content=excel_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{stylesheet_name}_consistency_report.xlsx"'},
+        )
+
+
+def _merge_stylesheet_scan_data(scan_data_list: list[dict]) -> dict:
+    """Merge multiple per-file scan results into one combined dict for bulk export."""
+    if len(scan_data_list) == 1:
+        return scan_data_list[0]
+
+    merged_findings: list[dict] = []
+    merged_chapters: list[dict] = []
+    merged_ia_rows: list[dict] = []
+    merged_inconsistencies: list[dict] = []
+    chapter_offset = 0
+
+    for scan_data in scan_data_list:
+        chapters = scan_data.get("chapters") or []
+        findings = scan_data.get("findings") or []
+        ia_report = scan_data.get("ia_report") or {}
+        ia_rows = ia_report.get("rows") or []
+
+        for f in findings:
+            f_copy = dict(f)
+            f_copy["chapter_index"] = (f.get("chapter_index") or 0) + chapter_offset
+            merged_findings.append(f_copy)
+
+        for i, ch in enumerate(chapters):
+            ch_copy = dict(ch)
+            ch_copy["index"] = i + chapter_offset
+            merged_chapters.append(ch_copy)
+
+        merged_ia_rows.extend(ia_rows)
+        merged_inconsistencies.extend(scan_data.get("inconsistencies") or [])
+        chapter_offset += len(chapters)
+
+    # Aggregate category totals
+    category_totals: dict[str, int] = {}
+    for sd in scan_data_list:
+        for cat, cnt in (sd.get("category_totals") or {}).items():
+            category_totals[cat] = category_totals.get(cat, 0) + cnt
+
+    first = scan_data_list[0]
+    return {
+        "meta": {
+            "chapter_count": len(merged_chapters),
+            "total_words": sum((sd.get("meta") or {}).get("total_words", 0) for sd in scan_data_list),
+            "total_findings": len(merged_findings),
+            "total_inconsistencies": len(merged_inconsistencies),
+        },
+        "chapters": merged_chapters,
+        "findings": merged_findings,
+        "inconsistencies": merged_inconsistencies,
+        "ia_report": {"rows": merged_ia_rows},
+        "category_totals": category_totals,
+        "spelling_summary": (first.get("meta") or {}).get("spelling_summary") or first.get("spelling_summary") or {},
+        "spelling_profile": {},
+    }
+
+
 @router.post("/files/{file_id}/technical-review/apply", response_model=schemas_v2.TechnicalApplyResponse)
 def api_v2_technical_apply(
     file_id: int,
@@ -3177,6 +3376,7 @@ def api_v2_structuring_export(
 )
 def api_v2_reference_review(
     file_id: int,
+    style: Optional[str] = Query(None),
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -3192,6 +3392,7 @@ def api_v2_reference_review(
         page_state = structuring_review_service.build_reference_review_page_state(
             db,
             file_id=file_id,
+            style=style,
             logger=logger,
         )
     except HTTPException as exc:
@@ -3326,6 +3527,7 @@ def api_v2_reference_export(
 @router.get("/files/{file_id}/reference-review/validate-only", response_model=schemas_v2.ReferenceValidateOnlyResponse)
 def api_v2_reference_validate_only(
     file_id: int,
+    style: Optional[str] = Query(None),
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -3341,6 +3543,7 @@ def api_v2_reference_validate_only(
         result = structuring_review_service.run_validation_only(
             db,
             file_id=file_id,
+            style=style,
             logger=logger,
         )
         return result

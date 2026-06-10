@@ -82,7 +82,8 @@ export function ReferenceValidationReviewPage() {
     Number.isInteger(parsedFileId) && parsedFileId > 0 ? parsedFileId : null;
 
   const editorRef = useRef<WysiwygEditorHandle>(null);
-  const reviewQuery = useReferenceReviewQuery(normalizedFileId);
+  const [styleOverride, setStyleOverride] = useState<"AUTO" | "AMA" | "APA">("AUTO");
+  const reviewQuery = useReferenceReviewQuery(normalizedFileId, styleOverride === "AUTO" ? undefined : styleOverride);
   const saveMutation = useReferenceSave(normalizedFileId);
   const validateOnlyMutation = useReferenceValidateOnly(normalizedFileId ?? 0);
 
@@ -99,6 +100,11 @@ export function ReferenceValidationReviewPage() {
   // Tab 2 — Structuring
   const [refFilter, setRefFilter] = useState("");
   const [showUncitedOnly, setShowUncitedOnly] = useState(false);
+  const [editingEntryIdx, setEditingEntryIdx] = useState<number | null>(null);
+  const [editingText, setEditingText] = useState("");
+
+  // Tab 3 — Logs
+  const [logViewMode, setLogViewMode] = useState<"dashboard" | "raw">("dashboard");
 
   // Phase 2 — Citation Linking
   const [linkingSource, setLinkingSource] = useState<LinkingSource | null>(null);
@@ -192,7 +198,271 @@ export function ReferenceValidationReviewPage() {
     return stats;
   }, [reviewQuery.data?.content]);
 
-  const detectedStyle = reviewQuery.data?.validation_logs?.detected_style ?? "AMA";
+  const detectedStyle = styleOverride === "AUTO"
+    ? (reviewQuery.data?.validation_logs?.detected_style ?? "AMA")
+    : styleOverride;
+
+  // Hover highlighting in editor for citations
+  const highlightInEditor = (text: string | null, isHover: boolean) => {
+    if (!text) return;
+    const editor = editorRef.current?.editor;
+    if (!editor) return;
+
+    const clean = (s: string) => s.replace(/[\[\]()\s,.-]/g, "").toLowerCase();
+    const targetClean = clean(text);
+    if (!targetClean) return;
+
+    const spans = editor.view.dom.querySelectorAll('span.cite_bib, [class*="cite_bib"]');
+    spans.forEach((span: any) => {
+      const spanText = clean(span.textContent || "");
+      if (spanText === targetClean || spanText.includes(targetClean) || targetClean.includes(spanText)) {
+        if (isHover) {
+          span.classList.add("flash-highlight");
+          span.style.outline = "2px solid #C9821A";
+          span.style.boxShadow = "0 0 8px #C9821A";
+          span.style.borderRadius = "2px";
+          span.style.transition = "all 0.15s ease";
+        } else {
+          span.classList.remove("flash-highlight");
+          span.style.outline = "";
+          span.style.boxShadow = "";
+          span.style.borderRadius = "";
+        }
+      }
+    });
+  };
+
+  // Hover highlighting in editor for references
+  const highlightRefInEditor = (paraIdx: number, isHover: boolean) => {
+    const editor = editorRef.current?.editor;
+    if (!editor) return;
+
+    const el = editor.view.dom.querySelector(`[data-para-idx="${paraIdx}"]`) as HTMLElement;
+    if (el) {
+      if (isHover) {
+        el.style.backgroundColor = "rgba(251, 191, 36, 0.15)";
+        el.style.borderLeft = "3px solid #C9821A";
+        el.style.paddingLeft = "8px";
+        el.style.transition = "all 0.2s ease";
+      } else {
+        el.style.backgroundColor = "";
+        el.style.borderLeft = "";
+        el.style.paddingLeft = "";
+      }
+      return;
+    }
+
+    const paragraphs = editor.view.dom.querySelectorAll('p, h1, h2, h3, h4, h5, h6');
+    const targetEl = paragraphs[paraIdx] as HTMLElement;
+    if (targetEl) {
+      if (isHover) {
+        targetEl.style.backgroundColor = "rgba(251, 191, 36, 0.15)";
+        targetEl.style.borderLeft = "3px solid #C9821A";
+        targetEl.style.paddingLeft = "8px";
+        targetEl.style.transition = "all 0.2s ease";
+      } else {
+        targetEl.style.backgroundColor = "";
+        targetEl.style.borderLeft = "";
+        targetEl.style.paddingLeft = "";
+      }
+    }
+  };
+
+  // Direct paragraph style application
+  const applyStyleToPara = (paraIdx: number, newStyle: string) => {
+    const editor = editorRef.current?.editor;
+    if (!editor) return;
+
+    let targetPos = -1;
+    let count = 0;
+    
+    editor.state.doc.descendants((node: any, pos: number) => {
+      if (targetPos !== -1) return false;
+      if (isTextBlock(node)) {
+        if (count === paraIdx) {
+          targetPos = pos;
+          return false;
+        }
+        count++;
+      }
+      return true;
+    });
+
+    if (targetPos !== -1) {
+      const headingMap: Record<string, number> = {
+        "H1": 1, "H2": 2, "H3": 3, "H4": 4, "H5": 5, "H6": 6,
+      };
+      const headingLevel = headingMap[newStyle];
+      
+      editor.chain()
+        .focus()
+        .setTextSelection(targetPos + 1)
+        .run();
+
+      let chain = editor.chain();
+      if (headingLevel) {
+        chain = chain
+          .setHeading({ level: headingLevel as any })
+          .updateAttributes("heading", { styleLabel: newStyle });
+      } else {
+        const label = (newStyle === "Normal" || newStyle === "Body Text") ? "Normal" : newStyle;
+        if (editor.isActive("heading")) {
+          chain = chain.setParagraph();
+        }
+        chain = chain.updateAttributes("paragraph", { styleLabel: label });
+      }
+      chain.run();
+    }
+  };
+
+  // Direct paragraph text replacement
+  const updateParaText = (paraIdx: number, newText: string) => {
+    const editor = editorRef.current?.editor;
+    if (!editor) return;
+
+    let targetPos = -1;
+    let targetEnd = -1;
+    let count = 0;
+    
+    editor.state.doc.descendants((node: any, pos: number) => {
+      if (targetPos !== -1) return false;
+      if (isTextBlock(node)) {
+        if (count === paraIdx) {
+          targetPos = pos;
+          targetEnd = pos + node.nodeSize;
+          return false;
+        }
+        count++;
+      }
+      return true;
+    });
+
+    if (targetPos !== -1 && targetEnd !== -1) {
+      editor.chain()
+        .focus()
+        .deleteRange(targetPos + 1, targetEnd - 1)
+        .insertContentAt(targetPos + 1, newText)
+        .run();
+    }
+  };
+
+  // Structured bibliography parser
+  const parseRefText = (text: string) => {
+    if (!text) return null;
+    const doiMatch = text.match(/10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/);
+    const doi = doiMatch ? doiMatch[0] : null;
+
+    const yearMatch = text.match(/\b(19|20)\d{2}\b/);
+    const year = yearMatch ? yearMatch[0] : null;
+
+    let title = "";
+    let journal = "";
+    
+    if (text.includes("). ")) {
+      const parts = text.split("). ");
+      if (parts[1]) {
+        const titleAndJournal = parts[1].split(". ");
+        title = titleAndJournal[0] || "";
+        journal = titleAndJournal.slice(1).join(". ") || "";
+      }
+    } else {
+      title = text.slice(0, 100) + "...";
+    }
+
+    return { doi, year, title, journal };
+  };
+
+  // Log report dynamic parser
+  const parseLogText = useCallback((rawLog: string) => {
+    if (!rawLog) return null;
+
+    const lines = rawLog.split("\n");
+    const stats: Record<string, string> = {};
+    const items: Array<{ category: string; para?: number; message: string; id?: string; from?: string; to?: string; status?: string; type?: string }> = [];
+    let currentCategory = "";
+
+    const isConversionLog = rawLog.includes("--- CONVERSION ---") || rawLog.includes("Reference Conversion Log");
+
+    if (isConversionLog) {
+      let currentItem: any = null;
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        const itemHeaderMatch = line.match(/^\[(\d+)\]$/);
+        
+        if (itemHeaderMatch) {
+          if (currentItem) {
+            items.push(currentItem);
+          }
+          currentItem = { id: itemHeaderMatch[1], category: "Conversions", message: "" };
+          continue;
+        }
+
+        if (!currentItem) {
+          if (line.includes("Total references found:") || line.includes("Successfully converted:") || line.includes("Errors:")) {
+            const parts = line.split(":");
+            if (parts[0] && parts[1]) {
+              stats[parts[0].trim()] = parts[1].trim();
+            }
+          }
+          continue;
+        }
+
+        if (line.startsWith("TYPE:")) {
+          currentItem.type = line.replace("TYPE:", "").trim();
+        } else if (line.startsWith("FROM:")) {
+          currentItem.from = line.replace("FROM:", "").trim();
+        } else if (line.startsWith("TO:")) {
+          currentItem.to = line.replace("TO:", "").trim();
+          currentItem.status = currentItem.to.includes("[FAILED]") ? "error" : "success";
+        } else if (line.startsWith("NOTES:")) {
+          currentItem.message = line.replace("NOTES:", "").trim();
+        } else if (line.startsWith("ERROR:")) {
+          currentItem.message = line.replace("ERROR:", "").trim();
+          currentItem.status = "error";
+        }
+      }
+      if (currentItem) {
+        items.push(currentItem);
+      }
+    } else {
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        if (line.match(/^[A-Z\s👥🏢🔤&]+$/) && lines[i + 1] && lines[i + 1].trim().startsWith("----")) {
+          currentCategory = line.trim();
+          i++; 
+          continue;
+        }
+
+        if (line.includes(":") && (currentCategory === "" || line.startsWith("Total ") || line.startsWith("Matched "))) {
+          const parts = line.split(":");
+          if (parts[0] && parts[1] && parts[0].trim().length < 40) {
+            stats[parts[0].trim()] = parts[1].trim();
+            continue;
+          }
+        }
+
+        const paraMatch = line.match(/^Para\s+(\d+):\s*(.*)$/);
+        if (paraMatch) {
+          items.push({
+            category: currentCategory || "General Issues",
+            para: parseInt(paraMatch[1], 10),
+            message: paraMatch[2].trim(),
+          });
+        } else if (!line.startsWith("Step ") && !line.startsWith("Result:") && !line.startsWith("Before Stats:") && !line.startsWith("===") && !line.startsWith("---")) {
+          if (currentCategory && line.length > 8) {
+            items.push({
+              category: currentCategory,
+              message: line,
+            });
+          }
+        }
+      }
+    }
+
+    return { isConversionLog, stats, items };
+  }, []);
 
   const review = reviewQuery.data;
   // Effective logs: local override takes precedence after validation
@@ -890,12 +1160,19 @@ export function ReferenceValidationReviewPage() {
                     v{review.file.version}
                   </span>
                 </div>
-                <span className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 ${detectedStyle === "AMA"
-                    ? "bg-purple-100 text-purple-700 border border-purple-200"
-                    : "bg-teal-100 text-teal-700 border border-teal-200"
-                  }`}>
-                  {detectedStyle === "AMA" ? "AMA" : "APA"}
-                </span>
+                <select
+                  value={styleOverride}
+                  onChange={(e) => setStyleOverride(e.target.value as any)}
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 border focus:outline-none focus:ring-1 focus:ring-navy-400 cursor-pointer ${detectedStyle === "AMA"
+                      ? "bg-purple-50 text-purple-700 border-purple-200"
+                      : "bg-teal-50 text-teal-700 border-teal-200"
+                    }`}
+                  title="Override validation style"
+                >
+                  <option value="AUTO">Auto ({reviewQuery.data?.validation_logs?.detected_style ?? "AMA"})</option>
+                  <option value="AMA">AMA (Numbered)</option>
+                  <option value="APA">APA (Name-Year)</option>
+                </select>
               </div>
 
               {/* Row 2: Issue count chips */}
@@ -924,7 +1201,7 @@ export function ReferenceValidationReviewPage() {
                     if (editorRef.current?.editor) {
                       const html = editorRef.current.editor.getHTML();
                       await saveMutation.save(review.save_endpoint, html);
-                      const result = await validateOnlyMutation.mutateAsync();
+                      const result = await validateOnlyMutation.mutateAsync(styleOverride === "AUTO" ? undefined : styleOverride);
                       setLocalValidationLogs(result.validation_logs);
                       setLastValidatedAt(new Date());
                       setActiveTab("citations");
@@ -1187,10 +1464,19 @@ export function ReferenceValidationReviewPage() {
                         const isUnused = pair.status === "unused";
                         const isOk = pair.status === "ok";
 
+                        const parsed = parseRefText(pair.ref_text);
+                        const cardIssues = (logs.issues || []).filter((issue: any) => {
+                          return issue.citation === pair.citation || 
+                                 (pair.citation && issue.message.includes(pair.citation)) ||
+                                 (issue.para_idx === pair.para_idx && issue.para_idx !== -1);
+                        });
+
                         return (
                           <div
                             key={idx}
                             id={`citation-card-${idx}`}
+                            onMouseEnter={() => pair.citation ? highlightInEditor(pair.citation, true) : highlightRefInEditor(pair.para_idx, true)}
+                            onMouseLeave={() => pair.citation ? highlightInEditor(pair.citation, false) : highlightRefInEditor(pair.para_idx, false)}
                             className={`rounded-lg border bg-white overflow-hidden border-l-[3.5px] transition-all hover:shadow-hover ${isMissing ? "border-l-error-500 bg-error-50/30 border-error-100" :
                                 isUnused ? "border-l-warning-500 bg-warning-50/30 border-warning-100" :
                                   "border-l-success-500 bg-white border-navy-100"
@@ -1260,13 +1546,39 @@ export function ReferenceValidationReviewPage() {
                             {/* Card Body (Expanded view) */}
                             {isExpanded && (
                               <div className="p-3 bg-surface-50/30 border-t border-navy-100/60 space-y-3">
+                                {cardIssues.length > 0 && (
+                                  <div className="space-y-1.5">
+                                    {cardIssues.map((issue: any, issueIdx: number) => {
+                                      const isYearMismatch = issue.message.toLowerCase().includes("year") || issue.message.toLowerCase().includes("date") || issue.message.toLowerCase().includes("changed to");
+                                      const yearMatches = issue.message.match(/\b(19|20)\d{2}\b/g);
+                                      const expectedYear = yearMatches && yearMatches.length > 0 ? yearMatches[yearMatches.length - 1] : null;
+
+                                      return (
+                                        <div key={issueIdx} className="text-[10px] font-medium p-2 bg-red-50 text-red-800 rounded border border-red-100 flex flex-col gap-1.5">
+                                          <span>⚠️ {issue.message}</span>
+                                          {isYearMismatch && expectedYear && (
+                                            <button
+                                              onClick={() => {
+                                                quickFixYear(pair.para_idx !== undefined && pair.para_idx >= 0 ? pair.para_idx : issue.para_idx, issue.message, expectedYear);
+                                              }}
+                                              className="w-fit px-2 py-0.5 bg-red-100 hover:bg-red-200 text-red-900 border border-red-300 rounded text-[9px] font-bold transition-all cursor-pointer"
+                                            >
+                                              Quick Fix: Update year to {expectedYear}
+                                            </button>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+
                                 {isMissing ? (
                                   <div className="text-[11px] text-navy-800 font-semibold p-2 bg-red-50 rounded border border-red-100">
                                     ⚠️ Citation found in text but no matching bibliography entry.
                                     {pair.citation && (
                                       <button
                                         onClick={() => addBibliographyPlaceholder(detectedStyle === "AMA" && !pair.citation.includes("[") ? `[${pair.citation}]` : pair.citation)}
-                                        className="mt-2 text-[10px] font-bold text-emerald-600 hover:text-emerald-800 flex items-center gap-1 hover:underline"
+                                        className="mt-2 text-[10px] font-bold text-emerald-600 hover:text-emerald-800 flex items-center gap-1 hover:underline bg-transparent border-none cursor-pointer"
                                       >
                                         <PlusIcon className="w-3 h-3" />
                                         Add Placeholder Reference
@@ -1283,7 +1595,7 @@ export function ReferenceValidationReviewPage() {
                                     </div>
                                   </div>
                                 ) : (
-                                  <div className="space-y-2">
+                                  <div className="space-y-2.5">
                                     <div className="flex items-center justify-between">
                                       <span className="text-[9px] uppercase font-bold text-navy-400 tracking-wider">Reference Text</span>
                                       <button
@@ -1292,13 +1604,61 @@ export function ReferenceValidationReviewPage() {
                                           setCopiedIdx(idx);
                                           setTimeout(() => setCopiedIdx(null), 1500);
                                         }}
-                                        className="text-[9px] font-bold text-navy-500 hover:text-navy-800"
+                                        className="text-[9px] font-bold text-navy-500 hover:text-navy-800 bg-transparent border-none cursor-pointer"
                                       >
                                         {copiedIdx === idx ? "Copied!" : "Copy"}
                                       </button>
                                     </div>
                                     <div className="p-2.5 bg-white rounded border border-navy-100 text-[11px] leading-relaxed text-navy-800 selection:bg-blue-100">
                                       {pair.ref_text}
+                                    </div>
+
+                                    {parsed && (
+                                      <div className="bg-white rounded border border-navy-100 p-2 space-y-1 text-[10px] text-navy-700">
+                                        {parsed.title && (
+                                          <p className="line-clamp-2"><strong>Title:</strong> {parsed.title}</p>
+                                        )}
+                                        {parsed.journal && (
+                                          <p><strong>Journal:</strong> {parsed.journal}</p>
+                                        )}
+                                        <div className="flex gap-4">
+                                          {parsed.year && <p><strong>Year:</strong> {parsed.year}</p>}
+                                          {parsed.doi && <p><strong>DOI:</strong> {parsed.doi}</p>}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    <div className="flex items-center gap-3 pt-1">
+                                      <a
+                                        href={`https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(parsed?.title || pair.ref_text)}`}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="text-[10px] text-blue-600 font-bold hover:underline"
+                                      >
+                                        PubMed ↗
+                                      </a>
+                                      <span className="text-navy-200">|</span>
+                                      <a
+                                        href={`https://search.crossref.org/?q=${encodeURIComponent(parsed?.title || pair.ref_text)}`}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="text-[10px] text-blue-600 font-bold hover:underline"
+                                      >
+                                        CrossRef ↗
+                                      </a>
+                                      {parsed?.doi && (
+                                        <>
+                                          <span className="text-navy-200">|</span>
+                                          <a
+                                            href={`https://doi.org/${parsed.doi}`}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="text-[10px] text-purple-600 font-bold hover:underline"
+                                          >
+                                            DOI Link ↗
+                                          </a>
+                                        </>
+                                      )}
                                     </div>
                                   </div>
                                 )}
@@ -1356,22 +1716,84 @@ export function ReferenceValidationReviewPage() {
                       </div>
                     ) : (
                       filteredEntries.map((entry: any, idx: number) => (
-                        <div key={idx} className="bg-white rounded-lg border border-navy-100 shadow-sm p-3.5 space-y-3 hover:border-navy-300 transition-colors">
-                          <div className="flex items-center gap-2">
-                            <span className="text-[11px] font-black text-navy-900 bg-surface-100 px-1.5 py-0.5 rounded">
-                              {entry.number ? `#${entry.number}` : `Ref ${idx + 1}`}
-                            </span>
-                            <span className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded tracking-wide ${entry.is_cited ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
-                              }`}>
-                              {entry.is_cited ? "Cited" : "Not Cited"}
-                            </span>
+                        <div
+                          key={idx}
+                          onMouseEnter={() => highlightRefInEditor(entry.para_idx, true)}
+                          onMouseLeave={() => highlightRefInEditor(entry.para_idx, false)}
+                          className="bg-white rounded-lg border border-navy-100 shadow-sm p-3.5 space-y-3 hover:border-navy-300 transition-colors"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[11px] font-black text-navy-900 bg-surface-100 px-1.5 py-0.5 rounded">
+                                {entry.number ? `#${entry.number}` : `Ref ${idx + 1}`}
+                              </span>
+                              <span className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded tracking-wide ${entry.is_cited ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
+                                }`}>
+                                {entry.is_cited ? "Cited" : "Not Cited"}
+                              </span>
+                            </div>
+                            <select
+                              value={entry.style || (detectedStyle === "AMA" ? "REF-N" : "REF-U")}
+                              onChange={(e) => applyStyleToPara(entry.para_idx, e.target.value)}
+                              className="text-[9px] bg-slate-100 hover:bg-slate-200 text-navy-700 font-bold px-1.5 py-0.5 rounded border border-slate-200 cursor-pointer focus:outline-none focus:ring-1 focus:ring-navy-400"
+                              title="Change paragraph style"
+                            >
+                              {(review.styles || []).map((style: string) => (
+                                <option key={style} value={style}>
+                                  {style}
+                                </option>
+                              ))}
+                            </select>
                           </div>
 
-                          <p className="text-[11px] text-navy-800 leading-relaxed font-medium line-clamp-3">
-                            {entry.text}
-                          </p>
+                          {editingEntryIdx === idx ? (
+                            <div className="space-y-2">
+                              <textarea
+                                className="w-full text-xs p-2 border rounded text-navy-800 bg-white focus:outline-none focus:ring-1 focus:ring-navy-400"
+                                value={editingText}
+                                onChange={(e) => setEditingText(e.target.value)}
+                                rows={3}
+                              />
+                              <div className="flex justify-end gap-2">
+                                <button
+                                  onClick={() => setEditingEntryIdx(null)}
+                                  className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded text-[10px] cursor-pointer"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    updateParaText(entry.para_idx, editingText);
+                                    setEditingEntryIdx(null);
+                                    if (editorRef.current?.editor) {
+                                      const html = editorRef.current.editor.getHTML();
+                                      await saveMutation.save(review.save_endpoint, html);
+                                    }
+                                  }}
+                                  className="px-2 py-1 bg-[#C9821A] hover:bg-[#B3711A] text-white font-bold rounded text-[10px] cursor-pointer"
+                                >
+                                  Save
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-[11px] text-navy-800 leading-relaxed font-medium line-clamp-3">
+                              {entry.text}
+                            </p>
+                          )}
 
-                          <div className="flex justify-end pt-1 border-t border-navy-50">
+                          <div className="flex justify-between items-center pt-1 border-t border-navy-50">
+                            {editingEntryIdx !== idx && (
+                              <button
+                                onClick={() => {
+                                  setEditingEntryIdx(idx);
+                                  setEditingText(entry.text);
+                                }}
+                                className="text-[10px] font-bold text-navy-500 hover:text-navy-700 bg-transparent border-none cursor-pointer"
+                              >
+                                Edit Text
+                              </button>
+                            )}
                             <button
                               onClick={() => {
                                 if (entry.para_idx !== undefined && entry.para_idx >= 0) {
@@ -1380,7 +1802,7 @@ export function ReferenceValidationReviewPage() {
                                   navigateByText(editorRef.current?.editor, entry.text.slice(0, 40));
                                 }
                               }}
-                              className="text-[10px] font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 bg-blue-50 px-2 py-1 rounded hover:bg-blue-100 transition-colors"
+                              className="text-[10px] font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 bg-blue-50 px-2 py-1 rounded hover:bg-blue-100 transition-colors cursor-pointer"
                             >
                               Jump to reference <CornerDownRight className="w-3 h-3 ml-0.5" />
                             </button>
@@ -1451,13 +1873,142 @@ export function ReferenceValidationReviewPage() {
               )}
 
               {/* ─── TAB 4: RAW LOGS ─── */}
-              {activeTab === "logs" && logs.raw_log && (
-                <div className="page-enter bg-slate-950 rounded-lg p-3 shadow-inner border border-slate-900 max-h-[600px] overflow-y-auto">
-                  <pre className="text-[10px] text-emerald-400 font-mono whitespace-pre-wrap leading-relaxed select-text">
-                    {logs.raw_log}
-                  </pre>
-                </div>
-              )}
+              {activeTab === "logs" && logs.raw_log && (() => {
+                const parsed = parseLogText(logs.raw_log);
+                if (!parsed) {
+                  return (
+                    <div className="page-enter bg-slate-950 rounded-lg p-3 shadow-inner border border-slate-900 max-h-[600px] overflow-y-auto">
+                      <pre className="text-[10px] text-emerald-400 font-mono whitespace-pre-wrap leading-relaxed select-text">
+                        {logs.raw_log}
+                      </pre>
+                    </div>
+                  );
+                }
+
+                const categories = Array.from(new Set(parsed.items.map(item => item.category)));
+
+                return (
+                  <div className="space-y-4 page-enter">
+                    {/* View mode toggle */}
+                    <div className="flex bg-surface-100 p-0.5 rounded-lg border border-navy-100 w-fit">
+                      <button
+                        onClick={() => setLogViewMode("dashboard")}
+                        className={`px-3 py-1 rounded-md text-[11px] font-bold transition-all border-none cursor-pointer ${
+                          logViewMode === "dashboard"
+                            ? "bg-white text-navy-800 shadow-sm"
+                            : "text-navy-400 hover:text-navy-600 bg-transparent"
+                        }`}
+                      >
+                        Dashboard View
+                      </button>
+                      <button
+                        onClick={() => setLogViewMode("raw")}
+                        className={`px-3 py-1 rounded-md text-[11px] font-bold transition-all border-none cursor-pointer ${
+                          logViewMode === "raw"
+                            ? "bg-white text-navy-800 shadow-sm"
+                            : "text-navy-400 hover:text-navy-600 bg-transparent"
+                        }`}
+                      >
+                        Raw Log Text
+                      </button>
+                    </div>
+
+                    {logViewMode === "raw" ? (
+                      <div className="bg-slate-950 rounded-lg p-3 shadow-inner border border-slate-900 max-h-[600px] overflow-y-auto">
+                        <pre className="text-[10px] text-emerald-400 font-mono whitespace-pre-wrap leading-relaxed select-text">
+                          {logs.raw_log}
+                        </pre>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {/* Stats Dashboard Row */}
+                        <div className="grid grid-cols-2 gap-2 bg-white p-3 border border-navy-100 rounded-lg shadow-sm">
+                          {Object.entries(parsed.stats).slice(0, 6).map(([key, val]) => (
+                            <div key={key} className="flex flex-col gap-0.5 border-b border-navy-50 pb-1.5 last:border-b-0">
+                              <span className="text-[9px] uppercase font-bold text-navy-400 tracking-wider truncate" title={key}>
+                                {key}
+                              </span>
+                              <span className="text-xs font-extrabold text-navy-800">{val}</span>
+                            </div>
+                          ))}
+                          {Object.keys(parsed.stats).length === 0 && (
+                            <div className="col-span-2 text-center text-[10px] text-navy-400 font-bold py-2">
+                              No summary statistics parsed
+                            </div>
+                          )}
+                        </div>
+
+                        {/* List grouped by category */}
+                        <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
+                          {categories.length === 0 ? (
+                            <div className="text-center py-8 bg-white border border-navy-100 rounded-lg text-xs text-navy-400 font-semibold">
+                              No log issues or conversions detected.
+                            </div>
+                          ) : (
+                            categories.map((cat: string) => {
+                              const catItems = parsed.items.filter(item => item.category === cat);
+                              return (
+                                <div key={cat} className="space-y-1.5">
+                                  <h4 className="text-[10px] uppercase font-extrabold text-navy-500 tracking-wider px-1">
+                                    {cat} ({catItems.length})
+                                  </h4>
+                                  <div className="space-y-2">
+                                    {catItems.map((item, itemIdx) => {
+                                      const isSuccess = item.status === "success";
+                                      const isError = item.status === "error" || cat.toLowerCase().includes("error") || cat.toLowerCase().includes("mismatch") || cat.toLowerCase().includes("missing");
+                                      const isWarning = !isSuccess && !isError;
+                                      
+                                      return (
+                                        <div
+                                          key={itemIdx}
+                                          className={`p-2.5 rounded-lg border bg-white shadow-sm flex flex-col gap-1.5 border-l-[3.5px] ${
+                                            isError
+                                              ? "border-l-error-500 bg-error-50/20 border-error-100"
+                                              : isWarning
+                                                ? "border-l-warning-500 bg-warning-50/20 border-warning-100"
+                                                : "border-l-success-500 bg-success-50/20 border-success-100"
+                                          }`}
+                                        >
+                                          <div className="flex justify-between items-start gap-2 w-full text-[10px]">
+                                            <div className="flex-1 font-semibold text-navy-800 leading-relaxed break-words">
+                                              {item.id && (
+                                                <span className="font-mono bg-navy-100 text-navy-800 px-1 py-0.5 rounded text-[9px] mr-1.5">
+                                                  [{item.id}]
+                                                </span>
+                                              )}
+                                              {item.message || (item.from && `Converted from: "${item.from}"`)}
+                                            </div>
+                                            {item.para !== undefined && (
+                                              <button
+                                                onClick={() => navigateToDocPara(item.para || 0)}
+                                                className="text-[9px] font-bold text-blue-600 hover:text-blue-800 flex items-center gap-0.5 bg-blue-50 px-1.5 py-0.5 rounded cursor-pointer border-none whitespace-nowrap shrink-0 font-mono"
+                                              >
+                                                Locate <CornerDownRight className="w-2.5 h-2.5" />
+                                              </button>
+                                            )}
+                                          </div>
+
+                                          {/* For conversions, show changes diff */}
+                                          {item.from && item.to && (
+                                            <div className="text-[9px] bg-slate-900 text-slate-100 rounded p-1.5 font-mono space-y-1">
+                                              <div className="text-red-300 break-words line-through"><span className="text-slate-400 select-none">- </span>{item.from}</div>
+                                              <div className="text-green-300 break-words"><span className="text-slate-400 select-none">+ </span>{item.to}</div>
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* ─── TAB 4: TRACKED CHANGES ─── */}
               {activeTab === "trackedChanges" && (

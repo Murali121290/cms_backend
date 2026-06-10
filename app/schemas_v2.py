@@ -682,12 +682,14 @@ class StylesheetSummary(BaseModel):
     created_at: datetime
     created_by_id: int | None = None
     selected_ia_rows: list[IARow] = Field(default_factory=list)
+    analyzed_file_ids: list[int] = Field(default_factory=list)
 
 
 class StylesheetCreateRequest(BaseModel):
     name: str
     description: str | None = None
     selected_ia_rows: list[IARow] = Field(default_factory=list)
+    analyzed_file_ids: list[int] = Field(default_factory=list)
 
 
 class StylesheetCreateResponse(BaseModel):
@@ -699,6 +701,7 @@ class StylesheetUpdateRequest(BaseModel):
     name: str | None = None
     description: str | None = None
     selected_ia_rows: list[IARow] | None = None
+    analyzed_file_ids: list[int] | None = None
 
 
 class StylesheetUpdateResponse(BaseModel):

@@ -1,18 +1,46 @@
-﻿import { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/Button";
-import { BookOpen, Plus } from "lucide-react";
+import { BookOpen, Plus, Search, X } from "lucide-react";
 import type { WysiwygEditorHandle } from "@/features/editor";
 import { NewStyleDialog } from "./NewStyleDialog";
 
 interface StylesPanelProps {
   styles: string[];
   editorRef: React.RefObject<WysiwygEditorHandle>;
+  onAddStyle?: (newStyle: string) => void;
 }
 
-export function StylesPanel({ styles, editorRef }: StylesPanelProps) {
+function HighlightedText({ text, highlight }: { text: string; highlight: string }) {
+  if (!highlight.trim()) {
+    return <span>{text}</span>;
+  }
+  const regex = new RegExp(`(${highlight.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&")})`, "gi");
+  const parts = text.split(regex);
+  return (
+    <span>
+      {parts.map((part, idx) =>
+        part.toLowerCase() === highlight.toLowerCase() ? (
+          <mark key={idx} className="bg-amber-200 text-amber-950 font-bold px-0.5 rounded">
+            {part}
+          </mark>
+        ) : (
+          <span key={idx}>{part}</span>
+        )
+      )}
+    </span>
+  );
+}
+
+export function StylesPanel({ styles, editorRef, onAddStyle }: StylesPanelProps) {
   const [currentStyle, setCurrentStyle] = useState<string>("Normal");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [allStyles, setAllStyles] = useState<string[]>(styles);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Update local styles when prop changes
+  useEffect(() => {
+    setAllStyles(styles);
+  }, [styles]);
 
   // Update current style when selection changes
   useEffect(() => {
@@ -66,7 +94,15 @@ export function StylesPanel({ styles, editorRef }: StylesPanelProps) {
       chain = chain.updateAttributes("paragraph", { styleLabel: label });
     }
     chain.run();
+
+    if (onAddStyle) {
+      onAddStyle(styleName);
+    }
   };
+
+  const filteredStyles = allStyles.filter((style) =>
+    style.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   return (
     <div className="bg-white rounded-lg shadow-card border border-border flex flex-col h-full">
@@ -84,14 +120,76 @@ export function StylesPanel({ styles, editorRef }: StylesPanelProps) {
         </div>
       </div>
 
+      {/* Search Input */}
+      <div className="px-3 py-2 border-b border-border bg-sidebar/5 flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-muted" />
+          <input
+            type="text"
+            placeholder="Search or add style..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && searchQuery.trim()) {
+                const clean = searchQuery.trim();
+                const matched = filteredStyles.find(
+                  (s) => s.toLowerCase() === clean.toLowerCase()
+                );
+                if (matched) {
+                  applyStyle(matched);
+                } else {
+                  if (!allStyles.includes(clean)) {
+                    setAllStyles((prev) => [...prev, clean].sort());
+                  }
+                  applyStyle(clean);
+                }
+                setSearchQuery("");
+              }
+            }}
+            className="w-full pl-8 pr-7 py-1.5 text-xs border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary bg-white text-text font-medium"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-2 top-2 p-0.5 hover:bg-slate-100 rounded text-muted hover:text-text cursor-pointer border-none bg-transparent"
+              title="Clear search"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Styles List */}
       <div className="flex-1 overflow-y-auto styles-scrollbar pr-1 p-3 space-y-2">
-        {allStyles.length === 0 ? (
+        {searchQuery && !allStyles.some(s => s.toLowerCase() === searchQuery.toLowerCase().trim()) && (
+          <button
+            onClick={() => {
+              const clean = searchQuery.trim();
+              if (clean) {
+                if (!allStyles.includes(clean)) {
+                  setAllStyles((prev) => [...prev, clean].sort());
+                }
+                applyStyle(clean);
+                setSearchQuery("");
+              }
+            }}
+            className="w-full text-left px-3 py-2.5 bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <Plus className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">Create & Apply "{searchQuery.trim()}"</span>
+          </button>
+        )}
+        {filteredStyles.length === 0 && !searchQuery ? (
           <div className="text-center py-6 text-muted text-xs">
             No styles available
           </div>
+        ) : filteredStyles.length === 0 ? (
+          <div className="text-center py-6 text-muted text-xs">
+            No matching styles found
+          </div>
         ) : (
-          allStyles.map((style) => (
+          filteredStyles.map((style) => (
             <button
               key={style}
               onClick={() => applyStyle(style)}
@@ -104,7 +202,7 @@ export function StylesPanel({ styles, editorRef }: StylesPanelProps) {
               <div className="flex items-center justify-between">
                 <div className="flex-1">
                   <span className="font-mono text-[10px] uppercase tracking-wide">
-                    {style}
+                    <HighlightedText text={style} highlight={searchQuery} />
                   </span>
                   <p className="text-[10px] text-muted mt-0.5">
                     {style === "Normal" || style === "Body Text"
@@ -175,3 +273,4 @@ export function StylesPanel({ styles, editorRef }: StylesPanelProps) {
     </div>
   );
 }
+

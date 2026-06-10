@@ -531,7 +531,7 @@ export function StructuringReviewPage() {
                   {sidePanelTab === "styles" ? (
                     <div className="flex-1 min-h-0 flex flex-col gap-4">
                       <div className="flex-1 min-h-0">
-                        <StylesPanel styles={allStyles} editorRef={editorRef} />
+                        <StylesPanel styles={allStyles} editorRef={editorRef} onAddStyle={handleAddStyle} />
                       </div>
                       <div className="flex-shrink-0">
                         <VersionHistoryPanel
@@ -576,6 +576,7 @@ export function StructuringReviewPage() {
                 onOpenVersion={(versionId) =>
                   navigate(uiPaths.structuringReview(normalizedProjectId, normalizedChapterId, versionId) + "?tab=onlyoffice")
                 }
+                onAddStyle={handleAddStyle}
               />
 
               <OnlyOfficeEditor

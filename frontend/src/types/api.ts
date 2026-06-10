@@ -616,6 +616,7 @@ export interface StylesheetSummary {
   created_at: string;
   created_by_id: number | null;
   selected_ia_rows: IARow[];
+  analyzed_file_ids: number[];
 }
 
 export interface StylesheetsListResponse {
@@ -628,6 +629,7 @@ export interface StylesheetCreateRequest {
   name: string;
   description?: string | null;
   selected_ia_rows: IARow[];
+  analyzed_file_ids?: number[];
 }
 
 export interface StylesheetCreateResponse {

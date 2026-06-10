@@ -23,7 +23,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
   // Initial state
   authenticated: false,
   viewer: null,
-  loading: false,
+  loading: true,
   error: null,
   handoffStarted: false,
 
@@ -42,10 +42,14 @@ export const useSessionStore = create<SessionStore>((set) => ({
   setAnonymous: () => set({
     authenticated: false,
     viewer: null,
+    loading: false,
     error: null,
   }),
 
-  setError: (error: string | null) => set({ error }),
+  setError: (error: string | null) => set({
+    error,
+    loading: false,
+  }),
 
   clear: () => {
     set({

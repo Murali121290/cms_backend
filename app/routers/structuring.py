@@ -10,18 +10,18 @@ from app import database
 from app.auth import get_current_user_from_cookie
 from app.models import User
 from app.services import structuring_review_service
-from app.processing.structuring_lib.doc_utils import (
+from app.utils.utils.structuring_lib.doc_utils import (
     extract_document_structure,
     load_document,
     save_document,
 )
-from app.processing.structuring_lib.rules_loader import get_rules_loader
+from app.utils.utils.structuring_lib.rules_loader import get_rules_loader
 from app.integrations.collabora.config import (
     COLLABORA_BASE_URL,
     COLLABORA_PUBLIC_URL,
     WOPI_BASE_URL,
 )
-from app.processing.structuring_lib.styler import process_docx
+from app.utils.utils.structuring_lib.styler import process_docx
 
 # Configure logger
 logger = logging.getLogger("app.routers.structuring")
@@ -96,7 +96,7 @@ async def save_structuring_changes(
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    from app.processing.structuring_lib.doc_utils import update_document_structure
+    from app.utils.utils.structuring_lib.doc_utils import update_document_structure
 
     result = structuring_review_service.save_changes(
         db,
