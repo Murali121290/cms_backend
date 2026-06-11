@@ -7,7 +7,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.domains.auth import api_v1 as users
 from app.domains.files import api_v1 as files
 from app.domains.projects import api_v1 as projects
-from app.domains.projects import teams_api_v1 as teams
 from app.domains.clients import api_v1 as clients
 from app.domains.workflow import api_v1 as workflow
 from app.legacy import web as legacy_web
@@ -35,7 +34,6 @@ app.include_router(legacy_web.router, tags=["Web UI"])
 # API Routers
 app.include_router(api_v2.router, prefix="/api/v2", tags=["API v2"])
 app.include_router(users.router, prefix=f"{settings.API_V1_STR}/users", tags=["Users"])
-app.include_router(teams.router, prefix=f"{settings.API_V1_STR}/teams", tags=["Teams"])
 app.include_router(projects.router, prefix=f"{settings.API_V1_STR}/projects", tags=["Projects"])
 app.include_router(files.router, prefix=f"{settings.API_V1_STR}/files", tags=["Files"])
 # Processing Router
@@ -67,30 +65,32 @@ def init_data():
         raise ValueError("SECRET_KEY must be changed from the default value in production/staging environments!")
 
     from app.database import SessionLocal
-    from app import models
+    from app.domains.workflow.models import RolesMaster
     db = SessionLocal()
     try:
-        # Define all required roles
+        # Define all required roles in RolesMaster
         roles = [
-            {"name": "Viewer", "description": "Read-only access"},
-            {"name": "Editor", "description": "General editing access"},
-            {"name": "ProjectManager", "description": "Can manage projects"},
-            {"name": "Admin", "description": "Full access"},
-            {"name": "Tagger", "description": "Responsible for XML/content tagging"},
-            {"name": "CopyEditor", "description": "Reviews and edits manuscripts"},
-            {"name": "GraphicDesigner", "description": "Manages art and visual assets"},
-            {"name": "Typesetter", "description": "Formats layout for publication"},
-            {"name": "QCPerson", "description": "Quality control assurance"},
-            {"name": "PPD", "description": "Pre-press and production"},
-            {"name": "PermissionsManager", "description": "Manages rights and permissions"}
+            {"role_name": "admin", "team": "Admin Team", "description": "Full system access — all modules and settings"},
+            {"role_name": "viewer", "team": "General", "description": "Read-only access across all permitted modules"},
+            {"role_name": "manager", "team": "General", "description": "General management access"},
+            {"role_name": "copyeditor", "team": "Copyediting Team", "description": "Language and style editing of manuscript content"}
         ]
         
         for r_data in roles:
-            role = db.query(models.Role).filter(models.Role.name == r_data["name"]).first()
+            role = db.query(RolesMaster).filter(
+                RolesMaster.role_name == r_data["role_name"],
+                RolesMaster.team == r_data["team"]
+            ).first()
             if not role:
-                new_role = models.Role(name=r_data["name"], description=r_data["description"])
+                new_role = RolesMaster(
+                    role_name=r_data["role_name"],
+                    team=r_data["team"],
+                    description=r_data["description"]
+                )
                 db.add(new_role)
-        
-        db.commit()
+                try:
+                    db.commit()
+                except Exception:
+                    db.rollback()
     finally:
         db.close()

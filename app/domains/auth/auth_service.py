@@ -15,48 +15,6 @@ def authenticate_browser_user(db: Session, username: str, password: str):
     }
 
 
-def ensure_default_browser_roles(db: Session):
-    viewer_role = db.query(models.Role).filter(models.Role.name == "Viewer").first()
-    admin_role = None
-
-    if not viewer_role:
-        viewer_role = models.Role(name="Viewer", description="Read-only access")
-        editor_role = models.Role(name="Editor", description="General editing access")
-        manager_role = models.Role(name="ProjectManager", description="Can manage projects")
-        admin_role = models.Role(name="Admin", description="Full access")
-
-        tagger_role = models.Role(name="Tagger", description="Responsible for XML/content tagging")
-        copyeditor_role = models.Role(name="CopyEditor", description="Reviews and edits manuscripts")
-        graphic_role = models.Role(name="GraphicDesigner", description="Manages art and visual assets")
-        typesetter_role = models.Role(name="Typesetter", description="Formats layout for publication")
-        qc_role = models.Role(name="QCPerson", description="Quality control assurance")
-        ppd_role = models.Role(name="PPD", description="Pre-press and production")
-        permissions_role = models.Role(name="PermissionsManager", description="Manages rights and permissions")
-
-        db.add_all(
-            [
-                viewer_role,
-                editor_role,
-                manager_role,
-                admin_role,
-                tagger_role,
-                copyeditor_role,
-                graphic_role,
-                typesetter_role,
-                qc_role,
-                ppd_role,
-                permissions_role,
-            ]
-        )
-        db.commit()
-        db.refresh(viewer_role)
-        db.refresh(admin_role)
-    else:
-        admin_role = db.query(models.Role).filter(models.Role.name == "Admin").first()
-
-    return viewer_role, admin_role
-
-
 def register_browser_user(
     db: Session,
     *,
@@ -74,19 +32,19 @@ def register_browser_user(
     if existing_user:
         raise ValueError("Username or email already exists")
 
+    is_first_user = db.query(models.User).count() == 0
+    role_name = "admin" if is_first_user else "viewer"
+    team_name = "Admin Team" if is_first_user else "General"
+
     new_user = models.User(
         username=username,
         email=email,
         password_hash=hash_password(password),
         is_active=True,
+        role=role_name,
+        team=team_name,
     )
 
-    viewer_role, admin_role = ensure_default_browser_roles(db)
-
-    is_first_user = db.query(models.User).count() == 0
-    target_role = admin_role if is_first_user else viewer_role
-
-    new_user.roles.append(target_role)
     db.add(new_user)
     db.commit()
 

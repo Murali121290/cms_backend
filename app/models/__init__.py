@@ -20,22 +20,49 @@ class WorkflowStatus(str, enum.Enum):
     XML_GENERATED = "XML_GENERATED"
     PUBLISHED = "PUBLISHED"
 
-class Role(Base):
-    __tablename__ = "roles"
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, index=True)
-    description = Column(String)
-    users = relationship("User", secondary="user_roles", back_populates="roles")
+class CompatibilityRoleItem:
+    def __init__(self, name: str, role_id: int = 1):
+        self.name = name
+        self.id = role_id
 
-class Team(Base):
-    __tablename__ = "teams"
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, index=True)
-    description = Column(String, nullable=True)
-    owner_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    
-    users = relationship("User", back_populates="team", foreign_keys="[User.team_id]")
-    projects = relationship("Project", back_populates="team")
+    def __repr__(self):
+        return f"<CompatibilityRoleItem name={self.name}>"
+
+    def __eq__(self, other):
+        if isinstance(other, str):
+            return self.name.lower() == other.lower()
+        if isinstance(other, CompatibilityRoleItem):
+            return self.name.lower() == other.name.lower()
+        return False
+
+class CompatibilityRolesList(list):
+    def __contains__(self, item):
+        if isinstance(item, str):
+            return any(r.name.lower() == item.lower() for r in self)
+        return super().__contains__(item)
+
+ROLE_MAP = {
+    "admin": "Admin",
+    "viewer": "Viewer",
+    "manager": "ProjectManager",
+    "copyeditor": "CopyEditor",
+    "technical_copyeditor": "TechnicalCopyEditor",
+    "typesetter": "Typesetter",
+    "pereditor": "PreEditor",
+    "qa_reviewer": "QAReviewer",
+    "operations_manager": "OperationsManager",
+    "finance_analyst": "FinanceAnalyst",
+    "support": "Support",
+    "developer": "Developer",
+    "analyst": "Analyst",
+    "designer": "Designer"
+}
+
+def map_role_to_capitalized(role_name: str) -> str:
+    if not role_name:
+        return "Viewer"
+    return ROLE_MAP.get(role_name.lower(), role_name.capitalize())
+
 
 class User(Base):
     __tablename__ = "users"
@@ -44,16 +71,23 @@ class User(Base):
     email = Column(String, unique=True, index=True)
     password_hash = Column(String)
     is_active = Column(Boolean, default=True)
-    team_id = Column(Integer, ForeignKey("teams.id"), nullable=True)
+    role = Column(String, nullable=True)
+    team = Column(String, nullable=True)
     customer_access = Column(DialectArray, nullable=True, default=list)
 
-    team = relationship("Team", back_populates="users", foreign_keys=[team_id])
-    roles = relationship("Role", secondary="user_roles", back_populates="users")
-
-class UserRole(Base):
-    __tablename__ = "user_roles"
-    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
-    role_id = Column(Integer, ForeignKey("roles.id"), primary_key=True)
+    @property
+    def roles(self):
+        if not self.role:
+            return CompatibilityRolesList()
+        cap_role = map_role_to_capitalized(self.role)
+        role_id = 1
+        if self.role.lower() == "admin":
+            role_id = 4
+        elif self.role.lower() == "viewer":
+            role_id = 1
+        elif self.role.lower() == "manager":
+            role_id = 3
+        return CompatibilityRolesList([CompatibilityRoleItem(cap_role, role_id)])
 
 class Project(Base):
     __tablename__ = "projects"
@@ -64,7 +98,7 @@ class Project(Base):
     client_name = Column(String, nullable=True)
     xml_standard = Column(String)
     status = Column(String, default="RECEIVED")
-    team_id = Column(Integer, ForeignKey("teams.id"))
+    team = Column(String, nullable=True)
     workflow_type = Column(String, nullable=True)
     workflow_stage_no = Column(String, nullable=True)
     # WMS project fields
@@ -90,7 +124,6 @@ class Project(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
 
-    team = relationship("Team", back_populates="projects")
     files = relationship("File", back_populates="project")
     chapters = relationship("Chapter", back_populates="project", cascade="all, delete-orphan")
     stylesheets = relationship("ProjectStylesheet", back_populates="project", cascade="all, delete-orphan")

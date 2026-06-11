@@ -139,7 +139,7 @@ def _has_admin_or_pm_role(user: models.User):
 
 
 
-def _serialize_admin_role(role: models.Role):
+def _serialize_admin_role(role: Any):
     return schemas_v2.AdminRole(id=role.id, name=role.name, description=role.description)
 
 
@@ -150,7 +150,7 @@ def _serialize_admin_user(user: models.User):
         email=user.email,
         is_active=user.is_active,
         roles=[schemas_v2.AdminUserRole(id=role.id, name=role.name) for role in user.roles],
-        team=user.team.name if user.team else None,
+        team=user.team,
         customer_access=user.customer_access or [],
     )
 
@@ -183,7 +183,7 @@ def _serialize_project_summary(project: models.Project):
         customer_name=project.client_name,
         xml_standard=project.xml_standard or "",
         status=project.status,
-        team_id=project.team_id,
+        team=project.team,
         chapter_count=len(project.chapters),
         file_count=len(project.files),
         workflow_type=getattr(project, "workflow_type", None),
@@ -1233,6 +1233,7 @@ def api_v2_ia_template(
             code="AUTH_REQUIRED",
             message="Authentication required.",
         )
+    # pyrefly: ignore [missing-import]
     from app.data.ia_template_rows import IA_TEMPLATE_ROWS
     return schemas_v2.IATemplateResponse(
         rows=[

@@ -14,17 +14,21 @@ def get_admin_dashboard_stats(db: Session):
 
 
 def get_admin_users_page_data(db: Session):
+    from app.domains.workflow.models import RolesMaster
     return {
         "users": db.query(models.User).all(),
-        "all_roles": db.query(models.Role).all(),
+        "all_roles": db.query(RolesMaster).all(),
     }
 
 
 def get_available_roles(db: Session):
-    return db.query(models.Role).all()
+    from app.domains.workflow.models import RolesMaster
+    return db.query(RolesMaster).all()
 
 
 def create_admin_user(db: Session, *, username: str, email: str, password: str, role_id: int, team_name: str | None = None, customer_access: list[str] | None = None):
+    from app.domains.workflow.models import RolesMaster
+
     existing_user = db.query(models.User).filter(
         (models.User.username == username) | (models.User.email == email)
     ).first()
@@ -39,18 +43,13 @@ def create_admin_user(db: Session, *, username: str, email: str, password: str, 
         customer_access=customer_access or [],
     )
 
-    if team_name:
-        team_obj = db.query(models.Team).filter(models.Team.name == team_name).first()
-        if not team_obj:
-            team_obj = models.Team(name=team_name)
-            db.add(team_obj)
-            db.commit()
-            db.refresh(team_obj)
-        new_user.team_id = team_obj.id
-
-    target_role = db.query(models.Role).filter(models.Role.id == role_id).first()
+    target_role = db.query(RolesMaster).filter(RolesMaster.id == role_id).first()
     if target_role:
-        new_user.roles.append(target_role)
+        new_user.role = target_role.role_name
+        new_user.team = target_role.team
+    else:
+        new_user.role = "viewer"
+        new_user.team = team_name or "General"
 
     db.add(new_user)
     db.commit()
@@ -58,27 +57,23 @@ def create_admin_user(db: Session, *, username: str, email: str, password: str, 
 
 
 def replace_user_role(db: Session, *, user_id: int, role_id: int, team_name: str | None = None):
+    from app.domains.workflow.models import RolesMaster
+
     target_user = db.query(models.User).filter(models.User.id == user_id).first()
-    new_role = db.query(models.Role).filter(models.Role.id == role_id).first()
+    new_role = db.query(RolesMaster).filter(RolesMaster.id == role_id).first()
     if not target_user or not new_role:
         return {"status": "invalid"}
 
-    admin_role = db.query(models.Role).filter(models.Role.name == "Admin").first()
-    if admin_role:
-        admin_count = db.query(models.UserRole).filter(models.UserRole.role_id == admin_role.id).count()
-        target_has_admin = any(role.name == "Admin" for role in target_user.roles)
-        if target_has_admin and new_role.name != "Admin" and admin_count <= 1:
+    is_target_admin = target_user.role and target_user.role.lower() == "admin"
+    is_new_role_admin = new_role.role_name.lower() == "admin"
+
+    if is_target_admin and not is_new_role_admin:
+        admin_count = db.query(models.User).filter(models.User.role.ilike("admin")).count()
+        if admin_count <= 1:
             return {"status": "last_admin_blocked"}
 
-    target_user.roles = [new_role]
-    if team_name:
-        team_obj = db.query(models.Team).filter(models.Team.name == team_name).first()
-        if not team_obj:
-            team_obj = models.Team(name=team_name)
-            db.add(team_obj)
-            db.commit()
-            db.refresh(team_obj)
-        target_user.team_id = team_obj.id
+    target_user.role = new_role.role_name
+    target_user.team = new_role.team
     
     db.commit()
     return {"status": "updated"}

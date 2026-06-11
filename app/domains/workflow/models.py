@@ -66,6 +66,12 @@ class RolesMaster(Base):
     active_status = Column(Boolean,     nullable=False, default=True)
     created_at    = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
+    @property
+    def name(self) -> str:
+        # Compatibility mapping to capitalized roles for frontend/serializers
+        from app.models import map_role_to_capitalized
+        return map_role_to_capitalized(self.role_name)
+
 
 class StageActivityMaster(Base):
     __tablename__ = "stage_activity_master"
