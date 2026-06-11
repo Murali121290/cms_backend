@@ -65,6 +65,7 @@ class RolesMaster(Base):
     description   = Column(Text,        nullable=True)
     active_status = Column(Boolean,     nullable=False, default=True)
     created_at    = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at    = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     @property
     def name(self) -> str:

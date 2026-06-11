@@ -40,7 +40,7 @@ def register_browser_user(
         username=username,
         email=email,
         password_hash=hash_password(password),
-        is_active=True,
+        active_status=True,
         role=role_name,
         team=team_name,
     )

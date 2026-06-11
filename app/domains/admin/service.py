@@ -39,7 +39,7 @@ def create_admin_user(db: Session, *, username: str, email: str, password: str, 
         username=username,
         email=email,
         password_hash=hash_password(password),
-        is_active=True,
+        active_status=True,
         customer_access=customer_access or [],
     )
 
@@ -82,7 +82,7 @@ def replace_user_role(db: Session, *, user_id: int, role_id: int, team_name: str
 def toggle_user_status(db: Session, *, user_id: int, actor_user_id: int):
     target_user = db.query(models.User).filter(models.User.id == user_id).first()
     if target_user and target_user.id != actor_user_id:
-        target_user.is_active = not target_user.is_active
+        target_user.active_status = not target_user.active_status
         db.commit()
     return target_user
 

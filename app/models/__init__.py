@@ -1,6 +1,6 @@
-from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, DateTime, Date, JSON, Enum as SQLEnum, TypeDecorator
-from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
-from sqlalchemy.orm import relationship
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, DateTime, Date, JSON, Enum as SQLEnum, TypeDecorator, BigInteger, Text, func
+from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY, JSONB
+from sqlalchemy.orm import relationship, synonym
 from datetime import datetime
 from app.database import Base
 import enum
@@ -64,16 +64,30 @@ def map_role_to_capitalized(role_name: str) -> str:
     return ROLE_MAP.get(role_name.lower(), role_name.capitalize())
 
 
+class DialectJSONB(TypeDecorator):
+    impl = JSON
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(JSONB)
+        return dialect.type_descriptor(JSON)
+
+
 class User(Base):
     __tablename__ = "users"
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True)
-    email = Column(String, unique=True, index=True)
-    password_hash = Column(String)
-    is_active = Column(Boolean, default=True)
-    role = Column(String, nullable=True)
-    team = Column(String, nullable=True)
-    customer_access = Column(DialectArray, nullable=True, default=list)
+    id              = Column(BigInteger, primary_key=True, autoincrement=True)
+    username        = Column(String(150),  unique=True, nullable=False, index=True)
+    email           = Column(String(255),  unique=True, nullable=False, index=True)
+    password_hash   = Column(Text,         nullable=False)
+    role            = Column(String(50),   nullable=False)
+    team            = Column(String(50),   nullable=False)
+    customer_access = Column(DialectJSONB,  nullable=False, default=list)
+    active_status   = Column(Boolean,      nullable=False, default=True)
+    created_at      = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at      = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    is_active       = synonym("active_status")
 
     @property
     def roles(self):
