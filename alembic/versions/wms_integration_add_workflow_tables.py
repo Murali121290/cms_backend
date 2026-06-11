@@ -10,6 +10,7 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
+from sqlalchemy import inspect
 
 # revision identifiers, used by Alembic.
 revision: str = 'wms_integration_001'
@@ -19,44 +20,13 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Create clients table
-    op.create_table(
-        'clients',
-        sa.Column('id', sa.BigInteger(), nullable=False),
-        sa.Column('category_type', sa.String(20), nullable=False),
-        sa.Column('contact_type', sa.String(100), nullable=False),
-        sa.Column('first_name', sa.String(150), nullable=True),
-        sa.Column('surname', sa.String(150), nullable=True),
-        sa.Column('name_company', sa.String(255), nullable=True),
-        sa.Column('company', sa.String(255), nullable=False),
-        sa.Column('division', sa.String(150), nullable=False),
-        sa.Column('designation', sa.String(150), nullable=True),
-        sa.Column('department', sa.String(150), nullable=True),
-        sa.Column('email', sa.String(255), nullable=False),
-        sa.Column('website', sa.String(255), nullable=True),
-        sa.Column('vendor_number', sa.String(100), nullable=True),
-        sa.Column('address1', sa.Text(), nullable=True),
-        sa.Column('address2', sa.Text(), nullable=True),
-        sa.Column('city', sa.String(120), nullable=True),
-        sa.Column('state', sa.String(120), nullable=True),
-        sa.Column('country', sa.String(120), nullable=True),
-        sa.Column('zip_code', sa.String(20), nullable=True),
-        sa.Column('sub_specialisation', sa.String(255), nullable=True),
-        sa.Column('working_hours', sa.String(100), nullable=True),
-        sa.Column('contact_hours', sa.String(100), nullable=True),
-        sa.Column('phone_main', sa.String(50), nullable=True),
-        sa.Column('phone_additional', sa.String(50), nullable=True),
-        sa.Column('active_status', sa.Boolean(), nullable=False, server_default='true'),
-        sa.Column('created_by', sa.BigInteger(), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.ForeignKeyConstraint(['created_by'], ['users.id'], ondelete='SET NULL'),
-        sa.PrimaryKeyConstraint('id')
-    )
+    conn = op.get_bind()
+    inspector = inspect(conn)
 
     # Create roles_master table
-    op.create_table(
-        'roles_master',
+    if 'roles_master' not in inspector.get_table_names():
+        op.create_table(
+            'roles_master',
         sa.Column('id', sa.BigInteger(), nullable=False),
         sa.Column('role_name', sa.String(100), nullable=False),
         sa.Column('team', sa.String(150), nullable=False),
@@ -65,24 +35,26 @@ def upgrade() -> None:
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('role_name', 'team', name='uq_roles_name_team')
-    )
-    op.create_index('ix_roles_master_role_name', 'roles_master', ['role_name'])
+        )
+        op.create_index('ix_roles_master_role_name', 'roles_master', ['role_name'])
 
     # Create stage_activity_master table
-    op.create_table(
-        'stage_activity_master',
+    if 'stage_activity_master' not in inspector.get_table_names():
+        op.create_table(
+            'stage_activity_master',
         sa.Column('id', sa.BigInteger(), nullable=False),
         sa.Column('stage_activity_name', sa.String(150), nullable=False, unique=True),
         sa.Column('description', sa.Text(), nullable=True),
         sa.Column('active_status', sa.Boolean(), nullable=False, server_default='true'),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.PrimaryKeyConstraint('id')
-    )
-    op.create_index('ix_stage_activity_master_stage_activity_name', 'stage_activity_master', ['stage_activity_name'])
+        )
+        op.create_index('ix_stage_activity_master_stage_activity_name', 'stage_activity_master', ['stage_activity_name'])
 
     # Create stage_master table
-    op.create_table(
-        'stage_master',
+    if 'stage_master' not in inspector.get_table_names():
+        op.create_table(
+            'stage_master',
         sa.Column('id', sa.BigInteger(), nullable=False),
         sa.Column('stage_name', sa.String(100), nullable=False, unique=True),
         sa.Column('description', sa.Text(), nullable=True),
@@ -94,12 +66,13 @@ def upgrade() -> None:
         sa.Column('active_status', sa.Boolean(), nullable=False, server_default='true'),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.PrimaryKeyConstraint('id')
-    )
-    op.create_index('ix_stage_master_stage_name', 'stage_master', ['stage_name'])
+        )
+        op.create_index('ix_stage_master_stage_name', 'stage_master', ['stage_name'])
 
     # Create stages_details table
-    op.create_table(
-        'stages_details',
+    if 'stages_details' not in inspector.get_table_names():
+        op.create_table(
+            'stages_details',
         sa.Column('id', sa.BigInteger(), nullable=False),
         sa.Column('client', sa.String(150), nullable=False),
         sa.Column('project', sa.String(200), nullable=False),
@@ -133,11 +106,12 @@ def upgrade() -> None:
         sa.CheckConstraint('actual_end_date IS NULL OR actual_start_date IS NULL OR actual_end_date >= actual_start_date', name='ck_stage_detail_actual_end_after_start'),
         sa.CheckConstraint('sla >= 0', name='ck_stage_detail_sla_non_negative'),
         sa.CheckConstraint('stage_level >= 0', name='ck_stage_detail_level_non_negative'),
-    )
+        )
 
     # Create workflow_master table
-    op.create_table(
-        'workflow_master',
+    if 'workflow_master' not in inspector.get_table_names():
+        op.create_table(
+            'workflow_master',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('workflow_name', sa.String(255), nullable=False),
         sa.Column('stage_name', sa.String(255), nullable=False),
@@ -148,12 +122,13 @@ def upgrade() -> None:
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.PrimaryKeyConstraint('id')
-    )
-    op.create_index('ix_workflow_master_workflow_name', 'workflow_master', ['workflow_name'])
+        )
+        op.create_index('ix_workflow_master_workflow_name', 'workflow_master', ['workflow_name'])
 
     # Create chapter_details table
-    op.create_table(
-        'chapter_details',
+    if 'chapter_details' not in inspector.get_table_names():
+        op.create_table(
+            'chapter_details',
         sa.Column('id', sa.BigInteger(), nullable=False),
         sa.Column('client', sa.String(150), nullable=False),
         sa.Column('project', sa.String(200), nullable=False),
@@ -180,7 +155,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['current_stage_activity'], ['stage_activity_master.stage_activity_name'], ondelete='SET NULL', onupdate='CASCADE'),
         sa.ForeignKeyConstraint(['current_assignee_name'], ['users.username'], ondelete='SET NULL', onupdate='CASCADE'),
         sa.PrimaryKeyConstraint('id')
-    )
+        )
 
 
 def downgrade() -> None:
@@ -194,4 +169,3 @@ def downgrade() -> None:
     op.drop_table('stage_activity_master')
     op.drop_index('ix_roles_master_role_name', table_name='roles_master')
     op.drop_table('roles_master')
-    op.drop_table('clients')

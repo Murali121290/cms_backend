@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 
 # revision identifiers, used by Alembic.
@@ -19,22 +20,26 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        'project_stylesheets',
-        sa.Column('id', sa.Integer(), nullable=False),
-        sa.Column('project_id', sa.Integer(), nullable=False),
-        sa.Column('name', sa.String(), nullable=False),
-        sa.Column('description', sa.String(), nullable=True),
-        sa.Column('selected_ia_rows', sa.String(), nullable=False, server_default='[]'),
-        sa.Column('is_active', sa.Boolean(), nullable=False, server_default='false'),
-        sa.Column('created_at', sa.DateTime(), nullable=False),
-        sa.Column('created_by_id', sa.Integer(), nullable=True),
-        sa.ForeignKeyConstraint(['created_by_id'], ['users.id'], ),
-        sa.ForeignKeyConstraint(['project_id'], ['projects.id'], ondelete='CASCADE'),
-        sa.PrimaryKeyConstraint('id')
-    )
-    op.create_index(op.f('ix_project_stylesheets_id'), 'project_stylesheets', ['id'], unique=False)
-    op.create_index(op.f('ix_project_stylesheets_project_id'), 'project_stylesheets', ['project_id'], unique=False)
+    conn = op.get_bind()
+    inspector = inspect(conn)
+
+    if 'project_stylesheets' not in inspector.get_table_names():
+        op.create_table(
+            'project_stylesheets',
+            sa.Column('id', sa.Integer(), nullable=False),
+            sa.Column('project_id', sa.Integer(), nullable=False),
+            sa.Column('name', sa.String(), nullable=False),
+            sa.Column('description', sa.String(), nullable=True),
+            sa.Column('selected_ia_rows', sa.String(), nullable=False, server_default='[]'),
+            sa.Column('is_active', sa.Boolean(), nullable=False, server_default='false'),
+            sa.Column('created_at', sa.DateTime(), nullable=False),
+            sa.Column('created_by_id', sa.Integer(), nullable=True),
+            sa.ForeignKeyConstraint(['created_by_id'], ['users.id'], ),
+            sa.ForeignKeyConstraint(['project_id'], ['projects.id'], ondelete='CASCADE'),
+            sa.PrimaryKeyConstraint('id')
+        )
+        op.create_index(op.f('ix_project_stylesheets_id'), 'project_stylesheets', ['id'], unique=False)
+        op.create_index(op.f('ix_project_stylesheets_project_id'), 'project_stylesheets', ['project_id'], unique=False)
 
 
 def downgrade() -> None:
