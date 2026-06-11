@@ -66,8 +66,13 @@ def init_data():
 
     from app.database import SessionLocal
     from app.domains.workflow.models import RolesMaster
+    from sqlalchemy import text
     db = SessionLocal()
     try:
+        # Use advisory lock on PostgreSQL to serialize initialization across concurrent workers
+        if db.bind.dialect.name == "postgresql":
+            db.execute(text("SELECT pg_advisory_xact_lock(424242);"))
+            
         # Define all required roles in RolesMaster
         roles = [
             {"role_name": "admin", "team": "Admin Team", "description": "Full system access — all modules and settings"},

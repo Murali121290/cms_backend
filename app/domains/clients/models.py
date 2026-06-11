@@ -36,3 +36,5 @@ class Client(Base):
     created_by        = Column(BigInteger,  ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at        = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at        = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    projects = relationship("Project", back_populates="client", cascade="all, delete-orphan")

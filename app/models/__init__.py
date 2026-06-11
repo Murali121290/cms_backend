@@ -141,6 +141,7 @@ class Project(Base):
     files = relationship("File", back_populates="project")
     chapters = relationship("Chapter", back_populates="project", cascade="all, delete-orphan")
     stylesheets = relationship("ProjectStylesheet", back_populates="project", cascade="all, delete-orphan")
+    client = relationship("Client", back_populates="projects")
 
 class Chapter(Base):
     __tablename__ = "chapters"
