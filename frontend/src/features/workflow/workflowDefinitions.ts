@@ -4,7 +4,8 @@
 //   "Tool Process/s4carlisle_workflows_v3_1.html" (the WFS array + ROLES table).
 // This is static reference data — the single source for both the Workflow catalog
 // viewer and the per-project tracking UI. Keep the `id` values stable: the backend
-// validates a project's workflow_type against them.
+// validates a project's workflow_name against them.
+
 
 export type StageType = "art" | "tmpl" | "pre" | "xml" | "default";
 

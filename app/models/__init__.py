@@ -109,7 +109,6 @@ class Project(Base):
     id               = Column(Integer,     primary_key=True, autoincrement=True)
     client_id        = Column(BigInteger,  ForeignKey("clients.id", ondelete="CASCADE"), nullable=True)
     project_code     = Column(String(100), unique=True, nullable=True, index=True)
-    customer_name    = Column(String(255), nullable=True)
     client_name      = Column(String,      nullable=True)
     xml_standard     = Column(String,      nullable=True)
     division_code    = Column(String(100), nullable=True)
@@ -146,7 +145,6 @@ class Project(Base):
     # SQLAlchemy Synonyms for backward compatibility
     title = synonym("project_title")
     code = synonym("project_code")
-    workflow_name = synonym("workflow_name")
     chapter_count_wms = synonym("chapter_count")
 
 class Chapter(Base):

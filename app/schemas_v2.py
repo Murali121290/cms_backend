@@ -94,7 +94,7 @@ class ProjectSummary(BaseModel):
     project_code: str | None = None
     project_title: str | None = None
     workflow_name: str | None = None
-    customer_name: str | None = None
+    cilent_name: str | None = None
     # CMS fields
     client_id: int | None = None
     client_name: str | None = None

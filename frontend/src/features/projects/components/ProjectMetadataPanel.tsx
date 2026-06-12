@@ -30,8 +30,8 @@ export function ProjectMetadataPanel({ project }: ProjectMetadataPanelProps) {
         <MetaCard label="XML Standard" value={project.xml_standard} />
         <MetaCard label="Chapters" value={project.chapter_count} />
         <MetaCard label="Files" value={project.file_count} />
-        <MetaCard label="Workflow" value={project.workflow_type ?? project.workflow_name} />
-        <MetaCard label="Stage" value={project.workflow_stage_no} />
+        <MetaCard label="Workflow" value={project.workflow_name} />
+
         <MetaCard label="Project Manager" value={project.project_manager} />
         <MetaCard label="Priority" value={project.priority} />
         <MetaCard label="Category" value={project.category} />

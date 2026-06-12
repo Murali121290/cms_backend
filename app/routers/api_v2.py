@@ -180,13 +180,11 @@ def _serialize_project_summary(project: models.Project):
         project_title=project.title,
         client_id=project.client_id,
         client_name=project.client_name,
-        customer_name=project.client_name,
         xml_standard=project.xml_standard or "",
         status=project.status,
         chapter_count=len(project.chapters),
         file_count=len(project.files),
-        workflow_name=getattr(project, "workflow_type", None),
-        workflow_stage_no=getattr(project, "workflow_stage_no", None),
+        workflow_name=project.workflow_name,
         division_code=getattr(project, "division_code", None),
         customer_contact=getattr(project, "customer_contact", None),
         category=getattr(project, "category", None),
@@ -790,7 +788,6 @@ def api_v2_project_bootstrap(
     client_name: str | None = Form(None),
     xml_standard: str = Form(...),
     chapter_count: int = Form(...),
-    workflow_type: str | None = Form(None),
     workflow_name: str | None = Form(None),
     division_code: str | None = Form(None),
     customer_contact: str | None = Form(None),
@@ -820,13 +817,13 @@ def api_v2_project_bootstrap(
             message="Authentication required.",
         )
 
-    if workflow_type:
+    if workflow_name:
         db_workflows = {w.workflow_name for w in db.query(models.WorkflowMaster).all()}
-        if workflow_type not in db_workflows and workflow_type not in _WORKFLOW_TYPE_IDS:
+        if workflow_name not in db_workflows and workflow_name not in _WORKFLOW_TYPE_IDS:
             return _error_response(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 code="INVALID_WORKFLOW_TYPE",
-                message=f"Unknown workflow type: {workflow_type}",
+                message=f"Unknown workflow type: {workflow_name}",
             )
 
     try:
@@ -867,10 +864,8 @@ def api_v2_project_bootstrap(
         .order_by(models.File.id.asc())
         .all()
     )
-    effective_workflow = workflow_name or workflow_type
-    if effective_workflow:
-        project.workflow_type = effective_workflow
-        project.workflow_stage_no = "01"
+    if workflow_name:
+        project.workflow_name = workflow_name
 
     if client_id is not None:
         project.client_id = client_id
@@ -909,7 +904,7 @@ def api_v2_project_bootstrap(
                 project=project.code,
                 chapters=_ch.number,
                 chapter_title=_ch.title or f"Chapter {_ch.number}",
-                workflow=getattr(project, "workflow_type", None) or "",
+                workflow=project.workflow_name or "",
                 status="Received",
                 complexity_level=getattr(project, "composition", None) or "Medium",
                 stage_level=1,
@@ -953,12 +948,8 @@ def api_v2_update_project(
 
     if payload.status is not None:
         project.status = payload.status
-    if payload.workflow_type is not None:
-        project.workflow_type = payload.workflow_type
-    if payload.workflow_stage_no is not None:
-        project.workflow_stage_no = payload.workflow_stage_no
     if payload.workflow_name is not None:
-        project.workflow_type = payload.workflow_name
+        project.workflow_name = payload.workflow_name
     if payload.client_id is not None:
         project.client_id = payload.client_id
         from app.domains.clients.models import Client as _Client
@@ -1077,24 +1068,18 @@ def api_v2_update_project_workflow(
             message="Project not found.",
         )
 
-    if payload.workflow_type is not None:
+    if payload.workflow_name is not None:
         db_workflows = {w.workflow_name for w in db.query(models.WorkflowMaster).all()}
-        if payload.workflow_type not in db_workflows and payload.workflow_type not in _WORKFLOW_TYPE_IDS:
+        if payload.workflow_name not in db_workflows and payload.workflow_name not in _WORKFLOW_TYPE_IDS:
             return _error_response(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 code="INVALID_WORKFLOW_TYPE",
-                message=f"Unknown workflow type: {payload.workflow_type}",
+                message=f"Unknown workflow type: {payload.workflow_name}",
             )
 
-    # Setting a workflow type (when none was set) seeds the first stage.
-    if payload.workflow_type is not None:
-        is_new_assignment = project.workflow_type != payload.workflow_type
-        project.workflow_type = payload.workflow_type
-        if is_new_assignment and payload.workflow_stage_no is None:
-            project.workflow_stage_no = "01"
-
-    if payload.workflow_stage_no is not None:
-        project.workflow_stage_no = payload.workflow_stage_no
+    # Setting a workflow name
+    if payload.workflow_name is not None:
+        project.workflow_name = payload.workflow_name
 
     db.commit()
     db.refresh(project)
@@ -2013,7 +1998,7 @@ def api_v2_upload_zip(
                     project=project.code,
                     chapters=_ch.number,
                     chapter_title=_ch.title or f"Chapter {_ch.number}",
-                    workflow=getattr(project, "workflow_type", None) or "",
+                    workflow=project.workflow_name or "",
                     status="Received",
                     complexity_level=getattr(project, "composition", None) or "Medium",
                     stage_level=1,
@@ -4329,7 +4314,7 @@ def api_v2_sync_chapters(project_id: int, db: Session = Depends(database.get_db)
                 project=project.code,
                 chapters=ch.number,
                 chapter_title=ch.title or f"Chapter {ch.number}",
-                workflow=getattr(project, "workflow_type", None) or "",
+                workflow=project.workflow_name or "",
                 status="Received",
                 complexity_level=getattr(project, "composition", None) or "Medium",
                 stage_level=1,

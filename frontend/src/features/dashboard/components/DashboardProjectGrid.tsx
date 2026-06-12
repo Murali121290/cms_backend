@@ -36,9 +36,9 @@ function ProjectCard({ project }: { project: ProjectSummary }) {
         <span className="flex items-center gap-1 text-xs text-muted">
           <File size={11} /> {project.file_count} files
         </span>
-        {project.workflow_type && (
+        {project.workflow_name && (
           <span className="ml-auto text-[10px] font-medium text-muted truncate max-w-[80px]">
-            {project.workflow_type}
+            {project.workflow_name}
           </span>
         )}
       </div>

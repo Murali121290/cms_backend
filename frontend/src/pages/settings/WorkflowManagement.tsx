@@ -477,7 +477,7 @@ export function WorkflowManagement() {
 
       const usage = new Map<string, number>()
       for (const p of projects) {
-        const wfType = p.workflow_type || (p as any).workflow_name
+        const wfType = p.workflow_name
         if (wfType) {
           usage.set(wfType, (usage.get(wfType) ?? 0) + 1)
         }

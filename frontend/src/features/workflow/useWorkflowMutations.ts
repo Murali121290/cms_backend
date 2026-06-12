@@ -7,16 +7,13 @@ export function useUpdateProjectWorkflow() {
   return useMutation({
     mutationFn: ({
       projectId,
-      workflowType,
-      stageNo,
+      workflowName,
     }: {
       projectId: number;
-      workflowType?: string | null;
-      stageNo?: string | null;
+      workflowName?: string | null;
     }) =>
       updateProjectWorkflow(projectId, {
-        ...(workflowType !== undefined ? { workflow_type: workflowType } : {}),
-        ...(stageNo !== undefined ? { workflow_stage_no: stageNo } : {}),
+        ...(workflowName !== undefined ? { workflow_name: workflowName } : {}),
       }),
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({ queryKey: ["projects"] });

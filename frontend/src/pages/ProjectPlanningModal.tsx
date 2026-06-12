@@ -143,7 +143,7 @@ export function ProjectPlanningModal({ projectId, open, onClose, onApproved }: P
         setProject(proj)
         setPreviewComposition(proj.composition ?? 'Medium')
         const projectCode = proj.code || proj.project_code || ''
-        const workflowName = proj.workflow_type || proj.workflow_name || ''
+        const workflowName = proj.workflow_name || ''
 
         // Ensure WMS chapter_details are in sync with CMS chapters
         await import('@/api/client').then(m => m.default.post(`/projects/${projectId}/sync-chapters`)).catch(() => undefined)
@@ -304,7 +304,7 @@ export function ProjectPlanningModal({ projectId, open, onClose, onApproved }: P
 
     // Steps 2-5 run independently — a failure in one does not block the rest
     const prjCode = project.code || project.project_code
-    const wfName = project.workflow_type || project.workflow_name
+    const wfName = project.workflow_name
     if (prjCode) {
       // Step 2 — chapters → In-progress
       chaptersApi.bulkUpdateStatus(prjCode, 'In-progress')
@@ -407,9 +407,9 @@ export function ProjectPlanningModal({ projectId, open, onClose, onApproved }: P
                 {project.project_title || project.title || project.code || project.project_code || `Project #${project.id}`}
               </p>
               <div className="flex items-center gap-2 mt-1">
-                {(project.workflow_type || project.workflow_name) && (
+                {project.workflow_name && (
                   <span className="inline-flex items-center gap-1 text-xs bg-accent text-primary border border-primary/20 rounded-md px-2 py-0.5 font-medium">
-                    <Layers size={10} /> {project.workflow_type || project.workflow_name}
+                    <Layers size={10} /> {project.workflow_name}
                   </span>
                 )}
                 <span className="text-xs text-muted">{chapters.length} chapter{chapters.length !== 1 ? 's' : ''}</span>
