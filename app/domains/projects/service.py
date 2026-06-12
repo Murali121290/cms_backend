@@ -85,7 +85,6 @@ def create_project_with_initial_files(
             title=title,
             code=code,
             xml_standard=xml_standard,
-            team="General",
         )
         db_project = create_project(db, new_project)
 
@@ -123,7 +122,6 @@ def create_project_with_initial_files(
         title=title,
         code=code,
         xml_standard=xml_standard,
-        team="General",
     )
     db_project = create_project(db, new_project)
 

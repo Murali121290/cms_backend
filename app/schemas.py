@@ -7,7 +7,6 @@ class UserCreate(BaseModel):
     password: str
 
 class ProjectCreate(BaseModel):
-    team: Optional[str] = "General"
     code: str
     title: str
     xml_standard: str

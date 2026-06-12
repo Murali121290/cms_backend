@@ -100,11 +100,9 @@ class ProjectSummary(BaseModel):
     client_name: str | None = None
     xml_standard: str
     status: str
-    team: str | None = None
     chapter_count: int
     file_count: int
-    workflow_type: str | None = None
-    workflow_stage_no: str | None = None
+    workflow_name: str | None = None
     # WMS project fields
     division_code: str | None = None
     customer_contact: str | None = None
@@ -418,9 +416,7 @@ class ProjectBootstrapResponse(BaseModel):
 
 
 class ProjectWorkflowUpdateRequest(BaseModel):
-    workflow_type: str | None = None
-    workflow_stage_no: str | None = None
-
+    workflow_name: str | None = None
 
 class ProjectWorkflowUpdateResponse(BaseModel):
     status: Literal["ok"] = "ok"
@@ -783,10 +779,8 @@ class ReferenceSaveResponse(BaseModel):
 
 class ProjectUpdateRequest(BaseModel):
     status: str | None = None
-    workflow_type: str | None = None
-    workflow_stage_no: str | None = None
-    client_id: int | None = None
     workflow_name: str | None = None
+    client_id: int | None = None
     project_manager: str | None = None
     priority: str | None = None
     composition: str | None = None
