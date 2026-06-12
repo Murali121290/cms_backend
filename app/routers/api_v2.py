@@ -854,8 +854,8 @@ def api_v2_project_bootstrap(
 
     chapters = (
         db.query(models.Chapter)
-        .filter(models.Chapter.project_id == project.id)
-        .order_by(models.Chapter.number.asc())
+        .filter(models.Chapter.project == project.project_code)
+        .order_by(models.Chapter.chapters.asc())
         .all()
     )
     ingested_files = (
@@ -1888,7 +1888,7 @@ def api_v2_upload_zip(
         xml_list = []
         docs_list = []
         
-        initial_chapters_count = db.query(models.Chapter).filter(models.Chapter.project_id == project.id).count()
+        initial_chapters_count = db.query(models.Chapter).filter(models.Chapter.project == project.project_code).count()
 
         for root, _, filenames in os.walk(temp_dir):
             for fname in filenames:
@@ -1910,14 +1910,21 @@ def api_v2_upload_zip(
                 chapter = None
                 if chapter_no_str:
                     chapter = db.query(models.Chapter).filter(
-                        models.Chapter.project_id == project.id,
-                        models.Chapter.number == chapter_no_str,
+                        models.Chapter.project == project.project_code,
+                        models.Chapter.chapters == chapter_no_str,
                     ).first()
                     if not chapter:
                         chapter = models.Chapter(
-                            project_id=project.id,
-                            number=chapter_no_str,
-                            title=f"Chapter {chapter_no_str}",
+                            client=project.client_name or "",
+                            project=project.project_code,
+                            chapters=chapter_no_str,
+                            chapter_title=f"Chapter {chapter_no_str}",
+                            workflow=project.workflow_name or "",
+                            status="Received",
+                            complexity_level=getattr(project, "composition", None) or "Medium",
+                            stage_level=1,
+                            published_status="Draft",
+                            priority=getattr(project, "priority", None) or "Normal",
                         )
                         db.add(chapter)
                         db.commit()
@@ -1925,7 +1932,7 @@ def api_v2_upload_zip(
 
 
                 if chapter:
-                    dest_dir = os.path.join(file_service.UPLOAD_DIR, project.code, chapter.number, category)
+                    dest_dir = os.path.join(file_service.UPLOAD_DIR, project.code, chapter.chapters, category)
                 else:
                     dest_dir = os.path.join(file_service.UPLOAD_DIR, project.code, "project_files", category)
 
@@ -1987,17 +1994,17 @@ def api_v2_upload_zip(
 
         # Sync: ensure every CMS chapter has a matching WMS ChapterInfo record
         from app.domains.workflow.models import ChapterInfo as _ChapterInfo
-        all_cms_chapters = db.query(models.Chapter).filter(models.Chapter.project_id == project.id).all()
+        all_cms_chapters = db.query(models.Chapter).filter(models.Chapter.project == project.project_code).all()
         existing_ci_nums = {
             ci.chapters for ci in db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code).all()
         }
         for _ch in all_cms_chapters:
-            if _ch.number and _ch.number not in existing_ci_nums:
+            if _ch.chapters and _ch.chapters not in existing_ci_nums:
                 db.add(_ChapterInfo(
                     client=project.client_name or "",
                     project=project.code,
-                    chapters=_ch.number,
-                    chapter_title=_ch.title or f"Chapter {_ch.number}",
+                    chapters=_ch.chapters,
+                    chapter_title=_ch.chapter_title or f"Chapter {_ch.chapters}",
                     workflow=project.workflow_name or "",
                     status="Received",
                     complexity_level=getattr(project, "composition", None) or "Medium",
@@ -2006,10 +2013,10 @@ def api_v2_upload_zip(
                     priority=getattr(project, "priority", None) or "Normal",
                     project_manager_name=getattr(project, "project_manager", None) or None,
                 ))
-                existing_ci_nums.add(_ch.number)
+                existing_ci_nums.add(_ch.chapters)
         db.commit()
 
-        final_chapters_count = db.query(models.Chapter).filter(models.Chapter.project_id == project.id).count()
+        final_chapters_count = db.query(models.Chapter).filter(models.Chapter.project == project.project_code).count()
         chapters_inserted = final_chapters_count - initial_chapters_count
         unique_extracted_chapters = len({c.chapter_no for c in chapters_list if c.chapter_no is not None})
 
@@ -4304,16 +4311,16 @@ def api_v2_sync_chapters(project_id: int, db: Session = Depends(database.get_db)
     project = db.query(models.Project).filter(models.Project.id == project_id).first()
     if not project:
         return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="PROJECT_NOT_FOUND", message="Project not found.")
-    cms_chapters = db.query(models.Chapter).filter(models.Chapter.project_id == project.id).all()
+    cms_chapters = db.query(models.Chapter).filter(models.Chapter.project == project.project_code).all()
     existing_nums = {ci.chapters for ci in db.query(ChapterInfo).filter(ChapterInfo.project == project.code).all()}
     created = 0
     for ch in cms_chapters:
-        if ch.number and ch.number not in existing_nums:
+        if ch.chapters and ch.chapters not in existing_nums:
             db.add(ChapterInfo(
                 client=project.client_name or "",
                 project=project.code,
-                chapters=ch.number,
-                chapter_title=ch.title or f"Chapter {ch.number}",
+                chapters=ch.chapters,
+                chapter_title=ch.chapter_title or f"Chapter {ch.chapters}",
                 workflow=project.workflow_name or "",
                 status="Received",
                 complexity_level=getattr(project, "composition", None) or "Medium",
@@ -4322,7 +4329,7 @@ def api_v2_sync_chapters(project_id: int, db: Session = Depends(database.get_db)
                 priority=getattr(project, "priority", None) or "Normal",
                 project_manager_name=getattr(project, "project_manager", None) or None,
             ))
-            existing_nums.add(ch.number)
+            existing_nums.add(ch.chapters)
             created += 1
     db.commit()
     return {"synced": created, "total_chapters": len(cms_chapters)}

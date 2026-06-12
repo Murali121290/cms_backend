@@ -138,7 +138,7 @@ class Project(Base):
 
     # ORM Relationships
     files = relationship("File", back_populates="project")
-    chapters = relationship("Chapter", back_populates="project", cascade="all, delete-orphan")
+    chapters = relationship("ChapterInfo", primaryjoin="Project.project_code == ChapterInfo.project", foreign_keys="[ChapterInfo.project]", back_populates="project_rel", cascade="all, delete-orphan")
     stylesheets = relationship("ProjectStylesheet", back_populates="project", cascade="all, delete-orphan")
     client = relationship("Client", back_populates="projects")
 
@@ -147,21 +147,11 @@ class Project(Base):
     code = synonym("project_code")
     chapter_count_wms = synonym("chapter_count")
 
-class Chapter(Base):
-    __tablename__ = "chapters"
-    id = Column(Integer, primary_key=True, index=True)
-    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), index=True)
-    number = Column(String, index=True)
-    title = Column(String)
-    
-    project = relationship("Project", back_populates="chapters")
-    files = relationship("File", back_populates="chapter")
-
 class File(Base):
     __tablename__ = "files"
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), index=True)
-    chapter_id = Column(Integer, ForeignKey("chapters.id", ondelete="CASCADE"), nullable=True, index=True)
+    chapter_id = Column(BigInteger, ForeignKey("chapter_details.id", ondelete="CASCADE"), nullable=True, index=True)
     filename = Column(String, index=True)
     file_type = Column(String)
     category = Column(String, default="Manuscript") # Art, Manuscript, InDesign, Proof, XML
@@ -170,7 +160,7 @@ class File(Base):
     version = Column(Integer, default=1)
     
     project = relationship("Project", back_populates="files")
-    chapter = relationship("Chapter", back_populates="files")
+    chapter = relationship("ChapterInfo", back_populates="files")
     
     # Checkout Logic
     is_checked_out = Column(Boolean, default=False)
@@ -179,6 +169,7 @@ class File(Base):
     
     checked_out_by = relationship("User", foreign_keys=[checked_out_by_id])
     versions = relationship("FileVersion", back_populates="original_file", cascade="all, delete-orphan")
+
 
 class FileVersion(Base):
     __tablename__ = "file_versions"
@@ -218,6 +209,9 @@ from app.domains.workflow.models import (  # noqa: F401
     WorkflowMaster,
     ChapterInfo,
 )
+
+Chapter = ChapterInfo
+
 
 
 

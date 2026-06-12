@@ -14,7 +14,13 @@ def create_chapter(db: Session, *, project_id: int, number: str, title: str, upl
     if not project:
         return {"project": None, "chapter": None}
 
-    new_chapter = models.Chapter(project_id=project_id, number=number, title=title)
+    new_chapter = models.ChapterInfo(
+        client=project.division_code or "",
+        project=project.project_code or "",
+        chapters=number,
+        chapter_title=title,
+        status="In-progress"
+    )
     db.add(new_chapter)
     db.commit()
     db.refresh(new_chapter)
@@ -35,15 +41,15 @@ def rename_chapter(
     title: str,
     upload_dir: str,
 ):
-    chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id).first()
+    chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == chapter_id).first()
     project = db.query(models.Project).filter(models.Project.id == project_id).first()
 
     if not chapter or not project:
         return {"project": project, "chapter": chapter}
 
-    old_number = chapter.number
-    chapter.number = number
-    chapter.title = title
+    old_number = chapter.chapters
+    chapter.chapters = number
+    chapter.chapter_title = title
     db.commit()
 
     if old_number != number:
@@ -56,13 +62,13 @@ def rename_chapter(
 
 
 def delete_chapter_primary(db: Session, *, project_id: int, chapter_id: int, upload_dir: str):
-    chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id).first()
+    chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == chapter_id).first()
     project = db.query(models.Project).filter(models.Project.id == project_id).first()
 
     if not chapter or not project:
         return {"project": project, "chapter": chapter}
 
-    chapter_dir = f"{upload_dir}/{project.code}/{chapter.number}"
+    chapter_dir = f"{upload_dir}/{project.code}/{chapter.chapters}"
     if os.path.exists(chapter_dir):
         shutil.rmtree(chapter_dir)
 
@@ -73,15 +79,16 @@ def delete_chapter_primary(db: Session, *, project_id: int, chapter_id: int, upl
 
 def delete_chapter_secondary(db: Session, *, project_id: int, chapter_id: int, upload_dir: str):
     project = db.query(models.Project).filter(models.Project.id == project_id).first()
-    chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id).first()
+    chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == chapter_id).first()
 
-    if not chapter:
+    if not chapter or not project:
         return {"project": project, "chapter": chapter}
 
-    chapter_path = f"{upload_dir}/{project.code}/{chapter.number}"
+    chapter_path = f"{upload_dir}/{project.code}/{chapter.chapters}"
     if os.path.exists(chapter_path):
         shutil.rmtree(chapter_path, ignore_errors=True)
 
     db.delete(chapter)
     db.commit()
     return {"project": project, "chapter": chapter}
+

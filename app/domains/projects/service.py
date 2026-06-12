@@ -98,10 +98,12 @@ def create_project_with_initial_files(
 
         for i in range(1, chapter_count + 1):
             chapter_number = f"{i:02d}"
-            chapter = models.Chapter(
-                project_id=db_project.id,
-                number=chapter_number,
-                title=f"Chapter {chapter_number}",
+            chapter = models.ChapterInfo(
+                client=db_project.division_code or "",
+                project=db_project.project_code or "",
+                chapters=chapter_number,
+                chapter_title=f"Chapter {chapter_number}",
+                status="In-progress"
             )
             db.add(chapter)
             db.commit()
@@ -136,10 +138,12 @@ def create_project_with_initial_files(
     for plan_item in upload_plan:
         chapter_number = plan_item["chapter_number"]
         chapter_folder_name = plan_item["folder_name"]
-        chapter = models.Chapter(
-            project_id=db_project.id,
-            number=chapter_number,
-            title=plan_item["safe_stem"],
+        chapter = models.ChapterInfo(
+            client=db_project.division_code or "",
+            project=db_project.project_code or "",
+            chapters=chapter_number,
+            chapter_title=plan_item["safe_stem"],
+            status="In-progress"
         )
         db.add(chapter)
         db.commit()
