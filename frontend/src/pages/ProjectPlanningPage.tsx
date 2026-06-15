@@ -93,7 +93,7 @@ export function ProjectPlanningPage() {
         const proj = response.project as unknown as Project
         setProject(proj)
         const projectCode = proj.code || proj.project_code || ''
-        const workflowName = proj.workflow_type || proj.workflow_name || ''
+        const workflowName = proj.workflow_name || ''
 
         // Ensure WMS chapter_details exist for this project
         await import('@/api/client').then(m => m.default.post(`/projects/${id}/sync-chapters`)).catch(() => undefined)
@@ -172,7 +172,7 @@ export function ProjectPlanningPage() {
             </h1>
             <p className="text-xs text-muted flex items-center gap-1.5 mt-0.5">
               <Layers size={11} />
-              {project.workflow_type || project.workflow_name || 'No workflow'} · Project Planning
+              {project.workflow_name || 'No workflow'} · Project Planning
             </p>
           </div>
         </div>

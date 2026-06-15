@@ -1,6 +1,6 @@
-from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, DateTime, Date, JSON, Enum as SQLEnum, TypeDecorator
-from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
-from sqlalchemy.orm import relationship
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, DateTime, Date, JSON, Enum as SQLEnum, TypeDecorator, BigInteger, Text, func
+from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY, JSONB
+from sqlalchemy.orm import relationship, synonym
 from datetime import datetime
 from app.database import Base
 import enum
@@ -20,96 +20,138 @@ class WorkflowStatus(str, enum.Enum):
     XML_GENERATED = "XML_GENERATED"
     PUBLISHED = "PUBLISHED"
 
-class Role(Base):
-    __tablename__ = "roles"
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, index=True)
-    description = Column(String)
-    users = relationship("User", secondary="user_roles", back_populates="roles")
+class CompatibilityRoleItem:
+    def __init__(self, name: str, role_id: int = 1):
+        self.name = name
+        self.id = role_id
 
-class Team(Base):
-    __tablename__ = "teams"
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, index=True)
-    description = Column(String, nullable=True)
-    owner_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    
-    users = relationship("User", back_populates="team", foreign_keys="[User.team_id]")
-    projects = relationship("Project", back_populates="team")
+    def __repr__(self):
+        return f"<CompatibilityRoleItem name={self.name}>"
+
+    def __eq__(self, other):
+        if isinstance(other, str):
+            return self.name.lower() == other.lower()
+        if isinstance(other, CompatibilityRoleItem):
+            return self.name.lower() == other.name.lower()
+        return False
+
+class CompatibilityRolesList(list):
+    def __contains__(self, item):
+        if isinstance(item, str):
+            return any(r.name.lower() == item.lower() for r in self)
+        return super().__contains__(item)
+
+ROLE_MAP = {
+    "admin": "Admin",
+    "viewer": "Viewer",
+    "manager": "ProjectManager",
+    "copyeditor": "CopyEditor",
+    "technical_copyeditor": "TechnicalCopyEditor",
+    "typesetter": "Typesetter",
+    "pereditor": "PreEditor",
+    "qa_reviewer": "QAReviewer",
+    "operations_manager": "OperationsManager",
+    "finance_analyst": "FinanceAnalyst",
+    "support": "Support",
+    "developer": "Developer",
+    "analyst": "Analyst",
+    "designer": "Designer"
+}
+
+def map_role_to_capitalized(role_name: str) -> str:
+    if not role_name:
+        return "Viewer"
+    return ROLE_MAP.get(role_name.lower(), role_name.capitalize())
+
+
+class DialectJSONB(TypeDecorator):
+    impl = JSON
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(JSONB)
+        return dialect.type_descriptor(JSON)
+
 
 class User(Base):
     __tablename__ = "users"
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True)
-    email = Column(String, unique=True, index=True)
-    password_hash = Column(String)
-    is_active = Column(Boolean, default=True)
-    team_id = Column(Integer, ForeignKey("teams.id"), nullable=True)
-    customer_access = Column(DialectArray, nullable=True, default=list)
+    id              = Column(BigInteger, primary_key=True, autoincrement=True)
+    username        = Column(String(150),  unique=True, nullable=False, index=True)
+    email           = Column(String(255),  unique=True, nullable=False, index=True)
+    password_hash   = Column(Text,         nullable=False)
+    role            = Column(String(50),   nullable=False)
+    team            = Column(String(50),   nullable=False)
+    customer_access = Column(DialectJSONB,  nullable=False, default=list)
+    active_status   = Column(Boolean,      nullable=False, default=True)
+    created_at      = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at      = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
-    team = relationship("Team", back_populates="users", foreign_keys=[team_id])
-    roles = relationship("Role", secondary="user_roles", back_populates="users")
+    is_active       = synonym("active_status")
 
-class UserRole(Base):
-    __tablename__ = "user_roles"
-    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
-    role_id = Column(Integer, ForeignKey("roles.id"), primary_key=True)
+    @property
+    def roles(self):
+        if not self.role:
+            return CompatibilityRolesList()
+        cap_role = map_role_to_capitalized(self.role)
+        role_id = 1
+        if self.role.lower() == "admin":
+            role_id = 4
+        elif self.role.lower() == "viewer":
+            role_id = 1
+        elif self.role.lower() == "manager":
+            role_id = 3
+        return CompatibilityRolesList([CompatibilityRoleItem(cap_role, role_id)])
 
 class Project(Base):
     __tablename__ = "projects"
-    id = Column(Integer, primary_key=True, index=True)
-    title = Column(String, index=True)
-    code = Column(String, unique=True, index=True)
-    client_id = Column(Integer, ForeignKey("clients.id", ondelete="SET NULL"), nullable=True)
-    client_name = Column(String, nullable=True)
-    xml_standard = Column(String)
-    status = Column(String, default="RECEIVED")
-    team_id = Column(Integer, ForeignKey("teams.id"))
-    workflow_type = Column(String, nullable=True)
-    workflow_stage_no = Column(String, nullable=True)
-    # WMS project fields
-    division_code = Column(String, nullable=True)
-    customer_contact = Column(String, nullable=True)
-    category = Column(String, nullable=True)
-    composition = Column(String, nullable=True)
-    project_manager = Column(String, nullable=True)
-    sales_person = Column(String, nullable=True)
-    priority = Column(String, nullable=True)
-    edition = Column(String, nullable=True)
-    color = Column(String, nullable=True)
-    trim_size = Column(String, nullable=True)
-    copyright_year = Column(Integer, nullable=True)
-    manuscript_pages = Column(Integer, nullable=True)
-    estimated_pages = Column(Integer, nullable=True)
-    actual_pages = Column(Integer, nullable=True)
-    chapter_count_wms = Column(Integer, nullable=True)
-    isbn_no = Column(String, nullable=True)
-    billing_location = Column(String, nullable=True)
-    due_date = Column(Date, nullable=True)
-    file_details = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=True)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
 
-    team = relationship("Team", back_populates="projects")
+    id               = Column(Integer,     primary_key=True, autoincrement=True)
+    client_id        = Column(BigInteger,  ForeignKey("clients.id", ondelete="CASCADE"), nullable=True)
+    project_code     = Column(String(100), unique=True, nullable=True, index=True)
+    client_name      = Column(String,      nullable=True)
+    xml_standard     = Column(String,      nullable=True)
+    division_code    = Column(String(100), nullable=True)
+    customer_contact = Column(String(255), nullable=True)
+    category         = Column(String(100), nullable=True)
+    composition      = Column(String(50),  nullable=True)
+    workflow_name    = Column(String(255), nullable=True)
+    status           = Column(String(50),  nullable=True)
+    project_manager  = Column(String(150), ForeignKey("users.username", ondelete="SET NULL", onupdate="CASCADE"), nullable=True)
+    sales_person     = Column(String(255), nullable=True)
+    priority         = Column(String(50),  nullable=True)
+    project_title    = Column(Text,        nullable=True)
+    edition          = Column(String(50),  nullable=True)
+    color            = Column(String(100), nullable=True)
+    trim_size        = Column(String(50),  nullable=True)
+    copyright_year   = Column(Integer,     nullable=True)
+    manuscript_pages = Column(Integer,     nullable=True)
+    estimated_pages  = Column(Integer,     nullable=True)
+    actual_pages     = Column(Integer,     nullable=False, default=0)
+    chapter_count    = Column(Integer,     nullable=True)
+    isbn_no          = Column(String(20),  nullable=True)
+    billing_location = Column(String(255), nullable=True)
+    due_date         = Column(Date,        nullable=True)
+    file_details     = Column(JSON,        nullable=True)
+    created_at       = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at       = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    # ORM Relationships
     files = relationship("File", back_populates="project")
-    chapters = relationship("Chapter", back_populates="project", cascade="all, delete-orphan")
+    chapters = relationship("ChapterInfo", primaryjoin="Project.project_code == ChapterInfo.project", foreign_keys="[ChapterInfo.project]", back_populates="project_rel", cascade="all, delete-orphan")
     stylesheets = relationship("ProjectStylesheet", back_populates="project", cascade="all, delete-orphan")
+    client = relationship("Client", back_populates="projects")
 
-class Chapter(Base):
-    __tablename__ = "chapters"
-    id = Column(Integer, primary_key=True, index=True)
-    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), index=True)
-    number = Column(String, index=True)
-    title = Column(String)
-    
-    project = relationship("Project", back_populates="chapters")
-    files = relationship("File", back_populates="chapter")
+    # SQLAlchemy Synonyms for backward compatibility
+    title = synonym("project_title")
+    code = synonym("project_code")
+    chapter_count_wms = synonym("chapter_count")
 
 class File(Base):
     __tablename__ = "files"
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), index=True)
-    chapter_id = Column(Integer, ForeignKey("chapters.id", ondelete="CASCADE"), nullable=True, index=True)
+    chapter_id = Column(BigInteger, ForeignKey("chapter_details.id", ondelete="CASCADE"), nullable=True, index=True)
     filename = Column(String, index=True)
     file_type = Column(String)
     category = Column(String, default="Manuscript") # Art, Manuscript, InDesign, Proof, XML
@@ -118,7 +160,7 @@ class File(Base):
     version = Column(Integer, default=1)
     
     project = relationship("Project", back_populates="files")
-    chapter = relationship("Chapter", back_populates="files")
+    chapter = relationship("ChapterInfo", back_populates="files")
     
     # Checkout Logic
     is_checked_out = Column(Boolean, default=False)
@@ -127,6 +169,7 @@ class File(Base):
     
     checked_out_by = relationship("User", foreign_keys=[checked_out_by_id])
     versions = relationship("FileVersion", back_populates="original_file", cascade="all, delete-orphan")
+
 
 class FileVersion(Base):
     __tablename__ = "file_versions"
@@ -166,6 +209,9 @@ from app.domains.workflow.models import (  # noqa: F401
     WorkflowMaster,
     ChapterInfo,
 )
+
+Chapter = ChapterInfo
+
 
 
 

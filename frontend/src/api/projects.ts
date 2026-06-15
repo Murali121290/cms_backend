@@ -18,7 +18,7 @@ export interface Project extends ProjectSummary {
   // WMS compatibility fields
   client_id: number | null
   project_code?: string | null
-  customer_name?: string | null
+  client_name?: string | null
   division_code?: string | null
   customer_contact?: string | null
   category?: string | null
@@ -46,7 +46,7 @@ export interface Project extends ProjectSummary {
 export interface ProjectCreate {
   client_id?: number | null
   project_code?: string | null
-  customer_name?: string | null
+  client_name?: string | null
   division_code?: string | null
   customer_contact?: string | null
   category?: string | null

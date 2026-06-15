@@ -27,7 +27,7 @@ def get_project_chapters_page_data(db: Session, project_id: int):
 
 def get_chapter_detail_page_data(db: Session, project_id: int, chapter_id: int):
     project = db.query(models.Project).filter(models.Project.id == project_id).first()
-    chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id).first()
+    chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == chapter_id).first()
     files = db.query(models.File).filter(models.File.chapter_id == chapter_id).all()
 
     return {

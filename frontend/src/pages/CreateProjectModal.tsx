@@ -248,7 +248,7 @@ export function CreateProjectModal({ open, onClose, onCreated, defaultClientId }
           if (client) {
             setForm(f => ({
               ...f,
-              customer_name:    client.name_company ?? client.company ?? [client.first_name, client.surname].filter(Boolean).join(' ') ?? '',
+              client_name:    client.name_company ?? client.company ?? [client.first_name, client.surname].filter(Boolean).join(' ') ?? '',
               division_code:    client.division ?? '',
               customer_contact: client.email ?? client.phone_main ?? '',
             }))
@@ -270,7 +270,7 @@ export function CreateProjectModal({ open, onClose, onCreated, defaultClientId }
     set('client_id', id || null)
     const c = clients.find(x => x.id === id)
     if (c) {
-      set('customer_name',    c.name_company ?? c.company ?? [c.first_name, c.surname].filter(Boolean).join(' ') ?? '')
+      set('client_name',    c.name_company ?? c.company ?? [c.first_name, c.surname].filter(Boolean).join(' ') ?? '')
       set('division_code',    c.division ?? '')
       set('customer_contact', c.email ?? c.phone_main ?? '')
     }
@@ -324,19 +324,20 @@ export function CreateProjectModal({ open, onClose, onCreated, defaultClientId }
       const formData = new FormData()
       formData.append('code', form.project_code ?? '')
       formData.append('title', form.project_title ?? '')
-      if (form.customer_name) {
-        formData.append('client_name', form.customer_name)
+      if (form.client_name) {
+        formData.append('client_name', form.client_name)
       }
       formData.append('xml_standard', form.xml_standard ?? 'NLM')
       formData.append('chapter_count', String(form.chapter_count ?? 1))
       if (form.workflow_name) {
-        formData.append('workflow_type', form.workflow_name)
+        formData.append('workflow_name', form.workflow_name)
       }
+
 
       const response = await projectsApi.create(formData)
 
       if (zipFile && response.project.code) {
-        const customerCode = form.division_code || form.customer_name || 'unknown'
+        const customerCode = form.division_code || form.client_name || 'unknown'
         try {
           const result = await uploadsApi.uploadZip(customerCode, response.project.code, response.project.id, zipFile)
           toast.success(`ZIP processed — ${result.total_chapters} chapter(s) detected`)
@@ -448,7 +449,7 @@ export function CreateProjectModal({ open, onClose, onCreated, defaultClientId }
 
           <Input
             label="Customer Name"
-            value={form.customer_name ?? ''}
+            value={form.client_name ?? ''}
             readOnly
             onChange={() => {}}
             placeholder="Auto-filled from client"

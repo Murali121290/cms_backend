@@ -61,6 +61,7 @@ export const usersApi = {
       password: data.password,
       role_id: roleId,
       team_name: data.team,
+      customer_access: data.customer_access,
     })
     return mapUser(response.data.user)
   },
@@ -75,6 +76,11 @@ export const usersApi = {
 
     if (data.password) {
       await api.put(`/admin/users/${id}/password`, { new_password: data.password })
+    }
+
+    if (data.customer_access !== undefined) {
+      const res = await api.patch<{ user: any }>(`/admin/users/${id}`, { customer_access: data.customer_access })
+      updatedUser = res.data.user
     }
 
     if (data.role || data.team) {

@@ -42,7 +42,7 @@ def create_file_record(db: Session, project_id: int, file: UploadFile):
 
 def get_project_and_chapter(db: Session, *, project_id: int, chapter_id: int):
     project = db.query(models.Project).filter(models.Project.id == project_id).first()
-    chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id).first()
+    chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == chapter_id).first()
     return project, chapter
 
 

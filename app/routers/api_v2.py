@@ -139,7 +139,7 @@ def _has_admin_or_pm_role(user: models.User):
 
 
 
-def _serialize_admin_role(role: models.Role):
+def _serialize_admin_role(role: Any):
     return schemas_v2.AdminRole(id=role.id, name=role.name, description=role.description)
 
 
@@ -150,7 +150,7 @@ def _serialize_admin_user(user: models.User):
         email=user.email,
         is_active=user.is_active,
         roles=[schemas_v2.AdminUserRole(id=role.id, name=role.name) for role in user.roles],
-        team=user.team.name if user.team else None,
+        team=user.team,
         customer_access=user.customer_access or [],
     )
 
@@ -180,15 +180,11 @@ def _serialize_project_summary(project: models.Project):
         project_title=project.title,
         client_id=project.client_id,
         client_name=project.client_name,
-        customer_name=project.client_name,
         xml_standard=project.xml_standard or "",
         status=project.status,
-        team_id=project.team_id,
         chapter_count=len(project.chapters),
         file_count=len(project.files),
-        workflow_type=getattr(project, "workflow_type", None),
-        workflow_name=getattr(project, "workflow_type", None),
-        workflow_stage_no=getattr(project, "workflow_stage_no", None),
+        workflow_name=project.workflow_name,
         division_code=getattr(project, "division_code", None),
         customer_contact=getattr(project, "customer_contact", None),
         category=getattr(project, "category", None),
@@ -792,7 +788,6 @@ def api_v2_project_bootstrap(
     client_name: str | None = Form(None),
     xml_standard: str = Form(...),
     chapter_count: int = Form(...),
-    workflow_type: str | None = Form(None),
     workflow_name: str | None = Form(None),
     division_code: str | None = Form(None),
     customer_contact: str | None = Form(None),
@@ -822,13 +817,13 @@ def api_v2_project_bootstrap(
             message="Authentication required.",
         )
 
-    if workflow_type:
+    if workflow_name:
         db_workflows = {w.workflow_name for w in db.query(models.WorkflowMaster).all()}
-        if workflow_type not in db_workflows and workflow_type not in _WORKFLOW_TYPE_IDS:
+        if workflow_name not in db_workflows and workflow_name not in _WORKFLOW_TYPE_IDS:
             return _error_response(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 code="INVALID_WORKFLOW_TYPE",
-                message=f"Unknown workflow type: {workflow_type}",
+                message=f"Unknown workflow type: {workflow_name}",
             )
 
     try:
@@ -859,8 +854,8 @@ def api_v2_project_bootstrap(
 
     chapters = (
         db.query(models.Chapter)
-        .filter(models.Chapter.project_id == project.id)
-        .order_by(models.Chapter.number.asc())
+        .filter(models.Chapter.project == project.project_code)
+        .order_by(models.Chapter.chapters.asc())
         .all()
     )
     ingested_files = (
@@ -869,10 +864,8 @@ def api_v2_project_bootstrap(
         .order_by(models.File.id.asc())
         .all()
     )
-    effective_workflow = workflow_name or workflow_type
-    if effective_workflow:
-        project.workflow_type = effective_workflow
-        project.workflow_stage_no = "01"
+    if workflow_name:
+        project.workflow_name = workflow_name
 
     if client_id is not None:
         project.client_id = client_id
@@ -911,7 +904,7 @@ def api_v2_project_bootstrap(
                 project=project.code,
                 chapters=_ch.number,
                 chapter_title=_ch.title or f"Chapter {_ch.number}",
-                workflow=getattr(project, "workflow_type", None) or "",
+                workflow=project.workflow_name or "",
                 status="Received",
                 complexity_level=getattr(project, "composition", None) or "Medium",
                 stage_level=1,
@@ -955,12 +948,8 @@ def api_v2_update_project(
 
     if payload.status is not None:
         project.status = payload.status
-    if payload.workflow_type is not None:
-        project.workflow_type = payload.workflow_type
-    if payload.workflow_stage_no is not None:
-        project.workflow_stage_no = payload.workflow_stage_no
     if payload.workflow_name is not None:
-        project.workflow_type = payload.workflow_name
+        project.workflow_name = payload.workflow_name
     if payload.client_id is not None:
         project.client_id = payload.client_id
         from app.domains.clients.models import Client as _Client
@@ -1079,24 +1068,18 @@ def api_v2_update_project_workflow(
             message="Project not found.",
         )
 
-    if payload.workflow_type is not None:
+    if payload.workflow_name is not None:
         db_workflows = {w.workflow_name for w in db.query(models.WorkflowMaster).all()}
-        if payload.workflow_type not in db_workflows and payload.workflow_type not in _WORKFLOW_TYPE_IDS:
+        if payload.workflow_name not in db_workflows and payload.workflow_name not in _WORKFLOW_TYPE_IDS:
             return _error_response(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 code="INVALID_WORKFLOW_TYPE",
-                message=f"Unknown workflow type: {payload.workflow_type}",
+                message=f"Unknown workflow type: {payload.workflow_name}",
             )
 
-    # Setting a workflow type (when none was set) seeds the first stage.
-    if payload.workflow_type is not None:
-        is_new_assignment = project.workflow_type != payload.workflow_type
-        project.workflow_type = payload.workflow_type
-        if is_new_assignment and payload.workflow_stage_no is None:
-            project.workflow_stage_no = "01"
-
-    if payload.workflow_stage_no is not None:
-        project.workflow_stage_no = payload.workflow_stage_no
+    # Setting a workflow name
+    if payload.workflow_name is not None:
+        project.workflow_name = payload.workflow_name
 
     db.commit()
     db.refresh(project)
@@ -1233,6 +1216,7 @@ def api_v2_ia_template(
             code="AUTH_REQUIRED",
             message="Authentication required.",
         )
+    # pyrefly: ignore [missing-import]
     from app.data.ia_template_rows import IA_TEMPLATE_ROWS
     return schemas_v2.IATemplateResponse(
         rows=[
@@ -1904,7 +1888,7 @@ def api_v2_upload_zip(
         xml_list = []
         docs_list = []
         
-        initial_chapters_count = db.query(models.Chapter).filter(models.Chapter.project_id == project.id).count()
+        initial_chapters_count = db.query(models.Chapter).filter(models.Chapter.project == project.project_code).count()
 
         for root, _, filenames in os.walk(temp_dir):
             for fname in filenames:
@@ -1926,14 +1910,21 @@ def api_v2_upload_zip(
                 chapter = None
                 if chapter_no_str:
                     chapter = db.query(models.Chapter).filter(
-                        models.Chapter.project_id == project.id,
-                        models.Chapter.number == chapter_no_str,
+                        models.Chapter.project == project.project_code,
+                        models.Chapter.chapters == chapter_no_str,
                     ).first()
                     if not chapter:
                         chapter = models.Chapter(
-                            project_id=project.id,
-                            number=chapter_no_str,
-                            title=f"Chapter {chapter_no_str}",
+                            client=project.client_name or "",
+                            project=project.project_code,
+                            chapters=chapter_no_str,
+                            chapter_title=f"Chapter {chapter_no_str}",
+                            workflow=project.workflow_name or "",
+                            status="Received",
+                            complexity_level=getattr(project, "composition", None) or "Medium",
+                            stage_level=1,
+                            published_status="Draft",
+                            priority=getattr(project, "priority", None) or "Normal",
                         )
                         db.add(chapter)
                         db.commit()
@@ -1941,7 +1932,7 @@ def api_v2_upload_zip(
 
 
                 if chapter:
-                    dest_dir = os.path.join(file_service.UPLOAD_DIR, project.code, chapter.number, category)
+                    dest_dir = os.path.join(file_service.UPLOAD_DIR, project.code, chapter.chapters, category)
                 else:
                     dest_dir = os.path.join(file_service.UPLOAD_DIR, project.code, "project_files", category)
 
@@ -2003,18 +1994,18 @@ def api_v2_upload_zip(
 
         # Sync: ensure every CMS chapter has a matching WMS ChapterInfo record
         from app.domains.workflow.models import ChapterInfo as _ChapterInfo
-        all_cms_chapters = db.query(models.Chapter).filter(models.Chapter.project_id == project.id).all()
+        all_cms_chapters = db.query(models.Chapter).filter(models.Chapter.project == project.project_code).all()
         existing_ci_nums = {
             ci.chapters for ci in db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code).all()
         }
         for _ch in all_cms_chapters:
-            if _ch.number and _ch.number not in existing_ci_nums:
+            if _ch.chapters and _ch.chapters not in existing_ci_nums:
                 db.add(_ChapterInfo(
                     client=project.client_name or "",
                     project=project.code,
-                    chapters=_ch.number,
-                    chapter_title=_ch.title or f"Chapter {_ch.number}",
-                    workflow=getattr(project, "workflow_type", None) or "",
+                    chapters=_ch.chapters,
+                    chapter_title=_ch.chapter_title or f"Chapter {_ch.chapters}",
+                    workflow=project.workflow_name or "",
                     status="Received",
                     complexity_level=getattr(project, "composition", None) or "Medium",
                     stage_level=1,
@@ -2022,10 +2013,10 @@ def api_v2_upload_zip(
                     priority=getattr(project, "priority", None) or "Normal",
                     project_manager_name=getattr(project, "project_manager", None) or None,
                 ))
-                existing_ci_nums.add(_ch.number)
+                existing_ci_nums.add(_ch.chapters)
         db.commit()
 
-        final_chapters_count = db.query(models.Chapter).filter(models.Chapter.project_id == project.id).count()
+        final_chapters_count = db.query(models.Chapter).filter(models.Chapter.project == project.project_code).count()
         chapters_inserted = final_chapters_count - initial_chapters_count
         unique_extracted_chapters = len({c.chapter_no for c in chapters_list if c.chapter_no is not None})
 
@@ -4325,17 +4316,17 @@ def api_v2_sync_chapters(project_id: int, db: Session = Depends(database.get_db)
     project = db.query(models.Project).filter(models.Project.id == project_id).first()
     if not project:
         return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="PROJECT_NOT_FOUND", message="Project not found.")
-    cms_chapters = db.query(models.Chapter).filter(models.Chapter.project_id == project.id).all()
+    cms_chapters = db.query(models.Chapter).filter(models.Chapter.project == project.project_code).all()
     existing_nums = {ci.chapters for ci in db.query(ChapterInfo).filter(ChapterInfo.project == project.code).all()}
     created = 0
     for ch in cms_chapters:
-        if ch.number and ch.number not in existing_nums:
+        if ch.chapters and ch.chapters not in existing_nums:
             db.add(ChapterInfo(
                 client=project.client_name or "",
                 project=project.code,
-                chapters=ch.number,
-                chapter_title=ch.title or f"Chapter {ch.number}",
-                workflow=getattr(project, "workflow_type", None) or "",
+                chapters=ch.chapters,
+                chapter_title=ch.chapter_title or f"Chapter {ch.chapters}",
+                workflow=project.workflow_name or "",
                 status="Received",
                 complexity_level=getattr(project, "composition", None) or "Medium",
                 stage_level=1,
@@ -4343,7 +4334,7 @@ def api_v2_sync_chapters(project_id: int, db: Session = Depends(database.get_db)
                 priority=getattr(project, "priority", None) or "Normal",
                 project_manager_name=getattr(project, "project_manager", None) or None,
             ))
-            existing_nums.add(ch.number)
+            existing_nums.add(ch.chapters)
             created += 1
     db.commit()
     return {"synced": created, "total_chapters": len(cms_chapters)}

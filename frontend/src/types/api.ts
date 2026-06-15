@@ -84,13 +84,9 @@ export interface ProjectSummary {
   team_id: number | null;
   chapter_count: number;
   file_count: number;
-  workflow_type: string | null;
-  workflow_stage_no: string | null;
-  // WMS aliases
+  workflow_name: string | null;
   project_code?: string | null;
   project_title?: string | null;
-  workflow_name?: string | null;
-  customer_name?: string | null;
   // WMS project fields
   division_code?: string | null;
   customer_contact?: string | null;

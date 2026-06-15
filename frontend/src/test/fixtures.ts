@@ -60,8 +60,8 @@ export function createProjectSummary(overrides: Partial<ProjectSummary> = {}): P
     team_id: null,
     chapter_count: 2,
     file_count: 3,
-    workflow_type: null,
-    workflow_stage_no: null,
+    workflow_name: null,
+
     ...overrides,
   };
 }

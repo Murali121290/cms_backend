@@ -1,4 +1,4 @@
-﻿import { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ChevronRight, GitBranch, LayoutGrid, ListChecks } from "lucide-react";
 
@@ -227,7 +227,7 @@ function TrackingTab() {
     const assigned: ProjectSummary[] = [];
     const unassigned: ProjectSummary[] = [];
     for (const p of projects) {
-      (p.workflow_type ? assigned : unassigned).push(p);
+      (p.workflow_name ? assigned : unassigned).push(p);
     }
     return { assigned, unassigned };
   }, [projects]);
@@ -270,82 +270,40 @@ function TrackingTab() {
 }
 
 function ProjectTrackingCard({ project }: { project: ProjectSummary }) {
-  const definition = getWorkflowDefinition(project.workflow_type);
-  const mutation = useUpdateProjectWorkflow();
-  const { addToast } = useToast();
+  const definition = getWorkflowDefinition(project.workflow_name);
 
   if (!definition) {
     return (
       <div className="bg-white rounded-lg shadow-card p-4 text-sm text-muted">
-        <span className="font-medium text-text">{project.code}</span> â€” unknown workflow{" "}
-        <Badge variant="warning">{project.workflow_type}</Badge>
+        <span className="font-medium text-text">{project.code}</span> — unknown workflow{" "}
+        <Badge variant="warning">{project.workflow_name}</Badge>
       </div>
     );
   }
-
-  const currentIdx = Math.max(
-    0,
-    definition.stages.findIndex((s) => s.no === project.workflow_stage_no),
-  );
-  const currentStage = definition.stages[currentIdx];
-  const progress = Math.round(((currentIdx + 1) / definition.stages.length) * 100);
-
-  function setStage(stageNo: string) {
-    mutation.mutate(
-      { projectId: project.id, stageNo },
-      {
-        onSuccess: () => addToast({ title: `${project.code} stage updated`, variant: "success" }),
-        onError: () => addToast({ title: "Failed to update stage", variant: "error" }),
-      },
-    );
-  }
-
-  const nextStage = definition.stages[currentIdx + 1];
 
   return (
     <section className="bg-white rounded-lg shadow-card p-5">
       <header className="flex items-start justify-between gap-4 mb-3 flex-wrap">
         <div className="min-w-0">
           <Link to={uiPaths.projectDetail(project.id)} className="text-sm font-semibold text-text hover:text-primary">
-            {project.code} Â· {project.title}
+            {project.code} · {project.title}
           </Link>
           <p className="text-xs text-muted mt-0.5">
-            <Badge variant="default">{definition.id} {definition.title}</Badge>{" "}
-            Stage {currentStage?.no} of {definition.stages.length}
+            <Badge variant="default">{definition.id} — {definition.title}</Badge>
           </p>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <select
-            value={currentStage?.no ?? ""}
-            onChange={(e) => setStage(e.target.value)}
-            disabled={mutation.isPending}
-            className="h-9 px-2 text-sm bg-white border border-border rounded-md text-text focus:outline-none focus:border-text"
-          >
-            {definition.stages.map((s) => (
-              <option key={s.no} value={s.no}>
-                {s.no} Â· {s.name}
-              </option>
-            ))}
-          </select>
-          {nextStage && (
-            <button
-              type="button"
-              onClick={() => setStage(nextStage.no)}
-              disabled={mutation.isPending}
-              className="h-9 px-3 text-sm font-medium rounded-md bg-primary text-white hover:bg-primary disabled:opacity-50 transition-colors"
-            >
-              Advance
-            </button>
-          )}
         </div>
       </header>
 
-      <ProgressBar value={progress} color="gold" size="md" showValue label={currentStage?.name} />
-
-      <p className="text-xs text-muted mt-2">
-        Owner: <span className="text-text font-medium">{currentStage?.owner}</span> Â· Deliverable:{" "}
-        <span className="text-text font-medium">{currentStage?.out}</span>
-      </p>
+      <div className="mt-3">
+        <h4 className="text-[10px] font-bold text-muted uppercase tracking-wide mb-1.5">Workflow Stages</h4>
+        <div className="flex flex-wrap gap-2">
+          {definition.stages.map((s) => (
+            <span key={s.no} className="text-xs px-2.5 py-1 bg-background border border-border rounded-md text-text">
+              {s.no} · {s.name}
+            </span>
+          ))}
+        </div>
+      </div>
     </section>
   );
 }
@@ -358,7 +316,7 @@ function UnassignedRow({ project }: { project: ProjectSummary }) {
   function assign() {
     if (!value) return;
     mutation.mutate(
-      { projectId: project.id, workflowType: value },
+      { projectId: project.id, workflowName: value },
       {
         onSuccess: () => addToast({ title: `${project.code} assigned ${value}`, variant: "success" }),
         onError: () => addToast({ title: "Failed to assign workflow", variant: "error" }),

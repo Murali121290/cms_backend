@@ -1,8 +1,7 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 import { GitBranch } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
-import { ProgressBar } from "@/components/ui/ProgressBar";
 import { useToast } from "@/components/ui/useToast";
 import { useUpdateProjectWorkflow } from "@/features/workflow/useWorkflowMutations";
 import { WORKFLOW_DEFINITIONS, getWorkflowDefinition } from "@/features/workflow/workflowDefinitions";
@@ -10,10 +9,9 @@ import { WORKFLOW_DEFINITIONS, getWorkflowDefinition } from "@/features/workflow
 interface ProjectWorkflowPanelProps {
   projectId: number;
   workflowType: string | null;
-  workflowStageNo: string | null;
 }
 
-export function ProjectWorkflowPanel({ projectId, workflowType, workflowStageNo }: ProjectWorkflowPanelProps) {
+export function ProjectWorkflowPanel({ projectId, workflowType }: ProjectWorkflowPanelProps) {
   const mutation = useUpdateProjectWorkflow();
   const { addToast } = useToast();
   const [assignValue, setAssignValue] = useState("");
@@ -23,7 +21,7 @@ export function ProjectWorkflowPanel({ projectId, workflowType, workflowStageNo 
   function assign() {
     if (!assignValue) return;
     mutation.mutate(
-      { projectId, workflowType: assignValue },
+      { projectId, workflowName: assignValue },
       {
         onSuccess: () => addToast({ title: `Workflow ${assignValue} assigned`, variant: "success" }),
         onError: () => addToast({ title: "Failed to assign workflow", variant: "error" }),
@@ -31,17 +29,7 @@ export function ProjectWorkflowPanel({ projectId, workflowType, workflowStageNo 
     );
   }
 
-  function setStage(stageNo: string) {
-    mutation.mutate(
-      { projectId, stageNo },
-      {
-        onSuccess: () => addToast({ title: "Stage updated", variant: "success" }),
-        onError: () => addToast({ title: "Failed to update stage", variant: "error" }),
-      },
-    );
-  }
-
-  // â”€â”€ Not assigned â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // —— Not assigned ——————————————————————————————————————————————
   if (!definition) {
     return (
       <section className="bg-white rounded-lg shadow-card p-4 mb-4">
@@ -62,10 +50,10 @@ export function ProjectWorkflowPanel({ projectId, workflowType, workflowStageNo 
               onChange={(e) => setAssignValue(e.target.value)}
               className="h-9 px-2 text-sm bg-white border border-border rounded-md text-text focus:outline-none focus:border-text"
             >
-              <option value="">Select workflowâ€¦</option>
+              <option value="">Select workflow…</option>
               {WORKFLOW_DEFINITIONS.map((wf) => (
                 <option key={wf.id} value={wf.id}>
-                  {wf.id} Â· {wf.title}
+                  {wf.id} · {wf.title}
                 </option>
               ))}
             </select>
@@ -83,12 +71,7 @@ export function ProjectWorkflowPanel({ projectId, workflowType, workflowStageNo 
     );
   }
 
-  // â”€â”€ Assigned â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const currentIdx = Math.max(0, definition.stages.findIndex((s) => s.no === workflowStageNo));
-  const currentStage = definition.stages[currentIdx];
-  const progress = Math.round(((currentIdx + 1) / definition.stages.length) * 100);
-  const nextStage = definition.stages[currentIdx + 1];
-
+  // —— Assigned ——————————————————————————————————————————————————
   return (
     <section className="bg-white rounded-lg shadow-card p-4 mb-4">
       <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
@@ -97,40 +80,18 @@ export function ProjectWorkflowPanel({ projectId, workflowType, workflowStageNo 
           <Badge variant="default">
             {definition.id} {definition.title}
           </Badge>
-          <span className="text-xs text-muted">
-            Stage {currentStage?.no} of {definition.stages.length}
-          </span>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <select
-            value={currentStage?.no ?? ""}
-            onChange={(e) => setStage(e.target.value)}
-            disabled={mutation.isPending}
-            className="h-9 px-2 text-sm bg-white border border-border rounded-md text-text focus:outline-none focus:border-text"
-          >
-            {definition.stages.map((s) => (
-              <option key={s.no} value={s.no}>
-                {s.no} Â· {s.name}
-              </option>
-            ))}
-          </select>
-          {nextStage && (
-            <button
-              type="button"
-              onClick={() => setStage(nextStage.no)}
-              disabled={mutation.isPending}
-              className="h-9 px-3 text-sm font-medium rounded-md bg-primary text-white hover:bg-primary disabled:opacity-50 transition-colors"
-            >
-              Advance
-            </button>
-          )}
         </div>
       </div>
-      <ProgressBar value={progress} color="gold" size="md" showValue label={currentStage?.name} />
-      <p className="text-xs text-muted mt-2">
-        Owner: <span className="text-text font-medium">{currentStage?.owner}</span> Â· Deliverable:{" "}
-        <span className="text-text font-medium">{currentStage?.out}</span>
-      </p>
+      <div className="mt-3">
+        <h4 className="text-[10px] font-bold text-muted uppercase tracking-wide mb-1.5">Workflow Stages</h4>
+        <div className="flex flex-wrap gap-2">
+          {definition.stages.map((s) => (
+            <span key={s.no} className="text-xs px-2.5 py-1 bg-background border border-border rounded-md text-text">
+              {s.no} · {s.name}
+            </span>
+          ))}
+        </div>
+      </div>
     </section>
   );
 }

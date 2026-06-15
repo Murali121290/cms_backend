@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 
 # revision identifiers, used by Alembic.
@@ -20,11 +21,17 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    op.add_column('projects', sa.Column('workflow_type', sa.String(), nullable=True))
-    op.add_column('projects', sa.Column('workflow_stage_no', sa.String(), nullable=True))
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    projects_columns = {col['name'] for col in inspector.get_columns('projects')}
+
+    if 'workflow_name' not in projects_columns:
+        op.add_column('projects', sa.Column('workflow_name', sa.String(), nullable=True))
+    if 'workflow_stage_no' not in projects_columns:
+        op.add_column('projects', sa.Column('workflow_stage_no', sa.String(), nullable=True))
 
 
 def downgrade() -> None:
     """Downgrade schema."""
     op.drop_column('projects', 'workflow_stage_no')
-    op.drop_column('projects', 'workflow_type')
+    op.drop_column('projects', 'workflow_name')

@@ -15,6 +15,8 @@ def compile_bigint_sqlite(element, compiler, **kw):
     return "INTEGER"
 
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
+from typing import Optional
 
 from app.database import Base
 
@@ -65,6 +67,13 @@ class RolesMaster(Base):
     description   = Column(Text,        nullable=True)
     active_status = Column(Boolean,     nullable=False, default=True)
     created_at    = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at    = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    @property
+    def name(self) -> str:
+        # Compatibility mapping to capitalized roles for frontend/serializers
+        from app.models import map_role_to_capitalized
+        return map_role_to_capitalized(self.role_name)
 
 
 class StageActivityMaster(Base):
@@ -166,3 +175,29 @@ class ChapterInfo(Base):
     delayed_stages         = Column(String,      nullable=True)  # JSON stored as text
     created_at             = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at             = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    project_rel = relationship("Project", primaryjoin="Project.project_code == ChapterInfo.project", foreign_keys="[ChapterInfo.project]", back_populates="chapters")
+    files = relationship("File", back_populates="chapter", cascade="all, delete-orphan")
+
+    # Compatibility properties for WMS chapters table
+    @property
+    def project_id(self) -> Optional[int]:
+        return self.project_rel.id if self.project_rel else None
+
+    @property
+    def number(self) -> str:
+        return self.chapters
+
+    @number.setter
+    def number(self, val: str):
+        self.chapters = val
+
+    @property
+    def title(self) -> Optional[str]:
+        return self.chapter_title
+
+    @title.setter
+    def title(self, val: Optional[str]):
+        self.chapter_title = val
+

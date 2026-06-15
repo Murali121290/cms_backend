@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, ChevronRight,
   Calendar, Clock, Zap, BookOpen, AlertCircle, CheckCircle2,
-  RotateCcw, Layers, User, BookMarked,
+  RotateCcw, Layers, User, BookMarked, Info, Edit2
 } from 'lucide-react'
 import { ViewSwitcher } from '@/components/ui/ViewSwitcher'
 import { useViewMode } from '@/hooks/useViewMode'
@@ -20,12 +20,14 @@ import { toast } from '@/store/useToastStore'
 import { FullPageSpinner, Spinner } from '@/components/ui/Spinner'
 import { uiPaths } from '@/utils/appPaths'
 import { useStylesheetsQuery } from '@/features/stylesheets/useStylesheetsQuery'
+import { ProjectInfoModal } from './ProjectInfoModal'
+import { ProjectPlanningModal } from './ProjectPlanningModal'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function orderStages(stages: WorkflowStage[]): WorkflowStage[] {
   const byName = new Map(stages.map(s => [s.stage_name, s]))
-  const first  = stages.find(s => !s.previous_stage)
+  const first = stages.find(s => !s.previous_stage)
   if (!first) return stages
   const result: WorkflowStage[] = []
   const visited = new Set<string>()
@@ -56,21 +58,21 @@ function formatDate(d: string | null | undefined): string {
 
 function statusMeta(status: string): { cls: string; label: string } {
   switch (status) {
-    case 'complete':    return { cls: 'bg-emerald-50 text-emerald-700 border border-emerald-200', label: 'Complete'    }
-    case 'In-progress': return { cls: 'bg-amber-50  text-amber-700  border border-amber-200',    label: 'In Progress' }
-    case 'Hold':        return { cls: 'bg-slate-50  text-slate-600  border border-slate-200',    label: 'Hold'        }
-    case 'In-query':    return { cls: 'bg-blue-50   text-blue-700   border border-blue-200',     label: 'In-query'    }
-    default:            return { cls: 'bg-gray-50   text-gray-600   border border-gray-200',     label: status        }
+    case 'complete': return { cls: 'bg-emerald-50 text-emerald-700 border border-emerald-200', label: 'Complete' }
+    case 'In-progress': return { cls: 'bg-amber-50  text-amber-700  border border-amber-200', label: 'In Progress' }
+    case 'Hold': return { cls: 'bg-slate-50  text-slate-600  border border-slate-200', label: 'Hold' }
+    case 'In-query': return { cls: 'bg-blue-50   text-blue-700   border border-blue-200', label: 'In-query' }
+    default: return { cls: 'bg-gray-50   text-gray-600   border border-gray-200', label: status }
   }
 }
 
 function cardBorderCls(ch: Chapter): string {
-  if (ch.status === 'complete')   return 'border-l-4 border-l-emerald-500'
-  if (isDelayed(ch))              return 'border-l-4 border-l-red-500'
+  if (ch.status === 'complete') return 'border-l-4 border-l-emerald-500'
+  if (isDelayed(ch)) return 'border-l-4 border-l-red-500'
   if (ch.priority === 'Fast Track') return 'border-l-4 border-l-purple-500'
-  if (ch.status === 'In-progress')  return 'border-l-4 border-l-amber-400'
-  if (ch.status === 'Hold')         return 'border-l-4 border-l-slate-400'
-  if (ch.status === 'In-query')     return 'border-l-4 border-l-blue-400'
+  if (ch.status === 'In-progress') return 'border-l-4 border-l-amber-400'
+  if (ch.status === 'Hold') return 'border-l-4 border-l-slate-400'
+  if (ch.status === 'In-query') return 'border-l-4 border-l-blue-400'
   return 'border-l-4 border-l-border'
 }
 
@@ -83,9 +85,8 @@ function SummaryWidget({ label, value, icon: Icon, iconCls, onClick, active }: {
   return (
     <div
       onClick={onClick}
-      className={`bg-card rounded-xl border px-4 py-3 flex items-center gap-3 shadow-sm transition-all flex-1 min-w-0 ${
-        onClick ? 'cursor-pointer hover:shadow-md' : ''
-      } ${active ? 'border-primary ring-1 ring-primary/30' : 'border-border'}`}
+      className={`bg-card rounded-xl border px-4 py-3 flex items-center gap-3 shadow-sm transition-all flex-1 min-w-0 ${onClick ? 'cursor-pointer hover:shadow-md' : ''
+        } ${active ? 'border-primary ring-1 ring-primary/30' : 'border-border'}`}
     >
       <div className={`p-2 rounded-xl ${iconCls}`}><Icon size={15} /></div>
       <div>
@@ -117,26 +118,24 @@ function WorkflowRail({ stages, chapters, filterStage, onStageClick }: {
       <div className="flex items-center gap-1 overflow-x-auto pb-0.5 scrollbar-none">
         <Layers size={13} className="text-muted flex-shrink-0 mr-1" />
         {stages.map((stage, i) => {
-          const cnt   = countByStage.get(stage.stage_name) ?? 0
+          const cnt = countByStage.get(stage.stage_name) ?? 0
           const active = filterStage === stage.stage_name
           return (
             <span key={stage.stage_name} className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={() => onStageClick(stage.stage_name)}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
-                  active
-                    ? 'bg-primary text-white'
-                    : 'bg-card border border-border text-text hover:bg-accent'
-                }`}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${active
+                  ? 'bg-primary text-white'
+                  : 'bg-card border border-border text-text hover:bg-accent'
+                  }`}
               >
                 {/* <span className={`w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center flex-shrink-0 ${
                   active ? 'bg-white/20 text-white' : 'bg-primary/10 text-primary'
                 }`}>{i + 1}</span> */}
                 {stage.stage_name}
                 {cnt > 0 && (
-                  <span className={`px-1 py-0.5 rounded text-[9px] font-bold ${
-                    active ? 'bg-white/20 text-white' : 'bg-primary/10 text-primary'
-                  }`}>{cnt}</span>
+                  <span className={`px-1 py-0.5 rounded text-[9px] font-bold ${active ? 'bg-white/20 text-white' : 'bg-primary/10 text-primary'
+                    }`}>{cnt}</span>
                 )}
               </button>
               {i < stages.length - 1 && <ChevronRight size={10} className="text-muted" />}
@@ -276,16 +275,20 @@ function ChapterCard({ chapter, users, projectCode, plannedDueDates, onUpdate, o
 export function ProjectWorkflow() {
   const { projectId, clientId } = useParams<{ projectId: string; clientId?: string }>()
   const navigate = useNavigate()
-  const id       = Number(projectId)
+  const id = Number(projectId)
 
-  const [project,         setProject]         = useState<Project | null>(null)
-  const [chapters,        setChapters]        = useState<Chapter[]>([])
-  const [workflowStages,  setWorkflowStages]  = useState<WorkflowStage[]>([])
-  const [users,           setUsers]           = useState<AppUser[]>([])
+  const [project, setProject] = useState<Project | null>(null)
+  const [chapters, setChapters] = useState<Chapter[]>([])
+  const [workflowStages, setWorkflowStages] = useState<WorkflowStage[]>([])
+  const [users, setUsers] = useState<AppUser[]>([])
   const [plannedDueDates, setPlannedDueDates] = useState<Map<string, StageInfo>>(new Map())
   // Maps WMS chapter number (e.g. "01") → CMS chapter DB id for correct navigation
   const [cmsChapterIdMap, setCmsChapterIdMap] = useState<Map<string, number>>(new Map())
-  const [loading,         setLoading]         = useState(true)
+  const [loading, setLoading] = useState(true)
+
+  const [isInfoOpen, setIsInfoOpen] = useState(false)
+  const [isEditOpen, setIsEditOpen] = useState(false)
+  const [isPlanningOpen, setIsPlanningOpen] = useState(false)
 
 
   const stylesheetsQuery = useStylesheetsQuery(id || null)
@@ -295,22 +298,22 @@ export function ProjectWorkflow() {
   const [viewMode, setViewMode] = useViewMode('view:chapters', 'large')
 
   const [filterAssignee, setFilterAssignee] = useState('')
-  const [filterStage,    setFilterStage]    = useState('')
-  const [filterStatus,   setFilterStatus]   = useState('')
+  const [filterStage, setFilterStage] = useState('')
+  const [filterStatus, setFilterStatus] = useState('')
 
   useEffect(() => {
     if (!id) return
     setLoading(true)
 
     // Load users in background — don't block the main page render
-    usersApi.list().then(setUsers).catch(() => {})
+    usersApi.list().then(setUsers).catch(() => { })
 
     projectsApi.getById(id)
       .then(async response => {
         const p = response.project as unknown as Project
         setProject(p)
         const projectCode = p.code || p.project_code || ''
-        const workflowName = p.workflow_type || p.workflow_name || ''
+        const workflowName = p.workflow_name || ''
         const [chs, stages, details, cmsChapters] = await Promise.all([
           chaptersApi.getByProject(projectCode).catch(() => [] as Chapter[]),
           workflowName
@@ -357,12 +360,12 @@ export function ProjectWorkflow() {
   const orderedStages = useMemo(() => orderStages(workflowStages), [workflowStages])
 
   const summary = useMemo(() => {
-    const total    = chapters.length
+    const total = chapters.length
     const complete = chapters.filter(c => c.status === 'complete').length
-    const inProg   = chapters.filter(c => c.status === 'In-progress').length
-    const hold     = chapters.filter(c => c.status === 'Hold').length
-    const inQuery  = chapters.filter(c => c.status === 'In-query').length
-    const delayed  = chapters.filter(c => isDelayed(c, plannedDueDates)).length
+    const inProg = chapters.filter(c => c.status === 'In-progress').length
+    const hold = chapters.filter(c => c.status === 'Hold').length
+    const inQuery = chapters.filter(c => c.status === 'In-query').length
+    const delayed = chapters.filter(c => isDelayed(c, plannedDueDates)).length
     return { total, complete, inProg, hold, inQuery, delayed }
   }, [chapters, plannedDueDates])
 
@@ -374,13 +377,13 @@ export function ProjectWorkflow() {
   const filtered = useMemo(() => chapters
     .filter(ch => {
       if (filterAssignee && ch.current_assignee_name !== filterAssignee) return false
-      if (filterStage    && ch.stage_name             !== filterStage)    return false
+      if (filterStage && ch.stage_name !== filterStage) return false
       if (filterStatus === '__delayed__' && !isDelayed(ch, plannedDueDates)) return false
       if (filterStatus && filterStatus !== '__delayed__' && ch.status !== filterStatus) return false
       return true
     })
     .sort((a, b) => a.id - b.id)
-  , [chapters, filterAssignee, filterStage, filterStatus, plannedDueDates])
+    , [chapters, filterAssignee, filterStage, filterStatus, plannedDueDates])
 
   function handleChapterUpdate(id: number, patch: Partial<Chapter>) {
     setChapters(prev => {
@@ -407,7 +410,7 @@ export function ProjectWorkflow() {
 
   function openChapter(ch: Chapter) {
     const num = ch.chapters
-    const cmsId = cmsChapterIdMap.get(num) ?? cmsChapterIdMap.get(parseInt(num,10).toString()) ?? cmsChapterIdMap.get(num.padStart(2,'0')) ?? null
+    const cmsId = cmsChapterIdMap.get(num) ?? cmsChapterIdMap.get(parseInt(num, 10).toString()) ?? cmsChapterIdMap.get(num.padStart(2, '0')) ?? null
     if (!cmsId) { toast.error(`Chapter "${num}" has no files yet.`); return }
     navigate(`${clientId ? `/clients/${clientId}/projects/${projectId}` : `/projects/${projectId}`}/chapters/${cmsId}`)
   }
@@ -439,12 +442,33 @@ export function ProjectWorkflow() {
                   <Zap size={10} /> Fast Track
                 </span>
               )}
+              <button
+                onClick={() => setIsInfoOpen(true)}
+                title="View project info"
+                className="text-muted hover:text-primary transition-colors flex-shrink-0 ml-2"
+              >
+                <Info size={14} />
+              </button>
+              <button
+                onClick={() => setIsEditOpen(true)}
+                title="Edit project"
+                className="text-muted hover:text-primary transition-colors flex-shrink-0 ml-1.5"
+              >
+                <Edit2 size={14} />
+              </button>
+              <button
+                onClick={() => setIsPlanningOpen(true)}
+                title="Project planning"
+                className="text-muted hover:text-primary transition-colors flex-shrink-0 ml-1.5"
+              >
+                <Calendar size={14} />
+              </button>
             </div>
             <div className="flex items-center gap-3 mt-1 flex-wrap text-xs text-muted">
               {(project.code || project.project_code) && <span>{project.code || project.project_code}</span>}
-              {(project.workflow_type || project.workflow_name) && (
+              {project.workflow_name && (
                 <span className="inline-flex items-center gap-1">
-                  <Layers size={11} /> {project.workflow_type || project.workflow_name}
+                  <Layers size={11} /> {project.workflow_name}
                 </span>
               )}
               {project.project_manager && (
@@ -495,12 +519,12 @@ export function ProjectWorkflow() {
 
         {/* ── Summary Widgets ── */}
         <div className="flex flex-wrap gap-3">
-          <SummaryWidget label="Total"       value={summary.total}    icon={BookOpen}     iconCls="bg-blue-50    text-blue-600"    onClick={() => setFilterStatus('')}              active={filterStatus === ''}           />
-          <SummaryWidget label="Completed"   value={summary.complete} icon={CheckCircle2} iconCls="bg-emerald-50 text-emerald-600" onClick={() => setFilterStatus(prev => prev === 'complete'    ? '' : 'complete')}    active={filterStatus === 'complete'}    />
-          <SummaryWidget label="In Progress" value={summary.inProg}   icon={RotateCcw}    iconCls="bg-amber-50   text-amber-600"   onClick={() => setFilterStatus(prev => prev === 'In-progress' ? '' : 'In-progress')} active={filterStatus === 'In-progress'} />
-          {summary.hold    > 0 && <SummaryWidget label="Hold"     value={summary.hold}    icon={AlertCircle} iconCls="bg-slate-50 text-slate-600" onClick={() => setFilterStatus(prev => prev === 'Hold'        ? '' : 'Hold')}        active={filterStatus === 'Hold'}        />}
-          {summary.inQuery > 0 && <SummaryWidget label="In-query" value={summary.inQuery} icon={BookOpen}    iconCls="bg-blue-50  text-blue-700"  onClick={() => setFilterStatus(prev => prev === 'In-query'    ? '' : 'In-query')}   active={filterStatus === 'In-query'}    />}
-          {summary.delayed > 0 && <SummaryWidget label="Delayed"  value={summary.delayed} icon={AlertCircle} iconCls="bg-red-50   text-red-600"   onClick={() => setFilterStatus(prev => prev === '__delayed__' ? '' : '__delayed__')} active={filterStatus === '__delayed__'} />}
+          <SummaryWidget label="Total" value={summary.total} icon={BookOpen} iconCls="bg-blue-50    text-blue-600" onClick={() => setFilterStatus('')} active={filterStatus === ''} />
+          <SummaryWidget label="Completed" value={summary.complete} icon={CheckCircle2} iconCls="bg-emerald-50 text-emerald-600" onClick={() => setFilterStatus(prev => prev === 'complete' ? '' : 'complete')} active={filterStatus === 'complete'} />
+          <SummaryWidget label="In Progress" value={summary.inProg} icon={RotateCcw} iconCls="bg-amber-50   text-amber-600" onClick={() => setFilterStatus(prev => prev === 'In-progress' ? '' : 'In-progress')} active={filterStatus === 'In-progress'} />
+          {summary.hold > 0 && <SummaryWidget label="Hold" value={summary.hold} icon={AlertCircle} iconCls="bg-slate-50 text-slate-600" onClick={() => setFilterStatus(prev => prev === 'Hold' ? '' : 'Hold')} active={filterStatus === 'Hold'} />}
+          {summary.inQuery > 0 && <SummaryWidget label="In-query" value={summary.inQuery} icon={BookOpen} iconCls="bg-blue-50  text-blue-700" onClick={() => setFilterStatus(prev => prev === 'In-query' ? '' : 'In-query')} active={filterStatus === 'In-query'} />}
+          {summary.delayed > 0 && <SummaryWidget label="Delayed" value={summary.delayed} icon={AlertCircle} iconCls="bg-red-50   text-red-600" onClick={() => setFilterStatus(prev => prev === '__delayed__' ? '' : '__delayed__')} active={filterStatus === '__delayed__'} />}
         </div>
 
         {/* ── Filters ── */}
@@ -519,7 +543,7 @@ export function ProjectWorkflow() {
             {assigneeOptions.map(a => <option key={a} value={a}>{a}</option>)}
           </select>
 
-{hasFilters && (
+          {hasFilters && (
             <button
               onClick={() => { setFilterAssignee(''); setFilterStage(''); setFilterStatus('') }}
               className="flex items-center gap-1 text-xs text-danger hover:underline"
@@ -599,7 +623,7 @@ export function ProjectWorkflow() {
                   const delayed = !!due && ch.status !== 'complete' && new Date(due) < new Date()
                   return (
                     <div key={ch.id} onClick={() => openChapter(ch)}
-                      className={`flex items-center gap-4 px-5 py-3 cursor-pointer hover:bg-surface transition-colors ${i > 0 ? 'border-t border-border' : ''} ${cardBorderCls(ch).replace('border-l-4','border-l-[3px]')}`}>
+                      className={`flex items-center gap-4 px-5 py-3 cursor-pointer hover:bg-surface transition-colors ${i > 0 ? 'border-t border-border' : ''} ${cardBorderCls(ch).replace('border-l-4', 'border-l-[3px]')}`}>
                       <span className="text-xs font-bold text-primary uppercase w-8 flex-shrink-0">{ch.chapters}</span>
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-semibold text-text truncate">{ch.chapter_title || ch.chapters}</p>
@@ -629,7 +653,7 @@ export function ProjectWorkflow() {
                 <table className="w-full text-sm border-collapse min-w-max">
                   <thead>
                     <tr className="border-b border-border bg-surface">
-                      {['#','Title','Stage','Status','Assignee','Due Date','MS Pages','Delayed'].map(h => (
+                      {['#', 'Title', 'Stage', 'Status', 'Assignee', 'Due Date', 'MS Pages', 'Delayed'].map(h => (
                         <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -680,6 +704,38 @@ export function ProjectWorkflow() {
           </>
         )}
       </div>
+
+      {/* View Info Modal */}
+      <ProjectInfoModal
+        project={project}
+        open={isInfoOpen}
+        mode="view"
+        onClose={() => setIsInfoOpen(false)}
+        onUpdated={() => {}}
+      />
+
+      {/* Edit Info Modal */}
+      <ProjectInfoModal
+        project={project}
+        open={isEditOpen}
+        mode="edit"
+        onClose={() => setIsEditOpen(false)}
+        onUpdated={updated => {
+          setProject(updated)
+          setIsEditOpen(false)
+        }}
+      />
+
+      {/* Planning Modal */}
+      <ProjectPlanningModal
+        projectId={id}
+        open={isPlanningOpen}
+        onClose={() => setIsPlanningOpen(false)}
+        onApproved={() => {
+          setProject(p => p ? { ...p, status: 'Active' } : null)
+          setIsPlanningOpen(false)
+        }}
+      />
 
     </div>
   )

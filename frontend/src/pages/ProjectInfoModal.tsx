@@ -138,7 +138,7 @@ export function ProjectInfoModal({ project, open, mode, onClose, onUpdated }: Pr
         <Section title="Project Information" icon={BookOpen} />
 
         <InfoField label="Project Code"     value={project.project_code} />
-        <InfoField label="Customer Name"    value={project.customer_name} />
+        <InfoField label="Customer Name"    value={project.client_name} />
         <InfoField label="Division Code"    value={project.division_code} />
         <InfoField label="Customer Contact" value={project.customer_contact} />
         <InfoField label="Category"         value={project.category} />
