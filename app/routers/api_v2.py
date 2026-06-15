@@ -2959,18 +2959,23 @@ def api_v2_get_file_xhtml(
     xhtml_dir = os.path.join(dir_name, "xhtml")
     xhtml_path = os.path.join(xhtml_dir, f"{base_name}.html")
 
-    # Always force a fresh conversion to ensure the editor shows the latest text/formatting
-    from app.processing.docx_to_xhtml import DocxToXhtmlEngine
-    try:
-        os.makedirs(os.path.dirname(xhtml_path), exist_ok=True)
-        engine = DocxToXhtmlEngine()
-        engine.convert(file_path, xhtml_path)
-    except Exception as e:
-        return _error_response(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            code="XHTML_GENERATION_FAILED",
-            message=f"Failed to generate XHTML representation: {str(e)}",
-        )
+    # Use cached XHTML if the file on disk hasn't changed since the XHTML was last written
+    file_mtime = os.path.getmtime(file_path)
+    if os.path.exists(xhtml_path) and os.path.getmtime(xhtml_path) >= file_mtime:
+        logger.info(f"Serving cached XHTML for file {file_id}")
+    else:
+        # Always force a fresh conversion to ensure the editor shows the latest text/formatting
+        from app.processing.docx_to_xhtml import DocxToXhtmlEngine
+        try:
+            os.makedirs(os.path.dirname(xhtml_path), exist_ok=True)
+            engine = DocxToXhtmlEngine()
+            engine.convert(file_path, xhtml_path)
+        except Exception as e:
+            return _error_response(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                code="XHTML_GENERATION_FAILED",
+                message=f"Failed to generate XHTML representation: {str(e)}",
+            )
 
     try:
         with open(xhtml_path, "r", encoding="utf-8") as f:

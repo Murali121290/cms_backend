@@ -44,11 +44,10 @@ def get_target_path(file_record: File, mode: str = "original"):
         processed_filename = f"{name_only}_Processed.docx"
         processed_path = os.path.join(dir_name, processed_filename)
 
-        # Fallback if _Processed.docx does not exist but the original file has been processed in-place
+        # Fallback if _Processed.docx does not exist
         if not os.path.exists(processed_path) and os.path.exists(original_path):
-            has_history = file_record.version > 1 or (hasattr(file_record, "versions") and len(file_record.versions) > 0)
-            if has_history:
-                processed_path = original_path
+            processed_path = original_path
+            processed_filename = os.path.basename(original_path)
 
         return processed_path, processed_filename
 

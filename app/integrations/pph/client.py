@@ -78,27 +78,27 @@ class PPHClient:
             self._login()
 
     def submit_and_wait(
-        self, 
-        endpoint: str, 
-        files: Dict[str, Any], 
+        self,
+        endpoint: str,
+        files: Dict[str, Any],
         data: Optional[Dict[str, Any]] = None,
         file_field: str = "files",
-        poll_interval: int = 2,
+        poll_interval: Optional[int] = None,
         max_wait: Optional[int] = None
     ) -> bytes:
+        """Submits job to the remote server, polls progress until completed, and downloads output."""
         if max_wait is None:
-            max_wait = getattr(self.settings, "PPH_MAX_WAIT_SECONDS", 1800)
-        """
-        Submits job to the remote server, polls progress until completed, and downloads output.
-        """
+            max_wait = getattr(self.settings, "PPH_MAX_WAIT_SECONDS", 4500)
+        if poll_interval is None:
+            poll_interval = getattr(self.settings, "PPH_POLL_INTERVAL_SECONDS", 20)
         self.ensure_authenticated()
         endpoint_clean = endpoint.lstrip("/")
-        
+
         try:
             # 1. Post job submission
             submit_url = f"{self.base_url}/{endpoint_clean}"
             logger.info(f"Submitting job to PPH endpoint: {submit_url}")
-            
+
             # Extract CSRF token from the session cookies if present
             headers = {}
             csrf_cookie = self.session.cookies.get("csrf_access_token") or self.session.cookies.get("csrf_token")
@@ -106,51 +106,56 @@ class PPHClient:
                 headers["X-CSRF-Token"] = csrf_cookie
 
             response = self.session.post(
-                submit_url, 
-                files=files, 
-                data=data or {}, 
+                submit_url,
+                files=files,
+                data=data or {},
                 headers=headers,
-                timeout=30
+                timeout=120
             )
             response.raise_for_status()
-            
+
             res_json = response.json()
             job_id = res_json.get("job_id")
             if not job_id:
                 raise PPHClientError(f"Job submission succeeded but no job_id returned. Response: {res_json}")
-                
+
             logger.info(f"Job enqueued successfully. Job ID: {job_id}")
 
             # 2. Poll progress until complete
             start_time = time.time()
             progress_url = f"{self.base_url}/progress/{job_id}"
-            
+
             while True:
                 if time.time() - start_time > max_wait:
                     raise PPHClientError(f"Job {job_id} exceeded maximum wait time of {max_wait}s.")
-                    
-                poll_resp = self.session.get(progress_url, timeout=15)
-                poll_resp.raise_for_status()
-                poll_json = poll_resp.json()
-                
+
+                try:
+                    poll_resp = self.session.get(progress_url, timeout=30)
+                    poll_resp.raise_for_status()
+                    poll_json = poll_resp.json()
+                except Exception as poll_err:
+                    logger.warning(f"Transient poll error for job {job_id} (will retry): {poll_err}")
+                    time.sleep(poll_interval)
+                    continue
+
                 status = poll_json.get("status")
                 logger.info(f"Polling job {job_id} progress... Status: {status}")
-                
+
                 if status == "Completed":
                     break
                 elif status in ["Failed", "Error"]:
                     error_msg = poll_json.get("error") or "Unknown error"
                     raise PPHClientError(f"Remote processing failed for job {job_id}: {error_msg}")
-                    
+
                 time.sleep(poll_interval)
 
             # 3. Download results
             download_url = f"{self.base_url}/download_zip/{job_id}"
             logger.info(f"Processing complete! Downloading results from {download_url}...")
-            
-            dl_resp = self.session.get(download_url, timeout=60)
+
+            dl_resp = self.session.get(download_url, stream=True, timeout=120)
             dl_resp.raise_for_status()
-            
+
             return dl_resp.content
 
         except Exception as e:
@@ -165,25 +170,14 @@ class PPHClient:
         output_dir: str,
         source_style: str = "Auto",
         target_style: str = "APA",
-        poll_interval: int = 2,
+        poll_interval: Optional[int] = None,
         max_wait: Optional[int] = None
     ) -> List[str]:
+        """Submit a .docx file to PPH's /validate endpoint for reference structuring."""
         if max_wait is None:
-            max_wait = getattr(self.settings, "PPH_MAX_WAIT_SECONDS", 1800)
-        """
-        Submit a .docx file to PPH's /validate endpoint for reference structuring.
-
-        Args:
-            file_path: Path to the .docx file to process
-            output_dir: Directory to save output files
-            source_style: Source citation style (Auto, AMA, APA, CGRN)
-            target_style: Target citation style (APA, AMA, CGRN)
-            poll_interval: Seconds between status polls
-            max_wait: Maximum wait time in seconds
-
-        Returns:
-            List of paths to output files (docx, log, json)
-        """
+            max_wait = getattr(self.settings, "PPH_MAX_WAIT_SECONDS", 4500)
+        if poll_interval is None:
+            poll_interval = getattr(self.settings, "PPH_POLL_INTERVAL_SECONDS", 20)
         logger.info(f"Submitting reference structuring job: {file_path}")
 
         # Prepare file upload

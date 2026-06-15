@@ -359,21 +359,79 @@ class BibliographyParser:
             return f"{sn[0]} et al."
         return f"{sn[0]} & {sn[1]}"
 
+# ── Matcher Cache ──────────────────────────────────────────────────────────────
+class IndexedBib:
+    def __init__(self, bibliography: Dict[str, dict]):
+        self.length = len(bibliography)
+        self.first_key = next(iter(bibliography.keys())) if bibliography else None
+        self.records = []
+        self.exact_rn_map = defaultdict(list)
+        self.first_rf_map = defaultdict(list)
+        for key, ref in bibliography.items():
+            rfull = ref.get("full_author", "")
+            rn = _norm(rfull)
+            ry = ref.get("year", "")
+            rb = _strip_suffix(ry)
+            rf = _first_surname(rfull)
+            bib_surnames = _surname_set(rfull)
+            record = {
+                "key": key,
+                "ref": ref,
+                "rfull": rfull,
+                "rn": rn,
+                "ry": ry,
+                "rb": rb,
+                "rf": rf,
+                "bib_surnames": bib_surnames,
+            }
+            self.records.append(record)
+            self.exact_rn_map[rn].append(record)
+            if rf:
+                self.first_rf_map[rf].append(record)
+
+_BIB_INDEX_CACHE: Dict[int, IndexedBib] = {}
+_BIB_INDEX_LOCK = threading.Lock()
+
 # ── Matcher ───────────────────────────────────────────────────────────────────
 def match_citation(cite_author: str, cite_year: str, bibliography: Dict[str,dict]) -> Tuple[Optional[str],str]:
+    bib_id = id(bibliography)
+    with _BIB_INDEX_LOCK:
+        if (bib_id not in _BIB_INDEX_CACHE or 
+            _BIB_INDEX_CACHE[bib_id].length != len(bibliography) or 
+            _BIB_INDEX_CACHE[bib_id].first_key != (next(iter(bibliography.keys())) if bibliography else None)):
+            if len(_BIB_INDEX_CACHE) >= 100:
+                _BIB_INDEX_CACHE.clear()
+            _BIB_INDEX_CACHE[bib_id] = IndexedBib(bibliography)
+        indexed = _BIB_INDEX_CACHE[bib_id]
+
     cn = _norm(cite_author); cf = _first_surname(cite_author); cw = _surname_set(cite_author)
     cb = _strip_suffix(cite_year); cu = cite_author.strip().upper()
+    
+    # Fast path O(1): exact match with correct year
+    if cn in indexed.exact_rn_map:
+        for record in indexed.exact_rn_map[cn]:
+            if record["ry"] == cite_year:
+                return record["key"], "exact"
+
     ym: List[str]=[]; fh: List[Tuple[float,str,str]]=[]; sh: List[str]=[]
     matcher = difflib.SequenceMatcher(None, "", "")
     len_cn = len(cn)
     
-    for key, ref in bibliography.items():
-        rfull=ref["full_author"]; rn=_norm(rfull); ry=ref["year"]; rb=_strip_suffix(ry)
-        rf=_first_surname(rfull); yok=(cite_year==ry)
+    for record in indexed.records:
+        key = record["key"]
+        ref = record["ref"]
+        rn = record["rn"]
+        ry = record["ry"]
+        rb = record["rb"]
+        rf = record["rf"]
+        rfull = record["rfull"]
+        bib_surnames = record["bib_surnames"]
+        
+        yok = (cite_year == ry)
         def _sfx_or_miss():
-            if cb==rb and cite_year==cb: sh.append(key)
+            if cb == rb and cite_year == cb: sh.append(key)
             else: ym.append(key)
-        if cn==rn:
+        if cn == rn:
             if yok: return key,"exact"
             _sfx_or_miss(); continue
             
@@ -392,7 +450,6 @@ def match_citation(cite_author: str, cite_year: str, bibliography: Dict[str,dict
                         if yok: return key,"smart"
                         _sfx_or_miss(); continue
             
-        bib_surnames = _surname_set(rfull)
         if cw:
             if cw.issubset(bib_surnames):
                 if yok: return key,"smart"

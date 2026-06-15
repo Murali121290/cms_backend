@@ -194,3 +194,56 @@ def test_reference_review_style_override(
     assert response.status_code == 200
     data = response.json()
     assert data["detected_style"] == "AMA"
+
+
+def test_reference_review_cache_hit(
+    db_session,
+    temp_upload_root,
+    project_record,
+    chapter_record,
+    auth_cookie_client,
+    admin_user,
+    caplog,
+):
+    import logging
+    file_path = temp_upload_root / project_record.code / chapter_record.number / "Manuscript"
+    file_path.mkdir(parents=True, exist_ok=True)
+    
+    # Processed file
+    filename = "chapter04_Processed.docx"
+    paragraphs = [
+        ("Some text with a citation (Smith, 2020).", "Normal"),
+        ("Smith, J. (2020). Reference 2.", "REF-U"),
+    ]
+    docx_file = _build_docx_with_styles(file_path / filename, paragraphs)
+    
+    file_record = models.File(
+        project_id=project_record.id,
+        chapter_id=chapter_record.id,
+        filename=filename,
+        file_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        category="Manuscript",
+        path=str(docx_file),
+        version=1,
+    )
+    db_session.add(file_record)
+    db_session.commit()
+    db_session.refresh(file_record)
+
+    client = auth_cookie_client(admin_user)
+    
+    # First request: should be a MISS
+    with caplog.at_level(logging.INFO):
+        response1 = client.get(f"/api/v2/files/{file_record.id}/reference-review")
+        assert response1.status_code == 200
+        assert any("Reference review cache MISS" in record.message for record in caplog.records)
+    
+    caplog.clear()
+    
+    # Second request: should be a HIT
+    with caplog.at_level(logging.INFO):
+        response2 = client.get(f"/api/v2/files/{file_record.id}/reference-review")
+        assert response2.status_code == 200
+        assert any("Reference review cache HIT" in record.message for record in caplog.records)
+        assert not any("Reference review cache MISS" in record.message for record in caplog.records)
+

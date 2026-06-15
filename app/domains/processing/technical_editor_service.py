@@ -55,15 +55,22 @@ def scan_errors(
         logger.error(f"Scan failed: Physical file missing at {file_path}")
         raise HTTPException(status_code=404, detail=f"Physical file missing: {file_path}")
 
-    # 1. Invalidate Results Cache to ensure a live, fresh scan of the latest file state
+    # 1. Check Results Cache first to ensure O(1) page loads if file hasn't changed
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     cache_path = RESULTS_DIR / f"{file_id}_scan.json"
     
     if cache_path.exists():
         try:
-            cache_path.unlink()
-        except Exception:
-            pass
+            with open(cache_path, "r", encoding="utf-8") as cf:
+                cached = json.load(cf)
+            cached_file = cached.get("file", {})
+            file_mtime = os.path.getmtime(file_path)
+            if (cached_file.get("version") == file_record.version and 
+                cached_file.get("mtime") == file_mtime):
+                logger.info(f"Technical Review Cache HIT for file {file_id}")
+                return cached
+        except Exception as e:
+            logger.warning(f"Failed to read cached scan results for file {file_id}: {e}")
 
     # 2. Run manuscript_core Analyzer
     try:
@@ -117,6 +124,7 @@ def scan_errors(
 
         # 3. Cache the results
         try:
+            scan_result["file"]["mtime"] = os.path.getmtime(file_path)
             cache_path.write_text(json.dumps(scan_result, ensure_ascii=False), encoding="utf-8")
         except Exception as e:
             logger.error(f"Failed to cache scan results: {e}")

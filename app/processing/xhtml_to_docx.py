@@ -532,7 +532,9 @@ class XhtmlToDocxEngine:
             # Parse font-family
             node_font_name = font_name
             if "font-family" in styles:
-                node_font_name = styles["font-family"].strip().replace("'", "").replace('"', '')
+                raw_family = styles["font-family"].strip()
+                first_font = raw_family.split(',')[0].strip().replace("'", "").replace('"', '').strip()
+                node_font_name = first_font if first_font else None
 
             # Append direct text
             if el.text:
@@ -593,7 +595,9 @@ class XhtmlToDocxEngine:
                     root_font_size = val
         root_font_name = None
         if "font-family" in root_styles:
-            root_font_name = root_styles["font-family"].strip().replace("'", "").replace('"', '')
+            raw_family = root_styles["font-family"].strip()
+            first_font = raw_family.split(',')[0].strip().replace("'", "").replace('"', '').strip()
+            root_font_name = first_font if first_font else None
 
         # Begin traversal
         if html_el.text:
@@ -711,31 +715,22 @@ def apply_final_docx_formatting(doc):
         normal_style.font.size = Pt(12)
         normal_style.paragraph_format.line_spacing = 2.0
     except Exception as e:
-        logger.warning(f"Could not set Normal style formatting: {e}")
+        logger.warning(f"Could not set Normal style: {e}")
 
-    # 2. Iterate over all paragraphs (body + tables)
-    # Ensure they are Times New Roman, 12pt, double spacing, unless they have explicit overrides
+    body = doc.element.body
+    for rFonts in body.findall(f".//{qn('w:rFonts')}"):
+        rFonts.set(qn('w:ascii'), 'Times New Roman')
+        rFonts.set(qn('w:hAnsi'), 'Times New Roman')
+        rFonts.set(qn('w:cs'), 'Times New Roman')
+
+    for sz in body.findall(f".//{qn('w:sz')}"):
+        sz.set(qn('w:val'), '24')
+    for szCs in body.findall(f".//{qn('w:szCs')}"):
+        szCs.set(qn('w:val'), '24')
+
     for para in doc.paragraphs:
         style_name = para.style.name if para.style else "Normal"
-        
         is_list = "list" in style_name.lower() or "bullet" in style_name.lower() or "number" in style_name.lower()
         is_extract = any(x in style_name.lower() for x in ("extract", "quote", "ex"))
-        
         if not is_list and not is_extract:
             para.paragraph_format.line_spacing = 2.0
-            
-        for run in para.runs:
-            if not run.font.name:
-                run.font.name = 'Times New Roman'
-            if not run.font.size:
-                run.font.size = Pt(12)
-
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                for para in cell.paragraphs:
-                    for run in para.runs:
-                        if not run.font.name:
-                            run.font.name = 'Times New Roman'
-                        if not run.font.size:
-                            run.font.size = Pt(12)

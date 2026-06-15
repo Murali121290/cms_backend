@@ -141,6 +141,7 @@ def _get_or_create_para_bookmark(para, doc, prefix="p_bm_") -> str:
                 return name
 
     # Generate new bookmark
+    doc._dirty = True
     unique_id = uuid.uuid4().hex[:8]
     bm_name = f"{prefix}{unique_id}"
     next_id = _get_unique_bookmark_id(doc)
@@ -152,8 +153,16 @@ def _get_or_create_para_bookmark(para, doc, prefix="p_bm_") -> str:
     bm_end = OxmlElement("w:bookmarkEnd")
     bm_end.set(qn("w:id"), str(next_id))
 
-    para._p.insert(0, bm_start)
-    para._p.insert(1, bm_end)
+    # Fix 4: Insert bookmark after w:pPr to prevent OOXML validation issues
+    pPr = para._p.find(qn("w:pPr"))
+    if pPr is not None:
+        children = list(para._p)
+        ppr_idx = children.index(pPr)
+        para._p.insert(ppr_idx + 1, bm_start)
+        para._p.insert(ppr_idx + 2, bm_end)
+    else:
+        para._p.insert(0, bm_start)
+        para._p.insert(1, bm_end)
     return bm_name
 
 
@@ -181,6 +190,7 @@ def _get_or_create_run_bookmark(run, para, doc) -> str:
     except ValueError:
         pass
 
+    doc._dirty = True
     unique_id = uuid.uuid4().hex[:8]
     bm_name = f"r_bm_{unique_id}"
     next_id = _get_unique_bookmark_id(doc)
@@ -220,6 +230,7 @@ def _get_or_create_table_bookmark(table, doc) -> str:
     except ValueError:
         pass
 
+    doc._dirty = True
     unique_id = uuid.uuid4().hex[:8]
     bm_name = f"tbl_bm_{unique_id}"
     next_id = _get_unique_bookmark_id(doc)
@@ -678,6 +689,7 @@ class DocxToXhtmlRunsEngine:
 
     def convert(self, docx_path: str, file_id: int | None = None) -> str:
         doc = Document(docx_path)
+        doc._dirty = False
         
         # Load scan findings cache if file_id is provided
         findings_by_para = {}
@@ -739,8 +751,11 @@ class DocxToXhtmlRunsEngine:
             blocks.append(f'<div class="NotesContainer">{notes_html}</div>')
 
         # Persist all newly generated paragraph & run bookmarks permanently back into the DOCX source file!
-        doc.save(docx_path)
-        logger.info(f"Assigned structural bookmarks and saved DOCX: {docx_path}")
+        if getattr(doc, "_dirty", False):
+            doc.save(docx_path)
+            logger.info(f"Assigned structural bookmarks and saved DOCX: {docx_path}")
+        else:
+            logger.info(f"No new bookmarks added. Skipped saving DOCX: {docx_path}")
 
         body = "\n".join(blocks)
         return f"<!DOCTYPE html>\n<html><body>{body}</body></html>"

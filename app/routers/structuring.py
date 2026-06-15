@@ -14,6 +14,7 @@ from app.utils.utils.structuring_lib.doc_utils import (
     extract_document_structure,
     load_document,
     save_document,
+    update_document_structure,
 )
 from app.utils.utils.structuring_lib.rules_loader import get_rules_loader
 from app.integrations.collabora.config import (
@@ -96,7 +97,6 @@ async def save_structuring_changes(
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    from app.utils.utils.structuring_lib.doc_utils import update_document_structure
 
     result = structuring_review_service.save_changes(
         db,

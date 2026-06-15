@@ -13,6 +13,34 @@ from app.processing.docx_to_xhtml import DocxToXhtmlEngine
 from app.processing.docx_to_xhtml_runs import DocxToXhtmlRunsEngine
 from app.processing.xhtml_to_docx import XhtmlToDocxEngine
 from app.processing.xhtml_to_docx_delta import XhtmlToDocxDeltaEngine
+import re
+
+def _get_full_reference_text(para, doc_paragraphs, para_index_map) -> str:
+    idx = para_index_map.get(para._element)
+    if idx is None:
+        return para.text.strip()
+    
+    text_parts = [para.text.strip()]
+    curr_idx = idx + 1
+    while curr_idx < len(doc_paragraphs):
+        next_p = doc_paragraphs[curr_idx]
+        next_text = next_p.text.strip()
+        if not next_text:
+            break
+        
+        if next_p.style and next_p.style.name == "REF-N":
+            break
+            
+        is_doi = next_text.lower().startswith(("doi:", "https://doi.org/", "http://dx.doi.org/", "url:", "http://", "https://"))
+        is_short_doi = len(next_text) < 100 and bool(re.search(r"\b10\.\d{4,9}/", next_text))
+        
+        if is_doi or is_short_doi:
+            text_parts.append(next_text)
+            curr_idx += 1
+        else:
+            break
+            
+    return " ".join(text_parts)
 
 
 ADDITIONAL_REVIEW_STYLES = [
@@ -46,11 +74,10 @@ def resolve_processed_target(db: Session, *, file_id: int):
         processed_filename = f"{name_only}_Processed.docx"
         processed_path = os.path.join(dir_name, processed_filename)
 
-        # Fallback if _Processed.docx does not exist but the original file has been processed in-place
+        # Fallback if _Processed.docx does not exist
         if not os.path.exists(processed_path) and os.path.exists(original_path):
-            has_history = file_record.version > 1 or (file_record.versions and len(file_record.versions) > 0)
-            if has_history:
-                processed_path = original_path
+            processed_path = original_path
+            processed_filename = os.path.basename(original_path)
 
     return {
         "file_record": file_record,
@@ -270,14 +297,20 @@ def get_xhtml_content(db: Session, *, file_id: int) -> Dict[str, Any]:
 
     xhtml_path = _get_xhtml_path(processed_path)
 
-    # Always force a fresh conversion to ensure the editor shows the latest text/styles in all stages
-    try:
-        os.makedirs(os.path.dirname(xhtml_path), exist_ok=True)
-        engine = DocxToXhtmlEngine()
-        engine.convert(processed_path, xhtml_path)
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning(f"Failed to force-convert XHTML in get_xhtml_content: {e}")
+    # Use cached XHTML if the processed docx hasn't changed since the cached XHTML was written
+    docx_mtime = os.path.getmtime(processed_path)
+    if os.path.exists(xhtml_path) and os.path.getmtime(xhtml_path) >= docx_mtime:
+        logger.info(f"Serving cached XHTML for file {file_id}")
+    else:
+        try:
+            os.makedirs(os.path.dirname(xhtml_path), exist_ok=True)
+            engine = DocxToXhtmlRunsEngine()
+            content = engine.convert(processed_path, file_id=file_id)
+            with open(xhtml_path, "w", encoding="utf-8") as f:
+                f.write(content)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to force-convert XHTML in get_xhtml_content: {e}")
 
     if not os.path.exists(xhtml_path):
         return {
@@ -317,12 +350,14 @@ def generate_xhtml(db: Session, *, file_id: int, logger) -> Dict[str, Any]:
 
     try:
         os.makedirs(os.path.dirname(xhtml_path), exist_ok=True)
-        engine = DocxToXhtmlEngine()
-        result_path = engine.convert(processed_path, xhtml_path)
-        logger.info(f"Generated XHTML: {result_path}")
+        engine = DocxToXhtmlRunsEngine()
+        content = engine.convert(processed_path, file_id=file_id)
+        with open(xhtml_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        logger.info(f"Generated XHTML runs: {xhtml_path}")
         return {
             "status": "ok",
-            "xhtml_path": result_path,
+            "xhtml_path": xhtml_path,
         }
     except Exception as e:
         logger.error(f"XHTML generation failed: {e}", exc_info=True)
@@ -392,9 +427,16 @@ def save_xhtml_and_convert(
         logger.info(f"Saved XHTML: {xhtml_path}")
 
         # 3. Patch in-place directly on the existing file path!
-        engine = XhtmlToDocxEngine()
+        engine = XhtmlToDocxDeltaEngine()
         engine.convert(xhtml_path, processed_path, username=username)
         logger.info(f"Style-patched DOCX version {file_record.version + 1} in-place: {processed_path}")
+
+        # Update the mtime of xhtml_path to match or be newer than processed_path's mtime to ensure cache hit on reload
+        try:
+            docx_mtime = os.path.getmtime(processed_path)
+            os.utime(xhtml_path, (docx_mtime + 1, docx_mtime + 1))
+        except Exception as utime_err:
+            logger.warning(f"Failed to update XHTML cache mtime: {utime_err}")
 
         # 4. Update the existing file record version and timestamp in-place
         from app.utils.timezone import now_ist_naive
@@ -444,8 +486,49 @@ def get_file_xhtml_runs(db: Session, *, file_id: int, logger) -> Dict[str, Any]:
     if not os.path.exists(source_path):
         raise HTTPException(status_code=404, detail="Physical file missing on disk")
 
+    xhtml_path = _get_xhtml_path(source_path)
+    docx_mtime = os.path.getmtime(source_path)
+
+    # 1. Try XHTML cache first
+    if os.path.exists(xhtml_path) and os.path.getmtime(xhtml_path) >= docx_mtime:
+        logger.info(f"Serving cached runs XHTML from xhtml file for file {file_id}")
+        try:
+            with open(xhtml_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            return {"content": content, "filename": file_record.filename}
+        except Exception as e:
+            logger.warning(f"Failed to read runs XHTML cache from {xhtml_path}: {e}")
+
+    # 2. Try reference review cache as secondary fallback
+    cache_path = _ref_review_cache_path(source_path)
+    if os.path.exists(cache_path):
+        try:
+            import json
+            with open(cache_path, "r", encoding="utf-8") as cf:
+                cached = json.load(cf)
+            if cached.get("mtime") == docx_mtime and cached.get("cache_version") == REF_REVIEW_CACHE_VERSION and cached.get("content"):
+                logger.info(f"Serving cached runs XHTML from ref cache for file {file_id}")
+                # Save to xhtml_path for future fast loads
+                try:
+                    os.makedirs(os.path.dirname(xhtml_path), exist_ok=True)
+                    with open(xhtml_path, "w", encoding="utf-8") as f:
+                        f.write(cached["content"])
+                except Exception as ce:
+                    logger.warning(f"Failed to write ref cache content to {xhtml_path}: {ce}")
+                return {"content": cached["content"], "filename": file_record.filename}
+        except Exception as e:
+            logger.warning(f"Failed to read runs XHTML cache: {e}")
+
+    # 3. Generate from scratch
     try:
         content = DocxToXhtmlRunsEngine().convert(source_path, file_id=file_id)
+        # Write to cache
+        try:
+            os.makedirs(os.path.dirname(xhtml_path), exist_ok=True)
+            with open(xhtml_path, "w", encoding="utf-8") as f:
+                f.write(content)
+        except Exception as ce:
+            logger.warning(f"Failed to write runs XHTML cache to {xhtml_path}: {ce}")
     except Exception as e:
         logger.error(f"Run-anchored XHTML generation failed for file {file_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to generate editor content: {str(e)}")
@@ -506,6 +589,13 @@ def save_xhtml_delta_and_convert(
         XhtmlToDocxDeltaEngine().convert(xhtml_path, source_path, username=username)
         logger.info(f"Delta-patched DOCX version {file_record.version + 1} in-place: {source_path}")
 
+        # Update the mtime of xhtml_path to match or be newer than source_path's mtime to ensure cache hit on reload
+        try:
+            docx_mtime = os.path.getmtime(source_path)
+            os.utime(xhtml_path, (docx_mtime + 1, docx_mtime + 1))
+        except Exception as utime_err:
+            logger.warning(f"Failed to update XHTML cache mtime: {utime_err}")
+
         # 3. Update the existing file record version and timestamp in-place
         from app.utils.timezone import now_ist_naive
         file_record.version += 1
@@ -528,6 +618,9 @@ def save_xhtml_delta_and_convert(
     except Exception as e:
         logger.error(f"XHTML delta save/convert failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"XHTML delta save/convert failed: {str(e)}")
+
+
+REF_REVIEW_CACHE_VERSION = 3
 
 
 def _ref_review_cache_path(processed_path: str) -> str:
@@ -557,7 +650,7 @@ def build_reference_review_page_state(db: Session, *, file_id: int, style: Optio
         try:
             with open(cache_path, "r", encoding="utf-8") as cf:
                 cached = json.load(cf)
-            if cached.get("mtime") == docx_mtime:
+            if cached.get("mtime") == docx_mtime and cached.get("cache_version") == REF_REVIEW_CACHE_VERSION:
                 cached_style = cached.get("validation_logs", {}).get("detected_style")
                 if style is None or cached_style == style:
                     logger.info(f"Reference review cache HIT for file {file_id}")
@@ -608,19 +701,17 @@ def build_reference_review_page_state(db: Session, *, file_id: int, style: Optio
         
         detected_style = style
         if not detected_style:
-            # Detect the style based on paragraph style names
+            # Detect the style based on paragraph style names or ref-open tags
             is_ama = False
             is_apa = False
             for p in doc.paragraphs:
                 style_name = (p.style.name or "") if p.style else ""
                 if "REF-N" in style_name:
                     is_ama = True
-                elif "REF-U" in style_name:
+                if "REF-U" in style_name or "<ref-open>" in p.text:
                     is_apa = True
 
-            detected_style = "AMA"
-            if is_apa and not is_ama:
-                detected_style = "APA"
+            detected_style = "APA" if is_apa else "AMA"
             
         validation_logs["detected_style"] = detected_style
         
@@ -663,15 +754,26 @@ def build_reference_review_page_state(db: Session, *, file_id: int, style: Optio
             all_cited_ids, appearance_order = ref_proc.get_citations_in_text()
             cited_set = set(all_cited_ids)
 
+            from docx.oxml.ns import qn
+            import docx.text.paragraph
+            doc_paragraphs = [docx.text.paragraph.Paragraph(p_elem, doc) for p_elem in doc.element.body.iter(qn("w:p"))]
+            para_index_map = {p._element: idx for idx, p in enumerate(doc_paragraphs)}
+
             # Build citation_pairs: one entry per unique cited number, in appearance order
-            ref_text_map = {obj["id"]: obj["para"].text.strip() for obj in ref_objects}
+            ref_text_map = {obj["id"]: _get_full_reference_text(obj["para"], doc_paragraphs, para_index_map) for obj in ref_objects}
             citation_pairs = []
             for num in appearance_order:
+                ref_para = None
+                for obj in ref_objects:
+                    if obj["id"] == num:
+                        ref_para = obj["para"]
+                        break
                 citation_pairs.append({
                     "citation": str(num),
                     "ref_number": num,
                     "ref_text": ref_text_map.get(num, ""),
                     "status": "ok" if num in refs_found else "missing",
+                    "para_idx": para_index_map.get(ref_para._element, -1) if ref_para else -1,
                 })
             # Add unused entries (in bibliography but never cited)
             for obj in ref_objects:
@@ -679,8 +781,9 @@ def build_reference_review_page_state(db: Session, *, file_id: int, style: Optio
                     citation_pairs.append({
                         "citation": None,
                         "ref_number": obj["id"],
-                        "ref_text": obj["para"].text.strip(),
+                        "ref_text": _get_full_reference_text(obj["para"], doc_paragraphs, para_index_map),
                         "status": "unused",
+                        "para_idx": para_index_map.get(obj["para"]._element, -1),
                     })
 
             # Build reference_entries: all bibliography paragraphs in order
@@ -688,10 +791,10 @@ def build_reference_review_page_state(db: Session, *, file_id: int, style: Optio
             for i, obj in enumerate(ref_objects):
                 reference_entries.append({
                     "number": obj["id"],
-                    "text": obj["para"].text.strip(),
+                    "text": _get_full_reference_text(obj["para"], doc_paragraphs, para_index_map),
                     "style": "REF-N",
                     "is_cited": obj["id"] in cited_set,
-                    "para_idx": i,   # approximate; sufficient for editor focus
+                    "para_idx": para_index_map.get(obj["para"]._element, -1),
                 })
 
             validation_logs["citation_pairs"] = citation_pairs
@@ -787,9 +890,16 @@ def build_reference_review_page_state(db: Session, *, file_id: int, style: Optio
     # ── Write cache so the next page load is instant ──────────────────────────
     try:
         import json
+        docx_mtime = os.path.getmtime(processed_path)
         with open(cache_path, "w", encoding="utf-8") as cf:
             json.dump(
-                {"mtime": docx_mtime, "filename": filename, "content": content, "validation_logs": validation_logs},
+                {
+                    "mtime": docx_mtime,
+                    "filename": filename,
+                    "content": content,
+                    "validation_logs": validation_logs,
+                    "cache_version": REF_REVIEW_CACHE_VERSION
+                },
                 cf,
                 ensure_ascii=False,
             )
@@ -838,17 +948,17 @@ def run_validation_only(db: Session, *, file_id: int, style: Optional[str] = Non
 
         detected_style = style
         if not detected_style:
-            # Detect style: REF-N -> AMA, REF-U -> APA
+            # Detect style: REF-N -> AMA, REF-U or <ref-open> -> APA
             is_ama = False
             is_apa = False
             for p in doc.paragraphs:
                 style_name = (p.style.name or "") if p.style else ""
                 if "REF-N" in style_name:
                     is_ama = True
-                elif "REF-U" in style_name:
+                if "REF-U" in style_name or "<ref-open>" in p.text:
                     is_apa = True
 
-            detected_style = "AMA" if is_ama and not is_apa else ("APA" if is_apa else "AMA")
+            detected_style = "APA" if is_apa else "AMA"
         validation_logs["detected_style"] = detected_style
 
         if detected_style == "AMA":
@@ -888,53 +998,57 @@ def run_validation_only(db: Session, *, file_id: int, style: Optional[str] = Non
             all_cited_ids, appearance_order = ref_proc.get_citations_in_text()
             cited_set = set(all_cited_ids)
 
-            ref_text_map = {obj["id"]: obj["para"].text.strip() for obj in ref_objects}
+            # Build a map of paragraph elements to their global index in the document
+            from docx.oxml.ns import qn
+            import docx.text.paragraph
+            doc_paragraphs = [docx.text.paragraph.Paragraph(p_elem, doc) for p_elem in doc.element.body.iter(qn("w:p"))]
+            para_index_map = {p._element: idx for idx, p in enumerate(doc_paragraphs)}
+
+            ref_text_map = {obj["id"]: _get_full_reference_text(obj["para"], doc_paragraphs, para_index_map) for obj in ref_objects}
             citation_pairs = []
             for num in appearance_order:
+                ref_para = None
+                for obj in ref_objects:
+                    if obj["id"] == num:
+                        ref_para = obj["para"]
+                        break
                 citation_pairs.append({
                     "citation": str(num),
                     "ref_number": num,
                     "ref_text": ref_text_map.get(num, ""),
                     "status": "ok" if num in refs_found else "missing",
-                    "para_idx": -1,  # Will be set from global document index below
+                    "para_idx": para_index_map.get(ref_para._element, -1) if ref_para else -1,
                 })
             for obj in ref_objects:
                 if obj["id"] not in cited_set:
                     citation_pairs.append({
                         "citation": None,
                         "ref_number": obj["id"],
-                        "ref_text": obj["para"].text.strip(),
+                        "ref_text": _get_full_reference_text(obj["para"], doc_paragraphs, para_index_map),
                         "status": "unused",
-                        "para_idx": -1,
+                        "para_idx": para_index_map.get(obj["para"]._element, -1),
                     })
 
             # Build reference_entries with global para_idx
             reference_entries = []
-            para_count = 0
-            for p in doc.paragraphs:
+            for p in doc_paragraphs:
                 style_name = (p.style.name or "") if p.style else ""
                 if "REF-N" in style_name:
                     # This is a bibliography paragraph
                     ref_num = None
                     for obj in ref_objects:
-                        if obj["para"] == p:
+                        if obj["para"]._element == p._element:
                             ref_num = obj["id"]
                             break
 
                     if ref_num is not None:
-                        # Update citation_pairs with global para_idx
-                        for pair in citation_pairs:
-                            if pair.get("ref_number") == ref_num:
-                                pair["para_idx"] = para_count
-
                         reference_entries.append({
                             "number": ref_num,
-                            "text": p.text.strip(),
+                            "text": _get_full_reference_text(p, doc_paragraphs, para_index_map),
                             "style": "REF-N",
                             "is_cited": ref_num in cited_set,
-                            "para_idx": para_count,
+                            "para_idx": para_index_map.get(p._element, -1),
                         })
-                para_count += 1
 
             validation_logs["citation_pairs"] = citation_pairs
             validation_logs["reference_entries"] = reference_entries

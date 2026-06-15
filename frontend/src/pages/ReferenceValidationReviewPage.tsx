@@ -17,13 +17,14 @@ import {
   Sparkles,
   Layers,
   Search,
-  Eye,
-  EyeOff,
-  CornerDownRight,
-  User,
+  X,
+  Edit2,
   Calendar,
-  AlignLeft,
   Terminal,
+  EyeOff,
+  Eye,
+  CornerDownRight,
+  RotateCcw,
 } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
@@ -67,6 +68,483 @@ const CHAR_STYLE_COLOURS: Record<string, string> = {
   cite_tfn: "#fed7aa",
 };
 
+function formatPubMedToStyle(doc: any, style: "AMA" | "APA"): string {
+  const authorsList = doc.authors || [];
+  const title = (doc.title || "").replace(/\.$/, "");
+  const journal = doc.source || "";
+  const pubdate = doc.pubdate || "";
+  const yearMatch = pubdate.match(/\b(19|20)\d{2}\b/);
+  const year = yearMatch ? yearMatch[0] : "";
+  const volume = doc.volume || "";
+  const issue = doc.issue || "";
+  const pages = doc.pages || "";
+  
+  let doi = "";
+  if (doc.articleids) {
+    const doiObj = doc.articleids.find((id: any) => id.idtype === "doi");
+    if (doiObj) {
+      doi = doiObj.value;
+    }
+  }
+
+  // Format authors
+  let authorsFormatted = "";
+  if (style === "AMA") {
+    if (authorsList.length > 6) {
+      authorsFormatted = authorsList.slice(0, 3).map((a: any) => a.name).join(", ") + ", et al";
+    } else if (authorsList.length > 0) {
+      authorsFormatted = authorsList.map((a: any) => a.name).join(", ");
+    }
+  } else {
+    const parseName = (name: string) => {
+      const parts = name.trim().split(/\s+/);
+      if (parts.length > 1) {
+        const last = parts[0];
+        const initials = parts.slice(1).join("").split("").map(c => `${c}.`).join(" ");
+        return `${last}, ${initials}`;
+      }
+      return name;
+    };
+    if (authorsList.length > 0) {
+      const parsedAuthors = authorsList.map((a: any) => parseName(a.name));
+      if (parsedAuthors.length > 1) {
+        authorsFormatted = parsedAuthors.slice(0, -1).join(", ") + ", & " + parsedAuthors[parsedAuthors.length - 1];
+      } else {
+        authorsFormatted = parsedAuthors[0];
+      }
+    }
+  }
+
+  if (style === "AMA") {
+    let res = "";
+    if (authorsFormatted) res += `${authorsFormatted}. `;
+    res += `${title}. `;
+    if (journal) res += `${journal}. `;
+    if (year) res += `${year}`;
+    if (volume || issue || pages) {
+      res += ";";
+      if (volume) res += volume;
+      if (issue) res += `(${issue})`;
+      if (pages) res += `:${pages}`;
+    }
+    if (!res.endsWith(".")) res += ".";
+    if (doi) {
+      res += ` doi:${doi}`;
+    }
+    return res;
+  } else {
+    let res = "";
+    if (authorsFormatted) res += `${authorsFormatted} `;
+    if (year) res += `(${year}). `;
+    res += `${title}. `;
+    if (journal) res += `${journal}`;
+    if (volume || issue || pages) {
+      if (journal) res += ", ";
+      if (volume) res += volume;
+      if (issue) res += `(${issue})`;
+      if (pages) {
+        if (volume || issue) res += ", ";
+        res += pages;
+      }
+    }
+    if (!res.endsWith(".")) res += ".";
+    if (doi) {
+      res += ` https://doi.org/${doi}`;
+    }
+    return res;
+  }
+}
+
+function formatCrossRefToStyle(item: any, style: "AMA" | "APA"): string {
+  const authorList = item.author || [];
+  const title = (item.title && item.title[0] || "").replace(/\.$/, "");
+  const journal = item["container-title"] && item["container-title"][0] || "";
+  
+  let year = "";
+  const dateParts = item["published-print"]?.["date-parts"]?.[0] || item["published"]?.["date-parts"]?.[0] || item["published-online"]?.["date-parts"]?.[0];
+  if (dateParts && dateParts.length > 0) {
+    year = dateParts[0].toString();
+  }
+
+  const volume = item.volume || "";
+  const issue = item.issue || "";
+  const pages = item.page || "";
+  const doi = item.DOI || "";
+
+  // Format authors
+  let authorsFormatted = "";
+  if (style === "AMA") {
+    const formatted = authorList.map((a: any) => {
+      const initials = (a.given || "").split(/\s+/).map((p: string) => p[0] || "").join("");
+      return `${a.family || ""} ${initials}`.trim();
+    });
+    if (formatted.length > 6) {
+      authorsFormatted = formatted.slice(0, 3).join(", ") + ", et al";
+    } else if (formatted.length > 0) {
+      authorsFormatted = formatted.join(", ");
+    }
+  } else {
+    const formatted = authorList.map((a: any) => {
+      const initials = (a.given || "").split(/\s+/).map((p: string) => p[0] ? `${p[0]}.` : "").join(" ");
+      return `${a.family || ""}, ${initials}`.trim();
+    });
+    if (formatted.length > 0) {
+      if (formatted.length > 1) {
+        authorsFormatted = formatted.slice(0, -1).join(", ") + ", & " + formatted[formatted.length - 1];
+      } else {
+        authorsFormatted = formatted[0];
+      }
+    }
+  }
+
+  if (style === "AMA") {
+    let res = "";
+    if (authorsFormatted) res += `${authorsFormatted}. `;
+    res += `${title}. `;
+    if (journal) res += `${journal}. `;
+    if (year) res += `${year}`;
+    if (volume || issue || pages) {
+      res += ";";
+      if (volume) res += volume;
+      if (issue) res += `(${issue})`;
+      if (pages) res += `:${pages}`;
+    }
+    if (!res.endsWith(".")) res += ".";
+    if (doi) {
+      res += ` doi:${doi}`;
+    }
+    return res;
+  } else {
+    let res = "";
+    if (authorsFormatted) res += `${authorsFormatted} `;
+    if (year) res += `(${year}). `;
+    res += `${title}. `;
+    if (journal) res += `${journal}`;
+    if (volume || issue || pages) {
+      if (journal) res += ", ";
+      if (volume) res += volume;
+      if (issue) res += `(${issue})`;
+      if (pages) {
+        if (volume || issue) res += ", ";
+        res += pages;
+      }
+    }
+    if (!res.endsWith(".")) res += ".";
+    if (doi) {
+      res += ` https://doi.org/${doi}`;
+    }
+    return res;
+  }
+}
+
+function diffWordsToHTML(oldStr: string, newStr: string, currentUser: string = "Editor"): string {
+  const oldWords = oldStr.split(/(\s+)/);
+  const newWords = newStr.split(/(\s+)/);
+
+  const dp: number[][] = Array(oldWords.length + 1).fill(0).map(() => Array(newWords.length + 1).fill(0));
+  for (let i = 1; i <= oldWords.length; i++) {
+    for (let j = 1; j <= newWords.length; j++) {
+      if (oldWords[i - 1] === newWords[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1] + 1;
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
+  }
+
+  let i = oldWords.length;
+  let j = newWords.length;
+  const result: string[] = [];
+  const timestamp = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && oldWords[i - 1] === newWords[j - 1]) {
+      result.push(escapeHTML(oldWords[i - 1]));
+      i--;
+      j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      const text = newWords[j - 1];
+      if (text.trim() !== "") {
+        result.push(`<ins data-author="${currentUser}" data-date="${timestamp}">${escapeHTML(text)}</ins>`);
+      } else {
+        result.push(text);
+      }
+      j--;
+    } else {
+      const text = oldWords[i - 1];
+      if (text.trim() !== "") {
+        result.push(`<del data-author="${currentUser}" data-date="${timestamp}">${escapeHTML(text)}</del>`);
+      } else {
+        result.push(text);
+      }
+      i--;
+    }
+  }
+
+  const diffHtml = result.reverse().join("");
+  const doiRegex = /(doi:\s*10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+|https?:\/\/doi\.org\/10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)/gi;
+  return diffHtml.replace(doiRegex, (match) => {
+    return `<span class="bib_doi">${match}</span>`;
+  });
+}
+
+function styledDiffHTML(oldStr: string, newStr: string, currentUser: string = "Editor"): string {
+  const oldWords = oldStr.split(/(\s+)/);
+  const newWords = newStr.split(/(\s+)/);
+
+  const dp: number[][] = Array(oldWords.length + 1).fill(0).map(() => Array(newWords.length + 1).fill(0));
+  for (let i = 1; i <= oldWords.length; i++) {
+    for (let j = 1; j <= newWords.length; j++) {
+      if (oldWords[i - 1] === newWords[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1] + 1;
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
+  }
+
+  let i = oldWords.length;
+  let j = newWords.length;
+  type Token = { type: "same" | "ins" | "del"; text: string };
+  const tokens: Token[] = [];
+  const timestamp = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && oldWords[i - 1] === newWords[j - 1]) {
+      tokens.push({ type: "same", text: oldWords[i - 1] });
+      i--; j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      tokens.push({ type: "ins", text: newWords[j - 1] });
+      j--;
+    } else {
+      tokens.push({ type: "del", text: oldWords[i - 1] });
+      i--;
+    }
+  }
+  tokens.reverse();
+
+  const parts: string[] = [];
+  for (const tok of tokens) {
+    if (tok.text.trim() === "") {
+      parts.push(tok.text);
+      continue;
+    }
+    if (tok.type === "same") {
+      parts.push(escapeHTML(tok.text));
+    } else if (tok.type === "ins") {
+      parts.push(`<ins class="tc-insert" data-author="${currentUser}" data-date="${timestamp}">${escapeHTML(tok.text)}</ins>`);
+    } else {
+      parts.push(`<del class="tc-delete" data-author="${currentUser}" data-date="${timestamp}">${escapeHTML(tok.text)}</del>`);
+    }
+  }
+
+  return parts.join("");
+}
+
+function escapeHTML(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function styleReferenceText(text: string): string {
+  if (!text) return "";
+  
+  let rawText = text.trim();
+  
+  // 1. Identify and extract DOI
+  const doiRegex = /(doi:\s*10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+|https?:\/\/doi\.org\/10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)/i;
+  const doiMatch = rawText.match(doiRegex);
+  let doiText = "";
+  if (doiMatch) {
+    doiText = doiMatch[0];
+    rawText = rawText.replace(doiRegex, "").trim();
+  }
+
+  // 1b. Identify and extract PubMed/Medline IDs
+  const pubmedRegex = /(pubmed:\s*\d+|pmid:\s*\d+)/i;
+  const pubmedMatch = rawText.match(pubmedRegex);
+  let pubmedText = "";
+  if (pubmedMatch) {
+    pubmedText = pubmedMatch[0];
+    rawText = rawText.replace(pubmedRegex, "").trim();
+  }
+  
+  // 2. Extract leading number (AMA style)
+  const numRegex = /^(\[?\d+\]?[\.\s]+)/;
+  const numMatch = rawText.match(numRegex);
+  let numText = "";
+  if (numMatch) {
+    numText = numMatch[0];
+    rawText = rawText.substring(numText.length).trim();
+  }
+  
+  // 3. Determine if APA or AMA
+  const apaYearRegex = /\s+\(((?:19|20)\d{2}[a-z]?|n\.d\.|in\s+press)\)/i;
+  const isAPA = apaYearRegex.test(rawText);
+  
+  let authors = "";
+  let year = "";
+  let rest = "";
+  
+  if (isAPA) {
+    const yearMatch = rawText.match(apaYearRegex);
+    if (yearMatch && yearMatch.index !== undefined) {
+      authors = rawText.substring(0, yearMatch.index).trim();
+      year = yearMatch[1];
+      rest = rawText.substring(yearMatch.index + yearMatch[0].length).trim();
+      if (rest.startsWith(".")) rest = rest.substring(1).trim();
+    }
+  } else {
+    // AMA Style - split by first period to isolate authors
+    const firstPeriodIndex = rawText.indexOf(".");
+    if (firstPeriodIndex !== -1) {
+      authors = rawText.substring(0, firstPeriodIndex).trim();
+      rest = rawText.substring(firstPeriodIndex + 1).trim();
+    } else {
+      authors = rawText;
+    }
+  }
+  
+  // Parse and style Authors
+  let styledAuthors = "";
+  if (authors) {
+    const authorList = authors.split(/,|\b&\b/);
+    styledAuthors = authorList.map((authStr) => {
+      const trimmed = authStr.trim();
+      if (!trimmed) return "";
+      
+      if (trimmed.toLowerCase().includes("et al")) {
+        return `<span class="bib_etal">${escapeHTML(trimmed)}</span>`;
+      }
+      
+      const parts = trimmed.split(/\s+/);
+      if (parts.length > 1) {
+        const isInitials = /^[A-Z]\.?(\s*[A-Z]\.?)*$/.test(parts[0]);
+        if (isInitials) {
+          return `<span class="bib_fname">${escapeHTML(trimmed)}</span>`;
+        } else {
+          const lastPart = parts[parts.length - 1];
+          if (/^[A-Z]\.?([A-Z]\.?)*$/.test(lastPart)) {
+            const surname = parts.slice(0, -1).join(" ");
+            return `<span class="bib_surname">${escapeHTML(surname)}</span> <span class="bib_fname">${escapeHTML(lastPart)}</span>`;
+          }
+          return `<span class="bib_surname">${escapeHTML(trimmed)}</span>`;
+        }
+      }
+      return `<span class="bib_surname">${escapeHTML(trimmed)}</span>`;
+    }).join(", ");
+  }
+  
+  // Parse rest of elements (Title, Journal, Volume, Issue, Pages)
+  let styledRest = "";
+  if (rest) {
+    if (isAPA) {
+      const parts = rest.split(".");
+      const title = parts[0] || "";
+      const journalAndMore = parts.slice(1).join(".").trim();
+      
+      styledRest += ` <span class="bib_title">${escapeHTML(title)}</span>.`;
+      
+      if (journalAndMore) {
+        let styledJournal = escapeHTML(journalAndMore);
+        const volIssuePages = /(\d+)\((\d+)\),\s*(\d+)([-–—])(\d+)/;
+        const volPages = /(\d+),\s*(\d+)([-–—])(\d+)/;
+        
+        const commaIndex = journalAndMore.indexOf(",");
+        if (commaIndex !== -1) {
+          const journalName = journalAndMore.substring(0, commaIndex).trim();
+          const journalRest = journalAndMore.substring(commaIndex).trim();
+          let styledJRest = escapeHTML(journalRest);
+          if (volIssuePages.test(styledJRest)) {
+            styledJRest = styledJRest.replace(volIssuePages, '<span class="bib_volume">$1</span>(<span class="bib_issue">$2</span>), <span class="bib_fpage">$3</span>$4<span class="bib_lpage">$5</span>');
+          } else if (volPages.test(styledJRest)) {
+            styledJRest = styledJRest.replace(volPages, '<span class="bib_volume">$1</span>, <span class="bib_fpage">$2</span>$3<span class="bib_lpage">$4</span>');
+          }
+          styledRest += ` <span class="bib_journal"><em>${escapeHTML(journalName)}</em></span>${styledJRest}`;
+        } else {
+          styledRest += ` <span class="bib_journal"><em>${styledJournal}</em></span>`;
+        }
+      }
+    } else {
+      // AMA Style rest: Title, Journal, Year;Volume(Issue):Pages
+      const yearVolRegex = /\b((?:19|20)\d{2})\b/;
+      const yearMatch = rest.match(yearVolRegex);
+      
+      if (yearMatch && yearMatch.index !== undefined) {
+        const titleAndJournal = rest.substring(0, yearMatch.index).trim();
+        const yearVolPages = rest.substring(yearMatch.index).trim();
+        
+        const tjParts = titleAndJournal.split(".");
+        let title = "";
+        let journal = "";
+        if (tjParts.length > 2) {
+          title = tjParts.slice(0, -2).join(".").trim();
+          journal = tjParts[tjParts.length - 2].trim();
+        } else if (tjParts.length === 2) {
+          title = tjParts[0].trim();
+          journal = tjParts[1].trim();
+        } else {
+          journal = titleAndJournal;
+        }
+        
+        if (title) styledRest += ` <span class="bib_title">${escapeHTML(title)}</span>.`;
+        if (journal) styledRest += ` <span class="bib_journal"><em>${escapeHTML(journal)}</em></span>.`;
+        
+        let styledYVP = escapeHTML(yearVolPages);
+        const yvpRegex = /\b(\d{4})\b;(\d+)\((\d+)\):(\d+)([-–—])(\d+)/;
+        const yvpNoIssueRegex = /\b(\d{4})\b;(\d+):(\d+)([-–—])(\d+)/;
+        const yvpNoPagesRegex = /\b(\d{4})\b;(\d+)\((\d+)\):(\d+)/;
+        
+        if (yvpRegex.test(styledYVP)) {
+          styledYVP = styledYVP.replace(yvpRegex, '<span class="bib_year">$1</span>;<span class="bib_volume">$2</span>(<span class="bib_issue">$3</span>):<span class="bib_fpage">$4</span>$5<span class="bib_lpage">$6</span>');
+        } else if (yvpNoIssueRegex.test(styledYVP)) {
+          styledYVP = styledYVP.replace(yvpNoIssueRegex, '<span class="bib_year">$1</span>;<span class="bib_volume">$2</span>:<span class="bib_fpage">$3</span>$4<span class="bib_lpage">$5</span>');
+        } else if (yvpNoPagesRegex.test(styledYVP)) {
+          styledYVP = styledYVP.replace(yvpNoPagesRegex, '<span class="bib_year">$1</span>;<span class="bib_volume">$2</span>(<span class="bib_issue">$3</span>):<span class="bib_fpage">$4</span>');
+        } else {
+          const justYearRegex = /\b(\d{4})\b/g;
+          styledYVP = styledYVP.replace(justYearRegex, '<span class="bib_year">$1</span>');
+        }
+        
+        styledRest += ` ${styledYVP}`;
+      } else {
+        styledRest += ` ${escapeHTML(rest)}`;
+      }
+    }
+  }
+  
+  let result = "";
+  if (numText) result += `<span class="bib_chapterno">${escapeHTML(numText)}</span>`;
+  if (styledAuthors) result += styledAuthors + (isAPA ? "" : ".");
+  if (isAPA && year) result += ` (<span class="bib_year">${escapeHTML(year)}</span>).`;
+  if (styledRest) result += styledRest;
+  if (doiText) {
+    result += `, <span class="bib_doi">${escapeHTML(doiText)}</span>`;
+  }
+  if (pubmedText) {
+    result += `, <span class="bib_medline">${escapeHTML(pubmedText)}</span>`;
+  }
+  
+  return result;
+}
+
+function getPlainTextFromHTML(html: string): string {
+  if (!html) return "";
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, "text/html");
+  
+  // Remove all <del> elements (rejected track changes deletions)
+  const dels = doc.querySelectorAll("del");
+  dels.forEach((del) => del.remove());
+  
+  // Get plain text content
+  return doc.body.textContent || "";
+}
+
 export function ReferenceValidationReviewPage() {
   const navigate = useNavigate();
   const { projectId, chapterId, fileId } = useParams();
@@ -100,8 +578,206 @@ export function ReferenceValidationReviewPage() {
   // Tab 2 — Structuring
   const [refFilter, setRefFilter] = useState("");
   const [showUncitedOnly, setShowUncitedOnly] = useState(false);
+  const [structuringViewMode, setStructuringViewMode] = useState<"list" | "changes">("list");
   const [editingEntryIdx, setEditingEntryIdx] = useState<number | null>(null);
   const [editingText, setEditingText] = useState("");
+
+  // Edit Reference Modal states
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<{ idx: number; paraIdx: number; originalText: string } | null>(null);
+  const [editingEntryHtml, setEditingEntryHtml] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchSource, setSearchSource] = useState<"pubmed" | "crossref" | null>(null);
+
+  const getReferenceHTML = (paraIdx: number): string => {
+    const editor = editorRef.current?.editor;
+    if (!editor) return "";
+
+    if (paraIdx === undefined || paraIdx === null || typeof paraIdx !== "number" || Number.isNaN(paraIdx) || paraIdx < 0) {
+      return "";
+    }
+
+    const html = editor.getHTML();
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
+    
+    // Find the block by its data-para-idx attribute first (accurate mapping)
+    const targetBlock = doc.body.querySelector(`[data-para-idx="${paraIdx}"]`) || 
+                        doc.body.querySelector(`[data-para-idx='${paraIdx}']`);
+    
+    if (!targetBlock) {
+      // Fallback: querySelectorAll index-based
+      const blocks = Array.from(doc.body.querySelectorAll("p, h1, h2, h3, h4, h5, h6, li"));
+      if (paraIdx < 0 || paraIdx >= blocks.length) return "";
+      
+      const fallbackBlock = blocks[paraIdx];
+      let resultHtml = fallbackBlock.innerHTML;
+      
+      let curr = fallbackBlock.nextElementSibling;
+      while (curr) {
+        const text = curr.textContent?.trim() || "";
+        const styleLabel = curr.getAttribute("data-style-label") || curr.className || "";
+        
+        if (styleLabel.includes("REF-N") || styleLabel.includes("REF-U")) {
+          break;
+        } else if (
+          text.toLowerCase().startsWith("doi:") ||
+          text.toLowerCase().startsWith("https://doi.org/") ||
+          text.toLowerCase().startsWith("http://dx.doi.org/") ||
+          (text.length < 100 && /10\.\d{4,9}\//i.test(text))
+        ) {
+          resultHtml += " " + curr.innerHTML;
+          curr = curr.nextElementSibling;
+        } else {
+          break;
+        }
+      }
+      return resultHtml;
+    }
+
+    let resultHtml = targetBlock.innerHTML;
+    let curr = targetBlock.nextElementSibling;
+    while (curr) {
+      const text = curr.textContent?.trim() || "";
+      const styleLabel = curr.getAttribute("data-style-label") || curr.className || "";
+      
+      if (styleLabel.includes("REF-N") || styleLabel.includes("REF-U")) {
+        break;
+      } else if (
+        text.toLowerCase().startsWith("doi:") ||
+        text.toLowerCase().startsWith("https://doi.org/") ||
+        text.toLowerCase().startsWith("http://dx.doi.org/") ||
+        (text.length < 100 && /10\.\d{4,9}\//i.test(text))
+      ) {
+        resultHtml += " " + curr.innerHTML;
+        curr = curr.nextElementSibling;
+      } else {
+        break;
+      }
+    }
+
+    return resultHtml;
+  };
+
+  const referenceHasChanges = (paraIdx: number): boolean =>
+    /<ins[\s>]|<del[\s>]/i.test(getReferenceHTML(paraIdx));
+
+  const resolveReferenceChanges = async (paraIdx: number, accept: boolean) => {
+    const html = getReferenceHTML(paraIdx);
+    if (!html) return;
+    const body = new DOMParser()
+      .parseFromString(`<body>${html}</body>`, "text/html").body;
+    if (accept) {
+      body.querySelectorAll("ins, .tc-insert").forEach(el =>
+        el.replaceWith(...Array.from(el.childNodes)));
+      body.querySelectorAll("del, .tc-delete").forEach(el => el.remove());
+    } else {
+      body.querySelectorAll("del, .tc-delete").forEach(el =>
+        el.replaceWith(...Array.from(el.childNodes)));
+      body.querySelectorAll("ins, .tc-insert").forEach(el => el.remove());
+    }
+    updateParaText(paraIdx, body.innerHTML);
+    if (editorRef.current?.editor && reviewQuery.data?.save_endpoint)
+      await saveMutation.save(reviewQuery.data.save_endpoint, editorRef.current.editor.getHTML());
+  };
+
+  const searchPubMed = async (query: string) => {
+    if (!query.trim()) return;
+    setSearchLoading(true);
+    setSearchSource("pubmed");
+    setSearchResults([]);
+    try {
+      const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&retmode=json&retmax=3`;
+      const searchRes = await fetch(searchUrl);
+      const searchData = await searchRes.json();
+      const idList = searchData?.esearchresult?.idlist || [];
+      
+      if (idList.length === 0) {
+        setSearchResults([]);
+        setSearchLoading(false);
+        return;
+      }
+
+      const fetchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=${idList.join(",")}&retmode=json`;
+      const fetchRes = await fetch(fetchUrl);
+      const fetchData = await fetchRes.json();
+      const results = fetchData?.result || {};
+
+      const formattedResults = idList.map((id: string) => {
+        const doc = results[id];
+        if (!doc) return null;
+        const formatted = formatPubMedToStyle(doc, detectedStyle);
+        return {
+          id,
+          raw: doc,
+          formatted,
+          title: doc.title,
+          doi: doc.articleids?.find((i: any) => i.idtype === "doi")?.value || ""
+        };
+      }).filter(Boolean);
+
+      setSearchResults(formattedResults);
+    } catch (err) {
+      console.error("PubMed search failed:", err);
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  const searchCrossRef = async (query: string) => {
+    if (!query.trim()) return;
+    setSearchLoading(true);
+    setSearchSource("crossref");
+    setSearchResults([]);
+    try {
+      const searchUrl = `https://api.crossref.org/works?query=${encodeURIComponent(query)}&rows=3`;
+      const res = await fetch(searchUrl);
+      const data = await res.json();
+      const items = data?.message?.items || [];
+
+      const formattedResults = items.map((item: any) => {
+        const formatted = formatCrossRefToStyle(item, detectedStyle);
+        return {
+          id: item.DOI || "",
+          raw: item,
+          formatted,
+          title: item.title?.[0] || "",
+          doi: item.DOI || ""
+        };
+      });
+
+      setSearchResults(formattedResults);
+    } catch (err) {
+      console.error("CrossRef search failed:", err);
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  const handleSaveEditedReference = async () => {
+    if (!editingEntry) return;
+    const original = editingEntry.originalText;
+    const edited = editingText;
+
+    if (original.trim() === edited.trim()) {
+      setIsEditModalOpen(false);
+      setEditingEntry(null);
+      return;
+    }
+
+    const diffHtml = diffWordsToHTML(original, edited, viewer?.username || "Editor");
+
+    updateParaText(editingEntry.paraIdx, diffHtml);
+    setIsEditModalOpen(false);
+    setEditingEntry(null);
+
+    if (editorRef.current?.editor && reviewQuery.data?.save_endpoint) {
+      const html = editorRef.current.editor.getHTML();
+      await saveMutation.save(reviewQuery.data.save_endpoint, html);
+    }
+  };
 
   // Tab 3 — Logs
   const [logViewMode, setLogViewMode] = useState<"dashboard" | "raw">("dashboard");
@@ -237,6 +913,10 @@ export function ReferenceValidationReviewPage() {
     const editor = editorRef.current?.editor;
     if (!editor) return;
 
+    if (paraIdx === undefined || paraIdx === null || typeof paraIdx !== "number" || Number.isNaN(paraIdx) || paraIdx < 0) {
+      return;
+    }
+
     const el = editor.view.dom.querySelector(`[data-para-idx="${paraIdx}"]`) as HTMLElement;
     if (el) {
       if (isHover) {
@@ -273,20 +953,37 @@ export function ReferenceValidationReviewPage() {
     const editor = editorRef.current?.editor;
     if (!editor) return;
 
+    if (paraIdx === undefined || paraIdx === null || typeof paraIdx !== "number" || Number.isNaN(paraIdx) || paraIdx < 0) {
+      return;
+    }
+
     let targetPos = -1;
-    let count = 0;
     
     editor.state.doc.descendants((node: any, pos: number) => {
       if (targetPos !== -1) return false;
       if (isTextBlock(node)) {
-        if (count === paraIdx) {
+        if (node.attrs?.paraIdx !== undefined && node.attrs?.paraIdx !== null && String(node.attrs.paraIdx) === String(paraIdx)) {
           targetPos = pos;
           return false;
         }
-        count++;
       }
       return true;
     });
+
+    if (targetPos === -1) {
+      let count = 0;
+      editor.state.doc.descendants((node: any, pos: number) => {
+        if (targetPos !== -1) return false;
+        if (isTextBlock(node)) {
+          if (count === paraIdx) {
+            targetPos = pos;
+            return false;
+          }
+          count++;
+        }
+        return true;
+      });
+    }
 
     if (targetPos !== -1) {
       const headingMap: Record<string, number> = {
@@ -320,27 +1017,73 @@ export function ReferenceValidationReviewPage() {
     const editor = editorRef.current?.editor;
     if (!editor) return;
 
+    if (paraIdx === undefined || paraIdx === null || typeof paraIdx !== "number" || Number.isNaN(paraIdx) || paraIdx < 0) {
+      return;
+    }
+
     let targetPos = -1;
     let targetEnd = -1;
-    let count = 0;
     
     editor.state.doc.descendants((node: any, pos: number) => {
       if (targetPos !== -1) return false;
       if (isTextBlock(node)) {
-        if (count === paraIdx) {
+        if (node.attrs?.paraIdx !== undefined && node.attrs?.paraIdx !== null && String(node.attrs.paraIdx) === String(paraIdx)) {
           targetPos = pos;
           targetEnd = pos + node.nodeSize;
           return false;
         }
-        count++;
       }
       return true;
     });
 
+    if (targetPos === -1) {
+      let count = 0;
+      editor.state.doc.descendants((node: any, pos: number) => {
+        if (targetPos !== -1) return false;
+        if (isTextBlock(node)) {
+          if (count === paraIdx) {
+            targetPos = pos;
+            targetEnd = pos + node.nodeSize;
+            return false;
+          }
+          count++;
+        }
+        return true;
+      });
+    }
+
     if (targetPos !== -1 && targetEnd !== -1) {
+      let deleteRangeEnd = targetEnd;
+      let nextPos = targetEnd;
+      let done = false;
+
+      while (!done && nextPos < editor.state.doc.content.size) {
+        const nextNode = editor.state.doc.nodeAt(nextPos);
+        if (nextNode && isTextBlock(nextNode)) {
+          const text = nextNode.textContent.trim();
+          const nextStyleLabel = nextNode.attrs?.styleLabel || "";
+          
+          if (nextStyleLabel === "REF-N") {
+            done = true;
+          } else if (
+            text.toLowerCase().startsWith("doi:") ||
+            text.toLowerCase().startsWith("https://doi.org/") ||
+            text.toLowerCase().startsWith("http://dx.doi.org/") ||
+            (text.length < 100 && /10\.\d{4,9}\//i.test(text))
+          ) {
+            deleteRangeEnd = nextPos + nextNode.nodeSize;
+            nextPos = deleteRangeEnd;
+          } else {
+            done = true;
+          }
+        } else {
+          done = true;
+        }
+      }
+
       editor.chain()
         .focus()
-        .deleteRange(targetPos + 1, targetEnd - 1)
+        .deleteRange(targetPos + 1, deleteRangeEnd - 1)
         .insertContentAt(targetPos + 1, newText)
         .run();
     }
@@ -661,37 +1404,49 @@ export function ReferenceValidationReviewPage() {
     const editor = editorRef.current?.editor;
     if (!editor) return;
 
-    // 1. Direct DOM query using the data attribute (if the exporter emitted it)
-    const el = editor.view.dom.querySelector(`[data-para-idx="${paraIdx}"]`) as HTMLElement;
-    if (el) {
-      editor.commands.setTextSelection(editor.view.posAtDOM(el, 0));
-      flashBlock(el);
-      return;
-    }
+    // Helper: scroll the DOM element at a given ProseMirror position into view
+    const scrollToDocPos = (pos: number) => {
+      try {
+        const domInfo = editor.view.domAtPos(pos);
+        const el = (domInfo.node.nodeType === Node.TEXT_NODE
+          ? domInfo.node.parentElement
+          : domInfo.node) as HTMLElement | null;
+        flashBlock(el);
+      } catch {/* ignore */}
+    };
 
-    // 2. Block-aware text search (handles references split across many char-style spans)
-    if (highlight && navigateByText(editor, highlight)) return;
-
-    // 3. Index-based fallback: select the Nth text block in document order
+    // 1. ProseMirror doc traversal — match by paraIdx attribute (most accurate)
     if (paraIdx >= 0) {
-      let count = 0;
       let targetPos = -1;
       editor.state.doc.descendants((node: any, pos: number) => {
         if (targetPos !== -1) return false;
-        if (isTextBlock(node)) {
-          if (count === paraIdx) {
-            targetPos = pos;
-            return false;
-          }
-          count++;
+        if (isTextBlock(node) && node.attrs?.paraIdx != null
+            && String(node.attrs.paraIdx) === String(paraIdx)) {
+          targetPos = pos;
+          return false;
         }
         return true;
       });
       if (targetPos !== -1) {
+        editor.commands.focus();
         editor.commands.setTextSelection(targetPos + 1);
-        flashBlock(editor.view.nodeDOM(targetPos) as HTMLElement | null);
+        scrollToDocPos(targetPos + 1);
+        return;
       }
     }
+
+    // 2. Direct DOM query — scroll without needing posAtDOM
+    if (paraIdx >= 0) {
+      const el = editor.view.dom.querySelector(`[data-para-idx="${paraIdx}"]`) as HTMLElement;
+      if (el) {
+        editor.commands.focus();
+        flashBlock(el);
+        return;
+      }
+    }
+
+    // 3. Block-aware text search fallback (for para_idx = -1 cases)
+    if (highlight) navigateByText(editor, highlight);
   };
 
   // Block-aware text search: matches against each block's combined text so that
@@ -720,6 +1475,7 @@ export function ReferenceValidationReviewPage() {
     });
 
     if (targetPos === -1) return false;
+    editor.commands.focus();
     editor.commands.setTextSelection(targetPos + 1);
     flashBlock(editor.view.nodeDOM(targetPos) as HTMLElement | null);
     return true;
@@ -849,16 +1605,27 @@ export function ReferenceValidationReviewPage() {
 
     // Find the paragraph text at given index
     let paraPos = -1;
-    let idxCounter = 0;
     editor.state.doc.descendants((node: any, pos: number) => {
       if (node.type.name === "paragraph" || node.type.name.startsWith("heading")) {
-        if (idxCounter === paraIdx) {
+        if (node.attrs?.paraIdx !== undefined && node.attrs?.paraIdx !== null && String(node.attrs.paraIdx) === String(paraIdx)) {
           paraPos = pos;
           return false;
         }
-        idxCounter++;
       }
     });
+
+    if (paraPos === -1) {
+      let idxCounter = 0;
+      editor.state.doc.descendants((node: any, pos: number) => {
+        if (node.type.name === "paragraph" || node.type.name.startsWith("heading")) {
+          if (idxCounter === paraIdx) {
+            paraPos = pos;
+            return false;
+          }
+          idxCounter++;
+        }
+      });
+    }
 
     if (paraPos !== -1) {
       // Find the year inside that paragraph's text content and replace it
@@ -1021,6 +1788,21 @@ export function ReferenceValidationReviewPage() {
             )
             .join("\n")}
             
+          .tc-insert, ins {
+            background-color: rgba(34, 197, 94, 0.2) !important;
+            text-decoration: underline !important;
+            text-decoration-color: rgb(22, 163, 74) !important;
+            color: inherit !important;
+          }
+          .tc-delete, del {
+            background-color: rgba(239, 68, 68, 0.15) !important;
+            text-decoration: line-through !important;
+            text-decoration-color: rgb(220, 38, 38) !important;
+            color: rgba(127, 29, 29, 0.8) !important;
+            padding: 2px 4px !important;
+            border-radius: 2px !important;
+          }
+
           .flash-highlight {
             animation: temp-glow 1.5s ease-out;
           }
@@ -1598,16 +2380,39 @@ export function ReferenceValidationReviewPage() {
                                   <div className="space-y-2.5">
                                     <div className="flex items-center justify-between">
                                       <span className="text-[9px] uppercase font-bold text-navy-400 tracking-wider">Reference Text</span>
-                                      <button
-                                        onClick={() => {
-                                          navigator.clipboard.writeText(pair.ref_text);
-                                          setCopiedIdx(idx);
-                                          setTimeout(() => setCopiedIdx(null), 1500);
-                                        }}
-                                        className="text-[9px] font-bold text-navy-500 hover:text-navy-800 bg-transparent border-none cursor-pointer"
-                                      >
-                                        {copiedIdx === idx ? "Copied!" : "Copy"}
-                                      </button>
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          onClick={() => {
+                                            const refHtml = getReferenceHTML(pair.para_idx);
+                                            setEditingEntryHtml(refHtml);
+                                            setEditingEntry({
+                                              idx,
+                                              paraIdx: pair.para_idx,
+                                              originalText: pair.ref_text,
+                                            });
+                                            const currentText = refHtml ? getPlainTextFromHTML(refHtml) : pair.ref_text;
+                                            setEditingText(currentText);
+                                            setSearchQuery(currentText);
+                                            setSearchResults([]);
+                                            setSearchSource(null);
+                                            setIsEditModalOpen(true);
+                                          }}
+                                          className="text-[9px] font-bold text-navy-500 hover:text-navy-800 bg-transparent border-none cursor-pointer"
+                                        >
+                                          Edit Text
+                                        </button>
+                                        <span className="text-navy-200">|</span>
+                                        <button
+                                          onClick={() => {
+                                            navigator.clipboard.writeText(pair.ref_text);
+                                            setCopiedIdx(idx);
+                                            setTimeout(() => setCopiedIdx(null), 1500);
+                                          }}
+                                          className="text-[9px] font-bold text-navy-500 hover:text-navy-800 bg-transparent border-none cursor-pointer"
+                                        >
+                                          {copiedIdx === idx ? "Copied!" : "Copy"}
+                                        </button>
+                                      </div>
                                     </div>
                                     <div className="p-2.5 bg-white rounded border border-navy-100 text-[11px] leading-relaxed text-navy-800 selection:bg-blue-100">
                                       {pair.ref_text}
@@ -1628,38 +2433,18 @@ export function ReferenceValidationReviewPage() {
                                       </div>
                                     )}
 
-                                    <div className="flex items-center gap-3 pt-1">
-                                      <a
-                                        href={`https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(parsed?.title || pair.ref_text)}`}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="text-[10px] text-blue-600 font-bold hover:underline"
-                                      >
-                                        PubMed ↗
-                                      </a>
-                                      <span className="text-navy-200">|</span>
-                                      <a
-                                        href={`https://search.crossref.org/?q=${encodeURIComponent(parsed?.title || pair.ref_text)}`}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="text-[10px] text-blue-600 font-bold hover:underline"
-                                      >
-                                        CrossRef ↗
-                                      </a>
-                                      {parsed?.doi && (
-                                        <>
-                                          <span className="text-navy-200">|</span>
-                                          <a
-                                            href={`https://doi.org/${parsed.doi}`}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                            className="text-[10px] text-purple-600 font-bold hover:underline"
-                                          >
-                                            DOI Link ↗
-                                          </a>
-                                        </>
-                                      )}
-                                    </div>
+                                    {parsed?.doi && (
+                                      <div className="flex items-center gap-3 pt-1">
+                                        <a
+                                          href={`https://doi.org/${parsed.doi}`}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="text-[10px] text-purple-600 font-bold hover:underline"
+                                        >
+                                          DOI Link ↗
+                                        </a>
+                                      </div>
+                                    )}
                                   </div>
                                 )}
                               </div>
@@ -1677,140 +2462,233 @@ export function ReferenceValidationReviewPage() {
                 <div className="space-y-4 page-enter">
                   {/* Header Stat Bar & Search */}
                   <div className="bg-white p-3 border border-navy-100 rounded-lg shadow-sm space-y-3">
-                    <div className="flex gap-4 text-[11px] font-bold text-navy-800 flex-wrap">
-                      <span>{referenceEntries.length} references</span>
-                      <span className="text-navy-300">|</span>
-                      <span className="text-emerald-600">✅ {referenceEntries.filter((e: any) => e.is_cited).length} cited</span>
-                      <span className="text-navy-300">|</span>
-                      <span className="text-amber-600">🟡 {referenceEntries.filter((e: any) => !e.is_cited).length} uncited</span>
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div className="flex gap-4 text-[11px] font-bold text-navy-800 flex-wrap">
+                        <span>{referenceEntries.length} references</span>
+                        <span className="text-navy-300">|</span>
+                        <span className="text-emerald-600">✅ {referenceEntries.filter((e: any) => e.is_cited).length} cited</span>
+                        <span className="text-navy-300">|</span>
+                        <span className="text-amber-600">🟡 {referenceEntries.filter((e: any) => !e.is_cited).length} uncited</span>
+                      </div>
+                      {/* List / Changes toggle */}
+                      <div className="flex gap-0.5 p-0.5 bg-surface-100 rounded-md border border-navy-100">
+                        {(["list", "changes"] as const).map(mode => (
+                          <button
+                            key={mode}
+                            onClick={() => setStructuringViewMode(mode)}
+                            className={`px-2.5 py-1 text-[10px] font-bold rounded capitalize transition-colors cursor-pointer ${
+                              structuringViewMode === mode
+                                ? "bg-white text-navy-900 shadow-sm"
+                                : "text-navy-500 hover:text-navy-700"
+                            }`}
+                          >
+                            {mode === "changes"
+                              ? `Changes (${referenceEntries.filter((e: any) => referenceHasChanges(e.para_idx)).length})`
+                              : "List"}
+                          </button>
+                        ))}
+                      </div>
                     </div>
 
-                    <div className="flex gap-2">
-                      <div className="relative flex-1">
-                        <Search className="w-3.5 h-3.5 text-navy-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                        <input
-                          type="text"
-                          placeholder="Search references..."
-                          value={refFilter}
-                          onChange={(e) => setRefFilter(e.target.value)}
-                          className="w-full pl-8 pr-3 py-1.5 bg-surface-50 text-[11px] rounded border border-navy-200 focus:outline-none focus:border-navy-500"
-                        />
+                    {structuringViewMode === "list" && (
+                      <div className="flex gap-2">
+                        <div className="relative flex-1">
+                          <Search className="w-3.5 h-3.5 text-navy-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="text"
+                            placeholder="Search references..."
+                            value={refFilter}
+                            onChange={(e) => setRefFilter(e.target.value)}
+                            className="w-full pl-8 pr-3 py-1.5 bg-surface-50 text-[11px] rounded border border-navy-200 focus:outline-none focus:border-navy-500"
+                          />
+                        </div>
+                        <button
+                          onClick={() => setShowUncitedOnly(!showUncitedOnly)}
+                          className={`px-3 text-[10px] font-bold rounded border whitespace-nowrap transition-colors ${showUncitedOnly
+                              ? "bg-amber-100 text-amber-800 border-amber-300"
+                              : "bg-surface-50 text-navy-600 border-navy-200 hover:bg-navy-50"
+                            }`}
+                        >
+                          Uncited Only
+                        </button>
                       </div>
-                      <button
-                        onClick={() => setShowUncitedOnly(!showUncitedOnly)}
-                        className={`px-3 text-[10px] font-bold rounded border whitespace-nowrap transition-colors ${showUncitedOnly
-                            ? "bg-amber-100 text-amber-800 border-amber-300"
-                            : "bg-surface-50 text-navy-600 border-navy-200 hover:bg-navy-50"
-                          }`}
-                      >
-                        Uncited Only
-                      </button>
-                    </div>
+                    )}
                   </div>
 
-                  {/* Reference Index Cards */}
-                  <div className="space-y-3">
-                    {filteredEntries.length === 0 ? (
-                      <div className="text-center py-10 bg-white rounded-lg border border-navy-100 p-6 text-navy-400 text-xs font-semibold">
-                        No references match the filter.
-                      </div>
-                    ) : (
-                      filteredEntries.map((entry: any, idx: number) => (
-                        <div
-                          key={idx}
-                          onMouseEnter={() => highlightRefInEditor(entry.para_idx, true)}
-                          onMouseLeave={() => highlightRefInEditor(entry.para_idx, false)}
-                          className="bg-white rounded-lg border border-navy-100 shadow-sm p-3.5 space-y-3 hover:border-navy-300 transition-colors"
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <span className="text-[11px] font-black text-navy-900 bg-surface-100 px-1.5 py-0.5 rounded">
-                                {entry.number ? `#${entry.number}` : `Ref ${idx + 1}`}
-                              </span>
-                              <span className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded tracking-wide ${entry.is_cited ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
-                                }`}>
-                                {entry.is_cited ? "Cited" : "Not Cited"}
-                              </span>
-                            </div>
-                            <select
-                              value={entry.style || (detectedStyle === "AMA" ? "REF-N" : "REF-U")}
-                              onChange={(e) => applyStyleToPara(entry.para_idx, e.target.value)}
-                              className="text-[9px] bg-slate-100 hover:bg-slate-200 text-navy-700 font-bold px-1.5 py-0.5 rounded border border-slate-200 cursor-pointer focus:outline-none focus:ring-1 focus:ring-navy-400"
-                              title="Change paragraph style"
-                            >
-                              {(review.styles || []).map((style: string) => (
-                                <option key={style} value={style}>
-                                  {style}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-
-                          {editingEntryIdx === idx ? (
-                            <div className="space-y-2">
-                              <textarea
-                                className="w-full text-xs p-2 border rounded text-navy-800 bg-white focus:outline-none focus:ring-1 focus:ring-navy-400"
-                                value={editingText}
-                                onChange={(e) => setEditingText(e.target.value)}
-                                rows={3}
-                              />
-                              <div className="flex justify-end gap-2">
-                                <button
-                                  onClick={() => setEditingEntryIdx(null)}
-                                  className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded text-[10px] cursor-pointer"
-                                >
-                                  Cancel
-                                </button>
-                                <button
-                                  onClick={async () => {
-                                    updateParaText(entry.para_idx, editingText);
-                                    setEditingEntryIdx(null);
-                                    if (editorRef.current?.editor) {
-                                      const html = editorRef.current.editor.getHTML();
-                                      await saveMutation.save(review.save_endpoint, html);
-                                    }
-                                  }}
-                                  className="px-2 py-1 bg-[#C9821A] hover:bg-[#B3711A] text-white font-bold rounded text-[10px] cursor-pointer"
-                                >
-                                  Save
-                                </button>
+                  {/* ── LIST VIEW ── */}
+                  {structuringViewMode === "list" && (
+                    <div className="space-y-3">
+                      {filteredEntries.length === 0 ? (
+                        <div className="text-center py-10 bg-white rounded-lg border border-navy-100 p-6 text-navy-400 text-xs font-semibold">
+                          No references match the filter.
+                        </div>
+                      ) : (
+                        filteredEntries.map((entry: any, idx: number) => (
+                          <div
+                            key={idx}
+                            onMouseEnter={() => highlightRefInEditor(entry.para_idx, true)}
+                            onMouseLeave={() => highlightRefInEditor(entry.para_idx, false)}
+                            className="bg-white rounded-lg border border-navy-100 shadow-sm p-3.5 space-y-3 hover:border-navy-300 transition-colors"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[11px] font-black text-navy-900 bg-surface-100 px-1.5 py-0.5 rounded">
+                                  {entry.number ? `#${entry.number}` : `Ref ${idx + 1}`}
+                                </span>
+                                <span className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded tracking-wide ${entry.is_cited ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
+                                  }`}>
+                                  {entry.is_cited ? "Cited" : "Not Cited"}
+                                </span>
                               </div>
+                              <select
+                                value={entry.style || (detectedStyle === "AMA" ? "REF-N" : "REF-U")}
+                                onChange={(e) => applyStyleToPara(entry.para_idx, e.target.value)}
+                                className="text-[9px] bg-slate-100 hover:bg-slate-200 text-navy-700 font-bold px-1.5 py-0.5 rounded border border-slate-200 cursor-pointer focus:outline-none focus:ring-1 focus:ring-navy-400"
+                                title="Change paragraph style"
+                              >
+                                {(review.styles || []).map((style: string) => (
+                                  <option key={style} value={style}>
+                                    {style}
+                                  </option>
+                                ))}
+                              </select>
                             </div>
-                          ) : (
+
                             <p className="text-[11px] text-navy-800 leading-relaxed font-medium line-clamp-3">
                               {entry.text}
                             </p>
-                          )}
 
-                          <div className="flex justify-between items-center pt-1 border-t border-navy-50">
-                            {editingEntryIdx !== idx && (
+                            <div className="flex justify-between items-center pt-1 border-t border-navy-50">
                               <button
                                 onClick={() => {
-                                  setEditingEntryIdx(idx);
-                                  setEditingText(entry.text);
+                                  const refHtml = getReferenceHTML(entry.para_idx);
+                                  setEditingEntryHtml(refHtml);
+                                  setEditingEntry({
+                                    idx,
+                                    paraIdx: entry.para_idx,
+                                    originalText: entry.text,
+                                  });
+                                  const currentText = refHtml ? getPlainTextFromHTML(refHtml) : entry.text;
+                                  setEditingText(currentText);
+                                  setSearchQuery(currentText);
+                                  setSearchResults([]);
+                                  setSearchSource(null);
+                                  setIsEditModalOpen(true);
                                 }}
                                 className="text-[10px] font-bold text-navy-500 hover:text-navy-700 bg-transparent border-none cursor-pointer"
                               >
                                 Edit Text
                               </button>
-                            )}
-                            <button
-                              onClick={() => {
-                                if (entry.para_idx !== undefined && entry.para_idx >= 0) {
-                                  navigateToDocPara(entry.para_idx, entry.text.slice(0, 40));
-                                } else {
-                                  navigateByText(editorRef.current?.editor, entry.text.slice(0, 40));
-                                }
-                              }}
-                              className="text-[10px] font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 bg-blue-50 px-2 py-1 rounded hover:bg-blue-100 transition-colors cursor-pointer"
-                            >
-                              Jump to reference <CornerDownRight className="w-3 h-3 ml-0.5" />
-                            </button>
+                              <button
+                                onClick={() => {
+                                  if (entry.para_idx !== undefined && entry.para_idx >= 0) {
+                                    navigateToDocPara(entry.para_idx, entry.text.slice(0, 40));
+                                  } else {
+                                    navigateByText(editorRef.current?.editor, entry.text.slice(0, 40));
+                                  }
+                                }}
+                                className="text-[10px] font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 bg-blue-50 px-2 py-1 rounded hover:bg-blue-100 transition-colors cursor-pointer"
+                              >
+                                Jump to reference <CornerDownRight className="w-3 h-3 ml-0.5" />
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+
+                  {/* ── CHANGES VIEW (thrix-style) ── */}
+                  {structuringViewMode === "changes" && (() => {
+                    const changedEntries = filteredEntries.filter((e: any) => referenceHasChanges(e.para_idx));
+                    return (
+                      <div className="space-y-3">
+                        {/* Changes header with Accept All / Reject All */}
+                        {changedEntries.length > 0 && (
+                          <div className="flex items-center justify-between px-1">
+                            <span className="text-[10px] font-bold text-navy-600">
+                              {changedEntries.length} pending change{changedEntries.length !== 1 ? "s" : ""}
+                            </span>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => changedEntries.forEach((e: any) => resolveReferenceChanges(e.para_idx, false))}
+                                className="px-2 py-1 bg-rose-50 text-rose-700 border border-rose-200 rounded text-[10px] font-bold hover:bg-rose-100 transition-colors cursor-pointer"
+                              >
+                                Reject All
+                              </button>
+                              <button
+                                onClick={() => changedEntries.forEach((e: any) => resolveReferenceChanges(e.para_idx, true))}
+                                className="px-2 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-[10px] font-bold hover:bg-emerald-100 transition-colors cursor-pointer"
+                              >
+                                Accept All
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {changedEntries.length === 0 ? (
+                          <div className="text-center py-10 bg-white rounded-lg border border-navy-100 p-6 text-navy-400 text-xs font-semibold">
+                            No pending changes. Edit a reference to see diffs here.
+                          </div>
+                        ) : (
+                          changedEntries.map((entry: any, idx: number) => (
+                            <div
+                              key={idx}
+                              onMouseEnter={() => highlightRefInEditor(entry.para_idx, true)}
+                              onMouseLeave={() => highlightRefInEditor(entry.para_idx, false)}
+                              className="bg-white rounded-lg border border-navy-100 shadow-sm p-3.5 space-y-3 hover:border-navy-300 transition-colors"
+                            >
+                              {/* Header row */}
+                              <div className="flex items-center gap-2">
+                                <span className="text-[11px] font-black text-navy-900 bg-surface-100 px-1.5 py-0.5 rounded">
+                                  {entry.number ? `#${entry.number}` : `Ref ${idx + 1}`}
+                                </span>
+                                <span className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded tracking-wide ${entry.is_cited ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+                                  {entry.is_cited ? "Cited" : "Not Cited"}
+                                </span>
+                              </div>
+
+                              {/* Inline diff — rendered with ProseMirror CSS (ins=green, del=red) */}
+                              <div
+                                className="text-[11px] leading-relaxed font-medium ProseMirror"
+                                dangerouslySetInnerHTML={{ __html: getReferenceHTML(entry.para_idx) }}
+                              />
+
+                              {/* Action row — thrix-style */}
+                              <div className="flex items-center gap-2 pt-1 border-t border-navy-50">
+                                <button
+                                  onClick={() => resolveReferenceChanges(entry.para_idx, false)}
+                                  title="Revert — reject all changes"
+                                  className="flex items-center gap-1 px-2 py-1 text-[10px] font-bold text-rose-600 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 rounded border border-rose-100 transition-colors cursor-pointer"
+                                >
+                                  <RotateCcw className="w-3 h-3" /> Revert
+                                </button>
+                                <button
+                                  onClick={() => resolveReferenceChanges(entry.para_idx, true)}
+                                  title="Accept all changes"
+                                  className="flex items-center gap-1 px-2 py-1 text-[10px] font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 rounded border border-emerald-100 transition-colors cursor-pointer"
+                                >
+                                  <Check className="w-3 h-3" /> Accept
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    if (entry.para_idx !== undefined && entry.para_idx >= 0) {
+                                      navigateToDocPara(entry.para_idx, entry.text.slice(0, 40));
+                                    } else {
+                                      navigateByText(editorRef.current?.editor, entry.text.slice(0, 40));
+                                    }
+                                  }}
+                                  className="ml-auto flex items-center gap-1 text-[10px] font-bold text-blue-600 hover:text-blue-800 bg-blue-50 px-2 py-1 rounded hover:bg-blue-100 transition-colors cursor-pointer"
+                                >
+                                  Jump <CornerDownRight className="w-3 h-3" />
+                                </button>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 
@@ -2036,6 +2914,170 @@ export function ReferenceValidationReviewPage() {
             setLinkingSource(null);
           }}
         />
+
+        {/* Edit Reference Modal Popup */}
+        {isEditModalOpen && editingEntry && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+            <div className="bg-white rounded-xl shadow-2xl border border-navy-100 max-w-3xl w-full flex flex-col overflow-hidden max-h-[90vh] transition-all duration-200">
+              {/* Header */}
+              <div className="px-5 py-4 border-b border-navy-50 flex items-center justify-between bg-surface-50">
+                <h3 className="text-sm font-bold text-navy-900 flex items-center gap-2">
+                  <Edit2 className="w-4 h-4 text-navy-600" />
+                  Edit Reference Text
+                </h3>
+                <button
+                  onClick={() => {
+                    setIsEditModalOpen(false);
+                    setEditingEntry(null);
+                  }}
+                  className="text-navy-400 hover:text-navy-600 transition-colors p-1 rounded-md hover:bg-navy-50 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="p-5 space-y-4 flex-1 overflow-y-auto min-h-0">
+                <div className="space-y-1">
+                  <label className="text-[9px] uppercase font-bold text-navy-400 tracking-wider">Edited Reference</label>
+                  <textarea
+                    className="w-full text-xs p-3 border border-navy-200 rounded-lg text-navy-800 bg-white focus:outline-none focus:ring-2 focus:ring-navy-400 focus:border-navy-500 font-medium leading-relaxed"
+                    value={editingText}
+                    onChange={(e) => setEditingText(e.target.value)}
+                    rows={3}
+                    placeholder="Modify reference text here..."
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[9px] uppercase font-bold text-navy-400 tracking-wider">Live Preview (with styling highlights)</label>
+                  {/* Current editor state — exact same rendering as the document editor */}
+                  {editingEntryHtml && (
+                    <div
+                      className="p-3 bg-surface-50/50 rounded-lg border border-navy-100/30 text-xs leading-relaxed font-medium select-text ProseMirror"
+                      style={{ whiteSpace: "pre-wrap" }}
+                      dangerouslySetInnerHTML={{ __html: editingEntryHtml }}
+                    />
+                  )}
+                  {/* Track changes diff — shown when textarea text differs from original */}
+                  {editingText.trim() !== editingEntry.originalText.trim() && (
+                    <div className="space-y-1 mt-1">
+                      <div className="text-[9px] uppercase font-bold text-navy-400 tracking-wider">After save (track changes)</div>
+                      <div
+                        className="p-3 bg-white rounded-lg border border-navy-100/30 text-xs leading-relaxed font-medium select-text ProseMirror"
+                        style={{ whiteSpace: "pre-wrap" }}
+                        dangerouslySetInnerHTML={{
+                          __html: styledDiffHTML(
+                            editingEntry.originalText,
+                            editingText,
+                            viewer?.username || "Editor"
+                          )
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* PubMed/CrossRef Live Search */}
+                <div className="border-t border-navy-50 pt-4 space-y-3">
+                  <div className="text-[9px] uppercase font-bold text-navy-400 tracking-wider">Search Database for correct formatting ({detectedStyle} Style)</div>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Search className="w-3.5 h-3.5 text-navy-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full pl-8 pr-3 py-1.5 bg-surface-50 text-xs rounded-lg border border-navy-200 focus:outline-none focus:ring-1 focus:ring-navy-400 font-medium"
+                        placeholder="Enter article title or keywords..."
+                      />
+                    </div>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => searchPubMed(searchQuery)}
+                      disabled={searchLoading}
+                      className="cursor-pointer"
+                    >
+                      PubMed
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => searchCrossRef(searchQuery)}
+                      disabled={searchLoading}
+                      className="cursor-pointer"
+                    >
+                      CrossRef
+                    </Button>
+                  </div>
+
+                  {searchLoading && (
+                    <div className="flex items-center justify-center py-6 text-xs text-navy-500 font-semibold gap-2">
+                      <RefreshCw className="w-4 h-4 animate-spin text-navy-600" />
+                      Searching {searchSource === "pubmed" ? "PubMed" : "CrossRef"}...
+                    </div>
+                  )}
+
+                  {!searchLoading && searchResults.length > 0 && (
+                    <div className="space-y-2.5 max-h-[200px] overflow-y-auto border border-navy-100 rounded-lg p-3 bg-surface-50/20">
+                      <div className="text-[9px] uppercase font-bold text-navy-400 tracking-wider mb-2">Search Results ({searchSource === "pubmed" ? "PubMed" : "CrossRef"})</div>
+                      {searchResults.map((result: any, index: number) => (
+                        <div key={index} className="p-2.5 bg-white border border-navy-100 rounded-lg shadow-sm flex items-start justify-between gap-4 hover:border-navy-300 transition-colors">
+                          <div className="text-xs text-navy-800 leading-relaxed font-medium flex-1">
+                            {result.formatted}
+                          </div>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => {
+                              setEditingText(result.formatted);
+                            }}
+                            className="shrink-0 text-[10px] font-bold px-2 py-1 h-auto cursor-pointer"
+                          >
+                            Use Result
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {!searchLoading && searchSource && searchResults.length === 0 && (
+                    <div className="text-center py-6 text-navy-400 text-xs font-semibold bg-surface-50/50 rounded-lg border border-navy-100/50">
+                      No matches found on {searchSource === "pubmed" ? "PubMed" : "CrossRef"}. Try refining the query keywords.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="px-5 py-3.5 border-t border-navy-50 flex justify-end gap-3 bg-surface-50/50">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setIsEditModalOpen(false);
+                    setEditingEntry(null);
+                  }}
+                  className="cursor-pointer"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={async () => {
+                    await handleSaveEditedReference();
+                  }}
+                  disabled={saveMutation.isPending}
+                  className="cursor-pointer font-bold"
+                >
+                  {saveMutation.isPending ? "Saving..." : "Save Changes"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </main>
   );

@@ -38,7 +38,8 @@ class Settings(BaseSettings):
     PPH_BASE_URL: str = "http://[IP_ADDRESS]"
     PPH_USERNAME: str = "admin"
     PPH_PASSWORD: str = "Murali@12"
-    PPH_MAX_WAIT_SECONDS: int = 1800
+    PPH_MAX_WAIT_SECONDS: int = 4500   # 75 min — covers worst-case 1-hour jobs with headroom
+    PPH_POLL_INTERVAL_SECONDS: int = 20  # Poll every 20s; jobs run 30-60 min so 2s is excessive
 
     # PPH Reference Conversion settings (for reference_structuring process type)
     REF_SOURCE_STYLE: str = "Auto"  # Auto, AMA, APA, CGRN

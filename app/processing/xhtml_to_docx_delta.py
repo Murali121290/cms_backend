@@ -106,6 +106,27 @@ def _find_run_by_bookmark(para, bookmark_name: str):
     return None
 
 
+def _build_bookmark_para_index(doc) -> dict:
+    """Builds an O(1) lookup index from bookmark names to their containing paragraphs."""
+    index = {}
+    for para in doc.paragraphs:
+        for child in para._p:
+            if child.tag == qn("w:bookmarkStart"):
+                name = child.get(qn("w:name"), "")
+                if name:
+                    index[name] = para
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for para in cell.paragraphs:
+                    for child in para._p:
+                        if child.tag == qn("w:bookmarkStart"):
+                            name = child.get(qn("w:name"), "")
+                            if name:
+                                index[name] = para
+    return index
+
+
 # ─── Core Delta Saving Engine ────────────────────────────────────────────────
 
 class XhtmlToDocxDeltaEngine:
@@ -124,6 +145,9 @@ class XhtmlToDocxDeltaEngine:
         root = lxml.html.fromstring(html_content)
         doc = Document(out_docx_path)
         patched = 0
+
+        # Build bookmark paragraph index for O(1) lookups
+        para_index = _build_bookmark_para_index(doc)
 
         # Find all HTML paragraphs, headings, list items, cell paragraphs, and page breaks
         all_elements = root.xpath("//p | //h1 | //h2 | //h3 | //h4 | //h5 | //h6 | //li | //div[contains(@class, 'page-break')] | //hr[contains(@class, 'page-break')]")
@@ -146,7 +170,7 @@ class XhtmlToDocxDeltaEngine:
                 for next_el in html_blocks[idx + 1:]:
                     next_bm = next_el.get("data-bookmark")
                     if next_bm:
-                        target_para = _find_para_by_bookmark(doc, next_bm) or _find_note_para_by_bookmark(doc, next_bm)
+                        target_para = para_index.get(next_bm) or _find_note_para_by_bookmark(doc, next_bm)
                         if target_para:
                             break
                 if target_para:
@@ -173,7 +197,7 @@ class XhtmlToDocxDeltaEngine:
                     new_style = "Normal"
 
             # 1. Retrieve the exact paragraph node in the body, table cells, or footnote parts
-            para = _find_para_by_bookmark(doc, bm_name)
+            para = para_index.get(bm_name)
             if not para:
                 para = _find_note_para_by_bookmark(doc, bm_name)
             
@@ -425,7 +449,9 @@ class XhtmlToDocxDeltaEngine:
                 # Parse font-family
                 node_font_name = font_name
                 if "font-family" in styles:
-                    node_font_name = styles["font-family"].strip().replace("'", "").replace('"', '')
+                    raw_family = styles["font-family"].strip()
+                    first_font = raw_family.split(',')[0].strip().replace("'", "").replace('"', '').strip()
+                    node_font_name = first_font if first_font else None
 
                 original_text = el.text or ""
                 for child in el:
@@ -559,7 +585,9 @@ class XhtmlToDocxDeltaEngine:
             # Parse font-family
             node_font_name = font_name
             if "font-family" in styles:
-                node_font_name = styles["font-family"].strip().replace("'", "").replace('"', '')
+                raw_family = styles["font-family"].strip()
+                first_font = raw_family.split(',')[0].strip().replace("'", "").replace('"', '').strip()
+                node_font_name = first_font if first_font else None
 
             def process_text_and_children(xml_parent):
                 if el.text:
@@ -623,7 +651,9 @@ class XhtmlToDocxDeltaEngine:
                     root_font_size = val
         root_font_name = None
         if "font-family" in root_styles:
-            root_font_name = root_styles["font-family"].strip().replace("'", "").replace('"', '')
+            raw_family = root_styles["font-family"].strip()
+            first_font = raw_family.split(',')[0].strip().replace("'", "").replace('"', '').strip()
+            root_font_name = first_font if first_font else None
 
         # Begin traversal
         if html_el.text:
@@ -665,31 +695,22 @@ def apply_final_docx_formatting(doc):
         normal_style.font.size = Pt(12)
         normal_style.paragraph_format.line_spacing = 2.0
     except Exception as e:
-        logger.warning(f"Could not set Normal style formatting in delta: {e}")
+        logger.warning(f"Could not set Normal style: {e}")
 
-    # 2. Iterate over all paragraphs (body + tables)
-    # Ensure they are Times New Roman, 12pt, double spacing, unless they have explicit overrides
+    body = doc.element.body
+    for rFonts in body.findall(f".//{qn('w:rFonts')}"):
+        rFonts.set(qn('w:ascii'), 'Times New Roman')
+        rFonts.set(qn('w:hAnsi'), 'Times New Roman')
+        rFonts.set(qn('w:cs'), 'Times New Roman')
+
+    for sz in body.findall(f".//{qn('w:sz')}"):
+        sz.set(qn('w:val'), '24')
+    for szCs in body.findall(f".//{qn('w:szCs')}"):
+        szCs.set(qn('w:val'), '24')
+
     for para in doc.paragraphs:
         style_name = para.style.name if para.style else "Normal"
-        
         is_list = "list" in style_name.lower() or "bullet" in style_name.lower() or "number" in style_name.lower()
         is_extract = any(x in style_name.lower() for x in ("extract", "quote", "ex"))
-        
         if not is_list and not is_extract:
             para.paragraph_format.line_spacing = 2.0
-            
-        for run in para.runs:
-            if not run.font.name:
-                run.font.name = 'Times New Roman'
-            if not run.font.size:
-                run.font.size = Pt(12)
-
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                for para in cell.paragraphs:
-                    for run in para.runs:
-                        if not run.font.name:
-                            run.font.name = 'Times New Roman'
-                        if not run.font.size:
-                            run.font.size = Pt(12)

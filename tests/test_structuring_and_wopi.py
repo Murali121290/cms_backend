@@ -1,17 +1,25 @@
 from pathlib import Path
 
 
-def test_structuring_review_renders_error_template_when_processed_file_missing(
+def test_structuring_review_renders_original_editor_when_processed_file_missing(
+    monkeypatch,
     auth_cookie_client,
     admin_user,
     file_record,
 ):
-    client = auth_cookie_client(admin_user)
+    monkeypatch.setattr("app.routers.structuring.extract_document_structure", lambda _path: [])
 
+    class FakeRulesLoader:
+        def get_paragraphs(self):
+            return [{"style": "H1"}]
+
+    monkeypatch.setattr("app.routers.structuring.get_rules_loader", lambda: FakeRulesLoader())
+
+    client = auth_cookie_client(admin_user)
     response = client.get(f"/api/v1/files/{file_record.id}/structuring/review")
 
     assert response.status_code == 200
-    assert "Processed file not found. Please run Structuring process first." in response.text
+    assert 'id="collaboraFrame"' in response.text
 
 
 def test_structuring_review_loads_shell_when_processed_file_exists(
@@ -55,7 +63,7 @@ def test_structuring_save_returns_success_and_targets_processed_document(
         calls["modifications"] = modifications
         return True
 
-    monkeypatch.setattr("app.processing.structuring_lib.doc_utils.update_document_structure", _fake_update)
+    monkeypatch.setattr("app.routers.structuring.update_document_structure", _fake_update)
 
     client = auth_cookie_client(admin_user)
     response = client.post(

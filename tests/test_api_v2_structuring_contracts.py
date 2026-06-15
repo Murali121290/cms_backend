@@ -61,23 +61,28 @@ def test_api_v2_structuring_review_returns_stable_metadata_and_shell_support(
     assert "Body Text" in body["styles"]
 
 
-def test_api_v2_structuring_review_maps_missing_processed_file_to_stable_error(
+def test_api_v2_structuring_review_falls_back_to_original_when_processed_file_missing(
+    monkeypatch,
     auth_cookie_client,
     admin_user,
     file_record,
 ):
-    client = auth_cookie_client(admin_user)
+    monkeypatch.setattr("app.routers.api_v2.extract_document_structure", lambda _path: [])
 
+    class FakeRulesLoader:
+        def get_paragraphs(self):
+            return [{"style": "H1"}]
+
+    monkeypatch.setattr("app.routers.api_v2.get_rules_loader", lambda: FakeRulesLoader())
+
+    client = auth_cookie_client(admin_user)
     response = client.get(f"/api/v2/files/{file_record.id}/structuring-review")
 
-    assert response.status_code == 404
-    assert response.json() == {
-        "status": "error",
-        "code": "PROCESSED_FILE_MISSING",
-        "message": "Processed file not found. Please run Structuring process first.",
-        "field_errors": None,
-        "details": None,
-    }
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["file"]["id"] == file_record.id
+    assert body["processed_file"]["filename"] == file_record.filename
 
 
 def test_api_v2_structuring_save_returns_normalized_contract_and_targets_processed_file(
