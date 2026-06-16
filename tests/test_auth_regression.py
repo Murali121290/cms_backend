@@ -64,7 +64,8 @@ def test_register_first_user_bootstraps_roles_and_assigns_admin(client, db_sessi
     founder = db_session.query(models.User).filter(models.User.username == "founder").first()
     assert founder is not None
     assert sorted(role.name for role in founder.roles) == ["Admin"]
-    role_names = {role.name for role in db_session.query(models.Role).all()}
+    from app.domains.workflow.models import RolesMaster
+    role_names = {role.name for role in db_session.query(RolesMaster).all()}
     assert "Viewer" in role_names
     assert "Admin" in role_names
 

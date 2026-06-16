@@ -180,12 +180,11 @@ def test_api_v1_projects_routes_preserve_current_compatibility_behavior(
 
     list_response = bearer_client.get("/api/v1/projects/")
     assert list_response.status_code == 200
-    assert any(project["code"] == project_record.code for project in list_response.json())
+    assert any((project.get("code") or project.get("project_code")) == project_record.code for project in list_response.json())
 
     create_response = bearer_client.post(
         "/api/v1/projects/",
         json={
-            "team_id": team.id,
             "code": "API100",
             "title": "API Project",
             "xml_standard": "NLM",

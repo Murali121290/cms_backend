@@ -124,27 +124,25 @@ def db_session(app_env):
 
 @pytest.fixture()
 def roles(db_session):
-    from app import models
-
-    existing = {role.name: role for role in db_session.query(models.Role).all()}
+    from app.domains.workflow.models import RolesMaster
+    existing = {r.role_name.lower(): r for r in db_session.query(RolesMaster).all()}
+    res = {}
     for name, description in ROLE_DEFINITIONS:
-        if name not in existing:
-            db_session.add(models.Role(name=name, description=description))
+        db_name = name.lower()
+        if db_name not in existing:
+            role_obj = RolesMaster(role_name=db_name, team="General", description=description)
+            db_session.add(role_obj)
+            db_session.flush()
+            res[name] = role_obj
+        else:
+            res[name] = existing[db_name]
     db_session.commit()
-    return {role.name: role for role in db_session.query(models.Role).all()}
+    return res
 
 
 @pytest.fixture()
 def team(db_session):
-    from app import models
-
-    team = db_session.query(models.Team).filter(models.Team.id == 1).first()
-    if not team:
-        team = models.Team(id=1, name="Test Team")
-        db_session.add(team)
-        db_session.commit()
-        db_session.refresh(team)
-    return team
+    return "Test Team"
 
 
 @pytest.fixture()
@@ -160,15 +158,23 @@ def user_factory(db_session, roles, team):
         role_names: tuple[str, ...] = ("Viewer",),
         is_active: bool = True,
     ):
+        role_map_inv = {
+            "Admin": "admin",
+            "Viewer": "viewer",
+            "ProjectManager": "manager",
+            "CopyEditor": "copyeditor"
+        }
+        primary_role_name = role_names[0] if role_names else "Viewer"
+        role_val = role_map_inv.get(primary_role_name, primary_role_name.lower())
+
         user = models.User(
             username=username,
             email=email or f"{username}@example.com",
             password_hash=hash_password(password),
-            is_active=is_active,
-            team_id=team.id,
+            active_status=is_active,
+            role=role_val,
+            team="General",
         )
-        for role_name in role_names:
-            user.roles.append(roles[role_name])
         db_session.add(user)
         db_session.commit()
         db_session.refresh(user)
@@ -228,7 +234,6 @@ def project_factory(db_session, team):
         status: str = "RECEIVED",
     ):
         project = models.Project(
-            team_id=team.id,
             code=code,
             title=title,
             client_name=client_name,
@@ -254,7 +259,12 @@ def chapter_factory(db_session, project_record):
 
     def _create(*, project=None, number: str = "01", title: str = "Chapter 01"):
         project = project or project_record
-        chapter = models.Chapter(project_id=project.id, number=number, title=title)
+        chapter = models.Chapter(
+            project=project.code,
+            client=project.client_name or "Client A",
+            number=number,
+            title=title
+        )
         db_session.add(chapter)
         db_session.commit()
         db_session.refresh(chapter)

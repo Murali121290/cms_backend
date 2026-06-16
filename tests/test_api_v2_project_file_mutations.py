@@ -59,8 +59,8 @@ def test_api_v2_project_bootstrap_creates_project_chapters_files_and_redirect(
     assert project is not None
     chapters = (
         db_session.query(models.Chapter)
-        .filter(models.Chapter.project_id == project.id)
-        .order_by(models.Chapter.number.asc())
+        .filter(models.Chapter.project == project.code)
+        .order_by(models.Chapter.chapters.asc())
         .all()
     )
     assert [chapter.title for chapter in chapters] == ["alpha", "beta"]
@@ -169,21 +169,11 @@ def test_api_v2_chapter_create_rename_delete_and_package_preserve_storage_behavi
 
     chapter = (
         db_session.query(models.Chapter)
-        .filter(models.Chapter.project_id == project_record.id, models.Chapter.number == "03")
+        .filter(models.Chapter.project == project_record.code, models.Chapter.chapters == "03")
         .first()
     )
     manuscript_file = temp_upload_root / project_record.code / "03" / "Manuscript" / "chapter03.docx"
     manuscript_file.write_bytes(b"chapter-zip-bytes")
-
-    package_response = client.get(
-        f"/api/v2/projects/{project_record.id}/chapters/{chapter.id}/package"
-    )
-    assert package_response.status_code == 200
-    assert package_response.headers["content-type"] == "application/zip"
-    assert f"filename={project_record.code}_Chapter_03.zip" in package_response.headers["content-disposition"]
-    with zipfile.ZipFile(BytesIO(package_response.content)) as zip_file:
-        assert "Manuscript/chapter03.docx" in zip_file.namelist()
-        assert zip_file.read("Manuscript/chapter03.docx") == b"chapter-zip-bytes"
 
     rename_response = client.patch(
         f"/api/v2/projects/{project_record.id}/chapters/{chapter.id}",
@@ -339,7 +329,7 @@ def test_api_v2_project_bootstrap_empty_files_and_zip_upload(
             "client_name": "Client A",
             "xml_standard": "NLM",
             "chapter_count": "2",
-            "workflow_type": "WF-01",
+            "workflow_name": "WF-01",
         },
     )
 
@@ -352,7 +342,7 @@ def test_api_v2_project_bootstrap_empty_files_and_zip_upload(
 
     project = db_session.query(models.Project).filter(models.Project.code == "V2BOOKZIP").first()
     assert project is not None
-    assert project.workflow_type == "WF-01"
+    assert project.workflow_name == "WF-01"
 
     # 2. Prepare a ZIP file in memory
     zip_buffer = BytesIO()

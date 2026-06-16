@@ -45,8 +45,8 @@ def test_project_create_with_files_bootstraps_project_chapters_directories_and_f
 
     chapters = (
         db_session.query(models.Chapter)
-        .filter(models.Chapter.project_id == project.id)
-        .order_by(models.Chapter.number.asc())
+        .filter(models.Chapter.project == project.code)
+        .order_by(models.Chapter.chapters.asc())
         .all()
     )
     assert [chapter.number for chapter in chapters] == ["01", "02"]
@@ -352,7 +352,7 @@ def test_project_create_with_files_uses_chapter_index_and_safe_stem_folder_namin
 
     assert response.status_code == 302
     project = db_session.query(models.Project).filter(models.Project.code == "BOOK104").first()
-    chapter = db_session.query(models.Chapter).filter(models.Chapter.project_id == project.id).one()
+    chapter = db_session.query(models.Chapter).filter(models.Chapter.project == project.code).one()
     assert chapter.number == "01"
     assert chapter.title == "Spacing_Symbols"
 
@@ -387,7 +387,7 @@ def test_chapter_create_rename_and_delete_preserve_storage_behavior(
 
     chapter = (
         db_session.query(models.Chapter)
-        .filter(models.Chapter.project_id == project_record.id, models.Chapter.number == "03")
+        .filter(models.Chapter.project == project_record.code, models.Chapter.chapters == "03")
         .first()
     )
     assert chapter is not None

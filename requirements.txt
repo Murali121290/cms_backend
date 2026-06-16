@@ -25,3 +25,6 @@ google-genai
 chardet
 flask
 pytz
+debugpy
+latex2mathml
+mathml2omml
