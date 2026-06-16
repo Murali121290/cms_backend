@@ -293,6 +293,9 @@ export function CreateProjectModal({ open, onClose, onCreated, defaultClientId }
   const workflowNames = useMemo(() => Array.from(workflowMap.keys()), [workflowMap])
 
   function orderStages(stages: WorkflowStage[]): WorkflowStage[] {
+    const hasLinks = stages.some(s => s.previous_stage || s.next_stage)
+    if (!hasLinks) return stages
+
     const byName = new Map(stages.map(s => [s.stage_name, s]))
     const first  = stages.find(s => !s.previous_stage)
     if (!first) return stages
@@ -303,6 +306,9 @@ export function CreateProjectModal({ open, onClose, onCreated, defaultClientId }
       visited.add(cur.stage_name)
       result.push(cur)
       cur = cur.next_stage ? byName.get(cur.next_stage) : undefined
+    }
+    if (result.length < stages.length) {
+      return stages
     }
     return result
   }
@@ -322,17 +328,31 @@ export function CreateProjectModal({ open, onClose, onCreated, defaultClientId }
     setSaving(true)
     try {
       const formData = new FormData()
-      formData.append('code', form.project_code ?? '')
-      formData.append('title', form.project_title ?? '')
-      if (form.client_name) {
-        formData.append('client_name', form.client_name)
-      }
-      formData.append('xml_standard', form.xml_standard ?? 'NLM')
+      formData.append('code',          form.project_code ?? '')
+      formData.append('title',         form.project_title ?? '')
+      formData.append('xml_standard',  form.xml_standard ?? 'NLM')
       formData.append('chapter_count', String(form.chapter_count ?? 1))
-      if (form.workflow_name) {
-        formData.append('workflow_name', form.workflow_name)
-      }
-
+      if (form.client_id)          formData.append('client_id',        String(form.client_id))
+      if (form.client_name)        formData.append('client_name',      form.client_name)
+      if (form.workflow_name)      formData.append('workflow_name',    form.workflow_name)
+      if (form.division_code)      formData.append('division_code',    form.division_code)
+      if (form.customer_contact)   formData.append('customer_contact', form.customer_contact)
+      if (form.category)           formData.append('category',         form.category)
+      if (form.composition)        formData.append('composition',      form.composition)
+      if (form.project_manager)    formData.append('project_manager',  form.project_manager)
+      if (form.sales_person)       formData.append('sales_person',     form.sales_person)
+      if (form.priority)           formData.append('priority',         form.priority)
+      if (form.status)             formData.append('status',           form.status)
+      if (form.edition)            formData.append('edition',          form.edition)
+      if (form.color)              formData.append('color',            form.color)
+      if (form.trim_size)          formData.append('trim_size',        form.trim_size)
+      if (form.copyright_year != null) formData.append('copyright_year',   String(form.copyright_year))
+      if (form.manuscript_pages != null) formData.append('manuscript_pages', String(form.manuscript_pages))
+      if (form.estimated_pages != null)  formData.append('estimated_pages',  String(form.estimated_pages))
+      if (form.actual_pages != null)     formData.append('actual_pages',     String(form.actual_pages))
+      if (form.isbn_no)            formData.append('isbn_no',          form.isbn_no)
+      if (form.billing_location)   formData.append('billing_location', form.billing_location)
+      if (form.due_date)           formData.append('due_date',         form.due_date)
 
       const response = await projectsApi.create(formData)
 
@@ -346,28 +366,7 @@ export function CreateProjectModal({ open, onClose, onCreated, defaultClientId }
         }
       }
 
-      // Sync other fields that are editable in WMS (e.g. project_manager, priority, etc.)
-      const updatePayload: any = {}
-      if (form.project_manager) updatePayload.project_manager = form.project_manager
-      if (form.priority) updatePayload.priority = form.priority
-      if (form.status) updatePayload.status = form.status
-      if (form.composition) updatePayload.composition = form.composition
-      if (form.edition) updatePayload.edition = form.edition
-      if (form.color) updatePayload.color = form.color
-      if (form.trim_size) updatePayload.trim_size = form.trim_size
-      if (form.copyright_year) updatePayload.copyright_year = form.copyright_year
-      if (form.actual_pages) updatePayload.actual_pages = form.actual_pages
-      if (form.estimated_pages) updatePayload.estimated_pages = form.estimated_pages
-      if (form.due_date) updatePayload.due_date = form.due_date
-
       let finalProject = response.project as unknown as Project
-      if (Object.keys(updatePayload).length > 0) {
-        try {
-          finalProject = await projectsApi.update(response.project.id, updatePayload)
-        } catch {
-          // Ignore secondary metadata sync failures
-        }
-      }
 
       toast.success(`Project "${response.project.title ?? response.project.code}" created`)
       onCreated(finalProject)

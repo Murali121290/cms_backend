@@ -19,7 +19,6 @@ import { ProjectPlanningPage } from '@/pages/ProjectPlanningPage'
 import { ChapterEditorPage } from '@/pages/ChapterEditorPage'
 import { Placeholder } from '@/pages/Placeholder'
 import { ProjectsPage } from '@/pages/ProjectsPage'
-import { ProjectCreatePage } from '@/pages/ProjectCreatePage'
 import { ChapterFilePage } from '@/pages/ChapterFilePage'
 import { TechnicalReviewPage } from '@/pages/TechnicalReviewPage'
 import { TechnicalEditorPage } from '@/pages/TechnicalEditorPage'
@@ -93,7 +92,6 @@ const router = createBrowserRouter([
       { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/reference-review',   element: <ReferenceValidationReviewPage /> },
 
       { path: 'projects', element: <ProjectsPage /> },
-      { path: 'projects/create', element: <ProjectCreatePage /> },
       { path: 'chapters', element: <Placeholder title="Chapters" /> },
       { path: 'reports',  element: <Placeholder title="Reports" /> },
 

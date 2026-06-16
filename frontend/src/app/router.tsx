@@ -12,7 +12,6 @@ import { RegisterPage } from "@/pages/RegisterPage";
 import { ForgotPasswordPage } from "@/pages/ForgotPasswordPage";
 import { FileEditorPage } from "@/pages/FileEditorPage";
 import { DocxEditorPage } from "@/pages/DocxEditorPage";
-import { ProjectCreatePage } from "@/pages/ProjectCreatePage";
 import { ProjectDetailPage } from "@/pages/ProjectDetailPage";
 import { ProjectsPage } from "@/pages/ProjectsPage";
 import { StylesheetsPage } from "@/pages/StylesheetsPage";
@@ -102,10 +101,6 @@ export const router = createBrowserRouter([
       {
         path: "projects",
         element: <ProjectsPage />,
-      },
-      {
-        path: "projects/create",
-        element: <ProjectCreatePage />,
       },
       {
         path: "projects/:projectId",
