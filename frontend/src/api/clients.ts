@@ -25,6 +25,7 @@ export interface Client {
   contact_hours: string | null
   phone_main: string | null
   phone_additional: string | null
+  logo_url: string | null
   active_status: boolean
   created_by: number | null
   created_at: string

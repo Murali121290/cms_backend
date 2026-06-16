@@ -73,14 +73,17 @@ function ClientCard({ client, projects, onClick }: ClientCardProps) {
       onKeyDown={e => e.key === 'Enter' && onClick()}
       className="bg-card rounded-xl border border-border shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 flex flex-col cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-primary/40 overflow-hidden"
     >
-      {/* Top — logo area with circular initials avatar */}
+      {/* Top — logo area */}
       <div className={`relative flex items-center justify-center py-8 ${areaBg}`}>
-        {/* Circular avatar with initials */}
-        <div className={`w-16 h-16 rounded-full flex items-center justify-center shadow-sm ${circleBg}`}>
-          <span className={`text-xl font-bold tracking-wide select-none ${circleText}`}>
-            {clientInitials(name)}
-          </span>
-        </div>
+        {client.logo_url ? (
+          <img src={client.logo_url} alt={name} className="h-16 max-w-[8rem] object-contain" />
+        ) : (
+          <div className={`w-16 h-16 rounded-full flex items-center justify-center shadow-sm ${circleBg}`}>
+            <span className={`text-xl font-bold tracking-wide select-none ${circleText}`}>
+              {clientInitials(name)}
+            </span>
+          </div>
+        )}
         {!client.active_status && (
           <span className="absolute top-2.5 right-2.5">
             <Badge variant="hold">Inactive</Badge>
@@ -215,9 +218,13 @@ export function Clients() {
                 return (
                   <div key={client.id} onClick={() => navigate(`/clients/${client.id}/projects`)}
                     className="bg-card rounded-xl border border-border shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer flex flex-col items-center gap-2 px-3 py-4">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${circleBg}`}>
-                      <span className={`text-sm font-bold ${circleText}`}>{clientInitials(name)}</span>
-                    </div>
+                    {client.logo_url ? (
+                      <img src={client.logo_url} alt={name} className="h-10 max-w-[5rem] object-contain" />
+                    ) : (
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center ${circleBg}`}>
+                        <span className={`text-sm font-bold ${circleText}`}>{clientInitials(name)}</span>
+                      </div>
+                    )}
                     <div className="text-center min-w-0 w-full">
                       <p className="text-xs font-semibold text-text truncate">{name}</p>
                       {!client.active_status && <Badge variant="hold" className="mt-0.5 text-[9px]">Inactive</Badge>}
@@ -245,9 +252,13 @@ export function Clients() {
                 return (
                   <div key={client.id} onClick={() => navigate(`/clients/${client.id}/projects`)}
                     className={`flex items-center gap-4 px-5 py-3 cursor-pointer hover:bg-surface transition-colors ${i > 0 ? 'border-t border-border' : ''}`}>
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${circleBg}`}>
-                      <span className={`text-xs font-bold ${circleText}`}>{clientInitials(name)}</span>
-                    </div>
+                    {client.logo_url ? (
+                      <img src={client.logo_url} alt={name} className="h-8 w-8 object-contain flex-shrink-0" />
+                    ) : (
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${circleBg}`}>
+                        <span className={`text-xs font-bold ${circleText}`}>{clientInitials(name)}</span>
+                      </div>
+                    )}
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold text-text truncate">{name}</p>
                       {client.division && <p className="text-xs text-muted truncate">{client.division}</p>}

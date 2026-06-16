@@ -73,6 +73,8 @@ services:
       # "directory created instead of file" pitfall of bind-mounting a file
       # that doesn't exist yet.
       - ref_cache:/opt/cms_runtime
+      # Live app code — overrides baked-in image files so changes are picked up on restart
+      - ./app:/app/app
     environment:
       REDIS_URL: redis://redis:6379/0
     expose:
@@ -97,6 +99,7 @@ services:
       - ./data:/app/data
       - ./temp_reports:/app/temp_reports
       - ref_cache:/opt/cms_runtime
+      - ./app:/app/app
     environment:
       REDIS_URL: redis://redis:6379/0
     command: celery -A app.core.celery_app worker --loglevel=info --concurrency=4

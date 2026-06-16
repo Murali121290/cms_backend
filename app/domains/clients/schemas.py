@@ -27,6 +27,7 @@ class ClientBase(BaseModel):
     contact_hours:      Optional[str] = None
     phone_main:         Optional[str] = None
     phone_additional:   Optional[str] = None
+    logo_url:           Optional[str] = None
     active_status:      bool = True
     created_by:         Optional[int] = None
 
@@ -59,6 +60,7 @@ class ClientUpdate(BaseModel):
     contact_hours:      Optional[str] = None
     phone_main:         Optional[str] = None
     phone_additional:   Optional[str] = None
+    logo_url:           Optional[str] = None
     active_status:      Optional[bool] = None
 
 
@@ -87,6 +89,7 @@ class ClientListResponse(BaseModel):
     contact_hours: Optional[str] = None
     phone_main: Optional[str] = None
     phone_additional: Optional[str] = None
+    logo_url: Optional[str] = None
     active_status: bool
     created_by: Optional[int] = None
     created_at: datetime

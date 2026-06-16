@@ -32,6 +32,7 @@ class Client(Base):
     contact_hours     = Column(String(100), nullable=True)
     phone_main        = Column(String(50),  nullable=True)
     phone_additional  = Column(String(50),  nullable=True)
+    logo_url          = Column(String(500), nullable=True)
     active_status     = Column(Boolean,     nullable=False, default=True)
     created_by        = Column(BigInteger,  ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at        = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
