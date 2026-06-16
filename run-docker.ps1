@@ -50,7 +50,7 @@ if (-not (Test-Path ".env")) {
     Write-Host "  Creating root .env file..." -ForegroundColor Cyan
 
     $envContent = @"
-DATABASE_URL=postgresql://cms_user:cms_password@postgres:5432/cms_db
+DATABASE_URL=postgresql://cms_user:cms_password@db:5432/cms_db
 POSTGRES_USER=cms_user
 POSTGRES_PASSWORD=cms_password
 POSTGRES_DB=cms_db
@@ -93,7 +93,7 @@ if (-not (Test-Path "ai_structuring_backend/.env")) {
 
     $aiEnvContent = @"
 REDIS_URL=redis://redis:6379/0
-DATABASE_URL=postgresql://cms_user:cms_password@postgres:5432/cms_db
+DATABASE_URL=postgresql://cms_user:cms_password@db:5432/cms_db
 "@
 
     $aiEnvContent | Out-File -FilePath "ai_structuring_backend/.env" -Encoding UTF8

@@ -57,6 +57,7 @@ export interface ClientPayload {
   phone_main?: string
   phone_additional?: string
   active_status?: boolean
+  logo_url?: string | null
 }
 
 export const clientsApi = {

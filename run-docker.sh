@@ -83,7 +83,7 @@ if [ ! -f ".env" ]; then
     print_info "Creating .env file..."
 
     cat > .env << 'EOF'
-DATABASE_URL=postgresql://cms_user:cms_password@postgres:5432/cms_db
+DATABASE_URL=postgresql://cms_user:cms_password@db:5432/cms_db
 POSTGRES_USER=cms_user
 POSTGRES_PASSWORD=cms_password
 POSTGRES_DB=cms_db
@@ -120,7 +120,7 @@ if [ ! -f "ai_structuring_backend/.env" ]; then
     print_info "Creating ai_structuring_backend/.env file..."
     cat > ai_structuring_backend/.env << 'EOF'
 REDIS_URL=redis://redis:6379/0
-DATABASE_URL=postgresql://cms_user:cms_password@postgres:5432/cms_db
+DATABASE_URL=postgresql://cms_user:cms_password@db:5432/cms_db
 EOF
     print_success "ai_structuring_backend/.env created"
 else

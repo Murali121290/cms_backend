@@ -43,7 +43,7 @@ RUN pip install --no-build-isolation -e /app/app/processing/manuscript_core/
 COPY alembic ./alembic
 COPY seed.py ./
 COPY entrypoint.sh ./
-RUN chmod +x /app/entrypoint.sh
+RUN sed -i 's/\r$//' entrypoint.sh && chmod +x entrypoint.sh
 
 RUN mkdir -p \
     /opt/cms_runtime/data/uploads \
