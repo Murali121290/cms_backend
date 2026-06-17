@@ -138,10 +138,27 @@ def build_review_page_state(
             for row in table.rows:
                 for cell in row.cells:
                     _collect(cell.paragraphs)
+
+        char_styles = set()
+        _CAPTION_CHAR_STYLES = {"FigureCitation", "TableCitation", "FIG-NUM", "TN"}
+        from docx.enum.style import WD_STYLE_TYPE
+        for style in doc.styles:
+            try:
+                if style.type == WD_STYLE_TYPE.CHARACTER and style.name != "Default Paragraph Font":
+                    n = style.name
+                    # Only include pipeline-created styles; skip Word built-ins
+                    if (n.startswith("bib_") or n.startswith("cite_")
+                            or (n.isalpha() and n.islower())
+                            or n in _CAPTION_CHAR_STYLES):
+                        char_styles.add(n)
+            except Exception:
+                pass
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("Could not read applied styles from %s: %s", processed_path, exc)
+        char_styles = set()
 
     style_list = sorted(styles)
+    char_style_list = sorted(char_styles)
 
     wopi_src = f"{wopi_base_url}/wopi/files/{file_id}/structuring"
     wopi_src_encoded = urllib.parse.quote(wopi_src, safe="")
@@ -157,6 +174,7 @@ def build_review_page_state(
         "filename": processed_filename,
         "collabora_url": collabora_url,
         "styles": style_list,
+        "char_styles": char_style_list,
     }
 
 
@@ -1142,6 +1160,140 @@ def _ref_review_styles() -> list:
         "cite_app", "cite_bib", "cite_eq", "cite_fig", "cite_fn", "cite_sec", "cite_tbl",
         "cite_tfn", "cite_base", "cite_box"
     ]
+
+
+def run_structuring_pipeline(db: Session, *, file_id: int, logger) -> dict:
+    """
+    Run the 10-step docx_pipeline on the current processed DOCX for a file.
+    Returns {"status": "ok", "content": str, "file_id": int}.
+    """
+    import shutil
+    import sys
+    import tempfile
+    from pathlib import Path
+
+    # Make docx_pipeline importable as a top-level package (it uses bare imports)
+    _pipeline_base = str(Path(__file__).parent.parent.parent)
+    if _pipeline_base not in sys.path:
+        sys.path.insert(0, _pipeline_base)
+
+    from docx_pipeline.pipeline.runner import process_file
+
+    resolved = resolve_processed_target(db, file_id=file_id)
+    file_record = resolved["file_record"]
+    processed_path = resolved["processed_path"]
+
+    if not os.path.exists(processed_path):
+        raise HTTPException(status_code=404, detail="Processed DOCX file not found")
+
+    with tempfile.TemporaryDirectory(prefix="pipeline_run_") as tmp_dir:
+        input_path = Path(processed_path)
+        output_dir = Path(tmp_dir)
+
+        logger.info(f"Running docx_pipeline on file {file_id}: {processed_path}")
+        result = process_file(input_path, output_dir)
+
+        if result["status"] == "error":
+            issues = "; ".join(
+                i["message"] for i in result.get("issues", []) if i.get("level") == "ERROR"
+            ) or "Unknown pipeline error"
+            logger.error(f"Pipeline failed for file {file_id}: {issues}")
+            raise HTTPException(status_code=500, detail=f"Pipeline failed: {issues}")
+
+        pipeline_output = output_dir / input_path.name
+        if not pipeline_output.exists():
+            raise HTTPException(status_code=500, detail="Pipeline produced no output file")
+
+        shutil.copy2(str(pipeline_output), processed_path)
+        logger.info(f"Pipeline output copied back to {processed_path}")
+
+    # Invalidate stale XHTML cache
+    xhtml_path = _get_xhtml_path(processed_path)
+    if os.path.exists(xhtml_path):
+        try:
+            os.remove(xhtml_path)
+        except Exception as e:
+            logger.warning(f"Could not remove stale XHTML cache: {e}")
+
+    # Bump version
+    file_record.version = (file_record.version or 0) + 1
+    db.commit()
+
+    # Regenerate XHTML from the pipeline output
+    try:
+        os.makedirs(os.path.dirname(xhtml_path), exist_ok=True)
+        engine = DocxToXhtmlRunsEngine()
+        content = engine.convert(processed_path, file_id=file_id)
+        with open(xhtml_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        logger.info(f"XHTML regenerated for file {file_id} after pipeline run")
+        return {"status": "ok", "content": content, "file_id": file_record.id}
+    except Exception as e:
+        logger.error(f"XHTML regeneration failed after pipeline: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Pipeline ran but XHTML generation failed: {str(e)}")
+
+
+def xslt_convert_to_xhtml(db: Session, *, file_id: int) -> Dict[str, Any]:
+    """
+    Convert the processed DOCX to XHTML using the XSLT 2.0 pipeline.
+    Writes result to a separate _xslt.xhtml cache — does NOT overwrite the
+    Python-converted cache used by the existing load flow.
+    Returns: {"status": "ok", "content": str}
+    """
+    from app.processing.xslt_docx_to_xhtml import XsltDocxToXhtmlEngine
+    from pathlib import Path as _Path
+
+    resolved = resolve_processed_target(db, file_id=file_id)
+    processed_path = resolved["processed_path"]
+    source_path = processed_path if os.path.exists(processed_path) else resolved["file_record"].path
+
+    if not os.path.exists(source_path):
+        raise HTTPException(status_code=404, detail="Physical file missing on disk")
+
+    try:
+        full_html = XsltDocxToXhtmlEngine().convert(source_path)
+    except Exception as e:
+        logger.error(f"XSLT conversion failed for file {file_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"XSLT conversion failed: {str(e)}")
+
+    # Extract only <body> content — TipTap's setContent expects a fragment, not a
+    # full HTML document with <html>/<head>/<body> wrappers.
+    body_match = re.search(r'<body[^>]*>(.*?)</body>', full_html, re.DOTALL | re.IGNORECASE)
+    content = body_match.group(1).strip() if body_match else full_html
+
+    xslt_cache = _Path(_get_xhtml_path(source_path)).with_suffix("._xslt.xhtml")
+    try:
+        os.makedirs(str(xslt_cache.parent), exist_ok=True)
+        xslt_cache.write_text(content, encoding="utf-8")
+    except Exception as e:
+        logger.warning(f"Could not write XSLT cache: {e}")
+
+    return {"status": "ok", "content": content}
+
+
+def xslt_save_to_docx(db: Session, *, file_id: int, xhtml: str) -> Dict[str, Any]:
+    """
+    Convert XHTML back to DOCX using the XSLT 2.0 pipeline.
+    Writes to a separate _xslt_output.docx — does NOT overwrite the original
+    processed DOCX until the pipeline is fully validated.
+    Returns: {"status": "ok", "output_path": str}
+    """
+    from app.processing.xslt_xhtml_to_docx import XsltXhtmlToDocxEngine
+    from pathlib import Path as _Path
+
+    resolved = resolve_processed_target(db, file_id=file_id)
+    processed_path = resolved["processed_path"]
+
+    docx_path = _Path(processed_path)
+    output_path = docx_path.with_name(docx_path.stem + "_xslt_output.docx")
+
+    try:
+        XsltXhtmlToDocxEngine().convert(xhtml, str(output_path))
+    except Exception as e:
+        logger.error(f"XSLT DOCX save failed for file {file_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"XSLT save failed: {str(e)}")
+
+    return {"status": "ok", "output_path": str(output_path)}
 
 
 def invalidate_ref_review_cache(processed_path: str, logger=None) -> None:

@@ -356,7 +356,7 @@ class XhtmlToDocxDeltaEngine:
             if char_style and char_style != "Default Paragraph Font":
                 rStyle = OxmlElement('w:rStyle')
                 rStyle.set(qn('w:val'), char_style)
-                rPr.append(rStyle)
+                rPr.insert(0, rStyle)  # w:rStyle must be first child of w:rPr per OOXML schema
                 has_rPr = True
 
             if has_rPr:
@@ -423,12 +423,20 @@ class XhtmlToDocxDeltaEngine:
                     else:
                         node_font_size = val
 
-            # Parse character style from class (starts with bib_ or cite_)
+            # Parse character style from class — only on span elements
+            _CAPTION_CHAR_STYLES = {"FigureCitation", "TableCitation", "FIG-NUM", "TN"}
             node_char_style = char_style
-            classes = (el.get("class") or "").split()
-            style_match = next((c for c in classes if c.startswith("bib_") or c.startswith("cite_")), None)
-            if style_match:
-                node_char_style = style_match
+            if tag == "span":
+                classes = (el.get("class") or "").split()
+                style_match = next(
+                    (c for c in classes
+                     if c.startswith("bib_") or c.startswith("cite_")
+                     or (c.isalpha() and c.islower())
+                     or c in _CAPTION_CHAR_STYLES),
+                    None,
+                )
+                if style_match:
+                    node_char_style = style_match
 
             current_bold = bold or tag in ('strong', 'b') or has_bold_style
             current_italic = italic or tag in ('em', 'i') or has_italic_style
