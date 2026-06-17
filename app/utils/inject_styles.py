@@ -17,6 +17,24 @@ from docx import Document
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 from docx.enum.style import WD_STYLE_TYPE
+from docx.shared import Pt
+from docx.enum.text import WD_LINE_SPACING
+
+# ---------------------------------------------------------------------------
+# Default formatting applied to every publisher style
+# ---------------------------------------------------------------------------
+STYLE_FONT_NAME = "Times New Roman"
+STYLE_FONT_SIZE = Pt(12)
+
+
+def _apply_formatting(style):
+    """Apply Times New Roman 12pt 2.0 line spacing to a style."""
+    style.font.name             = STYLE_FONT_NAME
+    style.font.size             = STYLE_FONT_SIZE
+    pf = style.paragraph_format
+    pf.line_spacing             = 2.0
+    pf.line_spacing_rule        = WD_LINE_SPACING.MULTIPLE
+
 
 # ---------------------------------------------------------------------------
 # Complete list of publisher style tags
@@ -105,7 +123,6 @@ PUBLISHER_STYLES = [
     "UOC", "UOC-FIRST", "UOS",
     "UOUT-1", "UOUT-2", "UOUTH1", "UQUOTE", "UST", "UT", "UTXT",
     "WEBTXT", "WL1",
-    # Front matter / title page
     "HTTLPG-TTL", "HTTLPG-SUBTTL", "HTTLPG-ED",
     "TTLPG-TTL", "TTLPG-SUBTTL", "TTLPG-ED", "TTLPG-VOL",
     "TTLPG-AU", "TTLPG-AU-AFFIL",
@@ -113,33 +130,25 @@ PUBLISHER_STYLES = [
     "FM-TTL", "FM-AU", "FM-AU-AFFIL",
     "CONTRIB-AU", "CONTRIB-AU-AFFIL",
     "REV-AU", "REV-AU-AFFIL",
-    # TOC
     "TOC-FM", "TOC-UN", "TOC-UT", "TOC-SN", "TOC-ST",
     "TOC-CN", "TOC-CT", "TOC-CAU", "TOC-H1", "TOC-H2",
     "TOC-BM-FIRST", "TOC-BM",
-    # Back matter
     "BM-TTL",
-    # Glossary
     "GLOS-UL-FIRST", "GLOS-UL-MID", "GLOS-NL-FIRST", "GLOS-NL-MID",
     "GLOS-BL-FIRST", "GLOS-BL-MID",
-    # Index
     "IDX-TXT", "IDX-ALPHA", "IDX-1", "IDX-2", "IDX-3",
 ]
 
 
 def _style_name_to_id(name: str) -> str:
-    """Convert a display name to a safe XML styleId (no spaces/special chars)."""
     return name.replace(" ", "_").replace("-", "_")
 
 
 def inject_publisher_styles(docx_path: str, save_path: str = None) -> None:
     """
     Inject all publisher styles into the DOCX as paragraph styles.
+    Each style is set to Times New Roman, 12pt, 2.0 line spacing.
     Skips styles that already exist (safe to call multiple times).
-
-    Args:
-        docx_path:  Path to the source .docx file.
-        save_path:  Where to save the result. If None, overwrites docx_path.
     """
     doc = Document(docx_path)
     existing = {s.name for s in doc.styles}
@@ -155,15 +164,15 @@ def inject_publisher_styles(docx_path: str, save_path: str = None) -> None:
         try:
             style = doc.styles.add_style(tag, WD_STYLE_TYPE.PARAGRAPH)
             style.hidden = False
-            style.quick_style = True          # makes it appear in style pickers
-            style.priority = 100              # low priority = appears at end of list
+            style.quick_style = True
+            style.priority = 100
 
-            # Base all custom styles on "Normal" so they inherit basic font settings
             try:
                 style.base_style = doc.styles["Normal"]
             except KeyError:
                 pass
 
+            _apply_formatting(style)
             added += 1
         except Exception as e:
             print(f"  [WARN] Could not add style '{tag}': {e}")
@@ -176,11 +185,9 @@ def inject_publisher_styles(docx_path: str, save_path: str = None) -> None:
 def create_template_dotx(output_path: str = "publisher_template.docx") -> None:
     """
     Create a blank DOCX containing all publisher styles.
-    Use this as a base template for new documents in your CMS.
     """
     doc = Document()
 
-    # Remove all default content
     for para in doc.paragraphs:
         p = para._element
         p.getparent().remove(p)
@@ -200,6 +207,7 @@ def create_template_dotx(output_path: str = "publisher_template.docx") -> None:
                 style.base_style = doc.styles["Normal"]
             except KeyError:
                 pass
+            _apply_formatting(style)
             added += 1
         except Exception as e:
             print(f"  [WARN] Could not add style '{tag}': {e}")
@@ -208,9 +216,6 @@ def create_template_dotx(output_path: str = "publisher_template.docx") -> None:
     print(f"Template created with {added} styles at: {output_path}")
 
 
-# ---------------------------------------------------------------------------
-# CLI entry point
-# ---------------------------------------------------------------------------
 if __name__ == "__main__":
     if len(sys.argv) == 3:
         inject_publisher_styles(sys.argv[1], sys.argv[2])

@@ -40,14 +40,20 @@ from docx.shared import Pt
 import difflib
 
 import os
+import sys
+
+# Add app directory to path for legacy module imports
+_app_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _app_dir not in sys.path:
+    sys.path.insert(0, _app_dir)
 
 # Import utils
 try:
-    from utils import track_changes
+    from app.utils import track_changes
     TRACK_CHANGES_ENABLED = True
-except ImportError:
+except ImportError as e:
     TRACK_CHANGES_ENABLED = False
-    logging.warning("track_changes module not found. Track changes disabled.")
+    logging.warning(f"track_changes module not found. Track changes disabled. Error: {e}")
 
 # -------------------------
 # CONFIG

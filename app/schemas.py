@@ -6,12 +6,8 @@ class UserCreate(BaseModel):
     email: str
     password: str
 
-class TeamCreate(BaseModel):
-    name: str
-    description: Optional[str] = None
-
 class ProjectCreate(BaseModel):
-    team_id: int
     code: str
     title: str
     xml_standard: str
+    client_name: Optional[str] = None

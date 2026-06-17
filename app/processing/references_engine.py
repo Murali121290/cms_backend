@@ -1,119 +1,88 @@
 import os
+import zipfile
+import io
+import shutil
 from pathlib import Path
+from app.core.config import get_settings
+from app.integrations.pph.client import PPHClient
+from app.processing.reference_char_style_applicator import apply_reference_char_styles
 
 # Legacy imports
-# These modules contain the core logic migrated from the Flask app
-from app.processing.legacy import ReferencesStructing
-from app.processing.legacy import Referencenumvalidation
-from app.processing.legacy import ReferenceAPAValidation
+try:
+    from app.processing.legacy import ReferencesStructing
+    from app.processing.legacy import Referencenumvalidation
+    from app.processing.legacy import ReferenceAPAValidation
+    LEGACY_AVAILABLE = True
+except Exception as e:
+    import logging
+    logging.getLogger(__name__).warning(f"Legacy reference modules unavailable: {e}")
+    LEGACY_AVAILABLE = False
 
 class ReferencesEngine:
-    def process_document(self, file_path: str, 
-                         run_structuring: bool = True, 
-                         run_num_validation: bool = True, 
+    def process_document(self, file_path: str,
+                         run_structuring: bool = False,
+                         run_conversion: bool = True,
+                         run_num_validation: bool = True,
                          run_apa_validation: bool = True,
-                         report_only: bool = False) -> list[str]:
+                         report_only: bool = False,
+                         target_style: str = "Auto",
+                         citation_format: str = "auto") -> list[str]:
         """
-        Runs the Reference Validation pipeline with granular control:
-        1. Structuring (Header/Style cleanup)
-        2. Numerical Validation (Sequence/Duplication checks)
-        3. Name/Year Validation (APA style checks)
-        
-        report_only: If True, validation runs but changes might not be saved (logic dependent).
-        
-        Returns a list of generated file paths.
+        Runs the Reference processing pipeline by delegating to PPH.
+
+        run_structuring: Run ReferencesStructing.py (re-formats reference list structure).
+        run_conversion:  Run ReferenceConversion.py via Gemini AI (converts APA ↔ AMA).
+                         These two are now independent — conversion runs on the original
+                         input file regardless of whether structuring is enabled.
         """
-        generated_files = []
+        settings = get_settings()
+
+        if not hasattr(settings, 'PPH_BASE_URL') or not settings.PPH_BASE_URL:
+            raise RuntimeError("PPH_BASE_URL is not configured in settings.")
+        if not getattr(settings, 'PPH_ENABLED', False):
+            raise RuntimeError("PPH integration is disabled in settings.")
+
+        client = PPHClient()
+        with open(file_path, "rb") as f:
+            files = {
+                "files": (
+                    os.path.basename(file_path),
+                    f.read(),
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+            }
+
+        payload = {
+            "report_only":               "true" if report_only else "false",
+            "run_validation":            "true" if run_num_validation else "false",
+            "run_name_year_validation":  "true" if run_apa_validation else "false",
+            "run_structuring":           "true" if run_structuring else "false",
+            "run_gemini":                "true" if run_conversion else "false",
+            "target_style":              target_style,
+            "citation_format":           citation_format,
+        }
+
+        import logging
+        engine_logger = logging.getLogger("app.processing.references_engine")
+        engine_logger.info(f"Submitting reference job to PPH for: {os.path.basename(file_path)}")
+        engine_logger.info(f"Payload: {payload}")
+
+        zip_bytes = client.submit_and_wait(
+            endpoint="/validate",
+            files=files,
+            data=payload
+        )
+
         folder = os.path.dirname(file_path)
-        current_path = file_path
-        
-        # ---------------------------------------------------------
-        # 1. Structuring
-        # ---------------------------------------------------------
-        if run_structuring:
-            try:
-                # process_docx_file expects Path objects
-                struct_res = ReferencesStructing.process_docx_file(Path(current_path), Path(folder))
-                fixed_docx = struct_res.get('output_docx')
-                
-                if fixed_docx and os.path.exists(fixed_docx):
-                    current_path = str(fixed_docx)
-                    generated_files.append(current_path)
-                    
-                # Log file from structuring?
-                log_file = struct_res.get('log_file')
-                if log_file and os.path.exists(log_file):
-                    generated_files.append(str(log_file))
-                    
-            except Exception as e:
-                print(f"Structuring Error (Non-fatal): {e}")
+        generated_files = []
 
-        # ---------------------------------------------------------
-        # 2. Numerical Validation
-        # ---------------------------------------------------------
-        if run_num_validation:
-            try:
-                # Returns: doc, before_stats, after_stats, mapping, status_msg
-                doc, before, after, mapping, val_msg = Referencenumvalidation.process_document(current_path)
-                
-                # Save if modified or useful
-                has_citations = bool(mapping)
-                is_perfect = before.get('is_perfect', False)
-                
-                # We save the validation step output if there were citations to map or issues found
-                # If report_only is True, we might skip saving the DOCX, but the legacy logic saves it.
-                # Assuming report_only mainly applies to APA/Report generation or we just let it save Val.docx for review.
-                if has_citations or (not is_perfect):
-                    base = os.path.splitext(os.path.basename(current_path))[0]
-                    val_path = os.path.join(folder, f"{base}_Val.docx")
-                    doc.save(val_path)
-                    
-                    # Update chain
-                    current_path = val_path
-                    generated_files.append(current_path)
-                
-                # Generate Text Report for Numerical Validation
-                base_orig = os.path.splitext(os.path.basename(file_path))[0]
-                report_text = Referencenumvalidation.generate_report(before, after, mapping, val_msg, base_orig)
-                report_path = os.path.join(folder, f"{base_orig}_ReferenceReport.txt")
-                
-                with open(report_path, "w", encoding="utf-8") as f:
-                    f.write(report_text)
-                generated_files.append(report_path)
-                    
-            except Exception as e:
-                 print(f"Numerical Validation Error (Non-fatal): {e}")
-
-        # ---------------------------------------------------------
-        # 3. Name & Year Validation (APA)
-        # ---------------------------------------------------------
-        if run_apa_validation:
-            try:
-                 from app.processing.legacy.validation_core import CitationProcessor
-                 
-                 processor = CitationProcessor(current_path)
-                 report = processor.run()
-                 
-                 if not report_only:
-                     # Save Final Version (NY = Name Year) if there are issues
-                     base = os.path.splitext(os.path.basename(current_path))[0]
-                     ny_path = os.path.join(folder, f"{base}_NY.docx")
-                     processor.save(ny_path)
-                     current_path = ny_path
-                     generated_files.append(current_path)
-                 
-                 # Generate Text Report
-                 base_orig = os.path.splitext(os.path.basename(file_path))[0]
-                 report_text = f"Document: {base_orig}\n\n{report.summary()}"
-                 report_path = os.path.join(folder, f"{base_orig}_ReferenceReport.txt")
-                 
-                 with open(report_path, "w", encoding="utf-8") as f:
-                     f.write(report_text)
-                 generated_files.append(report_path)
-
-            except Exception as e:
-                 print(f"Name/Year Validation Error: {e}")
-                 import traceback
-                 traceback.print_exc()
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
+            z.extractall(folder)
+            for name in z.namelist():
+                full_path = os.path.join(folder, name)
+                if os.path.isfile(full_path):
+                    generated_files.append(full_path)
+                    if full_path.endswith("_Processed.docx"):
+                        apply_reference_char_styles(full_path)
 
         return generated_files

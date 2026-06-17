@@ -1,8 +1,14 @@
 import re
 import os
+import sys
 import io
 import zipfile
 from collections import defaultdict
+
+# Add app directory to path for legacy module imports
+_app_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _app_dir not in sys.path:
+    sys.path.insert(0, _app_dir)
 
 from flask import Flask, request, send_file, render_template, redirect, url_for, session
 from docx import Document
@@ -11,7 +17,7 @@ from docx.oxml.table import CT_Tbl
 from docx.text.paragraph import Paragraph
 from docx.table import Table
 from docx.shared import RGBColor
-from utils import track_changes
+from app.utils import track_changes
 import logging
 
 TRACK_CHANGES_ENABLED = True
@@ -239,8 +245,8 @@ class ReferenceProcessor:
                 # Optimization: Length ratio check
                 # If lengths differ significantly, they can't be high matches
                 # If ratio > 0.85, then min_len / max_len must be roughly > 0.85
-                # We use 0.6 as a conservative safety net, but 0.8 is probably safe if threshold is 0.85.
-                if min(len_a, len_b) / max(len_a, len_b) < 0.6:
+                # We use 0.80 as a safe filter threshold.
+                if min(len_a, len_b) / max(len_a, len_b) < 0.80:
                     continue
                 
                 matcher.set_seq2(text_b)

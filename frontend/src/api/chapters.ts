@@ -1,0 +1,62 @@
+import api from './client'
+
+export interface Chapter {
+  id: number
+  client: string
+  project: string
+  chapters: string
+  chapter_title: string | null
+  project_manager_name: string | null
+  due_date: string | null
+  stage_name: string | null
+  current_stage_activity: string | null
+  current_assignee_name: string | null
+  status: string
+  complexity_level: string
+  stage_level: number
+  workflow: string
+  published_status: string
+  remarks: string | null
+  manuscript_pages: number | null
+  priority: string
+  delayed_stages: Record<string, number> | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ChapterUpdate {
+  stage_name?:             string | null
+  current_stage_activity?: string | null
+  current_assignee_name?:  string | null
+  status?:                 string | null
+  priority?:               string | null
+  remarks?:                string | null
+  manuscript_pages?:       number | null
+  due_date?:               string | null
+  published_status?:       string | null
+  complexity_level?:       string | null
+  delayed_stages?:         Record<string, number> | null
+}
+
+export const chaptersApi = {
+  list: () =>
+    api.get<Chapter[]>('/chapters/').then(r => r.data),
+
+  getById: (id: number) =>
+    api.get<Chapter>(`/chapters/${id}`).then(r => r.data),
+
+  getByProject: (project: string) =>
+    api.get<Chapter[]>(`/chapters/project/${encodeURIComponent(project)}`).then(r => r.data),
+
+  getByClient: (client: string) =>
+    api.get<Chapter[]>(`/chapters/client/${encodeURIComponent(client)}`).then(r => r.data),
+
+  update: (id: number, data: ChapterUpdate) =>
+    api.put<Chapter>(`/chapters/${id}`, data).then(r => r.data),
+
+  bulkUpdatePriority: (project: string, priority: string) =>
+    api.put<{ updated: number }>(`/chapters/project/${encodeURIComponent(project)}/priority`, { priority }).then(r => r.data),
+
+  bulkUpdateStatus: (project: string, status: string) =>
+    api.put<{ updated: number }>(`/chapters/project/${encodeURIComponent(project)}/status`, { status }).then(r => r.data),
+}

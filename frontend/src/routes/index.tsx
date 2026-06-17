@@ -1,0 +1,118 @@
+import { createBrowserRouter, RouterProvider } from 'react-router-dom'
+import { AppLayout } from '@/layouts/AppLayout'
+import { ProtectedRoute } from '@/components/ProtectedRoute'
+import { RoleGuard } from '@/components/RoleGuard'
+import { LoginPage } from '@/pages/LoginPage'
+import { RegisterPage } from '@/pages/RegisterPage'
+import { ForgotPasswordPage } from '@/pages/ForgotPasswordPage'
+import { DashboardPage } from '@/pages/DashboardPage'
+import { Settings } from '@/pages/Settings'
+import { UserManagement } from '@/pages/settings/UserManagement'
+import { CustomerManagement } from '@/pages/settings/CustomerManagement'
+import { StageManagement } from '@/pages/settings/StageManagement'
+import { RolesManagement } from '@/pages/settings/RolesManagement'
+import { WorkflowManagement } from '@/pages/settings/WorkflowManagement'
+import { Clients } from '@/pages/Clients'
+import { ClientProjects } from '@/pages/ClientProjects'
+import { ProjectWorkflow } from '@/pages/ProjectWorkflow'
+import { ProjectPlanningPage } from '@/pages/ProjectPlanningPage'
+import { ChapterEditorPage } from '@/pages/ChapterEditorPage'
+import { Placeholder } from '@/pages/Placeholder'
+import { ProjectsPage } from '@/pages/ProjectsPage'
+import { ChapterFilePage } from '@/pages/ChapterFilePage'
+import { TechnicalReviewPage } from '@/pages/TechnicalReviewPage'
+import { TechnicalEditorPage } from '@/pages/TechnicalEditorPage'
+import { StructuringReviewPage } from '@/pages/StructuringReviewPage'
+import { ReferenceValidationReviewPage } from '@/pages/ReferenceValidationReviewPage'
+import { FileEditorPage } from '@/pages/FileEditorPage'
+import { DocxEditorPage } from '@/pages/DocxEditorPage'
+import { StylesheetsPage } from '@/pages/StylesheetsPage'
+
+const router = createBrowserRouter([
+  // ── Public routes ──────────────────────────────────────────────────────────
+  { path: '/login',           element: <LoginPage /> },
+  { path: '/register',        element: <RegisterPage /> },
+  { path: '/forgot-password', element: <ForgotPasswordPage /> },
+
+  // ── Protected routes ───────────────────────────────────────────────────────
+  {
+    path: '/',
+    element: (
+      <ProtectedRoute>
+        <AppLayout />
+      </ProtectedRoute>
+    ),
+    children: [
+      { index: true, element: <DashboardPage /> },
+      { path: 'dashboard', element: <DashboardPage /> },
+
+      { path: 'clients',                    element: <Clients /> },
+      { path: 'clients/:clientId/projects', element: <ClientProjects /> },
+
+      {
+        path: 'clients/:clientId/projects/:projectId',
+        element: <ProjectWorkflow />,
+      },
+      {
+        path: 'clients/:clientId/projects/:projectId/chapters/:chapterId',
+        element: <ChapterFilePage />,
+      },
+      {
+        path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files',
+        element: <ChapterFilePage />,
+      },
+      {
+        path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/view/:subfolder/:filename',
+        element: <ChapterEditorPage />,
+      },
+
+      { path: 'projects/:projectId',          element: <ProjectWorkflow /> },
+      { path: 'projects/:projectId/planning', element: <ProjectPlanningPage /> },
+      { path: 'projects/:projectId/chapters/:chapterId', element: <ChapterFilePage /> },
+      { path: 'projects/:projectId/chapters/:chapterId/files', element: <ChapterFilePage /> },
+      {
+        path: 'projects/:projectId/chapters/:chapterId/view/:subfolder/:filename',
+        element: <ChapterEditorPage />,
+      },
+
+      // ── File-level pages (projects prefix) ──────────────────────────────────
+      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/edit',               element: <FileEditorPage /> },
+      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/wysiwyg',            element: <DocxEditorPage /> },
+      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/structuring-review', element: <StructuringReviewPage /> },
+      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/technical-review',   element: <TechnicalReviewPage /> },
+      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/technical-editor',   element: <TechnicalEditorPage /> },
+      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/reference-review',   element: <ReferenceValidationReviewPage /> },
+
+      // ── File-level pages (clients prefix) ───────────────────────────────────
+      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/edit',               element: <FileEditorPage /> },
+      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/wysiwyg',            element: <DocxEditorPage /> },
+      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/structuring-review', element: <StructuringReviewPage /> },
+      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/technical-review',   element: <TechnicalReviewPage /> },
+      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/technical-editor',   element: <TechnicalEditorPage /> },
+      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/reference-review',   element: <ReferenceValidationReviewPage /> },
+
+      { path: 'projects', element: <ProjectsPage /> },
+      { path: 'chapters', element: <Placeholder title="Chapters" /> },
+      { path: 'reports',  element: <Placeholder title="Reports" /> },
+
+      // ── Review pages without fileId (legacy patterns) ───────────────────────
+      { path: 'projects/:projectId/chapters/:chapterId/technical-review', element: <TechnicalReviewPage /> },
+      { path: 'projects/:projectId/chapters/:chapterId/structuring-review', element: <StructuringReviewPage /> },
+      { path: 'projects/:projectId/chapters/:chapterId/reference-review', element: <ReferenceValidationReviewPage /> },
+      { path: 'projects/:projectId/stylesheets', element: <StylesheetsPage /> },
+
+      // ── Settings: admin + manager only ───────────────────────────────────
+      { path: 'settings',           element: <RoleGuard allowedRoles={['admin','manager']}><Settings /></RoleGuard> },
+      { path: 'settings/users',     element: <RoleGuard allowedRoles={['admin','manager']}><UserManagement /></RoleGuard> },
+      { path: 'settings/customers', element: <RoleGuard allowedRoles={['admin','manager']}><CustomerManagement /></RoleGuard> },
+      { path: 'settings/stages',    element: <RoleGuard allowedRoles={['admin','manager']}><StageManagement /></RoleGuard> },
+      { path: 'settings/roles',     element: <RoleGuard allowedRoles={['admin','manager']}><RolesManagement /></RoleGuard> },
+      { path: 'settings/workflow',  element: <RoleGuard allowedRoles={['admin','manager']}><WorkflowManagement /></RoleGuard> },
+      { path: 'settings/system',    element: <RoleGuard allowedRoles={['admin','manager']}><Placeholder title="System Settings" /></RoleGuard> },
+    ],
+  },
+])
+
+export function AppRouter() {
+  return <RouterProvider router={router} />
+}

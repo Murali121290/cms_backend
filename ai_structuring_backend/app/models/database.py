@@ -254,4 +254,8 @@ def init_db(app):
     """Initialize database."""
     db.init_app(app)
     with app.app_context():
-        db.create_all()
+        try:
+            db.create_all()
+        except Exception as e:
+            print(f"[WARNING] Failed to create database tables: {e}")
+            print("[WARNING] Tables may already exist or will be created on next startup")

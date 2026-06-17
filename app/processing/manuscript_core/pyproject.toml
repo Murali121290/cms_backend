@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "manuscript_core"
+version = "0.1.0"
+description = "Manuscript consistency analysis engine"
+requires-python = ">=3.10"
+dependencies = [
+    "python-docx",
+    "lxml",
+]
+
+[tool.setuptools.packages.find]
+where = [".."]
+include = ["manuscript_core*"]
