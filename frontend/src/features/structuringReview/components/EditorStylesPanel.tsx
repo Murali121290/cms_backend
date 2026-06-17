@@ -1,28 +1,69 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/Button";
-import { BookOpen, Plus, Search, X } from "lucide-react";
+import { BookOpen, Plus, Search, X, Play, FileText, ChevronDown, ChevronRight, Folder, Tag, Layers, Table2 } from "lucide-react";
+import type { Node as PmNode, Mark as PmMark } from "@tiptap/pm/model";
 import type { WysiwygEditorHandle } from "@/features/editor";
 import { NewStyleDialog } from "./NewStyleDialog";
+
+// ── Types ──────────────────────────────────────────────────────────────────────
+
+type PanelTab = "paragraph" | "character" | "group";
+
+interface SdtNode {
+  type: "block" | "inline";
+  alias: string;
+  tag: string;
+}
+
+interface ScannedElement {
+  id: string;
+  type: "sdtBlock" | "sdtInline" | "table" | "bulletList" | "orderedList" | "blockquote" | "paragraph" | "heading";
+  name: string;
+  pos: number;
+  nodeSize: number;
+  checked: boolean;
+  children?: ScannedElement[];
+  inlineSdts?: ScannedElement[];
+}
 
 interface StylesPanelProps {
   styles: string[];
   editorRef: React.RefObject<WysiwygEditorHandle>;
   onAddStyle?: (newStyle: string) => void;
+  fileId?: number | null;
+  charStyles?: string[];
 }
 
+// Default character styles derived from the pipeline's bib/cite style map
+const DEFAULT_CHAR_STYLES: { group: string; styles: string[] }[] = [
+  {
+    group: "Bibliography",
+    styles: [
+      "bib_article", "bib_book", "bib_chapterno", "bib_chaptertitle",
+      "bib_doi", "bib_journal", "bib_publisher", "bib_title",
+      "bib_volume", "bib_year", "bib_fname", "bib_surname", "bib_url",
+    ],
+  },
+  {
+    group: "Citation",
+    styles: [
+      "cite_app", "cite_bib", "cite_eq", "cite_fig",
+      "cite_fn", "cite_sec", "cite_tbl", "cite_tfn", "cite_box",
+    ],
+  },
+];
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
 function HighlightedText({ text, highlight }: { text: string; highlight: string }) {
-  if (!highlight.trim()) {
-    return <span>{text}</span>;
-  }
+  if (!highlight.trim()) return <span>{text}</span>;
   const regex = new RegExp(`(${highlight.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&")})`, "gi");
   const parts = text.split(regex);
   return (
     <span>
       {parts.map((part, idx) =>
         part.toLowerCase() === highlight.toLowerCase() ? (
-          <mark key={idx} className="bg-amber-200 text-amber-950 font-bold px-0.5 rounded">
-            {part}
-          </mark>
+          <mark key={idx} className="bg-amber-200 text-amber-950 font-bold px-0.5 rounded">{part}</mark>
         ) : (
           <span key={idx}>{part}</span>
         )
@@ -31,246 +72,805 @@ function HighlightedText({ text, highlight }: { text: string; highlight: string 
   );
 }
 
-export function StylesPanel({ styles, editorRef, onAddStyle }: StylesPanelProps) {
-  const [currentStyle, setCurrentStyle] = useState<string>("Normal");
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
+// ── Component ──────────────────────────────────────────────────────────────────
+
+export function StylesPanel({
+  styles,
+  editorRef,
+  onAddStyle,
+  fileId,
+  charStyles,
+}: StylesPanelProps) {
+
+  // ── Shared ────────────────────────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState<PanelTab>("group");
+
+  // ── Paragraph tab ─────────────────────────────────────────────────────────
+  const [currentStyle, setCurrentStyle] = useState("Normal");
   const [allStyles, setAllStyles] = useState<string[]>(styles);
   const [searchQuery, setSearchQuery] = useState("");
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
 
-  // Update local styles when prop changes
-  useEffect(() => {
-    setAllStyles(styles);
-  }, [styles]);
+  useEffect(() => { setAllStyles(styles); }, [styles]);
 
-  // Update current style when selection changes
   useEffect(() => {
     const editor = editorRef.current?.editor;
     if (!editor) return;
-
-    const updateCurrentStyle = () => {
+    const update = () => {
       if (editor.isActive("heading")) {
-        const attrs = editor.getAttributes("heading");
-        setCurrentStyle(attrs.styleLabel || "H1");
+        setCurrentStyle(editor.getAttributes("heading").styleLabel || "H1");
       } else if (editor.isActive("paragraph")) {
-        const attrs = editor.getAttributes("paragraph");
-        setCurrentStyle(attrs.styleLabel || "Normal");
+        setCurrentStyle(editor.getAttributes("paragraph").styleLabel || "Normal");
       } else {
         setCurrentStyle("Normal");
       }
     };
-
-    editor.on("selectionUpdate", updateCurrentStyle);
-    editor.on("update", updateCurrentStyle);
-    updateCurrentStyle();
-
-    return () => {
-      editor.off("selectionUpdate", updateCurrentStyle);
-      editor.off("update", updateCurrentStyle);
-    };
+    editor.on("selectionUpdate", update);
+    editor.on("update", update);
+    update();
+    return () => { editor.off("selectionUpdate", update); editor.off("update", update); };
   }, [editorRef]);
 
   const applyStyle = (styleName: string) => {
     const editor = editorRef.current?.editor;
     if (!editor) return;
 
-    const headingMap: Record<string, number> = {
-      "H1": 1, "H2": 2, "H3": 3, "H4": 4, "H5": 5, "H6": 6,
-    };
+    const checkedNodes = getCheckedNodesList();
+    if (checkedNodes.length > 0) {
+      let chain = editor.chain().focus();
+      const headingMap: Record<string, number> = { H1: 1, H2: 2, H3: 3, H4: 4, H5: 5, H6: 6 };
+      const level = headingMap[styleName];
 
-    const headingLevel = headingMap[styleName];
-    let chain = editor.chain().focus();
-
-    if (headingLevel) {
-      chain = chain
-        .setHeading({ level: headingLevel as any })
-        .updateAttributes("heading", { styleLabel: styleName });
+      const sortedNodes = [...checkedNodes].sort((a, b) => b.pos - a.pos);
+      sortedNodes.forEach((node) => {
+        if (node.type === "sdtInline") return;
+        
+        chain = chain.setTextSelection({ from: node.pos, to: node.pos });
+        if (level) {
+          chain = chain.setHeading({ level: level as 1 | 2 | 3 | 4 | 5 | 6 })
+            .updateAttributes("heading", { styleLabel: styleName });
+        } else {
+          const $pos = editor.state.doc.resolve(node.pos);
+          const isHeading = $pos.parent && $pos.parent.type.name === "heading";
+          if (isHeading) {
+            chain = chain.setParagraph();
+          }
+          chain = chain.updateAttributes("paragraph", { styleLabel: styleName });
+        }
+      });
+      chain.run();
+      setCheckedIds(new Set());
     } else {
-      const label = (styleName === "Normal" || styleName === "Body Text") ? "Normal" : styleName;
-      
-      // Convert to paragraph only if it's currently a heading, to avoid lifting list items out of lists
-      if (editor.isActive("heading")) {
-        chain = chain.setParagraph();
+      const headingMap: Record<string, number> = { H1: 1, H2: 2, H3: 3, H4: 4, H5: 5, H6: 6 };
+      const level = headingMap[styleName];
+      let chain = editor.chain().focus();
+      if (level) {
+        chain = chain.setHeading({ level: level as 1 | 2 | 3 | 4 | 5 | 6 })
+          .updateAttributes("heading", { styleLabel: styleName });
+      } else {
+        if (editor.isActive("heading")) chain = chain.setParagraph();
+        chain = chain.updateAttributes("paragraph", { styleLabel: styleName });
       }
-      chain = chain.updateAttributes("paragraph", { styleLabel: label });
+      chain.run();
     }
-    chain.run();
+    onAddStyle?.(styleName);
+  };
 
-    if (onAddStyle) {
-      onAddStyle(styleName);
+  const filteredStyles = allStyles.filter((s) =>
+    s.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  // ── Character tab ─────────────────────────────────────────────────────────
+  const [activeCharStyle, setActiveCharStyle] = useState<string | null>(null);
+
+  useEffect(() => {
+    const editor = editorRef.current?.editor;
+    if (!editor) return;
+    const update = () => {
+      const attrs = editor.getAttributes("charStyle");
+      setActiveCharStyle((attrs?.class as string) || null);
+    };
+    editor.on("selectionUpdate", update);
+    update();
+    return () => { editor.off("selectionUpdate", update); };
+  }, [editorRef]);
+
+  // Group char styles from API into logical categories, or fall back to defaults
+  const charStyleGroups = charStyles && charStyles.length > 0
+    ? [
+        { group: "Formatting", styles: charStyles.filter(s => /^[a-z]+$/.test(s)) },
+        { group: "Bibliography", styles: charStyles.filter(s => s.startsWith("bib_")) },
+        { group: "Citation", styles: charStyles.filter(s => s.startsWith("cite_")) },
+        { group: "Caption", styles: charStyles.filter(s => !/^[a-z]+$/.test(s) && !s.startsWith("bib_") && !s.startsWith("cite_")) },
+      ].filter(g => g.styles.length > 0)
+    : DEFAULT_CHAR_STYLES;
+
+  const applyCharStyle = (cls: string) => {
+    const editor = editorRef.current?.editor;
+    if (!editor) return;
+
+    const checkedNodes = getCheckedNodesList();
+    if (checkedNodes.length > 0) {
+      let chain = editor.chain().focus();
+      const sortedNodes = [...checkedNodes].sort((a, b) => b.pos - a.pos);
+
+      sortedNodes.forEach((node) => {
+        const from = node.pos;
+        const to = node.pos + node.nodeSize;
+        chain = chain.setTextSelection({ from, to }).toggleMark("charStyle", { class: cls });
+      });
+      chain.run();
+      setCheckedIds(new Set());
+    } else {
+      editor.chain().focus().toggleMark("charStyle", { class: cls }).run();
     }
   };
 
-  const filteredStyles = allStyles.filter((style) =>
-    style.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // ── Group tab (Scanning & Bulk Actions) ───────────────────────────────────
+  const [scannedTree, setScannedTree] = useState<ScannedElement[]>([]);
+  const [flatNodes, setFlatNodes] = useState<ScannedElement[]>([]);
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [isRunningPipeline, setIsRunningPipeline] = useState(false);
+  const [pipelineError, setPipelineError] = useState<string | null>(null);
+  const [showWrapModal, setShowWrapModal] = useState(false);
+  const [wrapAlias, setWrapAlias] = useState("");
+  const [wrapTag, setWrapTag] = useState("");
+  const [wrapType, setWrapType] = useState<"block" | "inline">("block");
+  const scanTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  return (
-    <div className="bg-white rounded-lg shadow-card border border-border flex flex-col h-full">
-      {/* Header */}
-      <div className="p-4 border-b border-border">
-        <h3 className="text-xs font-semibold text-text uppercase tracking-wider flex items-center gap-2">
-          <BookOpen className="w-4 h-4 text-primary" />
-          Paragraph Styles
-        </h3>
-        <div className="mt-2 flex items-center gap-2">
-          <span className="text-[10px] text-muted">Current:</span>
-          <span className="px-2 py-1 bg-amber-100 text-amber-900 border border-amber-300 rounded text-[10px] font-semibold">
-            {currentStyle}
+  const getCheckedNodesList = (): ScannedElement[] => {
+    return flatNodes.filter(n => checkedIds.has(n.id));
+  };
+
+  const handleToggleChecked = (el: ScannedElement, checked: boolean) => {
+    const newChecked = new Set(checkedIds);
+
+    const toggleNodeAndChildren = (node: ScannedElement) => {
+      if (checked) {
+        newChecked.add(node.id);
+      } else {
+        newChecked.delete(node.id);
+      }
+      if (node.children) {
+        node.children.forEach(toggleNodeAndChildren);
+      }
+      if (node.inlineSdts) {
+        node.inlineSdts.forEach(toggleNodeAndChildren);
+      }
+    };
+
+    toggleNodeAndChildren(el);
+    setCheckedIds(newChecked);
+  };
+
+  const toggleExpanded = (id: string) => {
+    const newExpanded = new Set(expandedIds);
+    if (newExpanded.has(id)) {
+      newExpanded.delete(id);
+    } else {
+      newExpanded.add(id);
+    }
+    setExpandedIds(newExpanded);
+  };
+
+  const scanDocument = useCallback(() => {
+    if (scanTimer.current) clearTimeout(scanTimer.current);
+    scanTimer.current = setTimeout(() => {
+      const editor = editorRef.current?.editor;
+      if (!editor) return;
+
+      const targets: { pos: number; end: number; node: PmNode; type: string; markAttrs?: any }[] = [];
+      const flat: ScannedElement[] = [];
+
+      let lastInlineSdtKey = "";
+      editor.state.doc.descendants((node: PmNode, pos: number) => {
+        const type = node.type.name;
+
+        if (["sdtBlock", "table", "bulletList", "orderedList", "blockquote", "paragraph", "heading"].includes(type)) {
+          targets.push({ pos, end: pos + node.nodeSize, node, type });
+        }
+
+        node.marks.forEach((mark: PmMark) => {
+          if (mark.type.name === "sdtInline") {
+            const key = `${mark.attrs.alias}-${pos}`;
+            if (key !== lastInlineSdtKey) {
+              targets.push({
+                pos,
+                end: pos + node.nodeSize,
+                node,
+                type: "sdtInline",
+                markAttrs: mark.attrs
+              });
+              lastInlineSdtKey = key;
+            }
+          }
+        });
+      });
+
+      targets.sort((a, b) => {
+        if (a.pos !== b.pos) return a.pos - b.pos;
+        return (b.end - b.pos) - (a.end - a.pos);
+      });
+
+      const rootElements: ScannedElement[] = [];
+
+      targets.forEach((t) => {
+        let id = `${t.type}-${t.pos}`;
+        let name = "";
+
+        if (t.type === "sdtBlock") {
+          name = `Block SDT: ${t.node.attrs.alias || "unnamed"}`;
+        } else if (t.type === "sdtInline") {
+          name = `Inline SDT: ${t.markAttrs?.alias || "unnamed"}`;
+          id = `sdtInline-${t.pos}`;
+        } else if (t.type === "table") {
+          name = "Table";
+        } else if (t.type === "bulletList") {
+          name = "Bullet List";
+        } else if (t.type === "orderedList") {
+          name = "Numbered List";
+        } else if (t.type === "blockquote") {
+          name = "Blockquote";
+        } else if (t.type === "heading") {
+          name = `Heading (${t.node.attrs.styleLabel || "H" + t.node.attrs.level})`;
+        } else if (t.type === "paragraph") {
+          name = `Paragraph (${t.node.attrs.styleLabel || "Normal"})`;
+        }
+
+        const el: ScannedElement = {
+          id,
+          type: t.type as any,
+          name,
+          pos: t.pos,
+          nodeSize: t.end - t.pos,
+          checked: false
+        };
+
+        flat.push(el);
+
+        let parent: ScannedElement | null = null;
+        
+        const checkParent = (candidate: ScannedElement): ScannedElement | null => {
+          if (candidate.pos <= el.pos && el.pos + el.nodeSize <= candidate.pos + candidate.nodeSize && candidate.id !== el.id) {
+            if (candidate.children) {
+              for (const child of candidate.children) {
+                const sub = checkParent(child);
+                if (sub) return sub;
+              }
+            }
+            if (candidate.inlineSdts) {
+              for (const child of candidate.inlineSdts) {
+                const sub = checkParent(child);
+                if (sub) return sub;
+              }
+            }
+            return candidate;
+          }
+          return null;
+        };
+
+        for (let i = rootElements.length - 1; i >= 0; i--) {
+          const found = checkParent(rootElements[i]);
+          if (found) {
+            parent = found;
+            break;
+          }
+        }
+
+        if (parent) {
+          if (el.type === "sdtInline") {
+            if (!parent.inlineSdts) parent.inlineSdts = [];
+            parent.inlineSdts.push(el);
+          } else {
+            if (!parent.children) parent.children = [];
+            parent.children.push(el);
+          }
+        } else {
+          rootElements.push(el);
+        }
+      });
+
+      setScannedTree(rootElements);
+      setFlatNodes(flat);
+    }, 200);
+  }, [editorRef]);
+
+  useEffect(() => {
+    const editor = editorRef.current?.editor;
+    if (!editor) return;
+    editor.on("update", scanDocument);
+    scanDocument();
+    return () => { editor.off("update", scanDocument); };
+  }, [editorRef, scanDocument]);
+
+  const handleRunPipeline = async () => {
+    const editor = editorRef.current?.editor;
+    if (!editor || !fileId) return;
+    setIsRunningPipeline(true);
+    setPipelineError(null);
+    try {
+      const res = await fetch(`/api/v1/files/${fileId}/structuring/run-pipeline`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as Record<string, string>;
+        throw new Error(err.detail || `Pipeline failed (${res.status})`);
+      }
+      const data = await res.json() as { content?: string };
+      if (data.content) {
+        editor.commands.setContent(data.content);
+        scanDocument();
+      }
+    } catch (e) {
+      setPipelineError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsRunningPipeline(false);
+    }
+  };
+
+  const handleWrap = () => {
+    const editor = editorRef.current?.editor;
+    if (!editor || !wrapAlias.trim()) return;
+    if (wrapType === "block") {
+      editor.chain().focus().wrapInSdtBlock(wrapAlias.trim(), wrapTag.trim()).run();
+    } else {
+      editor.chain().focus().toggleSdtInline(wrapAlias.trim(), wrapTag.trim()).run();
+    }
+    setShowWrapModal(false);
+    setWrapAlias("");
+    setWrapTag("");
+    setWrapType("block");
+  };
+
+  const renderTreeNode = (el: ScannedElement, depth = 0) => {
+    const isExpanded = expandedIds.has(el.id);
+    const hasChildren = (el.children && el.children.length > 0) || (el.inlineSdts && el.inlineSdts.length > 0);
+    const isChecked = checkedIds.has(el.id);
+
+    return (
+      <div key={el.id} className="flex flex-col">
+        <div 
+          className="flex items-center gap-1.5 py-1 px-1.5 hover:bg-slate-50 rounded transition-colors text-xs select-none"
+          style={{ paddingLeft: `${Math.max(4, depth * 12)}px` }}
+        >
+          <button
+            onClick={() => toggleExpanded(el.id)}
+            className={`p-0.5 hover:bg-slate-200 rounded text-slate-400 hover:text-slate-600 border-none bg-transparent cursor-pointer shrink-0 w-4.5 h-4.5 flex items-center justify-center
+              ${hasChildren ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+          >
+            {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+          </button>
+
+          <input
+            type="checkbox"
+            checked={isChecked}
+            onChange={(e) => handleToggleChecked(el, e.target.checked)}
+            className="w-3.5 h-3.5 border-slate-300 rounded text-primary focus:ring-primary cursor-pointer shrink-0"
+          />
+
+          {el.type === "sdtBlock" || el.type === "sdtInline" ? (
+            <Tag className="w-3.5 h-3.5 text-primary shrink-0" />
+          ) : el.type === "table" ? (
+            <Table2 className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+          ) : el.type.endsWith("List") ? (
+            <Layers className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+          ) : (
+            <FileText className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+          )}
+
+          <span className="font-medium text-slate-700 truncate flex-1 font-mono text-[10px]" title={el.name}>
+            {el.name}
           </span>
         </div>
-      </div>
 
-      {/* Search Input */}
-      <div className="px-3 py-2 border-b border-border bg-sidebar/5 flex items-center gap-2">
-        <div className="relative flex-1">
-          <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-muted" />
-          <input
-            type="text"
-            placeholder="Search or add style..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && searchQuery.trim()) {
-                const clean = searchQuery.trim();
-                const matched = filteredStyles.find(
-                  (s) => s.toLowerCase() === clean.toLowerCase()
-                );
-                if (matched) {
-                  applyStyle(matched);
-                } else {
-                  if (!allStyles.includes(clean)) {
-                    setAllStyles((prev) => [...prev, clean].sort());
-                  }
-                  applyStyle(clean);
-                }
-                setSearchQuery("");
-              }
-            }}
-            className="w-full pl-8 pr-7 py-1.5 text-xs border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary bg-white text-text font-medium"
-          />
-          {searchQuery && (
-            <button
-              onClick={() => setSearchQuery("")}
-              className="absolute right-2 top-2 p-0.5 hover:bg-slate-100 rounded text-muted hover:text-text cursor-pointer border-none bg-transparent"
-              title="Clear search"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Styles List */}
-      <div className="flex-1 overflow-y-auto styles-scrollbar pr-1 p-3 space-y-2">
-        {searchQuery && !allStyles.some(s => s.toLowerCase() === searchQuery.toLowerCase().trim()) && (
-          <button
-            onClick={() => {
-              const clean = searchQuery.trim();
-              if (clean) {
-                if (!allStyles.includes(clean)) {
-                  setAllStyles((prev) => [...prev, clean].sort());
-                }
-                applyStyle(clean);
-                setSearchQuery("");
-              }
-            }}
-            className="w-full text-left px-3 py-2.5 bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-          >
-            <Plus className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">Create & Apply "{searchQuery.trim()}"</span>
-          </button>
+        {hasChildren && isExpanded && (
+          <div className="flex flex-col">
+            {el.children && el.children.map(child => renderTreeNode(child, depth + 1))}
+            {el.inlineSdts && el.inlineSdts.map(child => renderTreeNode(child, depth + 1))}
+          </div>
         )}
-        {filteredStyles.length === 0 && !searchQuery ? (
-          <div className="text-center py-6 text-muted text-xs">
-            No styles available
-          </div>
-        ) : filteredStyles.length === 0 ? (
-          <div className="text-center py-6 text-muted text-xs">
-            No matching styles found
-          </div>
-        ) : (
-          filteredStyles.map((style) => (
+      </div>
+    );
+  };
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  return (
+    <div className="bg-white rounded-lg shadow-card border border-border flex h-full min-h-0">
+
+      {/* ── Left Sidebar Vertical Icon Tabs Row ────────────────────────────── */}
+      <div className="flex flex-col border-r border-border bg-slate-900 w-14 shrink-0 py-3 gap-2 items-center">
+        {(["group", "paragraph", "character"] as PanelTab[]).map((tab) => {
+          const isActive = activeTab === tab;
+          return (
             <button
-              key={style}
-              onClick={() => applyStyle(style)}
-              className={`group w-full text-left px-3 py-2 rounded-md text-sm font-medium transition-all border relative ${
-                currentStyle === style
-                  ? "bg-emerald-100 border-emerald-400 text-emerald-900 ring-2 ring-emerald-300"
-                  : "bg-background border-border text-text hover:bg-sidebar/5 hover:border-border"
-              }`}
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              title={tab.toUpperCase()}
+              className={`w-10 h-10 rounded-lg flex flex-col items-center justify-center transition-all cursor-pointer border-none bg-transparent gap-0.5
+                ${isActive
+                  ? "text-amber-500 bg-slate-800/80 font-bold shadow-sm"
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"}`}
             >
-              <div className="flex items-center justify-between">
-                <div className="flex-1">
-                  <span className="font-mono text-[10px] uppercase tracking-wide">
-                    <HighlightedText text={style} highlight={searchQuery} />
-                  </span>
-                  <p className="text-[10px] text-muted mt-0.5">
-                    {style === "Normal" || style === "Body Text"
-                      ? "Regular paragraph"
-                      : style.startsWith("H")
-                        ? `Heading ${style.substring(1)}`
-                        : "Custom style"}
-                  </p>
+              {tab === "paragraph" ? (
+                <>
+                  <FileText className="w-4 h-4" />
+                  <span className="text-[7.5px] uppercase tracking-wide">Para</span>
+                </>
+              ) : tab === "character" ? (
+                <>
+                  <BookOpen className="w-4 h-4" />
+                  <span className="text-[7.5px] uppercase tracking-wide">Char</span>
+                </>
+              ) : (
+                <>
+                  <Layers className="w-4 h-4" />
+                  <span className="text-[7.5px] uppercase tracking-wide">Group</span>
+                </>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ── Right Content Panel ────────────────────────────────────────────── */}
+      <div className="flex-1 flex flex-col min-h-0 bg-white">
+
+        {/* ── Paragraph Tab ──────────────────────────────────────────────────── */}
+        {activeTab === "paragraph" && (
+          <>
+            <div className="px-3 py-2 border-b border-border bg-sidebar/5 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-muted">Current:</span>
+                <span className="px-2 py-0.5 bg-amber-100 text-amber-900 border border-amber-300 rounded text-[10px] font-semibold">
+                  {currentStyle}
+                </span>
+              </div>
+              {checkedIds.size > 0 && (
+                <span className="px-1.5 py-0.5 bg-amber-100 text-amber-900 rounded text-[8px] font-semibold">
+                  Bulk apply active
+                </span>
+              )}
+            </div>
+
+            <div className="px-3 py-2 border-b border-border">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-muted" />
+                <input
+                  type="text"
+                  placeholder="Search or add style..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && searchQuery.trim()) {
+                      const clean = searchQuery.trim();
+                      const matched = filteredStyles.find(
+                        (s) => s.toLowerCase() === clean.toLowerCase()
+                      );
+                      if (matched) {
+                        applyStyle(matched);
+                      } else {
+                        if (!allStyles.includes(clean)) setAllStyles((prev) => [...prev, clean].sort());
+                        applyStyle(clean);
+                      }
+                      setSearchQuery("");
+                    }
+                  }}
+                  className="w-full pl-8 pr-7 py-1.5 text-xs border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary bg-white text-text font-medium"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-2 top-2 p-0.5 hover:bg-slate-100 rounded text-muted hover:text-text cursor-pointer border-none bg-transparent"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto styles-scrollbar pr-1 p-3 space-y-2">
+              {searchQuery && !allStyles.some((s) => s.toLowerCase() === searchQuery.toLowerCase().trim()) && (
+                <button
+                  onClick={() => {
+                    const clean = searchQuery.trim();
+                    if (clean) {
+                      if (!allStyles.includes(clean)) setAllStyles((prev) => [...prev, clean].sort());
+                      applyStyle(clean);
+                      setSearchQuery("");
+                    }
+                  }}
+                  className="w-full text-left px-3 py-2.5 bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">Create & Apply "{searchQuery.trim()}"</span>
+                </button>
+              )}
+              {filteredStyles.length === 0 ? (
+                <div className="text-center py-6 text-muted text-xs">
+                  {searchQuery ? "No matching styles found" : "No styles available"}
                 </div>
-                <div className="flex items-center gap-2 ml-2 shrink-0">
-                  {currentStyle === style && (
-                    <span className="w-2 h-2 rounded-full bg-emerald-600"></span>
-                  )}
-                  {currentStyle !== style && (
-                    <span className="text-[9px] font-semibold px-1.5 py-0.5 bg-text/10 text-white rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                      Apply
-                    </span>
-                  )}
+              ) : (
+                filteredStyles.map((style) => (
+                  <button
+                    key={style}
+                    onClick={() => applyStyle(style)}
+                    className={`group w-full text-left px-3 py-2 rounded-md text-sm font-medium transition-all border relative cursor-pointer
+                      ${currentStyle === style
+                        ? "bg-emerald-100 border-emerald-400 text-emerald-900 ring-2 ring-emerald-300"
+                        : "bg-background border-border text-text hover:bg-sidebar/5 hover:border-border"}`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <span className="font-mono text-[10px] uppercase tracking-wide">
+                          <HighlightedText text={style} highlight={searchQuery} />
+                        </span>
+                        <p className="text-[10px] text-muted mt-0.5">
+                          {style === "Normal" || style === "Body Text"
+                            ? "Regular paragraph"
+                            : style.startsWith("H")
+                              ? `Heading ${style.substring(1)}`
+                              : "Custom style"}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 ml-2 shrink-0">
+                        {currentStyle === style && (
+                          <span className="w-2 h-2 rounded-full bg-emerald-600" />
+                        )}
+                        {currentStyle !== style && (
+                          <span className="text-[9px] font-semibold px-1.5 py-0.5 bg-text/10 text-white rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                            Apply
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+
+            <div className="border-t border-border p-3">
+              <Button
+                variant="secondary"
+                size="sm"
+                leftIcon={<Plus className="w-3 h-3" />}
+                className="w-full text-[11px]"
+                onClick={() => setIsDialogOpen(true)}
+              >
+                New Style
+              </Button>
+            </div>
+
+            <NewStyleDialog
+              isOpen={isDialogOpen}
+              onClose={() => setIsDialogOpen(false)}
+              onAdd={(styleName) => {
+                if (!allStyles.includes(styleName)) setAllStyles([...allStyles, styleName]);
+                applyStyle(styleName);
+              }}
+            />
+          </>
+        )}
+
+        {/* ── Character Tab ──────────────────────────────────────────────────── */}
+        {activeTab === "character" && (
+          <>
+            <div className="px-3 py-2 border-b border-border bg-sidebar/5 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-muted">Active:</span>
+                {activeCharStyle ? (
+                  <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 border border-indigo-300 rounded text-[10px] font-mono font-semibold truncate max-w-[140px]">
+                    {activeCharStyle}
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-muted italic">none</span>
+                )}
+              </div>
+              {checkedIds.size > 0 && (
+                <span className="px-1.5 py-0.5 bg-indigo-100 text-indigo-900 rounded text-[8px] font-semibold">
+                  Bulk apply active
+                </span>
+              )}
+            </div>
+
+            <div className="flex-1 overflow-y-auto styles-scrollbar p-3 space-y-3">
+              {charStyleGroups.map(({ group, styles: groupStyles }) => (
+                <div key={group}>
+                  <p className="text-[9px] font-bold uppercase tracking-wider text-muted mb-1.5 px-1">
+                    {group}
+                  </p>
+                  <div className="space-y-1">
+                    {groupStyles.map((cls) => (
+                      <button
+                        key={cls}
+                        onClick={() => applyCharStyle(cls)}
+                        className={`w-full text-left px-3 py-1.5 rounded-md text-[11px] font-mono border transition-all cursor-pointer
+                          flex items-center justify-between
+                          ${activeCharStyle === cls
+                            ? "bg-emerald-100 border-emerald-400 text-emerald-900 ring-2 ring-emerald-300"
+                            : "bg-background border-border text-text hover:bg-sidebar/5"}`}
+                      >
+                        <span>{cls}</span>
+                        {activeCharStyle === cls && (
+                          <span className="w-2 h-2 rounded-full bg-emerald-600 shrink-0" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {activeCharStyle && (
+              <div className="border-t border-border p-3">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="w-full text-[11px] border-rose-200 text-rose-700 hover:bg-rose-50"
+                  onClick={() => {
+                    editorRef.current?.editor?.chain().focus().unsetMark("charStyle").run();
+                  }}
+                >
+                  Remove Character Style
+                </Button>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ── Group Tab ──────────────────────────────────────────────────────── */}
+        {activeTab === "group" && (
+          <>
+            <div className="px-3 pt-3 pb-1 border-b border-border bg-slate-50 flex items-center justify-between">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-muted">
+                Document Elements ({flatNodes.length})
+              </p>
+              {checkedIds.size > 0 && (
+                <span className="px-2 py-0.5 bg-amber-100 text-amber-900 border border-amber-300 rounded text-[9px] font-semibold">
+                  {checkedIds.size} checked
+                </span>
+              )}
+            </div>
+
+            <div className="flex-1 overflow-y-auto styles-scrollbar p-3 space-y-1">
+              {scannedTree.length === 0 ? (
+                <p className="text-xs text-muted text-center py-4 italic">
+                  No elements detected in document
+                </p>
+              ) : (
+                scannedTree.map(el => renderTreeNode(el, 0))
+              )}
+            </div>
+
+            <div className="border-t border-border p-3 space-y-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                leftIcon={<Plus className="w-3 h-3" />}
+                className="w-full text-[11px]"
+                onClick={() => setShowWrapModal(true)}
+              >
+                Wrap Selection
+              </Button>
+
+              <Button
+                variant="primary"
+                size="sm"
+                leftIcon={
+                  isRunningPipeline ? (
+                    <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin inline-block" />
+                  ) : (
+                    <Play className="w-3 h-3" />
+                  )
+                }
+                className="w-full text-[11px]"
+                onClick={handleRunPipeline}
+                disabled={isRunningPipeline || !fileId}
+                title={!fileId ? "No file selected" : undefined}
+              >
+                {isRunningPipeline ? "Running Pipeline…" : "Run Pipeline"}
+              </Button>
+
+              {pipelineError && (
+                <p className="text-[10px] text-rose-600 px-1 break-words">{pipelineError}</p>
+              )}
+            </div>
+          </>
+        )}
+
+      </div>
+
+      {/* ── Wrap Selection Modal ──────────────────────────────────────────── */}
+      {showWrapModal && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowWrapModal(false); }}
+        >
+          <div className="bg-white rounded-lg shadow-xl p-5 w-72 flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-text">Wrap Selection in SDT</h2>
+              <button
+                onClick={() => setShowWrapModal(false)}
+                className="text-muted hover:text-text border-none bg-transparent cursor-pointer p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-[11px] font-semibold text-text block mb-1">Type</label>
+                <div className="flex gap-2">
+                  {(["block", "inline"] as const).map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => setWrapType(t)}
+                      className={`flex-1 py-1.5 rounded-md text-[11px] font-semibold border transition-all cursor-pointer
+                        ${wrapType === t
+                          ? "bg-primary text-white border-primary"
+                          : "bg-white text-text border-border hover:bg-sidebar/5"}`}
+                    >
+                      {t}
+                    </button>
+                  ))}
                 </div>
               </div>
-            </button>
-          ))
-        )}
-      </div>
 
-      {/* New Style Button */}
-      <div className="border-t border-border p-3">
-        <Button
-          variant="secondary"
-          size="sm"
-          leftIcon={<Plus className="w-3 h-3" />}
-          className="w-full text-[11px]"
-          onClick={() => setIsDialogOpen(true)}
-          title="Create a new paragraph style"
-        >
-          New Style
-        </Button>
-      </div>
+              <div>
+                <label className="text-[11px] font-semibold text-text block mb-1">Alias</label>
+                <input
+                  value={wrapAlias}
+                  onChange={(e) => setWrapAlias(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleWrap(); }}
+                  placeholder="e.g. TableGroup"
+                  className="w-full px-3 py-1.5 border border-border rounded text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                  autoFocus
+                />
+              </div>
 
-      {/* New Style Dialog */}
-      <NewStyleDialog
-        isOpen={isDialogOpen}
-        onClose={() => setIsDialogOpen(false)}
-        onAdd={(styleName) => {
-          // Add the new style to the list if it doesn't exist
-          if (!allStyles.includes(styleName)) {
-            setAllStyles([...allStyles, styleName]);
-          }
-          // Apply the new style to the current selection
-          applyStyle(styleName);
-        }}
-      />
+              <div>
+                <label className="text-[11px] font-semibold text-text block mb-1">Tag</label>
+                <input
+                  value={wrapTag}
+                  onChange={(e) => setWrapTag(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleWrap(); }}
+                  placeholder="e.g. TableGroup"
+                  className="w-full px-3 py-1.5 border border-border rounded text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                className="flex-1"
+                onClick={() => setShowWrapModal(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                className="flex-1"
+                disabled={!wrapAlias.trim()}
+                onClick={handleWrap}
+              >
+                Wrap
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style>{`
-        .styles-scrollbar::-webkit-scrollbar {
-          width: 5px;
-        }
-        .styles-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .styles-scrollbar::-webkit-scrollbar-thumb {
-          background: #cbd5e1;
-          border-radius: 4px;
-        }
-        .styles-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: #94a3b8;
-        }
+        .styles-scrollbar::-webkit-scrollbar { width: 5px; }
+        .styles-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .styles-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .styles-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
       `}</style>
     </div>
   );
 }
-

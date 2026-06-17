@@ -1,10 +1,15 @@
 import { Mark, mergeAttributes } from "@tiptap/core";
 
-/**
- * CharStyle — preserves bibliography and citation character style class names.
- *
- * This mark prevents class stripping on spans with class names starting with `bib_` or `cite_`.
- */
+// Caption character styles created by pipeline Step 8
+const CAPTION_CHAR_STYLES = new Set(["FigureCitation", "TableCitation", "FIG-NUM", "TN"]);
+
+function isPipelineCharStyle(cls: string): boolean {
+  if (cls.startsWith("bib_") || cls.startsWith("cite_")) return true;
+  if (/^[a-z]+$/.test(cls) && cls.length > 1) return true; // formatting styles: bold, italic, bolditalics, etc.
+  if (CAPTION_CHAR_STYLES.has(cls)) return true;
+  return false;
+}
+
 export const CharStyle = Mark.create({
   name: "charStyle",
 
@@ -18,7 +23,7 @@ export const CharStyle = Mark.create({
         default: null,
         parseHTML: (element) => {
           const className = element.getAttribute("class") || "";
-          const match = className.split(" ").find(c => c.startsWith("bib_") || c.startsWith("cite_"));
+          const match = className.split(" ").find(isPipelineCharStyle);
           return match || null;
         },
         renderHTML: (attributes) => {
@@ -36,8 +41,9 @@ export const CharStyle = Mark.create({
         getAttrs: (element) => {
           if (typeof element === "string") return false;
           const className = element.getAttribute("class") || "";
-          const hasMatch = className.split(" ").some(c => c.startsWith("bib_") || c.startsWith("cite_"));
-          return hasMatch ? null : false;
+          const classes = className.trim().split(/\s+/);
+          if (classes.length !== 1) return false; // only single-class spans
+          return isPipelineCharStyle(classes[0]) ? null : false;
         },
       },
     ];

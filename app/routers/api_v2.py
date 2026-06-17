@@ -3166,6 +3166,7 @@ def api_v2_structuring_review(
             **return_action,
         ),
         styles=page_state["styles"],
+        char_styles=page_state.get("char_styles", []),
     )
 
 

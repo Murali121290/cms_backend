@@ -640,6 +640,7 @@ class StructuringReviewResponse(BaseModel):
     editor: StructuringReviewEditor
     actions: StructuringReviewActions
     styles: list[str]
+    char_styles: list[str] = []
 
 
 class StructuringSaveRequest(BaseModel):

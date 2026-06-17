@@ -363,7 +363,7 @@ class XhtmlToDocxEngine:
             return styles
 
         # Helper to add a run with formatting
-        def add_rich_run(parent_element, text, bold=False, italic=False, underline=False, color=None, bg_color=None, font_size=None, font_name=None, superscript=False, subscript=False, is_link=False, is_del=False):
+        def add_rich_run(parent_element, text, bold=False, italic=False, underline=False, color=None, bg_color=None, font_size=None, font_name=None, superscript=False, subscript=False, is_link=False, is_del=False, char_style=None):
             if not text:
                 return
             r = OxmlElement('w:r')
@@ -371,6 +371,12 @@ class XhtmlToDocxEngine:
             # Add run properties if formatted or inside link
             rPr = OxmlElement('w:rPr')
             has_rPr = False
+
+            if char_style and char_style != "Default Paragraph Font":
+                rs = OxmlElement('w:rStyle')
+                rs.set(qn('w:val'), char_style)
+                rPr.append(rs)
+                has_rPr = True
 
             if bold:
                 b = OxmlElement('w:b')
@@ -445,7 +451,9 @@ class XhtmlToDocxEngine:
             parent_element.append(r)
 
         # 2. Traverse HTML element children and text recursively
-        def traverse(el, parent_xml, bold=False, italic=False, underline=False, color=None, bg_color=None, font_size=None, font_name=None, superscript=False, subscript=False, is_link=False):
+        _CAPTION_CHAR_STYLES_FB = {"FigureCitation", "TableCitation", "FIG-NUM", "TN"}
+
+        def traverse(el, parent_xml, bold=False, italic=False, underline=False, color=None, bg_color=None, font_size=None, font_name=None, superscript=False, subscript=False, is_link=False, char_style=None):
             tag = el.tag.split('}')[-1].lower() if isinstance(el.tag, str) else ""
 
             style_str = el.get("style", "")
@@ -485,6 +493,20 @@ class XhtmlToDocxEngine:
                         node_font_size = round(val * 0.75, 1)
                     else:
                         node_font_size = val
+
+            # Parse character style from class — only on span elements
+            node_char_style = char_style
+            if tag == "span":
+                classes = (el.get("class") or "").split()
+                style_match = next(
+                    (c for c in classes
+                     if c.startswith("bib_") or c.startswith("cite_")
+                     or (c.isalpha() and c.islower())
+                     or c in _CAPTION_CHAR_STYLES_FB),
+                    None,
+                )
+                if style_match:
+                    node_char_style = style_match
 
             current_bold = bold or tag in ('strong', 'b') or has_bold_style
             current_italic = italic or tag in ('em', 'i') or has_italic_style
@@ -543,7 +565,7 @@ class XhtmlToDocxEngine:
                     bold=current_bold, italic=current_italic, underline=current_underline,
                     color=node_color, bg_color=node_bg, font_size=node_font_size, font_name=node_font_name,
                     superscript=current_super, subscript=current_sub, is_link=current_link,
-                    is_del=is_del
+                    is_del=is_del, char_style=node_char_style
                 )
 
             # Recurse children
@@ -552,7 +574,8 @@ class XhtmlToDocxEngine:
                     child, current_xml_parent,
                     bold=current_bold, italic=current_italic, underline=current_underline,
                     color=node_color, bg_color=node_bg, font_size=node_font_size, font_name=node_font_name,
-                    superscript=current_super, subscript=current_sub, is_link=current_link
+                    superscript=current_super, subscript=current_sub, is_link=current_link,
+                    char_style=node_char_style
                 )
 
             # Append tail text
@@ -562,7 +585,7 @@ class XhtmlToDocxEngine:
                     bold=bold, italic=italic, underline=underline,
                     color=color, bg_color=bg_color, font_size=font_size, font_name=font_name,
                     superscript=superscript, subscript=subscript, is_link=is_link,
-                    is_del=False
+                    is_del=False, char_style=char_style
                 )
 
         # Parse root element's initial styles (if any)

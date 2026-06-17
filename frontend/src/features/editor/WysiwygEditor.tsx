@@ -62,6 +62,8 @@ import { FontSize } from "./FontSize";
 import { Comment } from "./Comment";
 import { SearchReplace } from "./SearchReplace";
 import { MathNode } from "./MathNode";
+import { SdtBlock } from "./SdtBlock";
+import { SdtInline } from "./SdtInline";
 import katex from "katex";
 
 
@@ -347,6 +349,8 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         Comment,
         SearchReplace,
         MathNode,
+        SdtBlock,
+        SdtInline,
       ],
       content: "",
       editorProps: {
@@ -1447,6 +1451,222 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
 
         {/* â”€â”€ Editor CSS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         <style>{`
+        /* ── SDT Block (Word Content Control) ─────────────────────────────── */
+        .sdt-block {
+          position: relative;
+          border: 1.5px solid #4f83cc;
+          border-radius: 3px;
+          padding: 6px 8px 6px 32px;
+          margin: 6px 0;
+          background: rgba(79, 131, 204, 0.04);
+        }
+        .sdt-block::before {
+          content: attr(data-alias);
+          position: absolute; top: 0; left: 0;
+          background: #4f83cc; color: #fff;
+          font-size: 8px; font-weight: 700; font-family: monospace;
+          padding: 1px 4px; border-radius: 2px 0 2px 0;
+          text-transform: uppercase; letter-spacing: 0.5px; line-height: 1.6;
+          max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .sdt-block .sdt-block {
+          border-color: #7c3aed;
+          background: rgba(124, 58, 237, 0.04);
+        }
+        .sdt-block .sdt-block::before { background: #7c3aed; }
+
+        /* ── Dynamic Group Styles (Content Control Color Coding) ──────────── */
+        /* Table / tbl_ Theme (Teal) */
+        .sdt-block[data-alias*="Table"], .sdt-block[data-alias*="tbl_"] {
+          border-color: #0d9488;
+          background: rgba(13, 148, 136, 0.03);
+        }
+        .sdt-block[data-alias*="Table"]::before, .sdt-block[data-alias*="tbl_"]::before {
+          background: #0d9488;
+        }
+        .sdt-inline[data-alias*="Table"], .sdt-inline[data-alias*="tbl_"] {
+          background: rgba(13, 148, 136, 0.08) !important;
+          border-top: 1px solid rgba(13, 148, 136, 0.4) !important;
+          border-bottom: 1px solid rgba(13, 148, 136, 0.4) !important;
+        }
+        .sdt-inline[data-alias*="Table"]::before, .sdt-inline[data-alias*="tbl_"]::before {
+          background: #0d9488 !important;
+        }
+
+        /* Figure / fig_ Theme (Orange) */
+        .sdt-block[data-alias*="Figure"], .sdt-block[data-alias*="fig_"] {
+          border-color: #ea580c;
+          background: rgba(234, 88, 12, 0.03);
+        }
+        .sdt-block[data-alias*="Figure"]::before, .sdt-block[data-alias*="fig_"]::before {
+          background: #ea580c;
+        }
+        .sdt-inline[data-alias*="Figure"], .sdt-inline[data-alias*="fig_"] {
+          background: rgba(234, 88, 12, 0.08) !important;
+          border-top: 1px solid rgba(234, 88, 12, 0.4) !important;
+          border-bottom: 1px solid rgba(234, 88, 12, 0.4) !important;
+        }
+        .sdt-inline[data-alias*="Figure"]::before, .sdt-inline[data-alias*="fig_"]::before {
+          background: #ea580c !important;
+        }
+
+        /* Chapters / Sections / Sequences (Pink/Rose) */
+        .sdt-block[data-alias*="Chap"], .sdt-block[data-alias*="Seq"] {
+          border-color: #be185d;
+          background: rgba(190, 24, 93, 0.03);
+        }
+        .sdt-block[data-alias*="Chap"]::before, .sdt-block[data-alias*="Seq"]::before {
+          background: #be185d;
+        }
+        .sdt-inline[data-alias*="Chap"], .sdt-inline[data-alias*="Seq"] {
+          background: rgba(190, 24, 93, 0.08) !important;
+          border-top: 1px solid rgba(190, 24, 93, 0.4) !important;
+          border-bottom: 1px solid rgba(190, 24, 93, 0.4) !important;
+        }
+        .sdt-inline[data-alias*="Chap"]::before, .sdt-inline[data-alias*="Seq"]::before {
+          background: #be185d !important;
+        }
+
+        /* Bibliography / References / bib_ / cite_ (Indigo/Purple) */
+        .sdt-block[data-alias*="Bib"], .sdt-block[data-alias*="Ref"] {
+          border-color: #6366f1;
+          background: rgba(99, 102, 241, 0.03);
+        }
+        .sdt-block[data-alias*="Bib"]::before, .sdt-block[data-alias*="Ref"]::before {
+          background: #6366f1;
+        }
+        .sdt-inline[data-alias*="Bib"], .sdt-inline[data-alias*="Ref"] {
+          background: rgba(99, 102, 241, 0.08) !important;
+          border-top: 1px solid rgba(99, 102, 241, 0.4) !important;
+          border-bottom: 1px solid rgba(99, 102, 241, 0.4) !important;
+        }
+        .sdt-inline[data-alias*="Bib"]::before, .sdt-inline[data-alias*="Ref"]::before {
+          background: #6366f1 !important;
+        }
+
+        /* ── SDT Inline ───────────────────────────────────────────────────── */
+        .sdt-inline {
+          background: rgba(79, 131, 204, 0.12);
+          border-top: 1px solid rgba(79, 131, 204, 0.35);
+          border-bottom: 1px solid rgba(79, 131, 204, 0.35);
+          padding: 1px 0;
+        }
+        /* Alias pill — only on the FIRST span in a consecutive group */
+        .sdt-inline[data-alias]::before {
+          content: attr(data-alias);
+          font-size: 7px; font-weight: 700; font-family: monospace;
+          color: #fff; background: #4f83cc;
+          padding: 0 3px; border-radius: 2px; margin-right: 3px;
+          vertical-align: 1px; text-transform: uppercase; letter-spacing: 0.3px;
+        }
+        /* Suppress repeat pill — Case 1: sdt-inline spans are direct siblings */
+        .sdt-inline + .sdt-inline::before { display: none; }
+        /* Suppress repeat pill — Case 2: each sdt-inline is nested inside a run span */
+        [data-run] + [data-run] > .sdt-inline::before { display: none; }
+
+        /* ── Character Styles Color & Typographic Treatments ──────────────── */
+
+        /* Formatting character styles from pipeline Step 7 */
+        .ProseMirror span.bold { font-weight: bold; }
+        .ProseMirror span.italic { font-style: italic; }
+        .ProseMirror span.bolditalics { font-weight: bold; font-style: italic; }
+        .ProseMirror span.singleunderline { text-decoration: underline; }
+        .ProseMirror span.doubleunderline { text-decoration: underline double; }
+        .ProseMirror span.superscript { vertical-align: super; font-size: 0.75em; }
+        .ProseMirror span.subscript { vertical-align: sub; font-size: 0.75em; }
+        .ProseMirror span.allcaps { text-transform: uppercase; }
+        .ProseMirror span.smallcaps { font-variant-caps: small-caps; }
+        .ProseMirror span.boldsingleunderline { font-weight: bold; text-decoration: underline; }
+        .ProseMirror span.bolddoubleunderline { font-weight: bold; text-decoration: underline double; }
+        .ProseMirror span.boldsuperscript { font-weight: bold; vertical-align: super; font-size: 0.75em; }
+        .ProseMirror span.boldsubscript { font-weight: bold; vertical-align: sub; font-size: 0.75em; }
+        .ProseMirror span.boldallcaps { font-weight: bold; text-transform: uppercase; }
+        .ProseMirror span.boldsmallcaps { font-weight: bold; font-variant-caps: small-caps; }
+        .ProseMirror span.italicsingleunderline { font-style: italic; text-decoration: underline; }
+        .ProseMirror span.italicdoubleunderline { font-style: italic; text-decoration: underline double; }
+        .ProseMirror span.italicsuperscript { font-style: italic; vertical-align: super; font-size: 0.75em; }
+        .ProseMirror span.italicsubscript { font-style: italic; vertical-align: sub; font-size: 0.75em; }
+        .ProseMirror span.italicallcaps { font-style: italic; text-transform: uppercase; }
+        .ProseMirror span.italicsmallcaps { font-style: italic; font-variant-caps: small-caps; }
+        .ProseMirror span.bolditalicsuperscript { font-weight: bold; font-style: italic; vertical-align: super; font-size: 0.75em; }
+        .ProseMirror span.bolditalicsubscript { font-weight: bold; font-style: italic; vertical-align: sub; font-size: 0.75em; }
+        .ProseMirror span.bolditalicallcaps { font-weight: bold; font-style: italic; text-transform: uppercase; }
+        .ProseMirror span.bolditalicsmallcaps { font-weight: bold; font-style: italic; font-variant-caps: small-caps; }
+        /* Caption character styles from pipeline Step 8 */
+        .ProseMirror span.FigureCitation { background-color: rgba(255, 255, 0, 0.35); }
+        .ProseMirror span.TableCitation { background-color: rgba(146, 208, 80, 0.35); }
+        .ProseMirror span[class="FIG-NUM"] { background-color: rgba(255, 255, 0, 0.35); }
+        .ProseMirror span.TN { background-color: rgba(146, 208, 80, 0.35); }
+
+        /* Default Bibliography Spans */
+        span[class^="bib_"], span[class*=" bib_"] {
+          background-color: rgba(16, 185, 129, 0.06);
+          color: #059669;
+          border-bottom: 1px dotted rgba(16, 185, 129, 0.4);
+          padding: 1px 0;
+        }
+        /* Default Citation Spans */
+        span[class^="cite_"], span[class*=" cite_"] {
+          background-color: rgba(249, 115, 22, 0.06);
+          color: #ea580c;
+          border-bottom: 1px dotted rgba(249, 115, 22, 0.4);
+          padding: 1px 0;
+        }
+        
+        /* Specific Bibliography styles */
+        .bib_fname, .bib_surname {
+          font-weight: 700;
+          color: #0d9488 !important;
+          background-color: rgba(13, 148, 136, 0.08) !important;
+          border-bottom: 1px dotted rgba(13, 148, 136, 0.4) !important;
+        }
+        .bib_year {
+          font-weight: 700;
+          color: #64748b !important;
+          background-color: rgba(100, 116, 139, 0.08) !important;
+          border-bottom: 1px dotted rgba(100, 116, 139, 0.4) !important;
+        }
+        .bib_title, .bib_journal {
+          font-style: italic;
+          color: #4f46e5 !important;
+          background-color: rgba(79, 70, 229, 0.08) !important;
+          border-bottom: 1px dotted rgba(79, 70, 229, 0.4) !important;
+        }
+        .bib_volume {
+          font-weight: 700;
+          color: #1e293b !important;
+          background-color: rgba(241, 245, 249, 0.8) !important;
+          border-bottom: none !important;
+        }
+        .bib_doi, .bib_url {
+          text-decoration: underline;
+          color: #e11d48 !important;
+          background-color: rgba(225, 29, 72, 0.08) !important;
+          border-bottom: none !important;
+        }
+
+        /* Specific Citation styles */
+        .cite_bib {
+          font-style: italic;
+          font-weight: 600;
+          color: #7c3aed !important;
+          background-color: rgba(139, 92, 246, 0.08) !important;
+          border-bottom: 1px dotted rgba(139, 92, 246, 0.4) !important;
+        }
+        .cite_fig, .cite_tbl {
+          font-weight: 700;
+          color: #d97706 !important;
+          background-color: rgba(245, 158, 11, 0.08) !important;
+          border-bottom: 1px dotted rgba(245, 158, 11, 0.4) !important;
+        }
+        .cite_eq, .cite_app {
+          font-style: italic;
+          font-weight: 600;
+          color: #0891b2 !important;
+          background-color: rgba(6, 182, 212, 0.08) !important;
+          border-bottom: 1px dotted rgba(6, 182, 212, 0.4) !important;
+        }
+
         .ProseMirror {
           outline: none;
           position: relative;

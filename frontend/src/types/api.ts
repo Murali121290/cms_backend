@@ -359,6 +359,7 @@ export interface StructuringReviewResponse {
   editor: StructuringReviewEditor;
   actions: StructuringReviewActions;
   styles: string[];
+  char_styles?: string[];
 }
 
 export interface StructuringSaveResponse {

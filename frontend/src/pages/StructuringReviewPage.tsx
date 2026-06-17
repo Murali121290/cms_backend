@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import {
   ArrowLeft,
   BookOpen,
@@ -11,7 +11,7 @@ import {
   Maximize2,
   Minimize2,
 } from "lucide-react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { getApiErrorMessage } from "@/api/client";
 import { Badge } from "@/components/ui/Badge";
@@ -56,6 +56,9 @@ export function StructuringReviewPage() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [trackChangesEnabled, setTrackChangesEnabled] = useState(false);
   const [sidePanelTab, setSidePanelTab] = useState<"styles" | "changes">("styles");
+  const location = useLocation();
+  const xsltContent = (location.state as { xsltContent?: string } | null)?.xsltContent;
+
   const viewer = useSessionStore((s) => s.viewer);
   const currentUser = viewer?.username;
   const [customStyles, setCustomStyles] = useState<string[]>([]);
@@ -478,13 +481,13 @@ export function StructuringReviewPage() {
         {/* ── TAB 2: EDITOR WORKSPACE ────────────────────────────── */}
         {(activeTab === "editor" || isFullscreen) && activeTab !== "onlyoffice" && (
           <div className="flex-1 flex flex-col min-h-0 page-enter">
-            {xhtmlQuery.isPending ? (
+            {xhtmlQuery.isPending && !xsltContent ? (
               <div style={{ padding: "24px", textAlign: "center" }}>Loading document…</div>
             ) : (
               <WysiwygEditor
                 ref={editorRef}
               key={`editor-${normalizedFileId}`}
-              initialContent={xhtmlQuery.data?.content ?? ""}
+              initialContent={xsltContent ?? xhtmlQuery.data?.content ?? ""}
               onSave={async (html) => {
                 const res = await editorSave.save(html);
                 if (res && res.file_id && res.file_id !== normalizedFileId) {
@@ -531,8 +534,9 @@ export function StructuringReviewPage() {
                   {sidePanelTab === "styles" ? (
                     <div className="flex-1 min-h-0 flex flex-col gap-4">
                       <div className="flex-1 min-h-0">
-                        <StylesPanel styles={allStyles} editorRef={editorRef} onAddStyle={handleAddStyle} />
+                        <StylesPanel styles={allStyles} editorRef={editorRef} onAddStyle={handleAddStyle} fileId={normalizedFileId} charStyles={review.char_styles} />
                       </div>
+
                       <div className="flex-shrink-0">
                         <VersionHistoryPanel
                           fileId={normalizedFileId}
