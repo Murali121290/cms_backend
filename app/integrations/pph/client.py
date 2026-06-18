@@ -65,6 +65,7 @@ class PPHClient:
                 logger.warning("Session cookie not found in response cookies. Proceeding anyway.")
             
             logger.info("Successfully authenticated with PPH external server.")
+            logger.info(f"Session cookies after login: {dict(self.session.cookies)}")
             self._authenticated = True
             return True
         except Exception as e:
@@ -98,6 +99,7 @@ class PPHClient:
             # 1. Post job submission
             submit_url = f"{self.base_url}/{endpoint_clean}"
             logger.info(f"Submitting job to PPH endpoint: {submit_url}")
+            logger.debug(f"Session cookies before POST: {dict(self.session.cookies)}")
 
             # GET the upload page first to retrieve a fresh CSRF token (Flask-WTF requires it in the form data)
             get_resp = self.session.get(submit_url, timeout=15)
@@ -116,6 +118,8 @@ class PPHClient:
             form_data = dict(data or {})
             if csrf_token:
                 form_data["csrf_token"] = csrf_token
+            
+            logger.debug(f"Form data being sent: {form_data}")
 
             response = self.session.post(
                 submit_url,
@@ -124,8 +128,18 @@ class PPHClient:
                 timeout=120
             )
             logger.info(f"PPH /validate response status: {response.status_code}")
-            logger.info(f"PPH /validate response body: {response.text[:300]!r}")
+            logger.info(f"PPH /validate Content-Type: {response.headers.get('content-type', 'unknown')}")
+            logger.info(f"PPH /validate response body: {response.text[:500]!r}")
             response.raise_for_status()
+
+            # Check if response is actually JSON
+            content_type = response.headers.get('content-type', '').lower()
+            if 'json' not in content_type and response.text.strip().startswith('<'):
+                # Response is HTML, likely an error or redirect page
+                error_msg = f"PPH endpoint returned HTML instead of JSON (possible login redirect or error page)"
+                logger.error(error_msg)
+                logger.error(f"Full response: {response.text}")
+                raise PPHClientError(error_msg)
 
             res_json = response.json()
             job_id = res_json.get("job_id")
