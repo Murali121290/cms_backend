@@ -40,8 +40,14 @@ ok "Docker $(docker --version | head -1)"
     || err "Docker Compose not found. Install plugin: sudo apt install docker-compose-plugin"
 ok "Compose: $DC"
 
-docker ps &>/dev/null \
-    || err "Docker daemon is not running — try: sudo systemctl start docker"
+if ! docker ps &>/dev/null; then
+    # Distinguish permission denied from daemon not running
+    if docker ps 2>&1 | grep -q "permission denied\|connect: no such file"; then
+        err "Permission denied on Docker socket. Add your user to the docker group:\n    sudo usermod -aG docker \$USER && newgrp docker"
+    else
+        err "Docker daemon is not running — try: sudo systemctl start docker"
+    fi
+fi
 ok "Docker daemon is running"
 
 # ─── 2. Environment setup ─────────────────────────────────────────────────────
