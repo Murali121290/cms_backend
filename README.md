@@ -1,100 +1,151 @@
-# CMS Backend Project Documentation
+# CMS Backend
 
-## 1. Overview
-This project is a Content Management System (CMS) designed for the publishing industry. It facilitates the workflow of receiving manuscripts, processing them (structuring, styling, XML tagging), and managing the publication lifecycle through various stages (Art, InDesign, Proof, XML).
-
-### Key Features
-- **Project Structure:** Hierarchical organization of Projects > Chapters > Files.
-- **Role-Based Access Control (RBAC):** Granular permissions for Project Managers, Editors, Typesetters, etc.
-- **Workflow Automation:** Automated status transitions and task tracking.
-- **Structuring Engine:** Automated analysis and styling of DOCX manuscripts using Python logic.
-- **In-Browser Editing:** Integration with LibreOffice Online (Collabora) for editing Word documents directly within the browser without downloading.
-- **Versioning:** checkout/check-in mechanism to prevent conflicts.
+A Content Management System for the publishing industry. Manages the full manuscript lifecycle — from raw DOCX upload through structuring, styling, XML tagging, review, and publication.
 
 ---
 
-## 2. Architecture
+## Architecture Overview
+
+```
+┌─────────────┐     ┌──────────────┐     ┌──────────────────────┐
+│  React SPA  │────▶│  Nginx Proxy │────▶│  FastAPI Backend     │
+│  (Vite/TS)  │     │   :80/:443   │     │  :8000               │
+└─────────────┘     └──────────────┘     └──────┬───────────────┘
+                                                 │
+                    ┌──────────────┐     ┌───────▼───────────────┐
+                    │  PostgreSQL  │◀────│  SQLAlchemy + Alembic │
+                    └──────────────┘     └──────┬───────────────┘
+                                                 │
+                    ┌──────────────┐     ┌───────▼───────────────┐
+                    │    Redis     │◀────│  Celery Workers       │
+                    └──────────────┘     └───────────────────────┘
+                                                 │
+              ┌──────────────────────────────────┼───────────────┐
+              │                                  │               │
+   ┌──────────▼──────┐   ┌──────────────┐  ┌────▼──────────────┐
+   │ Collabora Online│   │  OnlyOffice  │  │ AI Structuring    │
+   │   :9980         │   │  :8080       │  │ Backend (opt.)    │
+   └─────────────────┘   └──────────────┘  └───────────────────┘
+```
 
 ### Backend
-- **Framework:** FastAPI (Python 3.10+)
-- **Database:** SQLAlchemy ORM with SQLite (development) or PostgreSQL (production).
-- **Asynchronous:** Fully async route handlers for high performance.
-- **Authentication:** Cookie-based session authentication with hashed passwords.
+- **Framework:** FastAPI (Python 3.10+), fully async
+- **Database:** PostgreSQL (production) / SQLite (development)
+- **ORM & Migrations:** SQLAlchemy + Alembic
+- **Task Queue:** Celery with Redis broker
+- **Auth:** Cookie-based session authentication with hashed passwords
 
 ### Frontend
-- **Templating:** Jinja2 (server-side rendering).
-- **Styling:** Tailwind CSS (via CDN or build process).
-- **Interactivity:** Vanilla JavaScript for dynamic behaviors (modals, dropdowns, AJAX).
+- **Framework:** React 18 + TypeScript + Vite
+- **Styling:** Tailwind CSS
+- **Build output:** `frontend/dist/` served by Nginx
 
-### Integrations
-- **Collabora Online:** Docker container running LibreOffice Online for WOPI-based document editing.
-- **Gemini API:** (Optional) Integration for AI-assisted tasks like alt-text generation.
-
----
-
-## 3. Key Modules
-
-### 3.1 User & Team Management
-- **Users:** Managed via `app/routers/users.py`.
-- **Teams:** Organize users into functional groups.
-- **Roles:** Defined in `app/models.py` (e.g., `Admin`, `ProjectManager`, `Editor`).
-
-### 3.2 File Management (`app/routers/files.py`)
-- **Upload:** Supports multi-file upload with category assignment (Manuscript, Art, etc.).
-- **Checkout/Checkin:** Locks files to prevents concurrent edits.
-- **Versioning:** Keeps history of file changes.
-
-### 3.3 Structuring Engine (`app/processing/structuring_lib`)
-- **Purpose:** Analyze raw manuscripts and apply strict styling rules.
-- **Core Logic:**
-    - `doc_utils.py`: Low-level DOCX manipulation.
-    - `styler.py`: Applies styles based on regex rules.
-    - `rules_loader.py`: Loads styling rules from `rules.yaml`.
-- **Review Interface:** `structuring_review.html` allows users to review and modify styles before finalizing.
-
-### 3.4 Collabora Integration (WOPI)
-- **Protocol:** Uses the Web Application Open Platform Interface (WOPI) protocol.
-- **Endpoints:** `app/routers/wopi.py` implements:
-    - `CheckFileInfo`: Returns metadata and permissions.
-    - `GetFile`: Serves the file content.
-    - `PutFile`: Receives updated content from Collabora.
-- **UI:** Embedded via `<iframe>` in `editor.html` and `structuring_review.html`.
+### Document Editing
+- **Collabora Online:** LibreOffice-in-browser via WOPI protocol
+- **OnlyOffice:** Alternative document server integration
 
 ---
 
-## 4. Setup Instructions
+## Key Features
 
-### 4.1 Prerequisites
+- **Hierarchical structure:** Projects → Chapters → Files
+- **Role-Based Access Control:** Admin, Project Manager, Editor, Copyeditor, Typesetter, Viewer
+- **File versioning:** Checkout/checkin to prevent concurrent edits
+- **Processing pipeline:** 11-step DOCX pipeline (cleanup, style validation, conversion, etc.)
+- **Math support:** LaTeX ↔ MathML ↔ OMML conversions
+- **XML generation:** NLM XML tagging for academic publishing
+- **In-browser editing:** Collabora and OnlyOffice integrations
+- **AI structuring:** Optional external AI service for manuscript analysis
+- **PPH integration:** Pre-press server connectivity
+
+---
+
+## Project Structure
+
+```
+cms_backend/
+├── app/
+│   ├── core/              # Config, database, dependencies
+│   ├── domains/           # Business logic by domain
+│   │   ├── auth/
+│   │   ├── projects/
+│   │   ├── files/
+│   │   ├── chapters/
+│   │   ├── processing/
+│   │   ├── workflow/
+│   │   ├── clients/
+│   │   ├── admin/
+│   │   ├── activities/
+│   │   ├── review/
+│   │   └── notifications/
+│   ├── integrations/      # Collabora, OnlyOffice, PPH, AI service, storage
+│   ├── models/            # SQLAlchemy models
+│   ├── processing/        # Document processing engines
+│   │   ├── docx_pipeline/ # 11-step processing pipeline
+│   │   ├── structuring_engine.py
+│   │   ├── technical_engine.py
+│   │   ├── references_engine.py
+│   │   ├── docx_to_xhtml.py
+│   │   └── xhtml_to_docx.py
+│   ├── routers/
+│   │   ├── api_v2.py      # Primary REST API
+│   │   ├── web.py         # Legacy SSR routes
+│   │   └── processing.py
+│   └── main.py
+├── frontend/              # React 18 SPA
+│   ├── src/
+│   ├── package.json
+│   └── vite.config.ts
+├── ai_structuring_backend/ # Optional AI microservice
+├── alembic/               # Database migrations
+├── tests/                 # pytest test suite
+├── nginx/                 # Reverse proxy config
+├── docker-compose.yml
+├── Dockerfile
+├── requirements.txt
+└── .env.example
+```
+
+---
+
+## Setup
+
+### Prerequisites
+
 - Python 3.10+
-- Docker (for Collabora)
-- Git
+- Node.js 18+
+- Docker & Docker Compose
+- PostgreSQL (or use the Docker Compose stack)
 
-### 4.2 Backend Setup
-1. **Clone Repository:**
-   ```bash
-   git clone <repo_url>
-   cd cms_backend
-   ```
-2. **Virtual Environment:**
-   ```bash
-   python -m venv .venv
-   .\.venv\Scripts\Activate  # Windows
-   source .venv/bin/activate # Linux/Mac
-   ```
-3. **Install Dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-4. **Run Server:**
-   ```bash
-   python -m uvicorn app.main:app --reload --port 8000
-   ```
-   Access at `http://127.0.0.1:8000`.
+### Local Development
 
-### 4.3 Collabora (LibreOffice Online) Setup
-Collabora is required for in-browser editing.
+**1. Clone and configure environment:**
+```bash
+git clone <repo_url>
+cd cms_backend
+cp .env.example .env
+# Edit .env with your values
+```
 
-**Run in Docker:**
+**2. Backend:**
+```bash
+python -m venv .venv
+.\.venv\Scripts\Activate    # Windows
+source .venv/bin/activate   # Linux/Mac
+
+pip install -r requirements.txt
+alembic upgrade head
+python -m uvicorn app.main:app --reload --port 8000
+```
+
+**3. Frontend:**
+```bash
+cd frontend
+npm install
+npm run dev     # http://localhost:5173
+```
+
+**4. Collabora (required for in-browser editing):**
 ```bash
 docker run -t -d -p 9980:9980 \
   -e "aliasgroup1=http://host.docker.internal:8000,http://127.0.0.1:8000,http://localhost:8000" \
@@ -103,38 +154,144 @@ docker run -t -d -p 9980:9980 \
   collabora/code
 ```
 
-**Note on SSL:** The command above disables SSL for easier local development. For production, configuring SSL/HTTPS is recommended.
+### Production (Docker Compose)
 
-**Environment Variables (Optional overrides):**
-- `COLLABORA_URL`: URL of the Collabora container (default: `http://127.0.0.1:9980`)
-- `WOPI_BASE_URL`: URL backend uses to reach itself (default: `http://host.docker.internal:8000`)
+```bash
+cp .env.example .env
+# Edit .env — set DATABASE_URL, SECRET_KEY, REDIS_URL, domain settings
 
----
+cd frontend && npm ci && npm run build && cd ..
 
-## 5. Development Workflow
+mkdir -p data/uploads outputs temp_reports
 
-### Adding a New Route
-1. Create route handler in `app/routers/`.
-2. Register router in `app/main.py`.
+docker compose up -d
+docker compose exec backend alembic upgrade head
+```
 
-### Database Migrations
-Currently using `Base.metadata.create_all(bind=engine)` in `main.py` for auto-schema creation. For production, consider using Alembic.
-
-### Customizing Styles
-Edit `app/processing/structuring_lib/rules.yaml` to define new regex patterns and their corresponding Word styles.
+This starts: PostgreSQL, Redis, FastAPI backend, Celery worker, Collabora, OnlyOffice, Nginx.
 
 ---
 
-## 6. Troubleshooting
+## Environment Variables
 
-**Collabora "Refused to connect":**
-- Ensure Docker container is running (`docker ps`).
-- Check if `COLLABORA_URL` matches the container's port.
-- If using `http`, ensure `ssl.enable=false` is set in the docker command.
+| Variable | Description | Default |
+|---|---|---|
+| `DATABASE_URL` | PostgreSQL connection string | — |
+| `REDIS_URL` | Redis broker URL | `redis://localhost:6379` |
+| `SECRET_KEY` | Session signing key | — |
+| `HOST_DOMAIN` | Public domain name | `localhost` |
+| `HOST_PORT` | Public port | `8000` |
+| `COLLABORA_URL` | Collabora container URL | `http://127.0.0.1:9980` |
+| `WOPI_BASE_URL` | URL Collabora uses to reach the backend | `http://host.docker.internal:8000` |
+| `ONLYOFFICE_PUBLIC_URL` | OnlyOffice public endpoint | — |
+| `ONLYOFFICE_INTERNAL_URL` | OnlyOffice internal endpoint | — |
+| `ONLYOFFICE_JWT_SECRET` | OnlyOffice JWT secret | — |
+| `PPH_BASE_URL` | Pre-press server base URL | — |
+| `PPH_USERNAME` / `PPH_PASSWORD` | Pre-press server credentials | — |
+| `AI_STRUCTURING_BASE_URL` | AI service URL (optional) | — |
+| `AI_STRUCTURING_API_KEY` | AI service key (optional) | — |
 
-**File Upload Errors:**
-- Check permissions on the `uploads/` directory.
-- Ensure allowed file extensions are configured.
+See `.env.example` for the full list.
 
-**Database Locked (SQLite):**
-- Occurs with high concurrency. Switch to PostgreSQL for production environments.
+---
+
+## API
+
+FastAPI auto-generates interactive docs when the server is running:
+- **Swagger UI:** `http://localhost:8000/docs`
+- **ReDoc:** `http://localhost:8000/redoc`
+
+### API Versions
+
+| Prefix | Description |
+|---|---|
+| `/api/v2` | Primary REST API (auth, projects, files, processing, admin) |
+| `/api/v1` | Legacy API (users, projects, files, workflow) |
+
+### Key Endpoints (v2)
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/v2/session/login` | Authenticate |
+| `GET` | `/api/v2/dashboard` | User dashboard |
+| `GET` | `/api/v2/projects` | List projects |
+| `POST` | `/api/v2/files/upload` | Upload files |
+| `POST` | `/api/v2/processing/start` | Start processing pipeline |
+| `GET` | `/api/v2/admin/users` | Admin: manage users |
+
+---
+
+## Testing
+
+Tests use **pytest** with an in-memory SQLite database.
+
+```bash
+pytest tests/                                      # all tests
+pytest tests/test_api_v2_contracts.py -v           # single file
+pytest tests/ -k "workflow" -v                     # filter by name
+```
+
+Key test files:
+- `test_api_v2_contracts.py` — API contract tests
+- `test_project_and_file_workflows.py` — end-to-end workflows
+- `test_structuring_and_wopi.py` — document processing + WOPI
+- `test_auth_regression.py` — authentication edge cases
+
+---
+
+## Database Migrations
+
+Migrations are managed with Alembic.
+
+```bash
+# Apply all pending migrations
+alembic upgrade head
+
+# Create a new migration after changing models
+alembic revision --autogenerate -m "description"
+
+# Downgrade one step
+alembic downgrade -1
+```
+
+> In development, `Base.metadata.create_all()` in `main.py` will also auto-create tables, but Alembic is preferred for tracking schema changes.
+
+---
+
+## Processing Pipeline
+
+The DOCX pipeline runs through 11 steps managed by Celery workers:
+
+1. Pre-processing cleanup
+2. Style validation
+3. Structuring analysis
+4. Technical content extraction (math, formulas)
+5. Reference parsing
+6. DOCX → XHTML conversion
+7. XML tagging (NLM)
+8. Asset processing (figures, tables)
+9. Review package generation
+10. XHTML → DOCX round-trip
+11. Output packaging
+
+Customize structuring rules in `app/processing/structuring_lib/rules.yaml`.
+
+---
+
+## Troubleshooting
+
+**Collabora "Refused to connect"**
+- Verify the container is running: `docker ps`
+- Check `COLLABORA_URL` matches the container port
+- Ensure `--o:ssl.enable=false` is set for HTTP-only local dev
+
+**File upload errors**
+- Check write permissions on `data/uploads/`
+- Confirm the file extension is in the allowed list
+
+**Database locked (SQLite in dev)**
+- SQLite struggles with concurrent requests. Use PostgreSQL for any load beyond single-user dev.
+
+**Celery tasks not running**
+- Verify Redis is reachable at `REDIS_URL`
+- Check Celery worker logs: `docker compose logs celery`

@@ -24,10 +24,10 @@ services:
     image: postgres:15
     container_name: cms_db
     ports:
-      # Mapped to 5433 on the host to avoid collision with a local Windows
-      # PostgreSQL instance that may already occupy port 5432.
+      # Bound to 127.0.0.1 to prevent external network access.
+      # Mapped to 5433 to avoid collision with any local PostgreSQL on port 5432.
       # For local dev, use: DATABASE_URL=postgresql://cms_user:cms_password@127.0.0.1:5433/cms_db
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     env_file: .env
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -48,7 +48,8 @@ services:
     image: redis:7-alpine
     container_name: cms_redis
     ports:
-      - "6379:6379"
+      # Bound to 127.0.0.1 — Redis has no auth by default, never expose externally.
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -142,6 +143,8 @@ services:
     container_name: cms_onlyoffice
     ports:
       - "8083:80"
+    # OnlyOffice uses shared memory heavily for document co-authoring.
+    shm_size: '2gb'
     environment:
       JWT_ENABLED: "true"
       JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:-secret}
@@ -223,9 +226,12 @@ services:
       - /etc/letsencrypt:/etc/letsencrypt:ro
       - certbot_webroot:/var/www/certbot:ro
     depends_on:
-      - backend
-      - onlyoffice
-      - collabora
+      backend:
+        condition: service_healthy
+      onlyoffice:
+        condition: service_started
+      collabora:
+        condition: service_started
     restart: always
 
 volumes:
