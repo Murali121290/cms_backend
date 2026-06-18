@@ -78,6 +78,7 @@ services:
       - ./app:/app/app
     environment:
       REDIS_URL: redis://redis:6379/0
+      COOKIE_SECURE: "false"
     expose:
       - "8000"
     depends_on:

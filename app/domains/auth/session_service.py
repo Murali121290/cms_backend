@@ -1,5 +1,6 @@
 from fastapi import status
 from fastapi.responses import RedirectResponse
+import os
 
 ACCESS_TOKEN_COOKIE_NAME = "access_token"
 ACCESS_TOKEN_COOKIE_PREFIX = "Bearer "
@@ -51,9 +52,14 @@ def build_user_context(user, *, include_email: bool = False):
 
 
 def set_access_token_cookie(response, access_token: str):
-    import os
+    # Allow explicit override via COOKIE_SECURE env var. If not set,
+    # default to secure cookies in production/staging environments.
     env = os.getenv("ENVIRONMENT", "development").lower()
-    secure_cookie = env in ("production", "staging")
+    cookie_secure_env = os.getenv("COOKIE_SECURE")
+    if cookie_secure_env is not None:
+        secure_cookie = cookie_secure_env.lower() in ("1", "true", "yes")
+    else:
+        secure_cookie = env in ("production", "staging")
     response.set_cookie(
         key=ACCESS_TOKEN_COOKIE_NAME,
         value=format_access_token_cookie_value(access_token),
