@@ -99,19 +99,32 @@ class PPHClient:
             submit_url = f"{self.base_url}/{endpoint_clean}"
             logger.info(f"Submitting job to PPH endpoint: {submit_url}")
 
-            # Extract CSRF token from the session cookies if present
-            headers = {}
-            csrf_cookie = self.session.cookies.get("csrf_access_token") or self.session.cookies.get("csrf_token")
-            if csrf_cookie:
-                headers["X-CSRF-Token"] = csrf_cookie
+            # GET the upload page first to retrieve a fresh CSRF token (Flask-WTF requires it in the form data)
+            get_resp = self.session.get(submit_url, timeout=15)
+            csrf_token = None
+            csrf_match = re.search(r'name="csrf_token"\s+value="([^"]+)"', get_resp.text)
+            if not csrf_match:
+                csrf_match = re.search(r'id="csrf_token"\s+value="([^"]+)"', get_resp.text)
+            if not csrf_match:
+                csrf_match = re.search(r'<meta[^>]+name=["\']csrf-token["\'][^>]+content=["\']([^"\']+)["\']', get_resp.text)
+            if csrf_match:
+                csrf_token = csrf_match.group(1)
+                logger.info("Extracted CSRF token from /validate page.")
+            else:
+                logger.warning("No CSRF token found on /validate page — posting without it.")
+
+            form_data = dict(data or {})
+            if csrf_token:
+                form_data["csrf_token"] = csrf_token
 
             response = self.session.post(
                 submit_url,
                 files=files,
-                data=data or {},
-                headers=headers,
+                data=form_data,
                 timeout=120
             )
+            logger.info(f"PPH /validate response status: {response.status_code}")
+            logger.info(f"PPH /validate response body: {response.text[:300]!r}")
             response.raise_for_status()
 
             res_json = response.json()
