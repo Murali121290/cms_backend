@@ -44,82 +44,33 @@ export const usersApi = {
       .then(r => r.data.users.map(mapUser)),
 
   create: async (data: CreateUserPayload) => {
-    const systemRoles = await api.get<{ roles: { id: number; name: string }[] }>('/admin/roles').then(r => r.data.roles)
-    let systemRoleName = 'Editor'
-    const teamRole = data.role.toLowerCase()
-    if (teamRole === 'admin') {
-      systemRoleName = 'Admin'
-    } else if (teamRole === 'manager' || teamRole === 'operations_manager') {
-      systemRoleName = 'ProjectManager'
-    }
-    const matched = systemRoles.find(r => r.name.toLowerCase() === systemRoleName.toLowerCase())
-    const roleId = matched ? matched.id : (systemRoles[0]?.id ?? 3)
-
-    const response = await api.post<{ user: any }>('/admin/users', {
+    const response = await api.post<any>('/users', {
       username: data.user_name,
       email: data.email,
       password: data.password,
-      role_id: roleId,
-      team_name: data.team,
+      role: data.role,
+      team: data.team,
       customer_access: data.customer_access,
+      active_status: data.active_status ?? true,
     })
-    return mapUser(response.data.user)
+    return mapUser(response.data)
   },
 
   update: async (id: number, data: UpdateUserPayload) => {
-    let updatedUser: any = null
+    const payload: any = {}
+    if (data.role) payload.role = data.role
+    if (data.team) payload.team = data.team
+    if (data.password) payload.password = data.password
+    if (data.customer_access !== undefined) payload.customer_access = data.customer_access
+    if (data.active_status !== undefined) payload.active_status = data.active_status
 
-    if (data.active_status !== undefined) {
-      const res = await api.put<{ user: any }>(`/admin/users/${id}/status`, { is_active: data.active_status })
-      updatedUser = res.data.user
-    }
-
-    if (data.password) {
-      await api.put(`/admin/users/${id}/password`, { new_password: data.password })
-    }
-
-    if (data.customer_access !== undefined) {
-      const res = await api.patch<{ user: any }>(`/admin/users/${id}`, { customer_access: data.customer_access })
-      updatedUser = res.data.user
-    }
-
-    if (data.role || data.team) {
-      const systemRoles = await api.get<{ roles: { id: number; name: string }[] }>('/admin/roles').then(r => r.data.roles)
-      let systemRoleName = 'Editor'
-      const teamRole = data.role?.toLowerCase() ?? ''
-      if (teamRole === 'admin') {
-        systemRoleName = 'Admin'
-      } else if (teamRole === 'manager' || teamRole === 'operations_manager') {
-        systemRoleName = 'ProjectManager'
-      }
-      const matched = systemRoles.find(r => r.name.toLowerCase() === systemRoleName.toLowerCase())
-      const roleId = matched ? matched.id : (systemRoles[0]?.id ?? 3)
-
-      const res = await api.put<{ user: any }>(`/admin/users/${id}/role`, {
-        role_id: roleId,
-        team_name: data.team,
-      })
-      updatedUser = res.data.user
-    }
-
-    if (!updatedUser) {
-      const usersRes = await api.get<{ users: any[] }>('/admin/users')
-      const matched = usersRes.data.users.find((u: any) => u.id === id)
-      if (matched) {
-        updatedUser = matched
-      }
-    }
-
-    return mapUser(updatedUser)
+    const response = await api.put<any>(`/users/${id}`, payload)
+    return mapUser(response.data)
   },
 
   setStatus: async (id: number, active_status: boolean) => {
-    await api.put(`/admin/users/${id}/status`, { is_active: active_status })
-    const usersRes = await api.get<{ users: any[] }>('/admin/users')
-    const matched = usersRes.data.users.find((u: any) => u.id === id)
-    if (!matched) {
-      throw new Error('User not found after status update')
-    }
-    return mapUser(matched)
+    const response = await api.patch<any>(`/users/${id}/status`, { active_status })
+    return mapUser(response.data)
   },
+
 }
