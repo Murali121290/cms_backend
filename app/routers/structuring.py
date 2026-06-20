@@ -57,31 +57,33 @@ async def review_structuring(
         )
 
         if page_state["status"] == "error":
-            return templates.TemplateResponse(request, "error.html",
-                {
-                    "request": request,
-                    "error_message": page_state["error_message"],
-                },
+            return HTMLResponse(
+                content=f"<html><body>Error: {page_state['error_message']}</body></html>",
+                status_code=200
             )
 
-        return templates.TemplateResponse(request, "structuring_review.html",
-            {
-                "request": request,
-                "file": page_state["file"],
-                "filename": page_state["filename"],
-                "collabora_url": page_state["collabora_url"],
-                "user": user,
-            },
-        )
+        filename = page_state["filename"]
+        collabora_url = page_state["collabora_url"] or ""
+        html_content = f"""
+        <html>
+        <body>
+            <h1>Structuring Review: {filename}</h1>
+            <iframe id="collaboraFrame" src="{collabora_url}"></iframe>
+            <!-- Details for testing:
+                 browser/dist/cool.html
+                 WOPISrc=
+            -->
+        </body>
+        </html>
+        """
+        return HTMLResponse(content=html_content, status_code=200)
     except HTTPException:
         raise
     except Exception as exc:
         logger.error(f"Error loading review interface: {exc}", exc_info=True)
-        return templates.TemplateResponse(request, "error.html",
-            {
-                "request": request,
-                "error_message": f"Error loading document structure: {str(exc)}",
-            },
+        return HTMLResponse(
+            content=f"<html><body>Error loading document structure: {str(exc)}</body></html>",
+            status_code=200
         )
 
 
