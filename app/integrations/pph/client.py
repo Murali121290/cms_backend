@@ -25,6 +25,17 @@ class PPHClient:
         self.password = self.settings.PPH_PASSWORD
         self.session = requests.Session()
         self.session.verify = False  # Ignore self-signed SSL certificate issues on private corporate subnet IPs
+        
+        # Set standard headers that might be expected by the PPH server
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive',
+            'DNT': '1',
+        })
+        
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         self._authenticated = False
@@ -78,6 +89,14 @@ class PPHClient:
         if not self._authenticated:
             self._login()
 
+    def _is_login_page(self, response_text: str) -> bool:
+        """Check if the response is the PPH login page (indicating session not authenticated)."""
+        return (
+            '<title>PrepOps' in response_text or 
+            'Welcome to PrepOps' in response_text or
+            'Please log in to continue' in response_text
+        )
+
     def submit_and_wait(
         self,
         endpoint: str,
@@ -103,6 +122,19 @@ class PPHClient:
 
             # GET the upload page first to retrieve a fresh CSRF token (Flask-WTF requires it in the form data)
             get_resp = self.session.get(submit_url, timeout=15)
+            
+            # Check if we got redirected back to login (session not authenticated)
+            if self._is_login_page(get_resp.text):
+                error_msg = f"Session appears invalid — PPH /validate endpoint returned login page. Session may have expired or credentials may be incorrect."
+                logger.error(error_msg)
+                # Reset auth flag and try to re-login
+                self._authenticated = False
+                self.ensure_authenticated()
+                # Retry the GET
+                get_resp = self.session.get(submit_url, timeout=15)
+                if self._is_login_page(get_resp.text):
+                    raise PPHClientError("Failed to access /validate endpoint even after re-authentication.")
+            
             csrf_token = None
             csrf_match = re.search(r'name="csrf_token"\s+value="([^"]+)"', get_resp.text)
             if not csrf_match:
@@ -120,16 +152,28 @@ class PPHClient:
                 form_data["csrf_token"] = csrf_token
             
             logger.debug(f"Form data being sent: {form_data}")
+            logger.info(f"Session cookies before POST: {dict(self.session.cookies)}")
+            logger.info(f"Request headers: {dict(self.session.headers)}")
 
             response = self.session.post(
                 submit_url,
                 files=files,
                 data=form_data,
-                timeout=120
+                timeout=120,
+                allow_redirects=False  # Don't follow redirects automatically
             )
             logger.info(f"PPH /validate response status: {response.status_code}")
             logger.info(f"PPH /validate Content-Type: {response.headers.get('content-type', 'unknown')}")
+            logger.info(f"Response headers: {dict(response.headers)}")
+            logger.info(f"Response cookies: {dict(response.cookies)}")
             logger.info(f"PPH /validate response body: {response.text[:500]!r}")
+            
+            # Check for redirects
+            if 300 <= response.status_code < 400:
+                redirect_location = response.headers.get('Location', 'unknown')
+                logger.warning(f"PPH returned redirect ({response.status_code}) to: {redirect_location}")
+                raise PPHClientError(f"PPH endpoint redirected to {redirect_location} instead of accepting the job submission. Session may be invalid.")
+            
             response.raise_for_status()
 
             # Check if response is actually JSON

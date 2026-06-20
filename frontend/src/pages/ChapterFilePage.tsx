@@ -20,7 +20,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import {
   ArrowDownToLine, ArrowLeft, BookCheck, ChevronRight, ChevronUp, ChevronDown,
-  Code2, Download, Eye, File, FileCode, FileOutput, FilePen, FileText,
+  Code2, Download, ExternalLink, Eye, File, FileCode, FileOutput, FilePen, FileText,
   FolderOpen, Image, Info, Languages, Layers, Loader2, LogIn, LogOut,
   MoreVertical, Play, ScanLine, Search, ShieldCheck, Sparkles, Trash2,
   Upload, Wrench, X, Zap, CheckCircle2, Archive,
@@ -298,6 +298,14 @@ function FileActionsMenu({
                   <DropdownMenu.Item className={itemCls} onSelect={() => navigate(`${uiPaths.structuringReview(projectId, chapterId, fid)}?tab=onlyoffice`)}>
                     <FilePen size={12} className="text-muted"/> Edit in OnlyOffice
                   </DropdownMenu.Item>
+                  <DropdownMenu.Item className={itemCls} onSelect={() => {
+                    fetch(`/api/v2/files/${fid}/open-in-word`)
+                      .then(r => r.json())
+                      .then(d => { if (d?.ms_word_uri) window.location.href = d.ms_word_uri; })
+                      .catch(() => {});
+                  }}>
+                    <ExternalLink size={12} className="text-muted"/> Open in Word
+                  </DropdownMenu.Item>
                   <DropdownMenu.Item className={itemCls} asChild>
                     <a href={`/api/v2/files/${fid}/download`} download onClick={e => e.stopPropagation()}>
                       <ArrowDownToLine size={12} className="text-muted"/> Download
@@ -544,9 +552,12 @@ export function ChapterFilePage({
           uploaded_by: '—',
           uploaded_on: f.uploaded_at,
           path:        '',
-          isLocked:    f.lock?.is_checked_out ?? false,
-          lockedBy:    f.lock?.checked_out_by_username ?? null,
-          lockedAt:    f.lock?.checked_out_at ?? null,
+          isLocked:       f.lock?.is_checked_out ?? false,
+          lockedBy:       f.lock?.checked_out_by_username ?? null,
+          lockedAt:       f.lock?.checked_out_at ?? null,
+          webdavLocked:   f.lock?.webdav_locked ?? false,
+          webdavLockedBy: f.lock?.webdav_locked_by ?? null,
+          webdavLockedAt: f.lock?.webdav_locked_at ?? null,
         }))
     }
 
@@ -751,20 +762,35 @@ export function ChapterFilePage({
     col.display({
       id: 'lock',
       header: 'Lock',
-      size: 130,
+      size: 140,
       cell: ({ row }) => {
-        const { isLocked, lockedBy, lockedAt } = row.original
-        if (!isLocked) {
+        const { isLocked, lockedBy, lockedAt, webdavLocked, webdavLockedBy, webdavLockedAt } = row.original
+        if (!isLocked && !webdavLocked) {
           return <span className="text-muted text-[11px]">—</span>
         }
         return (
-          <div className="flex flex-col gap-0.5">
-            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 whitespace-nowrap">
-              <LogOut size={9} className="flex-shrink-0"/>
-              {lockedBy ?? 'Unknown'}
-            </span>
-            {lockedAt && (
-              <span className="text-[10px] text-muted whitespace-nowrap">{fmtDate(lockedAt)}</span>
+          <div className="flex flex-col gap-1">
+            {isLocked && (
+              <div className="flex flex-col gap-0.5">
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 whitespace-nowrap">
+                  <LogOut size={9} className="flex-shrink-0"/>
+                  {lockedBy ?? 'Unknown'}
+                </span>
+                {lockedAt && (
+                  <span className="text-[10px] text-muted whitespace-nowrap">{fmtDate(lockedAt)}</span>
+                )}
+              </div>
+            )}
+            {webdavLocked && (
+              <div className="flex flex-col gap-0.5">
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-blue-700 whitespace-nowrap">
+                  <ExternalLink size={9} className="flex-shrink-0"/>
+                  {webdavLockedBy ?? 'Unknown'} (Word)
+                </span>
+                {webdavLockedAt && (
+                  <span className="text-[10px] text-muted whitespace-nowrap">{fmtDate(webdavLockedAt)}</span>
+                )}
+              </div>
             )}
           </div>
         )

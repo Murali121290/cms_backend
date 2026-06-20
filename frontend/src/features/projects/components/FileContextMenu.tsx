@@ -19,6 +19,7 @@ import {
   Sparkles,
   Trash2,
   Wrench,
+  ExternalLink,
 } from "lucide-react";
 
 import type { FileRecord } from "@/types/api";
@@ -223,6 +224,46 @@ function MenuDownloadItem({
       <Icon style={ICON} aria-hidden />
       <span>{label}</span>
     </a>
+  );
+}
+
+function MenuWordItem({ fileId, onClose }: { fileId: number; onClose: () => void }) {
+  const [hov, setHov] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const handleClick = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/v2/files/${fileId}/open-in-word`);
+      const data = await res.json();
+      if (data && data.ms_word_uri) {
+        window.location.href = data.ms_word_uri;
+      }
+    } catch (e) {
+      // silently ignore; browser will show no handler error if Word not installed
+    } finally {
+      setLoading(false);
+      onClose();
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      style={{
+        ...ITEM_BASE,
+        backgroundColor: hov ? "#F5F4F1" : "transparent",
+        opacity: loading ? 0.6 : 1,
+      }}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      onClick={handleClick}
+      disabled={loading}
+    >
+      <ExternalLink style={ICON} aria-hidden />
+      <span>{loading ? "Opening…" : "Open in Word"}</span>
+    </button>
   );
 }
 
@@ -551,6 +592,7 @@ export function FileContextMenu({
               to={`${uiPaths.structuringReview(projectId, chapterId, file.id)}?tab=onlyoffice`}
               onClick={onClose}
             />
+            <MenuWordItem fileId={file.id} onClose={onClose} />
             <MenuDownloadItem
               icon={ArrowDownToLine}
               label="Download"
