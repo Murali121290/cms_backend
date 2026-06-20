@@ -4200,3 +4200,77 @@ def api_v2_sync_chapters(project_id: int, db: Session = Depends(database.get_db)
     db.commit()
     return {"synced": created, "total_chapters": len(cms_chapters)}
 
+
+# ── Clients (v2) ─────────────────────────────────────────────────────────────
+from app.domains.clients import crud as clients_crud
+from app.domains.clients.schemas import (
+    ClientCreate as V2ClientCreate,
+    ClientListResponse as V2ClientListResponse,
+    ClientResponse as V2ClientResponse,
+    ClientUpdate as V2ClientUpdate,
+)
+
+class ClientStatusUpdate(BaseModel):
+    active_status: bool
+
+def _filter_clients_for_user(clients_list: list, user) -> list:
+    if _has_admin_role(user):
+        return clients_list
+    allowed = set(user.customer_access or [])
+    return [
+        c for c in clients_list
+        if (c.company in allowed or c.division in allowed or (getattr(c, 'name_company', None) in allowed))
+    ]
+
+@router.post("/clients", response_model=V2ClientListResponse, status_code=status.HTTP_201_CREATED)
+def api_v2_create_client(client: V2ClientCreate, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
+    _require_cookie_user(user)
+    return clients_crud.create_client(db, client)
+
+@router.get("/clients", response_model=List[V2ClientListResponse])
+def api_v2_list_clients(skip: int = 0, limit: int = 500, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
+    viewer = _require_cookie_user(user)
+    all_clients = clients_crud.get_clients(db, skip=skip, limit=limit)
+    return _filter_clients_for_user(all_clients, viewer)
+
+@router.get("/clients/active", response_model=List[V2ClientListResponse])
+def api_v2_list_active_clients(db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
+    viewer = _require_cookie_user(user)
+    all_clients = clients_crud.get_active_clients(db)
+    return _filter_clients_for_user(all_clients, viewer)
+
+@router.get("/clients/{client_id}", response_model=V2ClientResponse)
+def api_v2_get_client(client_id: int, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
+    viewer = _require_cookie_user(user)
+    client = clients_crud.get_client(db, client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    if not _has_admin_role(viewer):
+        allowed = set(viewer.customer_access or [])
+        if client.company not in allowed and client.division not in allowed and getattr(client, 'name_company', None) not in allowed:
+            raise HTTPException(status_code=404, detail="Client not found")
+    return client
+
+@router.put("/clients/{client_id}", response_model=V2ClientListResponse)
+def api_v2_update_client(client_id: int, data: V2ClientUpdate, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
+    _require_cookie_user(user)
+    updated = clients_crud.update_client(db, client_id, data)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Client not found")
+    return updated
+
+@router.delete("/clients/{client_id}", status_code=status.HTTP_204_NO_CONTENT)
+def api_v2_delete_client(client_id: int, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
+    _require_cookie_user(user)
+    if not clients_crud.delete_client(db, client_id):
+        raise HTTPException(status_code=404, detail="Client not found")
+
+@router.patch("/clients/{client_id}/status", response_model=V2ClientListResponse)
+def api_v2_set_client_status(client_id: int, body: ClientStatusUpdate, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
+    _require_cookie_user(user)
+    updated = clients_crud.set_client_active_status(db, client_id, body.active_status)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Client not found")
+    return updated
+
+

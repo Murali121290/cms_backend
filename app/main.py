@@ -7,7 +7,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.domains.auth import api_v1 as users
 from app.domains.files import api_v1 as files
 from app.domains.projects import api_v1 as projects
-from app.domains.clients import api_v1 as clients
 from app.domains.workflow import api_v1 as workflow
 from app.legacy import web as legacy_web
 from app.routers import web as routers_web
@@ -47,7 +46,6 @@ from app.integrations.wopi import router as wopi
 app.include_router(wopi.router, tags=["WOPI"])
 
 # Workflow & Clients Routers (WMS Integration)
-app.include_router(clients.router, tags=["Clients"])
 app.include_router(workflow.router, tags=["Workflow"])
 
 @app.get("/")
