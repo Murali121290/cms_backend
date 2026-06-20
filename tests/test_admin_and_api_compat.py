@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from app import models
-from app.auth import verify_password
+from app.domains.auth.security import verify_password
 
 
 def test_admin_create_user_assigns_selected_role_and_redirects(

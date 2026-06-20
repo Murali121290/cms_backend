@@ -1,6 +1,6 @@
 from app.database import SessionLocal
 from app.models import Role, User
-from app.auth import pwd_context
+from app.domains.auth.security import pwd_context
 import sys
 
 def reset_admin(new_password="admin123"):

@@ -15,7 +15,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from app import database
-from app.auth import get_current_user_from_cookie
+from app.domains.auth.security import get_current_user_from_cookie
 from app.integrations.collabora.config import (
     COLLABORA_BASE_URL,
     COLLABORA_PUBLIC_URL,

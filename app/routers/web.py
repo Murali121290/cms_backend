@@ -8,8 +8,8 @@ from typing import Optional
 from jose import jwt, JWTError
 from datetime import datetime
 
-from app import database, models, schemas
-from app.auth import create_access_token, verify_password, hash_password, oauth2_scheme, get_current_user_from_cookie
+from app import database, models
+from app.domains.auth.security import create_access_token, verify_password, hash_password, oauth2_scheme, get_current_user_from_cookie
 from app.core.config import get_settings
 from app.services import (
     activity_service,

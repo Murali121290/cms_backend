@@ -6,7 +6,8 @@ from pathlib import Path
 from fastapi import UploadFile
 from sqlalchemy.orm import Session
 
-from app import models, schemas
+from app import models
+from app.domains.projects.schemas import ProjectCreate
 
 
 class ProjectBootstrapValidationError(Exception):
@@ -60,7 +61,7 @@ def _build_project_bootstrap_upload_plan(
 
     return upload_plan
 
-def create_project(db: Session, project: schemas.ProjectCreate):
+def create_project(db: Session, project: ProjectCreate):
     db_project = models.Project(**project.dict(), status="RECEIVED")
     db.add(db_project)
     db.commit()
@@ -81,7 +82,7 @@ def create_project_with_initial_files(
 ):
     valid_uploads = [upload for upload in files or [] if upload.filename]
     if not valid_uploads:
-        new_project = schemas.ProjectCreate(
+        new_project = ProjectCreate(
             title=title,
             code=code,
             xml_standard=xml_standard,
@@ -120,7 +121,7 @@ def create_project_with_initial_files(
         files=files,
     )
 
-    new_project = schemas.ProjectCreate(
+    new_project = ProjectCreate(
         title=title,
         code=code,
         xml_standard=xml_standard,

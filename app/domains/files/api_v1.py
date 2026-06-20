@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, UploadFile, File
 from sqlalchemy.orm import Session
 from app import database
 from app.services import file_service
-from app.auth import get_current_user
+from app.domains.auth.security import get_current_user
 
 router = APIRouter()
 

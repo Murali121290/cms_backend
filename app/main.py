@@ -8,7 +8,6 @@ from app.domains.auth import api_v1 as users
 from app.domains.files import api_v1 as files
 from app.domains.projects import api_v1 as projects
 from app.domains.workflow import api_v1 as workflow
-from app.legacy import web as legacy_web
 from app.routers import web as routers_web
 from app.routers import api_v2
 from app.core.config import get_settings
@@ -28,7 +27,7 @@ app.add_middleware(
 )
 
 # UI Router (Root) - Legacy SSR pages
-app.include_router(legacy_web.router, tags=["Web UI"])
+app.include_router(routers_web.router, tags=["Web UI"])
 
 # API Routers
 app.include_router(api_v2.router, prefix="/api/v2", tags=["API v2"])

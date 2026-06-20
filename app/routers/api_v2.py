@@ -12,7 +12,7 @@ from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from app import database, models, schemas_v2
-from app.auth import get_current_user_from_cookie
+from app.domains.auth.security import get_current_user_from_cookie
 from app.core.config import get_settings
 from app.services import (
     activity_service,
@@ -3973,7 +3973,7 @@ def api_v2_create_user(
             message="Email already registered"
         )
 
-    from app.auth import hash_password
+    from app.domains.auth.security import hash_password
     db_user = models.User(
         username=payload.username,
         email=payload.email,
@@ -4057,7 +4057,7 @@ def api_v2_update_user(
     if payload.customer_access is not None:
         db_user.customer_access = payload.customer_access
     if payload.password:
-        from app.auth import hash_password
+        from app.domains.auth.security import hash_password
         db_user.password_hash = hash_password(payload.password)
     if payload.active_status is not None:
         # Check self lockout

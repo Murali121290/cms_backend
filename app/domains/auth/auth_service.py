@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 
 from app import models
-from app.auth import create_access_token, hash_password, verify_password
+from app.domains.auth.security import create_access_token, hash_password, verify_password
 
 
 def authenticate_browser_user(db: Session, username: str, password: str):

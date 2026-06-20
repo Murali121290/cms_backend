@@ -1,5 +1,5 @@
 from app import models
-from app.auth import verify_password
+from app.domains.auth.security import verify_password
 
 
 

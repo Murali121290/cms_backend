@@ -148,7 +148,7 @@ def team(db_session):
 @pytest.fixture()
 def user_factory(db_session, roles, team):
     from app import models
-    from app.auth import hash_password
+    from app.domains.auth.security import hash_password
 
     def _create(
         username: str,
@@ -355,7 +355,7 @@ def processed_file_record(file_record_factory):
 
 @pytest.fixture()
 def auth_cookie_client(client_factory):
-    from app.auth import create_access_token
+    from app.domains.auth.security import create_access_token
 
     def _make(user):
         client = client_factory()
@@ -368,7 +368,7 @@ def auth_cookie_client(client_factory):
 
 @pytest.fixture()
 def bearer_auth_client(client_factory):
-    from app.auth import create_access_token
+    from app.domains.auth.security import create_access_token
 
     def _make(user):
         client = client_factory()

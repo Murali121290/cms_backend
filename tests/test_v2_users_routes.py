@@ -1,6 +1,6 @@
 import pytest
 from app import models
-from app.auth import verify_password
+from app.domains.auth.security import verify_password
 from app.domains.workflow.models import RolesMaster
 
 def test_v2_create_user_success(auth_cookie_client, admin_user, roles, db_session):

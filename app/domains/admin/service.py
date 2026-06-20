@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 
 from app import models
-from app.auth import hash_password
+from app.domains.auth.security import hash_password
 
 
 def get_admin_dashboard_stats(db: Session):

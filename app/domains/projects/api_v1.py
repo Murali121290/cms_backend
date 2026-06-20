@@ -1,16 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
-from app import database, schemas
+from app import database
+from app.domains.projects.schemas import ProjectCreate
 from app.services import project_service
-from app.rbac import require_role
-from app.auth import get_current_user, get_current_user_from_cookie
+from app.domains.auth.permissions import require_role
+from app.domains.auth.security import get_current_user, get_current_user_from_cookie
 
 router = APIRouter()
 
 @router.post("/")
 def create_project(
-    data: schemas.ProjectCreate,
+    data: ProjectCreate,
     db: Session = Depends(database.get_db),
     # Only ProjectManager can create projects
     user = Depends(require_role("ProjectManager")) 
