@@ -45,6 +45,9 @@ app.include_router(structuring.router, prefix=f"{settings.API_V1_STR}", tags=["S
 # WOPI Router (LibreOffice Online / Collabora)
 from app.integrations.wopi import router as wopi
 app.include_router(wopi.router, tags=["WOPI"])
+# WebDAV Router (MS Word desktop integration)
+from app.integrations.webdav import router as webdav_router
+app.include_router(webdav_router.router, prefix="/webdav", tags=["WebDAV"])
 
 # Workflow & Clients Routers (WMS Integration)
 app.include_router(clients.router, tags=["Clients"])

@@ -84,6 +84,9 @@ class LockState(BaseModel):
     checked_out_by_id: int | None = None
     checked_out_by_username: str | None = None
     checked_out_at: datetime | None = None
+    webdav_locked: bool = False
+    webdav_locked_by: str | None = None
+    webdav_locked_at: datetime | None = None
 
 
 class ProjectSummary(BaseModel):

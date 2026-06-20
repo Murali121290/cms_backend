@@ -2,7 +2,7 @@ import os
 import shutil
 import tempfile
 import zipfile
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 from typing import Any, List, Optional
 
@@ -53,6 +53,8 @@ from app.integrations.onlyoffice import (
     verify_callback_token,
 )
 from app.integrations.wopi import service as wopi_service
+from app.integrations.webdav.config import WEBDAV_BASE_URL, WEBDAV_TOKEN_EXPIRE_MINUTES
+from app.domains.auth.security import create_access_token
 
 settings = get_settings()
 router = APIRouter()
@@ -229,19 +231,47 @@ def _serialize_chapter_summary(chapter: models.Chapter):
     )
 
 
-def _serialize_lock(file_record: models.File):
+def _serialize_lock(file_record: models.File, db: Session | None = None):
+    from datetime import timezone as _tz
     checked_out_by_username = None
     if file_record.checked_out_by is not None:
         checked_out_by_username = file_record.checked_out_by.username
+
+    webdav_locked = False
+    webdav_locked_by = None
+    webdav_locked_at = None
+    if db is not None:
+        from sqlalchemy import or_
+        now = __import__("datetime").datetime.now(_tz.utc)
+        row = (
+            db.query(models.WebDAVLock, models.User)
+            .outerjoin(models.User, models.User.id == models.WebDAVLock.owner_user_id)
+            .filter(
+                models.WebDAVLock.file_id == file_record.id,
+                or_(models.WebDAVLock.expires_at.is_(None), models.WebDAVLock.expires_at > now),
+            )
+            .order_by(models.WebDAVLock.created_at.desc())
+            .first()
+        )
+        if row:
+            active_lock, lock_owner = row
+            webdav_locked = True
+            webdav_locked_at = active_lock.created_at
+            if lock_owner is not None:
+                webdav_locked_by = lock_owner.username
+
     return schemas_v2.LockState(
         is_checked_out=file_record.is_checked_out,
         checked_out_by_id=file_record.checked_out_by_id,
         checked_out_by_username=checked_out_by_username,
         checked_out_at=file_record.checked_out_at,
+        webdav_locked=webdav_locked,
+        webdav_locked_by=webdav_locked_by,
+        webdav_locked_at=webdav_locked_at,
     )
 
 
-def _serialize_file_record(file_record: models.File, *, viewer: models.User):
+def _serialize_file_record(file_record: models.File, *, viewer: models.User, db: Session | None = None):
     actions = list(_STANDARD_FILE_ACTIONS)
     if file_record.is_checked_out:
         if file_record.checked_out_by_id == viewer.id:
@@ -259,7 +289,7 @@ def _serialize_file_record(file_record: models.File, *, viewer: models.User):
         category=file_record.category,
         uploaded_at=file_record.uploaded_at,
         version=file_record.version,
-        lock=_serialize_lock(file_record),
+        lock=_serialize_lock(file_record, db=db),
         available_actions=actions,
     )
 
@@ -702,7 +732,7 @@ def api_v2_chapter_files(
     return schemas_v2.ChapterFilesResponse(
         project=_serialize_project_summary(project),
         chapter=_serialize_chapter_detail(chapter, files),
-        files=[_serialize_file_record(file_record, viewer=viewer) for file_record in files],
+        files=[_serialize_file_record(file_record, viewer=viewer, db=db) for file_record in files],
         viewer=_serialize_viewer(viewer),
     )
 
@@ -2097,6 +2127,46 @@ async def api_v2_onlyoffice_callback(
             background_tasks.add_task(_regen_xhtml_background, file_id=file_id)
 
     return {"error": 0}
+
+
+@router.get("/files/{file_id}/open-in-word")
+def api_v2_open_in_word(
+    file_id: int,
+    mode: str = "original",
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    file_record = db.query(models.File).filter(models.File.id == file_id).first()
+    if not file_record:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="FILE_NOT_FOUND",
+            message="File not found.",
+        )
+
+    file_path, filename = wopi_service.get_target_path(file_record, mode=mode)
+    if not os.path.exists(file_path):
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="FILE_NOT_FOUND",
+            message="Physical file not found.",
+        )
+
+    import urllib.parse
+    token = create_access_token({"sub": viewer.username, "file_id": file_id, "mode": mode}, expires_delta=timedelta(minutes=WEBDAV_TOKEN_EXPIRE_MINUTES))
+    quoted_filename = urllib.parse.quote(filename, safe="")
+    webdav_url = f"{WEBDAV_BASE_URL}/webdav/files/{file_id}/{mode}/{quoted_filename}?token={token}"
+    ms_word_uri = f"ms-word:ofe|u|{webdav_url}"
+
+    return {"ms_word_uri": ms_word_uri, "webdav_url": webdav_url}
 
 @router.get("/files/{file_id}/versions", response_model=schemas_v2.FileVersionsResponse)
 def api_v2_file_versions(

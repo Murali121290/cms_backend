@@ -174,6 +174,9 @@ export interface LockState {
   checked_out_by_id: number | null;
   checked_out_by_username: string | null;
   checked_out_at: string | null;
+  webdav_locked: boolean;
+  webdav_locked_by: string | null;
+  webdav_locked_at: string | null;
 }
 
 export interface ChapterCategoryCounts {
