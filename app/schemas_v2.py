@@ -328,6 +328,29 @@ class AdminRolesResponse(BaseModel):
     roles: list[AdminRole]
 
 
+class UserCreate(BaseModel):
+    username: str
+    email: str
+    password: str
+    role: str
+    team: str
+    customer_access: list[str] = []
+    active_status: bool | None = True
+
+
+class UserUpdate(BaseModel):
+    role: str | None = None
+    team: str | None = None
+    password: str | None = None
+    customer_access: list[str] | None = None
+    active_status: bool | None = None
+
+
+class UserStatusUpdate(BaseModel):
+    active_status: bool
+
+
+
 class AdminUserResponse(BaseModel):
     user: AdminUser
 

@@ -3918,9 +3918,9 @@ def api_v2_admin_roles(
     )
 
 
-@router.post("/admin/users", response_model=schemas_v2.AdminCreateUserResponse)
-def api_v2_admin_create_user(
-    payload: schemas_v2.AdminCreateUserRequest,
+@router.post("/users", response_model=schemas_v2.AdminUser)
+def api_v2_create_user(
+    payload: schemas_v2.UserCreate,
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -3938,33 +3938,62 @@ def api_v2_admin_create_user(
             message="Admin access required.",
         )
 
-    try:
-        created_user = admin_user_service.create_admin_user(
-            db,
-            username=payload.username,
-            email=payload.email,
-            password=payload.password,
-            role_id=payload.role_id,
-            team_name=payload.team_name,
-            customer_access=payload.customer_access,
+    # Role Validation: Ensure role exists and is active
+    from app.domains.workflow.models import RolesMaster
+    role_record = db.query(RolesMaster).filter(
+        RolesMaster.role_name.ilike(payload.role)
+    ).first()
+    if not role_record:
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="INVALID_ROLE",
+            message=f"Role '{payload.role}' does not exist"
         )
-    except ValueError as exc:
+    if not role_record.active_status:
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="INACTIVE_ROLE",
+            message=f"Role '{payload.role}' is inactive"
+        )
+
+    # Uniqueness Validation
+    username_exists = db.query(models.User).filter(models.User.username == payload.username).first()
+    if username_exists:
         return _error_response(
             status_code=status.HTTP_400_BAD_REQUEST,
             code="DUPLICATE_USER",
-            message=str(exc),
+            message="Username already registered"
+        )
+        
+    email_exists = db.query(models.User).filter(models.User.email == payload.email).first()
+    if email_exists:
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="DUPLICATE_USER",
+            message="Email already registered"
         )
 
-    return schemas_v2.AdminCreateUserResponse(
-        user=_serialize_admin_user(created_user),
-        redirect_to="/admin/users",
+    from app.auth import hash_password
+    db_user = models.User(
+        username=payload.username,
+        email=payload.email,
+        password_hash=hash_password(payload.password),
+        role=role_record.role_name,
+        team=role_record.team,
+        customer_access=payload.customer_access,
+        active_status=payload.active_status if payload.active_status is not None else True
     )
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+
+    return _serialize_admin_user(db_user)
 
 
-@router.put("/admin/users/{user_id}/role", response_model=schemas_v2.AdminUpdateRoleResponse)
-def api_v2_admin_update_user_role(
+@router.put("/users/{user_id}", response_model=schemas_v2.AdminUser)
+def api_v2_update_user(
     user_id: int,
-    payload: schemas_v2.AdminUpdateRoleRequest,
+    payload: schemas_v2.UserUpdate,
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -3982,148 +4011,114 @@ def api_v2_admin_update_user_role(
             message="Admin access required.",
         )
 
-    target_user = db.query(models.User).filter(models.User.id == user_id).first()
-    previous_role_ids = [role.id for role in target_user.roles] if target_user else []
-    result = admin_user_service.replace_user_role(db, user_id=user_id, role_id=payload.role_id, team_name=payload.team_name)
-    if result["status"] == "invalid":
-        return _error_response(
-            status_code=status.HTTP_404_NOT_FOUND,
-            code="INVALID_USER_OR_ROLE",
-            message="Invalid user or role.",
-        )
-    if result["status"] == "last_admin_blocked":
-        return _error_response(
-            status_code=status.HTTP_409_CONFLICT,
-            code="LAST_ADMIN_PROTECTED",
-            message="Cannot remove the last Admin role.",
-        )
-
-    db.refresh(target_user)
-    return schemas_v2.AdminUpdateRoleResponse(
-        user=_serialize_admin_user(target_user),
-        previous_role_ids=previous_role_ids,
-        redirect_to="/admin/users?msg=Role+Updated",
-    )
-
-
-@router.put("/admin/users/{user_id}/status", response_model=schemas_v2.AdminUpdateStatusResponse)
-def api_v2_admin_update_user_status(
-    user_id: int,
-    payload: schemas_v2.AdminUpdateStatusRequest,
-    db: Session = Depends(database.get_db),
-    user=Depends(get_current_user_from_cookie),
-):
-    viewer = _require_cookie_user(user)
-    if not viewer:
-        return _error_response(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            code="AUTH_REQUIRED",
-            message="Authentication required.",
-        )
-    if not _has_admin_role(viewer):
-        return _error_response(
-            status_code=status.HTTP_403_FORBIDDEN,
-            code="ADMIN_REQUIRED",
-            message="Admin access required.",
-        )
-
-    target_user = db.query(models.User).filter(models.User.id == user_id).first()
-    if not target_user:
+    db_user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not db_user:
         return _error_response(
             status_code=status.HTTP_404_NOT_FOUND,
             code="USER_NOT_FOUND",
-            message="User not found.",
+            message="User not found"
         )
-    if target_user.id == viewer.id and payload.is_active is False:
+
+    # Role updates and validation
+    if payload.role:
+        from app.domains.workflow.models import RolesMaster
+        role_record = db.query(RolesMaster).filter(
+            RolesMaster.role_name.ilike(payload.role)
+        ).first()
+        if not role_record:
+            return _error_response(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="INVALID_ROLE",
+                message=f"Role '{payload.role}' does not exist"
+            )
+        if not role_record.active_status:
+            return _error_response(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="INACTIVE_ROLE",
+                message=f"Role '{payload.role}' is inactive"
+            )
+
+        # Admin count check to protect the last admin
+        was_admin = db_user.role and db_user.role.lower() == "admin"
+        is_new_admin = role_record.role_name.lower() == "admin"
+        if was_admin and not is_new_admin:
+            admin_count = db.query(models.User).filter(models.User.role.ilike("admin")).count()
+            if admin_count <= 1:
+                return _error_response(
+                    status_code=status.HTTP_409_CONFLICT,
+                    code="LAST_ADMIN_PROTECTED",
+                    message="Cannot remove the last Admin role"
+                )
+
+        db_user.role = role_record.role_name
+        db_user.team = role_record.team
+
+    # Other updates
+    if payload.customer_access is not None:
+        db_user.customer_access = payload.customer_access
+    if payload.password:
+        from app.auth import hash_password
+        db_user.password_hash = hash_password(payload.password)
+    if payload.active_status is not None:
+        # Check self lockout
+        if db_user.id == viewer.id and payload.active_status is False:
+            return _error_response(
+                status_code=status.HTTP_409_CONFLICT,
+                code="SELF_LOCKOUT_BLOCKED",
+                message="Cannot disable your own account"
+            )
+        db_user.active_status = payload.active_status
+
+    db.commit()
+    db.refresh(db_user)
+
+    return _serialize_admin_user(db_user)
+
+
+@router.patch("/users/{user_id}/status", response_model=schemas_v2.AdminUser)
+def api_v2_update_user_status(
+
+    user_id: int,
+    payload: schemas_v2.UserStatusUpdate,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+    if not _has_admin_role(viewer):
+        return _error_response(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code="ADMIN_REQUIRED",
+            message="Admin access required.",
+        )
+
+    db_user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not db_user:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="USER_NOT_FOUND",
+            message="User not found"
+        )
+
+    # Check self lockout
+    if db_user.id == viewer.id and payload.active_status is False:
         return _error_response(
             status_code=status.HTTP_409_CONFLICT,
             code="SELF_LOCKOUT_BLOCKED",
-            message="Cannot disable your own account.",
-        )
-    if target_user.is_active != payload.is_active:
-        admin_user_service.toggle_user_status(db, user_id=user_id, actor_user_id=viewer.id)
-        db.refresh(target_user)
-
-    return schemas_v2.AdminUpdateStatusResponse(
-        user=schemas_v2.AdminStatusUser(id=target_user.id, is_active=target_user.is_active),
-        redirect_to="/admin/users",
-    )
-
-
-@router.patch("/admin/users/{user_id}", response_model=schemas_v2.AdminEditUserResponse)
-def api_v2_admin_edit_user(
-    user_id: int,
-    payload: schemas_v2.AdminEditUserRequest,
-    db: Session = Depends(database.get_db),
-    user=Depends(get_current_user_from_cookie),
-):
-    viewer = _require_cookie_user(user)
-    if not viewer:
-        return _error_response(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            code="AUTH_REQUIRED",
-            message="Authentication required.",
-        )
-    if not _has_admin_role(viewer):
-        return _error_response(
-            status_code=status.HTTP_403_FORBIDDEN,
-            code="ADMIN_REQUIRED",
-            message="Admin access required.",
+            message="Cannot disable your own account"
         )
 
-    try:
-        target_user = admin_user_service.update_user_email(db, user_id=user_id, email=payload.email, customer_access=payload.customer_access)
-    except LookupError:
-        return _error_response(
-            status_code=status.HTTP_404_NOT_FOUND,
-            code="USER_NOT_FOUND",
-            message="User not found.",
-        )
+    db_user.active_status = payload.active_status
+    db.commit()
+    db.refresh(db_user)
 
-    return schemas_v2.AdminEditUserResponse(
-        user=_serialize_admin_user(target_user),
-        redirect_to="/admin/users?msg=User+updated",
-    )
+    return _serialize_admin_user(db_user)
 
-
-@router.put("/admin/users/{user_id}/password", response_model=schemas_v2.AdminPasswordUpdateResponse)
-def api_v2_admin_change_password(
-    user_id: int,
-    payload: schemas_v2.AdminPasswordUpdateRequest,
-    db: Session = Depends(database.get_db),
-    user=Depends(get_current_user_from_cookie),
-):
-    viewer = _require_cookie_user(user)
-    if not viewer:
-        return _error_response(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            code="AUTH_REQUIRED",
-            message="Authentication required.",
-        )
-    if not _has_admin_role(viewer):
-        return _error_response(
-            status_code=status.HTTP_403_FORBIDDEN,
-            code="ADMIN_REQUIRED",
-            message="Admin access required.",
-        )
-
-    target_user = admin_user_service.change_password_first_handler(
-        db,
-        user_id=user_id,
-        new_password=payload.new_password,
-    )
-    if not target_user:
-        return _error_response(
-            status_code=status.HTTP_404_NOT_FOUND,
-            code="USER_NOT_FOUND",
-            message="User not found.",
-        )
-
-    return schemas_v2.AdminPasswordUpdateResponse(
-        user=schemas_v2.AdminPasswordUser(id=user_id),
-        password_updated=True,
-        redirect_to="/admin/users",
-    )
 
 
 @router.delete("/admin/users/{user_id}", response_model=schemas_v2.AdminDeleteUserResponse)
@@ -4274,4 +4269,78 @@ def api_v2_sync_chapters(project_id: int, db: Session = Depends(database.get_db)
             created += 1
     db.commit()
     return {"synced": created, "total_chapters": len(cms_chapters)}
+
+
+# ── Clients (v2) ─────────────────────────────────────────────────────────────
+from app.domains.clients import crud as clients_crud
+from app.domains.clients.schemas import (
+    ClientCreate as V2ClientCreate,
+    ClientListResponse as V2ClientListResponse,
+    ClientResponse as V2ClientResponse,
+    ClientUpdate as V2ClientUpdate,
+)
+
+class ClientStatusUpdate(BaseModel):
+    active_status: bool
+
+def _filter_clients_for_user(clients_list: list, user) -> list:
+    if _has_admin_role(user):
+        return clients_list
+    allowed = set(user.customer_access or [])
+    return [
+        c for c in clients_list
+        if (c.company in allowed or c.division in allowed or (getattr(c, 'name_company', None) in allowed))
+    ]
+
+@router.post("/clients", response_model=V2ClientListResponse, status_code=status.HTTP_201_CREATED)
+def api_v2_create_client(client: V2ClientCreate, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
+    _require_cookie_user(user)
+    return clients_crud.create_client(db, client)
+
+@router.get("/clients", response_model=List[V2ClientListResponse])
+def api_v2_list_clients(skip: int = 0, limit: int = 500, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
+    viewer = _require_cookie_user(user)
+    all_clients = clients_crud.get_clients(db, skip=skip, limit=limit)
+    return _filter_clients_for_user(all_clients, viewer)
+
+@router.get("/clients/active", response_model=List[V2ClientListResponse])
+def api_v2_list_active_clients(db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
+    viewer = _require_cookie_user(user)
+    all_clients = clients_crud.get_active_clients(db)
+    return _filter_clients_for_user(all_clients, viewer)
+
+@router.get("/clients/{client_id}", response_model=V2ClientResponse)
+def api_v2_get_client(client_id: int, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
+    viewer = _require_cookie_user(user)
+    client = clients_crud.get_client(db, client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    if not _has_admin_role(viewer):
+        allowed = set(viewer.customer_access or [])
+        if client.company not in allowed and client.division not in allowed and getattr(client, 'name_company', None) not in allowed:
+            raise HTTPException(status_code=404, detail="Client not found")
+    return client
+
+@router.put("/clients/{client_id}", response_model=V2ClientListResponse)
+def api_v2_update_client(client_id: int, data: V2ClientUpdate, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
+    _require_cookie_user(user)
+    updated = clients_crud.update_client(db, client_id, data)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Client not found")
+    return updated
+
+@router.delete("/clients/{client_id}", status_code=status.HTTP_204_NO_CONTENT)
+def api_v2_delete_client(client_id: int, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
+    _require_cookie_user(user)
+    if not clients_crud.delete_client(db, client_id):
+        raise HTTPException(status_code=404, detail="Client not found")
+
+@router.patch("/clients/{client_id}/status", response_model=V2ClientListResponse)
+def api_v2_set_client_status(client_id: int, body: ClientStatusUpdate, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
+    _require_cookie_user(user)
+    updated = clients_crud.set_client_active_status(db, client_id, body.active_status)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Client not found")
+    return updated
+
 
