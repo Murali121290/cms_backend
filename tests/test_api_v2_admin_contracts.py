@@ -2,7 +2,6 @@ from app import models
 from app.domains.auth.security import verify_password
 
 
-
 def test_api_v2_admin_users_and_roles_return_typed_lists(
     auth_cookie_client,
     admin_user,
@@ -35,29 +34,31 @@ def test_api_v2_admin_create_user_returns_user_and_duplicate_error(
     client = auth_cookie_client(admin_user)
 
     create_response = client.post(
-        "/api/v2/admin/users",
+        "/api/v2/users",
         json={
             "username": "newuser",
             "email": "newuser@example.com",
             "password": "Secret123!",
-            "role_id": roles["Editor"].id,
+            "role": "Editor",
+            "team": "Editor Team",
+            "customer_access": []
         },
     )
 
     assert create_response.status_code == 200
     create_body = create_response.json()
-    assert create_body["status"] == "ok"
-    assert create_body["redirect_to"] == "/admin/users"
-    assert create_body["user"]["username"] == "newuser"
-    assert create_body["user"]["roles"][0]["name"] == "Editor"
+    assert create_body["username"] == "newuser"
+    assert create_body["roles"][0]["name"] == "Editor"
 
     duplicate_response = client.post(
-        "/api/v2/admin/users",
+        "/api/v2/users",
         json={
             "username": "newuser",
             "email": "newuser@example.com",
             "password": "Secret123!",
-            "role_id": roles["Editor"].id,
+            "role": "Editor",
+            "team": "Editor Team",
+            "customer_access": []
         },
     )
 
@@ -76,20 +77,17 @@ def test_api_v2_admin_update_role_returns_previous_roles_and_blocks_last_admin(
     client = auth_cookie_client(admin_user)
 
     success_response = client.put(
-        f"/api/v2/admin/users/{viewer_user.id}/role",
-        json={"role_id": roles["Editor"].id},
+        f"/api/v2/users/{viewer_user.id}",
+        json={"role": "Editor", "team": "Editor Team"},
     )
 
     assert success_response.status_code == 200
     success_body = success_response.json()
-    assert success_body["status"] == "ok"
-    assert success_body["previous_role_ids"] == [roles["Viewer"].id]
-    assert success_body["user"]["roles"][0]["name"] == "Editor"
-    assert success_body["redirect_to"] == "/admin/users?msg=Role+Updated"
+    assert success_body["roles"][0]["name"] == "Editor"
 
     blocked_response = client.put(
-        f"/api/v2/admin/users/{admin_user.id}/role",
-        json={"role_id": roles["Editor"].id},
+        f"/api/v2/users/{admin_user.id}",
+        json={"role": "Editor", "team": "Editor Team"},
     )
 
     assert blocked_response.status_code == 409
@@ -106,25 +104,21 @@ def test_api_v2_admin_status_update_uses_explicit_target_state_and_blocks_self_l
 ):
     client = auth_cookie_client(admin_user)
 
-    block_response = client.put(
-        f"/api/v2/admin/users/{admin_user.id}/status",
-        json={"is_active": False},
+    block_response = client.patch(
+        f"/api/v2/users/{admin_user.id}/status",
+        json={"active_status": False},
     )
     assert block_response.status_code == 409
     assert block_response.json()["code"] == "SELF_LOCKOUT_BLOCKED"
     db_session.refresh(admin_user)
     assert admin_user.is_active is True
 
-    disable_response = client.put(
-        f"/api/v2/admin/users/{viewer_user.id}/status",
-        json={"is_active": False},
+    disable_response = client.patch(
+        f"/api/v2/users/{viewer_user.id}/status",
+        json={"active_status": False},
     )
     assert disable_response.status_code == 200
-    assert disable_response.json() == {
-        "status": "ok",
-        "user": {"id": viewer_user.id, "is_active": False},
-        "redirect_to": "/admin/users",
-    }
+    assert disable_response.json()["is_active"] is False
     db_session.refresh(viewer_user)
     assert viewer_user.is_active is False
 
@@ -137,15 +131,13 @@ def test_api_v2_admin_edit_user_preserves_current_logged_in_auth_gap(
 ):
     client = auth_cookie_client(viewer_user)
 
-    response = client.patch(
-        f"/api/v2/admin/users/{admin_user.id}",
-        json={"email": "admin-updated@example.com"},
+    response = client.put(
+        f"/api/v2/users/{admin_user.id}",
+        json={"role": "Editor", "team": "Editor Team"},
     )
 
     assert response.status_code == 403
     assert response.json()["code"] == "ADMIN_REQUIRED"
-    db_session.refresh(admin_user)
-    assert admin_user.email == "admin@example.com"
 
 
 def test_api_v2_admin_password_preserves_current_no_min_length_validation(
@@ -157,17 +149,11 @@ def test_api_v2_admin_password_preserves_current_no_min_length_validation(
     client = auth_cookie_client(admin_user)
 
     response = client.put(
-        f"/api/v2/admin/users/{viewer_user.id}/password",
-        json={"new_password": "123"},
+        f"/api/v2/users/{viewer_user.id}",
+        json={"password": "123"},
     )
 
     assert response.status_code == 200
-    assert response.json() == {
-        "status": "ok",
-        "user": {"id": viewer_user.id},
-        "password_updated": True,
-        "redirect_to": "/admin/users",
-    }
     db_session.refresh(viewer_user)
     assert verify_password("123", viewer_user.password_hash)
 

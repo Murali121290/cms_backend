@@ -416,7 +416,7 @@ def save_xhtml_and_convert(
             logger.warning(f"Failed to read existing XHTML to check for changes: {e}")
 
     # Get user id for archiving
-    from app.models import User
+    from app.domains.auth.models import User
     user_record = db.query(User).filter(User.username == username).first()
     user_id = user_record.id if user_record else None
 
@@ -578,7 +578,7 @@ def save_xhtml_delta_and_convert(
         raise HTTPException(status_code=404, detail="Processed DOCX file not found")
 
     # Get user id for archiving
-    from app.models import User
+    from app.domains.auth.models import User
     user_record = db.query(User).filter(User.username == username).first()
     user_id = user_record.id if user_record else None
 

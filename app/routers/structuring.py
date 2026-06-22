@@ -8,7 +8,7 @@ from typing import Dict, Any
 
 from app import database
 from app.domains.auth.security import get_current_user_from_cookie
-from app.models import User
+from app.domains.auth.models import User
 from app.services import structuring_review_service
 from app.utils.utils.structuring_lib.doc_utils import (
     extract_document_structure,

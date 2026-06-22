@@ -156,7 +156,7 @@ def apply_edits(
     output_path = file_path + ".te.tmp"
 
     # Get user id for archiving
-    from app.models import User
+    from app.domains.auth.models import User
     from app.domains.files import version_service
     from app.utils.timezone import now_ist_naive
     user_record = db.query(User).filter(User.username == username).first()

@@ -21,7 +21,7 @@ from app.integrations.collabora.config import (
     COLLABORA_PUBLIC_URL,
     WOPI_BASE_URL,
 )
-from app.models import User
+from app.domains.auth.models import User
 from app.services import wopi_service
 from app.domains.review import service as review_service
 
