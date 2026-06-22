@@ -231,7 +231,7 @@ def project_factory(db_session, team):
         title: str = "Regression Book",
         client_name: str = "Client A",
         xml_standard: str = "NLM",
-        status: str = "RECEIVED",
+        status: str = "Planning",
     ):
         project = Project(
             code=code,

@@ -15,10 +15,10 @@ class DialectArray(TypeDecorator):
         return dialect.type_descriptor(JSON)
 
 class WorkflowStatus(str, enum.Enum):
-    RECEIVED = "RECEIVED"
-    PROCESSING = "PROCESSING"
+    Planning = "Planning"
+    Inprogress = "In-progress"
     XML_GENERATED = "XML_GENERATED"
-    PUBLISHED = "PUBLISHED"
+    Published = "Published"
 
 from app.domains.auth.models import User, CompatibilityRoleItem, CompatibilityRolesList
 

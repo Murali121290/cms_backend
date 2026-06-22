@@ -63,7 +63,7 @@ def _build_project_bootstrap_upload_plan(
     return upload_plan
 
 def create_project(db: Session, project: ProjectCreate):
-    db_project = Project(**project.dict(), status="RECEIVED")
+    db_project = Project(**project.dict(), status="Planning")
     db.add(db_project)
     db.commit()
     db.refresh(db_project)
