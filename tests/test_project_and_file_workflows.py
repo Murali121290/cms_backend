@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from app import models
+from app.domains.projects.models import Project
 from app.utils.timezone import now_ist_naive
 
 
@@ -39,7 +40,7 @@ def test_project_create_with_files_bootstraps_project_chapters_directories_and_f
     assert response.status_code == 302
     assert response.headers["location"] == "/dashboard"
 
-    project = db_session.query(models.Project).filter(models.Project.code == "BOOK100").first()
+    project = db_session.query(Project).filter(Project.code == "BOOK100").first()
     assert project is not None
     assert project.client_name == "Client A"
 
@@ -116,7 +117,7 @@ def test_project_create_with_files_rejects_chapter_count_mismatch_without_creati
     assert response.status_code == 200
     assert "Create New Project" in response.text
     assert "Number of chapters must exactly match the number of uploaded files." in response.text
-    assert db_session.query(models.Project).filter(models.Project.code == "BOOK101").first() is None
+    assert db_session.query(Project).filter(Project.code == "BOOK101").first() is None
     assert db_session.query(models.Chapter).count() == 0
     assert db_session.query(models.File).count() == 0
     assert not (temp_upload_root / "BOOK101").exists()
@@ -162,7 +163,7 @@ def test_project_create_with_files_mismatch_has_zero_partial_creation(
 
     assert response.status_code == 200
     assert "Number of chapters must exactly match the number of uploaded files." in response.text
-    assert db_session.query(models.Project).filter(models.Project.code == "BOOK101B").first() is None
+    assert db_session.query(Project).filter(Project.code == "BOOK101B").first() is None
     assert db_session.query(models.Chapter).count() == 0
     assert db_session.query(models.File).count() == 0
     assert not (temp_upload_root / "BOOK101B").exists()
@@ -317,7 +318,7 @@ def test_project_create_with_files_rejects_duplicate_derived_stems(
 
     assert response.status_code == 200
     assert "Uploaded files must have unique filename stems." in response.text
-    assert db_session.query(models.Project).filter(models.Project.code == "BOOK103").first() is None
+    assert db_session.query(Project).filter(Project.code == "BOOK103").first() is None
     assert db_session.query(models.Chapter).count() == 0
     assert db_session.query(models.File).count() == 0
     assert not (temp_upload_root / "BOOK103").exists()
@@ -351,7 +352,7 @@ def test_project_create_with_files_uses_chapter_index_and_safe_stem_folder_namin
     )
 
     assert response.status_code == 302
-    project = db_session.query(models.Project).filter(models.Project.code == "BOOK104").first()
+    project = db_session.query(Project).filter(Project.code == "BOOK104").first()
     chapter = db_session.query(models.Chapter).filter(models.Chapter.project == project.code).one()
     assert chapter.number == "01"
     assert chapter.title == "Spacing_Symbols"
@@ -680,7 +681,7 @@ def test_project_delete_removes_project_row_and_project_directory(
 
     assert response.status_code == 302
     assert response.headers["location"] == "/dashboard?msg=Book+Deleted"
-    assert db_session.query(models.Project).filter(models.Project.id == project_record.id).first() is None
+    assert db_session.query(Project).filter(Project.id == project_record.id).first() is None
     assert not project_dir.exists()
 
 

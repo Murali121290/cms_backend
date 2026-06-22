@@ -2,6 +2,7 @@ from app.utils.timezone import now_ist_naive
 from sqlalchemy.orm import Session
 from fastapi import UploadFile
 from app import models
+from app.domains.projects.models import Project
 import shutil
 import os
 from datetime import datetime
@@ -41,7 +42,7 @@ def create_file_record(db: Session, project_id: int, file: UploadFile):
 
 
 def get_project_and_chapter(db: Session, *, project_id: int, chapter_id: int):
-    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    project = db.query(Project).filter(Project.id == project_id).first()
     chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == chapter_id).first()
     return project, chapter
 

@@ -11,7 +11,8 @@ sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, os.path.dirname(__file__))
 
 from app.database import SessionLocal, Base, engine
-from app.models import User, Project, Chapter, File, FileVersion, ProjectStylesheet
+from app.models import User, Chapter, File, FileVersion
+from app.domains.projects.models import Project, ProjectStylesheet
 from app.domains.clients.models import Client
 from app.domains.workflow.models import RolesMaster, StageActivityMaster, StageMaster, StageDetail, WorkflowMaster, ChapterInfo
 
@@ -391,7 +392,7 @@ def seed():
         seeded_chapter_ids = {c['id'] for c in DUMPED_DATA.get('ChapterInfo', [])}
         for row in rows:
             if model_name == "User" and "password" in row:
-                from app.auth import hash_password
+                from app.domains.auth.security import hash_password
                 row_copy = row.copy()
                 row_copy["password_hash"] = hash_password(row_copy["password"])
                 del row_copy["password"]

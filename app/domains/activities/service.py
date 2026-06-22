@@ -3,6 +3,7 @@ from datetime import timedelta
 from sqlalchemy.orm import Session
 
 from app import models
+from app.domains.projects.models import Project
 from app.domains.notifications.service import _format_relative_time
 from app.utils.timezone import now_ist_naive
 
@@ -16,7 +17,7 @@ def get_recent_activities(db: Session, *, file_limit: int = 50, version_limit: i
     activities = []
 
     for file_record in recent_files:
-        project = db.query(models.Project).filter(models.Project.id == file_record.project_id).first()
+        project = db.query(Project).filter(Project.id == file_record.project_id).first()
         chapter = db.query(models.Chapter).filter(models.Chapter.id == file_record.chapter_id).first()
 
         activities.append(
@@ -39,7 +40,7 @@ def get_recent_activities(db: Session, *, file_limit: int = 50, version_limit: i
         if not file_record:
             continue
 
-        project = db.query(models.Project).filter(models.Project.id == file_record.project_id).first()
+        project = db.query(Project).filter(Project.id == file_record.project_id).first()
         chapter = db.query(models.Chapter).filter(models.Chapter.id == file_record.chapter_id).first()
 
         activities.append(

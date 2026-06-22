@@ -9,6 +9,7 @@ from jose import jwt, JWTError
 from datetime import datetime
 
 from app import database, models
+from app.domains.projects.models import Project
 from app.domains.auth.security import create_access_token, verify_password, hash_password, oauth2_scheme, get_current_user_from_cookie
 from app.core.config import get_settings
 from app.services import (
@@ -51,7 +52,7 @@ async def get_metrics(db: Session = Depends(database.get_db)):
     """API endpoint for real-time metrics (no auth required for login/register page)"""
     try:
         total_files = db.query(models.File).count()
-        total_projects = db.query(models.Project).count()
+        total_projects = db.query(Project).count()
         total_macro = total_projects * 2
         active_jobs = 0
         
@@ -388,7 +389,7 @@ async def download_chapter_zip(
     
     # Get the chapter and project
     chapter = db.query(models.Chapter).filter(models.Chapter.id == chapter_id).first()
-    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    project = db.query(Project).filter(Project.id == project_id).first()
     
     if not chapter or not project:
         raise HTTPException(status_code=404, detail="Chapter or Project not found")

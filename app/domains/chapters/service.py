@@ -4,13 +4,14 @@ import shutil
 from sqlalchemy.orm import Session
 
 from app import models
+from app.domains.projects.models import Project
 
 
 _CHAPTER_CATEGORIES = ["Manuscript", "Art", "InDesign", "Proof", "XML"]
 
 
 def create_chapter(db: Session, *, project_id: int, number: str, title: str, upload_dir: str):
-    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         return {"project": None, "chapter": None}
 
@@ -42,7 +43,7 @@ def rename_chapter(
     upload_dir: str,
 ):
     chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == chapter_id).first()
-    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    project = db.query(Project).filter(Project.id == project_id).first()
 
     if not chapter or not project:
         return {"project": project, "chapter": chapter}
@@ -63,7 +64,7 @@ def rename_chapter(
 
 def delete_chapter_primary(db: Session, *, project_id: int, chapter_id: int, upload_dir: str):
     chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == chapter_id).first()
-    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    project = db.query(Project).filter(Project.id == project_id).first()
 
     if not chapter or not project:
         return {"project": project, "chapter": chapter}
@@ -78,7 +79,7 @@ def delete_chapter_primary(db: Session, *, project_id: int, chapter_id: int, upl
 
 
 def delete_chapter_secondary(db: Session, *, project_id: int, chapter_id: int, upload_dir: str):
-    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    project = db.query(Project).filter(Project.id == project_id).first()
     chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == chapter_id).first()
 
     if not chapter or not project:

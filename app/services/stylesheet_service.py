@@ -2,6 +2,7 @@ import json
 from datetime import datetime
 from sqlalchemy.orm import Session
 from app import models, schemas_v2
+from app.domains.projects.models import ProjectStylesheet
 
 
 def _deserialize_ia_rows(raw: str) -> list[schemas_v2.IARow]:
@@ -19,7 +20,7 @@ def _deserialize_file_ids(raw: str | None) -> list[int]:
         return []
 
 
-def _serialize_stylesheet(ss: models.ProjectStylesheet) -> schemas_v2.StylesheetSummary:
+def _serialize_stylesheet(ss: ProjectStylesheet) -> schemas_v2.StylesheetSummary:
     return schemas_v2.StylesheetSummary(
         id=ss.id,
         project_id=ss.project_id,
@@ -37,9 +38,9 @@ def get_stylesheets_for_project(
     db: Session, *, project_id: int
 ) -> dict:
     stylesheets = (
-        db.query(models.ProjectStylesheet)
-        .filter(models.ProjectStylesheet.project_id == project_id)
-        .order_by(models.ProjectStylesheet.created_at.desc())
+        db.query(ProjectStylesheet)
+        .filter(ProjectStylesheet.project_id == project_id)
+        .order_by(ProjectStylesheet.created_at.desc())
         .all()
     )
     active = next((s for s in stylesheets if s.is_active), None)
@@ -51,12 +52,12 @@ def get_stylesheets_for_project(
 
 def get_active_stylesheet_for_project(
     db: Session, *, project_id: int
-) -> models.ProjectStylesheet | None:
+) -> ProjectStylesheet | None:
     return (
-        db.query(models.ProjectStylesheet)
+        db.query(ProjectStylesheet)
         .filter(
-            models.ProjectStylesheet.project_id == project_id,
-            models.ProjectStylesheet.is_active.is_(True),
+            ProjectStylesheet.project_id == project_id,
+            ProjectStylesheet.is_active.is_(True),
         )
         .first()
     )
@@ -71,8 +72,8 @@ def create_stylesheet(
     selected_ia_rows: list[schemas_v2.IARow],
     created_by_id: int | None,
     analyzed_file_ids: list[int] | None = None,
-) -> models.ProjectStylesheet:
-    ss = models.ProjectStylesheet(
+) -> ProjectStylesheet:
+    ss = ProjectStylesheet(
         project_id=project_id,
         name=name,
         description=description,
@@ -97,12 +98,12 @@ def update_stylesheet(
     description: str | None,
     selected_ia_rows: list[schemas_v2.IARow] | None,
     analyzed_file_ids: list[int] | None = None,
-) -> models.ProjectStylesheet | None:
+) -> ProjectStylesheet | None:
     ss = (
-        db.query(models.ProjectStylesheet)
+        db.query(ProjectStylesheet)
         .filter(
-            models.ProjectStylesheet.id == stylesheet_id,
-            models.ProjectStylesheet.project_id == project_id,
+            ProjectStylesheet.id == stylesheet_id,
+            ProjectStylesheet.project_id == project_id,
         )
         .first()
     )
@@ -125,10 +126,10 @@ def delete_stylesheet(
     db: Session, *, stylesheet_id: int, project_id: int
 ) -> bool:
     ss = (
-        db.query(models.ProjectStylesheet)
+        db.query(ProjectStylesheet)
         .filter(
-            models.ProjectStylesheet.id == stylesheet_id,
-            models.ProjectStylesheet.project_id == project_id,
+            ProjectStylesheet.id == stylesheet_id,
+            ProjectStylesheet.project_id == project_id,
         )
         .first()
     )
@@ -144,10 +145,10 @@ def activate_stylesheet(
 ) -> dict | None:
     """Set one stylesheet as active, deactivating all others for the project."""
     target = (
-        db.query(models.ProjectStylesheet)
+        db.query(ProjectStylesheet)
         .filter(
-            models.ProjectStylesheet.id == stylesheet_id,
-            models.ProjectStylesheet.project_id == project_id,
+            ProjectStylesheet.id == stylesheet_id,
+            ProjectStylesheet.project_id == project_id,
         )
         .first()
     )
@@ -156,11 +157,11 @@ def activate_stylesheet(
 
     # Deactivate all others
     others = (
-        db.query(models.ProjectStylesheet)
+        db.query(ProjectStylesheet)
         .filter(
-            models.ProjectStylesheet.project_id == project_id,
-            models.ProjectStylesheet.id != stylesheet_id,
-            models.ProjectStylesheet.is_active.is_(True),
+            ProjectStylesheet.project_id == project_id,
+            ProjectStylesheet.id != stylesheet_id,
+            ProjectStylesheet.is_active.is_(True),
         )
         .all()
     )

@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 
 from app import models
+from app.domains.projects.models import Project
 from app.services import project_service
 
 
@@ -9,7 +10,7 @@ def get_projects_page_data(db: Session, *, skip: int = 0, limit: int = 100):
 
 
 def get_project_chapters_page_data(db: Session, project_id: int):
-    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         return {"project": None, "chapters": []}
 
@@ -26,7 +27,7 @@ def get_project_chapters_page_data(db: Session, project_id: int):
 
 
 def get_chapter_detail_page_data(db: Session, project_id: int, chapter_id: int):
-    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    project = db.query(Project).filter(Project.id == project_id).first()
     chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == chapter_id).first()
     files = db.query(models.File).filter(models.File.chapter_id == chapter_id).all()
 

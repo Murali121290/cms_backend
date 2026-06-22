@@ -408,8 +408,9 @@ def start_process(
         db.commit()
 
     try:
+        from app.domains.projects.models import Project
         version_num = (file_record.version or 1) + 1
-        project = db.query(models.Project).filter(models.Project.id == file_record.project_id).first()
+        project = db.query(Project).filter(Project.id == file_record.project_id).first()
         chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == file_record.chapter_id).first()
 
         if project and chapter:

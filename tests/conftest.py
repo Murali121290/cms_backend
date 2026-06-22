@@ -223,7 +223,7 @@ def temp_docx(tmp_path, docx_factory):
 
 @pytest.fixture()
 def project_factory(db_session, team):
-    from app import models
+    from app.domains.projects.models import Project
 
     def _create(
         *,
@@ -233,7 +233,7 @@ def project_factory(db_session, team):
         xml_standard: str = "NLM",
         status: str = "RECEIVED",
     ):
-        project = models.Project(
+        project = Project(
             code=code,
             title=title,
             client_name=client_name,

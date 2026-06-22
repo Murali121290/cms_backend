@@ -8,10 +8,12 @@ from typing import Any, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File as FastAPIFile, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse
+from pathlib import Path
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from app import database, models, schemas_v2
+from app.domains.projects.models import Project, ProjectStylesheet
 from app.domains.auth.security import get_current_user_from_cookie
 from app.core.config import get_settings
 from app.services import (
@@ -167,7 +169,7 @@ def _serialize_viewer(user: models.User):
     )
 
 
-def _serialize_project_summary(project: models.Project):
+def _serialize_project_summary(project: Project):
     from datetime import datetime as _dt
     due = project.due_date.isoformat() if getattr(project, "due_date", None) else None
     # Fall back to today for projects created before the created_at column was added
@@ -555,7 +557,7 @@ def api_v2_projects(
         )
 
     page_data = project_read_service.get_projects_page_data(db, skip=offset, limit=limit)
-    total = db.query(models.Project).count()
+    total = db.query(Project).count()
     return schemas_v2.ProjectsListResponse(
         projects=[_serialize_project_summary(project) for project in page_data["projects"]],
         pagination=schemas_v2.ProjectsPagination(offset=offset, limit=limit, total=total),
@@ -584,14 +586,14 @@ def api_v2_projects_by_client(
     client_name = client_obj.company if client_obj else None
 
     if client_name:
-        projects = db.query(models.Project).filter(
+        projects = db.query(Project).filter(
             or_(
-                models.Project.client_id == client_id,
-                models.Project.client_name == client_name,
+                Project.client_id == client_id,
+                Project.client_name == client_name,
             )
         ).all()
     else:
-        projects = db.query(models.Project).filter(models.Project.client_id == client_id).all()
+        projects = db.query(Project).filter(Project.client_id == client_id).all()
 
     # Back-fill client_id on projects that matched by name only
     for p in projects:
@@ -968,7 +970,7 @@ def api_v2_update_project(
             message="Authentication required.",
         )
 
-    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         return _error_response(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1090,7 +1092,7 @@ def api_v2_update_project_workflow(
             message="Authentication required.",
         )
 
-    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         return _error_response(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1274,7 +1276,7 @@ def api_v2_list_stylesheets(
             code="AUTH_REQUIRED",
             message="Authentication required.",
         )
-    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         return _error_response(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1309,7 +1311,7 @@ def api_v2_create_stylesheet(
             code="AUTH_REQUIRED",
             message="Authentication required.",
         )
-    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         return _error_response(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1446,7 +1448,7 @@ def api_v2_analyze_files_for_stylesheet(
         )
 
     # Validate project exists
-    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         return _error_response(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1748,7 +1750,7 @@ def api_v2_upload_zip(
             message="Authentication required.",
         )
 
-    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         return _error_response(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -2419,9 +2421,9 @@ def api_v2_technical_scan(
     # Annotate findings with stylesheet matching if stylesheet_id provided
     findings = raw_scan.get("findings", [])
     if stylesheet_id and findings:
-        selected_stylesheet = db.query(models.ProjectStylesheet).filter(
-            models.ProjectStylesheet.id == stylesheet_id,
-            models.ProjectStylesheet.project_id == file_record.project_id,
+        selected_stylesheet = db.query(ProjectStylesheet).filter(
+            ProjectStylesheet.id == stylesheet_id,
+            ProjectStylesheet.project_id == file_record.project_id,
         ).first()
 
         if selected_stylesheet:
@@ -2707,10 +2709,10 @@ def api_v2_export_stylesheet_report(
         raise HTTPException(status_code=401, detail="Authentication required.")
 
     ss = (
-        db.query(models.ProjectStylesheet)
+        db.query(ProjectStylesheet)
         .filter(
-            models.ProjectStylesheet.id == stylesheet_id,
-            models.ProjectStylesheet.project_id == project_id,
+            ProjectStylesheet.id == stylesheet_id,
+            ProjectStylesheet.project_id == project_id,
         )
         .first()
     )
@@ -4244,7 +4246,7 @@ def api_v2_sync_chapters(project_id: int, db: Session = Depends(database.get_db)
     viewer = _require_cookie_user(user)
     if not viewer:
         return _error_response(status_code=status.HTTP_401_UNAUTHORIZED, code="AUTH_REQUIRED", message="Authentication required.")
-    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="PROJECT_NOT_FOUND", message="Project not found.")
     cms_chapters = db.query(models.Chapter).filter(models.Chapter.project == project.project_code).all()
