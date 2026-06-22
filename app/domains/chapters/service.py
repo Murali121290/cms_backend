@@ -15,12 +15,25 @@ def create_chapter(db: Session, *, project_id: int, number: str, title: str, upl
     if not project:
         return {"project": None, "chapter": None}
 
+    from app.domains.workflow.models import WorkflowMaster
+    from sqlalchemy import or_
+    
+    first_stage = None
+    if project.workflow_name:
+        first_stage_row = db.query(WorkflowMaster).filter(
+            WorkflowMaster.workflow_name == project.workflow_name,
+            or_(WorkflowMaster.previous_stage.is_(None), WorkflowMaster.previous_stage == "")
+        ).first()
+        if first_stage_row:
+            first_stage = first_stage_row.stage_name
+
     new_chapter = models.ChapterInfo(
         client=project.division_code or "",
         project=project.project_code or "",
         chapters=number,
         chapter_title=title,
-        status="In-progress"
+        status="In-progress",
+        stage_name=first_stage
     )
     db.add(new_chapter)
     db.commit()

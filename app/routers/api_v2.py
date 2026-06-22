@@ -926,9 +926,28 @@ def api_v2_project_bootstrap(
 
     # Sync CMS chapters → WMS ChapterInfo records so planning page has data
     from app.domains.workflow.models import ChapterInfo as _ChapterInfo
+    from app.domains.workflow.models import WorkflowMaster as _WorkflowMaster
+    from sqlalchemy import or_ as _or
+    
+    first_stage = None
+    if project.workflow_name:
+        first_stage_row = db.query(_WorkflowMaster).filter(
+            _WorkflowMaster.workflow_name == project.workflow_name,
+            _or(_WorkflowMaster.previous_stage.is_(None), _WorkflowMaster.previous_stage == "")
+        ).first()
+        if first_stage_row:
+            first_stage = first_stage_row.stage_name
+
     _existing_ci = {
         ci.chapters for ci in db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code).all()
     }
+    # Update workflow and stage_name for any existing ChapterInfo records that were created during project service instantiation
+    if project.workflow_name:
+        db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code).update({
+            _ChapterInfo.workflow: project.workflow_name,
+            _ChapterInfo.stage_name: first_stage
+        }, synchronize_session=False)
+
     for _ch in chapters:
         if _ch.number and _ch.number not in _existing_ci:
             db.add(_ChapterInfo(
@@ -940,6 +959,7 @@ def api_v2_project_bootstrap(
                 status="Received",
                 complexity_level=getattr(project, "composition", None) or "Medium",
                 stage_level=1,
+                stage_name=first_stage,
                 published_status="Draft",
                 priority=getattr(project, "priority", None) or "Normal",
                 project_manager_name=getattr(project, "project_manager", None) or None,
@@ -1834,6 +1854,17 @@ def api_v2_upload_zip(
                         models.Chapter.chapters == chapter_no_str,
                     ).first()
                     if not chapter:
+                        from app.domains.workflow.models import WorkflowMaster as _WorkflowMaster
+                        from sqlalchemy import or_ as _or
+                        first_stage = None
+                        if project.workflow_name:
+                            first_stage_row = db.query(_WorkflowMaster).filter(
+                                _WorkflowMaster.workflow_name == project.workflow_name,
+                                _or(_WorkflowMaster.previous_stage.is_(None), _WorkflowMaster.previous_stage == "")
+                            ).first()
+                            if first_stage_row:
+                                first_stage = first_stage_row.stage_name
+
                         chapter = models.Chapter(
                             client=project.client_name or "",
                             project=project.project_code,
@@ -1843,6 +1874,7 @@ def api_v2_upload_zip(
                             status="Received",
                             complexity_level=getattr(project, "composition", None) or "Medium",
                             stage_level=1,
+                            stage_name=first_stage,
                             published_status="Draft",
                             priority=getattr(project, "priority", None) or "Normal",
                         )
@@ -1914,6 +1946,18 @@ def api_v2_upload_zip(
 
         # Sync: ensure every CMS chapter has a matching WMS ChapterInfo record
         from app.domains.workflow.models import ChapterInfo as _ChapterInfo
+        from app.domains.workflow.models import WorkflowMaster as _WorkflowMaster
+        from sqlalchemy import or_ as _or
+
+        first_stage = None
+        if project.workflow_name:
+            first_stage_row = db.query(_WorkflowMaster).filter(
+                _WorkflowMaster.workflow_name == project.workflow_name,
+                _or(_WorkflowMaster.previous_stage.is_(None), _WorkflowMaster.previous_stage == "")
+            ).first()
+            if first_stage_row:
+                first_stage = first_stage_row.stage_name
+
         all_cms_chapters = db.query(models.Chapter).filter(models.Chapter.project == project.project_code).all()
         existing_ci_nums = {
             ci.chapters for ci in db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code).all()
@@ -1929,6 +1973,7 @@ def api_v2_upload_zip(
                     status="Received",
                     complexity_level=getattr(project, "composition", None) or "Medium",
                     stage_level=1,
+                    stage_name=first_stage,
                     published_status="Draft",
                     priority=getattr(project, "priority", None) or "Normal",
                     project_manager_name=getattr(project, "project_manager", None) or None,
@@ -4249,6 +4294,18 @@ def api_v2_sync_chapters(project_id: int, db: Session = Depends(database.get_db)
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="PROJECT_NOT_FOUND", message="Project not found.")
+    from app.domains.workflow.models import WorkflowMaster as _WorkflowMaster
+    from sqlalchemy import or_ as _or
+
+    first_stage = None
+    if project.workflow_name:
+        first_stage_row = db.query(_WorkflowMaster).filter(
+            _WorkflowMaster.workflow_name == project.workflow_name,
+            _or(_WorkflowMaster.previous_stage.is_(None), _WorkflowMaster.previous_stage == "")
+        ).first()
+        if first_stage_row:
+            first_stage = first_stage_row.stage_name
+
     cms_chapters = db.query(models.Chapter).filter(models.Chapter.project == project.project_code).all()
     existing_nums = {ci.chapters for ci in db.query(ChapterInfo).filter(ChapterInfo.project == project.code).all()}
     created = 0
@@ -4263,6 +4320,7 @@ def api_v2_sync_chapters(project_id: int, db: Session = Depends(database.get_db)
                 status="Received",
                 complexity_level=getattr(project, "composition", None) or "Medium",
                 stage_level=1,
+                stage_name=first_stage,
                 published_status="Draft",
                 priority=getattr(project, "priority", None) or "Normal",
                 project_manager_name=getattr(project, "project_manager", None) or None,
