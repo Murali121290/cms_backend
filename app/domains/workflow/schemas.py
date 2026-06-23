@@ -241,6 +241,7 @@ class ChapterInfoBase(BaseModel):
     published_status: str = "Draft"
     remarks: Optional[str] = None
     manuscript_pages: Optional[int] = None
+    word_count: Optional[int] = None
     priority: str = "Normal"
     delayed_stages: Optional[Dict[str, int]] = None
 

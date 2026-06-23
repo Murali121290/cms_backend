@@ -18,6 +18,7 @@ export interface Chapter {
   published_status: string
   remarks: string | null
   manuscript_pages: number | null
+  word_count: number | null
   priority: string
   delayed_stages: Record<string, number> | null
   created_at: string

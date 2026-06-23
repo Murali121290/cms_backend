@@ -171,6 +171,7 @@ class ChapterInfo(Base):
     published_status       = Column(String(30),  nullable=False, default="Draft")
     remarks                = Column(Text,        nullable=True)
     manuscript_pages       = Column(Integer,     nullable=True)
+    word_count             = Column(Integer,     nullable=True)
     priority               = Column(String(20),  nullable=False, default="Normal")
     delayed_stages         = Column(String,      nullable=True)  # JSON stored as text
     created_at             = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

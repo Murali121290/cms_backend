@@ -429,8 +429,11 @@ export function ProjectPlanningPage() {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-[144px] z-20 bg-background whitespace-nowrap w-[176px] min-w-[176px] max-w-[176px] shadow-[inset_-1px_0_0_var(--color-border)]">
                   File Name
                 </th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-muted uppercase tracking-wider sticky left-[320px] z-20 bg-background whitespace-nowrap w-[112px] min-w-[112px] max-w-[112px] shadow-[inset_-2px_0_0_var(--color-border)]">
+                <th className="px-4 py-3 text-center text-xs font-semibold text-muted uppercase tracking-wider sticky left-[320px] z-20 bg-background whitespace-nowrap w-[112px] min-w-[112px] max-w-[112px] shadow-[inset_-1px_0_0_var(--color-border)]">
                   MS Pages
+                </th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-muted uppercase tracking-wider sticky left-[432px] z-20 bg-background whitespace-nowrap w-[96px] min-w-[96px] max-w-[96px] shadow-[inset_-2px_0_0_var(--color-border)]">
+                  CE Pages
                 </th>
                 {baseSchedule.map(s => (
                   <th key={s.stageName} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider whitespace-nowrap min-w-56 border-r border-border last:border-r-0">
@@ -467,8 +470,11 @@ export function ProjectPlanningPage() {
                       <td className="px-4 py-3 text-xs text-muted sticky left-[144px] z-10 whitespace-nowrap w-[176px] min-w-[176px] max-w-[176px] shadow-[inset_-1px_0_0_var(--color-border)] max-w-[176px] truncate bg-card group-hover:bg-accent transition-colors">
                         {ch.chapter_title || '—'}
                       </td>
-                      <td className="px-4 py-3 text-xs text-center sticky left-[320px] z-10 whitespace-nowrap w-[112px] min-w-[112px] max-w-[112px] shadow-[inset_-2px_0_0_var(--color-border)] font-medium text-text bg-card group-hover:bg-accent transition-colors">
+                      <td className="px-4 py-3 text-xs text-center sticky left-[320px] z-10 whitespace-nowrap w-[112px] min-w-[112px] max-w-[112px] shadow-[inset_-1px_0_0_var(--color-border)] font-medium text-text bg-card group-hover:bg-accent transition-colors">
                         {ch.manuscript_pages != null ? ch.manuscript_pages : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-center sticky left-[432px] z-10 whitespace-nowrap w-[96px] min-w-[96px] max-w-[96px] shadow-[inset_-2px_0_0_var(--color-border)] font-medium text-text bg-card group-hover:bg-accent transition-colors">
+                        {ch.word_count != null ? Math.floor(ch.word_count / 250) : '—'}
                       </td>
                       {chSched.map(s => {
                         const isCellEdited = s.slaDays !== (baseSlaMap.get(s.stageName) ?? null)

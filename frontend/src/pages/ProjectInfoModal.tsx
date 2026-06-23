@@ -192,6 +192,7 @@ export function ProjectInfoModal({ project, open, mode, onClose, onUpdated }: Pr
 
         {/* Read-only page / chapter info */}
         <InfoField label="Manuscript Pages" value={project.manuscript_pages} />
+        <InfoField label="CE Pages"         value={Math.floor((project.manuscript_pages ?? 0) / 250)} />
         <InfoField label="Estimated Pages"  value={project.estimated_pages} />
         <InfoField label="Chapter Count"    value={project.chapter_count} />
 

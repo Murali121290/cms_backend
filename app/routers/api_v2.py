@@ -1981,6 +1981,61 @@ def api_v2_upload_zip(
                 existing_ci_nums.add(_ch.chapters)
         db.commit()
 
+        # Extract word count and manuscript pages from docx files
+        try:
+            import docx
+            from lxml import etree as ET
+            
+            chapter_docx_map = {}
+            for ch_entry in chapters_list:
+                if ch_entry.chapter_no is not None and ch_entry.path.lower().endswith(".docx"):
+                    if "Manuscript" in ch_entry.path:
+                        if ch_entry.chapter_no not in chapter_docx_map:
+                            chapter_docx_map[ch_entry.chapter_no] = []
+                        chapter_docx_map[ch_entry.chapter_no].append(ch_entry.path)
+            
+            if chapter_docx_map:
+                NS = "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"
+                ci_records = db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code).all()
+                ci_dict = {ci.chapters: ci for ci in ci_records if ci.chapters}
+                
+                for chapter_no_int, docx_paths in chapter_docx_map.items():
+                    chapter_no_str = f"{chapter_no_int:02d}"
+                    ci_record = ci_dict.get(chapter_no_str)
+                    
+                    if ci_record:
+                        total_word_count = 0
+                        total_pages = 0
+                        
+                        for docx_path in docx_paths:
+                            if not os.path.exists(docx_path):
+                                continue
+                            try:
+                                doc = docx.Document(docx_path)
+                                total_word_count += sum(len(p.text.split()) for p in doc.paragraphs)
+                            except Exception as e:
+                                pass
+                                
+                            try:
+                                with zipfile.ZipFile(docx_path) as z:
+                                    if "docProps/app.xml" in z.namelist():
+                                        with z.open("docProps/app.xml") as f:
+                                            tree = ET.parse(f)
+                                            pages_el = tree.find(f"{{{NS}}}Pages")
+                                            if pages_el is not None and pages_el.text:
+                                                total_pages += int(pages_el.text)
+                            except Exception as e:
+                                pass
+                                
+                        if total_word_count > 0:
+                            ci_record.word_count = (ci_record.word_count or 0) + total_word_count
+                        if total_pages > 0:
+                            ci_record.manuscript_pages = (ci_record.manuscript_pages or 0) + total_pages
+                            
+                db.commit()
+        except Exception as e:
+            pass
+
         final_chapters_count = db.query(models.Chapter).filter(models.Chapter.project == project.project_code).count()
         chapters_inserted = final_chapters_count - initial_chapters_count
         unique_extracted_chapters = len({c.chapter_no for c in chapters_list if c.chapter_no is not None})
