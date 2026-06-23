@@ -74,23 +74,6 @@ class WebDAVLock(Base):
     file = relationship("File")
     owner = relationship("User")
 
-class ProjectStylesheet(Base):
-    __tablename__ = "project_stylesheets"
-    id = Column(Integer, primary_key=True, index=True)
-    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False, index=True)
-    lock_token = Column(String(200), unique=True, nullable=False, index=True)
-    owner_user_id = Column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    expires_at = Column(DateTime(timezone=True), nullable=True)
-    last_refresh_at = Column(DateTime(timezone=True), nullable=True, server_default=func.now(), onupdate=func.now())
-    user_agent = Column(String(512), nullable=True)
-    remote_addr = Column(String(128), nullable=True)
-
-    file = relationship("File")
-    owner = relationship("User")
-
-
-
 # Import all other domain models to register them in Base.metadata for foreign keys
 from app.domains.clients.models import Client  # noqa: F401
 from app.domains.workflow.models import (  # noqa: F401
