@@ -420,16 +420,16 @@ export function ProjectPlanningPage() {
             <p className="text-sm">No workflow stages found. Assign a workflow to this project first.</p>
           </div>
         ) : (
-          <table className="w-full border-collapse text-sm">
+          <table className="w-full border-collapse text-sm min-w-max">
             <thead>
-              <tr className="bg-surface border-b-2 border-border">
-                <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-0 z-20 bg-surface whitespace-nowrap min-w-36 border-r border-border">
+              <tr className="bg-background border-b-2 border-border">
+                <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-0 z-20 bg-background whitespace-nowrap w-[144px] min-w-[144px] max-w-[144px] shadow-[inset_-1px_0_0_var(--color-border)]">
                   Chapter
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-36 z-20 bg-surface whitespace-nowrap min-w-44 border-r border-border">
+                <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-[144px] z-20 bg-background whitespace-nowrap w-[176px] min-w-[176px] max-w-[176px] shadow-[inset_-1px_0_0_var(--color-border)]">
                   File Name
                 </th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-muted uppercase tracking-wider sticky left-80 z-20 bg-surface whitespace-nowrap min-w-28 border-r-2 border-border">
+                <th className="px-4 py-3 text-center text-xs font-semibold text-muted uppercase tracking-wider sticky left-[320px] z-20 bg-background whitespace-nowrap w-[112px] min-w-[112px] max-w-[112px] shadow-[inset_-2px_0_0_var(--color-border)]">
                   MS Pages
                 </th>
                 {baseSchedule.map(s => (
@@ -459,17 +459,15 @@ export function ProjectPlanningPage() {
                   return (
                     <tr
                       key={ch.id}
-                      className={`border-b border-border hover:bg-accent/20 transition-colors ${
-                        idx % 2 === 0 ? 'bg-background' : 'bg-surface/20'
-                      }`}
+                      className="border-b border-border hover:bg-accent transition-colors group bg-card"
                     >
-                      <td className="px-4 py-3 font-semibold text-text sticky left-0 z-10 bg-inherit whitespace-nowrap border-r border-border">
+                      <td className="px-4 py-3 font-semibold text-text sticky left-0 z-10 whitespace-nowrap w-[144px] min-w-[144px] max-w-[144px] shadow-[inset_-1px_0_0_var(--color-border)] bg-card group-hover:bg-accent transition-colors">
                         {ch.chapters}
                       </td>
-                      <td className="px-4 py-3 text-xs text-muted sticky left-36 z-10 bg-inherit whitespace-nowrap border-r border-border max-w-[11rem] truncate">
+                      <td className="px-4 py-3 text-xs text-muted sticky left-[144px] z-10 whitespace-nowrap w-[176px] min-w-[176px] max-w-[176px] shadow-[inset_-1px_0_0_var(--color-border)] max-w-[176px] truncate bg-card group-hover:bg-accent transition-colors">
                         {ch.chapter_title || '—'}
                       </td>
-                      <td className="px-4 py-3 text-xs text-center sticky left-80 z-10 bg-inherit whitespace-nowrap border-r-2 border-border font-medium text-text">
+                      <td className="px-4 py-3 text-xs text-center sticky left-[320px] z-10 whitespace-nowrap w-[112px] min-w-[112px] max-w-[112px] shadow-[inset_-2px_0_0_var(--color-border)] font-medium text-text bg-card group-hover:bg-accent transition-colors">
                         {ch.manuscript_pages != null ? ch.manuscript_pages : '—'}
                       </td>
                       {chSched.map(s => {
