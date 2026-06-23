@@ -15,13 +15,13 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from app import database
-from app.auth import get_current_user_from_cookie
+from app.domains.auth.security import get_current_user_from_cookie
 from app.integrations.collabora.config import (
     COLLABORA_BASE_URL,
     COLLABORA_PUBLIC_URL,
     WOPI_BASE_URL,
 )
-from app.models import User
+from app.domains.auth.models import User
 from app.services import wopi_service
 from app.domains.review import service as review_service
 

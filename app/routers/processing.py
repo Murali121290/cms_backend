@@ -12,7 +12,7 @@ import traceback
 from datetime import datetime
 
 from app import models, database
-from app.auth import get_current_user_from_cookie
+from app.domains.auth.security import get_current_user_from_cookie
 from app.services import processing_service, technical_editor_service
 from app.processing.ppd_engine import PPDEngine
 from app.processing.permissions_engine import PermissionsEngine

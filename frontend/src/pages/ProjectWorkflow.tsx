@@ -21,7 +21,6 @@ import { FullPageSpinner, Spinner } from '@/components/ui/Spinner'
 import { uiPaths } from '@/utils/appPaths'
 import { useStylesheetsQuery } from '@/features/stylesheets/useStylesheetsQuery'
 import { ProjectInfoModal } from './ProjectInfoModal'
-import { ProjectPlanningModal } from './ProjectPlanningModal'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -288,7 +287,6 @@ export function ProjectWorkflow() {
 
   const [isInfoOpen, setIsInfoOpen] = useState(false)
   const [isEditOpen, setIsEditOpen] = useState(false)
-  const [isPlanningOpen, setIsPlanningOpen] = useState(false)
 
 
   const stylesheetsQuery = useStylesheetsQuery(id || null)
@@ -457,7 +455,7 @@ export function ProjectWorkflow() {
                 <Edit2 size={14} />
               </button>
               <button
-                onClick={() => setIsPlanningOpen(true)}
+                onClick={() => navigate(`/projects/${id}/planning`)}
                 title="Project planning"
                 className="text-muted hover:text-primary transition-colors flex-shrink-0 ml-1.5"
               >
@@ -723,17 +721,6 @@ export function ProjectWorkflow() {
         onUpdated={updated => {
           setProject(updated)
           setIsEditOpen(false)
-        }}
-      />
-
-      {/* Planning Modal */}
-      <ProjectPlanningModal
-        projectId={id}
-        open={isPlanningOpen}
-        onClose={() => setIsPlanningOpen(false)}
-        onApproved={() => {
-          setProject(p => p ? { ...p, status: 'Active' } : null)
-          setIsPlanningOpen(false)
         }}
       />
 

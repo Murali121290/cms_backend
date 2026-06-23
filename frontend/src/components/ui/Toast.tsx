@@ -20,43 +20,50 @@ const variantConfig: Record<
     iconClass: string;
     borderClass: string;
     bgClass: string;
+    textClass: string;
   }
 > = {
   success: {
     icon: CheckCircle2,
-    iconClass: "text-success-600",
-    borderClass: "border-success-100",
-    bgClass: "bg-white",
+    iconClass: "text-green-800",
+    borderClass: "border-green-200",
+    bgClass: "bg-green-50",
+    textClass: "text-green-800",
   },
   error: {
     icon: AlertCircle,
-    iconClass: "text-danger",
-    borderClass: "border-danger/20",
-    bgClass: "bg-white",
+    iconClass: "text-red-800",
+    borderClass: "border-red-200",
+    bgClass: "bg-red-50",
+    textClass: "text-red-800",
   },
   warning: {
     icon: AlertTriangle,
-    iconClass: "text-warning-600",
-    borderClass: "border-warning-100",
-    bgClass: "bg-white",
+    iconClass: "text-yellow-800",
+    borderClass: "border-yellow-200",
+    bgClass: "bg-yellow-50",
+    textClass: "text-yellow-800",
   },
   info: {
     icon: Info,
-    iconClass: "text-info-600",
-    borderClass: "border-info-100",
-    bgClass: "bg-white",
+    iconClass: "text-blue-800",
+    borderClass: "border-blue-200",
+    bgClass: "bg-blue-50",
+    textClass: "text-blue-800",
   },
   processing: {
     icon: Loader2,
-    iconClass: "text-[#C9821A] animate-spin",
-    borderClass: "border-border border-l-4 border-l-[#C9821A]",
-    bgClass: "bg-white",
+    iconClass: "text-amber-800 animate-spin",
+    borderClass: "border-amber-200",
+    bgClass: "bg-amber-50",
+    textClass: "text-amber-800",
   },
   timeout: {
     icon: AlertTriangle,
-    iconClass: "text-[#92400E]",
-    borderClass: "border-border border-l-4 border-l-[#92400E]",
-    bgClass: "bg-white",
+    iconClass: "text-orange-800",
+    borderClass: "border-orange-200",
+    bgClass: "bg-orange-50",
+    textClass: "text-orange-800",
   },
 };
 
@@ -71,7 +78,6 @@ interface ToastItemProps {
 function ToastItem({ toast, onRemove }: ToastItemProps) {
   const config = variantConfig[toast.variant];
   const Icon = config.icon;
-  const isTimeout = toast.variant === "timeout";
 
   return (
     <div
@@ -90,16 +96,11 @@ function ToastItem({ toast, onRemove }: ToastItemProps) {
       />
 
       <div className="flex-1 min-w-0">
-        <p
-          className={cn(
-            "text-sm font-medium leading-snug",
-            isTimeout ? "text-[#92400E]" : "text-text"
-          )}
-        >
+        <p className={cn("text-sm font-medium leading-snug", config.textClass)}>
           {toast.title}
         </p>
         {toast.description && (
-          <p className="mt-0.5 text-xs text-muted leading-relaxed">
+          <p className={cn("mt-0.5 text-xs leading-relaxed opacity-85", config.textClass)}>
             {toast.description}
           </p>
         )}
@@ -109,7 +110,10 @@ function ToastItem({ toast, onRemove }: ToastItemProps) {
         type="button"
         onClick={() => onRemove(toast.id)}
         aria-label="Dismiss notification"
-        className="shrink-0 -mt-0.5 -mr-0.5 p-1 rounded-sm text-muted hover:text-text hover:bg-background transition-colors duration-100"
+        className={cn(
+          "shrink-0 -mt-0.5 -mr-0.5 p-1 rounded-sm transition-colors duration-100 opacity-60 hover:opacity-100",
+          config.textClass
+        )}
       >
         <X className="size-3.5" aria-hidden="true" />
       </button>
@@ -129,7 +133,7 @@ export function ToastContainer() {
     <div
       aria-live="polite"
       aria-label="Notifications"
-      className="fixed bottom-4 right-4 z-[9999] flex flex-col gap-2 pointer-events-none"
+      className="fixed top-4 right-4 z-[9999] flex flex-col gap-2 pointer-events-none"
     >
       {toasts.map((toast) => (
         <div key={toast.id} className="pointer-events-auto">

@@ -17,7 +17,6 @@ import { Button } from '@/components/ui/Button'
 import { Spinner, FullPageSpinner } from '@/components/ui/Spinner'
 import { CreateProjectModal } from './CreateProjectModal'
 import { ProjectInfoModal } from './ProjectInfoModal'
-import { ProjectPlanningModal } from './ProjectPlanningModal'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -343,7 +342,7 @@ export function ClientProjects() {
   const [createOpen,      setCreateOpen]      = useState(false)
   const [infoProject,     setInfoProject]     = useState<Project | null>(null)
   const [editProject,     setEditProject]     = useState<Project | null>(null)
-  const [planningProjectId, setPlanningProjectId] = useState<number | null>(null)
+
 
   const [viewMode, setViewMode] = useViewMode('view:client-projects', 'large')
 
@@ -507,18 +506,7 @@ export function ClientProjects() {
         }}
       />
 
-      {/* Planning Modal */}
-      <ProjectPlanningModal
-        projectId={planningProjectId}
-        open={planningProjectId !== null}
-        onClose={() => setPlanningProjectId(null)}
-        onApproved={() => {
-          setProjects(ps => ps.map(p =>
-            p.id === planningProjectId ? { ...p, status: 'Active' } : p
-          ))
-          setPlanningProjectId(null)
-        }}
-      />
+
 
       {/* Create Project Modal */}
       <CreateProjectModal
@@ -553,7 +541,7 @@ export function ClientProjects() {
                     if (project.status === 'Planning') { toast.error('Planning not approved yet.'); return }
                     navigate(`/clients/${clientId}/projects/${project.id}`)
                   }}
-                  onOpenPlanning={() => setPlanningProjectId(project.id)} />
+                  onOpenPlanning={() => navigate(`/projects/${project.id}/planning`)} />
               ))}
             </div>
           )}

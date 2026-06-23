@@ -6,7 +6,9 @@ from pathlib import Path
 from fastapi import UploadFile
 from sqlalchemy.orm import Session
 
-from app import models, schemas
+from app import models
+from app.domains.projects.models import Project
+from app.domains.projects.schemas import ProjectCreate
 
 
 class ProjectBootstrapValidationError(Exception):
@@ -60,8 +62,8 @@ def _build_project_bootstrap_upload_plan(
 
     return upload_plan
 
-def create_project(db: Session, project: schemas.ProjectCreate):
-    db_project = models.Project(**project.dict(), status="RECEIVED")
+def create_project(db: Session, project: ProjectCreate):
+    db_project = Project(**project.dict(), status="Planning")
     db.add(db_project)
     db.commit()
     db.refresh(db_project)
@@ -81,7 +83,7 @@ def create_project_with_initial_files(
 ):
     valid_uploads = [upload for upload in files or [] if upload.filename]
     if not valid_uploads:
-        new_project = schemas.ProjectCreate(
+        new_project = ProjectCreate(
             title=title,
             code=code,
             xml_standard=xml_standard,
@@ -120,7 +122,7 @@ def create_project_with_initial_files(
         files=files,
     )
 
-    new_project = schemas.ProjectCreate(
+    new_project = ProjectCreate(
         title=title,
         code=code,
         xml_standard=xml_standard,
@@ -176,7 +178,7 @@ def create_project_with_initial_files(
 
 
 def update_project_status(db: Session, project_id: int, status: str):
-    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    project = db.query(Project).filter(Project.id == project_id).first()
     if project:
         project.status = status
         db.commit()
@@ -184,10 +186,10 @@ def update_project_status(db: Session, project_id: int, status: str):
     return project
 
 def get_projects(db: Session, skip: int = 0, limit: int = 100):
-    return db.query(models.Project).offset(skip).limit(limit).all()
+    return db.query(Project).offset(skip).limit(limit).all()
 
 def delete_project(db, project_id: int):
-    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         return None
     db.delete(project)
@@ -196,7 +198,7 @@ def delete_project(db, project_id: int):
 
 
 def delete_project_v2(db, project_id: int):
-    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         return None
     db.delete(project)
@@ -205,7 +207,7 @@ def delete_project_v2(db, project_id: int):
 
 
 def delete_project_with_filesystem(db: Session, *, project_id: int, upload_dir: str):
-    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         return None
 

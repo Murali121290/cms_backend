@@ -1,7 +1,9 @@
 from pathlib import Path
 
 from app import models
-from app.auth import verify_password
+from app.domains.auth.security import verify_password
+from app.domains.projects.models import Project
+
 
 
 def test_admin_create_user_assigns_selected_role_and_redirects(
@@ -191,7 +193,7 @@ def test_api_v1_projects_routes_preserve_current_compatibility_behavior(
         },
     )
     assert create_response.status_code == 200
-    assert db_session.query(models.Project).filter(models.Project.code == "API100").first() is not None
+    assert db_session.query(Project).filter(Project.code == "API100").first() is not None
 
     status_response = bearer_client.put(f"/api/v1/projects/{project_record.id}/status", params={"status": "PROCESSING"})
     assert status_response.status_code == 200
@@ -206,7 +208,7 @@ def test_api_v1_projects_routes_preserve_current_compatibility_behavior(
     delete_response = cookie_client.delete(f"/api/v1/projects/{project_record.id}")
     assert delete_response.status_code == 200
     assert delete_response.json() == {"message": "Project deleted successfully"}
-    assert db_session.query(models.Project).filter(models.Project.id == project_record.id).first() is None
+    assert db_session.query(Project).filter(Project.id == project_record.id).first() is None
     assert project_dir.exists()
 
 

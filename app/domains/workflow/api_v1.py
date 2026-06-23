@@ -333,7 +333,23 @@ def stage_transition(project: str, chapters: str, payload: TransitionPayload, db
         )
         db.add(to_detail)
     
-    to_detail.stage_status = "In-progress"
+    from app.domains.workflow.models import WorkflowMaster
+    wf_name = to_detail.workflow
+    wf_stage = db.execute(
+        select(WorkflowMaster)
+        .where(
+            WorkflowMaster.workflow_name == wf_name,
+            WorkflowMaster.stage_name == payload.to_stage
+        )
+    ).scalars().first()
+
+    if wf_stage and not wf_stage.next_stage:
+        to_detail.stage_status = "Completed"
+        to_detail.actual_end_date = transition_time
+    else:
+        to_detail.stage_status = "In-progress"
+        to_detail.actual_end_date = None
+
     to_detail.actual_start_date = transition_time
     
     db.commit()

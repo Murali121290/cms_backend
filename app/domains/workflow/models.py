@@ -72,7 +72,7 @@ class RolesMaster(Base):
     @property
     def name(self) -> str:
         # Compatibility mapping to capitalized roles for frontend/serializers
-        from app.models import map_role_to_capitalized
+        from app.domains.auth.models import map_role_to_capitalized
         return map_role_to_capitalized(self.role_name)
 
 

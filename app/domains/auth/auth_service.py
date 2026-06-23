@@ -1,11 +1,11 @@
 from sqlalchemy.orm import Session
 
-from app import models
-from app.auth import create_access_token, hash_password, verify_password
+from app.domains.auth.models import User
+from app.domains.auth.security import create_access_token, hash_password, verify_password
 
 
 def authenticate_browser_user(db: Session, username: str, password: str):
-    user = db.query(models.User).filter(models.User.username == username).first()
+    user = db.query(User).filter(User.username == username).first()
     if not user or not verify_password(password, user.password_hash):
         raise ValueError("Invalid credentials")
 
@@ -26,17 +26,17 @@ def register_browser_user(
     if password != confirm_password:
         raise ValueError("Passwords do not match")
 
-    existing_user = db.query(models.User).filter(
-        (models.User.username == username) | (models.User.email == email)
+    existing_user = db.query(User).filter(
+        (User.username == username) | (User.email == email)
     ).first()
     if existing_user:
         raise ValueError("Username or email already exists")
 
-    is_first_user = db.query(models.User).count() == 0
+    is_first_user = db.query(User).count() == 0
     role_name = "admin" if is_first_user else "viewer"
     team_name = "Admin Team" if is_first_user else "General"
 
-    new_user = models.User(
+    new_user = User(
         username=username,
         email=email,
         password_hash=hash_password(password),

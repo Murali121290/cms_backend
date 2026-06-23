@@ -3,6 +3,8 @@ from pathlib import Path
 import zipfile
 
 from app import models
+from app.domains.projects.models import Project
+
 
 
 def test_api_v2_project_bootstrap_creates_project_chapters_files_and_redirect(
@@ -55,7 +57,7 @@ def test_api_v2_project_bootstrap_creates_project_chapters_files_and_redirect(
     assert (temp_upload_root / "V2BOOK100" / "Chapter 2 - beta" / "Manuscript" / "beta.docx").exists()
     assert not (temp_upload_root / "V2BOOK100" / "01").exists()
 
-    project = db_session.query(models.Project).filter(models.Project.code == "V2BOOK100").first()
+    project = db_session.query(Project).filter(Project.code == "V2BOOK100").first()
     assert project is not None
     chapters = (
         db_session.query(models.Chapter)
@@ -94,7 +96,7 @@ def test_api_v2_project_bootstrap_rejects_mismatch_and_duplicate_stems_without_p
     assert mismatch_response.status_code == 400
     assert mismatch_response.json()["code"] == "PROJECT_BOOTSTRAP_VALIDATION_ERROR"
     assert mismatch_response.json()["message"] == "Number of chapters must exactly match the number of uploaded files."
-    assert db_session.query(models.Project).filter(models.Project.code == "V2BOOK101").first() is None
+    assert db_session.query(Project).filter(Project.code == "V2BOOK101").first() is None
     assert not (temp_upload_root / "V2BOOK101").exists()
 
     duplicate_response = client.post(
@@ -113,7 +115,7 @@ def test_api_v2_project_bootstrap_rejects_mismatch_and_duplicate_stems_without_p
     )
     assert duplicate_response.status_code == 400
     assert duplicate_response.json()["message"] == "Uploaded files must have unique filename stems."
-    assert db_session.query(models.Project).filter(models.Project.code == "V2BOOK102").first() is None
+    assert db_session.query(Project).filter(Project.code == "V2BOOK102").first() is None
     assert not (temp_upload_root / "V2BOOK102").exists()
 
 
@@ -142,7 +144,7 @@ def test_api_v2_project_delete_removes_filesystem_and_returns_redirect_hint(
         },
         "redirect_to": "/dashboard?msg=Book+Deleted",
     }
-    assert db_session.query(models.Project).filter(models.Project.id == project_record.id).first() is None
+    assert db_session.query(Project).filter(Project.id == project_record.id).first() is None
     assert not project_dir.exists()
 
 
@@ -340,7 +342,7 @@ def test_api_v2_project_bootstrap_empty_files_and_zip_upload(
     assert [chapter["number"] for chapter in body["chapters"]] == ["01", "02"]
     assert len(body["ingested_files"]) == 0
 
-    project = db_session.query(models.Project).filter(models.Project.code == "V2BOOKZIP").first()
+    project = db_session.query(Project).filter(Project.code == "V2BOOKZIP").first()
     assert project is not None
     assert project.workflow_name == "WF-01"
 

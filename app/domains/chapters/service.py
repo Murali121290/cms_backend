@@ -4,22 +4,36 @@ import shutil
 from sqlalchemy.orm import Session
 
 from app import models
+from app.domains.projects.models import Project
 
 
 _CHAPTER_CATEGORIES = ["Manuscript", "Art", "InDesign", "Proof", "XML"]
 
 
 def create_chapter(db: Session, *, project_id: int, number: str, title: str, upload_dir: str):
-    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         return {"project": None, "chapter": None}
+
+    from app.domains.workflow.models import WorkflowMaster
+    from sqlalchemy import or_
+    
+    first_stage = None
+    if project.workflow_name:
+        first_stage_row = db.query(WorkflowMaster).filter(
+            WorkflowMaster.workflow_name == project.workflow_name,
+            or_(WorkflowMaster.previous_stage.is_(None), WorkflowMaster.previous_stage == "")
+        ).first()
+        if first_stage_row:
+            first_stage = first_stage_row.stage_name
 
     new_chapter = models.ChapterInfo(
         client=project.division_code or "",
         project=project.project_code or "",
         chapters=number,
         chapter_title=title,
-        status="In-progress"
+        status="In-progress",
+        stage_name=first_stage
     )
     db.add(new_chapter)
     db.commit()
@@ -42,7 +56,7 @@ def rename_chapter(
     upload_dir: str,
 ):
     chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == chapter_id).first()
-    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    project = db.query(Project).filter(Project.id == project_id).first()
 
     if not chapter or not project:
         return {"project": project, "chapter": chapter}
@@ -63,7 +77,7 @@ def rename_chapter(
 
 def delete_chapter_primary(db: Session, *, project_id: int, chapter_id: int, upload_dir: str):
     chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == chapter_id).first()
-    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    project = db.query(Project).filter(Project.id == project_id).first()
 
     if not chapter or not project:
         return {"project": project, "chapter": chapter}
@@ -78,7 +92,7 @@ def delete_chapter_primary(db: Session, *, project_id: int, chapter_id: int, upl
 
 
 def delete_chapter_secondary(db: Session, *, project_id: int, chapter_id: int, upload_dir: str):
-    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    project = db.query(Project).filter(Project.id == project_id).first()
     chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == chapter_id).first()
 
     if not chapter or not project:
