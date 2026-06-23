@@ -313,6 +313,74 @@ def stage_transition(project: str, chapters: str, payload: TransitionPayload, db
         if from_detail.actual_start_date:
             delta = transition_time - from_detail.actual_start_date
             from_detail.total_time_taken = delta.total_seconds() / 3600.0
+        
+        # Calculate completion delay
+        if from_detail.planned_end_date and transition_time.date() > from_detail.planned_end_date.date():
+            from_detail.delayed = True
+            from_detail.delay_days = (transition_time.date() - from_detail.planned_end_date.date()).days
+        else:
+            from_detail.delayed = False
+            from_detail.delay_days = 0
+
+        # Cascade delay propagation (shifting subsequent stages)
+        if from_detail.delay_days and from_detail.delay_days > 0:
+            from app.domains.workflow.models import WorkflowMaster
+            wf_stages = db.execute(
+                select(WorkflowMaster)
+                .where(WorkflowMaster.workflow_name == from_detail.workflow)
+            ).scalars().all()
+            
+            stage_by_name = {s.stage_name: s for s in wf_stages}
+            subsequent_stages = []
+            visited = set()
+            curr = stage_by_name.get(payload.to_stage)
+            while curr and curr.stage_name not in visited:
+                subsequent_stages.append(curr.stage_name)
+                visited.add(curr.stage_name)
+                curr = stage_by_name.get(curr.next_stage) if curr.next_stage else None
+                
+            if subsequent_stages:
+                from datetime import timedelta
+                shift_delta = timedelta(days=from_detail.delay_days)
+                subsequent_details = db.execute(
+                    select(StageDetail)
+                    .where(
+                        StageDetail.project == project,
+                        StageDetail.chapters == chapters,
+                        StageDetail.stage_name.in_(subsequent_stages)
+                    )
+                ).scalars().all()
+                for sd in subsequent_details:
+                    if sd.planned_start_date:
+                        sd.planned_start_date += shift_delta
+                    if sd.planned_end_date:
+                        sd.planned_end_date += shift_delta
+
+        # Sync ChapterInfo delayed_stages
+        from app.domains.workflow.models import ChapterInfo
+        import json
+        chapter_info = db.execute(
+            select(ChapterInfo)
+            .where(
+                ChapterInfo.project == project,
+                ChapterInfo.chapters == chapters
+            )
+        ).scalars().first()
+        if chapter_info:
+            current_delays = {}
+            if chapter_info.delayed_stages:
+                try:
+                    current_delays = json.loads(chapter_info.delayed_stages)
+                    if not isinstance(current_delays, dict):
+                        current_delays = {}
+                except Exception:
+                    current_delays = {}
+            if from_detail.delayed:
+                current_delays[from_detail.stage_name] = from_detail.delay_days
+            else:
+                current_delays.pop(from_detail.stage_name, None)
+            chapter_info.delayed_stages = json.dumps(current_delays)
+
     
     to_detail = db.execute(
         select(StageDetail)

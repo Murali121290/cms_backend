@@ -248,9 +248,16 @@ class ChapterInfoBase(BaseModel):
     @field_validator("delayed_stages", mode="before")
     @classmethod
     def coerce_delayed_stages(cls, v: Any) -> Optional[Dict[str, int]]:
+        if isinstance(v, str):
+            import json
+            try:
+                v = json.loads(v)
+            except Exception:
+                return {}
         if isinstance(v, list):
             return {s: 0 for s in v if isinstance(s, str)}
         return v
+
 
 
 class ChapterInfoCreate(ChapterInfoBase):
