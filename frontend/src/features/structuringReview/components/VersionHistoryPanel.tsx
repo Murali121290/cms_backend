@@ -9,6 +9,7 @@ interface VersionHistoryPanelProps {
   fileId: number | null;
   currentFileId: number;
   onOpenVersion: (fileId: number) => void;
+  defaultExpanded?: boolean;
 }
 
 function formatDateTime(iso: string): string {
@@ -26,8 +27,9 @@ export function VersionHistoryPanel({
   fileId,
   currentFileId,
   onOpenVersion,
+  defaultExpanded = false,
 }: VersionHistoryPanelProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(defaultExpanded);
 
   const versionsQuery = useQuery<FileVersionsResponse | undefined>({
     queryKey: ["file-versions", fileId],

@@ -213,6 +213,7 @@ export interface WysiwygEditorProps {
   onActiveCharStyleChange?: (cls: string | null) => void;
   currentUser?: string;
   fileId?: string;
+  toolbarExtras?: React.ReactNode;
 }
 
 const ToolbarButton = ({
@@ -270,6 +271,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
       onActiveCharStyleChange,
       currentUser,
       fileId,
+      toolbarExtras,
     }: WysiwygEditorProps,
     ref
   ) {
@@ -1093,6 +1095,12 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           >
             <Maximize2 className="w-4 h-4" />
           </ToolbarButton>
+
+          {toolbarExtras && (
+            <div className="ml-auto flex items-center gap-1.5 shrink-0 pl-2">
+              {toolbarExtras}
+            </div>
+          )}
         </div>
 
         {/* â”€â”€ Find & Replace Bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
