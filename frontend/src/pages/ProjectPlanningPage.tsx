@@ -55,6 +55,17 @@ function validDate(s: string | null | undefined): Date {
   return isNaN(d.getTime()) ? new Date() : d
 }
 
+function toLocalISOString(date: Date): string {
+  const tzoffset = date.getTimezoneOffset() * 60000; // offset in milliseconds
+  const localISOTime = (new Date(date.getTime() - tzoffset)).toISOString().slice(0, -1);
+  const offset = date.getTimezoneOffset();
+  const absOffset = Math.abs(offset);
+  const hours = String(Math.floor(absOffset / 60)).padStart(2, '0');
+  const minutes = String(absOffset % 60).padStart(2, '0');
+  const sign = offset <= 0 ? '+' : '-';
+  return `${localISOTime}${sign}${hours}:${minutes}`;
+}
+
 function buildBaseSchedule(
   orderedStages: WorkflowStage[],
   masterMap: Map<string, Stage>,
@@ -63,7 +74,6 @@ function buildBaseSchedule(
 ): StageSchedule[] {
   const result: StageSchedule[] = []
   const cursor = validDate(projectCreatedAt)
-  cursor.setHours(0, 0, 0, 0)
   for (const ws of orderedStages) {
     const master  = masterMap.get(ws.stage_name)
     const slaDays = master ? pickSla(master, composition) : null
@@ -85,7 +95,6 @@ function buildChapterSchedule(
 ): StageSchedule[] {
   const result: StageSchedule[] = []
   const cursor = validDate(projectCreatedAt)
-  cursor.setHours(0, 0, 0, 0)
   const chOverrides = cellSlas[chId] ?? {}
   for (const ws of orderedStages) {
     const slaDays = ws.stage_name in chOverrides
@@ -117,6 +126,7 @@ export function ProjectPlanningPage() {
   const [cellSlas, setCellSlas] = useState<Record<number, Record<string, number | null>>>({})
   const [delayMap,  setDelayMap]  = useState<Map<string, number>>(new Map())
   const [actualFinalDue, setActualFinalDue] = useState<Date | null>(null)
+  const [dbDates, setDbDates] = useState<Record<string, { start: Date; due: Date }>>({})
 
   useEffect(() => {
     if (!id) return
@@ -153,6 +163,7 @@ export function ProjectPlanningPage() {
           const slaSeen = new Set<string>()
           const loaded: Record<number, Record<string, number | null>> = {}
           const dMap = new Map<string, number>()
+          const datesMap: Record<string, { start: Date; due: Date }> = {}
           let maxDue: Date | null = null
 
           for (const d of sorted) {
@@ -163,6 +174,14 @@ export function ProjectPlanningPage() {
               if (ch) {
                 if (!loaded[ch.id]) loaded[ch.id] = {}
                 loaded[ch.id][d.stage_name] = d.sla
+              }
+            }
+            if (d.planned_start_date && d.planned_end_date) {
+              if (!datesMap[key]) {
+                datesMap[key] = {
+                  start: new Date(d.planned_start_date),
+                  due: new Date(d.planned_end_date)
+                }
               }
             }
             if (d.delayed && d.delay_days != null && d.delay_days > 0) {
@@ -176,6 +195,7 @@ export function ProjectPlanningPage() {
           }
           setCellSlas(loaded)
           setDelayMap(dMap)
+          setDbDates(datesMap)
           if (maxDue) setActualFinalDue(maxDue)
         }
       })
@@ -280,8 +300,8 @@ export function ProjectPlanningPage() {
           return chSched.map(s => ({
             chapters:           ch.chapters,
             stage_name:         s.stageName,
-            planned_start_date: s.start.toISOString(),
-            planned_end_date:   s.due.toISOString(),
+            planned_start_date: toLocalISOString(s.start),
+            planned_end_date:   toLocalISOString(s.due),
             sla:                s.slaDays,
           }))
         })
@@ -474,17 +494,20 @@ export function ProjectPlanningPage() {
                         const isCellEdited = s.slaDays !== (baseSlaMap.get(s.stageName) ?? null)
                         const delayDays    = delayMap.get(`${ch.chapters}||${s.stageName}`)
                                           ?? (ch.delayed_stages?.[s.stageName] ?? 0)
+                        const dbKey = `${ch.chapters}||${s.stageName}`
+                        const displayStart = alreadyApproved && dbDates[dbKey] ? dbDates[dbKey].start : s.start
+                        const displayDue = alreadyApproved && dbDates[dbKey] ? dbDates[dbKey].due : s.due
                         return (
                           <td key={s.stageName} className="px-4 py-3 border-r border-border/50 last:border-r-0">
                             <div className="space-y-1">
                               <div className="flex items-center gap-2 text-xs">
                                 <span className="w-9 text-[10px] font-semibold text-muted uppercase tracking-wide">Start</span>
-                                <span className="text-text font-medium">{fmt(s.start)}</span>
+                                <span className="text-text font-medium">{fmt(displayStart)}</span>
                               </div>
                               <div className="flex items-center gap-2 text-xs">
                                 <span className="w-9 text-[10px] font-semibold text-muted uppercase tracking-wide">Due</span>
                                 <span className={`font-medium ${isCellEdited ? 'text-primary font-bold' : 'text-text'}`}>
-                                  {fmt(s.due)}
+                                  {fmt(displayDue)}
                                 </span>
                               </div>
                               <div className="flex items-center gap-2 text-xs">
