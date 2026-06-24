@@ -712,11 +712,29 @@ export function ChapterFilePage({
     }),
     col.accessor('file_name', {
       header: 'File Name',
-      cell: i => {
-        const ext = i.getValue().split('.').pop() ?? ''
+      cell: ({ row, getValue }) => {
+        const name = getValue()
+        const ext = name.split('.').pop() ?? ''
         const { icon, color } = fileTypeIcon(ext)
+        const fid = row.original.db_id
         return (
           <div className="flex items-center gap-2">
+            <FolderIcon name={icon} size={14} color={color}/>
+            {fid ? (
+              <button
+                type="button"
+                onClick={e => {
+                  e.stopPropagation()
+                  navigate(`${uiPaths.structuringReview(pid, cid, fid)}?tab=editor`)
+                }}
+                title={name}
+                className="font-medium text-text truncate max-w-[2000px] text-left hover:text-primary hover:underline cursor-pointer"
+              >
+                {name}
+              </button>
+            ) : (
+              <span className="font-medium text-text truncate max-w-[2000px]" title={name}>{name}</span>
+            )}
             <FolderIcon name={icon} size={14} color={color} />
             <span className="font-medium text-text truncate max-w-[2000px]" title={i.getValue()}>{i.getValue()}</span>
           </div>

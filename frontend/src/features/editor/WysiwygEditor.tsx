@@ -10,6 +10,7 @@ import { TextAlign } from "@tiptap/extension-text-align";
 import { Underline } from "@tiptap/extension-underline";
 import { Color } from "@tiptap/extension-color";
 import { Highlight } from "@tiptap/extension-highlight";
+import { TextStyle } from "@tiptap/extension-text-style";
 import { Placeholder } from "@tiptap/extension-placeholder";
 import { FontFamily } from "@tiptap/extension-font-family";
 import { Superscript } from "@tiptap/extension-superscript";
@@ -213,6 +214,7 @@ export interface WysiwygEditorProps {
   onActiveCharStyleChange?: (cls: string | null) => void;
   currentUser?: string;
   fileId?: string;
+  toolbarExtras?: React.ReactNode;
 }
 
 const ToolbarButton = ({
@@ -270,6 +272,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
       onActiveCharStyleChange,
       currentUser,
       fileId,
+      toolbarExtras,
     }: WysiwygEditorProps,
     ref
   ) {
@@ -328,6 +331,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         TableHeader,
         TextAlign.configure({ types: ["heading", "paragraph"] }),
         Underline,
+        TextStyle,
         Color,
         FontSize,
         Highlight.configure({ multicolor: true }),
@@ -377,14 +381,16 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
       }
     }, [editor, initialContent]);
 
-    // Handle track changes
+    // Handle track changes. The TrackChanges plugin reads storage via the editor's
+    // shared storage map (editor.storage.trackChanges) — that's the live, mutable
+    // reference the plugin's closure sees. Mutating storage through an extension
+    // instance pulled from extensionManager does not propagate, because that path
+    // returns a fresh object on each access.
     useEffect(() => {
       if (editor) {
-        const tcExt = editor.extensionManager.extensions.find(
-          (e) => e.name === "trackChanges"
-        );
-        if (tcExt) {
-          (tcExt as any).storage.enabled = tcEnabled;
+        const store = (editor as any).storage?.trackChanges;
+        if (store) {
+          store.enabled = tcEnabled;
           if (onTrackChangesToggle) {
             onTrackChangesToggle(tcEnabled);
           }
@@ -395,11 +401,9 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
     // Handle track changes author
     useEffect(() => {
       if (editor) {
-        const tcExt = editor.extensionManager.extensions.find(
-          (e) => e.name === "trackChanges"
-        );
-        if (tcExt) {
-          (tcExt as any).storage.author = currentUser || "Unknown";
+        const store = (editor as any).storage?.trackChanges;
+        if (store) {
+          store.author = currentUser || "Unknown";
         }
       }
     }, [currentUser, editor]);
@@ -1096,6 +1100,12 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           >
             <Maximize2 className="w-4 h-4" />
           </ToolbarButton>
+
+          {toolbarExtras && (
+            <div className="ml-auto flex items-center gap-1.5 shrink-0 pl-2">
+              {toolbarExtras}
+            </div>
+          )}
         </div>
 
         {/* â”€â”€ Find & Replace Bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
@@ -1198,15 +1208,14 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         )}
 
         {/* â”€â”€ Document Area â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-        <div className="flex-1 overflow-y-auto bg-gradient-to-tr from-slate-100 to-slate-50 p-8 flex justify-start lg:justify-center items-start overflow-x-auto">
-          <div className={sidePanel ? "flex gap-8 w-full max-w-[1400px] justify-start lg:justify-center" : ""}>
+        <div className="flex-1 overflow-y-auto bg-gradient-to-tr from-slate-100 to-slate-50 p-2 flex items-start overflow-x-auto">
+          <div className={sidePanel ? "flex gap-8 w-full max-w-[1400px] justify-start lg:justify-center" : "w-full"}>
             {/* Word-style Document Page */}
             <div
-              className="bg-white flex-shrink-0 text-sm transition-shadow duration-300 relative"
+              className="bg-white text-sm transition-shadow duration-300 relative w-full"
               style={{
                 fontFamily: "'Times New Roman', Times, serif",
                 lineHeight: "2",
-                width: "8.5in",
                 minHeight: "11in",
                 padding: "1.0in 1.1in",
                 boxShadow: "0 4px 20px rgba(0,0,0,0.06), 0 12px 36px rgba(0,0,0,0.04)",
@@ -1403,7 +1412,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         </div>
 
         {/* â”€â”€ Save Bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-        <div className="border-t border-slate-200 bg-white/95 backdrop-blur-sm px-6 py-3 flex items-center gap-3 shadow-md">
+        <div className="sticky bottom-0 z-20 border-t border-slate-200 bg-white/95 backdrop-blur-sm px-6 py-3 flex items-center gap-3 shadow-md">
           <Button
             variant="primary"
             onClick={handleSave}

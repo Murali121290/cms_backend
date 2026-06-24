@@ -32,6 +32,7 @@ interface StylesPanelProps {
   onAddStyle?: (newStyle: string) => void;
   fileId?: number | null;
   charStyles?: string[];
+  visibleTabs?: PanelTab[];
 }
 
 // Default character styles derived from the pipeline's bib/cite style map
@@ -80,10 +81,12 @@ export function StylesPanel({
   onAddStyle,
   fileId,
   charStyles,
+  visibleTabs,
 }: StylesPanelProps) {
 
   // ── Shared ────────────────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState<PanelTab>("group");
+  const allowedTabs: PanelTab[] = visibleTabs && visibleTabs.length > 0 ? visibleTabs : ["group", "paragraph", "character"];
+  const [activeTab, setActiveTab] = useState<PanelTab>(allowedTabs[0]);
 
   // ── Paragraph tab ─────────────────────────────────────────────────────────
   const [currentStyle, setCurrentStyle] = useState("Normal");
@@ -481,8 +484,9 @@ export function StylesPanel({
     <div className="bg-white rounded-lg shadow-card border border-border flex h-full min-h-0">
 
       {/* ── Left Sidebar Vertical Icon Tabs Row ────────────────────────────── */}
+      {allowedTabs.length > 1 && (
       <div className="flex flex-col border-r border-border bg-slate-900 w-14 shrink-0 py-3 gap-2 items-center">
-        {(["group", "paragraph", "character"] as PanelTab[]).map((tab) => {
+        {(["group", "paragraph", "character"] as PanelTab[]).filter(t => allowedTabs.includes(t)).map((tab) => {
           const isActive = activeTab === tab;
           return (
             <button
@@ -514,6 +518,7 @@ export function StylesPanel({
           );
         })}
       </div>
+      )}
 
       {/* ── Right Content Panel ────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col min-h-0 bg-white">

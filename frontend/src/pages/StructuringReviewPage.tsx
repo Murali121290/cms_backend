@@ -1,15 +1,19 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, createContext, useContext } from "react";
+import { createPortal } from "react-dom";
 import {
   ArrowLeft,
   BookOpen,
   CheckCircle2,
   ChevronRight,
+  Clock,
   Download,
   FileText,
   Info,
+  Layers,
   LayoutDashboard,
   Maximize2,
   Minimize2,
+  X,
 } from "lucide-react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
@@ -20,7 +24,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SkeletonCard } from "@/components/ui/SkeletonLoader";
 import { useStructuringReviewQuery } from "@/features/structuringReview/useStructuringReviewQuery";
-import { WysiwygEditor, useEditorSaveRuns, type WysiwygEditorHandle, ChangesReviewPanel, OnlyOfficeEditor, OnlyOfficeSidePanel, type OnlyOfficeEditorHandle, CollaboraSidePanel } from "@/features/editor";
+import { WysiwygEditor, useEditorSaveRuns, type WysiwygEditorHandle, OnlyOfficeEditor, OnlyOfficeSidePanel, type OnlyOfficeEditorHandle, CollaboraSidePanel } from "@/features/editor";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useFileXhtmlRunsQuery } from "@/features/technicalReview/useFileXhtmlRunsQuery";
 import { StylesPanel } from "@/features/structuringReview/components/EditorStylesPanel";
@@ -28,6 +32,104 @@ import { VersionHistoryPanel } from "@/features/structuringReview/components/Ver
 import { useParagraphStyles } from "@/features/editor/useParagraphStyles";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { uiPaths } from "@/utils/appPaths";
+
+const ToolbarPopoverContext = createContext<{
+  openId: string | null;
+  setOpenId: (id: string | null) => void;
+}>({ openId: null, setOpenId: () => {} });
+
+function ToolbarPopoverGroup({ children }: { children: React.ReactNode }) {
+  const [openId, setOpenId] = useState<string | null>(null);
+  return (
+    <ToolbarPopoverContext.Provider value={{ openId, setOpenId }}>
+      {children}
+    </ToolbarPopoverContext.Provider>
+  );
+}
+
+interface ToolbarPopoverProps {
+  id: string;
+  icon: React.ReactNode;
+  label: string;
+  title?: string;
+  sticky?: boolean;
+  width?: number;
+  hideHeader?: boolean;
+  children: React.ReactNode;
+}
+
+function ToolbarPopover({ id, icon, label, title, sticky, width = 320, hideHeader, children }: ToolbarPopoverProps) {
+  const { openId, setOpenId } = useContext(ToolbarPopoverContext);
+  const open = openId === id;
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const rect = btnRef.current?.getBoundingClientRect();
+    if (rect) setPos({ top: rect.bottom + 6, right: window.innerWidth - rect.right });
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || sticky) return;
+    const handle = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (popRef.current?.contains(t)) return;
+      if (btnRef.current?.contains(t)) return;
+      setOpenId(null);
+    };
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [open, sticky, setOpenId]);
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setOpenId(open ? null : id)}
+        title={title ?? label}
+        className={`px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md border shrink-0 inline-flex items-center gap-1.5 transition-all duration-150 cursor-pointer ${
+          open
+            ? "bg-amber-600 text-white border-amber-500"
+            : "bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-slate-100"
+        }`}
+      >
+        {icon}
+        {label}
+      </button>
+      {open && pos && createPortal(
+        <div
+          ref={popRef}
+          style={{ position: "fixed", top: pos.top, right: pos.right, width, maxHeight: "70vh" }}
+          className="z-50 bg-white border border-border rounded-lg shadow-2xl flex flex-col overflow-hidden"
+        >
+          {!hideHeader && (
+            <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-slate-50 shrink-0">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-text inline-flex items-center gap-1.5">
+                {icon}
+                {title ?? label}
+              </span>
+              <button
+                type="button"
+                onClick={() => setOpenId(null)}
+                className="p-1 rounded hover:bg-slate-200 text-muted hover:text-text cursor-pointer border-none bg-transparent"
+                title="Close"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+          <div className="flex-1 min-h-0">
+            {children}
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
 
 export function StructuringReviewPage() {
   const navigate = useNavigate();
@@ -55,7 +157,6 @@ export function StructuringReviewPage() {
   const [activeTab, setActiveTab] = useState<"overview" | "editor" | "onlyoffice" | "collabora">(defaultTab);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [trackChangesEnabled, setTrackChangesEnabled] = useState(false);
-  const [sidePanelTab, setSidePanelTab] = useState<"styles" | "changes">("styles");
   const location = useLocation();
   const xsltContent = (location.state as { xsltContent?: string } | null)?.xsltContent;
 
@@ -176,7 +277,13 @@ export function StructuringReviewPage() {
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <main className={`page-enter min-h-screen bg-surface-100 flex flex-col ${isFullscreen ? "p-2" : "p-6"}`}>
-      <div className={`w-full flex-1 flex flex-col ${isFullscreen ? "max-w-none px-0" : "max-w-[1600px] mx-auto px-4 space-y-6"}`}>
+      <div className={`w-full flex-1 flex flex-col ${
+        isFullscreen
+          ? "max-w-none px-0"
+          : activeTab === "editor"
+            ? "px-4 space-y-6"
+            : "max-w-[1600px] mx-auto px-4 space-y-6"
+      }`}>
 
         {/* Page Header */}
         {!isFullscreen && (
@@ -281,12 +388,7 @@ export function StructuringReviewPage() {
           </div>
         )}
 
-        {/* Status / error banners */}
-        {editorSave.statusMessage && (
-          <div className="px-4 py-3 rounded-md text-sm font-medium border bg-success-100 border-success-100 text-success-600">
-            {editorSave.statusMessage}
-          </div>
-        )}
+        {/* Error banner only — success feedback comes from the save button's state */}
         {editorSave.errorMessage && (
           <div className="px-4 py-3 rounded-md text-sm font-medium border bg-error-100 border-error-100 text-error-600">
             {editorSave.errorMessage}
@@ -481,8 +583,105 @@ export function StructuringReviewPage() {
             {xhtmlQuery.isPending && !xsltContent ? (
               <div style={{ padding: "24px", textAlign: "center" }}>Loading document…</div>
             ) : (
+              <>
               <WysiwygEditor
                 ref={editorRef}
+              key={`editor-${normalizedFileId}`}
+              initialContent={xsltContent ?? xhtmlQuery.data?.content ?? ""}
+              onSave={async (html) => {
+                const res = await editorSave.save(html);
+                if (res && res.file_id && res.file_id !== normalizedFileId) {
+                  navigate(uiPaths.structuringReview(normalizedProjectId, normalizedChapterId, res.file_id) + "?tab=editor");
+                } else {
+                  void reviewQuery.refetch();
+                }
+              }}
+              isSaving={editorSave.isPending}
+              saveLabel="Save & Convert to DOCX"
+              documentTitle={review.file.filename}
+              exportHref={review.actions.export_href}
+              trackChangesEnabled={trackChangesEnabled}
+              onTrackChangesToggle={setTrackChangesEnabled}
+              height={isFullscreen ? "calc(100vh - 20px)" : "calc(100vh - 260px)"}
+              styles={allStyles}
+              onAddStyle={handleAddStyle}
+              currentUser={currentUser}
+              fileId={normalizedFileId?.toString()}
+              toolbarExtras={
+                <ToolbarPopoverGroup>
+                  <ToolbarPopover
+                    id="group"
+                    icon={<Layers className="w-3.5 h-3.5" />}
+                    label="Group"
+                    title="Document Elements"
+                    sticky
+                    width={360}
+                  >
+                    <StylesPanel
+                      styles={allStyles}
+                      editorRef={editorRef}
+                      onAddStyle={handleAddStyle}
+                      fileId={normalizedFileId}
+                      charStyles={review.char_styles}
+                      visibleTabs={["group"]}
+                    />
+                  </ToolbarPopover>
+                  <ToolbarPopover
+                    id="para"
+                    icon={<FileText className="w-3.5 h-3.5" />}
+                    label="Para"
+                    title="Paragraph Styles"
+                    sticky
+                    width={320}
+                  >
+                    <StylesPanel
+                      styles={allStyles}
+                      editorRef={editorRef}
+                      onAddStyle={handleAddStyle}
+                      fileId={normalizedFileId}
+                      charStyles={review.char_styles}
+                      visibleTabs={["paragraph"]}
+                    />
+                  </ToolbarPopover>
+                  <ToolbarPopover
+                    id="char"
+                    icon={<BookOpen className="w-3.5 h-3.5" />}
+                    label="Char"
+                    title="Character Styles"
+                    sticky
+                    width={320}
+                  >
+                    <StylesPanel
+                      styles={allStyles}
+                      editorRef={editorRef}
+                      onAddStyle={handleAddStyle}
+                      fileId={normalizedFileId}
+                      charStyles={review.char_styles}
+                      visibleTabs={["character"]}
+                    />
+                  </ToolbarPopover>
+                  <ToolbarPopover
+                    id="history"
+                    icon={<Clock className="w-3.5 h-3.5" />}
+                    label="History"
+                    title="Version History"
+                    width={320}
+                    hideHeader
+                  >
+                    <VersionHistoryPanel
+                      fileId={normalizedFileId}
+                      currentFileId={normalizedFileId}
+                      defaultExpanded
+                      onOpenVersion={(versionId) => {
+                        navigate(uiPaths.structuringReview(normalizedProjectId, normalizedChapterId, versionId) + "?tab=editor");
+                      }}
+                    />
+                  </ToolbarPopover>
+                </ToolbarPopoverGroup>
+              }
+            />
+              </>
+          )}
                 key={`editor-${normalizedFileId}`}
                 initialContent={xsltContent ?? xhtmlQuery.data?.content ?? ""}
                 onSave={async (html) => {
