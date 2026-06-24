@@ -833,7 +833,7 @@ def api_v2_project_bootstrap(
     client_id: int | None = Form(None),
     client_name: str | None = Form(None),
     xml_standard: str = Form(...),
-    chapter_count: int = Form(...),
+    chapter_count: int | None = Form(None),
     workflow_name: str | None = Form(None),
     division_code: str | None = Form(None),
     customer_contact: str | None = Form(None),
@@ -1850,6 +1850,34 @@ def api_v2_upload_zip(
         images_list = []
         xml_list = []
         docs_list = []
+
+        # First-pass validation: Check if we can identify any chapters in the ZIP file
+        has_chapters = False
+        for root, _, filenames in os.walk(temp_dir):
+            for fname in filenames:
+                if fname == file.filename or "__MACOSX" in root or fname.startswith("."):
+                    continue
+                chapter_no_str = extract_chapter_number(fname)
+                if not chapter_no_str:
+                    rel_path = os.path.relpath(os.path.join(root, fname), temp_dir)
+                    path_parts = rel_path.replace("\\", "/").split("/")
+                    for part in path_parts[:-1]:
+                        chapter_no_str = extract_chapter_number(part)
+                        if chapter_no_str:
+                            break
+                if chapter_no_str:
+                    has_chapters = True
+                    break
+            if has_chapters:
+                break
+
+        if not has_chapters:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            return _error_response(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="NO_CHAPTERS_FOUND",
+                message="Unable to identify any chapters in the uploaded ZIP file.",
+            )
         
         initial_chapters_count = db.query(models.Chapter).filter(models.Chapter.project == project.project_code).count()
 
@@ -2060,6 +2088,10 @@ def api_v2_upload_zip(
             pass
 
         final_chapters_count = db.query(models.Chapter).filter(models.Chapter.project == project.project_code).count()
+        project.chapter_count = final_chapters_count
+        db.commit()
+        db.refresh(project)
+
         chapters_inserted = final_chapters_count - initial_chapters_count
         unique_extracted_chapters = len({c.chapter_no for c in chapters_list if c.chapter_no is not None})
 

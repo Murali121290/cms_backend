@@ -38,7 +38,6 @@ function validate(f: Partial<ProjectCreate>): Record<string, string> {
   if (!f.workflow_name?.trim())  e.workflow_name = 'Workflow is required'
   if (!f.xml_standard?.trim())   e.xml_standard  = 'XML Standard is required'
   if (!f.copyright_year)         e.copyright_year = 'Copyright Year is required'
-  if (!f.chapter_count)          e.chapter_count = 'Chapter Count is required'
   if (!f.isbn_no?.trim()) {
     e.isbn_no = 'ISBN is required'
   } else if (!/^[0-9]{9}[0-9X]$|^[0-9]{13}$/i.test(f.isbn_no.trim())) {
@@ -350,7 +349,6 @@ export function CreateProjectPage() {
       formData.append('code',          form.project_code ?? '')
       formData.append('title',         form.project_title ?? '')
       formData.append('xml_standard',  form.xml_standard ?? 'NLM')
-      formData.append('chapter_count', String(form.chapter_count ?? 1))
       if (form.client_id)          formData.append('client_id',        String(form.client_id))
       if (form.client_name)        formData.append('client_name',      form.client_name)
       if (form.workflow_name)      formData.append('workflow_name',    form.workflow_name)
@@ -600,16 +598,6 @@ export function CreateProjectPage() {
               value={form.actual_pages != null ? String(form.actual_pages) : ''}
               onChange={e => set('actual_pages', e.target.value ? Number(e.target.value) : 0)}
               placeholder="0"
-            />
-            <Input
-              id="chapter_count"
-              label="Chapter Count"
-              required
-              type="number"
-              value={form.chapter_count != null ? String(form.chapter_count) : ''}
-              onChange={e => set('chapter_count', e.target.value ? Number(e.target.value) : null)}
-              placeholder="0"
-              error={errors.chapter_count}
             />
             <Input
               id="isbn_no"
