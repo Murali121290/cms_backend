@@ -45,36 +45,36 @@ import type { FileRecord } from '@/types/api'
 // ── Types ──────────────────────────────────────────────────────────────────
 
 export interface FileRow {
-  id:          string    // unique key: "{subfolder}::{file_name}"
-  db_id?:      number    // numeric DB file ID — required for all processing/edit actions
-  subfolder:   string
-  file_name:   string
-  file_size:   string
-  size_bytes:  number
+  id: string    // unique key: "{subfolder}::{file_name}"
+  db_id?: number    // numeric DB file ID — required for all processing/edit actions
+  subfolder: string
+  file_name: string
+  file_size: string
+  size_bytes: number
   uploaded_by: string
   uploaded_on: string
-  path:        string
+  path: string
   // Lock / processing status — sourced from FileRecord.lock
-  isLocked?:   boolean
-  lockedBy?:   string | null
-  lockedAt?:   string | null
-  pageCount?:        number
-  dpi?:              number
-  width?:            number
-  height?:           number
+  isLocked?: boolean
+  lockedBy?: string | null
+  lockedAt?: string | null
+  pageCount?: number
+  dpi?: number
+  width?: number
+  height?: number
   validationStatus?: string
-  colorProfile?:     string
-  xmlType?:          string
-  packageStatus?:    string
-  reviewer?:         string
-  reviewStatus?:     string
+  colorProfile?: string
+  xmlType?: string
+  packageStatus?: string
+  reviewer?: string
+  reviewStatus?: string
 }
 
 interface LegacyFileEntry {
-  file_name:   string
-  path:        string
-  file_size:   string
-  size_bytes:  number
+  file_name: string
+  path: string
+  file_size: string
+  size_bytes: number
   uploaded_by: string
   uploaded_on: string
 }
@@ -83,20 +83,20 @@ interface ChapterFilePageProps {
   // All props are optional — component self-loads from URL params when absent
   chapterFolderData?: {
     chapter_name: string
-    folder:       string
-    files:        Record<string, LegacyFileEntry[]>
+    folder: string
+    files: Record<string, LegacyFileEntry[]>
   } | null
-  projectId?:    number
-  chapterId?:    number
-  chapterName?:  string
+  projectId?: number
+  chapterId?: number
+  chapterName?: string
   chapterTitle?: string | null
-  clientId?:     string
-  clientName?:   string
-  projectName?:  string
-  stageName?:    string
-  isAssigned?:   boolean
-  onRefresh?:    () => void
-  onProceed?:    () => void
+  clientId?: string
+  clientName?: string
+  projectName?: string
+  stageName?: string
+  isAssigned?: boolean
+  onRefresh?: () => void
+  onProceed?: () => void
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -104,11 +104,11 @@ interface ChapterFilePageProps {
 function categoryToFolderKey(category: string): FolderKey {
   const c = category.toLowerCase()
   if (c === 'manuscript') return 'manuscript'
-  if (c === 'art')        return 'art'
-  if (c === 'indesign')   return 'indesign'
-  if (c === 'proof')      return 'proof'
-  if (c === 'xml')        return 'xml'
-  if (c === 'backup')     return 'backup'
+  if (c === 'art') return 'art'
+  if (c === 'indesign') return 'indesign'
+  if (c === 'proof') return 'proof'
+  if (c === 'xml') return 'xml'
+  if (c === 'backup') return 'backup'
   return 'misc'
 }
 
@@ -123,14 +123,14 @@ function fmtDate(iso: string) {
 function FolderIcon({ name, size = 14, color }: { name: string; size?: number; color?: string }) {
   const s = color ? { color } : {}
   switch (name) {
-    case 'FileText':       return <FileText      size={size} style={s} className="flex-shrink-0"/>
-    case 'Image':          return <Image         size={size} style={s} className="flex-shrink-0"/>
-    case 'Layers':         return <Layers        size={size} style={s} className="flex-shrink-0"/>
-    case 'Code2':          return <Code2         size={size} style={s} className="flex-shrink-0"/>
-    case 'FolderOpen':     return <FolderOpen    size={size} style={s} className="flex-shrink-0"/>
-    case 'ClipboardCheck': return <CheckCircle2  size={size} style={s} className="flex-shrink-0"/>
-    case 'Archive':        return <Archive       size={size} style={s} className="flex-shrink-0"/>
-    default:               return <File          size={size} style={s} className="flex-shrink-0"/>
+    case 'FileText': return <FileText size={size} style={s} className="flex-shrink-0" />
+    case 'Image': return <Image size={size} style={s} className="flex-shrink-0" />
+    case 'Layers': return <Layers size={size} style={s} className="flex-shrink-0" />
+    case 'Code2': return <Code2 size={size} style={s} className="flex-shrink-0" />
+    case 'FolderOpen': return <FolderOpen size={size} style={s} className="flex-shrink-0" />
+    case 'ClipboardCheck': return <CheckCircle2 size={size} style={s} className="flex-shrink-0" />
+    case 'Archive': return <Archive size={size} style={s} className="flex-shrink-0" />
+    default: return <File size={size} style={s} className="flex-shrink-0" />
   }
 }
 
@@ -145,8 +145,8 @@ function IndeterminateCheckbox({ checked, indeterminate, onChange, onClick }: {
   }, [checked, indeterminate])
   return (
     <input ref={ref} type="checkbox" checked={checked}
-      onChange={onChange ?? (() => {})} onClick={onClick}
-      className="w-3.5 h-3.5 rounded border-border accent-primary cursor-pointer flex-shrink-0"/>
+      onChange={onChange ?? (() => { })} onClick={onClick}
+      className="w-3.5 h-3.5 rounded border-border accent-primary cursor-pointer flex-shrink-0" />
   )
 }
 
@@ -157,34 +157,34 @@ const col = createColumnHelper<FileRow>()
 // ── Actions dropdown ───────────────────────────────────────────────────────
 
 type ConfirmStep = {
-  actionName:         string
-  jobFn:              () => Promise<unknown>
+  actionName: string
+  jobFn: () => Promise<unknown>
   isStructuringChoice?: boolean
 }
 
 function FileActionsMenu({
   row, onView, onDelete, onViewDetails, onOpenReferenceCheck, stageName, isAssigned, projectId, chapterId,
 }: {
-  row:                   FileRow
-  onView:                (row: FileRow) => void
-  onDelete:              (row: FileRow) => void
-  onViewDetails:         (row: FileRow) => void
-  onOpenReferenceCheck:  (file: FileRecord) => void
-  stageName:             string
-  isAssigned:            boolean
-  projectId:             number
-  chapterId:             number
+  row: FileRow
+  onView: (row: FileRow) => void
+  onDelete: (row: FileRow) => void
+  onViewDetails: (row: FileRow) => void
+  onOpenReferenceCheck: (file: FileRecord) => void
+  stageName: string
+  isAssigned: boolean
+  projectId: number
+  chapterId: number
 }) {
   const navigate = useNavigate()
   const [confirmStep, setConfirmStep] = useState<ConfirmStep | null>(null)
 
-  const fid     = row.db_id
-  const fname   = row.file_name.toLowerCase()
+  const fid = row.db_id
+  const fname = row.file_name.toLowerCase()
   const hasReview = fname.endsWith('_processed.docx') || fname.endsWith('_structured.docx')
 
   const itemCls = 'flex items-center gap-2 px-3 py-2 cursor-pointer text-text hover:bg-accent hover:text-primary focus:bg-accent focus:text-primary outline-none'
   const deadCls = 'flex items-center gap-2 px-3 py-2 text-text outline-none opacity-40 pointer-events-none cursor-not-allowed'
-  const redCls  = 'flex items-center gap-2 px-3 py-2 text-red-600 cursor-pointer hover:bg-red-50 focus:bg-red-50 outline-none'
+  const redCls = 'flex items-center gap-2 px-3 py-2 text-red-600 cursor-pointer hover:bg-red-50 focus:bg-red-50 outline-none'
 
   async function fire(label: string, fn: () => Promise<unknown>) {
     try {
@@ -207,8 +207,8 @@ function FileActionsMenu({
     catch { toast.error('Release lock failed') }
   }
 
-  const sep   = <DropdownMenu.Separator className="my-1 border-t border-border"/>
-  const grp   = (txt: string, dim = false) =>
+  const sep = <DropdownMenu.Separator className="my-1 border-t border-border" />
+  const grp = (txt: string, dim = false) =>
     <div className={`px-3 py-1 text-[10px] font-semibold text-muted uppercase tracking-wider${dim ? ' opacity-40' : ''}`}>{txt}</div>
 
   return (
@@ -218,7 +218,7 @@ function FileActionsMenu({
           <Tooltip.Trigger asChild>
             <DropdownMenu.Trigger asChild>
               <button className="p-1 rounded text-muted hover:text-text hover:bg-surface transition-colors">
-                <MoreVertical size={14}/>
+                <MoreVertical size={14} />
               </button>
             </DropdownMenu.Trigger>
           </Tooltip.Trigger>
@@ -247,7 +247,7 @@ function FileActionsMenu({
                     }}
                   >
                     AI Structuring
-                    <br/><span className="text-[10px] font-normal opacity-80">Standard automated process</span>
+                    <br /><span className="text-[10px] font-normal opacity-80">Standard automated process</span>
                   </button>
                   <button
                     className="w-full text-left px-3 py-2 rounded-lg border border-border bg-surface hover:bg-accent text-xs font-semibold"
@@ -257,7 +257,7 @@ function FileActionsMenu({
                     }}
                   >
                     Manual Structuring
-                    <br/><span className="text-[10px] font-normal text-muted">Rules-based styler lib</span>
+                    <br /><span className="text-[10px] font-normal text-muted">Rules-based styler lib</span>
                   </button>
                   <button className="text-center text-[11px] text-muted hover:text-text underline" onClick={() => setConfirmStep(null)}>Cancel</button>
                 </div>
@@ -279,7 +279,7 @@ function FileActionsMenu({
                       void fire(s.actionName, s.jobFn)
                     }}
                   >
-                    Confirm <ChevronRight size={11}/>
+                    Confirm <ChevronRight size={11} />
                   </button>
                 </div>
               </div>
@@ -289,42 +289,42 @@ function FileActionsMenu({
               {/* ── Group 1: Open / Edit ─────────────────────────── */}
               {fid ? (
                 <>
-                  <DropdownMenu.Item className={itemCls} onSelect={() => navigate(uiPaths.fileEditor(projectId, chapterId, fid))}>
+                  {/* <DropdownMenu.Item className={itemCls} onSelect={() => navigate(uiPaths.fileEditor(projectId, chapterId, fid))}>
                     <FilePen size={12} className="text-muted"/> Edit in Browser (Collabora)
-                  </DropdownMenu.Item>
+                  </DropdownMenu.Item> */}
                   <DropdownMenu.Item className={itemCls} onSelect={() => navigate(`${uiPaths.structuringReview(projectId, chapterId, fid)}?tab=editor`)}>
-                    <FilePen size={12} className="text-muted"/> Edit in Editor
+                    <FilePen size={12} className="text-muted" /> Edit in Editor
                   </DropdownMenu.Item>
                   <DropdownMenu.Item className={itemCls} onSelect={() => navigate(`${uiPaths.structuringReview(projectId, chapterId, fid)}?tab=onlyoffice`)}>
-                    <FilePen size={12} className="text-muted"/> Edit in OnlyOffice
+                    <FilePen size={12} className="text-muted" /> Edit in Office
                   </DropdownMenu.Item>
                   <DropdownMenu.Item className={itemCls} onSelect={() => {
                     fetch(`/api/v2/files/${fid}/open-in-word`)
                       .then(r => r.json())
                       .then(d => { if (d?.ms_word_uri) window.location.href = d.ms_word_uri; })
-                      .catch(() => {});
+                      .catch(() => { });
                   }}>
-                    <ExternalLink size={12} className="text-muted"/> Open in Word
+                    <ExternalLink size={12} className="text-muted" /> Open in MSWord
                   </DropdownMenu.Item>
                   <DropdownMenu.Item className={itemCls} asChild>
                     <a href={`/api/v2/files/${fid}/download`} download onClick={e => e.stopPropagation()}>
-                      <ArrowDownToLine size={12} className="text-muted"/> Download
+                      <ArrowDownToLine size={12} className="text-muted" /> Download
                     </a>
                   </DropdownMenu.Item>
                   {hasReview && (
                     <DropdownMenu.Item className={itemCls} onSelect={() => navigate(uiPaths.structuringReview(projectId, chapterId, fid))}>
-                      <Layers size={12} className="text-muted"/> View Structuring Review
+                      <Layers size={12} className="text-muted" /> View Structuring Review
                     </DropdownMenu.Item>
                   )}
                   {hasReview && (
                     <DropdownMenu.Item className={itemCls} onSelect={() => navigate(uiPaths.referenceReview(projectId, chapterId, fid))}>
-                      <BookCheck size={12} className="text-muted"/> Reference Review
+                      <BookCheck size={12} className="text-muted" /> Reference Review
                     </DropdownMenu.Item>
                   )}
                 </>
               ) : (
                 <DropdownMenu.Item className={itemCls} onSelect={() => onView(row)}>
-                  <Eye size={12} className="text-muted"/> View / Edit
+                  <Eye size={12} className="text-muted" /> View / Edit
                 </DropdownMenu.Item>
               )}
 
@@ -334,7 +334,7 @@ function FileActionsMenu({
                 onSelect={() => isAssigned && onDelete(row)}
                 className={isAssigned ? redCls : `${deadCls} text-red-400`}
               >
-                <Trash2 size={12}/> Delete
+                <Trash2 size={12} /> Delete
               </DropdownMenu.Item>
 
               {/* ── Group 2: Processing ──────────────────────────── */}
@@ -345,7 +345,7 @@ function FileActionsMenu({
                 <>
                   {/* Run All — placeholder */}
                   <DropdownMenu.Item className={deadCls}>
-                    <Play size={12}/> Run All Processes
+                    <Play size={12} /> Run All Processes
                     <span className="ml-auto text-[9px] px-1 py-0.5 rounded bg-surface border border-border text-muted">Soon</span>
                   </DropdownMenu.Item>
 
@@ -354,7 +354,7 @@ function FileActionsMenu({
                     className={itemCls}
                     onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Structuring', jobFn: () => Promise.resolve(), isStructuringChoice: true }) }}
                   >
-                    <Layers size={12} className="text-amber-500"/> Structuring (AI / Manual)
+                    <Layers size={12} className="text-amber-500" /> Structuring (AI / Manual)
                   </DropdownMenu.Item>
 
                   {/* Language Edit — v1 endpoint */}
@@ -362,7 +362,7 @@ function FileActionsMenu({
                     className={itemCls}
                     onSelect={() => void fire('Language Edit', () => startLanguageEdit(fid))}
                   >
-                    <Languages size={12} className="text-muted"/> Language Edit
+                    <Languages size={12} className="text-muted" /> Language Edit
                   </DropdownMenu.Item>
 
                   {/* Technical Edit — navigates to review page */}
@@ -370,7 +370,7 @@ function FileActionsMenu({
                     className={itemCls}
                     onSelect={() => navigate(uiPaths.technicalReview(projectId, chapterId, fid))}
                   >
-                    <Wrench size={12} className="text-muted"/> Technical Edit
+                    <Wrench size={12} className="text-muted" /> Technical Edit
                   </DropdownMenu.Item>
 
                   {/* Reference Check — opens configuration modal */}
@@ -389,7 +389,7 @@ function FileActionsMenu({
                       available_actions: [],
                     } as unknown as FileRecord)}
                   >
-                    <BookCheck size={12} className="text-muted"/> Reference Validation
+                    <BookCheck size={12} className="text-muted" /> Reference Validation
                   </DropdownMenu.Item>
 
                   {/* Manuscript Analysis (PPD) — v2 endpoint */}
@@ -397,7 +397,7 @@ function FileActionsMenu({
                     className={itemCls}
                     onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Manuscript Analysis', jobFn: () => startPpdGeneration(fid) }) }}
                   >
-                    <FileOutput size={12} className="text-muted"/> Manuscript Analysis
+                    <FileOutput size={12} className="text-muted" /> Manuscript Analysis
                   </DropdownMenu.Item>
 
                   {/* Permissions Check — v2 endpoint */}
@@ -405,7 +405,7 @@ function FileActionsMenu({
                     className={itemCls}
                     onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Permissions Check', jobFn: () => startPermissionsCheck(fid) }) }}
                   >
-                    <ShieldCheck size={12} className="text-muted"/> Permissions Check
+                    <ShieldCheck size={12} className="text-muted" /> Permissions Check
                   </DropdownMenu.Item>
 
                   {/* AI Credit Extraction — v2 endpoint */}
@@ -413,7 +413,7 @@ function FileActionsMenu({
                     className={itemCls}
                     onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'AI Credit Extraction', jobFn: () => startCreditExtraction(fid) }) }}
                   >
-                    <Sparkles size={12} className="text-muted"/> AI Credit Extraction
+                    <Sparkles size={12} className="text-muted" /> AI Credit Extraction
                   </DropdownMenu.Item>
 
                   {/* Bias Scan — v2 endpoint */}
@@ -421,7 +421,7 @@ function FileActionsMenu({
                     className={itemCls}
                     onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Bias Scan', jobFn: () => startBiasScan(fid) }) }}
                   >
-                    <ScanLine size={12} className="text-muted"/> Bias Scan
+                    <ScanLine size={12} className="text-muted" /> Bias Scan
                   </DropdownMenu.Item>
 
                   {/* Word to XML — v2 endpoint */}
@@ -429,14 +429,14 @@ function FileActionsMenu({
                     className={itemCls}
                     onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Word to XML', jobFn: () => startWordToXml(fid) }) }}
                   >
-                    <FileCode size={12} className="text-muted"/> Word to XML
+                    <FileCode size={12} className="text-muted" /> Word to XML
                   </DropdownMenu.Item>
                 </>
               ) : (
                 /* No db_id: show stage-based fallback labels (no API call) */
                 getProcessingActions(stageName).map(a => (
                   <DropdownMenu.Item key={a} className={deadCls}>
-                    <Zap size={12} className="text-muted"/> {a}
+                    <Zap size={12} className="text-muted" /> {a}
                   </DropdownMenu.Item>
                 ))
               )}
@@ -447,21 +447,21 @@ function FileActionsMenu({
               {fid ? (
                 <>
                   <DropdownMenu.Item className={itemCls} onSelect={() => void handleCheckout()}>
-                    <LogOut size={12} className="text-muted"/> Check Out
+                    <LogOut size={12} className="text-muted" /> Check Out
                   </DropdownMenu.Item>
                   <DropdownMenu.Item className={itemCls} onSelect={() => void handleReleaseLock()}>
-                    <LogIn size={12} className="text-muted"/> Release Lock
+                    <LogIn size={12} className="text-muted" /> Release Lock
                   </DropdownMenu.Item>
                 </>
               ) : (
-                <DropdownMenu.Item className={deadCls}><LogOut size={12}/> Check Out</DropdownMenu.Item>
+                <DropdownMenu.Item className={deadCls}><LogOut size={12} /> Check Out</DropdownMenu.Item>
               )}
 
               {/* ── Group 4: Details ─────────────────────────────── */}
               {sep}
               {grp('Details')}
               <DropdownMenu.Item className={itemCls} onSelect={() => onViewDetails(row)}>
-                <Info size={12} className="text-muted"/> View Meta &amp; Version Details
+                <Info size={12} className="text-muted" /> View Meta &amp; Version Details
               </DropdownMenu.Item>
             </>
           )}
@@ -475,15 +475,15 @@ function FileActionsMenu({
 
 export function ChapterFilePage({
   chapterFolderData,
-  projectId:    propProjectId,
-  chapterId:    propChapterId,
-  chapterName:  propChapterName,
+  projectId: propProjectId,
+  chapterId: propChapterId,
+  chapterName: propChapterName,
   chapterTitle: propChapterTitle,
-  clientId:     propClientId,
-  clientName:   propClientName,
-  projectName:  propProjectName,
-  stageName:    propStageName,
-  isAssigned:   propIsAssigned,
+  clientId: propClientId,
+  clientName: propClientName,
+  projectName: propProjectName,
+  stageName: propStageName,
+  isAssigned: propIsAssigned,
   onRefresh,
   onProceed,
 }: ChapterFilePageProps) {
@@ -491,13 +491,13 @@ export function ChapterFilePage({
 
   // ── Resolve IDs from URL params (preferred) or props (fallback) ──────────
   const {
-    projectId:  routeProjectId,
-    chapterId:  routeChapterId,
-    clientId:   routeClientId,
+    projectId: routeProjectId,
+    chapterId: routeChapterId,
+    clientId: routeClientId,
   } = useParams<{ projectId?: string; chapterId?: string; clientId?: string }>()
 
-  const pid   = routeProjectId  ? Number(routeProjectId)  : (propProjectId  ?? 0)
-  const cid   = routeChapterId  ? Number(routeChapterId)   : (propChapterId  ?? 0)
+  const pid = routeProjectId ? Number(routeProjectId) : (propProjectId ?? 0)
+  const cid = routeChapterId ? Number(routeChapterId) : (propChapterId ?? 0)
   const cliId = routeClientId ?? propClientId
 
   // ── Fetch chapter files from API ─────────────────────────────────────────
@@ -505,12 +505,12 @@ export function ChapterFilePage({
 
   // Derive metadata from API response when not passed as props
   const chapterMeta = filesQuery.data?.chapter
-  const resolvedChapterName  = propChapterName  ?? chapterMeta?.number ?? `Chapter ${cid}`
-  const resolvedChapterTitle = propChapterTitle ?? chapterMeta?.title  ?? null
-  const resolvedStageName    = propStageName    ?? ''
-  const resolvedIsAssigned   = propIsAssigned   ?? true
-  const resolvedClientName   = propClientName   ?? ''
-  const resolvedProjectName  = propProjectName  ?? filesQuery.data?.project?.title ?? ''
+  const resolvedChapterName = propChapterName ?? chapterMeta?.number ?? `Chapter ${cid}`
+  const resolvedChapterTitle = propChapterTitle ?? chapterMeta?.title ?? null
+  const resolvedStageName = propStageName ?? ''
+  const resolvedIsAssigned = propIsAssigned ?? true
+  const resolvedClientName = propClientName ?? ''
+  const resolvedProjectName = propProjectName ?? filesQuery.data?.project?.title ?? ''
   const resolvedChapterLabel = filesQuery.data?.chapter?.number ?? String(cid)
 
   const FOLDER_KEYS = Object.keys(FOLDER_CONFIG) as FolderKey[]
@@ -523,7 +523,7 @@ export function ChapterFilePage({
     setSearchParams(prev => { prev.set('folder', key); return prev }, { replace: true })
   }
 
-  const [sorting,      setSorting]      = useState<SortingState>([])
+  const [sorting, setSorting] = useState<SortingState>([])
   const [rowSelection, setRowSelection] = useState<Record<string, boolean>>({})
   const [downloadBusy, setDownloadBusy] = useState(false)
   const [selectedFile, setSelectedFile] = useState<FileRow | null>(null)
@@ -543,19 +543,19 @@ export function ChapterFilePage({
       return filesQuery.data.files
         .filter(f => categoryToFolderKey(f.category) === activeFolder)
         .map(f => ({
-          id:          `${sfLabel}::${f.filename}`,
-          db_id:       f.id,
-          subfolder:   sfLabel,
-          file_name:   f.filename,
-          file_size:   '—',
-          size_bytes:  0,
+          id: `${sfLabel}::${f.filename}`,
+          db_id: f.id,
+          subfolder: sfLabel,
+          file_name: f.filename,
+          file_size: '—',
+          size_bytes: 0,
           uploaded_by: '—',
           uploaded_on: f.uploaded_at,
-          path:        '',
-          isLocked:       f.lock?.is_checked_out ?? false,
-          lockedBy:       f.lock?.checked_out_by_username ?? null,
-          lockedAt:       f.lock?.checked_out_at ?? null,
-          webdavLocked:   f.lock?.webdav_locked ?? false,
+          path: '',
+          isLocked: f.lock?.is_checked_out ?? false,
+          lockedBy: f.lock?.checked_out_by_username ?? null,
+          lockedAt: f.lock?.checked_out_at ?? null,
+          webdavLocked: f.lock?.webdav_locked ?? false,
           webdavLockedBy: f.lock?.webdav_locked_by ?? null,
           webdavLockedAt: f.lock?.webdav_locked_at ?? null,
         }))
@@ -563,14 +563,14 @@ export function ChapterFilePage({
 
     if (!chapterFolderData) return []
     return (chapterFolderData.files[sfLabel] ?? []).map(f => ({
-      id:          `${sfLabel}::${f.file_name}`,
-      subfolder:   sfLabel,
-      file_name:   f.file_name,
-      file_size:   f.file_size,
-      size_bytes:  f.size_bytes,
+      id: `${sfLabel}::${f.file_name}`,
+      subfolder: sfLabel,
+      file_name: f.file_name,
+      file_size: f.file_size,
+      size_bytes: f.size_bytes,
       uploaded_by: f.uploaded_by,
       uploaded_on: f.uploaded_on,
-      path:        f.path,
+      path: f.path,
     }))
   }, [filesQuery.data, chapterFolderData, activeFolder])
 
@@ -735,6 +735,8 @@ export function ChapterFilePage({
             ) : (
               <span className="font-medium text-text truncate max-w-[2000px]" title={name}>{name}</span>
             )}
+            <FolderIcon name={icon} size={14} color={color} />
+            <span className="font-medium text-text truncate max-w-[2000px]" title={i.getValue()}>{i.getValue()}</span>
           </div>
         )
       },
@@ -761,14 +763,14 @@ export function ChapterFilePage({
         if (isLocked) {
           return (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 whitespace-nowrap">
-              <Loader2 size={9} className="animate-spin flex-shrink-0"/>
+              <Loader2 size={9} className="animate-spin flex-shrink-0" />
               Processing…
             </span>
           )
         }
         return (
           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 whitespace-nowrap">
-            <CheckCircle2 size={9} className="flex-shrink-0"/>
+            <CheckCircle2 size={9} className="flex-shrink-0" />
             Ready
           </span>
         )
@@ -789,7 +791,7 @@ export function ChapterFilePage({
             {isLocked && (
               <div className="flex flex-col gap-0.5">
                 <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 whitespace-nowrap">
-                  <LogOut size={9} className="flex-shrink-0"/>
+                  <LogOut size={9} className="flex-shrink-0" />
                   {lockedBy ?? 'Unknown'}
                 </span>
                 {lockedAt && (
@@ -800,7 +802,7 @@ export function ChapterFilePage({
             {webdavLocked && (
               <div className="flex flex-col gap-0.5">
                 <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-blue-700 whitespace-nowrap">
-                  <ExternalLink size={9} className="flex-shrink-0"/>
+                  <ExternalLink size={9} className="flex-shrink-0" />
                   {webdavLockedBy ?? 'Unknown'} (Word)
                 </span>
                 {webdavLockedAt && (
@@ -834,20 +836,20 @@ export function ChapterFilePage({
   ], [dynamicCols, pid, cid, resolvedStageName, resolvedIsAssigned, activeFolder]) // eslint-disable-line
 
   const table = useReactTable({
-    data:                 rows,
+    data: rows,
     columns,
-    getRowId:             row => row.id,
-    state:                { sorting, globalFilter, rowSelection },
-    onSortingChange:      setSorting,
+    getRowId: row => row.id,
+    state: { sorting, globalFilter, rowSelection },
+    onSortingChange: setSorting,
     onGlobalFilterChange: setGlobalFilter,
     onRowSelectionChange: setRowSelection,
-    enableRowSelection:   true,
-    getCoreRowModel:      getCoreRowModel(),
-    getSortedRowModel:    getSortedRowModel(),
-    getFilteredRowModel:  getFilteredRowModel(),
+    enableRowSelection: true,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
   })
 
-  const selectedRows  = table.getSelectedRowModel().rows.map(r => r.original)
+  const selectedRows = table.getSelectedRowModel().rows.map(r => r.original)
   const selectedCount = selectedRows.length
 
   async function handleBulkDownload() {
@@ -899,7 +901,7 @@ export function ChapterFilePage({
   if (filesQuery.isLoading && !chapterFolderData) {
     return (
       <div className="flex items-center justify-center flex-1 h-full gap-2 text-muted text-sm">
-        <Loader2 className="animate-spin w-5 h-5 text-primary"/>
+        <Loader2 className="animate-spin w-5 h-5 text-primary" />
         Loading chapter files…
       </div>
     )
@@ -923,7 +925,7 @@ export function ChapterFilePage({
       <header className="flex items-center gap-3 px-4 py-3 bg-card border-b border-border flex-shrink-0 shadow-sm">
         <button onClick={() => navigate(-1)}
           className="p-1.5 rounded-lg hover:bg-surface text-muted hover:text-text transition-colors">
-          <ArrowLeft size={16}/>
+          <ArrowLeft size={16} />
         </button>
 
         {/* Breadcrumb */}
@@ -931,13 +933,13 @@ export function ChapterFilePage({
           {resolvedClientName && (
             <>
               <span className="text-xs text-muted truncate max-w-[120px]" title={resolvedClientName}>{resolvedClientName}</span>
-              <ChevronRight size={11} className="text-muted flex-shrink-0 opacity-50"/>
+              <ChevronRight size={11} className="text-muted flex-shrink-0 opacity-50" />
             </>
           )}
           {resolvedProjectName && (
             <>
               <span className="text-xs text-muted truncate max-w-[140px]" title={resolvedProjectName}>{resolvedProjectName}</span>
-              <ChevronRight size={11} className="text-muted flex-shrink-0 opacity-50"/>
+              <ChevronRight size={11} className="text-muted flex-shrink-0 opacity-50" />
             </>
           )}
           <span className="text-sm font-bold text-text truncate">{resolvedChapterTitle || resolvedChapterName}</span>
@@ -947,18 +949,18 @@ export function ChapterFilePage({
           )}
           {!resolvedIsAssigned && (
             <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 flex-shrink-0">
-              <Eye size={10}/> View Only
+              <Eye size={10} /> View Only
             </span>
           )}
         </div>
 
         {/* Search */}
         <div className="relative w-48 flex-shrink-0">
-          <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none"/>
+          <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
           <input value={globalFilter} onChange={e => setGlobalFilter(e.target.value)}
             placeholder="Search files…"
-            className="w-full pl-7 pr-7 py-1.5 text-xs bg-surface border border-border rounded-lg text-text placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-primary/30"/>
-          {globalFilter && <button onClick={() => setGlobalFilter('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-text"><X size={11}/></button>}
+            className="w-full pl-7 pr-7 py-1.5 text-xs bg-surface border border-border rounded-lg text-text placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-primary/30" />
+          {globalFilter && <button onClick={() => setGlobalFilter('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-text"><X size={11} /></button>}
         </div>
 
         {/* Bulk Download */}
@@ -972,7 +974,7 @@ export function ChapterFilePage({
                 ? 'border-primary text-primary hover:bg-accent'
                 : 'border-border text-muted opacity-50 cursor-not-allowed'}`}
           >
-            {downloadBusy ? <Loader2 size={12} className="animate-spin"/> : <Download size={12}/>}
+            {downloadBusy ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
             {downloadBusy ? 'Downloading…' : selectedCount > 1 ? 'Download ZIP' : 'Bulk Download'}
             {selectedCount > 0 && !downloadBusy && (
               <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold px-1 py-0.5 rounded-full bg-primary text-white leading-none min-w-[16px] text-center">
@@ -990,7 +992,7 @@ export function ChapterFilePage({
             className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white rounded-lg transition-colors shadow-sm
               ${resolvedIsAssigned ? 'bg-primary hover:bg-primary/90' : 'bg-primary/30 opacity-50 cursor-not-allowed'}`}
           >
-            <Upload size={12}/> Bulk Upload
+            <Upload size={12} /> Bulk Upload
           </button>
         )}
 
@@ -1001,7 +1003,7 @@ export function ChapterFilePage({
             className="p-1.5 rounded-lg hover:bg-surface text-muted hover:text-text transition-colors"
             title="Refresh files"
           >
-            <Loader2 size={14} className={filesQuery.isFetching ? 'animate-spin text-primary' : ''}/>
+            <Loader2 size={14} className={filesQuery.isFetching ? 'animate-spin text-primary' : ''} />
           </button>
         )}
 
@@ -1013,7 +1015,7 @@ export function ChapterFilePage({
             className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold text-white rounded-lg transition-colors shadow-sm
               ${resolvedIsAssigned ? 'bg-primary hover:bg-primary/90 cursor-pointer' : 'bg-primary/30 opacity-50 cursor-not-allowed'}`}
           >
-            Proceed <ChevronRight size={12}/>
+            Proceed <ChevronRight size={12} />
           </button>
         )}
       </header>
@@ -1027,14 +1029,14 @@ export function ChapterFilePage({
             <p className="text-[10px] font-bold text-muted uppercase tracking-widest">Folders</p>
           </div>
           {FOLDER_KEYS.map(k => {
-            const cfg    = FOLDER_CONFIG[k]
-            const count  = fileCounts[k] ?? 0
+            const cfg = FOLDER_CONFIG[k]
+            const count = fileCounts[k] ?? 0
             const active = k === activeFolder
             return (
               <button key={k} onClick={() => { setActiveFolder(k); setSorting([]); setGlobalFilter('') }}
                 className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-left border-l-2 transition-colors
                   ${active ? 'bg-accent text-primary border-primary font-semibold' : 'text-muted hover:bg-card border-transparent'}`}>
-                <FolderIcon name={cfg.icon} size={14} color={active ? 'var(--color-primary)' : 'var(--color-muted)'}/>
+                <FolderIcon name={cfg.icon} size={14} color={active ? 'var(--color-primary)' : 'var(--color-muted)'} />
                 <span className="text-xs flex-1">{cfg.label}</span>
                 {count > 0 && (
                   <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full leading-none
@@ -1051,10 +1053,10 @@ export function ChapterFilePage({
 
             {/* Folder breadcrumb bar */}
             <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-card flex-shrink-0">
-              <FolderIcon name={FOLDER_CONFIG[activeFolder].icon} size={13} color="var(--color-muted)"/>
+              <FolderIcon name={FOLDER_CONFIG[activeFolder].icon} size={13} color="var(--color-muted)" />
               <span className="text-xs font-semibold text-text">{FOLDER_CONFIG[activeFolder].label}</span>
               <span className="text-xs text-muted">({table.getFilteredRowModel().rows.length} files)</span>
-              {filesQuery.isFetching && <Loader2 size={11} className="animate-spin text-muted ml-1"/>}
+              {filesQuery.isFetching && <Loader2 size={11} className="animate-spin text-muted ml-1" />}
             </div>
 
             {/* Selection strip */}
@@ -1064,7 +1066,7 @@ export function ChapterFilePage({
                   {selectedCount} file{selectedCount > 1 ? 's' : ''} selected
                 </span>
                 <button onClick={() => setRowSelection({})} className="inline-flex items-center gap-1 px-2 py-1 text-[11px] text-muted hover:text-text">
-                  <X size={11}/> Clear
+                  <X size={11} /> Clear
                 </button>
               </div>
             )}
@@ -1073,7 +1075,7 @@ export function ChapterFilePage({
             <div className="flex-1 overflow-auto">
               {table.getFilteredRowModel().rows.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full text-center p-8">
-                  <FolderOpen size={40} className="text-muted opacity-40 mb-3"/>
+                  <FolderOpen size={40} className="text-muted opacity-40 mb-3" />
                   <p className="text-sm font-medium text-muted">
                     {globalFilter
                       ? `No files match "${globalFilter}"`
@@ -1084,7 +1086,7 @@ export function ChapterFilePage({
                       onClick={() => setShowBulkUpload(true)}
                       className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary border border-primary/30 rounded-lg hover:bg-accent"
                     >
-                      <Upload size={11}/> Upload first file
+                      <Upload size={11} /> Upload first file
                     </button>
                   )}
                 </div>
@@ -1104,9 +1106,9 @@ export function ChapterFilePage({
                               {flexRender(h.column.columnDef.header, h.getContext())}
                               {h.column.getCanSort() && (
                                 <span className="text-muted opacity-50">
-                                  {h.column.getIsSorted() === 'asc'  ? <ChevronUp size={11}/> :
-                                   h.column.getIsSorted() === 'desc' ? <ChevronDown size={11}/> :
-                                   <ChevronUp size={11} className="opacity-20"/>}
+                                  {h.column.getIsSorted() === 'asc' ? <ChevronUp size={11} /> :
+                                    h.column.getIsSorted() === 'desc' ? <ChevronDown size={11} /> :
+                                      <ChevronUp size={11} className="opacity-20" />}
                                 </span>
                               )}
                             </div>

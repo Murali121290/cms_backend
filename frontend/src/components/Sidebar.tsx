@@ -27,7 +27,7 @@ export function Sidebar() {
 
   return (
     <aside className={cn(
-      'flex flex-col h-screen bg-sidebar border-r border-white/5 transition-all duration-300 ease-in-out flex-shrink-0',
+      'flex flex-col h-screen bg-sidebar border-r border-white/5 transition-all duration-300 ease-in-out flex-shrink-0 relative z-20',
       collapsed ? 'w-16' : 'w-60'
     )}>
       {/* Logo */}
@@ -60,7 +60,10 @@ export function Sidebar() {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 py-4 overflow-y-auto overflow-x-hidden">
+      <nav className={cn(
+        'flex-1 py-4',
+        collapsed ? 'overflow-visible' : 'overflow-y-auto overflow-x-hidden'
+      )}>
         {!collapsed && (
           <p className="px-4 mb-2 text-[10px] font-semibold uppercase tracking-widest text-sidebar-text/50">
             Main Menu
@@ -76,16 +79,21 @@ export function Sidebar() {
                 <NavLink
                   to={to}
                   className={cn(
-                    'flex items-center rounded-lg transition-all duration-150 group',
+                    'flex items-center rounded-lg transition-all duration-150 group relative',
                     collapsed ? 'justify-center p-2.5' : 'gap-3 px-3 py-2.5',
                     active
                       ? 'bg-primary text-white'
                       : 'text-sidebar-text hover:bg-white/8 hover:text-white'
                   )}
-                  title={collapsed ? label : undefined}
                 >
                   <Icon size={18} className="flex-shrink-0" />
-                  {!collapsed && <span className="text-sm font-medium">{label}</span>}
+                  {!collapsed ? (
+                    <span className="text-sm font-medium">{label}</span>
+                  ) : (
+                    <span className="absolute left-16 bg-zinc-900 border border-white/10 text-white text-xs font-medium px-2.5 py-1.5 rounded-md opacity-0 scale-95 pointer-events-none group-hover:opacity-100 group-hover:scale-100 transition-all duration-150 shadow-lg z-50 whitespace-nowrap">
+                      {label}
+                    </span>
+                  )}
                 </NavLink>
               </li>
             )

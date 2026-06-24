@@ -5,20 +5,19 @@ import { Topbar } from '@/components/Topbar'
 import { useSidebarStore } from '@/store/useSidebarStore'
 import { useAutoLogout } from '@/hooks/useAutoLogout'
 
-const CHAPTER_RE = /\/chapters\/\d+/
-const VIEW_RE    = /^\/clients\/\d+\/projects\/\d+\/chapters\/\d+\/view(\/.*)?$/
+const VIEW_RE = /^\/clients\/\d+\/projects\/\d+\/chapters\/\d+\/view(\/.*)?$/
 
 export function AppLayout() {
   const { pathname } = useLocation()
   const { setCollapsed } = useSidebarStore()
   useAutoLogout()
 
-  // Auto-collapse sidebar on chapter pages; restore when leaving
+  // Keep sidebar expanded only on the root page (/), collapse on all other pages
   useEffect(() => {
-    if (CHAPTER_RE.test(pathname)) {
-      setCollapsed(true)
-    } else {
+    if (pathname === '/' || pathname === '/dashboard') {
       setCollapsed(false)
+    } else {
+      setCollapsed(true)
     }
   }, [pathname, setCollapsed])
 

@@ -74,12 +74,12 @@ function CreateRoleModal({ isOpen, onClose, onCreated, existingTeams, existingRo
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Create New Role" footer={
-      <>
+      <div className="flex justify-end gap-3">
         <Button variant="secondary" onClick={onClose} disabled={loading}>Cancel</Button>
         <Button onClick={handleSubmit} disabled={loading}>
           {loading ? <><Spinner size="sm" />Saving…</> : 'Save Role'}
         </Button>
-      </>
+      </div>
     }>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
 
@@ -185,12 +185,12 @@ function EditRoleModal({ isOpen, onClose, onUpdated, role }: EditRoleModalProps)
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={`Edit Role — ${role?.role_name ?? ''}`} footer={
-      <>
+      <div className="flex justify-end gap-3">
         <Button variant="secondary" onClick={onClose} disabled={loading}>Cancel</Button>
         <Button onClick={handleSubmit} disabled={loading}>
           {loading ? <><Spinner size="sm" />Saving…</> : 'Save Changes'}
         </Button>
-      </>
+      </div>
     }>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Input label="Role Name" value={role?.role_name ?? ''} disabled className="opacity-60" />
@@ -278,8 +278,8 @@ export function RolesManagement() {
           <h2 className="text-xl font-bold text-text">Roles &amp; Teams</h2>
           <p className="text-xs text-muted mt-0.5">{roles.length} total roles</p>
         </div>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus size={15} /> Create New Role
+        <Button onClick={() => setCreateOpen(true)} leftIcon={<Plus size={15} />}>
+          Create New Role
         </Button>
       </div>
 
@@ -323,7 +323,7 @@ export function RolesManagement() {
             onClick={() => { setSearch(''); setFilterTeam(''); setFilterStatus('') }}
             className={`flex items-center gap-1 text-xs text-danger hover:underline transition-opacity ${
               search || filterTeam || filterStatus ? 'visible opacity-100' : 'invisible opacity-0 pointer-events-none'
-            }`}
+              }`}
           >
             <RefreshCw size={12} /> Clear
           </button>

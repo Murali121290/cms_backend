@@ -12,35 +12,26 @@ export function useOnlyOfficeScript(url: string) {
 
   useEffect(() => {
     if (!url) return;
+
+    // DocsAPI already set — script is loaded and functional.
     if (window.DocsAPI) {
       setLoaded(true);
       return;
     }
 
-    // Check if script is already injected by another component instance
-    const existingScript = document.querySelector(`script[src="${url}"]`);
-    if (existingScript) {
-      const handleLoad = () => setLoaded(true);
-      const handleError = () => setError(true);
-      existingScript.addEventListener("load", handleLoad);
-      existingScript.addEventListener("error", handleError);
-      return () => {
-        existingScript.removeEventListener("load", handleLoad);
-        existingScript.removeEventListener("error", handleError);
-      };
+    // Script tag exists but window.DocsAPI is gone (destroyEditor() cleared it).
+    // Remove the stale tag so we can reinject a fresh copy.
+    const stale = document.querySelector(`script[src="${url}"]`);
+    if (stale) {
+      stale.remove();
     }
 
     const script = document.createElement("script");
     script.src = url;
     script.async = true;
 
-    const onScriptLoad = () => {
-      setLoaded(true);
-    };
-
-    const onScriptError = () => {
-      setError(true);
-    };
+    const onScriptLoad = () => setLoaded(true);
+    const onScriptError = () => setError(true);
 
     script.addEventListener("load", onScriptLoad);
     script.addEventListener("error", onScriptError);
@@ -50,8 +41,6 @@ export function useOnlyOfficeScript(url: string) {
     return () => {
       script.removeEventListener("load", onScriptLoad);
       script.removeEventListener("error", onScriptError);
-      // Optional: keep script in body if other instances might need it,
-      // but remove listeners to avoid memory leaks.
     };
   }, [url]);
 

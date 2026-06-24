@@ -36,8 +36,15 @@ def create_chapter(db: Session, *, project_id: int, number: str, title: str, upl
         stage_name=first_stage
     )
     db.add(new_chapter)
+
+    if project.chapter_count is not None:
+        project.chapter_count += 1
+    else:
+        project.chapter_count = 1
+
     db.commit()
     db.refresh(new_chapter)
+    db.refresh(project)
 
     chapter_base_dir = f"{upload_dir}/{project.code}/{number}"
     for category in _CHAPTER_CATEGORIES:
@@ -87,7 +94,10 @@ def delete_chapter_primary(db: Session, *, project_id: int, chapter_id: int, upl
         shutil.rmtree(chapter_dir)
 
     db.delete(chapter)
+    if project.chapter_count is not None and project.chapter_count > 0:
+        project.chapter_count -= 1
     db.commit()
+    db.refresh(project)
     return {"project": project, "chapter": chapter}
 
 
@@ -103,6 +113,9 @@ def delete_chapter_secondary(db: Session, *, project_id: int, chapter_id: int, u
         shutil.rmtree(chapter_path, ignore_errors=True)
 
     db.delete(chapter)
+    if project.chapter_count is not None and project.chapter_count > 0:
+        project.chapter_count -= 1
     db.commit()
+    db.refresh(project)
     return {"project": project, "chapter": chapter}
 

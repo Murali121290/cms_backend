@@ -148,10 +148,11 @@ services:
     # OnlyOffice uses shared memory heavily for document co-authoring.
     shm_size: '2gb'
     environment:
-      JWT_ENABLED: "true"
+      JWT_ENABLED: "false"
       JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:-secret}
       JWT_HEADER: "Authorization"
       JWT_IN_BODY: "true"
+      ALLOW_PRIVATE_IP_ADDRESS: "true"
     restart: always
 
   # ── AI Structuring Service ────────────────────────────────────────────────

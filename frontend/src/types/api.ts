@@ -108,6 +108,7 @@ export interface ProjectSummary {
   file_details?: Record<string, unknown> | null;
   created_at?: string | null;
   updated_at?: string | null;
+  is_delayed?: boolean;
 }
 
 export interface ChapterSummary {

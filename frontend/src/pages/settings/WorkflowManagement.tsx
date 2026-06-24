@@ -220,14 +220,14 @@ function WorkflowModal({
       title={modalTitle}
       size="xl"
       footer={
-        <>
+        <div className="flex justify-end gap-3">
           <Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button>
           <Button onClick={handleSave} disabled={saving}>
             {saving
               ? <><Spinner size="sm" /> Saving…</>
               : editName ? 'Update Workflow' : 'Create Workflow'}
           </Button>
-        </>
+        </div>
       }
     >
       <div className="flex flex-col gap-4">
@@ -563,7 +563,7 @@ export function WorkflowManagement() {
             </div>
           </div>
         </div>
-        <Button onClick={openCreate}><Plus size={15} /> Create Workflow</Button>
+        <Button onClick={openCreate} leftIcon={<Plus size={15} />}> Create Workflow</Button>
       </div>
 
       {/* Table */}

@@ -77,11 +77,14 @@ def create_project_with_initial_files(
     title: str,
     client_name: str | None,
     xml_standard: str,
-    chapter_count: int,
-    files: list[UploadFile] | None,
+    chapter_count: int | None = None,
+    files: list[UploadFile] | None = None,
     upload_dir: str,
 ):
     valid_uploads = [upload for upload in files or [] if upload.filename]
+    if chapter_count is None or chapter_count <= 0:
+        chapter_count = len(valid_uploads)
+
     if not valid_uploads:
         new_project = ProjectCreate(
             title=title,
@@ -89,11 +92,12 @@ def create_project_with_initial_files(
             xml_standard=xml_standard,
         )
         db_project = create_project(db, new_project)
+        db_project.chapter_count = chapter_count
 
         if client_name:
             db_project.client_name = client_name
-            db.commit()
-            db.refresh(db_project)
+        db.commit()
+        db.refresh(db_project)
 
         base_path = f"{upload_dir}/{code}"
         os.makedirs(base_path, exist_ok=True)
@@ -128,11 +132,12 @@ def create_project_with_initial_files(
         xml_standard=xml_standard,
     )
     db_project = create_project(db, new_project)
+    db_project.chapter_count = chapter_count
 
     if client_name:
         db_project.client_name = client_name
-        db.commit()
-        db.refresh(db_project)
+    db.commit()
+    db.refresh(db_project)
 
     base_path = f"{upload_dir}/{code}"
     os.makedirs(base_path, exist_ok=True)

@@ -105,14 +105,16 @@ export function ProjectInfoModal({ project, open, mode, onClose, onUpdated }: Pr
       size="xl"
       footer={
         mode === 'edit' ? (
-          <>
+          <div className="flex justify-end gap-3">
             <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
             <Button onClick={handleSave} disabled={saving}>
               {saving ? <><Spinner size="sm" /> Saving…</> : 'Save Changes'}
             </Button>
-          </>
+          </div>
         ) : (
-          <Button variant="outline" onClick={onClose}>Close</Button>
+          <div className="flex justify-end">
+            <Button variant="outline" onClick={onClose}>Close</Button>
+          </div>
         )
       }
     >

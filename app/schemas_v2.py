@@ -127,6 +127,7 @@ class ProjectSummary(BaseModel):
     file_details: dict | None = None
     created_at: str | None = None
     updated_at: str | None = None
+    is_delayed: bool = False
 
 
 class ChapterSummary(BaseModel):

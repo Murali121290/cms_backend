@@ -49,6 +49,9 @@ export function useTechnicalApply({
         queryKey: ["technical-review", fileId],
       }),
       queryClient.invalidateQueries({
+        queryKey: ["file-xhtml", fileId],
+      }),
+      queryClient.invalidateQueries({
         queryKey: ["chapter-detail", projectId, chapterId],
       }),
       queryClient.invalidateQueries({
@@ -90,7 +93,23 @@ export function useTechnicalApply({
         selectedFindings,
         highlightFindings,
       });
+
+      // Invalidate old file caches first, then also invalidate new file caches
       await refreshReadState();
+
+      // If a new file was created, also invalidate its xhtml, technical-review and onlyoffice-config caches
+      const newFileId = response?.new_file_id;
+      if (newFileId && newFileId !== fileId) {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["file-xhtml", newFileId] }),
+          queryClient.invalidateQueries({ queryKey: ["technical-review", newFileId] }),
+          queryClient.invalidateQueries({ queryKey: ["onlyoffice-config", newFileId] }),
+        ]);
+      }
+
+      // Also invalidate old file's onlyoffice config
+      await queryClient.invalidateQueries({ queryKey: ["onlyoffice-config", fileId] });
+
       setResult(response);
       setStatusMessage(`Technical review applied. Created ${response.new_file.filename}.`);
       return response;

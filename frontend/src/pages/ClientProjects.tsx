@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft, Search, FolderOpen, BookOpen,
-  Layers, Zap, CheckCircle2, Clock, Plus, Info, Edit2, CalendarDays, ChevronRight
+  Layers, Zap, CheckCircle2, Clock, Plus, Info, Edit2, CalendarDays, ChevronRight, AlertCircle
 } from 'lucide-react'
 import { ViewSwitcher } from '@/components/ui/ViewSwitcher'
 import { useViewMode } from '@/hooks/useViewMode'
@@ -15,7 +15,6 @@ import { useRBAC } from '@/hooks/useRBAC'
 import { Badge, statusToBadge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Spinner, FullPageSpinner } from '@/components/ui/Spinner'
-import { CreateProjectModal } from './CreateProjectModal'
 import { ProjectInfoModal } from './ProjectInfoModal'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -45,9 +44,8 @@ function SummaryWidget({ icon: Icon, label, value, iconCls, onClick, active }: {
   return (
     <div
       onClick={onClick}
-      className={`bg-card rounded-xl border px-5 py-4 flex items-center gap-4 shadow-sm transition-all flex-1 min-w-0 ${
-        onClick ? 'cursor-pointer hover:shadow-md' : ''
-      } ${active ? 'border-primary ring-1 ring-primary/30' : 'border-border'}`}
+      className={`bg-card rounded-xl border px-5 py-4 flex items-center gap-4 shadow-sm transition-all flex-1 min-w-0 ${onClick ? 'cursor-pointer hover:shadow-md' : ''
+        } ${active ? 'border-primary ring-1 ring-primary/30' : 'border-border'}`}
     >
       <div className={`p-2.5 rounded-xl bg-surface ${iconCls}`}>
         <Icon size={18} />
@@ -115,20 +113,20 @@ function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo
 
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [chLoading, setChLoading] = useState(true)
-  const [ftLoading, setFtLoading]   = useState(false)
-  const [pmLoading, setPmLoading]   = useState(false)
+  const [ftLoading, setFtLoading] = useState(false)
+  const [pmLoading, setPmLoading] = useState(false)
 
   useEffect(() => {
     if (!project.project_code) { setChLoading(false); return }
     chaptersApi.getByProject(project.project_code)
       .then(setChapters)
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setChLoading(false))
   }, [project.project_code])
 
   const completed = chapters.filter(c => c.status === 'complete').length
-  const total     = chapters.length
-  const pct       = total > 0 ? Math.round((completed / total) * 100) : 0
+  const total = chapters.length
+  const pct = total > 0 ? Math.round((completed / total) * 100) : 0
 
   const statusV = project.status
     ? statusToBadge(project.status.toLowerCase())
@@ -225,11 +223,10 @@ function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo
           <button
             onClick={e => { e.stopPropagation(); toggleFastTrack() }}
             disabled={ftLoading}
-            className={`inline-flex items-center gap-1 text-xs font-medium px-2.5 py-0.5 rounded-full border transition-colors disabled:opacity-60 ${
-              isFastTrack
+            className={`inline-flex items-center gap-1 text-xs font-medium px-2.5 py-0.5 rounded-full border transition-colors disabled:opacity-60 ${isFastTrack
                 ? 'bg-orange-100 text-orange-700 border-orange-200 hover:bg-orange-200'
                 : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200 dark:bg-surface dark:text-muted dark:border-border'
-            }`}
+              }`}
           >
             {ftLoading
               ? <Spinner size="sm" />
@@ -281,15 +278,14 @@ function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo
             <BookOpen size={12} className="flex-shrink-0" />
             Chapters
           </span>
-          <span className={`inline-flex items-center gap-1 text-xs font-bold px-2.5 py-0.5 rounded-full border ${
-            total === 0
+          <span className={`inline-flex items-center gap-1 text-xs font-bold px-2.5 py-0.5 rounded-full border ${total === 0
               ? 'bg-surface text-muted border-border'
               : pct === 100
-              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-              : pct > 0
-              ? 'bg-primary/8 text-primary border-primary/20'
-              : 'bg-surface text-muted border-border'
-          }`}>
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                : pct > 0
+                  ? 'bg-primary/8 text-primary border-primary/20'
+                  : 'bg-surface text-muted border-border'
+            }`}>
             {completed}
             <span className="font-normal opacity-60">/</span>
             {total}
@@ -335,21 +331,20 @@ export function ClientProjects() {
   const navigate = useNavigate()
   const id = Number(clientId)
 
-  const [client,   setClient]   = useState<Client | null>(null)
+  const [client, setClient] = useState<Client | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
-  const [pmUsers,  setPmUsers]  = useState<User[]>([])
-  const [loading,    setLoading]    = useState(true)
-  const [createOpen,      setCreateOpen]      = useState(false)
-  const [infoProject,     setInfoProject]     = useState<Project | null>(null)
-  const [editProject,     setEditProject]     = useState<Project | null>(null)
+  const [pmUsers, setPmUsers] = useState<User[]>([])
+  const [loading, setLoading] = useState(true)
+  const [infoProject, setInfoProject] = useState<Project | null>(null)
+  const [editProject, setEditProject] = useState<Project | null>(null)
 
 
   const [viewMode, setViewMode] = useViewMode('view:client-projects', 'large')
 
-  const [search,           setSearch]           = useState('')
-  const [filterWorkflow,   setFilterWorkflow]   = useState('')
-  const [filterStatus,     setFilterStatus]     = useState('')
-  const [filterPriority,   setFilterPriority]   = useState('')
+  const [search, setSearch] = useState('')
+  const [filterWorkflow, setFilterWorkflow] = useState('')
+  const [filterStatus, setFilterStatus] = useState('')
+  const [filterPriority, setFilterPriority] = useState('')
 
   useEffect(() => {
     if (!id) return
@@ -364,7 +359,7 @@ export function ClientProjects() {
         setClient(c)
         setProjects(ps)
         setPmUsers((users || []).filter(u =>
-          u.active_status && u.role.toLowerCase().replace(" ","").includes('projectmanager')
+          u.active_status && u.role.toLowerCase().replace(" ", "").includes('projectmanager')
         ))
       })
       .catch(() => toast.error('Failed to load projects'))
@@ -379,12 +374,13 @@ export function ClientProjects() {
 
   // Summary stats (chapter stats loaded lazily per card)
   const stats = useMemo(() => {
-    const total     = projects.length
-    const active    = projects.filter(p => p.status === 'Active').length
-    const delayed   = projects.filter(p => p.status === 'Planning').length
+    const total = projects.length
+    const active = projects.filter(p => p.status === 'Active').length
+    const planning = projects.filter(p => p.status === 'Planning').length
     const completed = projects.filter(p => p.status === 'Completed').length
     const fastTrack = projects.filter(p => p.priority === 'Fast Track').length
-    return { total, active, delayed, completed, fastTrack }
+    const delayed = projects.filter(p => p.is_delayed).length
+    return { total, active, planning, completed, fastTrack, delayed }
   }, [projects])
 
   const STATUS_ORDER: Record<string, number> = { Planning: 0, Active: 1, Completed: 2 }
@@ -395,14 +391,18 @@ export function ClientProjects() {
     return projects
       .filter(p => {
         if (q && !projectLabel(p).toLowerCase().includes(q) &&
-                 !(p.project_code ?? '').toLowerCase().includes(q)) return false
+          !(p.project_code ?? '').toLowerCase().includes(q)) return false
         if (filterWorkflow && p.workflow_name !== filterWorkflow) return false
-        if (filterStatus   && p.status        !== filterStatus)   return false
-        if (filterPriority && p.priority      !== filterPriority) return false
+        if (filterStatus === '__delayed__') {
+          if (!p.is_delayed) return false
+        } else if (filterStatus && p.status !== filterStatus) {
+          return false
+        }
+        if (filterPriority && p.priority !== filterPriority) return false
         return true
       })
       .sort((a, b) =>
-        (STATUS_ORDER[a.status ?? ''] ?? 99) - (STATUS_ORDER[b.status ?? ''] ?? 99)
+        (a.project_code ?? '').localeCompare(b.project_code ?? '')
       )
   }, [projects, search, filterWorkflow, filterStatus, filterPriority])
 
@@ -434,18 +434,19 @@ export function ClientProjects() {
             </div>
           </div>
         </div>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus size={15} /> Create Project
+        <Button onClick={() => navigate(`/clients/${clientId}/projects/new`)} leftIcon={<Plus size={15} />}>
+          Create Project
         </Button>
       </div>
 
       {/* Summary widgets */}
       <div className="flex gap-3">
-        <SummaryWidget icon={Layers}       label="Total"      value={stats.total}     iconCls="text-blue-600"    onClick={() => setFilterStatus('')}                                          active={filterStatus === '' && filterPriority === ''}  />
-        <SummaryWidget icon={Clock}        label="Active"     value={stats.active}    iconCls="text-green-600"   onClick={() => { setFilterStatus(s => s === 'Active'    ? '' : 'Active');    setFilterPriority('') }} active={filterStatus === 'Active'}    />
-        <SummaryWidget icon={Layers}       label="Planning"   value={stats.delayed}   iconCls="text-purple-600"  onClick={() => { setFilterStatus(s => s === 'Planning'  ? '' : 'Planning');  setFilterPriority('') }} active={filterStatus === 'Planning'}  />
-        <SummaryWidget icon={CheckCircle2} label="Completed"  value={stats.completed} iconCls="text-emerald-600" onClick={() => { setFilterStatus(s => s === 'Completed' ? '' : 'Completed'); setFilterPriority('') }} active={filterStatus === 'Completed'} />
-        <SummaryWidget icon={Zap}          label="Fast Track" value={stats.fastTrack} iconCls="text-orange-600"  onClick={() => { setFilterPriority(p => p === 'Fast Track' ? '' : 'Fast Track'); setFilterStatus('') }} active={filterPriority === 'Fast Track'} />
+        <SummaryWidget icon={Layers} label="Total" value={stats.total} iconCls="text-blue-600" onClick={() => setFilterStatus('')} active={filterStatus === '' && filterPriority === ''} />
+        <SummaryWidget icon={Zap} label="Fast Track" value={stats.fastTrack} iconCls="text-orange-600" onClick={() => { setFilterPriority(p => p === 'Fast Track' ? '' : 'Fast Track'); setFilterStatus('') }} active={filterPriority === 'Fast Track'} />
+        <SummaryWidget icon={AlertCircle} label="Delayed" value={stats.delayed} iconCls="text-red-600" onClick={() => { setFilterStatus(s => s === '__delayed__' ? '' : '__delayed__'); setFilterPriority('') }} active={filterStatus === '__delayed__'} />
+        <SummaryWidget icon={Layers} label="Planning" value={stats.planning} iconCls="text-purple-600" onClick={() => { setFilterStatus(s => s === 'Planning' ? '' : 'Planning'); setFilterPriority('') }} active={filterStatus === 'Planning'} />
+        <SummaryWidget icon={Clock} label="Active" value={stats.active} iconCls="text-green-600" onClick={() => { setFilterStatus(s => s === 'Active' ? '' : 'Active'); setFilterPriority('') }} active={filterStatus === 'Active'} />
+        <SummaryWidget icon={CheckCircle2} label="Completed" value={stats.completed} iconCls="text-emerald-600" onClick={() => { setFilterStatus(s => s === 'Completed' ? '' : 'Completed'); setFilterPriority('') }} active={filterStatus === 'Completed'} />
       </div>
 
       {/* Filter bar */}
@@ -491,7 +492,7 @@ export function ClientProjects() {
         open={infoProject !== null}
         mode="view"
         onClose={() => setInfoProject(null)}
-        onUpdated={() => {}}
+        onUpdated={() => { }}
       />
 
       {/* Edit Info Modal */}
@@ -508,16 +509,7 @@ export function ClientProjects() {
 
 
 
-      {/* Create Project Modal */}
-      <CreateProjectModal
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        defaultClientId={id}
-        onCreated={project => {
-          setProjects(ps => [project, ...ps])
-          setCreateOpen(false)
-        }}
-      />
+
 
       {/* Projects — 4 view modes */}
       {filtered.length === 0 ? (
@@ -569,7 +561,7 @@ export function ClientProjects() {
                       {project.project_manager
                         ? <span className="truncate">PM: {project.project_manager}</span>
                         : <span className="italic">No PM</span>}
-                      {project.due_date && <span className="flex-shrink-0 flex items-center gap-0.5"><CalendarDays size={10}/> {new Date(project.due_date).toLocaleDateString('en-GB',{day:'2-digit',month:'short'})}</span>}
+                      {project.due_date && <span className="flex-shrink-0 flex items-center gap-0.5"><CalendarDays size={10} /> {new Date(project.due_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</span>}
                     </div>
                   </div>
                 )
@@ -596,7 +588,7 @@ export function ClientProjects() {
                     {project.status && <Badge variant={statusV} className="flex-shrink-0">{project.status}</Badge>}
                     <div className="flex items-center gap-4 text-xs text-muted flex-shrink-0">
                       {project.project_manager && <span>PM: {project.project_manager}</span>}
-                      {project.due_date && <span className="flex items-center gap-1"><CalendarDays size={11}/> {new Date(project.due_date).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})}</span>}
+                      {project.due_date && <span className="flex items-center gap-1"><CalendarDays size={11} /> {new Date(project.due_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span>}
                     </div>
                     <ChevronRight size={14} className="text-muted flex-shrink-0" />
                   </div>
@@ -611,7 +603,7 @@ export function ClientProjects() {
               <table className="w-full text-sm border-collapse min-w-max">
                 <thead>
                   <tr className="border-b border-border bg-surface">
-                    {['Code','Title','Status','Workflow','PM','Due Date','Chapters','Pages'].map(h => (
+                    {['Code', 'Title', 'Status', 'Workflow', 'PM', 'Due Date', 'Chapters', 'Pages'].map(h => (
                       <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -629,7 +621,7 @@ export function ClientProjects() {
                         <td className="px-4 py-3 text-xs text-muted whitespace-nowrap">{project.workflow_name ?? '—'}</td>
                         <td className="px-4 py-3 text-xs text-muted whitespace-nowrap">{project.project_manager ?? '—'}</td>
                         <td className="px-4 py-3 text-xs text-muted whitespace-nowrap">
-                          {project.due_date ? new Date(project.due_date).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}) : '—'}
+                          {project.due_date ? new Date(project.due_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
                         </td>
                         <td className="px-4 py-3 text-xs text-center text-text font-medium">{(project as any).chapter_count ?? '—'}</td>
                         <td className="px-4 py-3 text-xs text-muted whitespace-nowrap">

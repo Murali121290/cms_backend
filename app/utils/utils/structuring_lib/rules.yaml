@@ -82,10 +82,10 @@ paragraphs:
     description: "Common section headings"
 
   - priority: 20
-    pattern: "^(?:\\d+(?:\\.\\d+)*|[IVX]+|[A-Z])\\.\\s+[A-Z].{1,100}$"
+    pattern: "^(?:(?P<num>\\d+(?:\\.\\d+)*)|[IVX]+|[A-Z])\\.\\s+[A-Z].{1,100}$"
     tag: H1
     style: H1
-    description: "Numbered section headings"
+    description: "Numbered section headings (depth derived from 'num' group when present)"
 
   - priority: 21
     pattern: "^[A-Z][A-Z\\s]{1,49}$"
@@ -105,6 +105,12 @@ paragraphs:
     style: H3
     description: "Topic headings with colon"
 
+  - priority: 24
+    pattern: "^(?i:Source|Adapted from|Data from|Reproduced from|Courtesy of)\\b"
+    tag: FIG-SRC
+    style: FIG-SRC
+    description: "Source/citation line adjacent to a figure or table"
+
   - priority: 33
     pattern: "^Box\\s+\\d+\\."
     tag: NBX1-TTL
@@ -123,7 +129,12 @@ lists:
   bullet_pattern: "^[•\\-\\–▪■●○➢>*]\\s+"
   number_pattern: "^\\d+\\.\\s+"
   roman_pattern: "^(?i:[ivxlcdm]+)[\\.)]\\s+"
-  
+  # Single capital letter followed by a tab or 2+ spaces (mnemonic-style
+  # lettered lists), e.g. "A   Apple is red". Requires a tab or 2+ spaces
+  # (not just 1) so ordinary sentences starting with the article "A " aren't
+  # misclassified as list items.
+  mnemonic_pattern: "^[A-Z](?:\\t|[ ]{2,4})\\S"
+
   # Context-specific list handling
   learning_objectives:
     tag: OBJ-BL-MID
@@ -155,6 +166,10 @@ lists:
   general_roman:
     tag: RL-MID
     style: RL-MID
+
+  general_lettered:
+    tag: UL-MID
+    style: UL-MID
 
   general:
     tag: BL-MID
@@ -189,6 +204,9 @@ tables:
   bullet_style: TBL-MID
   number_style: TNL-MID
   roman_style: TRL-MID
+  source_note_style: TSN
+  footnote_style: TFN
+  stub_heading_style: T4
 
 # Box and explicit-tag normalization
 boxes:
@@ -206,6 +224,31 @@ boxes:
   title_style: NBX1-TTL
   body_style: NBX-TXT
   first_body_style: NBX-TXT-FIRST
+
+  # Keyword -> subtype-prefix map. Box-open tokens (literal text like
+  # "<CLINICAL PEARL>") that match one of these keywords resolve to the
+  # listed prefix instead of the generic NBX pair (gap #3).
+  type_keywords:
+    NOTE: NBX
+    TIP: NBX
+    "CLINICAL PEARL": BX1
+    EXAMPLE: BX1
+    "RED FLAG": BX2
+    WARNING: BX2
+    ALERT: BX2
+    REFLECTION: BX3
+    DISCUSSION: BX3
+    "CASE STUDY": BX4
+    BOX: NBX
+
+  # Prefix -> {title, body} style pair. NBX intentionally keeps the
+  # pre-existing default names (title carries a "1", body does not).
+  subtype_styles:
+    NBX: {title: NBX1-TTL, body: NBX-TXT}
+    BX1: {title: BX1-TTL, body: BX1-TXT}
+    BX2: {title: BX2-TTL, body: BX2-TXT}
+    BX3: {title: BX3-TTL, body: BX3-TXT}
+    BX4: {title: BX4-TTL, body: BX4-TXT}
 
 keyterms:
   explicit_styles:

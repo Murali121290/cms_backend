@@ -54,6 +54,7 @@ from app.integrations.onlyoffice import (
     sign_config,
     verify_callback_token,
 )
+from app.integrations.onlyoffice.config import ONLYOFFICE_INTERNAL_URL
 from app.integrations.wopi import service as wopi_service
 from app.integrations.webdav.config import WEBDAV_BASE_URL, WEBDAV_TOKEN_EXPIRE_MINUTES
 from app.domains.auth.security import create_access_token
@@ -176,6 +177,19 @@ def _serialize_project_summary(project: Project):
     _cat_raw = getattr(project, "created_at", None)
     cat = _cat_raw.isoformat() if _cat_raw else _dt.utcnow().date().isoformat()
     uat = project.updated_at.isoformat() if getattr(project, "updated_at", None) else None
+
+    is_delayed = False
+    for ch in project.chapters:
+        if ch.status != "complete" and ch.due_date:
+            due_dt = ch.due_date
+            if due_dt.tzinfo is not None:
+                now = _dt.now(due_dt.tzinfo)
+            else:
+                now = _dt.now()
+            if due_dt < now:
+                is_delayed = True
+                break
+
     return schemas_v2.ProjectSummary(
         id=project.id,
         code=project.code,
@@ -209,6 +223,7 @@ def _serialize_project_summary(project: Project):
         file_details=getattr(project, "file_details", None),
         created_at=cat,
         updated_at=uat,
+        is_delayed=is_delayed,
     )
 
 
@@ -819,7 +834,7 @@ def api_v2_project_bootstrap(
     client_id: int | None = Form(None),
     client_name: str | None = Form(None),
     xml_standard: str = Form(...),
-    chapter_count: int = Form(...),
+    chapter_count: int | None = Form(None),
     workflow_name: str | None = Form(None),
     division_code: str | None = Form(None),
     customer_contact: str | None = Form(None),
@@ -847,6 +862,15 @@ def api_v2_project_bootstrap(
             status_code=status.HTTP_401_UNAUTHORIZED,
             code="AUTH_REQUIRED",
             message="Authentication required.",
+        )
+
+    # Check if a project with the same code already exists
+    existing_project = db.query(Project).filter(Project.project_code == code).first()
+    if existing_project:
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="PROJECT_ALREADY_EXISTS",
+            message=f"Project code '{code}' already exists.",
         )
 
     if workflow_name:
@@ -1827,6 +1851,34 @@ def api_v2_upload_zip(
         images_list = []
         xml_list = []
         docs_list = []
+
+        # First-pass validation: Check if we can identify any chapters in the ZIP file
+        has_chapters = False
+        for root, _, filenames in os.walk(temp_dir):
+            for fname in filenames:
+                if fname == file.filename or "__MACOSX" in root or fname.startswith("."):
+                    continue
+                chapter_no_str = extract_chapter_number(fname)
+                if not chapter_no_str:
+                    rel_path = os.path.relpath(os.path.join(root, fname), temp_dir)
+                    path_parts = rel_path.replace("\\", "/").split("/")
+                    for part in path_parts[:-1]:
+                        chapter_no_str = extract_chapter_number(part)
+                        if chapter_no_str:
+                            break
+                if chapter_no_str:
+                    has_chapters = True
+                    break
+            if has_chapters:
+                break
+
+        if not has_chapters:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            return _error_response(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="NO_CHAPTERS_FOUND",
+                message="Unable to identify any chapters in the uploaded ZIP file.",
+            )
         
         initial_chapters_count = db.query(models.Chapter).filter(models.Chapter.project == project.project_code).count()
 
@@ -2037,6 +2089,10 @@ def api_v2_upload_zip(
             pass
 
         final_chapters_count = db.query(models.Chapter).filter(models.Chapter.project == project.project_code).count()
+        project.chapter_count = final_chapters_count
+        db.commit()
+        db.refresh(project)
+
         chapters_inserted = final_chapters_count - initial_chapters_count
         unique_extracted_chapters = len({c.chapter_no for c in chapters_list if c.chapter_no is not None})
 
@@ -2095,6 +2151,7 @@ def api_v2_file_editor(
 @router.get("/files/{file_id}/onlyoffice-config")
 def api_v2_onlyoffice_config(
     file_id: int,
+    request: Request,
     mode: str = "original",
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
@@ -2123,10 +2180,13 @@ def api_v2_onlyoffice_config(
             message="Physical file not found.",
         )
 
-    # Compute key
+    # Compute key — include mtime so OnlyOffice re-downloads after content or
+    # server changes (avoids stale cached-failure entries in the docservice).
     import hashlib
     with open(file_path, "rb") as f:
-        version_key = hashlib.sha256(f.read()).hexdigest()[:16]
+        _content = f.read()
+    _mtime = int(os.path.getmtime(file_path))
+    version_key = hashlib.sha256(_content + str(_mtime).encode()).hexdigest()[:20]
 
     # Document download URL (OnlyOffice container must reach this)
     if mode == "structuring":
@@ -2135,6 +2195,15 @@ def api_v2_onlyoffice_config(
         doc_url = f"{WOPI_BASE_URL}/wopi/files/{file_id}/contents"
 
     callback_url = f"{WOPI_BASE_URL}/api/v2/onlyoffice/callback/{file_id}?mode={mode}"
+
+    from urllib.parse import urlparse
+    _origin = request.headers.get("origin")
+    if not _origin:
+        _ref = request.headers.get("referer", "")
+        if _ref:
+            _p = urlparse(_ref)
+            _origin = f"{_p.scheme}://{_p.netloc}"
+    plugin_url = f"{_origin}/onlyoffice-plugins/style-connector/config.json" if _origin else ""
 
     config = {
         "document": {
@@ -2164,6 +2233,10 @@ def api_v2_onlyoffice_config(
                 "plugins": False,
                 "goback": {"url": ""},
             },
+            **({"plugins": {
+                "autostart": ["asc.{4c1b92a4-793d-4251-ba23-1451e06eeafd}"],
+                "pluginsData": [plugin_url],
+            }} if plugin_url else {}),
         },
     }
 
@@ -2201,7 +2274,12 @@ async def api_v2_onlyoffice_callback(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Download URL missing in OnlyOffice callback.",
             )
-            
+
+        # OnlyOffice sends the download URL using the public host (e.g. localhost:8083),
+        # but inside Docker the backend cannot reach that. Rewrite to the internal URL.
+        if ONLYOFFICE_PUBLIC_URL and ONLYOFFICE_INTERNAL_URL:
+            download_url = download_url.replace(ONLYOFFICE_PUBLIC_URL, ONLYOFFICE_INTERNAL_URL, 1)
+
         import requests
         try:
             response = requests.get(download_url, timeout=30)

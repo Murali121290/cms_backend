@@ -342,40 +342,37 @@ export function StructuringReviewPage() {
           <div className="flex border-b border-navy-200">
             <button
               onClick={() => setActiveTab("overview")}
-              className={`py-3 px-6 font-semibold text-sm flex items-center gap-2 border-b-2 transition-all ${
-                activeTab === "overview"
-                  ? "border-navy-600 text-navy-800"
-                  : "border-transparent text-navy-400 hover:text-navy-600"
-              }`}
+              className={`py-3 px-6 font-semibold text-sm flex items-center gap-2 border-b-2 transition-all ${activeTab === "overview"
+                ? "border-navy-600 text-navy-800"
+                : "border-transparent text-navy-400 hover:text-navy-600"
+                }`}
             >
               <LayoutDashboard className="w-4 h-4" />
               Document Overview
             </button>
             <button
               onClick={() => setActiveTab("editor")}
-              className={`py-3 px-6 font-semibold text-sm flex items-center gap-2 border-b-2 transition-all ${
-                activeTab === "editor"
-                  ? "border-navy-600 text-navy-800"
-                  : "border-transparent text-navy-400 hover:text-navy-600"
-              }`}
+              className={`py-3 px-6 font-semibold text-sm flex items-center gap-2 border-b-2 transition-all ${activeTab === "editor"
+                ? "border-navy-600 text-navy-800"
+                : "border-transparent text-navy-400 hover:text-navy-600"
+                }`}
             >
               <FileText className="w-4 h-4" />
-              Structuring Editor Workspace
+              Style Editor Workspace
             </button>
             {onlyoffice_available && (
               <button
                 onClick={() => setActiveTab("onlyoffice")}
-                className={`py-3 px-6 font-semibold text-sm flex items-center gap-2 border-b-2 transition-all ${
-                  activeTab === "onlyoffice"
-                    ? "border-navy-600 text-navy-800"
-                    : "border-transparent text-navy-400 hover:text-navy-600"
-                }`}
+                className={`py-3 px-6 font-semibold text-sm flex items-center gap-2 border-b-2 transition-all ${activeTab === "onlyoffice"
+                  ? "border-navy-600 text-navy-800"
+                  : "border-transparent text-navy-400 hover:text-navy-600"
+                  }`}
               >
                 <BookOpen className="w-4 h-4" />
-                OnlyOffice Editor
+                Office Editor
               </button>
             )}
-            {review.editor.collabora_url && (
+            {/* {review.editor.collabora_url && (
               <button
                 onClick={() => setActiveTab("collabora")}
                 className={`py-3 px-6 font-semibold text-sm flex items-center gap-2 border-b-2 transition-all ${
@@ -387,7 +384,7 @@ export function StructuringReviewPage() {
                 <BookOpen className="w-4 h-4" />
                 Collabora Office Editor
               </button>
-            )}
+            )} */}
           </div>
         )}
 
@@ -685,6 +682,74 @@ export function StructuringReviewPage() {
             />
               </>
           )}
+                key={`editor-${normalizedFileId}`}
+                initialContent={xsltContent ?? xhtmlQuery.data?.content ?? ""}
+                onSave={async (html) => {
+                  const res = await editorSave.save(html);
+                  if (res && res.file_id && res.file_id !== normalizedFileId) {
+                    navigate(uiPaths.structuringReview(normalizedProjectId, normalizedChapterId, res.file_id) + "?tab=editor");
+                  } else {
+                    void reviewQuery.refetch();
+                  }
+                }}
+                isSaving={editorSave.isPending}
+                saveLabel="Save & Convert to DOCX"
+                documentTitle={review.file.filename}
+                exportHref={review.actions.export_href}
+                trackChangesEnabled={trackChangesEnabled}
+                onTrackChangesToggle={setTrackChangesEnabled}
+                height={isFullscreen ? "calc(100vh - 20px)" : "calc(100vh - 260px)"}
+                styles={allStyles}
+                onAddStyle={handleAddStyle}
+                currentUser={currentUser}
+                fileId={normalizedFileId?.toString()}
+                sidePanel={
+                  <div className="flex flex-col gap-4 h-full min-h-0 text-slate-200">
+                    <div className="flex border-b border-navy-100 pb-1.5 shrink-0">
+                      <button
+                        onClick={() => setSidePanelTab("styles")}
+                        className={`flex-1 pb-1 text-center text-xs font-bold border-b-2 transition-all cursor-pointer ${sidePanelTab === "styles"
+                          ? "border-navy-800 text-navy-800 bg-transparent border-t-0 border-x-0"
+                          : "border-transparent text-navy-400 hover:text-navy-600 bg-transparent border-t-0 border-x-0"
+                          }`}
+                      >
+                        Styles
+                      </button>
+                      <button
+                        onClick={() => setSidePanelTab("changes")}
+                        className={`flex-1 pb-1 text-center text-xs font-bold border-b-2 transition-all cursor-pointer ${sidePanelTab === "changes"
+                          ? "border-navy-800 text-navy-800 bg-transparent border-t-0 border-x-0"
+                          : "border-transparent text-navy-400 hover:text-navy-600 bg-transparent border-t-0 border-x-0"
+                          }`}
+                      >
+                        Tracked Changes
+                      </button>
+                    </div>
+                    {sidePanelTab === "styles" ? (
+                      <div className="flex-1 min-h-0 flex flex-col gap-4">
+                        <div className="flex-1 min-h-0">
+                          <StylesPanel styles={allStyles} editorRef={editorRef} onAddStyle={handleAddStyle} fileId={normalizedFileId} charStyles={review.char_styles} />
+                        </div>
+
+                        <div className="flex-shrink-0">
+                          <VersionHistoryPanel
+                            fileId={normalizedFileId}
+                            currentFileId={normalizedFileId}
+                            onOpenVersion={(versionId) => {
+                              navigate(uiPaths.structuringReview(normalizedProjectId, normalizedChapterId, versionId) + "?tab=editor");
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex-1 min-h-0 overflow-y-auto">
+                        <ChangesReviewPanel editor={editorRef.current?.editor} />
+                      </div>
+                    )}
+                  </div>
+                }
+              />
+            )}
           </div>
         )}
 
@@ -702,7 +767,7 @@ export function StructuringReviewPage() {
                 Use a definite height (not min-height) so the side panel's list
                 can scroll internally instead of growing past the viewport. */}
             <div className="flex-1 flex min-h-0 gap-0" style={{ height: isFullscreen ? "calc(100vh - 90px)" : "calc(100vh - 240px)" }}>
-              <OnlyOfficeSidePanel
+              {/* <OnlyOfficeSidePanel
                 connector={ooConnector}
                 styles={allStyles}
                 fileId={normalizedFileId}
@@ -710,7 +775,7 @@ export function StructuringReviewPage() {
                   navigate(uiPaths.structuringReview(normalizedProjectId, normalizedChapterId, versionId) + "?tab=onlyoffice")
                 }
                 onAddStyle={handleAddStyle}
-              />
+              /> */}
 
               <OnlyOfficeEditor
                 ref={onlyofficeRef}
@@ -735,14 +800,14 @@ export function StructuringReviewPage() {
 
             {/* Split pane: tabbed sidebar + Collabora Editor */}
             <div className="flex-1 flex min-h-0 gap-0" style={{ minHeight: isFullscreen ? "calc(100vh - 80px)" : "600px" }}>
-              <CollaboraSidePanel
+              {/* <CollaboraSidePanel
                 iframeRef={collaboraIframeRef}
                 styles={allStyles}
                 fileId={normalizedFileId}
                 onOpenVersion={(versionId) =>
                   navigate(uiPaths.structuringReview(normalizedProjectId, normalizedChapterId, versionId) + "?tab=collabora")
                 }
-              />
+              /> */}
 
               {/* Collabora iframe */}
               <iframe
