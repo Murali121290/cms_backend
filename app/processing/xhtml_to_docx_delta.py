@@ -23,6 +23,29 @@ from lxml import etree
 logger = logging.getLogger("app.processing.xhtml_to_docx_delta")
 
 
+def _css_color_to_hex(val: str) -> str | None:
+    """Normalize a CSS color (#hex, rgb(...), rgba(...)) to a 6-char uppercase hex string.
+
+    Returns None for unrecognized values (e.g. 'inherit', 'transparent', named colors).
+    Browsers serialize editor-applied colors as rgb()/rgba(); the color picker emits hex.
+    """
+    if not val:
+        return None
+    val = val.strip()
+    if val.startswith("#"):
+        h = val.lstrip("#")
+        if len(h) == 3:
+            h = "".join(c * 2 for c in h)
+        if len(h) == 6:
+            return h.upper()
+        return None
+    m = re.match(r"rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)", val)
+    if m:
+        r, g, b = (max(0, min(255, int(m.group(i)))) for i in (1, 2, 3))
+        return f"{r:02X}{g:02X}{b:02X}"
+    return None
+
+
 # ─── Lookup Helpers ───────────────────────────────────────────────────────────
 
 def _get_unique_bookmark_id(doc) -> int:
@@ -221,6 +244,22 @@ class XhtmlToDocxDeltaEngine:
                 except Exception:
                     pass
 
+            # 2b. Sync paragraph alignment (text-align) from HTML style → w:jc
+            try:
+                inline_style = (block_el.get("style") or "").lower()
+                align_match = re.search(r"text-align\s*:\s*(left|center|right|justify)", inline_style)
+                pPr = para._p.get_or_add_pPr()
+                for existing in pPr.findall(qn("w:jc")):
+                    pPr.remove(existing)
+                if align_match:
+                    val = align_match.group(1)
+                    jc_val = "both" if val == "justify" else val
+                    jc = OxmlElement("w:jc")
+                    jc.set(qn("w:val"), jc_val)
+                    pPr.append(jc)
+            except Exception as align_err:
+                logger.warning(f"Failed to sync alignment for bookmark {bm_name}: {align_err}")
+
             # 3. Patch paragraph runs strictly in-place
             try:
                 self._patch_paragraph_runs(para, block_el, doc, username)
@@ -288,7 +327,7 @@ class XhtmlToDocxDeltaEngine:
                     styles[key.strip().lower()] = val.strip()
             return styles
 
-        def add_rich_run(parent_element, text, bold=False, italic=False, underline=False, color=None, bg_color=None, font_size=None, font_name=None, superscript=False, subscript=False, is_link=False, is_del=False, char_style=None):
+        def add_rich_run(parent_element, text, bold=False, italic=False, underline=False, strike=False, color=None, bg_color=None, font_size=None, font_name=None, superscript=False, subscript=False, is_link=False, is_del=False, char_style=None):
             if not text:
                 return
             r = OxmlElement('w:r')
@@ -304,7 +343,11 @@ class XhtmlToDocxDeltaEngine:
                 i = OxmlElement('w:i')
                 rPr.append(i)
                 has_rPr = True
-            
+            if strike:
+                s_el = OxmlElement('w:strike')
+                rPr.append(s_el)
+                has_rPr = True
+
             final_underline = underline or is_link
             final_color = color
             if is_link and not final_color:
@@ -385,7 +428,7 @@ class XhtmlToDocxDeltaEngine:
             process_content_fn(parent_xml)
             parent_xml.append(bm_end)
 
-        def traverse(el, parent_xml, bold=False, italic=False, underline=False, color=None, bg_color=None, font_size=None, font_name=None, superscript=False, subscript=False, is_link=False, char_style=None):
+        def traverse(el, parent_xml, bold=False, italic=False, underline=False, strike=False, color=None, bg_color=None, font_size=None, font_name=None, superscript=False, subscript=False, is_link=False, char_style=None, is_del=False):
             tag = el.tag.split('}')[-1].lower() if isinstance(el.tag, str) else ""
 
             style_str = el.get("style", "")
@@ -394,22 +437,30 @@ class XhtmlToDocxDeltaEngine:
             has_bold_style = "font-weight" in styles and styles["font-weight"].strip().lower() in ("bold", "700")
             has_underline_style = "text-decoration" in styles and "underline" in styles["text-decoration"].strip().lower()
             has_italic_style = "font-style" in styles and styles["font-style"].strip().lower() == "italic"
+            has_strike_style = "text-decoration" in styles and "line-through" in styles["text-decoration"].strip().lower()
 
             node_color = color
             if "color" in styles:
-                c_val = styles["color"].strip()
-                if c_val.startswith("#"):
-                    node_color = c_val.replace("#", "")
-            
+                parsed = _css_color_to_hex(styles["color"])
+                if parsed:
+                    node_color = parsed
+
             node_bg = bg_color
             if "background-color" in styles:
-                bg_val = styles["background-color"].strip()
-                if bg_val.startswith("#"):
-                    node_bg = bg_val.replace("#", "")
+                parsed = _css_color_to_hex(styles["background-color"])
+                if parsed:
+                    node_bg = parsed
             elif "background" in styles:
-                bg_val = styles["background"].strip()
-                if bg_val.startswith("#"):
-                    node_bg = bg_val.replace("#", "")
+                parsed = _css_color_to_hex(styles["background"])
+                if parsed:
+                    node_bg = parsed
+
+            # TipTap Highlight extension renders <mark data-color="#hex" style="background-color: rgb(...)">.
+            # If the inline style fails (e.g. 'inherit'), fall back to the data-color attribute.
+            if tag == "mark" and not node_bg:
+                parsed = _css_color_to_hex(el.get("data-color") or "")
+                if parsed:
+                    node_bg = parsed
 
             node_font_size = font_size
             if "font-size" in styles:
@@ -441,12 +492,15 @@ class XhtmlToDocxDeltaEngine:
             current_bold = bold or tag in ('strong', 'b') or has_bold_style
             current_italic = italic or tag in ('em', 'i') or has_italic_style
             current_underline = underline or tag == 'u' or has_underline_style
+            current_strike = strike or tag in ('s', 'strike') or has_strike_style
             current_super = superscript or tag == 'sup' or styles.get("vertical-align") == "super"
             current_sub = subscript or tag == 'sub' or styles.get("vertical-align") == "sub"
             current_link = is_link or tag == 'a'
 
             current_xml_parent = parent_xml
-            is_del = False
+            # is_del propagates from the parent (set by an enclosing <del>) so that
+            # nested elements like <del><b>...</b></del> still emit w:delText.
+            current_is_del = is_del
 
             replacement_text = el.get("data-replacement")
             if tag == 'span' and replacement_text is not None:
@@ -476,7 +530,7 @@ class XhtmlToDocxDeltaEngine:
                     
                     add_rich_run(
                         del_node, original_text,
-                        bold=current_bold, italic=current_italic, underline=current_underline,
+                        bold=current_bold, italic=current_italic, underline=current_underline, strike=current_strike,
                         color=node_color, bg_color=None, font_size=node_font_size, font_name=node_font_name,
                         superscript=current_super, subscript=current_sub, is_link=current_link,
                         is_del=True, char_style=node_char_style
@@ -493,21 +547,21 @@ class XhtmlToDocxDeltaEngine:
                     
                     add_rich_run(
                         ins_node, replacement_text,
-                        bold=current_bold, italic=current_italic, underline=current_underline,
+                        bold=current_bold, italic=current_italic, underline=current_underline, strike=current_strike,
                         color=node_color, bg_color=None, font_size=node_font_size, font_name=node_font_name,
                         superscript=current_super, subscript=current_sub, is_link=current_link,
                         is_del=False, char_style=node_char_style
                     )
                     current_xml_parent.append(ins_node)
                 
-                # 3. Handle tail text of the span element
+                # 3. Handle tail text of the span element (tail inherits parent's is_del scope)
                 if el.tail:
                     add_rich_run(
                         parent_xml, el.tail,
-                        bold=bold, italic=italic, underline=underline,
+                        bold=bold, italic=italic, underline=underline, strike=strike,
                         color=color, bg_color=bg_color, font_size=font_size, font_name=font_name,
                         superscript=superscript, subscript=subscript, is_link=is_link,
-                        is_del=False, char_style=char_style
+                        is_del=is_del, char_style=char_style
                     )
                 return
 
@@ -531,7 +585,7 @@ class XhtmlToDocxDeltaEngine:
                 next_id[0] += 1
                 parent_xml.append(del_node)
                 current_xml_parent = del_node
-                is_del = True
+                current_is_del = True
             elif tag == 'a':
                 href = el.get("href", "")
                 if href:
@@ -567,19 +621,19 @@ class XhtmlToDocxDeltaEngine:
                     if el.text:
                         add_rich_run(
                             current_xml_parent, el.text,
-                            bold=current_bold, italic=current_italic, underline=current_underline,
+                            bold=current_bold, italic=current_italic, underline=current_underline, strike=current_strike,
                             color=node_color, bg_color=node_bg, font_size=node_font_size, font_name=node_font_name,
                             superscript=current_super, subscript=current_sub, is_link=current_link,
-                            is_del=is_del, char_style=node_char_style
+                            is_del=current_is_del, char_style=node_char_style
                         )
-                
+
                 if el.tail:
                     add_rich_run(
                         parent_xml, el.tail,
-                        bold=bold, italic=italic, underline=underline,
+                        bold=bold, italic=italic, underline=underline, strike=strike,
                         color=color, bg_color=bg_color, font_size=font_size, font_name=font_name,
                         superscript=superscript, subscript=subscript, is_link=is_link,
-                        is_del=False, char_style=char_style
+                        is_del=is_del, char_style=char_style
                     )
                 return
 
@@ -601,18 +655,18 @@ class XhtmlToDocxDeltaEngine:
                 if el.text:
                     add_rich_run(
                         xml_parent, el.text,
-                        bold=current_bold, italic=current_italic, underline=current_underline,
+                        bold=current_bold, italic=current_italic, underline=current_underline, strike=current_strike,
                         color=node_color, bg_color=node_bg, font_size=node_font_size, font_name=node_font_name,
                         superscript=current_super, subscript=current_sub, is_link=current_link,
-                        is_del=is_del, char_style=node_char_style
+                        is_del=current_is_del, char_style=node_char_style
                     )
                 for child in el:
                     traverse(
                         child, xml_parent,
-                        bold=current_bold, italic=current_italic, underline=current_underline,
+                        bold=current_bold, italic=current_italic, underline=current_underline, strike=current_strike,
                         color=node_color, bg_color=node_bg, font_size=node_font_size, font_name=node_font_name,
                         superscript=current_super, subscript=current_sub, is_link=current_link,
-                        char_style=node_char_style
+                        char_style=node_char_style, is_del=current_is_del
                     )
 
             if bm_name and bm_name.startswith("r_bm_"):
@@ -621,12 +675,14 @@ class XhtmlToDocxDeltaEngine:
                 process_text_and_children(current_xml_parent)
 
             if el.tail:
+                # Tail text sits outside the current element, so the inherited
+                # is_del from the parent scope applies (not current_is_del).
                 add_rich_run(
                     parent_xml, el.tail,
-                    bold=bold, italic=italic, underline=underline,
+                    bold=bold, italic=italic, underline=underline, strike=strike,
                     color=color, bg_color=bg_color, font_size=font_size, font_name=font_name,
                     superscript=superscript, subscript=subscript, is_link=is_link,
-                    is_del=False, char_style=char_style
+                    is_del=is_del, char_style=char_style
                 )
 
         # Parse root element's initial styles (if any)
@@ -634,18 +690,12 @@ class XhtmlToDocxDeltaEngine:
         root_styles = parse_style(root_style)
         root_color = None
         if "color" in root_styles:
-            c_val = root_styles["color"].strip()
-            if c_val.startswith("#"):
-                root_color = c_val.replace("#", "")
+            root_color = _css_color_to_hex(root_styles["color"])
         root_bg = None
         if "background-color" in root_styles:
-            bg_val = root_styles["background-color"].strip()
-            if bg_val.startswith("#"):
-                root_bg = bg_val.replace("#", "")
+            root_bg = _css_color_to_hex(root_styles["background-color"])
         elif "background" in root_styles:
-            bg_val = root_styles["background"].strip()
-            if bg_val.startswith("#"):
-                root_bg = bg_val.replace("#", "")
+            root_bg = _css_color_to_hex(root_styles["background"])
         root_font_size = None
         if "font-size" in root_styles:
             sz_val = root_styles["font-size"].strip()
@@ -696,7 +746,9 @@ def _determine_list_style(li_el) -> str:
 
 def apply_final_docx_formatting(doc):
     from docx.shared import Pt
-    # 1. Update Normal style
+    # Update Normal style so unstyled runs inherit Times New Roman 12pt double-spaced.
+    # Run-level rFonts/sz (from user font-family / font-size choices in the editor) are
+    # left untouched so they survive the round-trip.
     try:
         normal_style = doc.styles['Normal']
         normal_style.font.name = 'Times New Roman'
@@ -704,17 +756,6 @@ def apply_final_docx_formatting(doc):
         normal_style.paragraph_format.line_spacing = 2.0
     except Exception as e:
         logger.warning(f"Could not set Normal style: {e}")
-
-    body = doc.element.body
-    for rFonts in body.findall(f".//{qn('w:rFonts')}"):
-        rFonts.set(qn('w:ascii'), 'Times New Roman')
-        rFonts.set(qn('w:hAnsi'), 'Times New Roman')
-        rFonts.set(qn('w:cs'), 'Times New Roman')
-
-    for sz in body.findall(f".//{qn('w:sz')}"):
-        sz.set(qn('w:val'), '24')
-    for szCs in body.findall(f".//{qn('w:szCs')}"):
-        szCs.set(qn('w:val'), '24')
 
     for para in doc.paragraphs:
         style_name = para.style.name if para.style else "Normal"

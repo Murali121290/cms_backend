@@ -17,9 +17,11 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # Check if table already exists to prevent duplicate table errors in resync/recovery scenarios
     conn = op.get_bind()
     inspector = sa.inspect(conn)
-    if 'webdav_locks' not in inspector.get_table_names():
+    tables = inspector.get_table_names()
+    if 'webdav_locks' not in tables:
         op.create_table(
             'webdav_locks',
             sa.Column('id', sa.Integer(), nullable=False),
@@ -41,7 +43,11 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index(op.f('ix_webdav_locks_lock_token'), table_name='webdav_locks')
-    op.drop_index(op.f('ix_webdav_locks_file_id'), table_name='webdav_locks')
-    op.drop_index(op.f('ix_webdav_locks_id'), table_name='webdav_locks')
-    op.drop_table('webdav_locks')
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    tables = inspector.get_table_names()
+    if 'webdav_locks' in tables:
+        op.drop_index(op.f('ix_webdav_locks_lock_token'), table_name='webdav_locks')
+        op.drop_index(op.f('ix_webdav_locks_file_id'), table_name='webdav_locks')
+        op.drop_index(op.f('ix_webdav_locks_id'), table_name='webdav_locks')
+        op.drop_table('webdav_locks')

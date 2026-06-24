@@ -1,48 +1,59 @@
-import { TextStyle } from "@tiptap/extension-text-style";
+import { Extension } from "@tiptap/core";
 
-declare module '@tiptap/core' {
+declare module "@tiptap/core" {
   interface Commands<ReturnType> {
     fontSize: {
       setFontSize: (fontSize: string) => ReturnType;
       unsetFontSize: () => ReturnType;
-    }
+    };
   }
 }
 
-export const FontSize = TextStyle.extend({
-  name: "textStyle",
+export interface FontSizeOptions {
+  types: string[];
+}
 
-  addAttributes() {
+export const FontSize = Extension.create<FontSizeOptions>({
+  name: "fontSize",
+
+  addOptions() {
     return {
-      ...this.parent?.(),
-      fontSize: {
-        default: null,
-        parseHTML: element => element.style.fontSize,
-        renderHTML: attributes => {
-          if (!attributes.fontSize) {
-            return {};
-          }
-          return {
-            style: `font-size: ${attributes.fontSize}`,
-          };
+      types: ["textStyle"],
+    };
+  },
+
+  addGlobalAttributes() {
+    return [
+      {
+        types: this.options.types,
+        attributes: {
+          fontSize: {
+            default: null,
+            parseHTML: (element) => element.style.fontSize || null,
+            renderHTML: (attributes) => {
+              if (!attributes.fontSize) {
+                return {};
+              }
+              return { style: `font-size: ${attributes.fontSize}` };
+            },
+          },
         },
       },
-    };
+    ];
   },
 
   addCommands() {
     return {
-      ...this.parent?.(),
-      setFontSize: (fontSize: string) => ({ chain }) => {
-        return chain()
-          .setMark("textStyle", { fontSize })
-          .run();
-      },
-      unsetFontSize: () => ({ chain }) => {
-        return chain()
-          .setMark("textStyle", { fontSize: null })
-          .run();
-      },
+      setFontSize:
+        (fontSize: string) =>
+        ({ chain }) => {
+          return chain().setMark("textStyle", { fontSize }).run();
+        },
+      unsetFontSize:
+        () =>
+        ({ chain }) => {
+          return chain().setMark("textStyle", { fontSize: null }).removeEmptyTextStyle().run();
+        },
     };
   },
 });

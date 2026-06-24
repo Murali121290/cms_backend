@@ -1,12 +1,16 @@
 #!/bin/bash
 set -e
 
-echo "Running database migrations..."
-{ alembic upgrade head; } || {
-    echo "Migration failed — resyncing alembic version to consolidated baseline (0001_initial_schema)..."
-    alembic stamp --purge 0001_initial_schema
-    alembic upgrade head
-}
+if [ "${RUN_MIGRATIONS}" != "false" ]; then
+    echo "Running database migrations..."
+    { alembic upgrade head; } || {
+        echo "Migration failed — resyncing alembic version to consolidated baseline (0001_initial_schema)..."
+        alembic stamp --purge 0001_initial_schema
+        alembic upgrade head
+    }
+else
+    echo "Skipping database migrations as RUN_MIGRATIONS is set to false..."
+fi
 
 # Auto-seed only when explicitly requested via SEED_DB=true
 # Usage: docker compose run --rm -e SEED_DB=true backend

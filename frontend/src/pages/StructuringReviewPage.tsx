@@ -24,7 +24,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SkeletonCard } from "@/components/ui/SkeletonLoader";
 import { useStructuringReviewQuery } from "@/features/structuringReview/useStructuringReviewQuery";
-import { WysiwygEditor, useEditorSaveRuns, type WysiwygEditorHandle, ChangesReviewPanel, OnlyOfficeEditor, OnlyOfficeSidePanel, type OnlyOfficeEditorHandle, CollaboraSidePanel } from "@/features/editor";
+import { WysiwygEditor, useEditorSaveRuns, type WysiwygEditorHandle, OnlyOfficeEditor, OnlyOfficeSidePanel, type OnlyOfficeEditorHandle, CollaboraSidePanel } from "@/features/editor";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useFileXhtmlRunsQuery } from "@/features/technicalReview/useFileXhtmlRunsQuery";
 import { StylesPanel } from "@/features/structuringReview/components/EditorStylesPanel";
@@ -277,7 +277,13 @@ export function StructuringReviewPage() {
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <main className={`page-enter min-h-screen bg-surface-100 flex flex-col ${isFullscreen ? "p-2" : "p-6"}`}>
-      <div className={`w-full flex-1 flex flex-col ${isFullscreen ? "max-w-none px-0" : "max-w-[1600px] mx-auto px-4 space-y-6"}`}>
+      <div className={`w-full flex-1 flex flex-col ${
+        isFullscreen
+          ? "max-w-none px-0"
+          : activeTab === "editor"
+            ? "px-4 space-y-6"
+            : "max-w-[1600px] mx-auto px-4 space-y-6"
+      }`}>
 
         {/* Page Header */}
         {!isFullscreen && (
@@ -385,12 +391,7 @@ export function StructuringReviewPage() {
           </div>
         )}
 
-        {/* Status / error banners */}
-        {editorSave.statusMessage && (
-          <div className="px-4 py-3 rounded-md text-sm font-medium border bg-success-100 border-success-100 text-success-600">
-            {editorSave.statusMessage}
-          </div>
-        )}
+        {/* Error banner only — success feedback comes from the save button's state */}
         {editorSave.errorMessage && (
           <div className="px-4 py-3 rounded-md text-sm font-medium border bg-error-100 border-error-100 text-error-600">
             {editorSave.errorMessage}
@@ -680,11 +681,6 @@ export function StructuringReviewPage() {
                     />
                   </ToolbarPopover>
                 </ToolbarPopoverGroup>
-              }
-              sidePanel={
-                <div className="flex-1 min-h-0 overflow-y-auto h-full">
-                  <ChangesReviewPanel editor={editorRef.current?.editor} />
-                </div>
               }
             />
               </>

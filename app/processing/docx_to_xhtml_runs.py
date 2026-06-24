@@ -671,8 +671,10 @@ def _nested_list_to_html(list_items, doc, findings_by_para=None) -> str:
             runs_html = "<br>"
             
         html_parts.append(
-            f'<li class="{label}" data-style-label="{label}" data-para-idx="{para_idx}" data-bookmark="{bm_name}">'
+            f'<li>'
+            f'<p class="{label}" data-style-label="{label}" data-para-idx="{para_idx}" data-bookmark="{bm_name}">'
             f'{runs_html}'
+            f'</p>'
         )
         
     while stack:
