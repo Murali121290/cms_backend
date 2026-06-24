@@ -1370,7 +1370,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         )}
 
         {/* â”€â”€ Document Area â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-        <div className="flex-1 overflow-y-auto bg-gradient-to-tr from-slate-100 to-slate-50 p-2 flex items-start overflow-x-auto">
+        <div className="flex-1 overflow-y-auto bg-gradient-to-tr from-slate-100 to-slate-50 p-2 pb-20 flex items-start overflow-x-auto">
           <div className={sidePanel ? "flex gap-8 w-full max-w-[1400px] justify-start lg:justify-center" : "w-full"}>
             {/* Word-style Document Page */}
             <div
@@ -1574,7 +1574,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         </div>
 
         {/* â”€â”€ Save Bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-        <div className="sticky bottom-0 z-20 border-t border-slate-200 bg-white/95 backdrop-blur-sm px-6 py-3 flex items-center gap-3 shadow-md">
+        <div className="fixed bottom-0 left-0 right-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur-sm px-6 py-3 flex items-center gap-3 shadow-[0_-2px_12px_rgba(15,23,42,0.08)]">
           <Button
             variant="primary"
             onClick={handleSave}

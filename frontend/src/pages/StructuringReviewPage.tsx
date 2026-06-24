@@ -9,7 +9,6 @@ import {
   Download,
   FileText,
   Info,
-  Layers,
   LayoutDashboard,
   Maximize2,
   Minimize2,
@@ -24,10 +23,9 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SkeletonCard } from "@/components/ui/SkeletonLoader";
 import { useStructuringReviewQuery } from "@/features/structuringReview/useStructuringReviewQuery";
-import { WysiwygEditor, useEditorSaveRuns, type WysiwygEditorHandle, ChangesReviewPanel, OnlyOfficeEditor, OnlyOfficeSidePanel, type OnlyOfficeEditorHandle, CollaboraSidePanel } from "@/features/editor";
+import { WysiwygEditor, useEditorSaveRuns, type WysiwygEditorHandle, OnlyOfficeEditor, OnlyOfficeSidePanel, type OnlyOfficeEditorHandle, CollaboraSidePanel } from "@/features/editor";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useFileXhtmlRunsQuery } from "@/features/technicalReview/useFileXhtmlRunsQuery";
-import { StylesPanel } from "@/features/structuringReview/components/EditorStylesPanel";
 import { VersionHistoryPanel } from "@/features/structuringReview/components/VersionHistoryPanel";
 import { useParagraphStyles } from "@/features/editor/useParagraphStyles";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
@@ -165,7 +163,6 @@ export function StructuringReviewPage() {
   const [customStyles, setCustomStyles] = useState<string[]>([]);
   const onlyofficeRef = useRef<OnlyOfficeEditorHandle>(null);
   const [ooConnector, setOoConnector] = useState<any>(null);
-  const [sidePanelTab, setSidePanelTab] = useState<"styles" | "changes">("styles");
   const collaboraIframeRef = useRef<HTMLIFrameElement>(null);
 
   useDocumentTitle(
@@ -611,57 +608,6 @@ export function StructuringReviewPage() {
               toolbarExtras={
                 <ToolbarPopoverGroup>
                   <ToolbarPopover
-                    id="group"
-                    icon={<Layers className="w-3.5 h-3.5" />}
-                    label="Group"
-                    title="Document Elements"
-                    sticky
-                    width={360}
-                  >
-                    <StylesPanel
-                      styles={allStyles}
-                      editorRef={editorRef}
-                      onAddStyle={handleAddStyle}
-                      fileId={normalizedFileId}
-                      charStyles={review.char_styles}
-                      visibleTabs={["group"]}
-                    />
-                  </ToolbarPopover>
-                  <ToolbarPopover
-                    id="para"
-                    icon={<FileText className="w-3.5 h-3.5" />}
-                    label="Para"
-                    title="Paragraph Styles"
-                    sticky
-                    width={320}
-                  >
-                    <StylesPanel
-                      styles={allStyles}
-                      editorRef={editorRef}
-                      onAddStyle={handleAddStyle}
-                      fileId={normalizedFileId}
-                      charStyles={review.char_styles}
-                      visibleTabs={["paragraph"]}
-                    />
-                  </ToolbarPopover>
-                  <ToolbarPopover
-                    id="char"
-                    icon={<BookOpen className="w-3.5 h-3.5" />}
-                    label="Char"
-                    title="Character Styles"
-                    sticky
-                    width={320}
-                  >
-                    <StylesPanel
-                      styles={allStyles}
-                      editorRef={editorRef}
-                      onAddStyle={handleAddStyle}
-                      fileId={normalizedFileId}
-                      charStyles={review.char_styles}
-                      visibleTabs={["character"]}
-                    />
-                  </ToolbarPopover>
-                  <ToolbarPopover
                     id="history"
                     icon={<Clock className="w-3.5 h-3.5" />}
                     label="History"
@@ -679,51 +625,6 @@ export function StructuringReviewPage() {
                     />
                   </ToolbarPopover>
                 </ToolbarPopoverGroup>
-              }
-              sidePanel={
-                <div className="flex flex-col gap-4 h-full min-h-0 text-slate-200">
-                  <div className="flex border-b border-navy-100 pb-1.5 shrink-0">
-                    <button
-                      onClick={() => setSidePanelTab("styles")}
-                      className={`flex-1 pb-1 text-center text-xs font-bold border-b-2 transition-all cursor-pointer ${sidePanelTab === "styles"
-                        ? "border-navy-800 text-navy-800 bg-transparent border-t-0 border-x-0"
-                        : "border-transparent text-navy-400 hover:text-navy-600 bg-transparent border-t-0 border-x-0"
-                        }`}
-                    >
-                      Styles
-                    </button>
-                    <button
-                      onClick={() => setSidePanelTab("changes")}
-                      className={`flex-1 pb-1 text-center text-xs font-bold border-b-2 transition-all cursor-pointer ${sidePanelTab === "changes"
-                        ? "border-navy-800 text-navy-800 bg-transparent border-t-0 border-x-0"
-                        : "border-transparent text-navy-400 hover:text-navy-600 bg-transparent border-t-0 border-x-0"
-                        }`}
-                    >
-                      Tracked Changes
-                    </button>
-                  </div>
-                  {sidePanelTab === "styles" ? (
-                    <div className="flex-1 min-h-0 flex flex-col gap-4">
-                      <div className="flex-1 min-h-0">
-                        <StylesPanel styles={allStyles} editorRef={editorRef} onAddStyle={handleAddStyle} fileId={normalizedFileId} charStyles={review.char_styles} />
-                      </div>
-
-                      <div className="flex-shrink-0">
-                        <VersionHistoryPanel
-                          fileId={normalizedFileId}
-                          currentFileId={normalizedFileId}
-                          onOpenVersion={(versionId) => {
-                            navigate(uiPaths.structuringReview(normalizedProjectId, normalizedChapterId, versionId) + "?tab=editor");
-                          }}
-                        />
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex-1 min-h-0 overflow-y-auto">
-                      <ChangesReviewPanel editor={editorRef.current?.editor} />
-                    </div>
-                  )}
-                </div>
               }
             />
               </>
