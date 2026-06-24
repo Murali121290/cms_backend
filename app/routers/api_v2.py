@@ -176,6 +176,19 @@ def _serialize_project_summary(project: Project):
     _cat_raw = getattr(project, "created_at", None)
     cat = _cat_raw.isoformat() if _cat_raw else _dt.utcnow().date().isoformat()
     uat = project.updated_at.isoformat() if getattr(project, "updated_at", None) else None
+
+    is_delayed = False
+    for ch in project.chapters:
+        if ch.status != "complete" and ch.due_date:
+            due_dt = ch.due_date
+            if due_dt.tzinfo is not None:
+                now = _dt.now(due_dt.tzinfo)
+            else:
+                now = _dt.now()
+            if due_dt < now:
+                is_delayed = True
+                break
+
     return schemas_v2.ProjectSummary(
         id=project.id,
         code=project.code,
@@ -209,6 +222,7 @@ def _serialize_project_summary(project: Project):
         file_details=getattr(project, "file_details", None),
         created_at=cat,
         updated_at=uat,
+        is_delayed=is_delayed,
     )
 
 

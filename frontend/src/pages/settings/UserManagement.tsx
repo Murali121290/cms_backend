@@ -62,7 +62,7 @@ function CreateUserModal({ isOpen, onClose, onCreated, roles, users, teams, cust
   // Unique role names for dropdown
   const roleOptions = useMemo(() =>
     [...new Set(roles.map(r => r.role_name))].sort().map(n => ({ value: n, label: n }))
-  , [roles])
+    , [roles])
 
   function handleRoleChange(roleName: string) {
     set('role', roleName)
@@ -91,12 +91,12 @@ function CreateUserModal({ isOpen, onClose, onCreated, roles, users, teams, cust
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Create New User" size="lg" footer={
-      <>
+      <div className="flex justify-end gap-3">
         <Button variant="secondary" onClick={onClose} disabled={loading}>Cancel</Button>
         <Button onClick={handleSubmit} disabled={loading}>
           {loading ? <><Spinner size="sm" />Creating...</> : 'Save User'}
         </Button>
-      </>
+      </div>
     }>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Input label="User Name" required value={form.user_name ?? ''} onChange={e => set('user_name', e.target.value)} error={errors.user_name} placeholder="e.g. john_doe" />
@@ -143,7 +143,7 @@ function EditUserModal({ isOpen, onClose, onUpdated, user, roles, teams, custome
   // Unique role names for dropdown
   const roleOptions = useMemo(() =>
     [...new Set(roles.map(r => r.role_name))].sort().map(n => ({ value: n, label: n }))
-  , [roles])
+    , [roles])
 
   function handleRoleChange(roleName: string) {
     set('role', roleName)
@@ -174,12 +174,12 @@ function EditUserModal({ isOpen, onClose, onUpdated, user, roles, teams, custome
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={`Edit User — ${user?.user_name ?? ''}`} size="lg" footer={
-      <>
+      <div className="flex justify-end gap-3">
         <Button variant="secondary" onClick={onClose} disabled={loading}>Cancel</Button>
         <Button onClick={handleSubmit} disabled={loading}>
           {loading ? <><Spinner size="sm" />Saving...</> : 'Save Changes'}
         </Button>
-      </>
+      </div>
     }>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Input label="User Name" value={user?.user_name ?? ''} disabled className="opacity-60" />
@@ -280,8 +280,8 @@ export function UserManagement() {
           <h2 className="text-xl font-bold text-text">User Management</h2>
           <p className="text-xs text-muted mt-0.5">{users.length} total users</p>
         </div>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus size={15} /> Create New User
+        <Button onClick={() => setCreateOpen(true)} leftIcon={<Plus size={15} />}>
+          Create New User
         </Button>
       </div>
 
@@ -327,7 +327,7 @@ export function UserManagement() {
             onClick={() => { setSearch(''); setFilterRole(''); setFilterTeam(''); setFilterStatus('') }}
             className={`flex items-center gap-1 text-xs text-danger hover:underline transition-opacity ${
               search || filterRole || filterTeam || filterStatus ? 'visible opacity-100' : 'invisible opacity-0 pointer-events-none'
-            }`}
+              }`}
           >
             <RefreshCw size={12} /> Clear
           </button>
@@ -426,21 +426,21 @@ export function UserManagement() {
                 Showing {filtered.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length} users
               </p>
               <div className={`flex items-center gap-1 ${totalPages <= 1 ? 'invisible' : ''}`}>
-                  <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
-                    className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-background disabled:opacity-40 disabled:cursor-not-allowed text-text transition-colors">
-                    Previous
+                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
+                  className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-background disabled:opacity-40 disabled:cursor-not-allowed text-text transition-colors">
+                  Previous
+                </button>
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+                  <button key={p} onClick={() => setPage(p)}
+                    className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${p === page ? 'bg-primary text-white border-primary' : 'border-border hover:bg-background text-text'}`}>
+                    {p}
                   </button>
-                  {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
-                    <button key={p} onClick={() => setPage(p)}
-                      className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${p === page ? 'bg-primary text-white border-primary' : 'border-border hover:bg-background text-text'}`}>
-                      {p}
-                    </button>
-                  ))}
-                  <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
-                    className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-background disabled:opacity-40 disabled:cursor-not-allowed text-text transition-colors">
-                    Next
-                  </button>
-                </div>
+                ))}
+                <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
+                  className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-background disabled:opacity-40 disabled:cursor-not-allowed text-text transition-colors">
+                  Next
+                </button>
+              </div>
             </div>
           </div>
         )}

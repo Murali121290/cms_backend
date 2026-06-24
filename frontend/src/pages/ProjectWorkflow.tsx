@@ -518,11 +518,11 @@ export function ProjectWorkflow() {
         {/* ── Summary Widgets ── */}
         <div className="flex flex-wrap gap-3">
           <SummaryWidget label="Total" value={summary.total} icon={BookOpen} iconCls="bg-blue-50    text-blue-600" onClick={() => setFilterStatus('')} active={filterStatus === ''} />
-          <SummaryWidget label="Completed" value={summary.complete} icon={CheckCircle2} iconCls="bg-emerald-50 text-emerald-600" onClick={() => setFilterStatus(prev => prev === 'complete' ? '' : 'complete')} active={filterStatus === 'complete'} />
+          {summary.delayed > 0 && <SummaryWidget label="Delayed" value={summary.delayed} icon={AlertCircle} iconCls="bg-red-50   text-red-600" onClick={() => setFilterStatus(prev => prev === '__delayed__' ? '' : '__delayed__')} active={filterStatus === '__delayed__'} />}
           <SummaryWidget label="In Progress" value={summary.inProg} icon={RotateCcw} iconCls="bg-amber-50   text-amber-600" onClick={() => setFilterStatus(prev => prev === 'In-progress' ? '' : 'In-progress')} active={filterStatus === 'In-progress'} />
           {summary.hold > 0 && <SummaryWidget label="Hold" value={summary.hold} icon={AlertCircle} iconCls="bg-slate-50 text-slate-600" onClick={() => setFilterStatus(prev => prev === 'Hold' ? '' : 'Hold')} active={filterStatus === 'Hold'} />}
           {summary.inQuery > 0 && <SummaryWidget label="In-query" value={summary.inQuery} icon={BookOpen} iconCls="bg-blue-50  text-blue-700" onClick={() => setFilterStatus(prev => prev === 'In-query' ? '' : 'In-query')} active={filterStatus === 'In-query'} />}
-          {summary.delayed > 0 && <SummaryWidget label="Delayed" value={summary.delayed} icon={AlertCircle} iconCls="bg-red-50   text-red-600" onClick={() => setFilterStatus(prev => prev === '__delayed__' ? '' : '__delayed__')} active={filterStatus === '__delayed__'} />}
+          <SummaryWidget label="Completed" value={summary.complete} icon={CheckCircle2} iconCls="bg-emerald-50 text-emerald-600" onClick={() => setFilterStatus(prev => prev === 'complete' ? '' : 'complete')} active={filterStatus === 'complete'} />
         </div>
 
         {/* ── Filters ── */}
@@ -709,7 +709,7 @@ export function ProjectWorkflow() {
         open={isInfoOpen}
         mode="view"
         onClose={() => setIsInfoOpen(false)}
-        onUpdated={() => {}}
+        onUpdated={() => { }}
       />
 
       {/* Edit Info Modal */}

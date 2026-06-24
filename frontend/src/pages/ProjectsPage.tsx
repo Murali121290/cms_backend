@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { Link } from "react-router-dom";
 
 import { ProjectsTable } from "@/features/projects/components/ProjectsTable";
@@ -8,6 +9,13 @@ import { getSsrUrl, ssrPaths, uiPaths } from "@/utils/appPaths";
 export function ProjectsPage() {
   useDocumentTitle("CMS UI Projects");
   const projectsQuery = useProjectsQuery(0, 100);
+
+  const sortedProjects = useMemo(() => {
+    if (!projectsQuery.data?.projects) return [];
+    return [...projectsQuery.data.projects].sort((a, b) =>
+      (a.code ?? '').localeCompare(b.code ?? '')
+    );
+  }, [projectsQuery.data?.projects]);
 
   if (projectsQuery.isPending) {
     return (
@@ -75,7 +83,7 @@ export function ProjectsPage() {
               </a>
             </div>
           ) : (
-            <ProjectsTable projects={projectsQuery.data.projects} />
+            <ProjectsTable projects={sortedProjects} />
           )}
         </div>
       </section>
