@@ -10,6 +10,7 @@ from docx import Document
 from docx.oxml.ns import qn
 from .annotator import annotate_document, detect_list_kind, is_list_paragraph
 from .logger_config import get_logger
+from .box_prefixer import apply_box_tag_prefixes
 from .hierarchy_manager import enforce_hierarchy
 from .list_normalizer import normalize_list_positions
 from .reference_normalizer import normalize_reference_numbers
@@ -338,6 +339,7 @@ def process_docx(
 
         logger.info(f"Annotating document with mode: {mode}")
         annotations = annotate_document(doc)
+        annotations = apply_box_tag_prefixes(annotations)
 
         if mode == "style":
             logger.info("Enforcing heading hierarchy and validation")

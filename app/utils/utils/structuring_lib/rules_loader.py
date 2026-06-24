@@ -264,6 +264,15 @@ class RulesLoader:
 
         return self.rules.get("normalization", {})
 
+    def get_structural_tags(self) -> Dict[str, Any]:
+        """Get the centralized registry of recognized template structural
+        tags (exact names + prefix families) used to decide whether a
+        leading <TAG> token is an author-provided, authoritative tag."""
+        if not self.loaded:
+            return {}
+
+        return self.rules.get("structural_tags", {})
+
 
 # Global rules instance
 _rules_loader: Optional[RulesLoader] = None
