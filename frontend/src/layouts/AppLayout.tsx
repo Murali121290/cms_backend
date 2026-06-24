@@ -14,7 +14,7 @@ export function AppLayout() {
 
   // Keep sidebar expanded only on the root page (/), collapse on all other pages
   useEffect(() => {
-    if (pathname === '/') {
+    if (pathname === '/' || pathname === '/dashboard') {
       setCollapsed(false)
     } else {
       setCollapsed(true)
