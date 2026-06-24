@@ -1,4 +1,5 @@
 
+# pyrefly: ignore [missing-import]
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
@@ -8,6 +9,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "changeme_in_production_secret_key_12345"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    APP_TIMEZONE: str = "Asia/Kolkata"
     
     DATABASE_URL: str = "postgresql://user:password@localhost/cms_db"
     REDIS_URL: str = "redis://localhost:6379/0"

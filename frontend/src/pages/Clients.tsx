@@ -47,7 +47,7 @@ interface ClientStats {
 function computeStats(projects: Project[]): ClientStats {
   return {
     active:    projects.filter(p => p.status === 'Active').length,
-    delayed:   projects.filter(p => p.status === 'Planning').length,
+    delayed:   projects.filter(p => p.is_delayed).length,
     fastTrack: projects.filter(p => p.priority === 'Fast Track').length,
   }
 }
@@ -74,9 +74,9 @@ function ClientCard({ client, projects, onClick }: ClientCardProps) {
       className="bg-card rounded-xl border border-border shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 flex flex-col cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-primary/40 overflow-hidden"
     >
       {/* Top — logo area */}
-      <div className={`relative flex items-center justify-center py-8 ${areaBg}`}>
+      <div className={`relative flex items-center justify-center h-32 ${areaBg}`}>
         {client.logo_url ? (
-          <img src={client.logo_url} alt={name} className="h-16 max-w-[8rem] object-contain" />
+          <img src={client.logo_url} alt={name} className="w-full h-full p-4 object-contain" />
         ) : (
           <div className={`w-16 h-16 rounded-full flex items-center justify-center shadow-sm ${circleBg}`}>
             <span className={`text-xl font-bold tracking-wide select-none ${circleText}`}>
@@ -150,12 +150,14 @@ export function Clients() {
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
-    if (!q) return clients
-    return clients.filter(c =>
-      clientDisplayName(c).toLowerCase().includes(q) ||
-      (c.division ?? '').toLowerCase().includes(q) ||
-      (c.company  ?? '').toLowerCase().includes(q)
-    )
+    const base = q
+      ? clients.filter(c =>
+          clientDisplayName(c).toLowerCase().includes(q) ||
+          (c.division ?? '').toLowerCase().includes(q) ||
+          (c.company  ?? '').toLowerCase().includes(q)
+        )
+      : [...clients]
+    return base.sort((a, b) => clientDisplayName(a).localeCompare(clientDisplayName(b)))
   }, [clients, search])
 
   if (loading) return <FullPageSpinner />

@@ -15,7 +15,10 @@ from .logger_config import get_logger
 logger = get_logger(__name__)
 rules_loader = get_rules_loader()
 EXPLICIT_STYLE_RE = re.compile(
-    r"^(?:<\s*(/?[A-Za-z0-9.\-]+)\s*>|\[STYLE:([A-Za-z0-9.\-]+)\])",
+    # Token allows internal spaces (lazily captured, trailing space left to
+    # \s*) so multi-word box markers like "<CASE STUDY>"/"<RED FLAG>" parse
+    # as a single explicit token instead of falling through unrecognized.
+    r"^(?:<\s*(/?[A-Za-z0-9.\- ]+?)\s*>|\[STYLE:([A-Za-z0-9.\-]+)\])",
     re.IGNORECASE,
 )
 
@@ -137,6 +140,8 @@ def detect_list_kind(text: str, style_name: str = "", is_word_list: bool = False
     number_pattern = list_config.get("number_pattern", r"^\d+\.\s+")
     roman_pattern = list_config.get("roman_pattern", r"^(?i:[ivxlcdm]+)[\.)]\s+")
 
+    mnemonic_pattern = list_config.get("mnemonic_pattern", r"^[A-Z](?:\t|[ ]{2,4})\S")
+
     text = (text or "").strip()
     style_name = style_name or ""
     lowered_style = style_name.lower()
@@ -147,7 +152,9 @@ def detect_list_kind(text: str, style_name: str = "", is_word_list: bool = False
         return "number"
     if re.match(roman_pattern, text) or "roman" in lowered_style:
         return "roman"
-    
+    if re.match(mnemonic_pattern, text):
+        return "lettered"
+
     if is_word_list and para is not None and doc is not None:
         xml_type = get_word_list_type(para, doc)
         if xml_type:
@@ -175,7 +182,54 @@ def parse_leading_style_hint(text: str) -> tuple[Optional[str], Optional[str], s
     return match.group(0), token, stripped
 
 
-def normalize_style_token(token: Optional[str], context_kind: Optional[str] = None) -> Optional[str]:
+def _resolve_box_keyword(token: Optional[str]) -> Optional[str]:
+    """Case-insensitive lookup of a box-open keyword (e.g. 'NOTE', 'CASE STUDY')
+    against rules.yaml's boxes.type_keywords map. Returns the resolved subtype
+    prefix (e.g. 'NBX', 'BX1') or None if token isn't a recognized keyword."""
+    if not token:
+        return None
+    box_cfg = rules_loader.get_box_config()
+    type_keywords = box_cfg.get("type_keywords", {})
+    if not type_keywords:
+        return None
+    lookup = {k.strip().upper(): v for k, v in type_keywords.items()}
+    return lookup.get(token.strip().upper())
+
+
+def resolve_box_prefix(token: Optional[str]) -> str:
+    """Resolve a box-open token to its style-prefix subtype, defaulting to 'NBX'."""
+    return _resolve_box_keyword(token) or "NBX"
+
+
+def _is_known_token(token: str, context_kind: Optional[str] = None) -> bool:
+    """True if normalize_style_token() resolves *token* via an actual rule
+    (even one that happens to map a token to itself, e.g. H1 -> H1) rather
+    than falling through unchanged. Used to detect genuinely unrecognized
+    marker tokens (gap #1) without false-positiving on self-mapped ones."""
+    cfg = rules_loader.get_normalization_config()
+    if token in cfg.get("explicit_tag_map", {}) or token in cfg.get("source_style_map", {}):
+        return True
+    if re.match(r"^FIG\d+(?:\.\d+)?$", token, re.IGNORECASE):
+        return True
+    box_cfg = rules_loader.get_box_config()
+    if any(re.match(pattern, token, re.IGNORECASE) for pattern in box_cfg.get("open_patterns", [])):
+        return True
+    if any(re.match(pattern, token, re.IGNORECASE) for pattern in box_cfg.get("close_patterns", [])):
+        return True
+    if _resolve_box_keyword(token) is not None:
+        return True
+    if token.startswith("/") and _resolve_box_keyword(token[1:]) is not None:
+        return True
+    if context_kind == "box" and token == "TITLE":
+        return True
+    return False
+
+
+def normalize_style_token(
+    token: Optional[str],
+    context_kind: Optional[str] = None,
+    box_prefix: Optional[str] = None,
+) -> Optional[str]:
     """
     Normalize incoming source styles and explicit tags to canonical styles.
     """
@@ -203,8 +257,15 @@ def normalize_style_token(token: Optional[str], context_kind: Optional[str] = No
     if any(re.match(pattern, token, re.IGNORECASE) for pattern in close_patterns):
         return box_cfg.get("close_style", "PMI")
 
+    if _resolve_box_keyword(token) is not None:
+        return box_cfg.get("open_style", "PMI")
+    if token.startswith("/") and _resolve_box_keyword(token[1:]) is not None:
+        return box_cfg.get("close_style", "PMI")
+
     if context_kind == "box" and token == "TITLE":
-        return box_cfg.get("title_style", "NBX1-TTL")
+        subtype_styles = box_cfg.get("subtype_styles", {})
+        pair = subtype_styles.get(box_prefix or "NBX") or {}
+        return pair.get("title", box_cfg.get("title_style", "NBX1-TTL"))
 
     return token
 
@@ -219,6 +280,8 @@ def classify_explicit_context(token: Optional[str]) -> Optional[str]:
     box_cfg = rules_loader.get_box_config()
     if any(re.match(pattern, token, re.IGNORECASE) for pattern in box_cfg.get("open_patterns", [])):
         return "objective" if token.upper() == "BXOBJ" else "box"
+    if _resolve_box_keyword(token) is not None:
+        return "box"
 
     keyterm_cfg = rules_loader.get_keyterm_config()
     if token.upper() in {style.upper() for style in keyterm_cfg.get("explicit_styles", [])}:
@@ -233,10 +296,12 @@ def is_explicit_context_closer(token: Optional[str], context_kind: Optional[str]
         return False
 
     if context_kind == "box":
-        return any(
+        if any(
             re.match(pattern, token, re.IGNORECASE)
             for pattern in rules_loader.get_box_config().get("close_patterns", [])
-        )
+        ):
+            return True
+        return token.startswith("/") and _resolve_box_keyword(token[1:]) is not None
     if context_kind == "objective":
         return token.upper() in {"/BXOBJ", "/BX"}
     if context_kind == "keyterm":
@@ -251,6 +316,7 @@ def get_general_list_tag_style(list_kind: str) -> tuple[str, str]:
         "bullet": ("general_bulleted", ("BL-MID", "BL-MID")),
         "number": ("general_numbered", ("NL-MID", "NL-MID")),
         "roman": ("general_roman", ("RL-MID", "RL-MID")),
+        "lettered": ("general_lettered", ("UL-MID", "UL-MID")),
     }
     config_key, default = key_map.get(list_kind, ("general", ("BL-MID", "BL-MID")))
     config = list_config.get(config_key, {})
@@ -323,6 +389,7 @@ def annotate_document(doc: Document) -> List[Dict[str, Any]]:
     current_block: Optional[str] = None
     block_item_count: int = 0
     explicit_context_kind: Optional[str] = None
+    current_box_prefix: Optional[str] = None
     in_chapter_preamble: bool = False
     previous_tag: Optional[str] = None
     
@@ -336,15 +403,20 @@ def annotate_document(doc: Document) -> List[Dict[str, Any]]:
         try:
             if not text:
                 empty_style = rules_loader.rules.get("defaults", {}).get("empty_paragraph", {}).get("style", "TXT")
-                annotations.append({"para": para, "tag": "EMPTY", "style": empty_style})
+                annotations.append({"para": para, "tag": "EMPTY", "style": empty_style, "block": current_block})
                 continue
-            
+
             # ===== PRIORITY 0: EXPLICIT TAGS <TAG> =====
             full_hint, explicit_token, stripped_text = parse_leading_style_hint(text)
             explicit_tag_found = False
-            
+
             if explicit_token:
-                normalized_explicit_style = normalize_style_token(explicit_token, explicit_context_kind)
+                normalized_explicit_style = normalize_style_token(explicit_token, explicit_context_kind, current_box_prefix)
+                if not _is_known_token(explicit_token, explicit_context_kind) and not stripped_text:
+                    # Unrecognized marker (e.g. <WIDGET> with no matching rule)
+                    # and nothing but the marker on this line -> neutral skip style,
+                    # not a bogus Word style auto-created from the raw token text.
+                    normalized_explicit_style = "PMI"
                 if normalized_explicit_style:
                     tag = normalized_explicit_style
                     style = normalized_explicit_style
@@ -354,10 +426,13 @@ def annotate_document(doc: Document) -> List[Dict[str, Any]]:
 
                 if is_explicit_context_closer(explicit_token, explicit_context_kind):
                     explicit_context_kind = None
+                    current_box_prefix = None
                 else:
                     new_context = classify_explicit_context(explicit_token)
                     if new_context:
                         explicit_context_kind = new_context
+                        if new_context == "box":
+                            current_box_prefix = resolve_box_prefix(explicit_token)
 
                 if text in rules_loader.get_block_start_markers():
                     current_block = rules_loader.get_block_start_markers()[text]
@@ -407,7 +482,13 @@ def annotate_document(doc: Document) -> List[Dict[str, Any]]:
             else:
                 rule_matched = explicit_tag_found # If we found explicit tag, we skip regex search
 
-                if explicit_tag_found and style in {"H1", "H2", "H3", "H4", "TXT", "TXT-FLUSH"}:
+                # Explicit heading levels (<H1>/<H2>/<H3>/<H4>) are an unambiguous
+                # author declaration and must win outright - never re-matched
+                # against the generic paragraph regex rules (which could pick a
+                # different level, e.g. a Title-Case rule silently downgrading an
+                # explicit H1 to H2). Only TXT/TXT-FLUSH - generic placeholders,
+                # not level declarations - stay open to further regex refinement.
+                if explicit_tag_found and style in {"TXT", "TXT-FLUSH"}:
                     rule_matched = False
                 
                 # Priority 0.5: Detect "OBJECTIVES" heading (case-insensitive)
@@ -431,11 +512,31 @@ def annotate_document(doc: Document) -> List[Dict[str, Any]]:
                     paragraph_rules = rules_loader.get_paragraphs()
                     for rule in paragraph_rules:
                         try:
-                            if re.match(rule["pattern"], text):
+                            rule_match = re.match(rule["pattern"], text)
+                            if rule_match:
                                 tag = rule["tag"]
                                 style = rule["style"]
                                 rule_matched = True
-                                
+
+                                # Numbered-heading depth: when the rule's pattern carries
+                                # a 'num' group (e.g. "1.2.3"), derive H-depth from the
+                                # number of dot-separated segments instead of the rule's
+                                # flat tag/style, so "1.2 Background" -> H2, not H1.
+                                num_group = rule_match.groupdict().get("num")
+                                if num_group:
+                                    depth = min(num_group.count(".") + 1, 4)
+                                    tag = f"H{depth}"
+                                    style = tag
+
+                                # Box title rule ("Box N. ...") should still respect
+                                # the open box's resolved keyword subtype prefix.
+                                if tag == "NBX1-TTL" and explicit_context_kind == "box":
+                                    box_cfg = rules_loader.get_box_config()
+                                    subtype_styles = box_cfg.get("subtype_styles", {})
+                                    style_pair = subtype_styles.get(current_box_prefix or "NBX") or {}
+                                    tag = style_pair.get("title", box_cfg.get("title_style", "NBX1-TTL"))
+                                    style = tag
+
                                 # Special Logic: Check if this matched rule is actually starting a block
                                 if text in block_markers:
                                      current_block = block_markers[text]
@@ -492,11 +593,13 @@ def annotate_document(doc: Document) -> List[Dict[str, Any]]:
                     and style == "TXT"
                 ):
                     box_cfg = rules_loader.get_box_config()
+                    subtype_styles = box_cfg.get("subtype_styles", {})
+                    style_pair = subtype_styles.get(current_box_prefix or "NBX") or {}
                     if style_name == "TITLE" or re.match(r"^Box\s+\d+", text):
-                        tag = box_cfg.get("title_style", "NBX1-TTL")
+                        tag = style_pair.get("title", box_cfg.get("title_style", "NBX1-TTL"))
                         style = tag
                     else:
-                        tag = box_cfg.get("body_style", "NBX-TXT")
+                        tag = style_pair.get("body", box_cfg.get("body_style", "NBX-TXT"))
                         style = tag
                 elif not rule_matched and explicit_context_kind == "keyterm":
                     tag = "KT"
@@ -533,11 +636,11 @@ def annotate_document(doc: Document) -> List[Dict[str, Any]]:
             if tag != "EMPTY":
                 previous_tag = tag
 
-            annotations.append({"para": para, "tag": tag, "style": style})
-        
+            annotations.append({"para": para, "tag": tag, "style": style, "block": current_block})
+
         except Exception as e:
             logger.error(f"Error annotating paragraph {para_idx}: {e}", exc_info=True)
-            annotations.append({"para": para, "tag": "TXT", "style": "TXT"})
+            annotations.append({"para": para, "tag": "TXT", "style": "TXT", "block": current_block})
     
     logger.info(f"Document annotation complete: {len(annotations)} paragraphs annotated")
     return annotations

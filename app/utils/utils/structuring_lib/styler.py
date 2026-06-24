@@ -11,12 +11,47 @@ from docx.oxml.ns import qn
 from .annotator import annotate_document, detect_list_kind, is_list_paragraph
 from .logger_config import get_logger
 from .hierarchy_manager import enforce_hierarchy
+from .list_normalizer import normalize_list_positions
+from .reference_normalizer import normalize_reference_numbers
+from .zone_styles import check_zone_style_legality
 from .enhanced_processor import DocumentProcessor
 
 logger = get_logger(__name__)
 
 
 from .rules_loader import get_rules_loader
+
+_SOURCE_LINE_RE = re.compile(
+    r"^(?:Source|Adapted from|Data from|Reproduced from|Courtesy of)\b", re.IGNORECASE
+)
+_FOOTNOTE_LINE_RE = re.compile(r"^(?:Note:|\*|†|[a-z]\))")
+_STUB_HEADING_RE = re.compile(r"^[A-Z0-9][A-Z0-9\s/&\-]{1,59}$")
+_MEASUREMENT_RE = re.compile(
+    r"^\d+(?:\.\d+)?\s*(?:mg|g|kg|ml|l|mmHg|bpm|kcal|IU|mol|cm|mm|m|km)\b", re.IGNORECASE
+)
+
+
+def _looks_like_stub_heading(text: str) -> bool:
+    """T4 heuristic: short, punctuation-free, mostly-capitalized cell text
+    that reads like a row label rather than a full sentence or a number."""
+    text = text.strip()
+    if not text or len(text) > 60:
+        return False
+    if re.search(r"[.!?;:]\s*$", text):
+        return False
+    if re.match(r"^\d", text) or "%" in text:
+        return False
+    if _MEASUREMENT_RE.match(text):
+        return False
+    if _STUB_HEADING_RE.match(text):
+        return True
+
+    words = text.split()
+    if not words:
+        return False
+    title_cased = sum(1 for w in words if w[:1].isupper())
+    return (title_cased / len(words)) >= 0.7
+
 
 def tag_tables(doc: Document, mode: Literal["style", "tag"] = "style") -> None:
     """
@@ -39,6 +74,9 @@ def tag_tables(doc: Document, mode: Literal["style", "tag"] = "style") -> None:
     bullet_style_name = table_config.get("bullet_style", "TBL-MID")
     number_style_name = table_config.get("number_style", "TNL-MID")
     roman_style_name = table_config.get("roman_style", "TOL-MID")
+    source_note_style_name = table_config.get("source_note_style", "TSN")
+    footnote_style_name = table_config.get("footnote_style", "TFN")
+    stub_heading_style_name = table_config.get("stub_heading_style", "T4")
     header_threshold = table_config.get("header_threshold", 1.0)
     doc_processor = DocumentProcessor()
 
@@ -50,29 +88,40 @@ def tag_tables(doc: Document, mode: Literal["style", "tag"] = "style") -> None:
                         text = para.text.strip()
                         if not text:
                             continue
-                        
-                        style_name = para.style.name if para.style else ""
-                        list_kind = detect_list_kind(text, style_name, is_list_paragraph(para), para, doc)
 
-                        if list_kind == "bullet":
-                            tag = "TBL-MID"
-                            style = bullet_style_name
-                        elif list_kind == "number":
-                            tag = "TNL-MID"
-                            style = number_style_name
-                        elif list_kind == "roman":
-                            tag = "TOL-MID"
-                            style = roman_style_name
+                        style_name = para.style.name if para.style else ""
+
+                        if _SOURCE_LINE_RE.match(text):
+                            tag = "TSN"
+                            style = source_note_style_name
+                        elif _FOOTNOTE_LINE_RE.match(text):
+                            tag = "TFN"
+                            style = footnote_style_name
                         else:
-                            score = doc_processor.detect_table_header_smart(
-                                text, row_idx, cell_idx, len(table.rows)
-                            )
-                            if score >= header_threshold:
-                                tag = "T2"
-                                style = header_style_name
+                            list_kind = detect_list_kind(text, style_name, is_list_paragraph(para), para, doc)
+
+                            if list_kind == "bullet":
+                                tag = "TBL-MID"
+                                style = bullet_style_name
+                            elif list_kind == "number":
+                                tag = "TNL-MID"
+                                style = number_style_name
+                            elif list_kind == "roman":
+                                tag = "TOL-MID"
+                                style = roman_style_name
                             else:
-                                tag = "T"
-                                style = body_style_name
+                                score = doc_processor.detect_table_header_smart(
+                                    text, row_idx, cell_idx, len(table.rows)
+                                )
+                                if score >= header_threshold:
+                                    tag = "T2"
+                                    style = header_style_name
+                                elif cell_idx == 0 and row_idx > 0 and _looks_like_stub_heading(text):
+                                    tag = "T4"
+                                    style = stub_heading_style_name
+                                else:
+                                    tag = "T"
+                                    style = body_style_name
                         
                         if mode == "style":
                             try:
@@ -279,20 +328,24 @@ def process_docx(
         "success": False,
         "paragraphs_processed": 0,
         "tables_processed": 0,
-        "errors": []
+        "errors": [],
+        "zone_warnings": 0
     }
-    
+
     try:
         logger.info(f"Opening document: {input_path}")
         doc = Document(input_path)
-        
+
         logger.info(f"Annotating document with mode: {mode}")
         annotations = annotate_document(doc)
-        
+
         if mode == "style":
             logger.info("Enforcing heading hierarchy and validation")
             annotations = enforce_hierarchy(annotations)
-        
+            annotations = normalize_list_positions(annotations)
+            annotations = normalize_reference_numbers(annotations)
+            result["zone_warnings"] = check_zone_style_legality(annotations)
+
         # Process annotations
         for idx, item in enumerate(annotations):
             try:
