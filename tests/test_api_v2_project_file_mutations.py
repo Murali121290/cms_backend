@@ -380,3 +380,29 @@ def test_api_v2_project_bootstrap_empty_files_and_zip_upload(
     assert "ch01_fig1.png" in filenames
     assert "project_settings.xml" in filenames
 
+
+def test_api_v2_project_bootstrap_rejects_duplicate_project_code(
+    auth_cookie_client,
+    admin_user,
+    project_record,
+):
+    client = auth_cookie_client(admin_user)
+
+    response = client.post(
+        "/api/v2/projects/bootstrap",
+        data={
+            "code": project_record.code,
+            "title": "Another Project Title",
+            "client_name": "Client A",
+            "xml_standard": "NLM",
+            "chapter_count": "1",
+        },
+    )
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["status"] == "error"
+    assert body["code"] == "PROJECT_ALREADY_EXISTS"
+    assert body["message"] == f"Project code '{project_record.code}' already exists."
+
+

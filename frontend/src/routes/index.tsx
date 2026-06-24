@@ -14,6 +14,7 @@ import { RolesManagement } from '@/pages/settings/RolesManagement'
 import { WorkflowManagement } from '@/pages/settings/WorkflowManagement'
 import { Clients } from '@/pages/Clients'
 import { ClientProjects } from '@/pages/ClientProjects'
+import { CreateProjectPage } from '@/pages/CreateProjectPage'
 import { ProjectWorkflow } from '@/pages/ProjectWorkflow'
 import { ProjectPlanningPage } from '@/pages/ProjectPlanningPage'
 import { ChapterEditorPage } from '@/pages/ChapterEditorPage'
@@ -49,6 +50,7 @@ const router = createBrowserRouter([
 
       { path: 'clients', element: <Clients /> },
       { path: 'clients/:clientId/projects', element: <ClientProjects /> },
+      { path: 'clients/:clientId/projects/new', element: <CreateProjectPage /> },
 
       {
         path: 'clients/:clientId/projects/:projectId',

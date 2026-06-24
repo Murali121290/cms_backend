@@ -863,6 +863,15 @@ def api_v2_project_bootstrap(
             message="Authentication required.",
         )
 
+    # Check if a project with the same code already exists
+    existing_project = db.query(Project).filter(Project.project_code == code).first()
+    if existing_project:
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="PROJECT_ALREADY_EXISTS",
+            message=f"Project code '{code}' already exists.",
+        )
+
     if workflow_name:
         db_workflows = {w.workflow_name for w in db.query(models.WorkflowMaster).all()}
         if workflow_name not in db_workflows and workflow_name not in _WORKFLOW_TYPE_IDS:
