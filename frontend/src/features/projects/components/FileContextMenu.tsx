@@ -574,12 +574,12 @@ export function FileContextMenu({
         ) : (
           <>
             {/* ── Group 1: Primary actions ─────────────────────────── */}
-            <MenuLinkItem
+            {/* <MenuLinkItem
               icon={FilePen}
               label="Edit in Browser"
               to={uiPaths.fileEditor(projectId, chapterId, file.id)}
               onClick={onClose}
-            />
+            /> */}
             <MenuLinkItem
               icon={FilePen}
               label="Edit in Editor"

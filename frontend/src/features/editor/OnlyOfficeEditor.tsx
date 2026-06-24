@@ -84,20 +84,6 @@ export const OnlyOfficeEditor = forwardRef<OnlyOfficeEditorHandle, OnlyOfficeEdi
 
       const editorConfig = {
         ...cfg,
-        editorConfig: {
-          ...(cfg.editorConfig || {}),
-          plugins: {
-            ...(cfg.editorConfig?.plugins || {}),
-            autostart: [
-              ...(cfg.editorConfig?.plugins?.autostart || []),
-              "asc.{4c1b92a4-793d-4251-ba23-1451e06eeafd}"
-            ],
-            pluginsData: [
-              ...(cfg.editorConfig?.plugins?.pluginsData || []),
-              window.location.origin + "/onlyoffice-plugins/style-connector/config.json"
-            ]
-          }
-        },
         events: {
           ...(cfg.events || {}),
           onDocumentReady: () => {

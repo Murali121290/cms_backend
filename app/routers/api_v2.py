@@ -54,6 +54,7 @@ from app.integrations.onlyoffice import (
     sign_config,
     verify_callback_token,
 )
+from app.integrations.onlyoffice.config import ONLYOFFICE_INTERNAL_URL
 from app.integrations.wopi import service as wopi_service
 from app.integrations.webdav.config import WEBDAV_BASE_URL, WEBDAV_TOKEN_EXPIRE_MINUTES
 from app.domains.auth.security import create_access_token
@@ -2109,6 +2110,7 @@ def api_v2_file_editor(
 @router.get("/files/{file_id}/onlyoffice-config")
 def api_v2_onlyoffice_config(
     file_id: int,
+    request: Request,
     mode: str = "original",
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
@@ -2137,10 +2139,13 @@ def api_v2_onlyoffice_config(
             message="Physical file not found.",
         )
 
-    # Compute key
+    # Compute key — include mtime so OnlyOffice re-downloads after content or
+    # server changes (avoids stale cached-failure entries in the docservice).
     import hashlib
     with open(file_path, "rb") as f:
-        version_key = hashlib.sha256(f.read()).hexdigest()[:16]
+        _content = f.read()
+    _mtime = int(os.path.getmtime(file_path))
+    version_key = hashlib.sha256(_content + str(_mtime).encode()).hexdigest()[:20]
 
     # Document download URL (OnlyOffice container must reach this)
     if mode == "structuring":
@@ -2149,6 +2154,15 @@ def api_v2_onlyoffice_config(
         doc_url = f"{WOPI_BASE_URL}/wopi/files/{file_id}/contents"
 
     callback_url = f"{WOPI_BASE_URL}/api/v2/onlyoffice/callback/{file_id}?mode={mode}"
+
+    from urllib.parse import urlparse
+    _origin = request.headers.get("origin")
+    if not _origin:
+        _ref = request.headers.get("referer", "")
+        if _ref:
+            _p = urlparse(_ref)
+            _origin = f"{_p.scheme}://{_p.netloc}"
+    plugin_url = f"{_origin}/onlyoffice-plugins/style-connector/config.json" if _origin else ""
 
     config = {
         "document": {
@@ -2178,6 +2192,10 @@ def api_v2_onlyoffice_config(
                 "plugins": False,
                 "goback": {"url": ""},
             },
+            **({"plugins": {
+                "autostart": ["asc.{4c1b92a4-793d-4251-ba23-1451e06eeafd}"],
+                "pluginsData": [plugin_url],
+            }} if plugin_url else {}),
         },
     }
 
@@ -2215,7 +2233,12 @@ async def api_v2_onlyoffice_callback(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Download URL missing in OnlyOffice callback.",
             )
-            
+
+        # OnlyOffice sends the download URL using the public host (e.g. localhost:8083),
+        # but inside Docker the backend cannot reach that. Rewrite to the internal URL.
+        if ONLYOFFICE_PUBLIC_URL and ONLYOFFICE_INTERNAL_URL:
+            download_url = download_url.replace(ONLYOFFICE_PUBLIC_URL, ONLYOFFICE_INTERNAL_URL, 1)
+
         import requests
         try:
             response = requests.get(download_url, timeout=30)
