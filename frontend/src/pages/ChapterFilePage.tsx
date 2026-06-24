@@ -735,8 +735,6 @@ export function ChapterFilePage({
             ) : (
               <span className="font-medium text-text truncate max-w-[2000px]" title={name}>{name}</span>
             )}
-            <FolderIcon name={icon} size={14} color={color} />
-            <span className="font-medium text-text truncate max-w-[2000px]" title={i.getValue()}>{i.getValue()}</span>
           </div>
         )
       },

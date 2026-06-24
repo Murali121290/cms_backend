@@ -24,7 +24,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SkeletonCard } from "@/components/ui/SkeletonLoader";
 import { useStructuringReviewQuery } from "@/features/structuringReview/useStructuringReviewQuery";
-import { WysiwygEditor, useEditorSaveRuns, type WysiwygEditorHandle, OnlyOfficeEditor, OnlyOfficeSidePanel, type OnlyOfficeEditorHandle, CollaboraSidePanel } from "@/features/editor";
+import { WysiwygEditor, useEditorSaveRuns, type WysiwygEditorHandle, OnlyOfficeEditor, OnlyOfficeSidePanel, type OnlyOfficeEditorHandle, CollaboraSidePanel, ChangesReviewPanel } from "@/features/editor";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useFileXhtmlRunsQuery } from "@/features/technicalReview/useFileXhtmlRunsQuery";
 import { StylesPanel } from "@/features/structuringReview/components/EditorStylesPanel";
@@ -157,6 +157,7 @@ export function StructuringReviewPage() {
   const [activeTab, setActiveTab] = useState<"overview" | "editor" | "onlyoffice" | "collabora">(defaultTab);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [trackChangesEnabled, setTrackChangesEnabled] = useState(false);
+  const [sidePanelTab, setSidePanelTab] = useState<"styles" | "changes">("styles");
   const location = useLocation();
   const xsltContent = (location.state as { xsltContent?: string } | null)?.xsltContent;
 
@@ -679,31 +680,7 @@ export function StructuringReviewPage() {
                   </ToolbarPopover>
                 </ToolbarPopoverGroup>
               }
-            />
-              </>
-          )}
-                key={`editor-${normalizedFileId}`}
-                initialContent={xsltContent ?? xhtmlQuery.data?.content ?? ""}
-                onSave={async (html) => {
-                  const res = await editorSave.save(html);
-                  if (res && res.file_id && res.file_id !== normalizedFileId) {
-                    navigate(uiPaths.structuringReview(normalizedProjectId, normalizedChapterId, res.file_id) + "?tab=editor");
-                  } else {
-                    void reviewQuery.refetch();
-                  }
-                }}
-                isSaving={editorSave.isPending}
-                saveLabel="Save & Convert to DOCX"
-                documentTitle={review.file.filename}
-                exportHref={review.actions.export_href}
-                trackChangesEnabled={trackChangesEnabled}
-                onTrackChangesToggle={setTrackChangesEnabled}
-                height={isFullscreen ? "calc(100vh - 20px)" : "calc(100vh - 260px)"}
-                styles={allStyles}
-                onAddStyle={handleAddStyle}
-                currentUser={currentUser}
-                fileId={normalizedFileId?.toString()}
-                sidePanel={
+              sidePanel={
                   <div className="flex flex-col gap-4 h-full min-h-0 text-slate-200">
                     <div className="flex border-b border-navy-100 pb-1.5 shrink-0">
                       <button
@@ -748,8 +725,9 @@ export function StructuringReviewPage() {
                     )}
                   </div>
                 }
-              />
-            )}
+            />
+              </>
+          )}
           </div>
         )}
 
