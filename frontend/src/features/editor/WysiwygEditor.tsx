@@ -365,9 +365,12 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
       },
     });
 
-    // Initialize content
+    const prevInitialContentRef = useRef<string | null>(null);
+
+    // Initialize content or update when parent provides new content (e.g. after apply)
     useEffect(() => {
-      if (editor && initialContent && !contentInitialised.current) {
+      if (editor && initialContent && initialContent !== prevInitialContentRef.current) {
+        prevInitialContentRef.current = initialContent;
         contentInitialised.current = true;
         editor.commands.setContent(initialContent);
         setIsDirty(false);
@@ -1707,6 +1710,13 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           border-radius: 2px !important;
           cursor: pointer !important;
           transition: all 0.18s ease-in-out !important;
+          background-color: rgba(249, 115, 22, 0.20) !important;
+          border-bottom: 2px solid rgba(249, 115, 22, 0.85) !important;
+          color: inherit !important;
+        }
+
+        .occurrence-highlight:hover {
+          background-color: rgba(249, 115, 22, 0.3) !important;
         }
 
         /* --- Active Selection (Vivid Focus Pulsating Highlights) --- */
@@ -1715,80 +1725,10 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           50% { box-shadow: 0 0 0 5px rgba(34, 197, 94, 0.55); }
           100% { box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.3); }
         }
-        @keyframes orange-highlight-pulse {
-          0% { box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.3); }
-          50% { box-shadow: 0 0 0 5px rgba(249, 115, 22, 0.55); }
-          100% { box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.3); }
-        }
 
-        /* 1. Green highlights (Compliance / Rules / Stylesheet) */
-        .occurrence-stylesheet,
-        .occurrence-te_point {
-          background-color: rgba(34, 197, 94, 0.20) !important;
-          border-bottom: 3px solid rgba(34, 197, 94, 0.85) !important;
-          color: inherit !important;
-          font-weight: inherit !important;
-        }
-        .occurrence-stylesheet:hover,
-        .occurrence-te_point:hover {
-          background-color: rgba(34, 197, 94, 0.12) !important;
-          border-bottom: 2px solid rgba(34, 197, 94, 0.9) !important;
-        }
-        .occurrence-stylesheet-selected,
-        .occurrence-te_point-selected {
+        .occurrence-highlight-selected {
           background-color: rgba(34, 197, 94, 0.40) !important;
           border-bottom: 2.5px solid rgba(34, 197, 94, 0.95) !important;
-          color: #14532d !important;
-          font-weight: 700 !important;
-          padding: 2px 3px !important;
-          border-radius: 3px !important;
-          animation: green-highlight-pulse 2s infinite ease-in-out !important;
-          transition: all 0.18s ease-in-out !important;
-          opacity: 1 !important;
-        }
-
-        /* 2. Orange highlights (Language anomalies: spelling, grammar, style, consistency, bias, hyphenation) */
-        .occurrence-spelling,
-        .occurrence-consistency,
-        .occurrence-grammar,
-        .occurrence-style,
-        .occurrence-hyphenation,
-        .occurrence-bias {
-          background-color: rgba(249, 115, 22, 0.20) !important;
-          border-bottom: 3px solid rgba(249, 115, 22, 0.85) !important;
-          color: inherit !important;
-          font-weight: inherit !important;
-        }
-        .occurrence-spelling:hover,
-        .occurrence-consistency:hover,
-        .occurrence-grammar:hover,
-        .occurrence-style:hover,
-        .occurrence-hyphenation:hover,
-        .occurrence-bias:hover {
-          background-color: rgba(249, 115, 22, 0.12) !important;
-          border-bottom: 2px solid rgba(249, 115, 22, 0.9) !important;
-        }
-        .occurrence-spelling-selected,
-        .occurrence-consistency-selected,
-        .occurrence-grammar-selected,
-        .occurrence-style-selected,
-        .occurrence-hyphenation-selected,
-        .occurrence-bias-selected {
-          background-color: rgba(249, 115, 22, 0.40) !important;
-          border-bottom: 2.5px solid rgba(249, 115, 22, 0.95) !important;
-          color: #7c2d12 !important;
-          font-weight: 700 !important;
-          padding: 2px 3px !important;
-          border-radius: 3px !important;
-          animation: orange-highlight-pulse 2s infinite ease-in-out !important;
-          transition: all 0.18s ease-in-out !important;
-          opacity: 1 !important;
-        }
-
-        /* Fallbacks for generic occurrence classes */
-        .occurrence-highlight-selected {
-          background-color: rgba(22, 163, 74, 0.40) !important;
-          border-bottom: 2.5px solid rgba(22, 163, 74, 0.95) !important;
           color: #14532d !important;
           font-weight: 700 !important;
           padding: 2px 3px !important;

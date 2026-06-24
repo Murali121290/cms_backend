@@ -376,9 +376,14 @@ export function TechnicalReviewPage() {
   async function handleConfirmApply() {
     if (!pendingApplyLists) return;
     try {
-      await technicalApply.apply(null, pendingApplyLists.selectedList, pendingApplyLists.highlightList);
+      const res = await technicalApply.apply(null, pendingApplyLists.selectedList, pendingApplyLists.highlightList);
       setConfirmApply(false);
       setPendingApplyLists(null);
+      // If the backend returned a new file ID, update the editor to load the fresh file
+      if (res && res.new_file_id && res.new_file_id !== editorFileId) {
+        setEditorFileId(res.new_file_id);
+        navigate(uiPaths.technicalReview(normalizedProjectId!, normalizedChapterId!, res.new_file_id));
+      }
     } catch (e) {
       console.error(e);
     }
@@ -1211,18 +1216,22 @@ export function TechnicalReviewPage() {
                     )
                   ) : viewMode === "onlyoffice" ? (
                     <div className="flex-1 flex min-h-0 gap-0 w-full h-full relative" style={{ minHeight: isFullscreen ? "calc(100vh - 80px)" : "600px" }}>
-                      <OnlyOfficeSidePanel
-                        connector={onlyofficeRef.current?.connector}
-                        styles={[]}
-                        fileId={normalizedFileId}
-                        findings={findings}
-                      />
-                      <OnlyOfficeEditor
-                        ref={onlyofficeRef}
-                        fileId={normalizedFileId}
-                        mode="original"
-                        height="100%"
-                      />
+                      {editorFileId !== null && (
+                        <>
+                          <OnlyOfficeSidePanel
+                            connector={onlyofficeRef.current?.connector}
+                            styles={[]}
+                            fileId={editorFileId}
+                            findings={findings}
+                          />
+                          <OnlyOfficeEditor
+                            ref={onlyofficeRef}
+                            fileId={editorFileId}
+                            mode="original"
+                            height="100%"
+                          />
+                        </>
+                      )}
                     </div>
                   ) : (
                     collabora_url ? (
