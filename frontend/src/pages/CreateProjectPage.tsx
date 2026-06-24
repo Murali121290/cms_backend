@@ -1,14 +1,13 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Upload, X, FileArchive, CheckCircle2, ExternalLink, Layers, BookOpen, ChevronRight } from 'lucide-react'
+import { useNavigate, useParams } from 'react-router-dom'
+import { Upload, X, FileArchive, CheckCircle2, ExternalLink, Layers, BookOpen, ChevronRight, ArrowLeft } from 'lucide-react'
 import { clientsApi, type Client } from '@/api/clients'
-import { projectsApi, type ProjectCreate, type Project } from '@/api/projects'
+import { projectsApi, type ProjectCreate } from '@/api/projects'
 import { uploadsApi } from '@/api/uploads'
 import { usersApi, type User } from '@/api/users'
 import { workflowsApi } from '@/api/workflows'
 import type { WorkflowStage } from '@/api/workflows'
 import { toast } from '@/store/useToastStore'
-import { Modal } from '@/components/ui/Modal'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Button } from '@/components/ui/Button'
@@ -38,18 +37,25 @@ function validate(f: Partial<ProjectCreate>): Record<string, string> {
   if (!f.project_title?.trim())  e.project_title = 'Project Title is required'
   if (!f.workflow_name?.trim())  e.workflow_name = 'Workflow is required'
   if (!f.xml_standard?.trim())   e.xml_standard  = 'XML Standard is required'
-  if (f.isbn_no?.trim() && !/^[0-9]{9}[0-9X]$|^[0-9]{13}$/i.test(f.isbn_no.trim()))
+  if (!f.copyright_year)         e.copyright_year = 'Copyright Year is required'
+  if (!f.isbn_no?.trim()) {
+    e.isbn_no = 'ISBN is required'
+  } else if (!/^[0-9]{9}[0-9X]$|^[0-9]{13}$/i.test(f.isbn_no.trim())) {
     e.isbn_no = 'ISBN must be 10 or 13 characters'
+  }
   return e
 }
 
 // ── Section Divider ───────────────────────────────────────────────────────────
 
-function Section({ title, icon: Icon }: { title: string; icon?: React.ElementType }) {
+function Section({ title, icon: Icon, required }: { title: string; icon?: React.ElementType; required?: boolean }) {
   return (
     <div className="col-span-2 flex items-center gap-2 pt-3 pb-1">
       {Icon && <Icon size={14} className="text-primary flex-shrink-0" />}
-      <h3 className="text-xs font-semibold text-primary uppercase tracking-wider whitespace-nowrap">{title}</h3>
+      <h3 className="text-xs font-semibold text-primary uppercase tracking-wider whitespace-nowrap">
+        {title}
+        {required && <span className="text-danger ml-0.5 font-bold">*</span>}
+      </h3>
       <div className="flex-1 h-px bg-border" />
     </div>
   )
@@ -188,21 +194,16 @@ function ZipUpload({ onFileReady }: ZipUploadProps) {
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
-interface CreateProjectModalProps {
-  open: boolean
-  onClose: () => void
-  onCreated: (project: Project) => void
-  defaultClientId?: number
-}
-
-export function CreateProjectModal({ open, onClose, onCreated, defaultClientId }: CreateProjectModalProps) {
+export function CreateProjectPage() {
   const navigate = useNavigate()
+  const { clientId } = useParams<{ clientId: string }>()
+  const parsedClientId = clientId ? Number(clientId) : undefined
 
   const INIT: Partial<ProjectCreate> = {
     status:   'Planning',
     priority: 'Normal',
     actual_pages: 0,
-    client_id: defaultClientId ?? undefined,
+    client_id: parsedClientId ?? undefined,
     xml_standard: 'NLM',
   }
 
@@ -218,12 +219,6 @@ export function CreateProjectModal({ open, onClose, onCreated, defaultClientId }
   const [initLoad,          setInitLoad]          = useState(true)
 
   useEffect(() => {
-    if (!open) return
-    // Reset immediately so the form is clean while data loads
-    setForm({ status: 'Planning', priority: 'Normal', actual_pages: 0, client_id: defaultClientId ?? undefined, xml_standard: 'NLM' })
-    setErrors({})
-    setZipFile(null)
-    setInitLoad(true)
     const clientsPromise = clientsApi.list().catch((err) => {
       console.error('Failed to load clients:', err)
       return []
@@ -243,8 +238,8 @@ export function CreateProjectModal({ open, onClose, onCreated, defaultClientId }
         setUsers(u)
         setAllWorkflowStages(ws)
         // Auto-fill client fields once clients are loaded
-        if (defaultClientId) {
-          const client = c.find(x => x.id === defaultClientId)
+        if (parsedClientId) {
+          const client = c.find(x => x.id === parsedClientId)
           if (client) {
             setForm(f => ({
               ...f,
@@ -257,7 +252,7 @@ export function CreateProjectModal({ open, onClose, onCreated, defaultClientId }
       })
       .catch(() => toast.error('Failed to load form data'))
       .finally(() => setInitLoad(false))
-  }, [open, defaultClientId])
+  }, [parsedClientId])
 
   function set<K extends keyof ProjectCreate>(key: K, value: ProjectCreate[K]) {
     setForm(f => ({ ...f, [key]: value }))
@@ -265,13 +260,13 @@ export function CreateProjectModal({ open, onClose, onCreated, defaultClientId }
   }
 
   // Auto-fill from selected client
-  function handleClientChange(clientId: string) {
-    const id = Number(clientId)
+  function handleClientChange(clientIdStr: string) {
+    const id = Number(clientIdStr)
     set('client_id', id || null)
     const c = clients.find(x => x.id === id)
     if (c) {
       set('client_name',    c.name_company ?? c.company ?? [c.first_name, c.surname].filter(Boolean).join(' ') ?? '')
-      set('division_code',    c.division ?? '')
+      set('division_code',    c.division ?? '',)
       set('customer_contact', c.email ?? c.phone_main ?? '')
     }
   }
@@ -322,16 +317,38 @@ export function CreateProjectModal({ open, onClose, onCreated, defaultClientId }
     clients.filter(c => c.active_status).map(c => ({ value: String(c.id), label: clientLabel(c) }))
   , [clients])
 
+  const handleCancel = () => {
+    if (parsedClientId) {
+      navigate(`/clients/${parsedClientId}/projects`)
+    } else {
+      navigate('/clients')
+    }
+  }
+
   async function handleSubmit() {
     const errs = validate(form)
-    if (Object.keys(errs).length) { setErrors(errs); return }
+    if (!zipFile) {
+      errs.zip_file = 'ZIP file is required'
+    }
+    if (Object.keys(errs).length) {
+      setErrors(errs)
+      toast.error('Please fill in all required fields.')
+      const firstErrorKey = Object.keys(errs)[0]
+      setTimeout(() => {
+        const element = document.getElementById(firstErrorKey)
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          element.focus()
+        }
+      }, 50)
+      return
+    }
     setSaving(true)
     try {
       const formData = new FormData()
       formData.append('code',          form.project_code ?? '')
       formData.append('title',         form.project_title ?? '')
       formData.append('xml_standard',  form.xml_standard ?? 'NLM')
-      formData.append('chapter_count', String(form.chapter_count ?? 1))
       if (form.client_id)          formData.append('client_id',        String(form.client_id))
       if (form.client_name)        formData.append('client_name',      form.client_name)
       if (form.workflow_name)      formData.append('workflow_name',    form.workflow_name)
@@ -366,11 +383,13 @@ export function CreateProjectModal({ open, onClose, onCreated, defaultClientId }
         }
       }
 
-      let finalProject = response.project as unknown as Project
-
       toast.success(`Project "${response.project.title ?? response.project.code}" created`)
-      onCreated(finalProject)
-      onClose()
+      
+      if (form.client_id) {
+        navigate(`/clients/${form.client_id}/projects`)
+      } else {
+        navigate('/clients')
+      }
     } catch (err: unknown) {
       let msg = 'Failed to create project'
       try {
@@ -380,7 +399,6 @@ export function CreateProjectModal({ open, onClose, onCreated, defaultClientId }
         } else if (typeof errData?.message === 'string') {
           msg = errData.message
         } else if (Array.isArray(errData?.detail)) {
-          // Handle Pydantic validation errors
           const details = errData.detail
             .filter((e: any) => e && typeof e === 'object')
             .map((e: any) => {
@@ -393,7 +411,7 @@ export function CreateProjectModal({ open, onClose, onCreated, defaultClientId }
           }
         }
       } catch {
-        // If anything goes wrong extracting the error, use default message
+        // use default
       }
       toast.error(String(msg))
     } finally {
@@ -401,263 +419,272 @@ export function CreateProjectModal({ open, onClose, onCreated, defaultClientId }
     }
   }
 
-  const footerBusy = saving
-
   return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title="Create New Project"
-      size="xl"
-      footer={
-        <div className="flex justify-end gap-3">
-          <Button variant="outline" onClick={onClose} disabled={footerBusy}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={footerBusy}>
-            {saving ? <><Spinner size="sm" /> Saving…</> : 'Save Project'}
-          </Button>
+    <div className="flex flex-col gap-6 p-6 min-h-full max-w-4xl mx-auto">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={handleCancel}
+          className="p-2 rounded-lg hover:bg-surface text-muted hover:text-text transition-colors"
+        >
+          <ArrowLeft size={18} />
+        </button>
+        <div>
+          <h1 className="text-2xl font-bold text-text">Create New Project</h1>
+          <p className="text-sm text-muted">Fill out the details below to initialize a new project workspace.</p>
         </div>
-      }
-    >
+      </div>
+
       {initLoad ? (
-        <div className="flex items-center justify-center py-16">
+        <div className="flex items-center justify-center py-20 bg-card rounded-2xl border border-border shadow-sm">
           <Spinner size="lg" />
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+        <div className="bg-card rounded-2xl border border-border p-6 shadow-sm flex flex-col gap-6">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+            {/* ── Project Information ─────────────────── */}
+            <Section title="Project Information" icon={BookOpen} />
 
-          {/* ── Project Information ─────────────────── */}
-          <Section title="Project Information" icon={BookOpen} />
-
-          <Select
-            label="Client"
-            required
-            value={form.client_id ? String(form.client_id) : ''}
-            onChange={e => handleClientChange(e.target.value)}
-            options={clientOptions}
-            placeholder="Select client"
-            error={errors.client_id}
-          />
-          <Input
-            label="Project Code"
-            required
-            value={form.project_code ?? ''}
-            onChange={e => set('project_code', e.target.value)}
-            placeholder="e.g. PRJ-2024-001"
-            error={errors.project_code}
-          />
-
-          <Input
-            label="Customer Name"
-            value={form.client_name ?? ''}
-            readOnly
-            onChange={() => {}}
-            placeholder="Auto-filled from client"
-            className="bg-surface cursor-default text-muted"
-          />
-          <Input
-            label="Division Code"
-            value={form.division_code ?? ''}
-            readOnly
-            onChange={() => {}}
-            placeholder="Auto-filled from client"
-            className="bg-surface cursor-default text-muted"
-          />
-
-          <Input
-            label="Customer Contact"
-            value={form.customer_contact ?? ''}
-            readOnly
-            onChange={() => {}}
-            placeholder="Auto-filled from client"
-            className="bg-surface cursor-default text-muted"
-          />
-          <Input
-            label="Category"
-            value={form.category ?? ''}
-            onChange={e => set('category', e.target.value)}
-            placeholder="e.g. Book, Journal, Report"
-          />
-          <Select
-            label="Composition"
-            value={form.composition ?? ''}
-            onChange={e => set('composition', e.target.value || null)}
-            options={[
-              { value: 'Low',      label: 'Low (Level 1)'      },
-              { value: 'Medium', label: 'Medium (Level 2)' },
-              { value: 'High',     label: 'High (Level 3)'     },
-            ]}
-            placeholder="Select composition level"
-          />
-
-          <Select
-            label="Priority"
-            value={form.priority ?? 'Normal'}
-            onChange={e => set('priority', e.target.value)}
-            options={[
-              { value: 'Normal',     label: 'Normal'     },
-              { value: 'Fast Track', label: 'Fast Track' },
-            ]}
-            placeholder="Select priority"
-          />
-
-          <Select
-            label="Project Manager"
-            value={form.project_manager ?? ''}
-            onChange={e => set('project_manager', e.target.value || null)}
-            options={pmUsers.map(u => ({ value: u.user_name, label: u.user_name }))}
-            placeholder="Select project manager"
-          />
-          <Select
-            label="Sales Person"
-            value={form.sales_person ?? ''}
-            onChange={e => set('sales_person', e.target.value || null)}
-            options={salesUsers.map(u => ({ value: u.user_name, label: u.user_name }))}
-            placeholder="Select sales person"
-          />
-
-          {/* Project Title — full width */}
-          <div className="col-span-2">
-            <Input
-              label="Project Title"
-              required
-              value={form.project_title ?? ''}
-              onChange={e => set('project_title', e.target.value)}
-              placeholder="Full project title"
-              error={errors.project_title}
-            />
-          </div>
-
-          {/* ── Publication Details ─────────────────── */}
-          <Section title="Publication Details" icon={Layers} />
-
-          <Input label="Edition"    value={form.edition    ?? ''} onChange={e => set('edition',    e.target.value)} placeholder="e.g. 3rd Edition" />
-          <Input label="Color"      value={form.color      ?? ''} onChange={e => set('color',      e.target.value)} placeholder="e.g. 4-color, B&W" />
-          <Input label="Trim Size"  value={form.trim_size  ?? ''} onChange={e => set('trim_size',  e.target.value)} placeholder="e.g. 8.5 x 11" />
-          <Select
-            label="XML Standard"
-            required
-            value={form.xml_standard ?? 'NLM'}
-            onChange={e => set('xml_standard', e.target.value)}
-            options={[
-              { value: 'NLM',     label: 'NLM / JATS' },
-              { value: 'BITS',    label: 'BITS (Book)' },
-              { value: 'DocBook', label: 'DocBook' },
-              { value: 'TEI',     label: 'TEI' },
-            ]}
-            placeholder="Select XML standard"
-            error={errors.xml_standard}
-          />
-          <Input
-            label="Copyright Year"
-            required
-            type="number"
-            value={form.copyright_year != null ? String(form.copyright_year) : ''}
-            onChange={e => set('copyright_year', e.target.value ? Number(e.target.value) : null)}
-            placeholder={String(new Date().getFullYear())}
-          />
-          <Input
-            label="Manuscript Pages"
-            type="number"
-            value={form.manuscript_pages != null ? String(form.manuscript_pages) : ''}
-            onChange={e => set('manuscript_pages', e.target.value ? Number(e.target.value) : null)}
-            placeholder="0"
-          />
-          <Input
-            label="Estimated Pages"
-            type="number"
-            value={form.estimated_pages != null ? String(form.estimated_pages) : ''}
-            onChange={e => set('estimated_pages', e.target.value ? Number(e.target.value) : null)}
-            placeholder="0"
-          />
-          <Input
-            label="Actual Pages"
-            type="number"
-            value={form.actual_pages != null ? String(form.actual_pages) : ''}
-            onChange={e => set('actual_pages', e.target.value ? Number(e.target.value) : 0)}
-            placeholder="0"
-          />
-          <Input
-            label="Chapter Count"
-            required
-            type="number"
-            value={form.chapter_count != null ? String(form.chapter_count) : ''}
-            onChange={e => set('chapter_count', e.target.value ? Number(e.target.value) : null)}
-            placeholder="0"
-          />
-          <Input
-            label="ISBN No"
-            required
-            value={form.isbn_no ?? ''}
-            onChange={e => set('isbn_no', e.target.value)}
-            // placeholder="ISBN-13"
-            error={errors.isbn_no}
-          />
-          <Input
-            label="Billing Location"
-            value={form.billing_location ?? ''}
-            onChange={e => set('billing_location', e.target.value)}
-            placeholder="e.g. New York, US"
-          />
-
-          {/* ── Workflow ────────────────────────────── */}
-          <Section title="Workflow" icon={Layers} />
-
-          <div className="col-span-2 flex flex-col gap-2">
             <Select
-              label="Workflow"
+              id="client_id"
+              label="Client"
               required
-              value={form.workflow_name ?? ''}
-              onChange={e => set('workflow_name', e.target.value || null)}
-              options={workflowNames.map(n => ({ value: n, label: n }))}
-              placeholder={workflowNames.length ? 'Select a workflow' : 'No workflows configured'}
-              error={errors.workflow_name}
+              value={form.client_id ? String(form.client_id) : ''}
+              onChange={e => handleClientChange(e.target.value)}
+              options={clientOptions}
+              placeholder="Select client"
+              error={errors.client_id}
+            />
+            <Input
+              id="project_code"
+              label="Project Code"
+              required
+              value={form.project_code ?? ''}
+              onChange={e => set('project_code', e.target.value)}
+              placeholder="e.g. PRJ-2024-001"
+              error={errors.project_code}
             />
 
-            {/* Flow preview */}
-            {form.workflow_name && selectedFlow.length > 0 && (
-              <div className="rounded-xl border border-border bg-surface p-4">
-                <p className="text-xs font-semibold text-muted uppercase tracking-wider mb-3">
-                  Flow — {form.workflow_name}
-                </p>
-                <div className="flex flex-wrap items-center gap-1">
-                  {selectedFlow.map((s, i) => (
-                    <span key={s.id} className="inline-flex items-center gap-1">
-                      <span className="inline-flex items-center gap-1.5 text-xs bg-card border border-border rounded-lg px-2.5 py-1">
-                        <span className="w-4 h-4 rounded-full bg-primary/10 text-primary text-[10px] font-bold flex items-center justify-center flex-shrink-0">
-                          {i + 1}
-                        </span>
-                        <span className="font-medium text-text">{s.stage_name}</span>
-                      </span>
-                      {i < selectedFlow.length - 1 && (
-                        <ChevronRight size={12} className="text-muted flex-shrink-0" />
-                      )}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
+            <Input
+              label="Customer Name"
+              value={form.client_name ?? ''}
+              readOnly
+              onChange={() => {}}
+              placeholder="Auto-filled from client"
+              className="bg-surface cursor-default text-muted"
+            />
+            <Input
+              label="Division Code"
+              value={form.division_code ?? ''}
+              readOnly
+              onChange={() => {}}
+              placeholder="Auto-filled from client"
+              className="bg-surface cursor-default text-muted"
+            />
 
-            {!form.workflow_name && workflowNames.length === 0 && (
-              <div className="flex items-center justify-between rounded-lg border border-dashed border-border bg-surface px-4 py-3">
-                <p className="text-xs text-muted">No workflows configured yet.</p>
-                <button
-                  type="button"
-                  onClick={() => navigate('/settings/workflow')}
-                  className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-                >
-                  <ExternalLink size={11} /> Create Workflow
-                </button>
-              </div>
-            )}
+            <Input
+              label="Customer Contact"
+              value={form.customer_contact ?? ''}
+              readOnly
+              onChange={() => {}}
+              placeholder="Auto-filled from client"
+              className="bg-surface cursor-default text-muted"
+            />
+            <Input
+              label="Category"
+              value={form.category ?? ''}
+              onChange={e => set('category', e.target.value)}
+              placeholder="e.g. Book, Journal, Report"
+            />
+            <Select
+              label="Composition"
+              value={form.composition ?? ''}
+              onChange={e => set('composition', e.target.value || null)}
+              options={[
+                { value: 'Low',      label: 'Low (Level 1)'      },
+                { value: 'Medium', label: 'Medium (Level 2)' },
+                { value: 'High',     label: 'High (Level 3)'     },
+              ]}
+              placeholder="Select composition level"
+            />
+
+            <Select
+              label="Priority"
+              value={form.priority ?? 'Normal'}
+              onChange={e => set('priority', e.target.value)}
+              options={[
+                { value: 'Normal',     label: 'Normal'     },
+                { value: 'Fast Track', label: 'Fast Track' },
+              ]}
+              placeholder="Select priority"
+            />
+
+            <Select
+              label="Project Manager"
+              value={form.project_manager ?? ''}
+              onChange={e => set('project_manager', e.target.value || null)}
+              options={pmUsers.map(u => ({ value: u.user_name, label: u.user_name }))}
+              placeholder="Select project manager"
+            />
+            <Select
+              label="Sales Person"
+              value={form.sales_person ?? ''}
+              onChange={e => set('sales_person', e.target.value || null)}
+              options={salesUsers.map(u => ({ value: u.user_name, label: u.user_name }))}
+              placeholder="Select sales person"
+            />
+
+            {/* Project Title — full width */}
+            <div className="col-span-2">
+              <Input
+                id="project_title"
+                label="Project Title"
+                required
+                value={form.project_title ?? ''}
+                onChange={e => set('project_title', e.target.value)}
+                placeholder="Full project title"
+                error={errors.project_title}
+              />
+            </div>
+
+            {/* ── Publication Details ─────────────────── */}
+            <Section title="Publication Details" icon={Layers} />
+
+            <Input label="Edition"    value={form.edition    ?? ''} onChange={e => set('edition',    e.target.value)} placeholder="e.g. 3rd Edition" />
+            <Input label="Color"      value={form.color      ?? ''} onChange={e => set('color',      e.target.value)} placeholder="e.g. 4-color, B&W" />
+            <Input label="Trim Size"  value={form.trim_size  ?? ''} onChange={e => set('trim_size',  e.target.value)} placeholder="e.g. 8.5 x 11" />
+            <Select
+              id="xml_standard"
+              label="XML Standard"
+              required
+              value={form.xml_standard ?? 'NLM'}
+              onChange={e => set('xml_standard', e.target.value)}
+              options={[
+                { value: 'NLM',     label: 'NLM / JATS' },
+                { value: 'BITS',    label: 'BITS (Book)' },
+                { value: 'DocBook', label: 'DocBook' },
+                { value: 'TEI',     label: 'TEI' },
+              ]}
+              placeholder="Select XML standard"
+              error={errors.xml_standard}
+            />
+            <Input
+              id="copyright_year"
+              label="Copyright Year"
+              required
+              type="number"
+              value={form.copyright_year != null ? String(form.copyright_year) : ''}
+              onChange={e => set('copyright_year', e.target.value ? Number(e.target.value) : null)}
+              placeholder={String(new Date().getFullYear())}
+              error={errors.copyright_year}
+            />
+            <Input
+              label="Manuscript Pages"
+              type="number"
+              value={form.manuscript_pages != null ? String(form.manuscript_pages) : ''}
+              onChange={e => set('manuscript_pages', e.target.value ? Number(e.target.value) : null)}
+              placeholder="0"
+            />
+            <Input
+              label="Estimated Pages"
+              type="number"
+              value={form.estimated_pages != null ? String(form.estimated_pages) : ''}
+              onChange={e => set('estimated_pages', e.target.value ? Number(e.target.value) : null)}
+              placeholder="0"
+            />
+            <Input
+              label="Actual Pages"
+              type="number"
+              value={form.actual_pages != null ? String(form.actual_pages) : ''}
+              onChange={e => set('actual_pages', e.target.value ? Number(e.target.value) : 0)}
+              placeholder="0"
+            />
+            <Input
+              id="isbn_no"
+              label="ISBN No"
+              required
+              value={form.isbn_no ?? ''}
+              onChange={e => set('isbn_no', e.target.value)}
+              error={errors.isbn_no}
+            />
+            <Input
+              label="Billing Location"
+              value={form.billing_location ?? ''}
+              onChange={e => set('billing_location', e.target.value)}
+              placeholder="e.g. New York, US"
+            />
+
+            {/* ── Workflow ────────────────────────────── */}
+            <Section title="Workflow" icon={Layers} />
+
+            <div className="col-span-2 flex flex-col gap-2">
+              <Select
+                id="workflow_name"
+                label="Workflow"
+                required
+                value={form.workflow_name ?? ''}
+                onChange={e => set('workflow_name', e.target.value || null)}
+                options={workflowNames.map(n => ({ value: n, label: n }))}
+                placeholder={workflowNames.length ? 'Select a workflow' : 'No workflows configured'}
+                error={errors.workflow_name}
+              />
+
+              {/* Flow preview */}
+              {form.workflow_name && selectedFlow.length > 0 && (
+                <div className="rounded-xl border border-border bg-surface p-4">
+                  <p className="text-xs font-semibold text-muted uppercase tracking-wider mb-3">
+                    Flow — {form.workflow_name}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-1">
+                    {selectedFlow.map((s, i) => (
+                      <span key={s.id} className="inline-flex items-center gap-1">
+                        <span className="inline-flex items-center gap-1.5 text-xs bg-card border border-border rounded-lg px-2.5 py-1">
+                          <span className="w-4 h-4 rounded-full bg-primary/10 text-primary text-[10px] font-bold flex items-center justify-center flex-shrink-0">
+                            {i + 1}
+                          </span>
+                          <span className="font-medium text-text">{s.stage_name}</span>
+                        </span>
+                        {i < selectedFlow.length - 1 && (
+                          <ChevronRight size={12} className="text-muted flex-shrink-0" />
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {!form.workflow_name && workflowNames.length === 0 && (
+                <div className="flex items-center justify-between rounded-lg border border-dashed border-border bg-surface px-4 py-3">
+                  <p className="text-xs text-muted">No workflows configured yet.</p>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/settings/workflow')}
+                    className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                  >
+                    <ExternalLink size={11} /> Create Workflow
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* ── ZIP Upload ──────────────────────────── */}
+            <Section title="ZIP File Upload" icon={Upload} required />
+
+            <div id="zip_file" className="col-span-2 flex flex-col gap-1 outline-none" tabIndex={-1}>
+              <ZipUpload onFileReady={setZipFile} />
+              {errors.zip_file && <p className="text-xs text-danger mt-1">{errors.zip_file}</p>}
+            </div>
           </div>
 
-          {/* ── ZIP Upload ──────────────────────────── */}
-          <Section title="ZIP File Upload" icon={Upload} />
-
-          <ZipUpload onFileReady={setZipFile} />
-
+          {/* Form Actions */}
+          <div className="flex justify-end gap-3 pt-4 border-t border-border">
+            <Button variant="outline" onClick={handleCancel} disabled={saving}>Cancel</Button>
+            <Button onClick={handleSubmit} disabled={saving}>
+              {saving ? <><Spinner size="sm" /> Saving…</> : 'Save Project'}
+            </Button>
+          </div>
         </div>
       )}
-    </Modal>
+    </div>
   )
 }

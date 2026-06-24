@@ -422,11 +422,10 @@ export function ProjectPlanningPage() {
             <Button
               onClick={handleApprove}
               disabled={approving || !finalDue || chapters.length === 0}
+              isLoading={approving}
+              leftIcon={<CheckCircle2 size={14} />}
             >
-              {approving
-                ? <><Spinner size="sm" /> Approving…</>
-                : <><CheckCircle2 size={14} /> Approve Planning</>
-              }
+              {approving ? "Approving…" : "Approve Planning"}
             </Button>
           )}
         </div>

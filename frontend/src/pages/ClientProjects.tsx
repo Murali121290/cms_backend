@@ -15,7 +15,6 @@ import { useRBAC } from '@/hooks/useRBAC'
 import { Badge, statusToBadge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Spinner, FullPageSpinner } from '@/components/ui/Spinner'
-import { CreateProjectModal } from './CreateProjectModal'
 import { ProjectInfoModal } from './ProjectInfoModal'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -336,7 +335,6 @@ export function ClientProjects() {
   const [projects, setProjects] = useState<Project[]>([])
   const [pmUsers, setPmUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
-  const [createOpen, setCreateOpen] = useState(false)
   const [infoProject, setInfoProject] = useState<Project | null>(null)
   const [editProject, setEditProject] = useState<Project | null>(null)
 
@@ -436,7 +434,7 @@ export function ClientProjects() {
             </div>
           </div>
         </div>
-        <Button onClick={() => setCreateOpen(true)} leftIcon={<Plus size={15} />}>
+        <Button onClick={() => navigate(`/clients/${clientId}/projects/new`)} leftIcon={<Plus size={15} />}>
           Create Project
         </Button>
       </div>
@@ -511,16 +509,7 @@ export function ClientProjects() {
 
 
 
-      {/* Create Project Modal */}
-      <CreateProjectModal
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        defaultClientId={id}
-        onCreated={project => {
-          setProjects(ps => [project, ...ps])
-          setCreateOpen(false)
-        }}
-      />
+
 
       {/* Projects — 4 view modes */}
       {filtered.length === 0 ? (

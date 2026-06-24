@@ -380,3 +380,165 @@ def test_api_v2_project_bootstrap_empty_files_and_zip_upload(
     assert "ch01_fig1.png" in filenames
     assert "project_settings.xml" in filenames
 
+
+def test_api_v2_project_bootstrap_rejects_duplicate_project_code(
+    auth_cookie_client,
+    admin_user,
+    project_record,
+):
+    client = auth_cookie_client(admin_user)
+
+    response = client.post(
+        "/api/v2/projects/bootstrap",
+        data={
+            "code": project_record.code,
+            "title": "Another Project Title",
+            "client_name": "Client A",
+            "xml_standard": "NLM",
+            "chapter_count": "1",
+        },
+    )
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["status"] == "error"
+    assert body["code"] == "PROJECT_ALREADY_EXISTS"
+    assert body["message"] == f"Project code '{project_record.code}' already exists."
+
+
+def test_api_v2_chapter_count_synchronization(
+    auth_cookie_client,
+    admin_user,
+    db_session,
+    temp_upload_root,
+):
+    client = auth_cookie_client(admin_user)
+
+    # 1. Bootstrap project
+    response = client.post(
+        "/api/v2/projects/bootstrap",
+        data={
+            "code": "COUNTBOOK",
+            "title": "Count Book",
+            "client_name": "Client A",
+            "xml_standard": "NLM",
+            "chapter_count": "3",
+        },
+    )
+    assert response.status_code == 200
+
+    project = db_session.query(Project).filter(Project.code == "COUNTBOOK").first()
+    assert project is not None
+    assert project.chapter_count == 3
+
+    # 2. Add a new chapter
+    create_response = client.post(
+        f"/api/v2/projects/{project.id}/chapters",
+        json={"number": "04", "title": "Chapter 04"},
+    )
+    assert create_response.status_code == 200
+    db_session.refresh(project)
+    assert project.chapter_count == 4
+
+    # 3. Delete a chapter
+    chapter = (
+        db_session.query(models.Chapter)
+        .filter(models.Chapter.project == project.code, models.Chapter.chapters == "04")
+        .first()
+    )
+    delete_response = client.delete(
+        f"/api/v2/projects/{project.id}/chapters/{chapter.id}"
+    )
+    assert delete_response.status_code == 200
+    db_session.refresh(project)
+    assert project.chapter_count == 3
+
+
+def test_api_v2_project_bootstrap_zip_upload_no_chapter_count(
+    auth_cookie_client,
+    admin_user,
+    db_session,
+    temp_upload_root,
+):
+    client = auth_cookie_client(admin_user)
+
+    # 1. Bootstrap project without specifying chapter_count
+    response = client.post(
+        "/api/v2/projects/bootstrap",
+        data={
+            "code": "NOCOUNTZIP",
+            "title": "No Count Zip Book",
+            "client_name": "Client A",
+            "xml_standard": "NLM",
+            "workflow_name": "WF-01",
+        },
+    )
+    assert response.status_code == 200
+
+    project = db_session.query(Project).filter(Project.code == "NOCOUNTZIP").first()
+    assert project is not None
+    assert project.chapter_count == 0
+
+    # 2. Prepare ZIP file with 2 chapters
+    zip_buffer = BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        zip_file.writestr("ch01/intro.docx", b"ch 1 content")
+        zip_file.writestr("ch02/body.docx", b"ch 2 content")
+        zip_file.writestr("project_settings.xml", b"<xml></xml>")
+    zip_buffer.seek(0)
+
+    # 3. Upload ZIP
+    upload_response = client.post(
+        "/api/v2/uploads/ClientA/NOCOUNTZIP",
+        data={"project_id": project.id},
+        files={"file": ("NOCOUNTZIP.zip", zip_buffer, "application/zip")},
+    )
+    assert upload_response.status_code == 200
+    db_session.refresh(project)
+
+    # 4. Verify chapter_count is updated to 2
+    assert project.chapter_count == 2
+
+
+def test_api_v2_project_bootstrap_zip_upload_no_identifiable_chapters_fails(
+    auth_cookie_client,
+    admin_user,
+    db_session,
+    temp_upload_root,
+):
+    client = auth_cookie_client(admin_user)
+
+    # 1. Bootstrap project
+    response = client.post(
+        "/api/v2/projects/bootstrap",
+        data={
+            "code": "NOCHAPSFAIL",
+            "title": "No Chaps Fail Book",
+            "client_name": "Client A",
+            "xml_standard": "NLM",
+        },
+    )
+    assert response.status_code == 200
+
+    project = db_session.query(Project).filter(Project.code == "NOCHAPSFAIL").first()
+
+    # 2. Prepare ZIP file with NO chapters (only random xml/assets files without ch/chap/chapter pattern)
+    zip_buffer = BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        zip_file.writestr("random_file.xml", b"<xml></xml>")
+        zip_file.writestr("docs/readme.txt", b"readme")
+    zip_buffer.seek(0)
+
+    # 3. Upload ZIP and check it fails
+    upload_response = client.post(
+        "/api/v2/uploads/ClientA/NOCHAPSFAIL",
+        data={"project_id": project.id},
+        files={"file": ("NOCHAPSFAIL.zip", zip_buffer, "application/zip")},
+    )
+    assert upload_response.status_code == 400
+    body = upload_response.json()
+    assert body["code"] == "NO_CHAPTERS_FOUND"
+    assert body["message"] == "Unable to identify any chapters in the uploaded ZIP file."
+
+
+
