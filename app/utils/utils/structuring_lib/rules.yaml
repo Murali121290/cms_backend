@@ -254,6 +254,77 @@ keyterms:
   explicit_styles:
     - KT
 
+# Centralized registry of all WK Book Template 1.1 structural tags that are
+# treated as author-provided and authoritative when written explicitly as a
+# leading "<TAG>" marker - they are preserved verbatim and locked against any
+# further rule/heuristic reclassification (see annotator._is_known_token and
+# hierarchy_manager's "locked" handling). Add new template tags here, in one
+# place, rather than hardcoding checks elsewhere. Matching is case-insensitive
+# against `exact`, and by case-insensitive startswith against `prefixes` (so
+# "BL-" covers "BL-FIRST", "BL-MID", "BL-LAST", etc.). Multi-word box-keyword
+# aliases like "CASE STUDY" intentionally never match here (they contain a
+# space) - those stay on the separate keyword-alias path in boxes.type_keywords.
+structural_tags:
+  exact:
+    - TXT
+    - TXT-FLUSH
+    - PMI
+    - CW
+    - CN
+    - CT
+    - CST
+    - CAU
+    - ABS
+    - H1
+    - H2
+    - H3
+    - H4
+    - H5
+    - H6
+    - SP1
+    - SP2
+    - OBJ1
+    - KT
+    - EPI
+    - EPI-ATT
+    - EXT
+    - EQ
+    - REFH1
+    - REFH2
+    - T1
+    - T2
+    - T4
+    - TFN
+    - TSN
+    - TBCH
+    - TB
+    - L1
+    - L2
+    - NBX1-TTL
+    - NBX-TXT
+  prefixes:
+    - "PT-H"
+    - "BL-"
+    - "NL-"
+    - "UL-"
+    - "RL-"
+    - "OBJ-"
+    - "REF-"
+    - "APX-"
+    - "BX1-"
+    - "BX2-"
+    - "BX3-"
+    - "BX4-"
+    - "NBX-"
+    - "NBX1-"
+    - "TBL-"
+    - "TNL-"
+    - "TRL-"
+    - "UNT-"
+    - "UNBX-"
+    - "FIG-"
+    - "EPI-"
+
 normalization:
   source_style_map:
     SUM: H1
