@@ -410,12 +410,12 @@ export function CreateProjectModal({ open, onClose, onCreated, defaultClientId }
       title="Create New Project"
       size="xl"
       footer={
-        <>
+        <div className="flex justify-end gap-3">
           <Button variant="outline" onClick={onClose} disabled={footerBusy}>Cancel</Button>
           <Button onClick={handleSubmit} disabled={footerBusy}>
             {saving ? <><Spinner size="sm" /> Saving…</> : 'Save Project'}
           </Button>
-        </>
+        </div>
       }
     >
       {initLoad ? (

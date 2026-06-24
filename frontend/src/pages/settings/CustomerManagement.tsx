@@ -183,7 +183,7 @@ function CustomerFormModal({ isOpen, onClose, onSaved, clients, editCustomer }: 
       title={isEdit ? `Edit — ${getDisplayName(editCustomer!)}` : 'Create New Customer'}
       size="xl"
       footer={
-        <>
+        <div className="flex justify-end gap-3">
           <button onClick={onClose}
             className="px-4 py-2 text-sm font-medium text-muted hover:text-text border border-border rounded-lg hover:bg-background transition-colors">
             Cancel
@@ -191,7 +191,7 @@ function CustomerFormModal({ isOpen, onClose, onSaved, clients, editCustomer }: 
           <Button onClick={() => handleSave()} disabled={saving}>
             {saving ? <><Spinner size="sm" /> Saving…</> : isEdit ? 'Update Customer' : 'Save Customer'}
           </Button>
-        </>
+        </div>
       }
     >
       <div className="space-y-5">
@@ -313,13 +313,13 @@ function ViewCustomerModal({ isOpen, onClose, customer, onEdit }: {
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={`Customer — ${getDisplayName(customer)}`} size="xl"
       footer={
-        <>
+        <div className="flex justify-end gap-3">
           <button onClick={onClose}
             className="px-4 py-2 text-sm font-medium text-muted hover:text-text border border-border rounded-lg hover:bg-background transition-colors">
             Close
           </button>
           <Button onClick={onEdit}><Edit2 size={14} /> Edit Customer</Button>
-        </>
+        </div>
       }
     >
       <div className="space-y-5">
@@ -422,7 +422,7 @@ export function CustomerManagement() {
 
   const countryOptions = useMemo(() =>
     [...new Set(clients.map(c => c.country).filter(Boolean) as string[])].sort()
-  , [clients])
+    , [clients])
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
@@ -506,8 +506,8 @@ export function CustomerManagement() {
           className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium border border-border text-muted hover:text-text hover:border-primary/40 rounded-lg transition-colors">
           <Download size={13} /> Export
         </button>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus size={15} /> Create Customer
+        <Button onClick={() => setCreateOpen(true)} leftIcon={<Plus size={15} />}>
+          Create Customer
         </Button>
       </div>
 
