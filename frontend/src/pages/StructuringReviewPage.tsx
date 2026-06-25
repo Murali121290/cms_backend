@@ -9,6 +9,7 @@ import {
   Download,
   FileText,
   Info,
+  Layers,
   LayoutDashboard,
   Maximize2,
   Minimize2,
@@ -26,6 +27,7 @@ import { useStructuringReviewQuery } from "@/features/structuringReview/useStruc
 import { WysiwygEditor, useEditorSaveRuns, type WysiwygEditorHandle, OnlyOfficeEditor, OnlyOfficeSidePanel, type OnlyOfficeEditorHandle, CollaboraSidePanel, ChangesReviewPanel } from "@/features/editor";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useFileXhtmlRunsQuery } from "@/features/technicalReview/useFileXhtmlRunsQuery";
+import { StylesPanel } from "@/features/structuringReview/components/EditorStylesPanel";
 import { VersionHistoryPanel } from "@/features/structuringReview/components/VersionHistoryPanel";
 import { useParagraphStyles } from "@/features/editor/useParagraphStyles";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
@@ -608,6 +610,57 @@ export function StructuringReviewPage() {
               fileId={normalizedFileId?.toString()}
               toolbarExtras={
                 <ToolbarPopoverGroup>
+                  <ToolbarPopover
+                    id="group"
+                    icon={<Layers className="w-3.5 h-3.5" />}
+                    label="Group"
+                    title="Document Elements"
+                    sticky
+                    width={360}
+                  >
+                    <StylesPanel
+                      styles={allStyles}
+                      editorRef={editorRef}
+                      onAddStyle={handleAddStyle}
+                      fileId={normalizedFileId}
+                      charStyles={review.char_styles}
+                      visibleTabs={["group"]}
+                    />
+                  </ToolbarPopover>
+                  <ToolbarPopover
+                    id="para"
+                    icon={<FileText className="w-3.5 h-3.5" />}
+                    label="Para"
+                    title="Paragraph Styles"
+                    sticky
+                    width={320}
+                  >
+                    <StylesPanel
+                      styles={allStyles}
+                      editorRef={editorRef}
+                      onAddStyle={handleAddStyle}
+                      fileId={normalizedFileId}
+                      charStyles={review.char_styles}
+                      visibleTabs={["paragraph"]}
+                    />
+                  </ToolbarPopover>
+                  <ToolbarPopover
+                    id="char"
+                    icon={<BookOpen className="w-3.5 h-3.5" />}
+                    label="Char"
+                    title="Character Styles"
+                    sticky
+                    width={320}
+                  >
+                    <StylesPanel
+                      styles={allStyles}
+                      editorRef={editorRef}
+                      onAddStyle={handleAddStyle}
+                      fileId={normalizedFileId}
+                      charStyles={review.char_styles}
+                      visibleTabs={["character"]}
+                    />
+                  </ToolbarPopover>
                   <ToolbarPopover
                     id="history"
                     icon={<Clock className="w-3.5 h-3.5" />}
