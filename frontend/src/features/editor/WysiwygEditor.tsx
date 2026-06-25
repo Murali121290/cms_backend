@@ -50,7 +50,10 @@ import {
   CornerDownRight,
   CheckCircle2,
   Sigma,
+  Eye,
+  EyeOff,
 } from "lucide-react";
+import { diffWords, diffArrays } from "diff";
 import { useState, useEffect, useImperativeHandle, forwardRef, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/Button";
 import Paragraph from "@tiptap/extension-paragraph";
@@ -66,6 +69,112 @@ import { MathNode } from "./MathNode";
 import { SdtBlock } from "./SdtBlock";
 import { SdtInline } from "./SdtInline";
 import katex from "katex";
+
+
+/**
+ * Helpers for the toolbar's eye toggle (review-mode diff overlay).
+ */
+
+const escapeHtml = (s: string) =>
+  s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+/**
+ * Extract the visible plain text per block from an HTML string. Returns one
+ * trimmed string per paragraph / heading / list item, preserving order. Empty
+ * blocks are dropped so a stray trailing `<p></p>` introduced by TipTap can't
+ * misalign the diff.
+ */
+function extractParagraphs(html: string): string[] {
+  if (!html) return [];
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const blocks = Array.from(
+    doc.body.querySelectorAll("p, h1, h2, h3, h4, h5, h6, li"),
+  );
+  const lines = blocks.map((el) => (el.textContent || "").replace(/\s+/g, " ").trim());
+  // If the parser produced no block-level children (e.g. raw text), fall back
+  // to the whole body text content.
+  if (lines.length === 0) {
+    const body = (doc.body.textContent || "").replace(/\s+/g, " ").trim();
+    return body ? [body] : [];
+  }
+  return lines.filter((l) => l.length > 0);
+}
+
+/**
+ * Build the read-only review HTML by diffing two paragraph lists.
+ *
+ * Strategy:
+ *   1. Align paragraphs via `diffArrays` so wholesale insertions/deletions
+ *      don't cascade. A removed paragraph followed by an added paragraph is
+ *      treated as a paragraph EDIT and word-diffed against each other.
+ *   2. Pure additions render as <ins class="rv-ins">…</ins>.
+ *   3. Pure removals render as <del class="rv-del">…</del>.
+ *   4. Equal paragraphs render as plain text.
+ *
+ * Result: removed words are red strikethrough, added words are green
+ * highlight, unchanged content stays neutral.
+ */
+function buildReviewHtml(originalParas: string[], currentParas: string[]): string {
+  const aligned = diffArrays(originalParas, currentParas);
+  const out: string[] = [];
+
+  for (let i = 0; i < aligned.length; i++) {
+    const part = aligned[i];
+    const next = aligned[i + 1];
+
+    // Paragraph edits: a "removed" group immediately followed by an "added"
+    // group represents lines whose text changed. Word-diff each pair so the
+    // user sees individual replacements like "the ~~new~~ old change".
+    if (part.removed && next && next.added) {
+      const oldLines = part.value;
+      const newLines = next.value;
+      const len = Math.max(oldLines.length, newLines.length);
+      for (let j = 0; j < len; j++) {
+        const a = oldLines[j] ?? "";
+        const b = newLines[j] ?? "";
+        if (a === b) {
+          out.push(`<p>${escapeHtml(a) || "&nbsp;"}</p>`);
+        } else if (!a) {
+          out.push(`<p><ins class="rv-ins">${escapeHtml(b)}</ins></p>`);
+        } else if (!b) {
+          out.push(`<p><del class="rv-del">${escapeHtml(a)}</del></p>`);
+        } else {
+          const words = diffWords(a, b);
+          const inner = words
+            .map((w) => {
+              const t = escapeHtml(w.value);
+              if (w.added) return `<ins class="rv-ins">${t}</ins>`;
+              if (w.removed) return `<del class="rv-del">${t}</del>`;
+              return t;
+            })
+            .join("");
+          out.push(`<p>${inner || "&nbsp;"}</p>`);
+        }
+      }
+      i++; // consume the paired "added" part
+      continue;
+    }
+
+    if (part.added) {
+      for (const line of part.value) {
+        out.push(`<p><ins class="rv-ins">${escapeHtml(line) || "&nbsp;"}</ins></p>`);
+      }
+    } else if (part.removed) {
+      for (const line of part.value) {
+        out.push(`<p><del class="rv-del">${escapeHtml(line) || "&nbsp;"}</del></p>`);
+      }
+    } else {
+      for (const line of part.value) {
+        out.push(`<p>${escapeHtml(line) || "&nbsp;"}</p>`);
+      }
+    }
+  }
+
+  return out.join("") || "<p>&nbsp;</p>";
+}
 
 
 const CustomParagraph = Paragraph.extend({
@@ -296,6 +405,14 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
     // Link dialog state
     const [showLinkDialog, setShowLinkDialog] = useState(false);
     const [linkUrl, setLinkUrl] = useState("");
+    // Review-mode toggle (eye icon): when ON, swap the editor for a read-only
+    // inline diff of the originally-loaded content vs the user's current edits.
+    // Turning it OFF restores the editable HTML the user was last working with.
+    // The baseline is stored as an array of plain-text paragraphs so the
+    // comparison can never drift from TipTap's HTML re-serialisation quirks.
+    const [reviewMode, setReviewMode] = useState(false);
+    const originalParagraphsRef = useRef<string[]>([]);
+    const preReviewHtmlRef = useRef<string>("");
     // Color picker refs
     const textColorRef = useRef<HTMLInputElement>(null);
     const highlightColorRef = useRef<HTMLInputElement>(null);
@@ -377,9 +494,35 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         prevInitialContentRef.current = initialContent;
         contentInitialised.current = true;
         editor.commands.setContent(initialContent);
+        // Snapshot the baseline as plain-text paragraphs straight from the
+        // initialContent prop. We deliberately do NOT use editor.getHTML()
+        // here — at this moment TipTap has just finished setContent and a
+        // delayed normalisation pass can still alter what getHTML returns,
+        // causing the very first eye-toggle to paint the whole tail of the
+        // document as "inserted". Reading the raw initialContent + extracting
+        // paragraph text is deterministic and immune to that race.
+        originalParagraphsRef.current = extractParagraphs(initialContent);
         setIsDirty(false);
       }
     }, [editor, initialContent]);
+
+    // Eye toggle: switch between editable current view and read-only diff view.
+    // setContent uses { emitUpdate: false } so the toggle never flags the
+    // document as dirty or fires onContentChange.
+    const handleToggleReviewMode = useCallback(() => {
+      if (!editor) return;
+      if (!reviewMode) {
+        preReviewHtmlRef.current = editor.getHTML();
+        const currentParas = extractParagraphs(preReviewHtmlRef.current);
+        const diffHtml = buildReviewHtml(originalParagraphsRef.current, currentParas);
+        editor.setEditable(false);
+        editor.commands.setContent(diffHtml, { emitUpdate: false });
+      } else {
+        editor.commands.setContent(preReviewHtmlRef.current || editor.getHTML(), { emitUpdate: false });
+        editor.setEditable(true);
+      }
+      setReviewMode((on) => !on);
+    }, [editor, reviewMode]);
 
     // Handle track changes. The TrackChanges plugin reads storage via the editor's
     // shared storage map (editor.storage.trackChanges) — that's the live, mutable
@@ -1043,14 +1186,33 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
 
           <ToolbarDivider />
 
+          {/* Review-mode (compare with original) Toggle */}
+          <button
+            onClick={handleToggleReviewMode}
+            className={`p-1.5 rounded-md transition-all duration-150 border shrink-0 ${
+              reviewMode
+                ? "bg-sky-950/40 text-sky-300 border-sky-800/80 shadow-sm"
+                : "bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800 hover:text-slate-200"
+            }`}
+            title={
+              reviewMode
+                ? "Reviewing changes vs. original — click to return to current view"
+                : "Show changes vs. original (review mode)"
+            }
+            aria-pressed={reviewMode}
+          >
+            {reviewMode ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+          </button>
+
           {/* Track Changes Toggle */}
           <button
             onClick={handleToggleTrackChanges}
+            disabled={reviewMode}
             className={`px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all duration-150 border shrink-0 ${tcEnabled
               ? "bg-emerald-950/40 text-emerald-400 border-emerald-800/80 shadow-sm"
               : "bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800 hover:text-slate-200"
-              }`}
-            title="Toggle Track Changes"
+              } ${reviewMode ? "opacity-40 cursor-not-allowed" : ""}`}
+            title={reviewMode ? "Track Changes is disabled in review mode" : "Toggle Track Changes"}
           >
             TC {tcEnabled ? "ON" : "OFF"}
           </button>
@@ -1208,7 +1370,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         )}
 
         {/* â”€â”€ Document Area â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-        <div className="flex-1 overflow-y-auto bg-gradient-to-tr from-slate-100 to-slate-50 p-2 flex items-start overflow-x-auto">
+        <div className="flex-1 overflow-y-auto bg-gradient-to-tr from-slate-100 to-slate-50 p-2 pb-20 flex items-start overflow-x-auto">
           <div className={sidePanel ? "flex gap-8 w-full max-w-[1400px] justify-start lg:justify-center" : "w-full"}>
             {/* Word-style Document Page */}
             <div
@@ -1412,7 +1574,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         </div>
 
         {/* â”€â”€ Save Bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-        <div className="sticky bottom-0 z-20 border-t border-slate-200 bg-white/95 backdrop-blur-sm px-6 py-3 flex items-center gap-3 shadow-md">
+        <div className="fixed bottom-0 left-0 right-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur-sm px-6 py-3 flex items-center gap-3 shadow-[0_-2px_12px_rgba(15,23,42,0.08)]">
           <Button
             variant="primary"
             onClick={handleSave}
@@ -1712,6 +1874,21 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         }
         .tc-delete:hover {
           background-color: rgba(239, 68, 68, 0.25);
+        }
+        /* ── Review mode (eye toggle) — original vs current diff overlay ───── */
+        .rv-del {
+          background-color: rgba(239, 68, 68, 0.12);
+          color: rgb(153, 27, 27);
+          text-decoration: line-through;
+          text-decoration-color: rgb(220, 38, 38);
+          padding: 1px 3px;
+          border-radius: 2px;
+        }
+        .rv-ins {
+          background-color: rgba(16, 185, 129, 0.16);
+          color: rgb(6, 95, 70);
+          padding: 1px 3px;
+          border-radius: 2px;
         }
         /* Occurrence highlights */
         .occurrence-highlight {
