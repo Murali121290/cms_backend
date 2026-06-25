@@ -63,10 +63,23 @@ class HierarchyManager:
             tag = item["tag"]
             style = item["style"]
             text = para.text.strip()
-            
+
+            if item.get("locked"):
+                # Author-provided tag (explicit <TAG> or carried over from a
+                # standalone tag line) is authoritative - never rewritten by
+                # synonym normalization, mandatory-H1 enforcement, or the
+                # hierarchy auto-fix below. Still feed its level into
+                # current_level so later, non-locked paragraphs are checked
+                # against accurate context.
+                level = style_levels.get(style, 99)
+                if level <= 4:
+                    current_level = level
+                refined_annotations.append(item)
+                continue
+
             # Skip empty or non-heading items mostly, but we need to track context
             # Actually, we process all, modify if needed.
-            
+
             # 1. Synonym Normalization
             if text in synonyms:
                 new_text = synonyms[text]
@@ -101,7 +114,8 @@ class HierarchyManager:
                         logger.warning(f"Heading '{text}' (H{level}) appears before first H1. Promoting to H1.")
                         level = 1
                         style = "H1"
-                        
+                        tag = style
+
                 if constraints.get("no_skipping_levels", False):
                     # valid: current=1, next=2. invalid: current=1, next=3
                     if level > current_level + 1:
@@ -111,13 +125,14 @@ class HierarchyManager:
                         # If current is 0 (Title/Start), next can be 1.
                         # If current is 1 (H1), next can be 2.
                         # If current is 1, next cannot be 3.
-                        
+
                         # However, sometimes we jump back up (H3 -> H1). That is allowed.
                         # Skipping is only forbidden downwards (H1 -> H3).
-                        
+
                         logger.warning(f"Hierarchy violation: H{current_level} -> H{level}. Auto-fixing to H{new_level}.")
                         level = new_level
                         style = level_styles.get(level, style)
+                        tag = style
                 
                 # Update current level context
                 current_level = level

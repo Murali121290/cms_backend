@@ -18,9 +18,96 @@ EXPLICIT_STYLE_RE = re.compile(
     # Token allows internal spaces (lazily captured, trailing space left to
     # \s*) so multi-word box markers like "<CASE STUDY>"/"<RED FLAG>" parse
     # as a single explicit token instead of falling through unrecognized.
-    r"^(?:<\s*(/?[A-Za-z0-9.\- ]+?)\s*>|\[STYLE:([A-Za-z0-9.\-]+)\])",
+    # Underscore is included so "BX<number>_<value>" box markers parse too.
+    r"^(?:<\s*(/?[A-Za-z0-9.\-_ ]+?)\s*>|\[STYLE:([A-Za-z0-9.\-]+)\])",
     re.IGNORECASE,
 )
+
+# Two-pass BX box markers: "BX<number>-<value>", "BX<number>_<value>", or
+# "NBX<number>-<value>" (e.g. "BX1-Header", "BX4_Section", "NBX2-Important").
+# The suffix only disambiguates which opening marker a given closing marker
+# pairs with - it carries no semantic meaning and is never included in the
+# generated prefix - see box_prefixer.py for the two-pass matching/prefixing
+# logic itself.
+_BOX_MARKER_RE = re.compile(r"^/?(?:(BX\d+)[-_]|(NBX\d+)-)(.+)$")
+
+# Fixed-keyword box markers - no number, no suffix, no separator: the bare
+# token itself ("COUT") is both the marker and the generated prefix. Kept in
+# its own set (mirrored in box_prefixer.py) rather than folded into
+# _BOX_MARKER_RE, since these have an entirely different shape.
+_BARE_BOX_MARKERS = {"COUT"}
+
+
+def _is_reserved_box_suffix(suffix: str) -> bool:
+    """True if *suffix* is itself a recognized base structural tag (e.g.
+    "H1"/"TXT", via the structural_tags registry) or one of the box
+    title/body suffixes derived from rules.yaml's box config (e.g. "TTL") -
+    i.e. it looks like an already-resolved content tag rather than a fresh,
+    author-chosen box-marker label. Without this, something like "BX1-TTL"
+    (a real, standalone explicit title tag - see
+    test_explicit_list_and_box_tags_are_preserved_verbatim) would be
+    mistaken for a fresh, never-closed box marker and downgraded to PMI."""
+    if _is_recognized_structural_tag(suffix):
+        return True
+    box_cfg = rules_loader.get_box_config()
+    values = [box_cfg.get(k, "") for k in ("title_style", "body_style", "first_body_style")]
+    for pair in box_cfg.get("subtype_styles", {}).values():
+        values.extend(pair.values())
+    return any(v and "-" in v and v.split("-", 1)[1].upper() == suffix.upper() for v in values)
+
+
+def _match_box_marker(token: Optional[str]):
+    """Match a box marker in any of the supported formats - returning
+    (base_id, is_close) - or None if *token* isn't shaped like one, or its
+    suffix is itself a reserved/already-resolved content-tag suffix (see
+    _is_reserved_box_suffix) rather than a fresh marker label."""
+    if not token:
+        return None
+    token = token.strip()
+    is_close = token.startswith("/")
+    if (token[1:] if is_close else token) in _BARE_BOX_MARKERS:
+        return (token[1:] if is_close else token), is_close
+    match = _BOX_MARKER_RE.match(token)
+    if not match:
+        return None
+    base_id = match.group(1) or match.group(2)
+    suffix = match.group(3)
+    if _is_reserved_box_suffix(suffix):
+        return None
+    return base_id, is_close
+
+
+# A closing box marker may now trail real paragraph content on the same
+# line (e.g. "Some paragraph text.</BX1-Header>"), unlike opening markers,
+# which must still appear only at the start of a block. This only looks for
+# a tag-shaped construct anchored at the very end of the text.
+_TRAILING_CLOSE_TAG_RE = re.compile(r"<\s*/\s*([A-Za-z0-9.\-_ ]+?)\s*>\s*$")
+
+
+def _strip_trailing_box_close(text: str):
+    """If *text* ends with a closing box marker, strip it and return
+    (clean_text, full_marker); otherwise return (text, None) unchanged.
+
+    Reuses _match_box_marker's recognition/exclusion rules, so a trailing
+    already-resolved structural tag (e.g. "...text.</BX1-TXT>") is never
+    mistaken for a closing marker, exactly like the leading-marker case.
+    Only fires when real content remains after stripping - a line that is
+    *entirely* the closing marker (e.g. "</BX1-Header>" alone) is left
+    untouched here and continues to go through the existing leading-marker
+    path, which already handles whole-marker-only lines."""
+    if not text:
+        return text, None
+    match = _TRAILING_CLOSE_TAG_RE.search(text)
+    if not match:
+        return text, None
+    clean_text = text[: match.start()].rstrip()
+    if not clean_text:
+        return text, None
+    token = "/" + match.group(1).strip()
+    box_marker_match = _match_box_marker(token)
+    if not box_marker_match:
+        return text, None
+    return clean_text, token.lstrip("/")
 
 
 # =========================
@@ -201,6 +288,21 @@ def resolve_box_prefix(token: Optional[str]) -> str:
     return _resolve_box_keyword(token) or "NBX"
 
 
+def _is_recognized_structural_tag(token: str) -> bool:
+    """Look up *token* against rules.yaml's `structural_tags` registry - the
+    single centralized place listing every WK Book Template 1.1 structural
+    tag (H1-H6, TXT, BL-FIRST, BX1-TTL, ...) that is treated as an
+    author-provided, authoritative tag. Add new template tags there, not
+    as ad-hoc checks scattered through this module."""
+    if not token:
+        return False
+    cfg = rules_loader.get_structural_tags()
+    token_upper = token.strip().upper()
+    if token_upper in {t.upper() for t in cfg.get("exact", [])}:
+        return True
+    return any(token_upper.startswith(p.upper()) for p in cfg.get("prefixes", []))
+
+
 def _is_known_token(token: str, context_kind: Optional[str] = None) -> bool:
     """True if normalize_style_token() resolves *token* via an actual rule
     (even one that happens to map a token to itself, e.g. H1 -> H1) rather
@@ -221,6 +323,8 @@ def _is_known_token(token: str, context_kind: Optional[str] = None) -> bool:
     if token.startswith("/") and _resolve_box_keyword(token[1:]) is not None:
         return True
     if context_kind == "box" and token == "TITLE":
+        return True
+    if _is_recognized_structural_tag(token):
         return True
     return False
 
@@ -399,8 +503,19 @@ def annotate_document(doc: Document) -> List[Dict[str, Any]]:
         text = para.text.strip()
         tag = "TXT"
         style = "TXT"
-        
+        bx_open_marker: Optional[str] = None
+        bx_close_marker: Optional[str] = None
+
         try:
+            # A closing box marker trailing real content on the same line
+            # (e.g. "Some text.</BX1-Header>") is stripped up front so every
+            # rule below classifies the clean content text exactly as if the
+            # marker weren't there; the marker itself is recorded separately
+            # and merged into "bx_close" below. A line that's *only* the
+            # marker is left untouched here (see _strip_trailing_box_close)
+            # and still flows through the existing leading-marker path.
+            text, trailing_bx_close = _strip_trailing_box_close(text)
+
             if not text:
                 empty_style = rules_loader.rules.get("defaults", {}).get("empty_paragraph", {}).get("style", "TXT")
                 annotations.append({"para": para, "tag": "EMPTY", "style": empty_style, "block": current_block})
@@ -411,31 +526,53 @@ def annotate_document(doc: Document) -> List[Dict[str, Any]]:
             explicit_tag_found = False
 
             if explicit_token:
-                normalized_explicit_style = normalize_style_token(explicit_token, explicit_context_kind, current_box_prefix)
-                if not _is_known_token(explicit_token, explicit_context_kind) and not stripped_text:
-                    # Unrecognized marker (e.g. <WIDGET> with no matching rule)
-                    # and nothing but the marker on this line -> neutral skip style,
-                    # not a bogus Word style auto-created from the raw token text.
-                    normalized_explicit_style = "PMI"
-                if normalized_explicit_style:
-                    tag = normalized_explicit_style
-                    style = normalized_explicit_style
-                text = stripped_text
-                explicit_tag_found = True
-                logger.debug(f"Para {para_idx}: Found explicit tag/style '{explicit_token}' -> '{style}'")
+                token_stripped = explicit_token.strip()
+                box_marker_match = _match_box_marker(token_stripped)
 
-                if is_explicit_context_closer(explicit_token, explicit_context_kind):
-                    explicit_context_kind = None
-                    current_box_prefix = None
+                if box_marker_match:
+                    # Two-pass BX box marker - preserved verbatim and handled
+                    # entirely by the separate box_prefixer.apply_box_tag_prefixes()
+                    # post-process, which needs the full marker (number + suffix)
+                    # recorded here to pair opens/closes exactly. Bypass the
+                    # keyword/title/body box machinery below for this token.
+                    _base_id, is_close = box_marker_match
+                    full_marker = token_stripped.lstrip("/")
+                    tag = full_marker
+                    style = full_marker
+                    text = stripped_text
+                    explicit_tag_found = True
+                    if is_close:
+                        bx_close_marker = full_marker
+                        logger.debug(f"Para {para_idx}: BX box close marker '{full_marker}'")
+                    else:
+                        bx_open_marker = full_marker
+                        logger.debug(f"Para {para_idx}: BX box open marker '{full_marker}'")
                 else:
-                    new_context = classify_explicit_context(explicit_token)
-                    if new_context:
-                        explicit_context_kind = new_context
-                        if new_context == "box":
-                            current_box_prefix = resolve_box_prefix(explicit_token)
+                    normalized_explicit_style = normalize_style_token(explicit_token, explicit_context_kind, current_box_prefix)
+                    if not _is_known_token(explicit_token, explicit_context_kind) and not stripped_text:
+                        # Unrecognized marker (e.g. <WIDGET> with no matching rule)
+                        # and nothing but the marker on this line -> neutral skip style,
+                        # not a bogus Word style auto-created from the raw token text.
+                        normalized_explicit_style = "PMI"
+                    if normalized_explicit_style:
+                        tag = normalized_explicit_style
+                        style = normalized_explicit_style
+                    text = stripped_text
+                    explicit_tag_found = True
+                    logger.debug(f"Para {para_idx}: Found explicit tag/style '{explicit_token}' -> '{style}'")
 
-                if text in rules_loader.get_block_start_markers():
-                    current_block = rules_loader.get_block_start_markers()[text]
+                    if is_explicit_context_closer(explicit_token, explicit_context_kind):
+                        explicit_context_kind = None
+                        current_box_prefix = None
+                    else:
+                        new_context = classify_explicit_context(explicit_token)
+                        if new_context:
+                            explicit_context_kind = new_context
+                            if new_context == "box":
+                                current_box_prefix = resolve_box_prefix(explicit_token)
+
+                    if text in rules_loader.get_block_start_markers():
+                        current_block = rules_loader.get_block_start_markers()[text]
 
                 # Override: if text is "OBJECTIVES", set to OBJ1 regardless of explicit tag
                 objectives_synonyms = ["objectives", "learning objectives", "learningobjectives", "lesson objectives"]
@@ -480,17 +617,13 @@ def annotate_document(doc: Document) -> List[Dict[str, Any]]:
             
             # ===== PARAGRAPH RULES =====
             else:
-                rule_matched = explicit_tag_found # If we found explicit tag, we skip regex search
+                # Any explicit/carried-forward tag - including TXT/TXT-FLUSH - is
+                # the author's authoritative classification and must win
+                # outright, never re-matched against the generic paragraph
+                # regex rules below (which could pick a different tag entirely,
+                # e.g. a Title-Case rule turning an explicit <TXT> into H2).
+                rule_matched = explicit_tag_found
 
-                # Explicit heading levels (<H1>/<H2>/<H3>/<H4>) are an unambiguous
-                # author declaration and must win outright - never re-matched
-                # against the generic paragraph regex rules (which could pick a
-                # different level, e.g. a Title-Case rule silently downgrading an
-                # explicit H1 to H2). Only TXT/TXT-FLUSH - generic placeholders,
-                # not level declarations - stay open to further regex refinement.
-                if explicit_tag_found and style in {"TXT", "TXT-FLUSH"}:
-                    rule_matched = False
-                
                 # Priority 0.5: Detect "OBJECTIVES" heading (case-insensitive)
                 objectives_synonyms = ["objectives", "learning objectives", "learningobjectives", "lesson objectives"]
                 if text.lower() in objectives_synonyms:
@@ -636,7 +769,25 @@ def annotate_document(doc: Document) -> List[Dict[str, Any]]:
             if tag != "EMPTY":
                 previous_tag = tag
 
-            annotations.append({"para": para, "tag": tag, "style": style, "block": current_block})
+            annotations.append({
+                "para": para,
+                "tag": tag,
+                "style": style,
+                "block": current_block,
+                # Author-provided tags (explicit <TAG> or carried over from a
+                # standalone tag line) are authoritative - hierarchy_manager
+                # must never reclassify them.
+                "locked": explicit_tag_found,
+                # Two-pass BX box markers ("BX1-AA", "BX2-KQ", ...) - consumed
+                # by box_prefixer.apply_box_tag_prefixes() to pair them up
+                # (exact number+suffix match) and prefix everything between.
+                # bx_close may come from a leading whole-marker line (tag is
+                # the marker itself) or a trailing marker sharing this row
+                # with real content (tag is that content's own tag) -
+                # box_prefixer distinguishes the two by that tag comparison.
+                "bx_open": bx_open_marker,
+                "bx_close": bx_close_marker or trailing_bx_close,
+            })
 
         except Exception as e:
             logger.error(f"Error annotating paragraph {para_idx}: {e}", exc_info=True)

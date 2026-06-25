@@ -23,7 +23,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SkeletonCard } from "@/components/ui/SkeletonLoader";
 import { useStructuringReviewQuery } from "@/features/structuringReview/useStructuringReviewQuery";
-import { WysiwygEditor, useEditorSaveRuns, type WysiwygEditorHandle, OnlyOfficeEditor, OnlyOfficeSidePanel, type OnlyOfficeEditorHandle, CollaboraSidePanel } from "@/features/editor";
+import { WysiwygEditor, useEditorSaveRuns, type WysiwygEditorHandle, OnlyOfficeEditor, OnlyOfficeSidePanel, type OnlyOfficeEditorHandle, CollaboraSidePanel, ChangesReviewPanel } from "@/features/editor";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useFileXhtmlRunsQuery } from "@/features/technicalReview/useFileXhtmlRunsQuery";
 import { VersionHistoryPanel } from "@/features/structuringReview/components/VersionHistoryPanel";
@@ -155,6 +155,7 @@ export function StructuringReviewPage() {
   const [activeTab, setActiveTab] = useState<"overview" | "editor" | "onlyoffice" | "collabora">(defaultTab);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [trackChangesEnabled, setTrackChangesEnabled] = useState(false);
+  const [sidePanelTab, setSidePanelTab] = useState<"styles" | "changes">("styles");
   const location = useLocation();
   const xsltContent = (location.state as { xsltContent?: string } | null)?.xsltContent;
 
