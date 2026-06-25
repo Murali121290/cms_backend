@@ -561,9 +561,14 @@ export function ReferenceValidationReviewPage() {
 
   const editorRef = useRef<WysiwygEditorHandle>(null);
   const [styleOverride, setStyleOverride] = useState<"AUTO" | "AMA" | "APA">("AUTO");
-  const reviewQuery = useReferenceReviewQuery(normalizedFileId, styleOverride === "AUTO" ? undefined : styleOverride);
+  const [citationFormat, setCitationFormat] = useState<"auto" | "superscript" | "bracket" | "paren" | "plain">("auto");
+  const reviewQuery = useReferenceReviewQuery(normalizedFileId, styleOverride === "AUTO" ? undefined : styleOverride, citationFormat === "auto" ? undefined : citationFormat);
   const saveMutation = useReferenceSave(normalizedFileId);
   const validateOnlyMutation = useReferenceValidateOnly(normalizedFileId ?? 0);
+
+  // Pending merge queue — merges are staged here and applied on "Apply Merges"
+  const [pendingMerges, setPendingMerges] = useState<Array<{ canonical: number; duplicate: number }>>([]);
+  const [resolvedDups, setResolvedDups] = useState<Set<string>>(new Set());
 
   // Tab
   const [activeTab, setActiveTab] = useState<"citations" | "structuring" | "logs" | "trackedChanges" | "issues" | "missing">("citations");
@@ -801,6 +806,12 @@ export function ReferenceValidationReviewPage() {
 
   // Highlight active style under cursor
   const [activeStyleUnderCursor, setActiveStyleUnderCursor] = useState<string | null>(null);
+
+  // Reset local validation logs and citation pairs when style or format options change
+  useEffect(() => {
+    setLocalValidationLogs(null);
+    setLocalCitationPairs(null);
+  }, [styleOverride, citationFormat]);
 
   // Listen to cursor updates in editor
   const editorInstance = editorRef.current?.editor;
@@ -1668,43 +1679,68 @@ export function ReferenceValidationReviewPage() {
     }, 100);
   };
 
-  // Merge duplicate references
-  const mergeDuplicateReferences = (dup: typeof logs.duplicates[0]) => {
-    const editor = editorRef.current?.editor;
-    if (!editor) return;
-
+  // Queue a duplicate merge — staged; not applied to DOCX until "Apply Merges" is clicked
+  const queueMerge = (dup: { num1?: number; num2?: number }) => {
     const num1 = dup.num1;
     const num2 = dup.num2;
-
     if (num1 === undefined || num2 === undefined) return;
 
-    // 1. Replace all citations matching num2 with num1
-    // We scan paragraphs for inline <span class="cite_bib">num2</span>
-    // For numerical validation, we will perform a text search & replace in the editor
-    const htmlContent = editor.getHTML();
+    const key = `${num2}→${num1}`;
+    if (resolvedDups.has(key)) return;
 
-    // Create regexp that matches the specific reference tag
-    const searchString = `<span class="cite_bib">${num2}</span>`;
-    const replacementString = `<span class="cite_bib">${num1}</span>`;
-
-    let updatedHtml = htmlContent;
-    // Replace citations
-    updatedHtml = updatedHtml.replaceAll(searchString, replacementString);
-
-    // 2. Remove the second duplicate paragraph from the bibliography
-    // We can parse the document blocks, find the paragraph styled as Reference or normal starting with the number, and delete it.
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(updatedHtml, "text/html");
-    const paragraphs = Array.from(doc.querySelectorAll("p"));
-
-    paragraphs.forEach((p) => {
-      const text = p.textContent?.trim() || "";
-      if (text.startsWith(`[${num2}]`) || text.startsWith(`${num2}.`)) {
-        p.remove();
-      }
+    setPendingMerges((prev) => {
+      // Avoid duplicates in queue
+      if (prev.some((m) => m.duplicate === num2 && m.canonical === num1)) return prev;
+      return [...prev, { canonical: num1, duplicate: num2 }];
     });
+    setResolvedDups((prev) => new Set([...prev, key]));
+  };
 
-    editor.commands.setContent(doc.body.innerHTML);
+  // Apply all queued merges to the editor (replace citations + strikethrough bib entries)
+  const applyPendingMerges = () => {
+    const editor = editorRef.current?.editor;
+    if (!editor || pendingMerges.length === 0) return;
+
+    let htmlContent = editor.getHTML();
+    const parser = new DOMParser();
+
+    for (const merge of pendingMerges) {
+      const { canonical, duplicate } = merge;
+
+      // 1. Replace in-text citations: cite_bib spans containing duplicate number
+      const patterns = [
+        `<span class="cite_bib">${duplicate}</span>`,
+        `<span class="cite_bib">[${duplicate}]</span>`,
+        `<span class="cite_bib">(${duplicate})</span>`,
+      ];
+      for (const pattern of patterns) {
+        const replacement = pattern.replace(String(duplicate), String(canonical));
+        htmlContent = htmlContent.replaceAll(pattern, replacement);
+      }
+
+      // 2. Remove duplicate bibliography paragraph
+      const doc = parser.parseFromString(htmlContent, "text/html");
+      const paragraphs = Array.from(doc.querySelectorAll("p"));
+      paragraphs.forEach((p) => {
+        const text = p.textContent?.trim() || "";
+        if (
+          text.startsWith(`[${duplicate}]`) ||
+          text.startsWith(`${duplicate}.`) ||
+          text.match(new RegExp(`^\\s*${duplicate}[\\s\\.]`))
+        ) {
+          p.remove();
+        }
+      });
+      htmlContent = doc.body.innerHTML;
+    }
+
+    editor.commands.setContent(htmlContent);
+    setPendingMerges([]);
+  };
+
+  // Legacy direct-merge kept for backward compat (used nowhere now)
+  const mergeDuplicateReferences = (dup: { num1?: number; num2?: number }) => {
+    queueMerge(dup);
   };
 
   // Reorder / sort bibliography alphabetically (APA style)
@@ -1942,19 +1978,36 @@ export function ReferenceValidationReviewPage() {
                     v{review.file.version}
                   </span>
                 </div>
-                <select
-                  value={styleOverride}
-                  onChange={(e) => setStyleOverride(e.target.value as any)}
-                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 border focus:outline-none focus:ring-1 focus:ring-navy-400 cursor-pointer ${detectedStyle === "AMA"
-                      ? "bg-purple-50 text-purple-700 border-purple-200"
-                      : "bg-teal-50 text-teal-700 border-teal-200"
+                <div className="flex gap-1.5 items-center flex-wrap">
+                  <select
+                    value={styleOverride}
+                    onChange={(e) => setStyleOverride(e.target.value as any)}
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 border focus:outline-none focus:ring-1 focus:ring-navy-400 cursor-pointer ${
+                      detectedStyle === "AMA"
+                        ? "bg-purple-50 text-purple-700 border-purple-200"
+                        : "bg-teal-50 text-teal-700 border-teal-200"
                     }`}
-                  title="Override validation style"
-                >
-                  <option value="AUTO">Auto ({reviewQuery.data?.validation_logs?.detected_style ?? "AMA"})</option>
-                  <option value="AMA">AMA (Numbered)</option>
-                  <option value="APA">APA (Name-Year)</option>
-                </select>
+                    title="Override validation style"
+                  >
+                    <option value="AUTO">Auto ({reviewQuery.data?.validation_logs?.detected_style ?? "AMA"})</option>
+                    <option value="AMA">AMA (Numbered)</option>
+                    <option value="APA">APA (Name-Year)</option>
+                  </select>
+                  {detectedStyle === "AMA" && (
+                    <select
+                      value={citationFormat}
+                      onChange={(e) => setCitationFormat(e.target.value as any)}
+                      className="px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 border focus:outline-none focus:ring-1 focus:ring-navy-400 cursor-pointer bg-sky-50 text-sky-700 border-sky-200"
+                      title="Citation format override"
+                    >
+                      <option value="auto">Auto-detect</option>
+                      <option value="superscript">Superscript (¹)</option>
+                      <option value="bracket">Bracket [1]</option>
+                      <option value="paren">Parenthesis (1)</option>
+                      <option value="plain">Plain 1</option>
+                    </select>
+                  )}
+                </div>
               </div>
 
               {/* Row 2: Issue count chips */}
@@ -1975,25 +2028,46 @@ export function ReferenceValidationReviewPage() {
                   <Calendar className="w-3 h-3" />
                   {lastValidatedAt ? lastValidatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "Not yet validated"}
                 </span>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  className="text-[11px] px-3 py-1 bg-[#C9821A] border-[#C9821A] hover:bg-[#B3711A] text-white"
-                  onClick={async () => {
-                    if (editorRef.current?.editor) {
-                      const html = editorRef.current.editor.getHTML();
-                      await saveMutation.save(review.save_endpoint, html);
-                      const result = await validateOnlyMutation.mutateAsync(styleOverride === "AUTO" ? undefined : styleOverride);
-                      setLocalValidationLogs(result.validation_logs);
-                      setLastValidatedAt(new Date());
-                      setActiveTab("citations");
-                    }
-                  }}
-                  isLoading={saveMutation.isPending || validateOnlyMutation.isPending}
-                  leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
-                >
-                  {validateOnlyMutation.isPending ? "Validating…" : "Validate"}
-                </Button>
+                <div className="flex gap-1.5">
+                  {pendingMerges.length > 0 && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="text-[11px] px-2 py-1 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                      onClick={applyPendingMerges}
+                      title={`Apply ${pendingMerges.length} queued merge(s) to editor`}
+                    >
+                      ✅ Apply ({pendingMerges.length})
+                    </Button>
+                  )}
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="text-[11px] px-3 py-1 bg-[#C9821A] border-[#C9821A] hover:bg-[#B3711A] text-white"
+                    onClick={async () => {
+                      if (editorRef.current?.editor) {
+                        // If there are pending merges, apply them first
+                        if (pendingMerges.length > 0) applyPendingMerges();
+                        const html = editorRef.current.editor.getHTML();
+                        await saveMutation.save(review.save_endpoint, html);
+                        const result = await validateOnlyMutation.mutateAsync({
+                          style: styleOverride === "AUTO" ? undefined : styleOverride,
+                          citationFormat: citationFormat === "auto" ? undefined : citationFormat,
+                        });
+                        setLocalValidationLogs(result.validation_logs);
+                        await reviewQuery.refetch();
+                        setLastValidatedAt(new Date());
+                        // Auto-switch to Issues tab if duplicates are found
+                        const hasDups = (result.validation_logs?.duplicates?.length ?? 0) > 0;
+                        setActiveTab(hasDups ? "issues" : "citations");
+                      }
+                    }}
+                    isLoading={saveMutation.isPending || validateOnlyMutation.isPending}
+                    leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
+                  >
+                    {validateOnlyMutation.isPending ? "Validating…" : "Validate"}
+                  </Button>
+                </div>
               </div>
             </div>
 
@@ -2694,29 +2768,87 @@ export function ReferenceValidationReviewPage() {
 
               {/* ─── TAB 3: ISSUES ─── */}
               {activeTab === "issues" && (
-                <div className="space-y-3 page-enter">
+                <div className="space-y-4 page-enter">
+                  {/* Pending Merge Queue Banner */}
+                  {pendingMerges.length > 0 && (
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] font-bold text-emerald-800 mb-1">
+                          ✅ {pendingMerges.length} merge{pendingMerges.length > 1 ? "s" : ""} queued
+                        </p>
+                        <ul className="space-y-0.5">
+                          {pendingMerges.map((m, i) => (
+                            <li key={i} className="text-[10px] text-emerald-700">
+                              Ref #{m.duplicate} → Ref #{m.canonical}
+                            </li>
+                          ))}
+                        </ul>
+                        <p className="text-[10px] text-emerald-600 mt-1.5">
+                          Click <strong>Apply</strong> to update editor, then <strong>Validate</strong> to renumber.
+                        </p>
+                      </div>
+                      <button
+                        onClick={applyPendingMerges}
+                        className="shrink-0 px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold rounded-md transition-colors cursor-pointer"
+                      >
+                        Apply Merges
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="space-y-3">
                   {/* Duplicates Section */}
                   {(logs.duplicates?.length || 0) > 0 && (
                     <div className="space-y-2">
                       <h4 className="text-[10px] uppercase font-extrabold text-navy-500 tracking-wider px-1">
                         Duplicate References ({logs.duplicates.length})
                       </h4>
-                      {logs.duplicates.map((dup: any, idx: number) => (
-                        <div key={idx} className="bg-white rounded-lg border border-warning-200 border-l-[3px] border-l-warning-500 p-3 space-y-2 shadow-sm">
-                          <div className="text-[10px] font-bold text-warning-700 flex items-center gap-1.5">
-                            <AlertTriangle className="w-3 h-3" />
-                            {Math.round((dup.similarity || 0) * 100)}% similarity
+                      {logs.duplicates.map((dup: any, idx: number) => {
+                        const dupKey = `${dup.num2}\u2192${dup.num1}`;
+                        const isQueued = resolvedDups.has(dupKey);
+                        const simPct = Math.round((dup.similarity || 0) * 100);
+                        return (
+                          <div key={idx} className="bg-white rounded-lg border border-warning-200 border-l-[3px] border-l-warning-500 p-3 space-y-2.5 shadow-sm">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-1.5 text-[10px] font-bold text-warning-700">
+                                <AlertTriangle className="w-3 h-3" />
+                                Possible Duplicate
+                              </div>
+                              <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded-full border ${simPct >= 95 ? "bg-red-50 text-red-700 border-red-200" : "bg-amber-50 text-amber-700 border-amber-200"}`}>
+                                {simPct}% similar
+                              </span>
+                            </div>
+                            <div className="space-y-1.5">
+                              <div className="bg-surface-50 rounded p-2 border border-navy-100">
+                                <div className="text-[9px] font-extrabold text-navy-500 uppercase tracking-wide mb-1">
+                                  Reference #{dup.num1 ?? "?"} (Keep)
+                                </div>
+                                <p className="text-[10px] text-navy-800 leading-relaxed line-clamp-3">{dup.text1}</p>
+                              </div>
+                              <div className="bg-surface-50 rounded p-2 border border-navy-100">
+                                <div className="text-[9px] font-extrabold text-navy-500 uppercase tracking-wide mb-1">
+                                  Reference #{dup.num2 ?? "?"} (Remove)
+                                </div>
+                                <p className="text-[10px] text-navy-800 leading-relaxed line-clamp-3">{dup.text2}</p>
+                              </div>
+                            </div>
+                            {isQueued ? (
+                              <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-1.5">
+                                <Check className="w-3 h-3" />
+                                Queued — will apply on next Save + Validate
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => queueMerge(dup)}
+                                className="w-full text-[10px] font-bold text-navy-700 hover:text-navy-900 bg-surface-100 hover:bg-navy-100 px-2.5 py-1.5 rounded border border-navy-200 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                              >
+                                <Layers className="w-3 h-3" />
+                                Queue Merge: #{dup.num2} → #{dup.num1}
+                              </button>
+                            )}
                           </div>
-                          <p className="text-[10px] text-navy-700 line-clamp-2 leading-relaxed">{dup.text1}</p>
-                          <button
-                            onClick={() => mergeDuplicateReferences(dup)}
-                            className="text-[10px] font-bold text-navy-700 hover:text-navy-900 bg-surface-100 hover:bg-navy-100 px-2.5 py-1 rounded border border-navy-200 flex items-center gap-1 transition-colors"
-                          >
-                            <Layers className="w-3 h-3" />
-                            Merge References
-                          </button>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
 
@@ -2740,6 +2872,7 @@ export function ReferenceValidationReviewPage() {
                       ))}
                     </div>
                   )}
+                  </div>
                 </div>
               )}
 
@@ -2751,139 +2884,142 @@ export function ReferenceValidationReviewPage() {
               )}
 
               {/* ─── TAB 4: RAW LOGS ─── */}
-              {activeTab === "logs" && logs.raw_log && (() => {
-                const parsed = parseLogText(logs.raw_log);
-                if (!parsed) {
-                  return (
-                    <div className="page-enter bg-slate-950 rounded-lg p-3 shadow-inner border border-slate-900 max-h-[600px] overflow-y-auto">
-                      <pre className="text-[10px] text-emerald-400 font-mono whitespace-pre-wrap leading-relaxed select-text">
-                        {logs.raw_log}
-                      </pre>
-                    </div>
-                  );
-                }
-
-                const categories = Array.from(new Set(parsed.items.map(item => item.category)));
-
+              {activeTab === "logs" && (() => {
                 return (
                   <div className="space-y-4 page-enter">
-                    {/* View mode toggle */}
-                    <div className="flex bg-surface-100 p-0.5 rounded-lg border border-navy-100 w-fit">
-                      <button
-                        onClick={() => setLogViewMode("dashboard")}
-                        className={`px-3 py-1 rounded-md text-[11px] font-bold transition-all border-none cursor-pointer ${
-                          logViewMode === "dashboard"
-                            ? "bg-white text-navy-800 shadow-sm"
-                            : "text-navy-400 hover:text-navy-600 bg-transparent"
-                        }`}
-                      >
-                        Dashboard View
-                      </button>
-                      <button
-                        onClick={() => setLogViewMode("raw")}
-                        className={`px-3 py-1 rounded-md text-[11px] font-bold transition-all border-none cursor-pointer ${
-                          logViewMode === "raw"
-                            ? "bg-white text-navy-800 shadow-sm"
-                            : "text-navy-400 hover:text-navy-600 bg-transparent"
-                        }`}
-                      >
-                        Raw Log Text
-                      </button>
+                    {/* 4-metric stats grid — always visible, reads directly from validation_logs */}
+                    <div className="grid grid-cols-2 gap-2 bg-white p-3 border border-navy-100 rounded-lg shadow-sm">
+                      {([
+                        ["Total References", logs.total_refs ?? 0],
+                        ["Total Citations", logs.total_cites ?? 0],
+                        ["Citations Tagged", (logs as any).tagged_cites ?? 0],
+                        ["Autonum Converted", (logs as any).autonum_converted ?? 0],
+                      ] as [string, number][]).map(([label, val]) => (
+                        <div key={label} className="flex flex-col gap-0.5 border-b border-navy-50 pb-1.5 last:border-b-0">
+                          <span className="text-[9px] uppercase font-bold text-navy-400 tracking-wider truncate" title={label}>
+                            {label}
+                          </span>
+                          <span className="text-xs font-extrabold text-navy-800">{val}</span>
+                        </div>
+                      ))}
                     </div>
 
-                    {logViewMode === "raw" ? (
-                      <div className="bg-slate-950 rounded-lg p-3 shadow-inner border border-slate-900 max-h-[600px] overflow-y-auto">
-                        <pre className="text-[10px] text-emerald-400 font-mono whitespace-pre-wrap leading-relaxed select-text">
-                          {logs.raw_log}
-                        </pre>
-                      </div>
-                    ) : (
-                      <div className="space-y-4">
-                        {/* Stats Dashboard Row */}
-                        <div className="grid grid-cols-2 gap-2 bg-white p-3 border border-navy-100 rounded-lg shadow-sm">
-                          {Object.entries(parsed.stats).slice(0, 6).map(([key, val]) => (
-                            <div key={key} className="flex flex-col gap-0.5 border-b border-navy-50 pb-1.5 last:border-b-0">
-                              <span className="text-[9px] uppercase font-bold text-navy-400 tracking-wider truncate" title={key}>
-                                {key}
-                              </span>
-                              <span className="text-xs font-extrabold text-navy-800">{val}</span>
-                            </div>
-                          ))}
-                          {Object.keys(parsed.stats).length === 0 && (
-                            <div className="col-span-2 text-center text-[10px] text-navy-400 font-bold py-2">
-                              No summary statistics parsed
-                            </div>
-                          )}
-                        </div>
+                    {/* Raw log section — only when raw_log is present */}
+                    {logs.raw_log && (() => {
+                      const parsed = parseLogText(logs.raw_log);
+                      if (!parsed) {
+                        return (
+                          <div className="bg-slate-950 rounded-lg p-3 shadow-inner border border-slate-900 max-h-[600px] overflow-y-auto">
+                            <pre className="text-[10px] text-emerald-400 font-mono whitespace-pre-wrap leading-relaxed select-text">
+                              {logs.raw_log}
+                            </pre>
+                          </div>
+                        );
+                      }
 
-                        {/* List grouped by category */}
-                        <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
-                          {categories.length === 0 ? (
-                            <div className="text-center py-8 bg-white border border-navy-100 rounded-lg text-xs text-navy-400 font-semibold">
-                              No log issues or conversions detected.
+                      const categories = Array.from(new Set(parsed.items.map(item => item.category)));
+
+                      return (
+                        <div className="space-y-4">
+                          {/* View mode toggle */}
+                          <div className="flex bg-surface-100 p-0.5 rounded-lg border border-navy-100 w-fit">
+                            <button
+                              onClick={() => setLogViewMode("dashboard")}
+                              className={`px-3 py-1 rounded-md text-[11px] font-bold transition-all border-none cursor-pointer ${
+                                logViewMode === "dashboard"
+                                  ? "bg-white text-navy-800 shadow-sm"
+                                  : "text-navy-400 hover:text-navy-600 bg-transparent"
+                              }`}
+                            >
+                              Dashboard View
+                            </button>
+                            <button
+                              onClick={() => setLogViewMode("raw")}
+                              className={`px-3 py-1 rounded-md text-[11px] font-bold transition-all border-none cursor-pointer ${
+                                logViewMode === "raw"
+                                  ? "bg-white text-navy-800 shadow-sm"
+                                  : "text-navy-400 hover:text-navy-600 bg-transparent"
+                              }`}
+                            >
+                              Raw Log Text
+                            </button>
+                          </div>
+
+                          {logViewMode === "raw" ? (
+                            <div className="bg-slate-950 rounded-lg p-3 shadow-inner border border-slate-900 max-h-[600px] overflow-y-auto">
+                              <pre className="text-[10px] text-emerald-400 font-mono whitespace-pre-wrap leading-relaxed select-text">
+                                {logs.raw_log}
+                              </pre>
                             </div>
                           ) : (
-                            categories.map((cat: string) => {
-                              const catItems = parsed.items.filter(item => item.category === cat);
-                              return (
-                                <div key={cat} className="space-y-1.5">
-                                  <h4 className="text-[10px] uppercase font-extrabold text-navy-500 tracking-wider px-1">
-                                    {cat} ({catItems.length})
-                                  </h4>
-                                  <div className="space-y-2">
-                                    {catItems.map((item, itemIdx) => {
-                                      const isSuccess = item.status === "success";
-                                      const isError = item.status === "error" || cat.toLowerCase().includes("error") || cat.toLowerCase().includes("mismatch") || cat.toLowerCase().includes("missing");
-                                      const isWarning = !isSuccess && !isError;
-                                      
-                                      return (
-                                        <div
-                                          key={itemIdx}
-                                          className={`p-2.5 rounded-lg border bg-white shadow-sm flex flex-col gap-1.5 border-l-[3.5px] ${
-                                            isError
-                                              ? "border-l-error-500 bg-error-50/20 border-error-100"
-                                              : isWarning
-                                                ? "border-l-warning-500 bg-warning-50/20 border-warning-100"
-                                                : "border-l-success-500 bg-success-50/20 border-success-100"
-                                          }`}
-                                        >
-                                          <div className="flex justify-between items-start gap-2 w-full text-[10px]">
-                                            <div className="flex-1 font-semibold text-navy-800 leading-relaxed break-words">
-                                              {item.id && (
-                                                <span className="font-mono bg-navy-100 text-navy-800 px-1 py-0.5 rounded text-[9px] mr-1.5">
-                                                  [{item.id}]
-                                                </span>
-                                              )}
-                                              {item.message || (item.from && `Converted from: "${item.from}"`)}
-                                            </div>
-                                            {item.para !== undefined && (
-                                              <button
-                                                onClick={() => navigateToDocPara(item.para || 0)}
-                                                className="text-[9px] font-bold text-blue-600 hover:text-blue-800 flex items-center gap-0.5 bg-blue-50 px-1.5 py-0.5 rounded cursor-pointer border-none whitespace-nowrap shrink-0 font-mono"
-                                              >
-                                                Locate <CornerDownRight className="w-2.5 h-2.5" />
-                                              </button>
-                                            )}
-                                          </div>
-
-                                          {/* For conversions, show changes diff */}
-                                          {item.from && item.to && (
-                                            <div className="text-[9px] bg-slate-900 text-slate-100 rounded p-1.5 font-mono space-y-1">
-                                              <div className="text-red-300 break-words line-through"><span className="text-slate-400 select-none">- </span>{item.from}</div>
-                                              <div className="text-green-300 break-words"><span className="text-slate-400 select-none">+ </span>{item.to}</div>
-                                            </div>
-                                          )}
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
+                            <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
+                              {categories.length === 0 ? (
+                                <div className="text-center py-8 bg-white border border-navy-100 rounded-lg text-xs text-navy-400 font-semibold">
+                                  No log issues or conversions detected.
                                 </div>
-                              );
-                            })
+                              ) : (
+                                categories.map((cat: string) => {
+                                  const catItems = parsed.items.filter(item => item.category === cat);
+                                  return (
+                                    <div key={cat} className="space-y-1.5">
+                                      <h4 className="text-[10px] uppercase font-extrabold text-navy-500 tracking-wider px-1">
+                                        {cat} ({catItems.length})
+                                      </h4>
+                                      <div className="space-y-2">
+                                        {catItems.map((item, itemIdx) => {
+                                          const isSuccess = item.status === "success";
+                                          const isError = item.status === "error" || cat.toLowerCase().includes("error") || cat.toLowerCase().includes("mismatch") || cat.toLowerCase().includes("missing");
+                                          const isWarning = !isSuccess && !isError;
+
+                                          return (
+                                            <div
+                                              key={itemIdx}
+                                              className={`p-2.5 rounded-lg border bg-white shadow-sm flex flex-col gap-1.5 border-l-[3.5px] ${
+                                                isError
+                                                  ? "border-l-error-500 bg-error-50/20 border-error-100"
+                                                  : isWarning
+                                                    ? "border-l-warning-500 bg-warning-50/20 border-warning-100"
+                                                    : "border-l-success-500 bg-success-50/20 border-success-100"
+                                              }`}
+                                            >
+                                              <div className="flex justify-between items-start gap-2 w-full text-[10px]">
+                                                <div className="flex-1 font-semibold text-navy-800 leading-relaxed break-words">
+                                                  {item.id && (
+                                                    <span className="font-mono bg-navy-100 text-navy-800 px-1 py-0.5 rounded text-[9px] mr-1.5">
+                                                      [{item.id}]
+                                                    </span>
+                                                  )}
+                                                  {item.message || (item.from && `Converted from: "${item.from}"`)}
+                                                </div>
+                                                {item.para !== undefined && (
+                                                  <button
+                                                    onClick={() => navigateToDocPara(item.para || 0)}
+                                                    className="text-[9px] font-bold text-blue-600 hover:text-blue-800 flex items-center gap-0.5 bg-blue-50 px-1.5 py-0.5 rounded cursor-pointer border-none whitespace-nowrap shrink-0 font-mono"
+                                                  >
+                                                    Locate <CornerDownRight className="w-2.5 h-2.5" />
+                                                  </button>
+                                                )}
+                                              </div>
+
+                                              {item.from && item.to && (
+                                                <div className="text-[9px] bg-slate-900 text-slate-100 rounded p-1.5 font-mono space-y-1">
+                                                  <div className="text-red-300 break-words line-through"><span className="text-slate-400 select-none">- </span>{item.from}</div>
+                                                  <div className="text-green-300 break-words"><span className="text-slate-400 select-none">+ </span>{item.to}</div>
+                                                </div>
+                                              )}
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  );
+                                })
+                              )}
+                            </div>
                           )}
                         </div>
-                      </div>
-                    )}
+                      );
+                    })()}
                   </div>
                 );
               })()}

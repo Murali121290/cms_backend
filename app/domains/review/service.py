@@ -1043,7 +1043,209 @@ def _ref_review_cache_path(processed_path: str) -> str:
     return os.path.join(dir_name, f".{base_name}.refcache.json")
 
 
-def build_reference_review_page_state(db: Session, *, file_id: int, style: Optional[str] = None, logger) -> Dict[str, Any]:
+def _run_validation_on_doc(
+    doc,
+    processed_path: str,
+    style: Optional[str] = None,
+    citation_format: Optional[str] = None,
+    logger=None
+) -> Dict[str, Any]:
+    validation_logs = {
+        "stats": {},
+        "total_refs": 0,
+        "total_cites": 0,
+        "issues": [],
+        "renumbering_map": {},
+        "duplicates": [],
+        "sequence_issues": [],
+        "missing_references": [],
+        "unused_references": [],
+        "pipeline_log": [],
+    }
+
+    detected_style = style
+    if not detected_style:
+        # Detect style: REF-N -> AMA, REF-U or <ref-open> -> APA
+        is_ama = False
+        is_apa = False
+        for p in doc.paragraphs:
+            style_name = (p.style.name or "") if p.style else ""
+            if "REF-N" in style_name:
+                is_ama = True
+            if "REF-U" in style_name or "<ref-open>" in p.text:
+                is_apa = True
+
+        detected_style = "APA" if is_apa else "AMA"
+
+    validation_logs["detected_style"] = detected_style
+    validation_logs["citation_format"] = citation_format or "auto"
+
+    if detected_style == "AMA":
+        # A. Numerical/Sequence Validation (AMA 11th Edition / Vancouver)
+        from app.processing.legacy.Referencenumvalidation import ReferenceProcessor, iter_document_paragraphs
+        ref_proc = ReferenceProcessor(doc, citation_format=validation_logs["citation_format"])
+        num_stats = ref_proc.get_validation_stats()
+
+        validation_logs["total_refs"] = num_stats.get("total_references", 0)
+        validation_logs["total_cites"] = num_stats.get("total_citations", 0)
+        validation_logs["duplicates"] = num_stats.get("duplicate_references", [])
+        validation_logs["sequence_issues"] = num_stats.get("sequence_issues", [])
+        validation_logs["tagged_cites"] = sum(
+            1 for para in iter_document_paragraphs(doc)
+            for run in para.runs
+            if ref_proc.is_citation_run(run)
+        )
+        validation_logs["autonum_converted"] = 0
+
+        # Map numerical missing/unused references to issues list
+        for missing_num in num_stats.get("missing_references", []):
+            msg = f"Numerical citation [{missing_num}] has no matching reference entry."
+            issue_item = {
+                "type": "missing",
+                "para_idx": -1,
+                "message": msg,
+                "citation": f"[{missing_num}]"
+            }
+            validation_logs["issues"].append(issue_item)
+            validation_logs["missing_references"].append(issue_item)
+
+        for unused_num in num_stats.get("unused_references", []):
+            msg = f"Reference [{unused_num}] is in bibliography but never cited."
+            issue_item = {
+                "type": "unused",
+                "para_idx": -1,
+                "message": msg,
+                "citation": f"[{unused_num}]"
+            }
+            validation_logs["issues"].append(issue_item)
+            validation_logs["unused_references"].append(issue_item)
+
+        # Build citation_pairs and reference_entries
+        refs_found, ref_objects = ref_proc.get_references_in_bibliography()
+        all_cited_ids, appearance_order = ref_proc.get_citations_in_text()
+        cited_set = set(all_cited_ids)
+
+        from docx.oxml.ns import qn
+        import docx.text.paragraph
+        doc_paragraphs = [docx.text.paragraph.Paragraph(p_elem, doc) for p_elem in doc.element.body.iter(qn("w:p"))]
+        para_index_map = {p._element: idx for idx, p in enumerate(doc_paragraphs)}
+
+        # Build citation_pairs: one entry per unique cited number, in appearance order
+        ref_text_map = {obj["id"]: _get_full_reference_text(obj["para"], doc_paragraphs, para_index_map) for obj in ref_objects}
+        citation_pairs = []
+        for num in appearance_order:
+            ref_para = None
+            for obj in ref_objects:
+                if obj["id"] == num:
+                    ref_para = obj["para"]
+                    break
+            citation_pairs.append({
+                "citation": str(num),
+                "ref_number": num,
+                "ref_text": ref_text_map.get(num, ""),
+                "status": "ok" if num in refs_found else "missing",
+                "para_idx": para_index_map.get(ref_para._element, -1) if ref_para else -1,
+            })
+        # Add unused entries (in bibliography but never cited)
+        for obj in ref_objects:
+            if obj["id"] not in cited_set:
+                citation_pairs.append({
+                    "citation": None,
+                    "ref_number": obj["id"],
+                    "ref_text": _get_full_reference_text(obj["para"], doc_paragraphs, para_index_map),
+                    "status": "unused",
+                    "para_idx": para_index_map.get(obj["para"]._element, -1),
+                })
+
+        # Build reference_entries with global para_idx
+        reference_entries = []
+        for p in doc_paragraphs:
+            style_name = (p.style.name or "") if p.style else ""
+            if "REF-N" in style_name:
+                ref_num = None
+                for obj in ref_objects:
+                    if obj["para"]._element == p._element:
+                        ref_num = obj["id"]
+                        break
+
+                if ref_num is not None:
+                    reference_entries.append({
+                        "number": ref_num,
+                        "text": _get_full_reference_text(p, doc_paragraphs, para_index_map),
+                        "style": "REF-N",
+                        "is_cited": ref_num in cited_set,
+                        "para_idx": para_index_map.get(p._element, -1),
+                    })
+
+        validation_logs["citation_pairs"] = citation_pairs
+        validation_logs["reference_entries"] = reference_entries
+    else:
+        # B. APA Name & Year Validation (APA 7th Edition)
+        from app.processing.legacy.validation_core import CitationProcessor
+        cite_proc = CitationProcessor(processed_path)
+        report = cite_proc.run()
+
+        validation_logs["stats"] = dict(report.stats)
+        validation_logs["total_refs"] = dict(report.stats).get("Total bibliography entries", 0)
+        validation_logs["total_cites"] = dict(report.stats).get("Total in-text citations", 0)
+
+        # Collect Name & Year issues
+        for issue in report.issues:
+            issue_copy = {k: v for k, v in issue.items() if k != "para"}
+            validation_logs["issues"].append(issue_copy)
+
+            # Map into categories
+            itype = issue_copy.get("type")
+            if itype == "missing":
+                validation_logs["missing_references"].append(issue_copy)
+            elif itype == "unused":
+                validation_logs["unused_references"].append(issue_copy)
+
+        # Build citation_pairs and reference_entries
+        bib_items = list(getattr(cite_proc, "_bib_ordered", []) or cite_proc.bibliography.values())
+
+        citation_pairs = []
+        # Iterate bib in document order to build pairs
+        for entry in bib_items:
+            status = "ok" if entry.get("cited") else "unused"
+            citation_pairs.append({
+                "citation": f"({entry.get('display', '')}, {entry.get('year', '')})",
+                "author": entry.get("display", ""),
+                "year": entry.get("year", ""),
+                "ref_text": entry.get("raw", ""),
+                "status": status,
+                "para_idx": entry.get("para_idx", -1),
+            })
+
+        # Add missing citations (cited in text but no bib entry)
+        for issue in report.issues:
+            if issue.get("type") == "missing":
+                citation_pairs.append({
+                    "citation": issue.get("raw", issue.get("citation", "")),
+                    "author": "",
+                    "year": "",
+                    "ref_text": "",
+                    "status": "missing",
+                    "para_idx": issue.get("para_idx", -1),
+                })
+
+        reference_entries = []
+        for i, entry in enumerate(bib_items):
+            reference_entries.append({
+                "number": None,
+                "text": entry.get("raw", ""),
+                "style": "REF-U",
+                "is_cited": entry.get("cited", False),
+                "para_idx": entry.get("para_idx", -1),
+            })
+
+        validation_logs["citation_pairs"] = citation_pairs
+        validation_logs["reference_entries"] = reference_entries
+
+    return validation_logs
+
+
+def build_reference_review_page_state(db: Session, *, file_id: int, style: Optional[str] = None, citation_format: Optional[str] = None, logger) -> Dict[str, Any]:
     import json
     resolved = resolve_processed_target(db, file_id=file_id)
     file_record = resolved["file_record"]
@@ -1065,7 +1267,9 @@ def build_reference_review_page_state(db: Session, *, file_id: int, style: Optio
                 cached = json.load(cf)
             if cached.get("mtime") == docx_mtime and cached.get("cache_version") == REF_REVIEW_CACHE_VERSION:
                 cached_style = cached.get("validation_logs", {}).get("detected_style")
-                if style is None or cached_style == style:
+                cached_format = cached.get("validation_logs", {}).get("citation_format", "auto")
+                req_format = citation_format or "auto"
+                if (style is None or cached_style == style) and cached_format == req_format:
                     logger.info(f"Reference review cache HIT for file {file_id}")
                     # Styles list (static, cheap to rebuild)
                     styles = _ref_review_styles()
@@ -1094,27 +1298,13 @@ def build_reference_review_page_state(db: Session, *, file_id: int, style: Optio
             detail=f"Failed to load document content: {str(e)}"
         )
 
-
-    # 2. Extract live stats and validation issues using PPH scripts
-    validation_logs = {
-        "stats": {},
-        "total_refs": 0,
-        "total_cites": 0,
-        "issues": [],
-        "renumbering_map": {},
-        "duplicates": [],
-        "sequence_issues": [],
-        "missing_references": [],
-        "unused_references": [],
-    }
-
+    # 2. Extract live stats and validation issues using refactored helper
     try:
         from docx import Document
         doc = Document(processed_path)
-        
+
         detected_style = style
         if not detected_style:
-            # Detect the style based on paragraph style names or ref-open tags
             is_ama = False
             is_apa = False
             for p in doc.paragraphs:
@@ -1123,165 +1313,30 @@ def build_reference_review_page_state(db: Session, *, file_id: int, style: Optio
                     is_ama = True
                 if "REF-U" in style_name or "<ref-open>" in p.text:
                     is_apa = True
-
             detected_style = "APA" if is_apa else "AMA"
-            
-        validation_logs["detected_style"] = detected_style
-        
-        if detected_style == "AMA":
-            # A. Numerical/Sequence Validation (AMA 11th Edition / Vancouver)
-            from app.processing.legacy.Referencenumvalidation import ReferenceProcessor
-            ref_proc = ReferenceProcessor(doc)
-            num_stats = ref_proc.get_validation_stats()
-            
-            validation_logs["total_refs"] = num_stats.get("total_references", 0)
-            validation_logs["total_cites"] = num_stats.get("total_citations", 0)
-            validation_logs["duplicates"] = num_stats.get("duplicate_references", [])
-            validation_logs["sequence_issues"] = num_stats.get("sequence_issues", [])
-            
-            # Map numerical missing/unused references to issues list
-            for missing_num in num_stats.get("missing_references", []):
-                msg = f"Numerical citation [{missing_num}] has no matching reference entry."
-                issue_item = {
-                    "type": "missing",
-                    "para_idx": -1,
-                    "message": msg,
-                    "citation": f"[{missing_num}]"
-                }
-                validation_logs["issues"].append(issue_item)
-                validation_logs["missing_references"].append(issue_item)
-                
-            for unused_num in num_stats.get("unused_references", []):
-                msg = f"Reference [{unused_num}] is in bibliography but never cited."
-                issue_item = {
-                    "type": "unused",
-                    "para_idx": -1,
-                    "message": msg,
-                    "citation": f"[{unused_num}]"
-                }
-                validation_logs["issues"].append(issue_item)
-                validation_logs["unused_references"].append(issue_item)
-                
-            # Build citation_pairs and reference_entries
-            refs_found, ref_objects = ref_proc.get_references_in_bibliography()
-            all_cited_ids, appearance_order = ref_proc.get_citations_in_text()
-            cited_set = set(all_cited_ids)
 
-            from docx.oxml.ns import qn
-            import docx.text.paragraph
-            doc_paragraphs = [docx.text.paragraph.Paragraph(p_elem, doc) for p_elem in doc.element.body.iter(qn("w:p"))]
-            para_index_map = {p._element: idx for idx, p in enumerate(doc_paragraphs)}
-
-            # Build citation_pairs: one entry per unique cited number, in appearance order
-            ref_text_map = {obj["id"]: _get_full_reference_text(obj["para"], doc_paragraphs, para_index_map) for obj in ref_objects}
-            citation_pairs = []
-            for num in appearance_order:
-                ref_para = None
-                for obj in ref_objects:
-                    if obj["id"] == num:
-                        ref_para = obj["para"]
-                        break
-                citation_pairs.append({
-                    "citation": str(num),
-                    "ref_number": num,
-                    "ref_text": ref_text_map.get(num, ""),
-                    "status": "ok" if num in refs_found else "missing",
-                    "para_idx": para_index_map.get(ref_para._element, -1) if ref_para else -1,
-                })
-            # Add unused entries (in bibliography but never cited)
-            for obj in ref_objects:
-                if obj["id"] not in cited_set:
-                    citation_pairs.append({
-                        "citation": None,
-                        "ref_number": obj["id"],
-                        "ref_text": _get_full_reference_text(obj["para"], doc_paragraphs, para_index_map),
-                        "status": "unused",
-                        "para_idx": para_index_map.get(obj["para"]._element, -1),
-                    })
-
-            # Build reference_entries: all bibliography paragraphs in order
-            reference_entries = []
-            for i, obj in enumerate(ref_objects):
-                reference_entries.append({
-                    "number": obj["id"],
-                    "text": _get_full_reference_text(obj["para"], doc_paragraphs, para_index_map),
-                    "style": "REF-N",
-                    "is_cited": obj["id"] in cited_set,
-                    "para_idx": para_index_map.get(obj["para"]._element, -1),
-                })
-
-            validation_logs["citation_pairs"] = citation_pairs
-            validation_logs["reference_entries"] = reference_entries
-        else:
-            # B. APA Name & Year Validation (APA 7th Edition)
-            from app.processing.legacy.validation_core import CitationProcessor
-            cite_proc = CitationProcessor(processed_path)
-            report = cite_proc.run()
-            
-            validation_logs["stats"] = dict(report.stats)
-            validation_logs["total_refs"] = dict(report.stats).get("Total bibliography entries", 0)
-            validation_logs["total_cites"] = dict(report.stats).get("Total in-text citations", 0)
-            
-            # Collect Name & Year issues
-            for issue in report.issues:
-                issue_copy = {k: v for k, v in issue.items() if k != "para"}
-                validation_logs["issues"].append(issue_copy)
-                
-                # Map into categories
-                itype = issue_copy.get("type")
-                if itype == "missing":
-                    validation_logs["missing_references"].append(issue_copy)
-                elif itype == "unused":
-                    validation_logs["unused_references"].append(issue_copy)
-
-            # Build citation_pairs and reference_entries
-            bib_items = list(getattr(cite_proc, "_bib_ordered", []) or cite_proc.bibliography.values())
-            cited_keys = getattr(cite_proc, "_cited_keys", set())
-
-            citation_pairs = []
-            for issue in report.issues:
-                if issue.get("type") in ("missing", "unused", "duplicate_entry"):
-                    pass  # these go to reference_entries only
-
-            # Iterate bib in document order to build pairs
-            for entry in bib_items:
-                status = "ok" if entry.get("cited") else "unused"
-                citation_pairs.append({
-                    "citation": f"({entry.get('display', '')}, {entry.get('year', '')})",
-                    "author": entry.get("display", ""),
-                    "year": entry.get("year", ""),
-                    "ref_text": entry.get("raw", ""),
-                    "status": status,
-                    "para_idx": entry.get("para_idx", -1),
-                })
-
-            # Add missing citations (cited in text but no bib entry)
-            for issue in report.issues:
-                if issue.get("type") == "missing":
-                    citation_pairs.append({
-                        "citation": issue.get("raw", issue.get("citation", "")),
-                        "author": "",
-                        "year": "",
-                        "ref_text": "",
-                        "status": "missing",
-                        "para_idx": issue.get("para_idx", -1),
-                    })
-
-            reference_entries = []
-            for i, entry in enumerate(bib_items):
-                reference_entries.append({
-                    "number": None,
-                    "text": entry.get("raw", ""),
-                    "style": "REF-U",
-                    "is_cited": entry.get("cited", False),
-                    "para_idx": entry.get("para_idx", -1),
-                })
-
-            validation_logs["citation_pairs"] = citation_pairs
-            validation_logs["reference_entries"] = reference_entries
+        validation_logs = _run_validation_on_doc(
+            doc,
+            processed_path,
+            style=detected_style,
+            citation_format=citation_format,
+            logger=logger
+        )
 
     except Exception as e:
         logger.error(f"Error computing live validation stats: {e}", exc_info=True)
+        validation_logs = {
+            "stats": {},
+            "total_refs": 0,
+            "total_cites": 0,
+            "issues": [],
+            "renumbering_map": {},
+            "duplicates": [],
+            "sequence_issues": [],
+            "missing_references": [],
+            "unused_references": [],
+            "pipeline_log": [],
+        }
 
     # 3. Read log file if it exists
     try:
@@ -1290,7 +1345,7 @@ def build_reference_review_page_state(db: Session, *, file_id: int, style: Optio
         clean_base = filename_base.replace("_Processed", "").replace("_Structured", "")
         log_filename = f"{clean_base}_log.txt"
         log_path = os.path.join(base_dir, log_filename)
-        
+
         if os.path.exists(log_path):
             with open(log_path, "r", encoding="utf-8") as lf:
                 raw_log = lf.read()
@@ -1330,7 +1385,7 @@ def build_reference_review_page_state(db: Session, *, file_id: int, style: Optio
     }
 
 
-def run_validation_only(db: Session, *, file_id: int, style: Optional[str] = None, logger=None) -> Dict[str, Any]:
+def run_validation_only(db: Session, *, file_id: int, style: Optional[str] = None, citation_format: Optional[str] = None, logger=None) -> Dict[str, Any]:
     """
     Run validation-only (no XHTML conversion, no re-structuring).
     Returns only validation_logs and detected_style.
@@ -1343,25 +1398,12 @@ def run_validation_only(db: Session, *, file_id: int, style: Optional[str] = Non
     if not os.path.exists(processed_path):
         raise HTTPException(status_code=404, detail="Processed reference file not found.")
 
-    validation_logs = {
-        "stats": {},
-        "total_refs": 0,
-        "total_cites": 0,
-        "issues": [],
-        "renumbering_map": {},
-        "duplicates": [],
-        "sequence_issues": [],
-        "missing_references": [],
-        "unused_references": [],
-    }
-
     try:
         from docx import Document
         doc = Document(processed_path)
 
         detected_style = style
         if not detected_style:
-            # Detect style: REF-N -> AMA, REF-U or <ref-open> -> APA
             is_ama = False
             is_apa = False
             for p in doc.paragraphs:
@@ -1370,161 +1412,105 @@ def run_validation_only(db: Session, *, file_id: int, style: Optional[str] = Non
                     is_ama = True
                 if "REF-U" in style_name or "<ref-open>" in p.text:
                     is_apa = True
-
             detected_style = "APA" if is_apa else "AMA"
-        validation_logs["detected_style"] = detected_style
+
+        pipeline_log = []
+        mapping = {}
 
         if detected_style == "AMA":
-            # Numerical/Sequence Validation (AMA)
-            from app.processing.legacy.Referencenumvalidation import ReferenceProcessor
-            ref_proc = ReferenceProcessor(doc)
-            num_stats = ref_proc.get_validation_stats()
+            from app.processing.legacy.Referencenumvalidation import process_document
+            pipeline_log.append("Started numeric reference validation pipeline.")
+            pipeline_log.append("Applied punctuation swapping (placed citations after punctuation).")
 
-            validation_logs["total_refs"] = num_stats.get("total_references", 0)
-            validation_logs["total_cites"] = num_stats.get("total_citations", 0)
-            validation_logs["duplicates"] = num_stats.get("duplicate_references", [])
-            validation_logs["sequence_issues"] = num_stats.get("sequence_issues", [])
+            # Run validation report on the original state BEFORE modifying the document
+            validation_logs = _run_validation_on_doc(
+                doc,
+                processed_path,
+                style="AMA",
+                citation_format=citation_format,
+                logger=logger
+            )
 
-            # Map missing/unused references to issues list
-            for missing_num in num_stats.get("missing_references", []):
-                issue_item = {
-                    "type": "missing",
-                    "para_idx": -1,
-                    "message": f"Numerical citation [{missing_num}] has no matching reference entry.",
-                    "citation": f"[{missing_num}]"
-                }
-                validation_logs["issues"].append(issue_item)
-                validation_logs["missing_references"].append(issue_item)
+            # Run renumbering/formatting pipeline in Referencenumvalidation
+            doc, before_stats, after_stats, mapping, status_msg = process_document(processed_path, citation_format=citation_format)
 
-            for unused_num in num_stats.get("unused_references", []):
-                issue_item = {
-                    "type": "unused",
-                    "para_idx": -1,
-                    "message": f"Reference [{unused_num}] is in bibliography but never cited.",
-                    "citation": f"[{unused_num}]"
-                }
-                validation_logs["issues"].append(issue_item)
-                validation_logs["unused_references"].append(issue_item)
+            pipeline_log.append(f"Initial check: {len(before_stats.get('missing_references', []))} missing, {len(before_stats.get('unused_references', []))} unused reference(s).")
 
-            # Build citation_pairs and reference_entries
-            refs_found, ref_objects = ref_proc.get_references_in_bibliography()
-            all_cited_ids, appearance_order = ref_proc.get_citations_in_text()
-            cited_set = set(all_cited_ids)
+            if before_stats.get("unused_references"):
+                pipeline_log.append("Aborted renumbering: Unused references detected in the bibliography.")
+            elif before_stats.get("missing_references"):
+                pipeline_log.append("Aborted renumbering: Missing references detected in the text.")
+            elif before_stats.get("is_perfect"):
+                pipeline_log.append("No sequence or formatting issues detected. Document is already perfect.")
+            else:
+                pipeline_log.append("Pass 1: Reordered bibliography and renumbered citations to resolve sequence issues.")
+                dup_before = len(before_stats.get("duplicate_references", []))
+                dup_after = len(after_stats.get("duplicate_references", []))
+                duplicates_resolved = dup_before - dup_after
+                if duplicates_resolved > 0:
+                    pipeline_log.append(f"Pass 2: Found and merged {duplicates_resolved} duplicate reference(s) and renumbered remaining citations.")
+                else:
+                    pipeline_log.append("Pass 2: No duplicate references to merge.")
+                pipeline_log.append("Successfully saved renumbered document.")
 
-            # Build a map of paragraph elements to their global index in the document
-            from docx.oxml.ns import qn
-            import docx.text.paragraph
-            doc_paragraphs = [docx.text.paragraph.Paragraph(p_elem, doc) for p_elem in doc.element.body.iter(qn("w:p"))]
-            para_index_map = {p._element: idx for idx, p in enumerate(doc_paragraphs)}
+            if not status_msg.startswith("Aborted:"):
+                # Save the updated doc, archive previous version, and bump file version
+                from app.domains.files import version_service as vs
+                try:
+                    vs.archive_existing_file(
+                        db,
+                        existing_file=file_record,
+                        base_path=os.path.dirname(processed_path),
+                        uploaded_by_id=None,
+                        source_path=processed_path,
+                    )
+                    file_record.version += 1
+                except Exception as _e:
+                    if logger:
+                        logger.warning(f"Version archive failed (non-fatal): {_e}")
 
-            ref_text_map = {obj["id"]: _get_full_reference_text(obj["para"], doc_paragraphs, para_index_map) for obj in ref_objects}
-            citation_pairs = []
-            for num in appearance_order:
-                ref_para = None
-                for obj in ref_objects:
-                    if obj["id"] == num:
-                        ref_para = obj["para"]
-                        break
-                citation_pairs.append({
-                    "citation": str(num),
-                    "ref_number": num,
-                    "ref_text": ref_text_map.get(num, ""),
-                    "status": "ok" if num in refs_found else "missing",
-                    "para_idx": para_index_map.get(ref_para._element, -1) if ref_para else -1,
-                })
-            for obj in ref_objects:
-                if obj["id"] not in cited_set:
-                    citation_pairs.append({
-                        "citation": None,
-                        "ref_number": obj["id"],
-                        "ref_text": _get_full_reference_text(obj["para"], doc_paragraphs, para_index_map),
-                        "status": "unused",
-                        "para_idx": para_index_map.get(obj["para"]._element, -1),
-                    })
+                doc.save(processed_path)
+                db.commit()
 
-            # Build reference_entries with global para_idx
-            reference_entries = []
-            for p in doc_paragraphs:
-                style_name = (p.style.name or "") if p.style else ""
-                if "REF-N" in style_name:
-                    # This is a bibliography paragraph
-                    ref_num = None
-                    for obj in ref_objects:
-                        if obj["para"]._element == p._element:
-                            ref_num = obj["id"]
-                            break
+                # Regenerate validation logs using the updated/saved document state!
+                validation_logs = _run_validation_on_doc(
+                    doc,
+                    processed_path,
+                    style="AMA",
+                    citation_format=citation_format,
+                    logger=logger
+                )
 
-                    if ref_num is not None:
-                        reference_entries.append({
-                            "number": ref_num,
-                            "text": _get_full_reference_text(p, doc_paragraphs, para_index_map),
-                            "style": "REF-N",
-                            "is_cited": ref_num in cited_set,
-                            "para_idx": para_index_map.get(p._element, -1),
-                        })
+                # Invalidate caches
+                invalidate_ref_review_cache(processed_path, logger=logger)
 
-            validation_logs["citation_pairs"] = citation_pairs
-            validation_logs["reference_entries"] = reference_entries
+                from app.domains.processing.technical_editor_service import RESULTS_DIR
+                cache_path = RESULTS_DIR / f"{file_id}_scan.json"
+                if cache_path.exists():
+                    try:
+                        cache_path.unlink()
+                    except Exception:
+                        pass
+
+                xhtml_path = _get_xhtml_path(processed_path)
+                if os.path.exists(xhtml_path):
+                    try:
+                        os.remove(xhtml_path)
+                    except Exception as e:
+                        if logger:
+                            logger.warning(f"Could not remove stale XHTML cache: {e}")
+
+            validation_logs["pipeline_log"] = pipeline_log
+            validation_logs["renumbering_map"] = mapping
         else:
-            # APA Name & Year Validation
-            from app.processing.legacy.validation_core import CitationProcessor
-            cite_proc = CitationProcessor(processed_path)
-            report = cite_proc.run()
-
-            validation_logs["stats"] = dict(report.stats)
-            validation_logs["total_refs"] = dict(report.stats).get("Total bibliography entries", 0)
-            validation_logs["total_cites"] = dict(report.stats).get("Total in-text citations", 0)
-
-            # Collect Name & Year issues
-            for issue in report.issues:
-                issue_copy = {k: v for k, v in issue.items() if k != "para"}
-                validation_logs["issues"].append(issue_copy)
-
-                itype = issue_copy.get("type")
-                if itype == "missing":
-                    validation_logs["missing_references"].append(issue_copy)
-                elif itype == "unused":
-                    validation_logs["unused_references"].append(issue_copy)
-
-            # Build citation_pairs and reference_entries
-            bib_items = list(getattr(cite_proc, "_bib_ordered", []) or cite_proc.bibliography.values())
-
-            citation_pairs = []
-            for entry in bib_items:
-                status = "ok" if entry.get("cited") else "unused"
-                citation_pairs.append({
-                    "citation": f"({entry.get('display', '')}, {entry.get('year', '')})",
-                    "author": entry.get("display", ""),
-                    "year": entry.get("year", ""),
-                    "ref_text": entry.get("raw", ""),
-                    "status": status,
-                    "para_idx": entry.get("para_idx", -1),
-                })
-
-            # Add missing citations
-            for issue in report.issues:
-                if issue.get("type") == "missing":
-                    citation_pairs.append({
-                        "citation": issue.get("raw", issue.get("citation", "")),
-                        "author": "",
-                        "year": "",
-                        "ref_text": "",
-                        "status": "missing",
-                        "para_idx": issue.get("para_idx", -1),
-                    })
-
-            reference_entries = []
-            for i, entry in enumerate(bib_items):
-                reference_entries.append({
-                    "number": None,
-                    "text": entry.get("raw", ""),
-                    "style": "REF-U",
-                    "is_cited": entry.get("cited", False),
-                    "para_idx": entry.get("para_idx", -1),
-                })
-
-            validation_logs["citation_pairs"] = citation_pairs
-            validation_logs["reference_entries"] = reference_entries
+            validation_logs = _run_validation_on_doc(
+                doc,
+                processed_path,
+                style="APA",
+                citation_format=citation_format,
+                logger=logger
+            )
+            validation_logs["pipeline_log"] = ["APA validation completed."]
 
     except Exception as e:
         if logger:
