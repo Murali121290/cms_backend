@@ -18,7 +18,13 @@ interface SdtNode {
 interface ScannedElement {
   id: string;
   type: "sdtBlock" | "sdtInline" | "table" | "bulletList" | "orderedList" | "blockquote" | "paragraph" | "heading";
+  // `styleLabel` (e.g. "CT", "TXNI") and `preview` (first ~50 chars of body
+  // text) are only populated for paragraph/heading rows so the Group panel
+  // can render an outline-like view. `name` remains the canonical label used
+  // by every other element type.
   name: string;
+  styleLabel?: string;
+  preview?: string;
   pos: number;
   nodeSize: number;
   checked: boolean;
@@ -301,6 +307,8 @@ export function StylesPanel({
       targets.forEach((t) => {
         let id = `${t.type}-${t.pos}`;
         let name = "";
+        let styleLabel: string | undefined;
+        let preview: string | undefined;
 
         if (t.type === "sdtBlock") {
           name = `Block SDT: ${t.node.attrs.alias || "unnamed"}`;
@@ -316,15 +324,29 @@ export function StylesPanel({
         } else if (t.type === "blockquote") {
           name = "Blockquote";
         } else if (t.type === "heading") {
-          name = `Heading (${t.node.attrs.styleLabel || "H" + t.node.attrs.level})`;
+          styleLabel = t.node.attrs.styleLabel || `H${t.node.attrs.level}`;
+          name = `Heading (${styleLabel})`;
         } else if (t.type === "paragraph") {
-          name = `Paragraph (${t.node.attrs.styleLabel || "Normal"})`;
+          styleLabel = t.node.attrs.styleLabel || "Normal";
+          name = `Paragraph (${styleLabel})`;
+        }
+
+        if (t.type === "paragraph" || t.type === "heading") {
+          const words = (t.node.textContent || "").split(/\s+/).filter(Boolean);
+          if (words.length === 0) {
+            preview = "";
+          } else {
+            const first = words.slice(0, 6).join(" ");
+            preview = words.length > 6 ? first + "…" : first;
+          }
         }
 
         const el: ScannedElement = {
           id,
           type: t.type as any,
           name,
+          styleLabel,
+          preview,
           pos: t.pos,
           nodeSize: t.end - t.pos,
           checked: false
@@ -427,14 +449,85 @@ export function StylesPanel({
     setWrapType("block");
   };
 
+  const scrollToElement = (el: ScannedElement) => {
+    const editor = editorRef.current?.editor;
+    if (!editor) return;
+    try {
+      const dom = editor.view.nodeDOM(el.pos) as HTMLElement | null;
+      if (!dom || !(dom instanceof HTMLElement)) {
+        editor.commands.setTextSelection(el.pos);
+        editor.commands.scrollIntoView();
+        return;
+      }
+      dom.scrollIntoView({ behavior: "smooth", block: "center" });
+
+      // After the smooth-scroll settles, flash *just the first word*. We
+      // overlay a transparent positioned div on top — no edits to the editor's
+      // own DOM, so ProseMirror's view state stays untouched.
+      window.setTimeout(() => {
+        const firstText = findFirstTextNode(dom);
+        if (!firstText) return;
+        const text = firstText.nodeValue || "";
+        const match = text.match(/^(\s*)(\S+)/);
+        if (!match) return;
+        const start = match[1].length;
+        const end = start + match[2].length;
+
+        let rect: DOMRect;
+        try {
+          const range = document.createRange();
+          range.setStart(firstText, start);
+          range.setEnd(firstText, end);
+          rect = range.getBoundingClientRect();
+          range.detach?.();
+        } catch {
+          return;
+        }
+        if (rect.width === 0 && rect.height === 0) return;
+
+        const overlay = document.createElement("div");
+        overlay.style.position = "fixed";
+        overlay.style.left = `${rect.left - 2}px`;
+        overlay.style.top = `${rect.top - 2}px`;
+        overlay.style.width = `${rect.width + 4}px`;
+        overlay.style.height = `${rect.height + 4}px`;
+        overlay.style.backgroundColor = "rgba(254, 215, 170, 0.7)";
+        overlay.style.outline = "2px solid #f97316";
+        overlay.style.borderRadius = "3px";
+        overlay.style.pointerEvents = "none";
+        overlay.style.zIndex = "9999";
+        overlay.style.transition = "opacity 0.4s ease";
+        document.body.appendChild(overlay);
+
+        window.setTimeout(() => {
+          overlay.style.opacity = "0";
+          window.setTimeout(() => overlay.remove(), 420);
+        }, 800);
+      }, 380);
+    } catch {
+      /* scroll/flash is best-effort */
+    }
+  };
+
+  const findFirstTextNode = (root: Node): Text | null => {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode() as Text | null;
+    while (node) {
+      if ((node.nodeValue || "").trim().length > 0) return node;
+      node = walker.nextNode() as Text | null;
+    }
+    return null;
+  };
+
   const renderTreeNode = (el: ScannedElement, depth = 0) => {
     const isExpanded = expandedIds.has(el.id);
     const hasChildren = (el.children && el.children.length > 0) || (el.inlineSdts && el.inlineSdts.length > 0);
     const isChecked = checkedIds.has(el.id);
+    const isOutlineRow = (el.type === "paragraph" || el.type === "heading") && (el.preview !== undefined);
 
     return (
       <div key={el.id} className="flex flex-col">
-        <div 
+        <div
           className="flex items-center gap-1.5 py-1 px-1.5 hover:bg-slate-50 rounded transition-colors text-xs select-none"
           style={{ paddingLeft: `${Math.max(4, depth * 12)}px` }}
         >
@@ -453,19 +546,26 @@ export function StylesPanel({
             className="w-3.5 h-3.5 border-slate-300 rounded text-primary focus:ring-primary cursor-pointer shrink-0"
           />
 
-          {el.type === "sdtBlock" || el.type === "sdtInline" ? (
-            <Tag className="w-3.5 h-3.5 text-primary shrink-0" />
-          ) : el.type === "table" ? (
-            <Table2 className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-          ) : el.type.endsWith("List") ? (
-            <Layers className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+          {isOutlineRow ? (
+            <button
+              type="button"
+              onClick={() => scrollToElement(el)}
+              className="flex-1 min-w-0 text-left inline-flex items-baseline gap-1.5 truncate cursor-pointer border-none bg-transparent p-0 hover:text-sky-700"
+              title={`${el.styleLabel} – ${el.preview || "(empty)"}`}
+            >
+              <span className="font-bold text-amber-700 font-mono text-[10px] shrink-0">
+                {el.styleLabel}
+              </span>
+              <span className="text-slate-400">–</span>
+              <span className="font-normal text-slate-700 truncate text-[11px]">
+                {el.preview || <span className="italic text-slate-400">(empty)</span>}
+              </span>
+            </button>
           ) : (
-            <FileText className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+            <span className="font-medium text-slate-700 truncate flex-1 font-mono text-[10px]" title={el.name}>
+              {el.name}
+            </span>
           )}
-
-          <span className="font-medium text-slate-700 truncate flex-1 font-mono text-[10px]" title={el.name}>
-            {el.name}
-          </span>
         </div>
 
         {hasChildren && isExpanded && (

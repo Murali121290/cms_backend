@@ -629,6 +629,49 @@ def _get_xhtml_path(processed_path: str) -> str:
     return os.path.join(xhtml_dir, f"{base_name}.html")
 
 
+def _augment_with_word_comments(
+    *,
+    db: Session,
+    file_id: int,
+    docx_path: str,
+    xhtml_path: str,
+    xhtml_content: str,
+    logger,
+) -> str:
+    """
+    Run `import_word_comments_into_xhtml` and persist the result. Always safe
+    to call — idempotent thanks to deterministic UUIDs and the
+    INSERT-only DB strategy. If the XHTML didn't change, this is essentially a
+    cheap DOCX peek (early-exits when no `word/comments.xml` part is present).
+    """
+    try:
+        new_content = import_word_comments_into_xhtml(
+            db=db,
+            file_id=file_id,
+            docx_path=docx_path,
+            xhtml_content=xhtml_content,
+            logger=logger,
+        )
+    except Exception as e:
+        logger.warning(f"Word-comment import skipped: {e}", exc_info=True)
+        return xhtml_content
+
+    if new_content == xhtml_content:
+        return xhtml_content
+
+    try:
+        os.makedirs(os.path.dirname(xhtml_path), exist_ok=True)
+        with open(xhtml_path, "w", encoding="utf-8") as f:
+            f.write(new_content)
+        # Keep the XHTML cache "newer than" the DOCX so the next read still
+        # serves the cached, span-augmented content rather than regenerating.
+        docx_mtime = os.path.getmtime(docx_path)
+        os.utime(xhtml_path, (docx_mtime + 1, docx_mtime + 1))
+    except Exception as e:
+        logger.warning(f"Failed to persist XHTML with imported comment spans: {e}")
+    return new_content
+
+
 def get_xhtml_content(db: Session, *, file_id: int) -> Dict[str, Any]:
     """
     Get XHTML content for a file.
@@ -652,18 +695,6 @@ def get_xhtml_content(db: Session, *, file_id: int) -> Dict[str, Any]:
             os.makedirs(os.path.dirname(xhtml_path), exist_ok=True)
             engine = DocxToXhtmlRunsEngine()
             content = engine.convert(processed_path, file_id=file_id)
-            # Pull any native Word comments in the DOCX into the DB and decorate
-            # the XHTML with <span data-comment-id> so the editor renders them.
-            try:
-                content = import_word_comments_into_xhtml(
-                    db=db,
-                    file_id=file_id,
-                    docx_path=processed_path,
-                    xhtml_content=content,
-                    logger=logger,
-                )
-            except Exception as ce:
-                logger.warning(f"Word-comment import skipped: {ce}", exc_info=True)
             with open(xhtml_path, "w", encoding="utf-8") as f:
                 f.write(content)
         except Exception as e:
@@ -681,6 +712,13 @@ def get_xhtml_content(db: Session, *, file_id: int) -> Dict[str, Any]:
     try:
         with open(xhtml_path, "r", encoding="utf-8") as f:
             content = f.read()
+        # Pull any native Word comments (added externally in Word) into the DB
+        # and decorate the XHTML — runs on every request, but is a near no-op
+        # for DOCXs without a comments part, and idempotent otherwise.
+        content = _augment_with_word_comments(
+            db=db, file_id=file_id, docx_path=processed_path,
+            xhtml_path=xhtml_path, xhtml_content=content, logger=logger,
+        )
         mtime = os.path.getmtime(xhtml_path)
         return {
             "content": content,
@@ -710,18 +748,13 @@ def generate_xhtml(db: Session, *, file_id: int, logger) -> Dict[str, Any]:
         os.makedirs(os.path.dirname(xhtml_path), exist_ok=True)
         engine = DocxToXhtmlRunsEngine()
         content = engine.convert(processed_path, file_id=file_id)
-        try:
-            content = import_word_comments_into_xhtml(
-                db=db,
-                file_id=file_id,
-                docx_path=processed_path,
-                xhtml_content=content,
-                logger=logger,
-            )
-        except Exception as ce:
-            logger.warning(f"Word-comment import skipped: {ce}", exc_info=True)
         with open(xhtml_path, "w", encoding="utf-8") as f:
             f.write(content)
+        # Pull native Word comments into DB + XHTML in a single idempotent pass.
+        _augment_with_word_comments(
+            db=db, file_id=file_id, docx_path=processed_path,
+            xhtml_path=xhtml_path, xhtml_content=content, logger=logger,
+        )
         logger.info(f"Generated XHTML runs: {xhtml_path}")
         return {
             "status": "ok",
@@ -863,6 +896,10 @@ def get_file_xhtml_runs(db: Session, *, file_id: int, logger) -> Dict[str, Any]:
         try:
             with open(xhtml_path, "r", encoding="utf-8") as f:
                 content = f.read()
+            content = _augment_with_word_comments(
+                db=db, file_id=file_id, docx_path=source_path,
+                xhtml_path=xhtml_path, xhtml_content=content, logger=logger,
+            )
             return {"content": content, "filename": file_record.filename}
         except Exception as e:
             logger.warning(f"Failed to read runs XHTML cache from {xhtml_path}: {e}")
@@ -883,7 +920,11 @@ def get_file_xhtml_runs(db: Session, *, file_id: int, logger) -> Dict[str, Any]:
                         f.write(cached["content"])
                 except Exception as ce:
                     logger.warning(f"Failed to write ref cache content to {xhtml_path}: {ce}")
-                return {"content": cached["content"], "filename": file_record.filename}
+                content = _augment_with_word_comments(
+                    db=db, file_id=file_id, docx_path=source_path,
+                    xhtml_path=xhtml_path, xhtml_content=cached["content"], logger=logger,
+                )
+                return {"content": content, "filename": file_record.filename}
         except Exception as e:
             logger.warning(f"Failed to read runs XHTML cache: {e}")
 
@@ -897,6 +938,10 @@ def get_file_xhtml_runs(db: Session, *, file_id: int, logger) -> Dict[str, Any]:
                 f.write(content)
         except Exception as ce:
             logger.warning(f"Failed to write runs XHTML cache to {xhtml_path}: {ce}")
+        content = _augment_with_word_comments(
+            db=db, file_id=file_id, docx_path=source_path,
+            xhtml_path=xhtml_path, xhtml_content=content, logger=logger,
+        )
     except Exception as e:
         logger.error(f"Run-anchored XHTML generation failed for file {file_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to generate editor content: {str(e)}")

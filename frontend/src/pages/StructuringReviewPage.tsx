@@ -619,21 +619,14 @@ export function StructuringReviewPage() {
               toolbarExtras={
                 <ToolbarPopoverGroup>
                   <ToolbarPopover
-                    id="group"
-                    icon={<Layers className="w-3.5 h-3.5" />}
-                    label="Group"
-                    title="Document Elements"
+                    id="comments"
+                    icon={<MessageSquare className="w-3.5 h-3.5" />}
+                    label="Comments"
+                    title="Comments"
                     sticky
                     width={360}
                   >
-                    <StylesPanel
-                      styles={allStyles}
-                      editorRef={editorRef}
-                      onAddStyle={handleAddStyle}
-                      fileId={normalizedFileId}
-                      charStyles={review.char_styles}
-                      visibleTabs={["group"]}
-                    />
+                    <CommentsPanel fileId={normalizedFileId} editorRef={editorRef} />
                   </ToolbarPopover>
                   <ToolbarPopover
                     id="para"
@@ -670,14 +663,21 @@ export function StructuringReviewPage() {
                     />
                   </ToolbarPopover>
                   <ToolbarPopover
-                    id="comments"
-                    icon={<MessageSquare className="w-3.5 h-3.5" />}
-                    label="Comments"
-                    title="Comments"
+                    id="group"
+                    icon={<Layers className="w-3.5 h-3.5" />}
+                    label="Group"
+                    title="Document Elements"
                     sticky
                     width={360}
                   >
-                    <CommentsPanel fileId={normalizedFileId} editorRef={editorRef} />
+                    <StylesPanel
+                      styles={allStyles}
+                      editorRef={editorRef}
+                      onAddStyle={handleAddStyle}
+                      fileId={normalizedFileId}
+                      charStyles={review.char_styles}
+                      visibleTabs={["group"]}
+                    />
                   </ToolbarPopover>
                   <ToolbarPopover
                     id="history"
