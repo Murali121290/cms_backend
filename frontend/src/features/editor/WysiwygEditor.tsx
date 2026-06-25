@@ -64,6 +64,8 @@ import { RunAnchor } from "./RunAnchor";
 import { CharStyle } from "./CharStyle";
 import { FontSize } from "./FontSize";
 import { Comment } from "./Comment";
+import { CommentDialog } from "./CommentDialog";
+import { useCommentsQuery, useCommentMutations } from "./useComments";
 import { SearchReplace } from "./SearchReplace";
 import { MathNode } from "./MathNode";
 import { SdtBlock } from "./SdtBlock";
@@ -356,6 +358,7 @@ const ToolbarDivider = () => <div className="w-px h-5 bg-slate-700 mx-1" />;
 
 export interface WysiwygEditorHandle {
   editor: any; // TipTap Editor instance
+  triggerCommentDialog: () => void;
 }
 
 export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>(
@@ -386,7 +389,6 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
     ref
   ) {
     const [tcEnabled, setTcEnabled] = useState(trackChangesEnabled);
-    const [headingLevel, setHeadingLevel] = useState<number>(0);
     const [activeGutter, setActiveGutter] = useState<{
       pos: number;
       element: HTMLElement;
@@ -419,9 +421,25 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
     // Track whether content has been initialised to avoid skipping loads
     const contentInitialised = useRef(false);
 
-    // Comments state
-    const [comments, setComments] = useState<Record<string, any>>({});
+    // Comments: server-persisted via the backend; the editor only owns the
+    // dialog state. `fileId` here is a string-or-undefined prop, so we coerce
+    // to number for the hook.
+    const numericFileId = fileId ? Number(fileId) : null;
+    const commentsQuery = useCommentsQuery(Number.isFinite(numericFileId) ? numericFileId : null);
+    const commentMutations = useCommentMutations(Number.isFinite(numericFileId) ? numericFileId : null);
+    const comments: Record<string, any> = (commentsQuery.data ?? []).reduce(
+      (acc, c) => {
+        acc[c.comment_uuid] = c;
+        return acc;
+      },
+      {} as Record<string, any>,
+    );
     const [commentPositions, setCommentPositions] = useState<Record<string, number>>({});
+    const [commentDialog, setCommentDialog] = useState<
+      | { mode: "create"; commentUuid: string; quotedText: string }
+      | { mode: "edit"; commentUuid: string; initialText: string; quotedText: string }
+      | null
+    >(null);
     const [currentFontSize, setCurrentFontSize] = useState("default");
     const [currentFontFamily, setCurrentFontFamily] = useState("default");
 
@@ -555,15 +573,6 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
     useEffect(() => {
       if (editor) {
         const updateSelectionStates = () => {
-          // Heading level
-          if (editor.isActive("heading", { level: 1 })) setHeadingLevel(1);
-          else if (editor.isActive("heading", { level: 2 })) setHeadingLevel(2);
-          else if (editor.isActive("heading", { level: 3 })) setHeadingLevel(3);
-          else if (editor.isActive("heading", { level: 4 })) setHeadingLevel(4);
-          else if (editor.isActive("heading", { level: 5 })) setHeadingLevel(5);
-          else if (editor.isActive("heading", { level: 6 })) setHeadingLevel(6);
-          else setHeadingLevel(0);
-
           // Font size
           const attrs = editor.getAttributes("textStyle");
           if (attrs && attrs.fontSize) {
@@ -706,71 +715,70 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
       };
     }, [editor, updateCommentPositions]);
 
-    // Load and save comments from localStorage
+    // Click on an inline comment highlight → open the edit dialog. Attached to
+    // the ProseMirror DOM so it works regardless of which paragraph the mark
+    // lands in.
     useEffect(() => {
-      if (fileId) {
-        try {
-          const stored = localStorage.getItem(`comments-${fileId}`);
-          if (stored) {
-            setComments(JSON.parse(stored));
-          } else {
-            setComments({});
-          }
-        } catch (e) {
-          console.error("Failed to load comments", e);
-        }
-      }
-    }, [fileId]);
-
-    useEffect(() => {
-      if (fileId) {
-        localStorage.setItem(`comments-${fileId}`, JSON.stringify(comments));
-      }
-    }, [comments, fileId]);
+      if (!editor) return;
+      const dom = editor.view.dom as HTMLElement;
+      const handle = (e: MouseEvent) => {
+        const target = (e.target as HTMLElement | null)?.closest?.("span[data-comment-id]") as HTMLElement | null;
+        if (!target) return;
+        const uuid = target.getAttribute("data-comment-id");
+        if (!uuid) return;
+        const existing = comments[uuid];
+        setCommentDialog({
+          mode: "edit",
+          commentUuid: uuid,
+          initialText: existing?.text ?? "",
+          quotedText: (target.textContent || "").trim(),
+        });
+      };
+      dom.addEventListener("click", handle);
+      return () => dom.removeEventListener("click", handle);
+    }, [editor, comments]);
 
     const searchResults = (editor?.storage as any)?.searchReplace?.results || [];
     const activeSearchIndex = (editor?.storage as any)?.searchReplace?.activeIndex ?? -1;
     const searchMatchCount = searchResults.length;
     const currentSearchMatch = searchMatchCount > 0 ? activeSearchIndex + 1 : 0;
 
-    // Expose editor instance to parent via ref
-    useImperativeHandle(ref, () => ({ editor: editor as any }), [editor]);
+    // Open the comment-creation dialog from whatever is selected in the
+    // editor. Used by both the in-toolbar button and the page-level
+    // CommentsPanel (via the ref), so both entry points behave identically.
+    const openCommentDialog = useCallback(() => {
+      if (!editor) return;
+      // Make sure the editor has focus so the selection is current.
+      editor.commands.focus();
+      const { empty, from, to } = editor.state.selection;
+      if (empty) {
+        alert("Please select some text to comment on.");
+        return;
+      }
+      if (!Number.isFinite(numericFileId)) {
+        alert("Cannot add comments until the file is loaded.");
+        return;
+      }
+      const quoted = editor.state.doc.textBetween(from, to, " ").trim();
+      const commentId = crypto.randomUUID();
+      setCommentDialog({ mode: "create", commentUuid: commentId, quotedText: quoted });
+    }, [editor, numericFileId]);
+
+    // Expose editor instance + imperative comment trigger to parent via ref
+    useImperativeHandle(
+      ref,
+      () => ({ editor: editor as any, triggerCommentDialog: openCommentDialog }),
+      [editor, openCommentDialog],
+    );
 
     const handleToggleTrackChanges = () => setTcEnabled(!tcEnabled);
 
-    const handleHeadingChange = (level: number) => {
-      if (level === 0) {
-        editor?.chain().focus().setParagraph().run();
-      } else {
-        editor?.chain().focus().setHeading({ level: level as any }).run();
-      }
-      setHeadingLevel(level);
-    };
-
-    const getCurrentStyle = (): string => {
-      if (!editor) return "Normal";
-      if (editor.isActive("heading", { level: 1 })) return "H1";
-      if (editor.isActive("heading", { level: 2 })) return "H2";
-      if (editor.isActive("heading", { level: 3 })) return "H3";
-      if (editor.isActive("heading", { level: 4 })) return "H4";
-      if (editor.isActive("heading", { level: 5 })) return "H5";
-      if (editor.isActive("heading", { level: 6 })) return "H6";
-      return "Normal";
-    };
-
-    function stripCommentMarks(html: string): string {
+    // Convert client-only LaTeX spans to MathML on save. Comment spans
+    // (`span[data-comment-id]`) are intentionally preserved so the backend
+    // can pair each highlighted range with its metadata when generating DOCX.
+    function convertMathForSave(html: string): string {
       const parser = new DOMParser();
       const doc = parser.parseFromString(html, "text/html");
-      const commentSpans = doc.querySelectorAll("span[data-comment-id]");
-      commentSpans.forEach(span => {
-        const parent = span.parentNode;
-        if (parent) {
-          while (span.firstChild) {
-            parent.insertBefore(span.firstChild, span);
-          }
-          parent.removeChild(span);
-        }
-      });
 
       const mathSpans = doc.querySelectorAll("span[data-latex]");
       mathSpans.forEach(span => {
@@ -795,7 +803,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
     const handleSave = async () => {
       if (editor) {
         const html = editor.getHTML();
-        const cleanHtml = stripCommentMarks(html);
+        const cleanHtml = convertMathForSave(html);
         await onSave(cleanHtml);
         setIsDirty(false);
         setSavedAt(new Date());
@@ -863,30 +871,40 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
     return (
       <div className="flex flex-col bg-[#e8e8e8] w-full" style={{ height }}>
 
+        {/* Comment dialog (modal, fixed position) */}
+        {commentDialog && (
+          <CommentDialog
+            open
+            mode={commentDialog.mode}
+            author={currentUser}
+            quotedText={commentDialog.quotedText}
+            initialText={commentDialog.mode === "edit" ? commentDialog.initialText : ""}
+            onCancel={() => setCommentDialog(null)}
+            onSubmit={(text) => {
+              const uuid = commentDialog.commentUuid;
+              if (commentDialog.mode === "create") {
+                editor?.chain().focus().addComment(uuid).run();
+                commentMutations.create.mutate({ commentUuid: uuid, text });
+              } else {
+                commentMutations.update.mutate({ commentUuid: uuid, text });
+              }
+              setCommentDialog(null);
+            }}
+            onDelete={
+              commentDialog.mode === "edit"
+                ? () => {
+                  const uuid = commentDialog.commentUuid;
+                  editor?.chain().focus().removeComment(uuid).run();
+                  commentMutations.remove.mutate({ commentUuid: uuid });
+                  setCommentDialog(null);
+                }
+                : undefined
+            }
+          />
+        )}
+
         {/* â”€â”€ Toolbar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         <div className="sticky top-0 z-10 bg-[#090d16] border-b border-slate-800 px-3 py-2 flex items-center gap-1.5 overflow-x-auto shadow-md flex-wrap">
-
-          {/* Style Badge */}
-          <div className="px-2 py-1 bg-amber-950/40 text-amber-500 border border-amber-800/60 rounded-md text-[10px] font-bold tracking-wider uppercase shrink-0">
-            {getCurrentStyle()}
-          </div>
-
-          <ToolbarDivider />
-
-          {/* Heading Selector */}
-          <select
-            value={headingLevel}
-            onChange={(e) => handleHeadingChange(parseInt(e.target.value))}
-            className="px-2 py-1 text-[11px] font-bold border border-slate-700 rounded-md bg-slate-900 text-slate-200 hover:bg-slate-800 focus:outline-none shrink-0"
-          >
-            <option value={0}>Normal</option>
-            <option value={1}>Heading 1</option>
-            <option value={2}>Heading 2</option>
-            <option value={3}>Heading 3</option>
-            <option value={4}>Heading 4</option>
-            <option value={5}>Heading 5</option>
-            <option value={6}>Heading 6</option>
-          </select>
 
           {/* Font Family */}
           <select
@@ -1144,31 +1162,11 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
             </>
           )}
 
-          {/* Add Comment Button */}
+          {/* Add Comment Button — opens the dialog; the Tiptap mark and the
+              backend record are only created once the user submits text. */}
           <ToolbarButton
-            onClick={() => {
-              if (!editor) return;
-              const { empty } = editor.state.selection;
-              if (empty) {
-                alert("Please select some text to comment on.");
-                return;
-              }
-              const commentId = crypto.randomUUID();
-              editor.chain().focus().addComment(commentId).run();
-              setComments((prev) => ({
-                ...prev,
-                [commentId]: {
-                  id: commentId,
-                  text: "",
-                  author: currentUser || "Unknown",
-                  date: new Date().toISOString(),
-                  resolved: false,
-                  replies: [],
-                },
-              }));
-              setTimeout(updateCommentPositions, 50);
-            }}
-            title="Add Comment"
+            onClick={openCommentDialog}
+            title="Add Comment on selection"
           >
             <MessageSquare className="w-4 h-4 text-sky-400" />
           </ToolbarButton>
@@ -1370,20 +1368,22 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         )}
 
         {/* â”€â”€ Document Area â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-        <div className="flex-1 overflow-y-auto bg-gradient-to-tr from-slate-100 to-slate-50 p-2 pb-20 flex items-start overflow-x-auto">
-          <div className={sidePanel ? "flex gap-8 w-full max-w-[1400px] justify-start lg:justify-center" : "w-full"}>
-            {/* Word-style Document Page */}
+        <div className="flex-1 overflow-y-auto bg-gradient-to-tr from-slate-200 to-slate-100 px-6 py-6 pb-20 flex items-start justify-center overflow-x-auto">
+          <div className={sidePanel ? "flex gap-6 max-w-[1400px] justify-start lg:justify-center" : "flex justify-center"}>
+            {/* Word-style A4 Document Page — fixed width so it looks like a
+                physical sheet on the canvas, regardless of viewport width. */}
             <div
-              className="bg-white text-sm transition-shadow duration-300 relative w-full"
+              className="bg-white text-sm transition-shadow duration-300 relative shrink-0"
               style={{
                 fontFamily: "'Times New Roman', Times, serif",
                 lineHeight: "2",
-                minHeight: "11in",
-                padding: "1.0in 1.1in",
-                boxShadow: "0 4px 20px rgba(0,0,0,0.06), 0 12px 36px rgba(0,0,0,0.04)",
-                border: "1px solid rgba(226, 232, 240, 0.8)",
+                width: "8.27in",          // A4 width (210mm)
+                minHeight: "11.69in",     // A4 height (297mm)
+                padding: "1in 1in",       // Word default margins
+                boxShadow: "0 4px 20px rgba(0,0,0,0.08), 0 12px 36px rgba(0,0,0,0.06)",
+                border: "1px solid rgba(203, 213, 225, 0.9)",
                 overflow: "visible",
-                borderRadius: "4px"
+                borderRadius: "2px",
               }}
               onClick={(e) => {
                 if (!editor) return;
@@ -1499,63 +1499,9 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
                   </div>
                 </>
               )}
-              {/* Comments margin rail */}
-              <div className="absolute left-[100%] top-0 ml-8 w-80 h-full pointer-events-none hidden xl:block">
-                {Object.keys(comments).length > 0 && (
-                  <div className="pointer-events-auto bg-slate-900/90 border border-slate-700/80 rounded-md p-3 mb-4 text-[10px] text-slate-300 font-bold uppercase tracking-wide flex items-center gap-1.5 shadow-md">
-                    <span className="text-amber-400">âš ï¸</span>
-                    <span>Comments are review-only; not written to exported DOCX.</span>
-                  </div>
-                )}
-                {Object.entries(comments).map(([id, comment]) => {
-                  const pos = commentPositions[id];
-                  if (pos === undefined) return null;
-                  return (
-                    <div
-                      key={id}
-                      className="absolute w-full pointer-events-auto transition-all duration-200"
-                      style={{ top: `${pos}px` }}
-                    >
-                      <CommentCard
-                        comment={comment}
-                        currentUser={currentUser || "Unknown"}
-                        onSaveText={(cid, text) => {
-                          setComments(prev => ({
-                            ...prev,
-                            [cid]: { ...prev[cid], text }
-                          }));
-                        }}
-                        onAddReply={(cid, replyText) => {
-                          setComments(prev => ({
-                            ...prev,
-                            [cid]: {
-                              ...prev[cid],
-                              replies: [
-                                ...prev[cid].replies,
-                                { text: replyText, author: currentUser || "Unknown", date: new Date().toISOString() }
-                              ]
-                            }
-                          }));
-                        }}
-                        onToggleResolve={(cid) => {
-                          setComments(prev => ({
-                            ...prev,
-                            [cid]: { ...prev[cid], resolved: !prev[cid].resolved }
-                          }));
-                        }}
-                        onDelete={(cid) => {
-                          editor?.commands.removeComment(cid);
-                          setComments(prev => {
-                            const next = { ...prev };
-                            delete next[cid];
-                            return next;
-                          });
-                        }}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
+              {/* Comments managed via Comments popover in toolbar + click dialog;
+                  old margin rail retired (its disclaimer was stale once Phase 2
+                  wired comments into DOCX export). */}
             </div>
 
             {/* Side Panel */}
@@ -2255,8 +2201,8 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
 
         /* Custom Comment and Find/Replace Styles */
         .ProseMirror span.tc-comment {
-          background-color: rgba(254, 240, 138, 0.4) !important;
-          border-bottom: 2px solid #eab308 !important;
+          background-color: rgba(147, 197, 253, 0.4) !important;
+          border-bottom: 2px solid #2563eb !important;
           cursor: pointer;
         }
         .ProseMirror span.search-result {

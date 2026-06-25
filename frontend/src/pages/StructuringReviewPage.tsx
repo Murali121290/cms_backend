@@ -12,6 +12,7 @@ import {
   Layers,
   LayoutDashboard,
   Maximize2,
+  MessageSquare,
   Minimize2,
   X,
 } from "lucide-react";
@@ -27,6 +28,7 @@ import { useStructuringReviewQuery } from "@/features/structuringReview/useStruc
 import { WysiwygEditor, useEditorSaveRuns, type WysiwygEditorHandle, OnlyOfficeEditor, OnlyOfficeSidePanel, type OnlyOfficeEditorHandle, CollaboraSidePanel, ChangesReviewPanel } from "@/features/editor";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useFileXhtmlRunsQuery } from "@/features/technicalReview/useFileXhtmlRunsQuery";
+import { CommentsPanel } from "@/features/structuringReview/components/CommentsPanel";
 import { StylesPanel } from "@/features/structuringReview/components/EditorStylesPanel";
 import { VersionHistoryPanel } from "@/features/structuringReview/components/VersionHistoryPanel";
 import { useParagraphStyles } from "@/features/editor/useParagraphStyles";
@@ -63,12 +65,18 @@ function ToolbarPopover({ id, icon, label, title, sticky, width = 320, hideHeade
   const open = openId === id;
   const btnRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+  const [pos, setPos] = useState<{ top: number; right: number; maxHeight: number } | null>(null);
 
   useLayoutEffect(() => {
     if (!open) return;
     const rect = btnRef.current?.getBoundingClientRect();
-    if (rect) setPos({ top: rect.bottom + 6, right: window.innerWidth - rect.right });
+    if (!rect) return;
+    const top = rect.bottom + 6;
+    // Cap the popover so its bottom edge stays well inside the viewport —
+    // otherwise the inner scrollbar's bottom can sit off-screen and a few
+    // rows at the end are unreachable.
+    const maxHeight = Math.max(200, window.innerHeight - top - 24);
+    setPos({ top, right: window.innerWidth - rect.right, maxHeight });
   }, [open]);
 
   useEffect(() => {
@@ -102,7 +110,7 @@ function ToolbarPopover({ id, icon, label, title, sticky, width = 320, hideHeade
       {open && pos && createPortal(
         <div
           ref={popRef}
-          style={{ position: "fixed", top: pos.top, right: pos.right, width, maxHeight: "70vh" }}
+          style={{ position: "fixed", top: pos.top, right: pos.right, width, maxHeight: pos.maxHeight }}
           className="z-50 bg-white border border-border rounded-lg shadow-2xl flex flex-col overflow-hidden"
         >
           {!hideHeader && (
@@ -121,7 +129,7 @@ function ToolbarPopover({ id, icon, label, title, sticky, width = 320, hideHeade
               </button>
             </div>
           )}
-          <div className="flex-1 min-h-0">
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
             {children}
           </div>
         </div>,
@@ -660,6 +668,16 @@ export function StructuringReviewPage() {
                       charStyles={review.char_styles}
                       visibleTabs={["character"]}
                     />
+                  </ToolbarPopover>
+                  <ToolbarPopover
+                    id="comments"
+                    icon={<MessageSquare className="w-3.5 h-3.5" />}
+                    label="Comments"
+                    title="Comments"
+                    sticky
+                    width={360}
+                  >
+                    <CommentsPanel fileId={normalizedFileId} editorRef={editorRef} />
                   </ToolbarPopover>
                   <ToolbarPopover
                     id="history"
