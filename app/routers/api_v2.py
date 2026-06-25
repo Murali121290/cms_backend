@@ -849,6 +849,7 @@ def api_v2_project_bootstrap(
     copyright_year: int | None = Form(None),
     manuscript_pages: int | None = Form(None),
     estimated_pages: int | None = Form(None),
+    actual_pages: int | None = Form(None),
     isbn_no: str | None = Form(None),
     billing_location: str | None = Form(None),
     due_date: str | None = Form(None),
@@ -933,7 +934,7 @@ def api_v2_project_bootstrap(
     for _f in ("division_code", "customer_contact", "category", "composition",
                "project_manager", "sales_person", "priority", "edition", "color",
                "trim_size", "copyright_year", "manuscript_pages", "estimated_pages",
-               "isbn_no", "billing_location"):
+               "actual_pages", "isbn_no", "billing_location"):
         _v = locals().get(_f)
         if _v is not None:
             setattr(project, _f, _v)
