@@ -278,6 +278,314 @@ def save_changes(
         raise HTTPException(status_code=500, detail=f"Failed to save changes: {str(exc)}")
 
 
+def import_word_comments_into_xhtml(
+    *,
+    db: Session,
+    file_id: int,
+    docx_path: str,
+    xhtml_content: str,
+    logger,
+) -> str:
+    """
+    Read native Word comments from the DOCX and:
+      1. Upsert each into the `comments` table for this file. Idempotent — keyed
+         on a deterministic UUID derived from (file_id, Word comment id), so
+         re-importing the same DOCX does not duplicate or overwrite rows.
+      2. Wrap every paragraph covered by a Word comment's range in a
+         <span data-comment-id="UUID"> in the XHTML so the in-browser editor
+         renders the comment highlight and the panel finds it.
+
+    Granularity is paragraph-level (matches the export side). Sub-paragraph
+    ranges in Word are widened to the paragraph(s) they cover.
+    """
+    import uuid as _uuid
+    from lxml import etree
+    import lxml.html
+
+    W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    def qn(tag: str) -> str:
+        return f"{{{W}}}{tag}"
+
+    try:
+        from docx import Document
+        from docx.opc.constants import RELATIONSHIP_TYPE as RT
+        doc = Document(docx_path)
+    except Exception as e:
+        logger.warning(f"Word-comment import: could not open {docx_path}: {e}")
+        return xhtml_content
+
+    comments_part = None
+    for rel in doc.part.rels.values():
+        if rel.reltype == RT.COMMENTS:
+            comments_part = rel.target_part
+            break
+    if comments_part is None:
+        return xhtml_content
+
+    try:
+        comments_root = etree.fromstring(comments_part.blob)
+    except Exception as e:
+        logger.warning(f"Word-comment import: could not parse comments.xml: {e}")
+        return xhtml_content
+
+    word_comments: Dict[str, Dict[str, str]] = {}
+    for cmt in comments_root.findall(qn("comment")):
+        cid = cmt.get(qn("id"))
+        if cid is None:
+            continue
+        word_comments[cid] = {
+            "author": cmt.get(qn("author")) or "Unknown",
+            "text": "".join(t.text or "" for t in cmt.iter(qn("t"))).strip(),
+        }
+    if not word_comments:
+        return xhtml_content
+
+    # Walk paragraphs in document order, tracking which comment ranges are open.
+    # A range can span multiple paragraphs — each one gets a span wrapper.
+    body = doc.element.body
+    open_ids: set = set()
+    bookmark_for_comment_id: Dict[str, list] = {}
+
+    def first_bookmark(p_el) -> Optional[str]:
+        for bm in p_el.iter(qn("bookmarkStart")):
+            name = bm.get(qn("name"))
+            if name:
+                return name
+        return None
+
+    for p_el in body.iter(qn("p")):
+        opens_in = set()
+        closes_in = set()
+        for child in p_el.iter():
+            if child.tag == qn("commentRangeStart"):
+                cid = child.get(qn("id"))
+                if cid is not None:
+                    opens_in.add(cid)
+                    open_ids.add(cid)
+            elif child.tag == qn("commentRangeEnd"):
+                cid = child.get(qn("id"))
+                if cid is not None:
+                    closes_in.add(cid)
+
+        covering = open_ids | opens_in
+        if covering:
+            bm = first_bookmark(p_el)
+            if bm:
+                for cid in covering:
+                    if cid in word_comments:
+                        bookmark_for_comment_id.setdefault(cid, []).append(bm)
+
+        for cid in closes_in:
+            open_ids.discard(cid)
+
+    if not bookmark_for_comment_id:
+        return xhtml_content
+
+    NAMESPACE = _uuid.uuid5(_uuid.NAMESPACE_DNS, "cms.comments")
+
+    def uuid_for(word_comment_id: str) -> str:
+        return str(_uuid.uuid5(NAMESPACE, f"file:{file_id}|wc:{word_comment_id}"))
+
+    uuid_for_wid = {cid: uuid_for(cid) for cid in bookmark_for_comment_id.keys()}
+
+    # Upsert: insert if missing, leave existing rows alone so user edits in the
+    # in-browser editor are not clobbered by a re-import.
+    from app.models import Comment as CommentModel
+    try:
+        existing_rows = (
+            db.query(CommentModel)
+            .filter(
+                CommentModel.file_id == file_id,
+                CommentModel.comment_uuid.in_(list(uuid_for_wid.values())),
+            )
+            .all()
+        )
+        existing_uuids = {r.comment_uuid for r in existing_rows}
+        inserted = 0
+        for cid, meta in word_comments.items():
+            u = uuid_for_wid.get(cid)
+            if not u or u in existing_uuids:
+                continue
+            db.add(
+                CommentModel(
+                    file_id=file_id,
+                    comment_uuid=u,
+                    text=meta["text"],
+                    author_name=meta["author"],
+                    resolved=False,
+                )
+            )
+            inserted += 1
+        if inserted:
+            db.commit()
+            logger.info(f"Imported {inserted} Word comment(s) into DB for file {file_id}")
+    except Exception as e:
+        logger.warning(f"Word-comment import: DB upsert failed: {e}", exc_info=True)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        # Continue — we can still annotate the XHTML even if the DB write failed,
+        # but realistically the panel won't show anything without the rows. Bail.
+        return xhtml_content
+
+    # Wrap matching XHTML paragraphs with <span data-comment-id="UUID">.
+    try:
+        root = lxml.html.fromstring(xhtml_content)
+    except Exception as e:
+        logger.warning(f"Word-comment import: could not parse XHTML: {e}")
+        return xhtml_content
+
+    block_by_bm: Dict[str, Any] = {}
+    for el in root.iter():
+        bm = el.get("data-bookmark")
+        if bm and bm not in block_by_bm:
+            block_by_bm[bm] = el
+
+    wrapped = 0
+    for cid, bms in bookmark_for_comment_id.items():
+        u = uuid_for_wid[cid]
+        for bm in bms:
+            block = block_by_bm.get(bm)
+            if block is None:
+                continue
+            # Idempotent: if an inner span already carries this UUID, skip.
+            if block.xpath(f'.//span[@data-comment-id="{u}"]'):
+                continue
+            span = lxml.html.Element(
+                "span",
+                attrib={"data-comment-id": u, "class": "tc-comment"},
+            )
+            span.text = block.text
+            block.text = None
+            for child in list(block):
+                span.append(child)
+            block.append(span)
+            wrapped += 1
+
+    if not wrapped:
+        return xhtml_content
+
+    logger.info(f"Wrapped {wrapped} XHTML paragraph(s) with Word-comment spans for file {file_id}")
+    return lxml.html.tostring(root, encoding="unicode")
+
+
+def _build_export_docx_with_comments(
+    *,
+    processed_path: str,
+    xhtml_path: str,
+    comments: list,
+    logger,
+) -> Optional[str]:
+    """
+    Copy the processed DOCX to a temp path and inject native Word
+    `<w:commentRangeStart>`/`<w:comment>` markers for every
+    `span[data-comment-id]` in the saved XHTML that corresponds to a stored
+    Comment record. Returns the temp file path, or None if there is nothing
+    to inject.
+
+    Granularity is paragraph-level for v1: each comment is pinned to the first
+    XHTML block that contains the matching span, mapped to the DOCX via the
+    existing `data-bookmark` ↔ Word-bookmark correspondence.
+    """
+    if not comments or not os.path.exists(xhtml_path):
+        return None
+
+    by_uuid = {c.comment_uuid: c for c in comments if c.comment_uuid}
+    if not by_uuid:
+        return None
+
+    import lxml.html
+    with open(xhtml_path, "r", encoding="utf-8") as f:
+        html_content = f.read()
+    try:
+        root = lxml.html.fromstring(html_content)
+    except Exception as e:
+        logger.warning(f"Could not parse XHTML for comment injection: {e}")
+        return None
+
+    # Map UUID -> first bookmark seen in document order. Comments that span
+    # multiple paragraphs anchor to the paragraph where the run starts.
+    BLOCK_TAGS = {"p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "td", "th"}
+    bookmark_for_uuid: Dict[str, str] = {}
+    for span in root.xpath("//span[@data-comment-id]"):
+        uuid = span.get("data-comment-id")
+        if not uuid or uuid in bookmark_for_uuid or uuid not in by_uuid:
+            continue
+        anc = span
+        bm = None
+        while anc is not None:
+            if anc.tag in BLOCK_TAGS:
+                bm = anc.get("data-bookmark")
+                if bm:
+                    break
+            # Some blocks carry the bookmark on a wrapping <div>, so keep walking
+            # up even after we've found a block-tag without a bookmark attribute.
+            if anc.get("data-bookmark"):
+                bm = anc.get("data-bookmark")
+                break
+            anc = anc.getparent()
+        if bm:
+            bookmark_for_uuid[uuid] = bm
+
+    if not bookmark_for_uuid:
+        return None
+
+    import shutil
+    import tempfile
+    fd, tmp_path = tempfile.mkstemp(suffix=".docx", prefix="export_with_comments_")
+    os.close(fd)
+    shutil.copyfile(processed_path, tmp_path)
+
+    from docx import Document
+    from app.docx_pipeline.utils.docx_helpers import add_comment_to_paragraph
+    from app.processing.xhtml_to_docx_delta import (
+        _build_bookmark_para_index,
+        _find_note_para_by_bookmark,
+    )
+
+    doc = Document(tmp_path)
+    para_index = _build_bookmark_para_index(doc)
+
+    injected = 0
+    for uuid, bm in bookmark_for_uuid.items():
+        comment = by_uuid[uuid]
+        para = para_index.get(bm) or _find_note_para_by_bookmark(doc, bm)
+        if para is None:
+            logger.info(f"Comment {uuid}: bookmark {bm} unresolved in DOCX, skipping")
+            continue
+        try:
+            add_comment_to_paragraph(
+                doc,
+                para,
+                text=comment.text or "",
+                author=comment.author_name or "Unknown",
+            )
+            injected += 1
+        except Exception as e:
+            logger.warning(f"Comment {uuid}: failed to inject: {e}", exc_info=True)
+
+    if injected == 0:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+        return None
+
+    try:
+        doc.save(tmp_path)
+    except Exception as e:
+        logger.warning(f"Failed to save DOCX with injected comments: {e}", exc_info=True)
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+        return None
+
+    logger.info(f"Injected {injected} Word comment(s) into export copy at {tmp_path}")
+    return tmp_path
+
+
 def get_export_payload(db: Session, *, file_id: int, logger):
     resolved = resolve_processed_target(db, file_id=file_id)
     processed_path = resolved["processed_path"]
@@ -287,9 +595,29 @@ def get_export_payload(db: Session, *, file_id: int, logger):
         logger.warning(f"Export failed: Processed file not found at {processed_path}")
         raise HTTPException(status_code=404, detail="Processed file not found")
 
+    # If any comments exist for this file, build a copy with native Word
+    # comments injected. Source of truth lives in the DB; the on-disk DOCX
+    # stays clean so re-saves don't accumulate stale comment XML.
+    enriched_path = None
+    try:
+        from app.models import Comment
+        stored_comments = db.query(Comment).filter(Comment.file_id == file_id).all()
+        if stored_comments:
+            xhtml_path = _get_xhtml_path(processed_path)
+            enriched_path = _build_export_docx_with_comments(
+                processed_path=processed_path,
+                xhtml_path=xhtml_path,
+                comments=stored_comments,
+                logger=logger,
+            )
+    except Exception as e:
+        logger.warning(f"Comment injection failed; falling back to plain DOCX: {e}", exc_info=True)
+        enriched_path = None
+
     return {
-        "path": processed_path,
+        "path": enriched_path or processed_path,
         "filename": processed_filename,
+        "is_temp": bool(enriched_path),
     }
 
 
@@ -299,6 +627,49 @@ def _get_xhtml_path(processed_path: str) -> str:
     base_name = os.path.splitext(os.path.basename(processed_path))[0]
     xhtml_dir = os.path.join(dir_name, "xhtml")
     return os.path.join(xhtml_dir, f"{base_name}.html")
+
+
+def _augment_with_word_comments(
+    *,
+    db: Session,
+    file_id: int,
+    docx_path: str,
+    xhtml_path: str,
+    xhtml_content: str,
+    logger,
+) -> str:
+    """
+    Run `import_word_comments_into_xhtml` and persist the result. Always safe
+    to call — idempotent thanks to deterministic UUIDs and the
+    INSERT-only DB strategy. If the XHTML didn't change, this is essentially a
+    cheap DOCX peek (early-exits when no `word/comments.xml` part is present).
+    """
+    try:
+        new_content = import_word_comments_into_xhtml(
+            db=db,
+            file_id=file_id,
+            docx_path=docx_path,
+            xhtml_content=xhtml_content,
+            logger=logger,
+        )
+    except Exception as e:
+        logger.warning(f"Word-comment import skipped: {e}", exc_info=True)
+        return xhtml_content
+
+    if new_content == xhtml_content:
+        return xhtml_content
+
+    try:
+        os.makedirs(os.path.dirname(xhtml_path), exist_ok=True)
+        with open(xhtml_path, "w", encoding="utf-8") as f:
+            f.write(new_content)
+        # Keep the XHTML cache "newer than" the DOCX so the next read still
+        # serves the cached, span-augmented content rather than regenerating.
+        docx_mtime = os.path.getmtime(docx_path)
+        os.utime(xhtml_path, (docx_mtime + 1, docx_mtime + 1))
+    except Exception as e:
+        logger.warning(f"Failed to persist XHTML with imported comment spans: {e}")
+    return new_content
 
 
 def get_xhtml_content(db: Session, *, file_id: int) -> Dict[str, Any]:
@@ -341,6 +712,13 @@ def get_xhtml_content(db: Session, *, file_id: int) -> Dict[str, Any]:
     try:
         with open(xhtml_path, "r", encoding="utf-8") as f:
             content = f.read()
+        # Pull any native Word comments (added externally in Word) into the DB
+        # and decorate the XHTML — runs on every request, but is a near no-op
+        # for DOCXs without a comments part, and idempotent otherwise.
+        content = _augment_with_word_comments(
+            db=db, file_id=file_id, docx_path=processed_path,
+            xhtml_path=xhtml_path, xhtml_content=content, logger=logger,
+        )
         mtime = os.path.getmtime(xhtml_path)
         return {
             "content": content,
@@ -372,6 +750,11 @@ def generate_xhtml(db: Session, *, file_id: int, logger) -> Dict[str, Any]:
         content = engine.convert(processed_path, file_id=file_id)
         with open(xhtml_path, "w", encoding="utf-8") as f:
             f.write(content)
+        # Pull native Word comments into DB + XHTML in a single idempotent pass.
+        _augment_with_word_comments(
+            db=db, file_id=file_id, docx_path=processed_path,
+            xhtml_path=xhtml_path, xhtml_content=content, logger=logger,
+        )
         logger.info(f"Generated XHTML runs: {xhtml_path}")
         return {
             "status": "ok",
@@ -513,6 +896,10 @@ def get_file_xhtml_runs(db: Session, *, file_id: int, logger) -> Dict[str, Any]:
         try:
             with open(xhtml_path, "r", encoding="utf-8") as f:
                 content = f.read()
+            content = _augment_with_word_comments(
+                db=db, file_id=file_id, docx_path=source_path,
+                xhtml_path=xhtml_path, xhtml_content=content, logger=logger,
+            )
             return {"content": content, "filename": file_record.filename}
         except Exception as e:
             logger.warning(f"Failed to read runs XHTML cache from {xhtml_path}: {e}")
@@ -533,7 +920,11 @@ def get_file_xhtml_runs(db: Session, *, file_id: int, logger) -> Dict[str, Any]:
                         f.write(cached["content"])
                 except Exception as ce:
                     logger.warning(f"Failed to write ref cache content to {xhtml_path}: {ce}")
-                return {"content": cached["content"], "filename": file_record.filename}
+                content = _augment_with_word_comments(
+                    db=db, file_id=file_id, docx_path=source_path,
+                    xhtml_path=xhtml_path, xhtml_content=cached["content"], logger=logger,
+                )
+                return {"content": content, "filename": file_record.filename}
         except Exception as e:
             logger.warning(f"Failed to read runs XHTML cache: {e}")
 
@@ -547,6 +938,10 @@ def get_file_xhtml_runs(db: Session, *, file_id: int, logger) -> Dict[str, Any]:
                 f.write(content)
         except Exception as ce:
             logger.warning(f"Failed to write runs XHTML cache to {xhtml_path}: {ce}")
+        content = _augment_with_word_comments(
+            db=db, file_id=file_id, docx_path=source_path,
+            xhtml_path=xhtml_path, xhtml_content=content, logger=logger,
+        )
     except Exception as e:
         logger.error(f"Run-anchored XHTML generation failed for file {file_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to generate editor content: {str(e)}")
