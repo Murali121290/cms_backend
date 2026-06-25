@@ -159,6 +159,22 @@ async def get_xhtml_content_endpoint(
     return JSONResponse(payload)
 
 
+@router.post("/files/{file_id}/structuring/run-pipeline")
+async def run_pipeline_endpoint(
+    file_id: int,
+    db: Session = Depends(database.get_db),
+    user: User = Depends(get_current_user_from_cookie),
+):
+    """Run the docx_pipeline on the processed DOCX and regenerate XHTML."""
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    result = structuring_review_service.run_structuring_pipeline(
+        db, file_id=file_id, logger=logger
+    )
+    return JSONResponse(result)
+
+
 @router.post("/files/{file_id}/structuring/xhtml/generate")
 async def generate_xhtml_endpoint(
     file_id: int,
