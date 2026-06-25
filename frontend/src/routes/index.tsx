@@ -29,6 +29,10 @@ import { ReferenceValidationReviewPage } from '@/pages/ReferenceValidationReview
 import { FileEditorPage } from '@/pages/FileEditorPage'
 import { DocxEditorPage } from '@/pages/DocxEditorPage'
 import { StylesheetsPage } from '@/pages/StylesheetsPage'
+import { ReportsPage } from '@/pages/ReportsPage'
+import ScheduleReport from '@/Reports/ScheduleReport'
+import TodaySchedule from '@/Reports/TodaySchedule'
+import ProjectSchedule from '@/Reports/ProjectSchedule'
 
 const router = createBrowserRouter([
   // ── Public routes ──────────────────────────────────────────────────────────
@@ -96,7 +100,10 @@ const router = createBrowserRouter([
 
       { path: 'projects', element: <ProjectsPage /> },
       { path: 'chapters', element: <Placeholder title="Chapters" /> },
-      { path: 'reports', element: <Placeholder title="Reports" /> },
+      { path: 'reports', element: <ReportsPage /> },
+      { path: 'reports/schedule', element: <ScheduleReport /> },
+      { path: 'reports/today-schedule', element: <TodaySchedule /> },
+      { path: 'reports/project-schedule', element: <ProjectSchedule /> },
 
       // ── Review pages without fileId (legacy patterns) ───────────────────────
       { path: 'projects/:projectId/chapters/:chapterId/technical-review', element: <TechnicalReviewPage /> },
