@@ -1076,18 +1076,18 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
             <>
               <ToolbarDivider />
               <div className="flex items-center gap-1 bg-[#131b2e] border border-slate-700/60 rounded-md p-0.5" title="Table Tools">
-                <button onClick={() => editor.chain().focus().addRowBefore().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Row Above">R+â†‘</button>
-                <button onClick={() => editor.chain().focus().addRowAfter().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Row Below">R+â†“</button>
+                <button onClick={() => editor.chain().focus().addRowBefore().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Row Above">+ Row Above</button>
+                <button onClick={() => editor.chain().focus().addRowAfter().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Row Below">+ Row Below</button>
                 <div className="w-px h-3.5 bg-slate-800" />
-                <button onClick={() => editor.chain().focus().addColumnBefore().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Column Left">C+â†</button>
-                <button onClick={() => editor.chain().focus().addColumnAfter().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Column Right">C+â†’</button>
+                <button onClick={() => editor.chain().focus().addColumnBefore().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Column Left">+ Col Left</button>
+                <button onClick={() => editor.chain().focus().addColumnAfter().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Column Right">+ Col Right</button>
                 <div className="w-px h-3.5 bg-slate-800" />
                 <button onClick={() => editor.chain().focus().mergeCells().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Merge Cells">Merge</button>
                 <button onClick={() => editor.chain().focus().splitCell().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Split Cell">Split</button>
                 <div className="w-px h-3.5 bg-slate-800" />
-                <button onClick={() => editor.chain().focus().deleteRow().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-rose-400 rounded" title="Delete Row">R-</button>
-                <button onClick={() => editor.chain().focus().deleteColumn().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-rose-400 rounded" title="Delete Column">C-</button>
-                <button onClick={() => editor.chain().focus().deleteTable().run()} className="p-1 hover:bg-slate-850 text-[10px] font-bold text-rose-500 rounded" title="Delete Table">Del Tab</button>
+                <button onClick={() => editor.chain().focus().deleteRow().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-rose-400 rounded" title="Delete Row">Delete Row</button>
+                <button onClick={() => editor.chain().focus().deleteColumn().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-rose-400 rounded" title="Delete Column">Delete Col</button>
+                <button onClick={() => editor.chain().focus().deleteTable().run()} className="px-1.5 py-1 hover:bg-slate-850 text-[10px] font-bold text-rose-500 rounded" title="Delete Table">Delete Table</button>
               </div>
             </>
           )}
