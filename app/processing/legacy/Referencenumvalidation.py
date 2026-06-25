@@ -20,7 +20,7 @@ from docx.shared import RGBColor
 from app.utils import track_changes
 import logging
 
-TRACK_CHANGES_ENABLED = True
+TRACK_CHANGES_ENABLED = False
 
 app = Flask(__name__)
 app.secret_key = "secret_key_for_session_encryption"
@@ -48,11 +48,39 @@ def iter_document_paragraphs(doc):
                         yield p
 
 
+_SUPER_TO_NORMAL = {
+    '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4',
+    '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9',
+    '⁺': '+', '⁻': '-', '⁼': '=', '⁽': '(', '⁾': ')',
+    'ⁿ': 'n', '–': '-', '—': '-'
+}
+
+_NORMAL_TO_SUPER = {
+    '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
+    '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
+    '+': '⁺', '-': '⁻', '=': '⁼', '(': '⁽', ')': '⁾',
+    'n': 'ⁿ'
+}
+
+def convert_superscript_to_normal(text):
+    if not text:
+        return ""
+    return "".join(_SUPER_TO_NORMAL.get(c, c) for c in text)
+
+def convert_normal_to_superscript(text):
+    if not text:
+        return ""
+    return "".join(_NORMAL_TO_SUPER.get(c, c) for c in text)
+
+
 def get_numbers(text):
     """
     Extract numbers from text like '1', '2-5', '1, 3, 5'.
     Handles ranges "1-5" -> [1, 2, 3, 4, 5].
     """
+    if not text:
+        return []
+    text = convert_superscript_to_normal(text)
     nums = []
     # Matches: (start)-(end) OR (single)
     # Allows hyphen, en dash, em dash
@@ -123,9 +151,80 @@ def is_citation_run(run):
     return False
 
 
+BIB_NUMBER_PATTERNS = [
+    re.compile(r'^\s*\[(\d+)\]\.\s+'),   # [1].
+    re.compile(r'^\s*\((\d+)\)\.\s+'),   # (1).
+    re.compile(r'^\s*\[(\d+)\]\s+'),     # [1]
+    re.compile(r'^\s*\((\d+)\)\s+'),     # (1)
+    re.compile(r'^\s*(\d+)\.\s+'),       # 1.
+    re.compile(r'^\s*(\d+)\s+'),         # 1  (space only)
+]
+
+
+def extract_bib_number(text):
+    """Extract bibliography number from text, handling all formats: 1., [1]., (1)., etc."""
+    for pat in BIB_NUMBER_PATTERNS:
+        m = pat.match(text)
+        if m:
+            return int(m.group(1)), pat
+    return None, None
+
+
 class ReferenceProcessor:
-    def __init__(self, doc):
+    def __init__(self, doc, citation_format=None):
         self.doc = doc
+        self.citation_format = citation_format or "auto"
+        
+    def is_citation_run(self, run):
+        """
+        Determine if a run is part of a citation based on citation_format.
+        """
+        fmt = self.citation_format
+        
+        # 1. Always match styled runs
+        if run.style and run.style.name in ["cite_bib"]:
+            return True
+            
+        # 2. Check by format
+        if fmt == "styled":
+            return False
+            
+        has_unicode_superscript = any(c in "⁰¹²³⁴⁵⁶⁷⁸⁹" for c in (run.text or ""))
+        
+        if fmt == "superscript":
+            if run.font and run.font.superscript:
+                return True
+            if has_unicode_superscript:
+                return True
+            return False
+            
+        elif fmt == "bracket":
+            if run.text and re.search(r'\[\s*\d+\s*(?:[-–—]\s*\d+\s*)?(?:,\s*\d+\s*(?:[-–—]\s*\d+\s*)?)*\]', run.text):
+                return True
+            return False
+            
+        elif fmt == "paren":
+            if run.text and re.search(r'\(\s*\d+\s*(?:[-–—]\s*\d+\s*)?(?:,\s*\d+\s*(?:[-–—]\s*\d+\s*)?)*\)', run.text):
+                return True
+            return False
+            
+        elif fmt == "plain":
+            if run.text and re.search(r'\b\d+\b', run.text):
+                return True
+            return False
+            
+        elif fmt == "auto":
+            if run.font and run.font.superscript:
+                return True
+            if has_unicode_superscript:
+                return True
+            if run.text and re.search(r'\[\s*\d+\s*(?:[-–—]\s*\d+\s*)?(?:,\s*\d+\s*(?:[-–—]\s*\d+\s*)?)*\]', run.text):
+                return True
+            if run.text and re.search(r'\(\s*\d+\s*(?:[-–—]\s*\d+\s*)?(?:,\s*\d+\s*(?:[-–—]\s*\d+\s*)?)*\)', run.text):
+                return True
+            return False
+            
+        return False
         
     def get_references_in_bibliography(self):
         """
@@ -149,6 +248,10 @@ class ReferenceProcessor:
                             bib_run = run
                             break
                 
+                # Fallback: extract from plain text using multi-format patterns
+                if found_id is None:
+                    found_id, pattern = extract_bib_number(para.text)
+
                 if found_id is not None:
                     refs_found.add(found_id)
                     ref_objects.append({
@@ -171,11 +274,13 @@ class ReferenceProcessor:
         seen = set()
         
         for para in iter_document_paragraphs(self.doc):
+            if para.style and para.style.name == "REF-N":
+                continue
             # 1. Process runs
             current_group = []
             
             for run in para.runs:
-                if is_citation_run(run):
+                if self.is_citation_run(run):
                     current_group.append(run)
                 else:
                     if current_group:
@@ -250,22 +355,29 @@ class ReferenceProcessor:
                     continue
                 
                 matcher.set_seq2(text_b)
-                
+
                 # Performance Optimization: Check cheap upper bounds first
-                if matcher.real_quick_ratio() < 0.85:
+                if matcher.real_quick_ratio() < 0.80:
                     continue
-                if matcher.quick_ratio() < 0.85:
+                if matcher.quick_ratio() < 0.80:
                     continue
-                    
+
                 ratio = matcher.ratio()
-                
-                # Threshold: 0.85 (85% similar)
-                if ratio > 0.85:
+
+                # Threshold: 0.80 (80% similar)
+                if ratio >= 0.80:
                     duplicates.append({
-                        'id': ref_b['id'], # The later one is the duplicate
+                        # Legacy keys
+                        'id': ref_b['id'],
                         'text': ref_b['text'][:100] + "...",
                         'duplicate_of': ref_a['id'],
-                        'score': round(ratio * 100, 1)
+                        'score': round(ratio * 100, 1),
+                        # Frontend-expected keys
+                        'num1': ref_a['id'],
+                        'num2': ref_b['id'],
+                        'text1': ref_a['text'][:200],
+                        'text2': ref_b['text'][:200],
+                        'similarity': ratio,
                     })
                     
         return duplicates
@@ -315,7 +427,7 @@ class ReferenceProcessor:
             "is_perfect": (not missing and not unused and not sequence_issues and not duplicates)
         }
 
-    def renumber(self):
+    def renumber(self, ignore_duplicates=False):
         """
         Renumber citations and reorder bibliography.
         Returns: mapping (Old -> New)
@@ -331,46 +443,78 @@ class ReferenceProcessor:
             s = styles.add_style('cite_bib', WD_STYLE_TYPE.CHARACTER)
             s.font.superscript = True
 
+        # Get duplicates to resolve duplicate IDs to original IDs
+        _, ref_objects = self.get_references_in_bibliography()
+        if ignore_duplicates:
+            duplicates = []
+        else:
+            duplicates = self.find_duplicates(ref_objects)
+        dup_to_orig = {dup['id']: dup['duplicate_of'] for dup in duplicates}
+
         # Create Mapping
         mapping = {} 
         new_id = 1
         for old_id in appearance_order:
-            mapping[old_id] = new_id
-            new_id += 1
+            # Resolve actual ID by resolving duplicate chain
+            actual_old_id = old_id
+            while actual_old_id in dup_to_orig:
+                actual_old_id = dup_to_orig[actual_old_id]
+                
+            if actual_old_id not in mapping:
+                mapping[actual_old_id] = new_id
+                new_id += 1
+                
+            mapping[old_id] = mapping[actual_old_id]
             
         for para in iter_document_paragraphs(self.doc):
+            if para.style and para.style.name == "REF-N":
+                continue
             i = 0
             while i < len(para.runs):
                 run = para.runs[i]
                 
-                if is_citation_run(run):
+                if self.is_citation_run(run):
                     txt = run.text
                     nums = get_numbers(txt)
                     if nums:
-                         new_nums = [mapping.get(n, n) for n in nums]
-                         new_text = format_numbers(new_nums)
-                         
-                         is_renumbered = (nums != new_nums)
-                         highlight_color = "008000" if is_renumbered else None
-                         
-                         style_name = run.style.name if run.style else "cite_bib"
-                         
-                         if TRACK_CHANGES_ENABLED:
-                             # Must replace the whole run
-                             track_changes.delete_tracked_run(para, run)
-                             
-                             run_del = run._element.getparent()
-                             anchor = run_del if run_del.tag == track_changes.qn('w:del') else run._element
-                             
-                             ins_new = track_changes.add_tracked_text(para, new_text, style=style_name, color=highlight_color)
-                             anchor.addnext(ins_new)
-                         else:
-                             run.text = new_text
-                             if is_renumbered:
-                                 run.font.color.rgb = RGBColor(0, 128, 0)
-                
-                i += 1
-                
+                        new_nums = [mapping.get(n, n) for n in nums]
+                        new_nums_formatted = format_numbers(new_nums)
+                        
+                        # Find the first and last digit in the original text to preserve prefix/suffix
+                        match_digits = list(re.finditer(r'[\d⁰¹²³⁴⁵⁶⁷⁸⁹]+', txt))
+                        
+                        has_orig_super = any(c in "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ" for c in (txt or ""))
+                        if has_orig_super:
+                            new_nums_formatted = convert_normal_to_superscript(new_nums_formatted)
+                            
+                        if match_digits:
+                            first_start = match_digits[0].start()
+                            last_end = match_digits[-1].end()
+                            prefix = txt[:first_start]
+                            suffix = txt[last_end:]
+                            new_text = prefix + new_nums_formatted + suffix
+                        else:
+                            new_text = new_nums_formatted
+                        
+                        is_renumbered = (nums != new_nums)
+                        highlight_color = "008000" if is_renumbered else None
+                        
+                        style_name = run.style.name if run.style else "cite_bib"
+                        
+                        if TRACK_CHANGES_ENABLED:
+                            # Must replace the whole run
+                            track_changes.delete_tracked_run(para, run)
+                            
+                            run_del = run._element.getparent()
+                            anchor = run_del if run_del.tag == track_changes.qn('w:del') else run._element
+                            
+                            ins_new = track_changes.add_tracked_text(para, new_text, style=style_name, color=highlight_color)
+                            anchor.addnext(ins_new)
+                        else:
+                            run.text = new_text
+                            if is_renumbered:
+                                run.font.color.rgb = RGBColor(0, 128, 0)
+
                 i += 1
 
         # 2. Reorder Bibliography
@@ -380,10 +524,13 @@ class ReferenceProcessor:
         cited_refs = []
         uncited_refs = []
         
+        seen_new_ids = set()
         for obj in ref_objects:
             if obj['id'] in mapping:
                 obj['new_id'] = mapping[obj['id']]
-                cited_refs.append(obj)
+                if obj['new_id'] not in seen_new_ids:
+                    seen_new_ids.add(obj['new_id'])
+                    cited_refs.append(obj)
             else:
                 uncited_refs.append(obj)
         
@@ -446,49 +593,197 @@ class ReferenceProcessor:
         return mapping
 
 
-def process_document(file):
+_SUPERSCRIPT_CHARS = "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ"
+_PUNCT_SWAP_BRACKET = re.compile(r'([\[(])(\d+)([\])])([.,;:?])')
+_PUNCT_SWAP_SUPER = re.compile(r'([' + _SUPERSCRIPT_CHARS + r']+)([.,;:?])')
+
+
+def ensure_bib_number_style(para, doc):
+    text = para.text
+    # If the paragraph already has a bib_number styled run, skip rebuilding
+    already_styled = False
+    for run in para.runs:
+        if run.style and run.style.name == "bib_number":
+            nums = get_numbers(run.text)
+            if nums:
+                already_styled = True
+                break
+    if already_styled:
+        return None
+
+    for pat in BIB_NUMBER_PATTERNS:
+        m = pat.match(text)
+        if m:
+            full_match = m.group(0) # e.g. "2. "
+            number_str = m.group(1) # e.g. "2"
+            
+            # Find the start and end of the number within full_match
+            num_start = full_match.find(number_str)
+            num_end = num_start + len(number_str)
+            
+            prefix_part = full_match[:num_start] # before digits
+            num_part = number_str
+            suffix_part = full_match[num_end:]  # after digits (e.g. ". ")
+            
+            if not para.runs:
+                continue
+                
+            first_run = para.runs[0]
+            first_run_text = first_run.text
+            
+            # Check if the first run text starts with full_match
+            if first_run_text.startswith(full_match):
+                remaining_text = first_run_text[len(full_match):]
+                
+                # Split runs: insert prefix, number (styled), suffix, and set first_run = remaining
+                p_element = para._element
+                first_run_element = first_run._element
+                first_run_idx = p_element.index(first_run_element)
+                
+                def insert_run_before(target_idx, run_text, style_name=None):
+                    r = para.add_run(run_text)
+                    if style_name:
+                        r.style = style_name
+                    p_element.remove(r._element)
+                    p_element.insert(target_idx, r._element)
+                    return r
+                
+                curr_idx = first_run_idx
+                if prefix_part:
+                    insert_run_before(curr_idx, prefix_part)
+                    curr_idx += 1
+                
+                num_run = insert_run_before(curr_idx, num_part, 'bib_number')
+                curr_idx += 1
+                
+                if suffix_part:
+                    insert_run_before(curr_idx, suffix_part)
+                    curr_idx += 1
+                
+                first_run.text = remaining_text
+                return num_run
+            else:
+                # Fallback: if first run doesn't start with full_match, clear runs and rebuild
+                remaining_text = text[len(full_match):]
+                para.text = "" # clears all runs
+                
+                if prefix_part:
+                    para.add_run(prefix_part)
+                num_run = para.add_run(num_part)
+                num_run.style = 'bib_number'
+                if suffix_part:
+                    para.add_run(suffix_part)
+                para.add_run(remaining_text)
+                return num_run
+    return None
+
+
+def apply_styles_prep(doc, citation_format="auto"):
+    # Ensure styles exist in document
+    from docx.enum.style import WD_STYLE_TYPE
+    try:
+        doc.styles['cite_bib']
+    except KeyError:
+        s = doc.styles.add_style('cite_bib', WD_STYLE_TYPE.CHARACTER)
+        s.font.superscript = True
+
+    try:
+        doc.styles['bib_number']
+    except KeyError:
+        doc.styles.add_style('bib_number', WD_STYLE_TYPE.CHARACTER)
+
+    # 1. Apply 'bib_number' style to references in bibliography
+    for para in doc.paragraphs:
+        if para.style and para.style.name == "REF-N":
+            ensure_bib_number_style(para, doc)
+
+    # 2. Apply 'cite_bib' style to body citations
+    processor = ReferenceProcessor(doc, citation_format=citation_format)
+    for para in iter_document_paragraphs(doc):
+        if para.style and para.style.name == "REF-N":
+            continue
+        for run in para.runs:
+            if processor.is_citation_run(run):
+                run.style = 'cite_bib'
+
+
+def swap_citation_punctuation_in_runs(doc):
+    """
+    Pre-processing step: in AMA/Vancouver style, citations must appear AFTER
+    punctuation (e.g. `.¹` not `¹.`).  Scans every run in the document body and
+    swaps the order in-place so that `(1).` becomes `.(1)` and `¹.` becomes `.¹`.
+    """
+    for para in iter_document_paragraphs(doc):
+        for run in para.runs:
+            text = run.text
+            if not text:
+                continue
+            # Bracket/paren format: (1). -> .(1)
+            text = _PUNCT_SWAP_BRACKET.sub(r'\4\1\2\3', text)
+            # Superscript format: ¹. -> .¹
+            text = _PUNCT_SWAP_SUPER.sub(r'\2\1', text)
+            if text != run.text:
+                run.text = text
+
+
+def process_document(file, citation_format="auto"):
     doc = Document(file)
-    processor = ReferenceProcessor(doc)
+    swap_citation_punctuation_in_runs(doc)
     
-    # Check BEFORE
-    before_stats = processor.get_validation_stats()
+    # 1. Apply styles prep before validation check
+    apply_styles_prep(doc, citation_format=citation_format)
+    
+    # 1. Check BEFORE on original state
+    processor1 = ReferenceProcessor(doc, citation_format=citation_format)
+    before_stats = processor1.get_validation_stats()
     
     # DECISION:
     # 1. If Unused References exist -> ABORT renumbering.
     if before_stats["unused_references"]:
         return doc, before_stats, before_stats, {}, "Aborted: Document validation failed due to unused references."
 
-    # 2. If Perfect -> No need.
-    if before_stats["is_perfect"]:
-        return doc, before_stats, before_stats, {}, "Validation completed."
-        
     # 3. If Missing Refs -> Can't safely renumber usually
     if before_stats["missing_references"]:
          return doc, before_stats, before_stats, {}, "Aborted: Missing references detected."
 
-    # DO RENUMBER
-    mapping = processor.renumber()
+    # 2. If Perfect -> No need.
+    if before_stats["is_perfect"]:
+        return doc, before_stats, before_stats, {}, "Validation completed."
+
+    # ── PASS 1: Reorder Sequence (ignore duplicates) ───────────────────────
+    pass1_mapping = processor1.renumber(ignore_duplicates=True)
     
-    # Check AFTER (Validate result)
-    after_stats = processor.get_validation_stats()
+    # Apply styles prep again on the intermediate document state
+    apply_styles_prep(doc, citation_format=citation_format)
+    
+    # ── PASS 2: Find Duplicates & Merge/Renumber ────────────────────────────
+    # We must instantiate a new ReferenceProcessor since the document elements might have changed/been reordered
+    processor2 = ReferenceProcessor(doc, citation_format=citation_format)
+    pass2_mapping = processor2.renumber(ignore_duplicates=False)
+    
+    # 3. Check AFTER final state
+    after_stats = processor2.get_validation_stats()
+    
+    # Composed mapping composition
+    mapping = {}
+    for old_id, intermediate_id in pass1_mapping.items():
+        mapping[old_id] = pass2_mapping.get(intermediate_id, intermediate_id)
+        
+    # Count duplicates resolved
+    dup_before = len(before_stats.get("duplicate_references", []))
+    dup_after = len(after_stats.get("duplicate_references", []))
+    duplicates_resolved = dup_before - dup_after
     
     # Determine status message
-    changes_made = False
-    if mapping:
-        for k, v in mapping.items():
-            if k != v:
-                changes_made = True
-                break
-
-    if before_stats["duplicate_references"]:
-        count = len(before_stats['duplicate_references'])
-        prefix = "Renumbering" if changes_made else "Validation"
-        status_msg = f"{prefix} completed with {count} duplicate{'s' if count > 1 else ''}."
+    changes_made = any(k != v for k, v in mapping.items())
+    
+    if duplicates_resolved > 0:
+        status_msg = f"Two-pass validation: Pass 1 renumbered, Pass 2 {duplicates_resolved} duplicate reference{'s' if duplicates_resolved > 1 else ''} removed and renumbered."
     elif changes_made:
         status_msg = "Renumbering completed successfully."
     else:
         status_msg = "Validation completed."
-
+        
     return doc, before_stats, after_stats, mapping, status_msg
 
 

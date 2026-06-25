@@ -80,8 +80,12 @@ export interface ReferenceValidateOnlyResponse {
   detected_style: "AMA" | "APA";
 }
 
-export async function getReferenceReview(fileId: number, style?: string) {
-  const url = style ? `/files/${fileId}/reference-review?style=${style}` : `/files/${fileId}/reference-review`;
+export async function getReferenceReview(fileId: number, style?: string, citationFormat?: string) {
+  const params = new URLSearchParams();
+  if (style) params.set("style", style);
+  if (citationFormat) params.set("citation_format", citationFormat);
+  const qs = params.toString();
+  const url = `/files/${fileId}/reference-review${qs ? `?${qs}` : ""}`;
   const response = await apiClient.get<ReferenceValidationReviewResponse>(url);
   return response.data;
 }
@@ -94,9 +98,38 @@ export async function saveReferenceReview(saveEndpoint: string, htmlContent: str
   return response.data;
 }
 
-export async function validateReferenceOnly(fileId: number, style?: string) {
-  const url = style ? `/files/${fileId}/reference-review/validate-only?style=${style}` : `/files/${fileId}/reference-review/validate-only`;
+export async function validateReferenceOnly(fileId: number, style?: string, citationFormat?: string) {
+  const params = new URLSearchParams();
+  if (style) params.set("style", style);
+  if (citationFormat) params.set("citation_format", citationFormat);
+  const qs = params.toString();
+  const url = `/files/${fileId}/reference-review/validate-only${qs ? `?${qs}` : ""}`;
   const response = await apiClient.get<ReferenceValidateOnlyResponse>(url);
+  return response.data;
+}
+
+export interface MergeDuplicatesRequest {
+  canonical_num: number;     // Keep this reference (num1)
+  duplicate_num: number;     // Remove this reference (num2)
+}
+
+export interface MergeDuplicatesResponse {
+  status: "ok";
+  canonical_num: number;
+  duplicate_num: number;
+  message: string;
+}
+
+// NOTE: The actual merge is performed client-side in the editor (queued);
+// this endpoint only records the intent so the server can renumber on next validate.
+export async function queueDuplicateMerge(
+  fileId: number,
+  data: MergeDuplicatesRequest
+) {
+  const response = await apiClient.post<MergeDuplicatesResponse>(
+    `/files/${fileId}/reference-review/merge-duplicate`,
+    data
+  );
   return response.data;
 }
 

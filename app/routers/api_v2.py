@@ -3512,6 +3512,7 @@ def api_v2_structuring_export(
 def api_v2_reference_review(
     file_id: int,
     style: Optional[str] = Query(None),
+    citation_format: Optional[str] = Query(None),
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -3528,6 +3529,7 @@ def api_v2_reference_review(
             db,
             file_id=file_id,
             style=style,
+            citation_format=citation_format,
             logger=logger,
         )
     except HTTPException as exc:
@@ -3663,6 +3665,7 @@ def api_v2_reference_export(
 def api_v2_reference_validate_only(
     file_id: int,
     style: Optional[str] = Query(None),
+    citation_format: Optional[str] = Query(None),
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -3679,6 +3682,7 @@ def api_v2_reference_validate_only(
             db,
             file_id=file_id,
             style=style,
+            citation_format=citation_format,
             logger=logger,
         )
         return result
