@@ -1,9 +1,41 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/Button";
-import { BookOpen, Plus, Search, X, Play, FileText, ChevronDown, ChevronRight, Folder, Tag, Layers, Table2 } from "lucide-react";
+import { BookOpen, Plus, Search, X, Play, FileText, ChevronDown, ChevronRight, Folder, Tag, Layers, Table2, Check, Loader2, CircleAlert } from "lucide-react";
 import type { Node as PmNode, Mark as PmMark } from "@tiptap/pm/model";
 import type { WysiwygEditorHandle } from "@/features/editor";
 import { NewStyleDialog } from "./NewStyleDialog";
+
+// ── Pipeline progress types ───────────────────────────────────────────────────
+
+type StepStatus = "pending" | "running" | "ok" | "skip" | "fail";
+
+interface PipelineStepState {
+  n: number;
+  title: string;
+  status: StepStatus;
+  detail?: string;
+  startedAt?: number;
+  durationMs?: number;
+}
+
+const PIPELINE_STEPS: { n: number; title: string }[] = [
+  { n: 0,  title: "Preconversion" },
+  { n: 1,  title: "Cleanup" },
+  { n: 2,  title: "Remove Unused Styles" },
+  { n: 3,  title: "Remove Bold" },
+  { n: 4,  title: "Heading Validation" },
+  { n: 5,  title: "Text Flush" },
+  { n: 6,  title: "Remove Tags" },
+  { n: 7,  title: "Character Styles" },
+  { n: 8,  title: "Content Controls" },
+  { n: 9,  title: "Symbol & Math" },
+  { n: 10, title: "Math Symbol Styles" },
+];
+
+function initialPipelineSteps(): PipelineStepState[] {
+  return PIPELINE_STEPS.map(s => ({ ...s, status: "pending" as StepStatus }));
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -222,6 +254,8 @@ export function StylesPanel({
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [isRunningPipeline, setIsRunningPipeline] = useState(false);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
+  const [pipelineSteps, setPipelineSteps] = useState<PipelineStepState[]>(() => initialPipelineSteps());
+  const [pipelineDone, setPipelineDone] = useState(false);
   const [showWrapModal, setShowWrapModal] = useState(false);
   const [wrapAlias, setWrapAlias] = useState("");
   const [wrapTag, setWrapTag] = useState("");
@@ -414,25 +448,135 @@ export function StylesPanel({
     if (!editor || !fileId) return;
     setIsRunningPipeline(true);
     setPipelineError(null);
+    setPipelineSteps(initialPipelineSteps());
+    setPipelineDone(false);
+
+    // Minimum visible time each step spends in "Processing…" before the UI
+    // applies its completion status, plus a tiny gap before the next step's
+    // "start" event is applied. Backend keeps running at full speed — these
+    // numbers only smooth the UI transitions.
+    const MIN_RUNNING_MS = 600;
+    const MIN_GAP_MS = 100;
+    const sleep = (ms: number) => new Promise<void>(r => window.setTimeout(r, ms));
+
+    type Event =
+      | { type: "step"; step: number; status: "start" | "ok" | "skip" | "fail"; reason?: string; error?: string }
+      | { type: "summary"; status: "ok" | "error" }
+      | { type: "result"; status: "ok"; content?: string; file_id?: number }
+      | { type: "result"; status: "error"; error?: string };
+
+    const queue: Event[] = [];
+    let streamDone = false;
+    const startAppliedAt = new Map<number, number>();
+    let finalContent: string | undefined;
+    let finalError: string | undefined;
+
+    const processor = (async () => {
+      while (true) {
+        if (queue.length === 0) {
+          if (streamDone) break;
+          await sleep(40);
+          continue;
+        }
+        const ev = queue.shift()!;
+        if (ev.type === "step") {
+          if (ev.status === "start") {
+            const now = performance.now();
+            startAppliedAt.set(ev.step, now);
+            setPipelineSteps(prev =>
+              prev.map(s =>
+                s.n === ev.step
+                  ? { ...s, status: "running", startedAt: now, durationMs: undefined, detail: undefined }
+                  : s
+              )
+            );
+          } else {
+            const startedAt = startAppliedAt.get(ev.step) ?? performance.now();
+            const elapsed = performance.now() - startedAt;
+            const remaining = MIN_RUNNING_MS - elapsed;
+            if (remaining > 0) await sleep(remaining);
+            const dur = performance.now() - startedAt;
+            const finalStatus: StepStatus =
+              ev.status === "ok" ? "ok" : ev.status === "skip" ? "skip" : "fail";
+            setPipelineSteps(prev =>
+              prev.map(s =>
+                s.n === ev.step
+                  ? { ...s, status: finalStatus, durationMs: dur, detail: ev.reason ?? ev.error }
+                  : s
+              )
+            );
+            await sleep(MIN_GAP_MS);
+          }
+        } else if (ev.type === "result") {
+          if (ev.status === "ok" && typeof ev.content === "string") {
+            finalContent = ev.content;
+          } else if (ev.status === "error") {
+            finalError = ev.error || "Pipeline failed";
+          }
+        }
+        // summary events drive the header in the overlay; no extra state needed.
+      }
+
+      if (finalError) {
+        setPipelineError(finalError);
+        setPipelineSteps(prev =>
+          prev.map(s => (s.status === "running" ? { ...s, status: "fail" as StepStatus } : s))
+        );
+      } else if (finalContent) {
+        editor.commands.setContent(finalContent);
+        scanDocument();
+      }
+      setIsRunningPipeline(false);
+      setPipelineDone(true);
+    })();
+
     try {
       const res = await fetch(`/api/v1/files/${fileId}/structuring/run-pipeline`, {
         method: "POST",
         credentials: "include",
+        headers: { Accept: "application/x-ndjson" },
       });
-      if (!res.ok) {
+      if (!res.ok || !res.body) {
         const err = await res.json().catch(() => ({})) as Record<string, string>;
         throw new Error(err.detail || `Pipeline failed (${res.status})`);
       }
-      const data = await res.json() as { content?: string };
-      if (data.content) {
-        editor.commands.setContent(data.content);
-        scanDocument();
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let nl: number;
+        while ((nl = buffer.indexOf("\n")) >= 0) {
+          const line = buffer.slice(0, nl).trim();
+          buffer = buffer.slice(nl + 1);
+          if (!line) continue;
+          try {
+            queue.push(JSON.parse(line) as Event);
+          } catch {
+            // ignore malformed lines
+          }
+        }
       }
     } catch (e) {
-      setPipelineError(e instanceof Error ? e.message : String(e));
+      queue.push({
+        type: "result",
+        status: "error",
+        error: e instanceof Error ? e.message : String(e),
+      });
     } finally {
-      setIsRunningPipeline(false);
+      streamDone = true;
+      await processor;
     }
+  };
+
+  const dismissPipelineOverlay = () => {
+    setPipelineDone(false);
+    setPipelineError(null);
+    setPipelineSteps(initialPipelineSteps());
   };
 
   const handleWrap = () => {
@@ -976,6 +1120,213 @@ export function StylesPanel({
         .styles-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         .styles-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
       `}</style>
+
+      {(isRunningPipeline || pipelineDone) && typeof document !== "undefined" && createPortal(
+        <PipelineProgressOverlay
+          steps={pipelineSteps}
+          running={isRunningPipeline}
+          error={pipelineError}
+          onDismiss={dismissPipelineOverlay}
+        />,
+        document.body
+      )}
     </div>
+  );
+}
+
+// ── Pipeline progress overlay ─────────────────────────────────────────────────
+
+function formatDuration(ms?: number): string {
+  if (ms == null) return "";
+  if (ms < 1000) return `${(ms / 1000).toFixed(2)}s`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const m = Math.floor(ms / 60_000);
+  const s = Math.round((ms % 60_000) / 1000);
+  return `${m}m ${s}s`;
+}
+
+function PipelineProgressOverlay({
+  steps,
+  running,
+  error,
+  onDismiss,
+}: {
+  steps: PipelineStepState[];
+  running: boolean;
+  error: string | null;
+  onDismiss: () => void;
+}) {
+  const total = steps.length;
+  const completedCount = steps.filter(s => s.status === "ok" || s.status === "skip").length;
+  const failedCount = steps.filter(s => s.status === "fail").length;
+  const percent = Math.round(((completedCount + failedCount) / total) * 100);
+  const currentStep = steps.find(s => s.status === "running");
+  const lastCompleted = [...steps].reverse().find(s => s.status === "ok" || s.status === "skip");
+  const headerStep = currentStep ?? lastCompleted;
+
+  const headerTitle = running
+    ? headerStep
+      ? `Running Step ${headerStep.n + 1} of ${total} — ${headerStep.title}`
+      : "Starting pipeline…"
+    : error
+    ? "Pipeline failed"
+    : "Pipeline completed successfully.";
+
+  // Brand colors: #1B5C9E (blue) → #F5822A (orange). The gradient is used for
+  // both the in-progress and completed states; failures fall back to rose so
+  // the error remains visually distinct.
+  const barStyle: React.CSSProperties = error
+    ? { backgroundColor: "#e11d48" }
+    : { backgroundImage: "linear-gradient(90deg, #1B5C9E 0%, #F5822A 100%)" };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Pipeline progress"
+      className="fixed inset-0 z-[9999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center"
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => { if (running) e.preventDefault(); }}
+    >
+      <div className="w-[460px] max-w-[92vw] bg-white rounded-lg shadow-2xl border border-slate-200 overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-200">
+          <div className="flex items-center gap-3">
+            {running ? (
+              <Loader2 className="w-5 h-5 animate-spin" style={{ color: "#1B5C9E" }} />
+            ) : error ? (
+              <CircleAlert className="w-5 h-5 text-rose-600" />
+            ) : (
+              <Check className="w-5 h-5 text-emerald-600" />
+            )}
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold text-slate-800 truncate">
+                {headerTitle}
+              </div>
+              <div className="text-[11px] text-slate-500">
+                {completedCount}/{total} steps · {percent}%
+                {running ? " — please don't close this window" : ""}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 h-2 w-full rounded bg-slate-100 overflow-hidden">
+            <div
+              className="h-full transition-[width] duration-200 ease-out"
+              style={{ width: `${percent}%`, ...barStyle }}
+              aria-valuenow={percent}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              role="progressbar"
+            />
+          </div>
+        </div>
+
+        <ul className="max-h-[60vh] overflow-y-auto styles-scrollbar divide-y divide-slate-100">
+          {steps.map(s => (
+            <li
+              key={s.n}
+              className={`px-5 py-2.5 flex items-center gap-3 ${
+                s.status === "fail" ? "bg-rose-50" : ""
+              }`}
+              style={
+                s.status === "ok"
+                  ? { animation: "pipeline-step-complete 0.5s ease-out 1 both" }
+                  : s.status === "fail"
+                  ? { animation: "pipeline-step-fail 0.5s ease-out 1 both" }
+                  : undefined
+              }
+            >
+              <StepIcon status={s.status} />
+              <div className="flex-1 min-w-0">
+                <div className={`text-[12px] truncate ${
+                  s.status === "fail" ? "text-rose-700 font-semibold" : "text-slate-700"
+                }`}>
+                  Step {s.n} — {s.title}
+                </div>
+                {s.detail ? (
+                  <div className={`text-[10px] truncate ${
+                    s.status === "fail" ? "text-rose-600" : "text-slate-500"
+                  }`}>
+                    {s.detail}
+                  </div>
+                ) : s.status === "ok" && s.durationMs != null ? (
+                  <div className="text-[10px] text-slate-500">
+                    Completed in {formatDuration(s.durationMs)}
+                  </div>
+                ) : s.status === "skip" && s.durationMs != null ? (
+                  <div className="text-[10px] text-amber-700">
+                    Skipped after {formatDuration(s.durationMs)}
+                  </div>
+                ) : s.status === "running" ? (
+                  <div className="text-[10px]" style={{ color: "#1B5C9E" }}>Processing…</div>
+                ) : null}
+              </div>
+              <StepBadge status={s.status} />
+            </li>
+          ))}
+        </ul>
+
+        <div className="px-5 py-3 border-t border-slate-200 flex items-center justify-end gap-2 bg-slate-50">
+          {error && (
+            <div className="flex-1 text-[11px] text-rose-700 truncate" title={error}>
+              {error}
+            </div>
+          )}
+          {!running && (
+            <Button variant="primary" size="sm" onClick={onDismiss}>
+              Close
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <style>{`
+        @keyframes pipeline-step-complete {
+          0%   { background-color: rgba(16,185,129,0.22); }
+          100% { background-color: transparent; }
+        }
+        @keyframes pipeline-step-fail {
+          0%   { background-color: rgba(244,63,94,0.30); }
+          100% { background-color: rgb(255,241,242); }
+        }
+        @keyframes pipeline-icon-pop {
+          0%   { transform: scale(0.6); opacity: 0; }
+          60%  { transform: scale(1.15); opacity: 1; }
+          100% { transform: scale(1);   opacity: 1; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function StepIcon({ status }: { status: StepStatus }) {
+  const popStyle = { animation: "pipeline-icon-pop 0.32s ease-out 1 both" };
+  if (status === "running") return <Loader2 className="w-4 h-4 animate-spin" style={{ color: "#1B5C9E" }} />;
+  if (status === "ok")      return <Check     className="w-4 h-4 text-emerald-600" style={popStyle} />;
+  if (status === "skip")    return <span      className="w-4 h-4 inline-block text-amber-600 text-[14px] leading-none" style={popStyle}>⏭</span>;
+  if (status === "fail")    return <CircleAlert className="w-4 h-4 text-rose-600" style={popStyle} />;
+  return <span className="w-4 h-4 rounded-full border border-slate-300 inline-block" />;
+}
+
+function StepBadge({ status }: { status: StepStatus }) {
+  const map: Record<StepStatus, { label: string; cls: string; style?: React.CSSProperties }> = {
+    pending: { label: "Pending",     cls: "bg-slate-100 text-slate-500" },
+    running: {
+      label: "Processing…",
+      cls: "",
+      style: { backgroundColor: "rgba(27,92,158,0.12)", color: "#1B5C9E" },
+    },
+    ok:      { label: "Completed",   cls: "bg-emerald-100 text-emerald-700" },
+    skip:    { label: "Skipped",     cls: "bg-amber-100 text-amber-800" },
+    fail:    { label: "Failed",      cls: "bg-rose-100 text-rose-700" },
+  };
+  const cur = map[status];
+  return (
+    <span
+      className={`text-[9.5px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded ${cur.cls}`}
+      style={cur.style}
+    >
+      {cur.label}
+    </span>
   );
 }

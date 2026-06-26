@@ -1557,10 +1557,13 @@ def _ref_review_styles() -> list:
     ]
 
 
-def run_structuring_pipeline(db: Session, *, file_id: int, logger) -> dict:
+def run_structuring_pipeline(db: Session, *, file_id: int, logger, on_event=None) -> dict:
     """
     Run the 10-step docx_pipeline on the current processed DOCX for a file.
     Returns {"status": "ok", "content": str, "file_id": int}.
+
+    on_event: optional callable invoked for each step + final summary event,
+    enabling streaming progress updates to the client.
     """
     import shutil
     import sys
@@ -1586,7 +1589,7 @@ def run_structuring_pipeline(db: Session, *, file_id: int, logger) -> dict:
         output_dir = Path(tmp_dir)
 
         logger.info(f"Running docx_pipeline on file {file_id}: {processed_path}")
-        result = process_file(input_path, output_dir)
+        result = process_file(input_path, output_dir, on_event=on_event)
 
         if result["status"] == "error":
             issues = "; ".join(
