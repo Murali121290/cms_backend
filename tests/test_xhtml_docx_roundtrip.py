@@ -331,3 +331,71 @@ class TestXhtmlTableCellFormatting:
         # Verify table still exists in output
         doc = Document(result)
         assert len(doc.tables) > 0
+
+
+class TestXhtmlNestedInlineSdts:
+    """Tests to verify that nested inline SDTs are preserved in the roundtrip."""
+
+    def test_nested_inline_sdt_roundtrip(self):
+        from app.processing.docx_to_xhtml_runs import _paragraph_content_to_html
+        from docx import Document
+        from lxml import etree
+        
+        # 1. Create a paragraph with a nested inline SDT manually
+        # [FigureRef [Figure Fig. ] [ChapNo 8] . [SeqNo 3] ]
+        doc = Document()
+        p = doc.add_paragraph()
+        p_el = p._p
+        
+        # Outer SDT
+        outer_sdt = etree.SubElement(p_el, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sdt")
+        outer_sdtPr = etree.SubElement(outer_sdt, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sdtPr")
+        alias_el = etree.SubElement(outer_sdtPr, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}alias")
+        alias_el.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val", "FigureRef")
+        outer_sdtContent = etree.SubElement(outer_sdt, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sdtContent")
+        
+        # Inner SDT 1 (Figure)
+        inner_sdt1 = etree.SubElement(outer_sdtContent, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sdt")
+        inner_sdtPr1 = etree.SubElement(inner_sdt1, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sdtPr")
+        alias_el1 = etree.SubElement(inner_sdtPr1, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}alias")
+        alias_el1.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val", "Figure")
+        inner_sdtContent1 = etree.SubElement(inner_sdt1, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sdtContent")
+        r1 = etree.SubElement(inner_sdtContent1, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r")
+        t1 = etree.SubElement(r1, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t")
+        t1.text = "Fig."
+        
+        # Inner SDT 2 (ChapNo)
+        inner_sdt2 = etree.SubElement(outer_sdtContent, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sdt")
+        inner_sdtPr2 = etree.SubElement(inner_sdt2, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sdtPr")
+        alias_el2 = etree.SubElement(inner_sdtPr2, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}alias")
+        alias_el2.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val", "ChapNo")
+        inner_sdtContent2 = etree.SubElement(inner_sdt2, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sdtContent")
+        r2 = etree.SubElement(inner_sdtContent2, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r")
+        t2 = etree.SubElement(r2, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t")
+        t2.text = "8"
+        
+        # Dot run in between
+        r_dot = etree.SubElement(outer_sdtContent, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r")
+        t_dot = etree.SubElement(r_dot, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t")
+        t_dot.text = "."
+        
+        # Inner SDT 3 (SeqNo)
+        inner_sdt3 = etree.SubElement(outer_sdtContent, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sdt")
+        inner_sdtPr3 = etree.SubElement(inner_sdt3, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sdtPr")
+        alias_el3 = etree.SubElement(inner_sdtPr3, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}alias")
+        alias_el3.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val", "SeqNo")
+        inner_sdtContent3 = etree.SubElement(inner_sdt3, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sdtContent")
+        r3 = etree.SubElement(inner_sdtContent3, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r")
+        t3 = etree.SubElement(r3, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t")
+        t3.text = "3"
+        
+        # 2. Render to HTML
+        html_out = _paragraph_content_to_html(p_el, p, doc)
+        
+        # Verify the HTML structure retains nested spans with aliases
+        assert 'class="sdt-inline"' in html_out
+        assert 'data-alias="FigureRef"' in html_out
+        assert 'data-alias="Figure"' in html_out
+        assert 'data-alias="ChapNo"' in html_out
+        assert 'data-alias="SeqNo"' in html_out
+

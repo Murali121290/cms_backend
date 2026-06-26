@@ -1,4 +1,4 @@
-﻿"""
+"""
 pipeline/step8_content_controls.py â€” SDT (content control) grouping and Nested Regex Tagging.
 
 Creates two kinds of Word Structured Document Tags:
@@ -23,7 +23,8 @@ from copy import deepcopy
 from lxml import etree
 from docx import Document
 from docx_pipeline.config import (
-    CAPTION_BOUNDARY_STYLES, CAPTION_GROUP_STYLES, SDT_TAG_TABLEGROUP, BX_STYLE_RE
+    CAPTION_BOUNDARY_STYLES, CAPTION_GROUP_STYLES, SDT_TAG_TABLEGROUP, BX_STYLE_RE,
+    FIGURE_CAPTION_STYLE, TABLE_CAPTION_STYLE
 )
 from docx_pipeline.utils.sdt_builder import make_block_sdt, make_inline_sdt
 from docx_pipeline.utils.report import ReportLogger
@@ -248,28 +249,31 @@ def _collect_group(body: etree._Element, anchor_idx: int, is_table: bool) -> lis
     group    = [children[anchor_idx]]
     i        = anchor_idx + 1
 
-    if is_table:
-        if i < len(children) and children[i].tag == W_ + "tbl":
-            group.append(children[i])
-            i += 1
+    has_table = False
 
     while i < len(children):
-        el    = children[i]
-        sname = _xml_style(el) if el.tag == W_ + "p" else None
+        el = children[i]
+        tag_name = etree.QName(el.tag).localname
 
-        if sname in CAPTION_BOUNDARY_STYLES:
-            break
-        if el.tag == W_ + "tbl":
-            break
-
-        if el.tag == W_ + "p":
+        if tag_name == "p":
+            sname = _xml_style(el)
+            if sname in CAPTION_BOUNDARY_STYLES:
+                break
             text = _xml_text(el).strip()
             if sname in CAPTION_GROUP_STYLES or not text:
                 group.append(el)
                 i += 1
                 continue
             break
-        i += 1
+        elif tag_name == "tbl":
+            if is_table and not has_table:
+                group.append(el)
+                has_table = True
+                i += 1
+                continue
+            break
+        else:
+            break
     return group
 
 def _process_block_sdts(body: etree._Element, logger: ReportLogger) -> int:
@@ -281,11 +285,11 @@ def _process_block_sdts(body: etree._Element, logger: ReportLogger) -> int:
         el    = children[i]
         sname = _xml_style(el) if el.tag == W_ + "p" else None
 
-        if sname not in ("FIG-LEG", "FGC", "T1", "TT"):
+        if sname not in CAPTION_BOUNDARY_STYLES:
             i += 1
             continue
 
-        is_table = (sname in ("T1", "TT"))
+        is_table = (sname in TABLE_CAPTION_STYLE)
         cap_type = "Table" if is_table else "Figure"
 
         # Apply Caption Regex first dynamically creating inner SDTs
@@ -319,7 +323,7 @@ def _process_inline_sdts(body: etree._Element, logger: ReportLogger) -> int:
     count = 0
     for para in body.iter(W_ + "p"):
         sname = _xml_style(para)
-        if sname in ("FIG-LEG", "FGC", "T1", "TT"):
+        if sname in CAPTION_BOUNDARY_STYLES:
             continue
             
         flags = _process_paragraph_regex(para, logger, is_caption=False)

@@ -130,23 +130,16 @@ def _find_run_by_bookmark(para, bookmark_name: str):
 
 
 def _build_bookmark_para_index(doc) -> dict:
-    """Builds an O(1) lookup index from bookmark names to their containing paragraphs."""
+    """Builds an O(1) lookup index from bookmark names to their containing paragraphs,
+    searching all paragraphs including those inside w:sdt/w:sdtContent elements."""
+    import docx.text.paragraph
     index = {}
-    for para in doc.paragraphs:
-        for child in para._p:
+    for p_elem in doc.element.body.iter(qn("w:p")):
+        for child in p_elem:
             if child.tag == qn("w:bookmarkStart"):
                 name = child.get(qn("w:name"), "")
                 if name:
-                    index[name] = para
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                for para in cell.paragraphs:
-                    for child in para._p:
-                        if child.tag == qn("w:bookmarkStart"):
-                            name = child.get(qn("w:name"), "")
-                            if name:
-                                index[name] = para
+                    index[name] = docx.text.paragraph.Paragraph(p_elem, doc)
     return index
 
 
@@ -304,7 +297,7 @@ class XhtmlToDocxDeltaEngine:
         p_elem = para._element
         for child in list(p_elem):
             tag_name = etree.QName(child.tag).localname
-            if tag_name in ('r', 'ins', 'del', 'hyperlink'):
+            if tag_name in ('r', 'ins', 'del', 'hyperlink', 'sdt'):
                 p_elem.remove(child)
             elif tag_name in ('bookmarkStart', 'bookmarkEnd'):
                 name = child.get(qn('w:name'), '')
@@ -555,6 +548,58 @@ class XhtmlToDocxDeltaEngine:
                     current_xml_parent.append(ins_node)
                 
                 # 3. Handle tail text of the span element (tail inherits parent's is_del scope)
+                if el.tail:
+                    add_rich_run(
+                        parent_xml, el.tail,
+                        bold=bold, italic=italic, underline=underline, strike=strike,
+                        color=color, bg_color=bg_color, font_size=font_size, font_name=font_name,
+                        superscript=superscript, subscript=subscript, is_link=is_link,
+                        is_del=is_del, char_style=char_style
+                    )
+                return
+
+            if tag == 'span' and 'sdt-inline' in (el.get("class") or "").split():
+                alias = el.get("data-alias") or ""
+                tag_val = el.get("data-tag") or ""
+                
+                sdt = OxmlElement('w:sdt')
+                sdtPr = OxmlElement('w:sdtPr')
+                al = OxmlElement('w:alias')
+                al.set(qn('w:val'), alias)
+                sdtPr.append(al)
+                tg = OxmlElement('w:tag')
+                tg.set(qn('w:val'), tag_val)
+                sdtPr.append(tg)
+                sdt.append(sdtPr)
+                
+                sdtContent = OxmlElement('w:sdtContent')
+                sdt.append(sdtContent)
+                
+                current_xml_parent.append(sdt)
+                
+                node_font_name = font_name
+                if "font-family" in styles:
+                    raw_family = styles["font-family"].strip()
+                    first_font = raw_family.split(',')[0].strip().replace("'", "").replace('"', '').strip()
+                    node_font_name = first_font if first_font else None
+
+                if el.text:
+                    add_rich_run(
+                        sdtContent, el.text,
+                        bold=current_bold, italic=current_italic, underline=current_underline, strike=current_strike,
+                        color=node_color, bg_color=node_bg, font_size=node_font_size, font_name=node_font_name,
+                        superscript=current_super, subscript=current_sub, is_link=current_link,
+                        is_del=current_is_del, char_style=node_char_style
+                    )
+                for child in el:
+                    traverse(
+                        child, sdtContent,
+                        bold=current_bold, italic=current_italic, underline=current_underline, strike=current_strike,
+                        color=node_color, bg_color=node_bg, font_size=node_font_size, font_name=node_font_name,
+                        superscript=current_super, subscript=current_sub, is_link=current_link,
+                        char_style=node_char_style, is_del=current_is_del
+                    )
+                
                 if el.tail:
                     add_rich_run(
                         parent_xml, el.tail,

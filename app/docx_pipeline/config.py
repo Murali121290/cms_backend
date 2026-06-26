@@ -151,7 +151,7 @@ STYLE_PROPERTY_MAP: dict[str, frozenset] = {
 FIGURE_CAPTION_STYLE = "FigureLegend", "FGC", "FIG-LEG"
 TABLE_CAPTION_STYLE  = "TableCaption", "TT", "T1"
 
-CAPTION_BOUNDARY_STYLES = {FIGURE_CAPTION_STYLE, TABLE_CAPTION_STYLE}
+CAPTION_BOUNDARY_STYLES = set(FIGURE_CAPTION_STYLE) | set(TABLE_CAPTION_STYLE)
 
 # Styles consumed into a caption group (source, footnote, abbrev lines)
 CAPTION_GROUP_STYLES = {

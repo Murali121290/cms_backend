@@ -65,36 +65,96 @@ def _get_run_track_change_info(run):
 
 def _get_all_paragraph_runs(para):
     """
-    Get all runs from a paragraph, including those inside w:ins and w:del elements.
-    Returns a list of (run, track_change_parent) tuples where track_change_parent is
-    the w:ins/w:del element if the run is inside one, else None.
+    Get all runs from a paragraph, including those inside w:ins, w:del, and w:sdt elements.
+    Returns a list of (run, track_change_parent, sdt_alias, sdt_tag) tuples.
+    sdt_alias/sdt_tag are set when the run comes from inside an inline w:sdt, else None.
     """
     from docx.text.run import Run
 
     all_runs = []
     p_elem = para._p
 
+    def _collect_sdt_runs(sdt_elem, outer_alias, outer_tag):
+        """Collect all leaf runs from an inline w:sdt, tagged with the outermost alias/tag."""
+        sdt_content = sdt_elem.find(qn('w:sdtContent'))
+        if sdt_content is None:
+            return
+        for sdt_child in sdt_content:
+            if sdt_child.tag == qn('w:r'):
+                all_runs.append((Run(sdt_child, para), None, outer_alias, outer_tag))
+            elif sdt_child.tag == qn('w:ins'):
+                for r_elem in sdt_child.findall(qn('w:r')):
+                    all_runs.append((Run(r_elem, para), sdt_child, outer_alias, outer_tag))
+            elif sdt_child.tag == qn('w:del'):
+                for r_elem in sdt_child.findall(qn('w:r')):
+                    all_runs.append((Run(r_elem, para), sdt_child, outer_alias, outer_tag))
+            elif sdt_child.tag == qn('w:sdt'):
+                # Nested inline SDT — flatten runs under the outermost alias/tag
+                _collect_sdt_runs(sdt_child, outer_alias, outer_tag)
+
     for child in p_elem:
         child_tag = child.tag
 
-        # Direct w:r elements
         if child_tag == qn('w:r'):
-            run = Run(child, para)
-            all_runs.append((run, None))
+            all_runs.append((Run(child, para), None, None, None))
 
-        # w:ins elements containing w:r
         elif child_tag == qn('w:ins'):
             for r_elem in child.findall(qn('w:r')):
-                run = Run(r_elem, para)
-                all_runs.append((run, child))
+                all_runs.append((Run(r_elem, para), child, None, None))
 
-        # w:del elements containing w:r
         elif child_tag == qn('w:del'):
             for r_elem in child.findall(qn('w:r')):
-                run = Run(r_elem, para)
-                all_runs.append((run, child))
+                all_runs.append((Run(r_elem, para), child, None, None))
+
+        elif child_tag == qn('w:sdt'):
+            alias, tag = _sdt_props(child)
+            _collect_sdt_runs(child, alias, tag)
 
     return all_runs
+
+
+def _sdt_props(sdt_elem) -> tuple:
+    """Extract (alias, tag) strings from a w:sdt element's w:sdtPr. Both default to ''."""
+    W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    W_ = "{%s}" % W_NS
+    sdtPr = sdt_elem.find(W_ + "sdtPr")
+    if sdtPr is None:
+        return "", ""
+    alias_el = sdtPr.find(W_ + "alias")
+    tag_el = sdtPr.find(W_ + "tag")
+    alias = alias_el.get(W_ + "val", "") if alias_el is not None else ""
+    tag = tag_el.get(W_ + "val", "") if tag_el is not None else ""
+    return alias, tag
+
+
+def _render_runs_with_sdt(items, para, doc, findings_by_para=None, para_idx=0) -> str:
+    """
+    Render a list of (run, tc_elem, sdt_alias, sdt_tag) items to HTML.
+    Consecutive runs sharing the same (sdt_alias, sdt_tag) are wrapped in one
+    <span class="sdt-inline"> element. Runs with sdt_alias=None render directly.
+    """
+    para_findings = findings_by_para.get(para_idx, []) if findings_by_para else []
+    parts = []
+    i = 0
+    while i < len(items):
+        run, tc_elem, sdt_alias, sdt_tag = items[i]
+        if sdt_alias is None:
+            parts.append(_run_to_html(run, para, doc, track_change_element=tc_elem, para_findings=para_findings))
+            i += 1
+        else:
+            # Collect consecutive runs with the same (alias, tag)
+            group = []
+            while i < len(items) and (items[i][2], items[i][3]) == (sdt_alias, sdt_tag):
+                r, tc, _, _ = items[i]
+                group.append(_run_to_html(r, para, doc, track_change_element=tc, para_findings=para_findings))
+                i += 1
+            esc_alias = html.escape(sdt_alias, quote=True)
+            esc_tag = html.escape(sdt_tag, quote=True)
+            parts.append(
+                f'<span class="sdt-inline" data-alias="{esc_alias}" data-tag="{esc_tag}">'
+                f'{"".join(group)}</span>'
+            )
+    return "".join(parts)
 
 
 # ─── Bookmark Generation Helpers ──────────────────────────────────────────────
@@ -214,13 +274,14 @@ def _get_or_create_run_bookmark(run, para, doc) -> str:
 
 
 def _get_or_create_table_bookmark(table, doc) -> str:
-    """Finds or creates a unique bookmark wrapping a table."""
+    """Finds or creates a unique bookmark wrapping a table, scoped to its parent container."""
     tbl_elem = table._element
-    body_children = list(doc.element.body)
+    parent = tbl_elem.getparent()
+    parent_children = list(parent) if parent is not None else []
     try:
-        t_idx = body_children.index(tbl_elem)
+        t_idx = parent_children.index(tbl_elem)
         for idx in range(t_idx - 1, -1, -1):
-            elem = body_children[idx]
+            elem = parent_children[idx]
             if elem.tag == qn("w:bookmarkStart"):
                 name = elem.get(qn("w:name"), "")
                 if name.startswith("tbl_bm_"):
@@ -242,11 +303,16 @@ def _get_or_create_table_bookmark(table, doc) -> str:
     bm_end = OxmlElement("w:bookmarkEnd")
     bm_end.set(qn("w:id"), str(next_id))
 
-    try:
-        t_idx = body_children.index(tbl_elem)
-        doc.element.body.insert(t_idx, bm_start)
-        doc.element.body.insert(t_idx + 2, bm_end)
-    except ValueError:
+    if parent is not None:
+        try:
+            t_idx = parent_children.index(tbl_elem)
+            parent.insert(t_idx, bm_start)
+            parent.insert(t_idx + 2, bm_end)
+        except ValueError:
+            parent.append(bm_start)
+            parent.append(tbl_elem)
+            parent.append(bm_end)
+    else:
         doc.element.body.append(bm_start)
         doc.element.body.append(tbl_elem)
         doc.element.body.append(bm_end)
@@ -427,6 +493,112 @@ def _run_to_html(run, para, doc, track_change_element=None, para_findings=None) 
     return span_html
 
 
+def _block_sdt_to_html(sdt_elem, doc, body_p_map=None, findings_by_para=None) -> str:
+    """Render a block-level w:sdt as <div class="sdt-block" data-alias="..." data-tag="...">."""
+    alias, tag = _sdt_props(sdt_elem)
+    esc_alias = html.escape(alias, quote=True)
+    esc_tag = html.escape(tag, quote=True)
+    open_tag = f'<div class="sdt-block" data-alias="{esc_alias}" data-tag="{esc_tag}">'
+
+    sdt_content = sdt_elem.find(qn("w:sdtContent"))
+    if sdt_content is None:
+        return f'{open_tag}<p><br></p></div>'
+
+    inner_blocks = []
+    current_list = []
+
+    for child in sdt_content:
+        child_localname = etree.QName(child.tag).localname
+
+        if child_localname == "p":
+            para = docx.text.paragraph.Paragraph(child, doc)
+            para_idx = body_p_map.get(child, 0) if body_p_map else 0
+            is_list, list_type, ilvl = _get_list_info(para)
+            if is_list:
+                current_list.append((para, para_idx, list_type, ilvl))
+            else:
+                if current_list:
+                    inner_blocks.append(_nested_list_to_html(current_list, doc, findings_by_para=findings_by_para))
+                    current_list = []
+                inner_blocks.append(_paragraph_to_html(para, para_idx, doc, findings_by_para=findings_by_para))
+
+        elif child_localname == "tbl":
+            if current_list:
+                inner_blocks.append(_nested_list_to_html(current_list, doc, findings_by_para=findings_by_para))
+                current_list = []
+            table = docx.table.Table(child, doc)
+            inner_blocks.append(_table_to_html(table, doc, body_p_map=body_p_map, findings_by_para=findings_by_para))
+
+        elif child_localname == "sdt":
+            if current_list:
+                inner_blocks.append(_nested_list_to_html(current_list, doc, findings_by_para=findings_by_para))
+                current_list = []
+            inner_blocks.append(_block_sdt_to_html(child, doc, body_p_map=body_p_map, findings_by_para=findings_by_para))
+
+    if current_list:
+        inner_blocks.append(_nested_list_to_html(current_list, doc, findings_by_para=findings_by_para))
+
+    if not inner_blocks:
+        inner_blocks.append("<p><br></p>")
+
+    return f'{open_tag}{"".join(inner_blocks)}</div>'
+
+
+def _paragraph_content_to_html(p_elem, para, doc, findings_by_para=None, para_idx=0) -> str:
+    """
+    Recursively renders the children of a paragraph element to HTML.
+    Supports nested w:sdt, w:ins, w:del, w:hyperlink, and w:r elements, preserving hierarchy.
+    """
+    from docx.text.run import Run
+
+    para_findings = findings_by_para.get(para_idx, []) if findings_by_para else []
+    parts = []
+    
+    for child in p_elem:
+        tag_local = etree.QName(child.tag).localname
+        
+        if tag_local == 'r':
+            run = Run(child, para)
+            parts.append(_run_to_html(run, para, doc, track_change_element=None, para_findings=para_findings))
+            
+        elif tag_local == 'ins':
+            author_attr = f' data-author="{html.escape(child.get(qn("w:author"), ""))}"' if child.get(qn("w:author")) else ""
+            date_attr = f' data-date="{html.escape(child.get(qn("w:date"), ""))}"' if child.get(qn("w:date")) else ""
+            inner_html = _paragraph_content_to_html(child, para, doc, findings_by_para, para_idx)
+            parts.append(f"<ins{author_attr}{date_attr}>{inner_html}</ins>")
+            
+        elif tag_local == 'del':
+            author_attr = f' data-author="{html.escape(child.get(qn("w:author"), ""))}"' if child.get(qn("w:author")) else ""
+            date_attr = f' data-date="{html.escape(child.get(qn("w:date"), ""))}"' if child.get(qn("w:date")) else ""
+            inner_html = _paragraph_content_to_html(child, para, doc, findings_by_para, para_idx)
+            parts.append(f"<del{author_attr}{date_attr}>{inner_html}</del>")
+            
+        elif tag_local == 'sdt':
+            alias, tag_val = _sdt_props(child)
+            esc_alias = html.escape(alias, quote=True)
+            esc_tag = html.escape(tag_val, quote=True)
+            sdt_content = child.find(qn('w:sdtContent'))
+            if sdt_content is not None:
+                inner_html = _paragraph_content_to_html(sdt_content, para, doc, findings_by_para, para_idx)
+                parts.append(
+                    f'<span class="sdt-inline" data-alias="{esc_alias}" data-tag="{esc_tag}">'
+                    f'{inner_html}</span>'
+                )
+            else:
+                parts.append(f'<span class="sdt-inline" data-alias="{esc_alias}" data-tag="{esc_tag}"></span>')
+                
+        elif tag_local == 'hyperlink':
+            inner_html = _paragraph_content_to_html(child, para, doc, findings_by_para, para_idx)
+            rId = child.get(qn('r:id'))
+            if rId and rId in para.part.relations:
+                url = para.part.relations[rId].target_ref
+                parts.append(f'<a href="{html.escape(url, quote=True)}">{inner_html}</a>')
+            else:
+                parts.append(inner_html)
+                
+    return "".join(parts)
+
+
 def _paragraph_to_html(para, para_idx: int, doc, findings_by_para=None) -> str:
     """Render a standard body paragraph to HTML."""
     style_name = para.style.name if para.style else "Normal"
@@ -436,11 +608,7 @@ def _paragraph_to_html(para, para_idx: int, doc, findings_by_para=None) -> str:
         if level in {"1", "2", "3", "4", "5", "6"}:
             tag = f"h{level}"
 
-    # Get all runs including those inside track change elements
-    all_runs = _get_all_paragraph_runs(para)
-    para_findings = findings_by_para.get(para_idx, []) if findings_by_para else []
-    runs_html = "".join(_run_to_html(run, para, doc, track_change_element=tc_elem, para_findings=para_findings)
-                        for run, tc_elem in all_runs)
+    runs_html = _paragraph_content_to_html(para._p, para, doc, findings_by_para, para_idx)
     if not runs_html:
         runs_html = "<br>"
 
@@ -470,11 +638,8 @@ def _table_to_html(table, doc, body_p_map=None, findings_by_para=None) -> str:
             for p in cell.paragraphs:
                 # Format each paragraph in the cell
                 p_style = p.style.name if p.style else "Normal"
-                all_runs = _get_all_paragraph_runs(p)
                 para_idx = body_p_map.get(p._element, 0) if body_p_map else 0
-                para_findings = findings_by_para.get(para_idx, []) if findings_by_para else []
-                runs = "".join(_run_to_html(r, p, doc, track_change_element=tc_elem, para_findings=para_findings)
-                               for r, tc_elem in all_runs) or html.escape(p.text)
+                runs = _paragraph_content_to_html(p._p, p, doc, findings_by_para, para_idx)
                 if not runs:
                     runs = "<br>"
                 p_bm = _get_or_create_para_bookmark(p, doc)
@@ -510,11 +675,9 @@ def _footnote_endnote_to_html(doc, findings_by_para=None) -> str:
                 for p_elem in ftn_elem.findall(qn("w:p")):
                     para = docx.text.paragraph.Paragraph(p_elem, doc)
                     p_style = para.style.name if para.style else "FootnoteText"
-                    all_runs = _get_all_paragraph_runs(para)
                     para_idx = 10000 + int(ftn_id)
-                    para_findings = findings_by_para.get(para_idx, []) if findings_by_para else []
-                    runs = "".join(_run_to_html(r, para, doc, track_change_element=tc_elem, para_findings=para_findings)
-                                   for r, tc_elem in all_runs) or html.escape(para.text)
+                    all_items = _get_all_paragraph_runs(para)
+                    runs = _render_runs_with_sdt(all_items, para, doc, findings_by_para, para_idx) or html.escape(para.text)
                     if not runs:
                         runs = "<br>"
                     p_bm = _get_or_create_para_bookmark(para, doc, prefix="fnpara_bm_")
@@ -548,11 +711,9 @@ def _footnote_endnote_to_html(doc, findings_by_para=None) -> str:
                 for p_elem in etn_elem.findall(qn("w:p")):
                     para = docx.text.paragraph.Paragraph(p_elem, doc)
                     p_style = para.style.name if para.style else "EndnoteText"
-                    all_runs = _get_all_paragraph_runs(para)
                     para_idx = 20000 + int(etn_id)
-                    para_findings = findings_by_para.get(para_idx, []) if findings_by_para else []
-                    runs = "".join(_run_to_html(r, para, doc, track_change_element=tc_elem, para_findings=para_findings)
-                                   for r, tc_elem in all_runs) or html.escape(para.text)
+                    all_items = _get_all_paragraph_runs(para)
+                    runs = _render_runs_with_sdt(all_items, para, doc, findings_by_para, para_idx) or html.escape(para.text)
                     if not runs:
                         runs = "<br>"
                     p_bm = _get_or_create_para_bookmark(para, doc, prefix="enpara_bm_")
@@ -663,13 +824,11 @@ def _nested_list_to_html(list_items, doc, findings_by_para=None) -> str:
         label = html.escape(style_name, quote=True)
         bm_name = _get_or_create_para_bookmark(para, doc)
         
-        all_runs = _get_all_paragraph_runs(para)
-        para_findings = findings_by_para.get(para_idx, []) if findings_by_para else []
-        runs_html = "".join(_run_to_html(run, para, doc, track_change_element=tc_elem, para_findings=para_findings)
-                            for run, tc_elem in all_runs)
+        all_items = _get_all_paragraph_runs(para)
+        runs_html = _render_runs_with_sdt(all_items, para, doc, findings_by_para, para_idx)
         if not runs_html:
             runs_html = "<br>"
-            
+
         html_parts.append(
             f'<li>'
             f'<p class="{label}" data-style-label="{label}" data-para-idx="{para_idx}" data-bookmark="{bm_name}">'
@@ -742,6 +901,12 @@ class DocxToXhtmlRunsEngine:
                     current_list = []
                 table = docx.table.Table(element, doc)
                 blocks.append(_table_to_html(table, doc, body_p_map=body_p_map, findings_by_para=findings_by_para))
+
+            elif tag == "sdt":
+                if current_list:
+                    blocks.append(_nested_list_to_html(current_list, doc, findings_by_para=findings_by_para))
+                    current_list = []
+                blocks.append(_block_sdt_to_html(element, doc, body_p_map=body_p_map, findings_by_para=findings_by_para))
 
         # Flush any remaining lists
         if current_list:
