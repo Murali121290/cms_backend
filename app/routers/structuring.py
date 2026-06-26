@@ -1,9 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from sqlalchemy.orm import Session
+import asyncio
+import json
 import os
 import logging
+import queue
+import threading
 from typing import Dict, Any
 
 from app import database
@@ -190,6 +194,62 @@ async def generate_xhtml_endpoint(
 
     result = structuring_review_service.generate_xhtml(db, file_id=file_id, logger=logger)
     return JSONResponse(result)
+
+
+@router.post("/files/{file_id}/structuring/run-pipeline")
+async def run_pipeline_endpoint(
+    file_id: int,
+    user: User = Depends(get_current_user_from_cookie),
+):
+    """
+    Re-run the structuring pipeline on the processed DOCX. Streams NDJSON events
+    as the pipeline progresses so the UI can render per-step progress:
+
+      {"type":"step","step":N,"title":"…","status":"start"|"ok"|"skip"|"fail",…}
+      {"type":"summary","status":"ok"|"error"}
+      {"type":"result","status":"ok","content":"<xhtml>","file_id":N}
+        or  {"type":"result","status":"error","error":"…"}
+    """
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    SENTINEL = object()
+    q: "queue.Queue[object]" = queue.Queue()
+
+    def _worker():
+        # Pipeline work is blocking — run it on a worker thread with its own DB
+        # session so we never share a SQLAlchemy session across threads.
+        worker_db = database.SessionLocal()
+        try:
+            result = structuring_review_service.run_structuring_pipeline(
+                worker_db,
+                file_id=file_id,
+                logger=logger,
+                on_event=lambda ev: q.put(ev),
+            )
+            q.put({"type": "result", **result})
+        except HTTPException as he:
+            q.put({"type": "result", "status": "error", "error": str(he.detail), "code": he.status_code})
+        except Exception as exc:
+            logger.error(f"Unexpected error running pipeline: {exc}", exc_info=True)
+            q.put({"type": "result", "status": "error", "error": str(exc), "code": 500})
+        finally:
+            try:
+                worker_db.close()
+            finally:
+                q.put(SENTINEL)
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+    async def stream():
+        loop = asyncio.get_running_loop()
+        while True:
+            item = await loop.run_in_executor(None, q.get)
+            if item is SENTINEL:
+                break
+            yield json.dumps(item) + "\n"
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson")
 
 
 @router.post("/files/{file_id}/structuring/xhtml")
