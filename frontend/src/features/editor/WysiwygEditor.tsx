@@ -1445,7 +1445,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
                   >
                     <div className="px-2 py-1 text-[10px] uppercase tracking-wider font-bold text-slate-400 border-b border-slate-800 mb-1.5 flex items-center justify-between">
                       <span>Change Style</span>
-                      <span className="px-1.5 py-0.5 bg-slate-800 text-amber-500 rounded text-[9px] font-mono">
+                      <span className="px-1.5 py-0.5 bg-slate-800 text-blue-400 rounded text-[9px] font-mono">
                         {activeGutter.styleLabel}
                       </span>
                     </div>
@@ -1472,7 +1472,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
                             setActiveGutter(null);
                           }}
                           className={`w-full text-left px-2.5 py-1.5 rounded text-xs transition-colors font-semibold flex items-center justify-between cursor-pointer ${activeGutter.styleLabel === style
-                            ? "bg-amber-600 text-white font-bold"
+                            ? "bg-blue-600 text-white font-bold"
                             : "hover:bg-slate-800 text-slate-300 hover:text-white"
                             }`}
                         >
@@ -1487,7 +1487,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
                       <input
                         type="text"
                         placeholder="Add new style..."
-                        className="w-full px-2 py-1.5 bg-slate-900 border border-slate-700/60 rounded text-xs text-slate-200 focus:outline-none focus:border-amber-500 placeholder-slate-500 font-semibold"
+                        className="w-full px-2 py-1.5 bg-slate-900 border border-slate-700/60 rounded text-xs text-slate-200 focus:outline-none focus:border-blue-500 placeholder-slate-500 font-semibold"
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
                             handleAddNewStyleFromGutter(e.currentTarget.value, activeGutter.pos);
@@ -1897,9 +1897,9 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           padding: 0.15rem 0.35rem !important;
           font-size: 0.6rem !important;
           font-weight: 700 !important;
-          background-color: rgba(245, 158, 11, 0.07) !important;
-          border: 1px solid rgba(245, 158, 11, 0.28) !important;
-          color: #b45309 !important;
+          background-color: rgba(59, 130, 246, 0.07) !important;
+          border: 1px solid rgba(59, 130, 246, 0.28) !important;
+          color: #1d4ed8 !important;
           border-radius: 0.25rem !important;
           text-transform: uppercase !important;
           letter-spacing: 0.04em !important;
@@ -1920,9 +1920,9 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         .ProseMirror h4[data-style-label]:hover::after,
         .ProseMirror h5[data-style-label]:hover::after,
         .ProseMirror h6[data-style-label]:hover::after {
-          background-color: rgba(245, 158, 11, 0.18) !important;
-          border-color: rgba(245, 158, 11, 0.6) !important;
-          color: #92400e !important;
+          background-color: rgba(59, 130, 246, 0.18) !important;
+          border-color: rgba(59, 130, 246, 0.6) !important;
+          color: #1e3a8a !important;
           box-shadow: 0 1px 3px rgba(0,0,0,0.06) !important;
         }
 
