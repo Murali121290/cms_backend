@@ -25,6 +25,7 @@ import {
   Eye,
   CornerDownRight,
   RotateCcw,
+  ArrowLeftRight,
 } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
@@ -569,6 +570,7 @@ export function ReferenceValidationReviewPage() {
   // Pending merge queue — merges are staged here and applied on "Apply Merges"
   const [pendingMerges, setPendingMerges] = useState<Array<{ canonical: number; duplicate: number }>>([]);
   const [resolvedDups, setResolvedDups] = useState<Set<string>>(new Set());
+  const [appliedFixes, setAppliedFixes] = useState<Set<string>>(new Set());
 
   // Tab
   const [activeTab, setActiveTab] = useState<"citations" | "structuring" | "logs" | "trackedChanges" | "issues" | "missing">("citations");
@@ -596,17 +598,29 @@ export function ReferenceValidationReviewPage() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchSource, setSearchSource] = useState<"pubmed" | "crossref" | null>(null);
 
-  const getReferenceHTML = (paraIdx: number): string => {
+  // Ref-based cache for the parsed editor document to avoid redundant DOMParser calls
+  const editorHtmlCache = useRef<{ html: string; doc: Document | null }>({ html: "", doc: null });
+
+  const getParsedEditorDoc = (): Document | null => {
     const editor = editorRef.current?.editor;
-    if (!editor) return "";
+    if (!editor) return null;
+    const html = editor.getHTML();
+    if (editorHtmlCache.current.html === html && editorHtmlCache.current.doc) {
+      return editorHtmlCache.current.doc;
+    }
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
+    editorHtmlCache.current = { html, doc };
+    return doc;
+  };
+
+  const getReferenceHTML = (paraIdx: number): string => {
+    const doc = getParsedEditorDoc();
+    if (!doc) return "";
 
     if (paraIdx === undefined || paraIdx === null || typeof paraIdx !== "number" || Number.isNaN(paraIdx) || paraIdx < 0) {
       return "";
     }
-
-    const html = editor.getHTML();
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, "text/html");
     
     // Find the block by its data-para-idx attribute first (accurate mapping)
     const targetBlock = doc.body.querySelector(`[data-para-idx="${paraIdx}"]`) || 
@@ -1229,6 +1243,34 @@ export function ReferenceValidationReviewPage() {
   const matchedCount = citationPairs.filter((p: any) => p.status === "ok").length;
   const issueCount = citationPairs.filter((p: any) => p.status !== "ok").length;
 
+  // Inline fix helper — before/after diff strip + Accept Fix / Applied button
+  const IssueFix = ({ issue }: { issue: any }) => {
+    if (!issue.original_text || !issue.corrected_text || issue.original_text === issue.corrected_text) return null;
+    const fixKey = `${issue.type}:${issue.para_idx}:${issue.original_text}`;
+    const isApplied = appliedFixes.has(fixKey);
+    return (
+      <div className="space-y-1.5 mt-1.5">
+        <div className="flex items-start gap-2 bg-white border border-slate-200 rounded px-2 py-1.5 text-[10px] font-mono leading-snug">
+          <span className="text-red-600 line-through break-all">{issue.original_text}</span>
+          <span className="text-slate-400 shrink-0">→</span>
+          <span className="text-emerald-700 font-semibold break-all">{issue.corrected_text}</span>
+        </div>
+        {isApplied ? (
+          <div className="flex items-center gap-1 text-[10px] font-bold text-emerald-700">
+            <Check className="w-3 h-3" /> Applied in editor
+          </div>
+        ) : (
+          <button
+            onClick={() => applyIssueFix(issue)}
+            className="text-[10px] font-bold px-2.5 py-1 rounded bg-navy-700 text-white hover:bg-navy-900 flex items-center gap-1 transition-colors cursor-pointer"
+          >
+            <Check className="w-3 h-3" /> Accept Fix
+          </button>
+        )}
+      </div>
+    );
+  };
+
   // Scan for cite_bib spans and update citation pair status in real-time
   const rescanCitationLinks = useCallback(() => {
     const editor = editorRef.current?.editor;
@@ -1743,6 +1785,63 @@ export function ReferenceValidationReviewPage() {
     queueMerge(dup);
   };
 
+  // Apply a single issue's auto-correction to the editor as a tracked change
+  const applyIssueFix = (issue: any) => {
+    const { original_text, corrected_text } = issue;
+    if (!original_text || !corrected_text || original_text === corrected_text) return;
+    const editor = editorRef.current?.editor;
+    if (!editor) return;
+
+    const author = viewer?.username || "Editor";
+    const date = new Date().toISOString();
+    const escaped = original_text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    const currentHtml = editor.getHTML();
+    const newHtml = currentHtml.replace(
+      new RegExp(escaped),
+      `<del class="tc-delete" data-author="${author}" data-date="${date}">${original_text}</del>` +
+      `<ins class="tc-insert" data-author="${author}" data-date="${date}">${corrected_text}</ins>`
+    );
+    if (newHtml === currentHtml) return;
+
+    editor.commands.setContent(newHtml, false);
+    setAppliedFixes((prev) => new Set([...prev, `${issue.type}:${issue.para_idx}:${original_text}`]));
+  };
+
+  // Batch-apply all fixable corrections from a log result (called after Validate)
+  const applyAllFixes = (issueList: any[]) => {
+    const editor = editorRef.current?.editor;
+    if (!editor) return;
+
+    const fixable = issueList.filter(
+      (i) => i.original_text && i.corrected_text && i.original_text !== i.corrected_text
+    );
+    if (!fixable.length) return;
+
+    const author = viewer?.username || "Editor";
+    const date = new Date().toISOString();
+    let html = editor.getHTML();
+    const newApplied = new Set(appliedFixes);
+
+    fixable.forEach((issue) => {
+      const key = `${issue.type}:${issue.para_idx}:${issue.original_text}`;
+      if (newApplied.has(key)) return;
+      const escaped = (issue.original_text as string).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const replaced = html.replace(
+        new RegExp(escaped),
+        `<del class="tc-delete" data-author="${author}" data-date="${date}">${issue.original_text}</del>` +
+        `<ins class="tc-insert" data-author="${author}" data-date="${date}">${issue.corrected_text}</ins>`
+      );
+      if (replaced !== html) {
+        html = replaced;
+        newApplied.add(key);
+      }
+    });
+
+    editor.commands.setContent(html, false);
+    setAppliedFixes(newApplied);
+  };
+
   // Reorder / sort bibliography alphabetically (APA style)
   const sortBibliographyAlphabetically = () => {
     const editor = editorRef.current?.editor;
@@ -2057,9 +2156,21 @@ export function ReferenceValidationReviewPage() {
                         setLocalValidationLogs(result.validation_logs);
                         await reviewQuery.refetch();
                         setLastValidatedAt(new Date());
-                        // Auto-switch to Issues tab if duplicates are found
-                        const hasDups = (result.validation_logs?.duplicates?.length ?? 0) > 0;
-                        setActiveTab(hasDups ? "issues" : "citations");
+
+                        // Batch-apply all auto-corrections as track changes
+                        const vl = result.validation_logs as any;
+                        const allFixable = [
+                          ...(vl?.et_al_issues ?? []),
+                          ...(vl?.name_spelling_warnings ?? []),
+                          ...(vl?.issues?.filter((i: any) => i.type === "year_mismatch") ?? []),
+                        ].filter((i: any) => i.original_text && i.corrected_text);
+                        if (allFixable.length > 0) {
+                          applyAllFixes(allFixable);
+                          setActiveTab("trackedChanges");
+                        } else {
+                          const hasDups = (vl?.duplicates?.length ?? 0) > 0;
+                          setActiveTab(hasDups ? "issues" : "citations");
+                        }
                       }
                     }}
                     isLoading={saveMutation.isPending || validateOnlyMutation.isPending}
@@ -2071,85 +2182,81 @@ export function ReferenceValidationReviewPage() {
               </div>
             </div>
 
-            {/* Sidebar Tabs */}
-            <div className="flex border-b border-navy-200 bg-surface-100 px-1 pt-1 gap-0.5">
-              <button
-                onClick={() => setActiveTab("citations")}
-                className={`flex-1 py-3 text-center text-xs font-bold border-b-2 transition-all flex items-center justify-center gap-1.5 rounded-t-md ${activeTab === "citations"
-                    ? "border-navy-800 text-navy-800 bg-white shadow-sm -mb-px"
-                    : "border-transparent text-navy-400 hover:text-navy-600 hover:bg-white/60"
-                  }`}
-              >
-                <Layers className="w-3.5 h-3.5" />
-                Citations & References
-                {(logs.citation_pairs?.filter((p: any) => p.status !== "ok").length || 0) > 0 && (
-                  <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] bg-error-100 text-error-600 border border-error-100 font-bold leading-none">
-                    {logs.citation_pairs?.filter((p: any) => p.status !== "ok").length}
-                  </span>
-                )}
-              </button>
-              <button
-                onClick={() => setActiveTab("structuring")}
-                className={`flex-1 py-3 text-center text-xs font-bold border-b-2 transition-all flex items-center justify-center gap-1.5 rounded-t-md ${activeTab === "structuring"
-                    ? "border-navy-800 text-navy-800 bg-white shadow-sm -mb-px"
-                    : "border-transparent text-navy-400 hover:text-navy-600 hover:bg-white/60"
-                  }`}
-              >
-                <Hash className="w-3.5 h-3.5" />
-                Structuring Review
-                {(logs.reference_entries?.filter((e: any) => !e.is_cited).length || 0) > 0 && (
-                  <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] bg-warning-100 text-warning-600 border border-warning-100 font-bold leading-none">
-                    {logs.reference_entries?.filter((e: any) => !e.is_cited).length}
-                  </span>
-                )}
-              </button>
-              <button
-                onClick={() => setActiveTab("trackedChanges")}
-                className={`flex-1 py-3 text-center text-xs font-bold border-b-2 transition-all flex items-center justify-center gap-1.5 rounded-t-md ${activeTab === "trackedChanges"
-                    ? "border-navy-800 text-navy-800 bg-white shadow-sm -mb-px"
-                    : "border-transparent text-navy-400 hover:text-navy-600 hover:bg-white/60"
-                  }`}
-              >
-                Tracked Changes
-              </button>
-              {(logs.duplicates?.length || 0) > 0 || (logs.sequence_issues?.length || 0) > 0 ? (
-                <button
-                  onClick={() => setActiveTab("issues")}
-                  className={`flex-1 py-3 text-center text-xs font-bold border-b-2 transition-all flex items-center justify-center gap-1.5 rounded-t-md ${activeTab === "issues"
-                      ? "border-navy-800 text-navy-800 bg-white shadow-sm -mb-px"
-                      : "border-transparent text-navy-400 hover:text-navy-600 hover:bg-white/60"
-                    }`}
-                >
-                  <AlertTriangle className="w-3.5 h-3.5" />
-                  Issues
-                  <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] bg-warning-100 text-warning-600 border border-warning-100 font-bold leading-none">
-                    {(logs.duplicates?.length || 0) + (logs.sequence_issues?.length || 0)}
-                  </span>
-                </button>
-              ) : null}
-              <button
-                onClick={() => setActiveTab("missing")}
-                className={`flex-1 py-3 text-center text-xs font-bold border-b-2 transition-all flex items-center justify-center gap-1.5 rounded-t-md ${activeTab === "missing"
-                    ? "border-navy-800 text-navy-800 bg-white shadow-sm -mb-px"
-                    : "border-transparent text-navy-400 hover:text-navy-600 hover:bg-white/60"
-                  }`}
-              >
-                <AlertCircle className="w-3.5 h-3.5" />
-                Missing Refs
-              </button>
-              {logs.raw_log && (
-                <button
-                  onClick={() => setActiveTab("logs")}
-                  className={`flex-grow-0 px-4 py-3 text-center text-xs font-bold border-b-2 transition-all flex items-center justify-center gap-1.5 rounded-t-md ${activeTab === "logs"
-                      ? "border-navy-800 text-navy-800 bg-white shadow-sm -mb-px"
-                      : "border-transparent text-navy-400 hover:text-navy-600 hover:bg-white/60"
-                    }`}
-                >
-                  <Terminal className="w-3.5 h-3.5" />
-                  Logs
-                </button>
-              )}
-            </div>
+            {/* Sidebar Tabs — stacked icon + micro-label, flex-1 so all fit without scrolling */}
+            {(() => {
+              const amaIssueCount =
+                (logs.duplicates?.length ?? 0) +
+                (logs.sequence_issues?.length ?? 0) +
+                (logs.broken_ranges?.length ?? 0) +
+                (logs.invalid_numbers?.length ?? 0);
+              const apaIssueCount =
+                (logs.et_al_issues?.length ?? 0) +
+                (logs.name_spelling_warnings?.length ?? 0) +
+                (logs.ordering_issues?.length ?? 0) +
+                (logs.suffix_issues?.length ?? 0) +
+                (logs.disambiguation_issues?.length ?? 0);
+              const issueCount = detectedStyle === "AMA" ? amaIssueCount : apaIssueCount;
+              const citeBadge = logs.citation_pairs?.filter((p: any) => p.status !== "ok").length || 0;
+              const structBadge = logs.reference_entries?.filter((e: any) => !e.is_cited).length || 0;
+
+              const tabCls = (id: string) =>
+                `flex-1 py-2 flex flex-col items-center gap-0.5 border-b-2 transition-all cursor-pointer ${
+                  activeTab === id
+                    ? "border-navy-800 text-navy-800 bg-white shadow-sm"
+                    : "border-transparent text-navy-400 hover:text-navy-700 hover:bg-white/60"
+                }`;
+
+              const Badge = ({ count, color = "error" }: { count: number; color?: string }) =>
+                count > 0 ? (
+                  <span className={`absolute -top-1.5 -right-2 min-w-[14px] h-[14px] flex items-center justify-center rounded-full text-[7.5px] font-extrabold px-0.5 leading-none ${
+                    color === "error" ? "bg-red-500 text-white" :
+                    color === "warning" ? "bg-amber-500 text-white" :
+                    "bg-navy-500 text-white"
+                  }`}>{count > 99 ? "99+" : count}</span>
+                ) : null;
+
+              const Label = ({ children }: { children: string }) => (
+                <span className="text-[8px] font-bold uppercase tracking-wide leading-none">{children}</span>
+              );
+
+              return (
+                <div className="flex border-b border-navy-200 bg-surface-100 shrink-0">
+                  <button title="Citations & References" onClick={() => setActiveTab("citations")} className={tabCls("citations")}>
+                    <div className="relative"><Layers className="w-4 h-4" /><Badge count={citeBadge} color="error" /></div>
+                    <Label>Cites</Label>
+                  </button>
+
+                  <button title="Structuring Review" onClick={() => setActiveTab("structuring")} className={tabCls("structuring")}>
+                    <div className="relative"><Hash className="w-4 h-4" /><Badge count={structBadge} color="warning" /></div>
+                    <Label>Struct</Label>
+                  </button>
+
+                  <button title="Tracked Changes" onClick={() => setActiveTab("trackedChanges")} className={tabCls("trackedChanges")}>
+                    <div className="relative"><ArrowLeftRight className="w-4 h-4" /></div>
+                    <Label>Track</Label>
+                  </button>
+
+                  {issueCount > 0 && (
+                    <button title="Issues" onClick={() => setActiveTab("issues")} className={tabCls("issues")}>
+                      <div className="relative"><AlertTriangle className="w-4 h-4" /><Badge count={issueCount} color="warning" /></div>
+                      <Label>Issues</Label>
+                    </button>
+                  )}
+
+                  <button title="Missing & Unused References" onClick={() => setActiveTab("missing")} className={tabCls("missing")}>
+                    <div className="relative"><AlertCircle className="w-4 h-4" /></div>
+                    <Label>Missing</Label>
+                  </button>
+
+                  {logs.raw_log && (
+                    <button title="Raw Logs" onClick={() => setActiveTab("logs")} className={tabCls("logs")}>
+                      <div className="relative"><Terminal className="w-4 h-4" /></div>
+                      <Label>Logs</Label>
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Sidebar Body */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0 bg-surface-50/20">
@@ -2158,24 +2265,19 @@ export function ReferenceValidationReviewPage() {
               {activeTab === "citations" && (
                 <div className="space-y-4 page-enter">
 
-                  {/* Summary Stats Bar */}
-                  <div className="grid grid-cols-2 gap-2 bg-white p-3 border border-navy-100 rounded-lg shadow-sm">
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-[9px] uppercase font-bold text-navy-400 tracking-wider">Total Refs</span>
-                      <span className="text-base font-extrabold text-navy-900">{logs.total_refs || 0}</span>
-                    </div>
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-[9px] uppercase font-bold text-navy-400 tracking-wider">Citations</span>
-                      <span className="text-base font-extrabold text-navy-900">{logs.total_cites || 0}</span>
-                    </div>
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-[9px] uppercase font-bold text-success-600 tracking-wider">Matched</span>
-                      <span className="text-base font-extrabold text-success-700">{matchedCount} / {logs.total_refs || 0}</span>
-                    </div>
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-[9px] uppercase font-bold text-error-600 tracking-wider">Issues</span>
-                      <span className="text-base font-extrabold text-error-700">{issueCount}</span>
-                    </div>
+                  {/* Summary Stats Bar — compact 4-column */}
+                  <div className="grid grid-cols-4 divide-x divide-slate-200 border border-slate-200 rounded-md overflow-hidden">
+                    {([
+                      { label: "Refs",    value: logs.total_refs ?? 0,  cls: "text-navy-800" },
+                      { label: "Cites",   value: logs.total_cites ?? 0, cls: "text-navy-800" },
+                      { label: "Matched", value: matchedCount,           cls: "text-emerald-600" },
+                      { label: "Issues",  value: issueCount,             cls: issueCount > 0 ? "text-red-600" : "text-navy-800" },
+                    ] as const).map(({ label, value, cls }) => (
+                      <div key={label} className="flex flex-col items-start px-2 py-1.5 bg-slate-50">
+                        <span className={`text-[17px] font-extrabold leading-none tabular-nums ${cls}`}>{value}</span>
+                        <span className="text-[8.5px] font-bold uppercase tracking-wide text-slate-400 mt-0.5">{label}</span>
+                      </div>
+                    ))}
                   </div>
 
                   {detectedStyle === "APA" && (
@@ -2358,13 +2460,28 @@ export function ReferenceValidationReviewPage() {
                                     isUnused ? <AlertTriangle className="w-3.5 h-3.5 text-warning-500 shrink-0 mt-0.5" /> :
                                       <CheckCircle2 className="w-3.5 h-3.5 text-success-500 shrink-0 mt-0.5" />}
                                   <div className="flex-1 min-w-0">
-                                    <p className="text-[11px] font-extrabold text-navy-900 break-words leading-tight">
-                                      {pair.citation ? (
-                                        detectedStyle === "AMA" && !pair.citation.includes("[") ? `[${pair.citation}]` : pair.citation
-                                      ) : (
-                                        <span className="text-navy-400 italic">No in-text citation</span>
-                                      )}
-                                    </p>
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <p className="text-[11px] font-extrabold text-navy-900 break-words leading-tight">
+                                        {pair.citation ? (
+                                          detectedStyle === "AMA" && !pair.citation.includes("[") ? `[${pair.citation}]` : pair.citation
+                                        ) : (
+                                          <span className="text-navy-400 italic">No in-text citation</span>
+                                        )}
+                                      </p>
+                                      {detectedStyle === "APA" && isOk && pair.match_score !== undefined && (() => {
+                                        const pct = Math.min(100, Math.round((pair.match_score / 3.5) * 100));
+                                        const cls = pct >= 85
+                                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                          : pct >= 65
+                                          ? "bg-amber-50 text-amber-700 border-amber-200"
+                                          : "bg-red-50 text-red-700 border-red-200";
+                                        return (
+                                          <span className={`text-[9.5px] font-bold px-1.5 py-0.5 rounded border ${cls} shrink-0`} title="Match confidence">
+                                            {pct}%
+                                          </span>
+                                        );
+                                      })()}
+                                    </div>
                                     <p className="text-[10px] text-navy-500 mt-1 truncate">
                                       {isMissing ? "Missing reference entry" :
                                         isUnused ? "Unused reference entry" :
@@ -2404,27 +2521,12 @@ export function ReferenceValidationReviewPage() {
                               <div className="p-3 bg-surface-50/30 border-t border-navy-100/60 space-y-3">
                                 {cardIssues.length > 0 && (
                                   <div className="space-y-1.5">
-                                    {cardIssues.map((issue: any, issueIdx: number) => {
-                                      const isYearMismatch = issue.message.toLowerCase().includes("year") || issue.message.toLowerCase().includes("date") || issue.message.toLowerCase().includes("changed to");
-                                      const yearMatches = issue.message.match(/\b(19|20)\d{2}\b/g);
-                                      const expectedYear = yearMatches && yearMatches.length > 0 ? yearMatches[yearMatches.length - 1] : null;
-
-                                      return (
-                                        <div key={issueIdx} className="text-[10px] font-medium p-2 bg-red-50 text-red-800 rounded border border-red-100 flex flex-col gap-1.5">
-                                          <span>⚠️ {issue.message}</span>
-                                          {isYearMismatch && expectedYear && (
-                                            <button
-                                              onClick={() => {
-                                                quickFixYear(pair.para_idx !== undefined && pair.para_idx >= 0 ? pair.para_idx : issue.para_idx, issue.message, expectedYear);
-                                              }}
-                                              className="w-fit px-2 py-0.5 bg-red-100 hover:bg-red-200 text-red-900 border border-red-300 rounded text-[9px] font-bold transition-all cursor-pointer"
-                                            >
-                                              Quick Fix: Update year to {expectedYear}
-                                            </button>
-                                          )}
-                                        </div>
-                                      );
-                                    })}
+                                    {cardIssues.map((issue: any, issueIdx: number) => (
+                                      <div key={issueIdx} className="text-[10px] font-medium p-2 bg-red-50 text-red-800 rounded border border-red-100 flex flex-col gap-1.5">
+                                        <span>⚠️ {issue.message}</span>
+                                        <IssueFix issue={issue} />
+                                      </div>
+                                    ))}
                                   </div>
                                 )}
 
@@ -2872,16 +2974,386 @@ export function ReferenceValidationReviewPage() {
                       ))}
                     </div>
                   )}
+
+                  {/* ── AMA: Broken Ranges ── */}
+                  {detectedStyle === "AMA" && (logs.broken_ranges?.length || 0) > 0 && (
+                    <div className="space-y-2">
+                      <h4 className="text-[10px] uppercase font-extrabold text-red-600 tracking-wider px-1">
+                        Broken Ranges ({logs.broken_ranges!.length})
+                      </h4>
+                      {logs.broken_ranges!.map((item: any, idx: number) => (
+                        <div key={idx} className="bg-red-50/30 rounded-lg border border-red-100 border-l-[3px] border-l-red-500 p-3 space-y-1.5 shadow-sm">
+                          <div className="flex items-center gap-1.5 text-[10px] font-bold text-red-700">
+                            <AlertTriangle className="w-3 h-3" />
+                            Broken Range · Error
+                          </div>
+                          <p className="font-mono text-[10px] text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1 inline-block">{item.raw}</p>
+                          <p className="text-[11px] text-navy-700">Range is incomplete — ensure both start and end numbers are present (e.g. <span className="font-mono">[1-3]</span>).</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* ── AMA: Invalid Numbers ── */}
+                  {detectedStyle === "AMA" && (logs.invalid_numbers?.length || 0) > 0 && (
+                    <div className="space-y-2">
+                      <h4 className="text-[10px] uppercase font-extrabold text-red-600 tracking-wider px-1">
+                        Invalid Numbers ({logs.invalid_numbers!.length})
+                      </h4>
+                      {logs.invalid_numbers!.map((item: any, idx: number) => (
+                        <div key={idx} className="bg-red-50/30 rounded-lg border border-red-100 border-l-[3px] border-l-red-500 p-3 space-y-1.5 shadow-sm">
+                          <div className="flex items-center gap-1.5 text-[10px] font-bold text-red-700">
+                            <AlertTriangle className="w-3 h-3" />
+                            Invalid Number · Error
+                          </div>
+                          <p className="text-[11px] text-navy-700">{item.message}</p>
+                          <p className="text-[10px] text-slate-500">Reference numbers must be ≥ 1.</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* ── AMA: Format Warnings ── */}
+                  {detectedStyle === "AMA" && (logs.mixed_citation_style || (logs.inline_text_citations?.length || 0) > 0) && (
+                    <div className="space-y-2">
+                      <h4 className="text-[10px] uppercase font-extrabold text-amber-600 tracking-wider px-1">
+                        Format Warnings
+                      </h4>
+                      {logs.mixed_citation_style && (
+                        <div className="bg-amber-50/30 rounded-lg border border-amber-100 border-l-[3px] border-l-amber-400 p-3 space-y-1.5 shadow-sm">
+                          <div className="flex items-center gap-1.5 text-[10px] font-bold text-amber-700">
+                            <AlertTriangle className="w-3 h-3" />
+                            Mixed Citation Styles
+                          </div>
+                          <p className="text-[11px] text-navy-700">Multiple citation formats detected: {logs.mixed_citation_style.styles_found?.join(", ")}. Use a single style throughout.</p>
+                        </div>
+                      )}
+                      {(logs.inline_text_citations || []).map((item: any, idx: number) => (
+                        <div key={idx} className="bg-amber-50/30 rounded-lg border border-amber-100 border-l-[3px] border-l-amber-400 p-3 space-y-1.5 shadow-sm">
+                          <div className="flex items-center gap-1.5 text-[10px] font-bold text-amber-700">
+                            <AlertTriangle className="w-3 h-3" />
+                            Inline Text Citation
+                          </div>
+                          <p className="font-mono text-[10px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1 inline-block">"{item.raw}"</p>
+                          <p className="text-[11px] text-navy-700">{item.message}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* ── APA: et al. Issues ── */}
+                  {detectedStyle === "APA" && (logs.et_al_issues?.length || 0) > 0 && (
+                    <div className="space-y-2">
+                      <h4 className="text-[10px] uppercase font-extrabold text-blue-600 tracking-wider px-1">
+                        et al. Issues ({logs.et_al_issues!.length})
+                      </h4>
+                      {logs.et_al_issues!.map((issue: any, idx: number) => (
+                        <div key={idx} className="bg-blue-50/20 rounded-lg border border-blue-100 border-l-[3px] border-l-blue-500 p-3 space-y-1.5 shadow-sm">
+                          <div className="text-[10px] font-bold text-blue-700">et al. · APA §8.17</div>
+                          <p className="text-[11px] text-navy-800">{issue.message}</p>
+                          {issue.citation && <p className="font-mono text-[10px] text-blue-800 bg-blue-50 border border-blue-200 rounded px-2 py-1 inline-block">{issue.citation}</p>}
+                          <IssueFix issue={issue} />
+                          <button onClick={() => issue.para_idx !== undefined && navigateToDocPara(issue.para_idx)} className="text-[10px] font-bold text-blue-600 hover:underline flex items-center gap-1">
+                            <CornerDownRight className="w-3 h-3" />Locate in editor
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* ── APA: Spelling Mismatches ── */}
+                  {detectedStyle === "APA" && (logs.name_spelling_warnings?.length || 0) > 0 && (
+                    <div className="space-y-2">
+                      <h4 className="text-[10px] uppercase font-extrabold text-amber-600 tracking-wider px-1">
+                        Spelling Mismatches ({logs.name_spelling_warnings!.length})
+                      </h4>
+                      {logs.name_spelling_warnings!.map((issue: any, idx: number) => (
+                        <div key={idx} className="bg-amber-50/20 rounded-lg border border-amber-100 border-l-[3px] border-l-amber-400 p-3 space-y-1.5 shadow-sm">
+                          <div className="text-[10px] font-bold text-amber-700">Spelling · Warning</div>
+                          <p className="text-[11px] text-navy-800">{issue.message}</p>
+                          <IssueFix issue={issue} />
+                          <button onClick={() => issue.para_idx !== undefined && navigateToDocPara(issue.para_idx)} className="text-[10px] font-bold text-blue-600 hover:underline flex items-center gap-1">
+                            <CornerDownRight className="w-3 h-3" />Locate in editor
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* ── APA: Ordering Issues ── */}
+                  {detectedStyle === "APA" && (logs.ordering_issues?.length || 0) > 0 && (
+                    <div className="space-y-2">
+                      <h4 className="text-[10px] uppercase font-extrabold text-purple-600 tracking-wider px-1">
+                        Ordering Issues ({logs.ordering_issues!.length})
+                      </h4>
+                      {logs.ordering_issues!.map((issue: any, idx: number) => (
+                        <div key={idx} className="bg-purple-50/20 rounded-lg border border-purple-100 border-l-[3px] border-l-purple-500 p-3 space-y-1.5 shadow-sm">
+                          <div className="text-[10px] font-bold text-purple-700">Order · APA §9.44</div>
+                          <p className="text-[11px] text-navy-800">{issue.message}</p>
+                          <button onClick={() => issue.para_idx !== undefined && navigateToDocPara(issue.para_idx)} className="text-[10px] font-bold text-blue-600 hover:underline flex items-center gap-1">
+                            <CornerDownRight className="w-3 h-3" />Locate in editor
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* ── APA: Suffix Issues ── */}
+                  {detectedStyle === "APA" && (logs.suffix_issues?.length || 0) > 0 && (
+                    <div className="space-y-2">
+                      <h4 className="text-[10px] uppercase font-extrabold text-orange-600 tracking-wider px-1">
+                        Suffix Issues ({logs.suffix_issues!.length})
+                      </h4>
+                      {logs.suffix_issues!.map((issue: any, idx: number) => (
+                        <div key={idx} className="bg-orange-50/20 rounded-lg border border-orange-100 border-l-[3px] border-l-orange-500 p-3 space-y-1.5 shadow-sm">
+                          <div className="text-[10px] font-bold text-orange-700">Year Suffix · Warning</div>
+                          <p className="text-[11px] text-navy-800">{issue.message}</p>
+                          <IssueFix issue={issue} />
+                          <button onClick={() => issue.para_idx !== undefined && navigateToDocPara(issue.para_idx)} className="text-[10px] font-bold text-blue-600 hover:underline flex items-center gap-1">
+                            <CornerDownRight className="w-3 h-3" />Locate in editor
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* ── APA: Disambiguation ── */}
+                  {detectedStyle === "APA" && (logs.disambiguation_issues?.length || 0) > 0 && (
+                    <div className="space-y-2">
+                      <h4 className="text-[10px] uppercase font-extrabold text-teal-600 tracking-wider px-1">
+                        Disambiguation ({logs.disambiguation_issues!.length})
+                      </h4>
+                      {logs.disambiguation_issues!.map((issue: any, idx: number) => (
+                        <div key={idx} className="bg-teal-50/20 rounded-lg border border-teal-100 border-l-[3px] border-l-teal-500 p-3 space-y-1.5 shadow-sm">
+                          <div className="text-[10px] font-bold text-teal-700">Disambiguation · APA §8.20</div>
+                          <p className="text-[11px] text-navy-800">{issue.message}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* ── APA: All-clear state ── */}
+                  {detectedStyle === "APA" &&
+                    (logs.et_al_issues?.length ?? 0) === 0 &&
+                    (logs.name_spelling_warnings?.length ?? 0) === 0 &&
+                    (logs.ordering_issues?.length ?? 0) === 0 &&
+                    (logs.suffix_issues?.length ?? 0) === 0 &&
+                    (logs.disambiguation_issues?.length ?? 0) === 0 && (
+                    <div className="flex flex-col items-center justify-center py-8 text-center gap-2">
+                      <Check className="w-8 h-8 text-emerald-400" />
+                      <p className="text-[12px] font-semibold text-emerald-700">No APA issues detected</p>
+                      <p className="text-[10px] text-slate-400">et al., spelling, ordering, suffix, and disambiguation all look good.</p>
+                    </div>
+                  )}
+
                   </div>
                 </div>
               )}
 
               {/* ─── TAB: MISSING REFERENCES ─── */}
-              {activeTab === "missing" && (
-                <div className="page-enter h-full">
-                  <MissingReferencesTab fileId={normalizedFileId || 0} />
-                </div>
-              )}
+              {activeTab === "missing" && (() => {
+                const missingPairs = logs.citation_pairs?.filter((p: any) => p.status === "missing") || [];
+                const unusedPairs = logs.citation_pairs?.filter((p: any) => p.status === "unused") || [];
+
+                if (detectedStyle === "AMA") {
+                  return (
+                    <div className="space-y-4 page-enter">
+                      <div>
+                        <h3 className="font-semibold text-gray-900 text-xs mb-1">
+                          Unresolved/Missing Citations
+                        </h3>
+                        <p className="text-xs text-gray-500">
+                          Found {missingPairs.length} citation{missingPairs.length !== 1 ? "s" : ""} cited in text with no matching bibliography entry.
+                        </p>
+                      </div>
+
+                      {missingPairs.length > 0 ? (
+                        <div className="space-y-2">
+                          {missingPairs.map((pair: any, idx: number) => (
+                            <div key={idx} className="p-3 bg-red-50/25 border border-red-200 rounded-lg flex items-center justify-between shadow-sm">
+                              <div>
+                                <span className="text-xs font-extrabold text-red-950 font-mono">
+                                  Citation {pair.citation}
+                                </span>
+                                <span className="block text-[10px] text-slate-400 mt-0.5">
+                                  Paragraph #{pair.para_idx !== undefined ? pair.para_idx + 1 : "unknown"}
+                                </span>
+                              </div>
+                              <button
+                                onClick={() =>
+                                  setLinkingSource({
+                                    type: "citation",
+                                    text: pair.citation || "",
+                                    paraIdx: pair.para_idx || 0,
+                                    key: pair.citation || "",
+                                  })
+                                }
+                                className="text-xs font-bold text-navy-700 hover:underline"
+                              >
+                                Link to Ref
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <EmptyState
+                          title="No missing references"
+                          description="All numerical citations match a bibliography entry."
+                          icon={CheckCircle2}
+                        />
+                      )}
+                    </div>
+                  );
+                } else {
+                  return (
+                    <div className="space-y-4 page-enter">
+                      {/* Section 1: Missing references */}
+                      <div className="space-y-2">
+                        <div>
+                          <h3 className="font-semibold text-gray-900 text-xs mb-1">
+                            Missing references (cited, not in Bib)
+                          </h3>
+                          <p className="text-xs text-gray-500">
+                            These citations exist in the text but have no matching reference in the bibliography list.
+                          </p>
+                        </div>
+
+                        {missingPairs.length > 0 ? (
+                          <div className="space-y-2">
+                            {missingPairs.map((pair: any, idx: number) => (
+                              <div key={idx} className="p-3 bg-red-50/25 border border-red-200 rounded-lg flex items-center justify-between shadow-sm">
+                                <div>
+                                  <span className="text-xs font-extrabold text-red-950 font-mono">
+                                    {pair.citation}
+                                  </span>
+                                  <span className="block text-[10px] text-slate-400 mt-0.5">
+                                    Paragraph #{pair.para_idx !== undefined ? pair.para_idx + 1 : "unknown"}
+                                  </span>
+                                </div>
+                                <button
+                                  onClick={() =>
+                                    setLinkingSource({
+                                      type: "citation",
+                                      text: pair.citation || "",
+                                      paraIdx: pair.para_idx || 0,
+                                      key: pair.citation || "",
+                                    })
+                                  }
+                                  className="text-xs font-bold text-navy-700 hover:underline"
+                                >
+                                  Link Ref
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <EmptyState
+                            title="No missing citations"
+                            description="All cited references exist in the bibliography."
+                            icon={CheckCircle2}
+                          />
+                        )}
+                      </div>
+
+                      {/* Section 2: Unused references */}
+                      <div className="space-y-2 pt-3 border-t border-slate-100">
+                        <div>
+                          <h3 className="font-semibold text-gray-900 text-xs mb-1">
+                            Unused references (in Bib, not cited)
+                          </h3>
+                          <p className="text-xs text-gray-500">
+                            These references exist in the bibliography but are never cited in the text.
+                          </p>
+                        </div>
+
+                        {unusedPairs.length > 0 ? (
+                          <div className="space-y-2">
+                            {unusedPairs.map((pair: any, idx: number) => (
+                              <div key={idx} className="p-3 bg-amber-50/25 border border-amber-200 rounded-lg flex items-center justify-between shadow-sm">
+                                <div className="min-w-0 flex-1 pr-3">
+                                  <span className="text-xs font-extrabold text-amber-950 font-mono block">
+                                    {pair.author ? `${pair.author} (${pair.year || ""})` : "Unused entry"}
+                                  </span>
+                                  <span className="block text-[10px] text-slate-400 truncate" title={pair.ref_text}>
+                                    {pair.ref_text}
+                                  </span>
+                                </div>
+                                <button
+                                  onClick={() =>
+                                    setLinkingSource({
+                                      type: "reference",
+                                      text: pair.ref_text || "",
+                                      refIdx: pair.para_idx || 0,
+                                    })
+                                  }
+                                  className="text-xs font-bold text-navy-700 hover:underline shrink-0"
+                                >
+                                  Link Citation
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <EmptyState
+                            title="No unused references"
+                            description="All bibliography entries are cited in the text."
+                            icon={CheckCircle2}
+                          />
+                        )}
+                      </div>
+
+                      {/* Personal Communications */}
+                      {(logs.personal_comm_citations?.length || 0) > 0 && (
+                        <div className="space-y-2 pt-3 border-t border-slate-100">
+                          <div className="flex items-center justify-between">
+                            <h3 className="font-semibold text-slate-700 text-xs">
+                              Personal Communications ({logs.personal_comm_citations!.length})
+                            </h3>
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              ✓ Excluded — APA §8.9
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-500">These citations do not require a bibliography entry.</p>
+                          <div className="space-y-1.5">
+                            {logs.personal_comm_citations!.map((item: any, idx: number) => (
+                              <div key={idx} className="bg-slate-50 rounded-lg border border-slate-200 border-l-[3px] border-l-slate-400 p-2.5">
+                                <p className="font-mono text-[10px] text-slate-700">{item.raw || item.message}</p>
+                                <p className="text-[10px] text-slate-400 mt-0.5">APA §8.9 — no bibliography entry required.</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Secondary Citations */}
+                      {(logs.secondary_citations?.length || 0) > 0 && (
+                        <div className="space-y-2 pt-3 border-t border-slate-100">
+                          <h3 className="font-semibold text-purple-700 text-xs">
+                            Secondary Citations ({logs.secondary_citations!.length})
+                          </h3>
+                          <p className="text-[10px] text-slate-500">Only the citing source needs a bibliography entry.</p>
+                          <div className="space-y-1.5">
+                            {logs.secondary_citations!.map((item: any, idx: number) => (
+                              <div key={idx} className="bg-purple-50/20 rounded-lg border border-purple-100 border-l-[3px] border-l-purple-400 p-2.5 flex items-start justify-between gap-2">
+                                <div>
+                                  <p className="font-mono text-[10px] text-purple-800">{item.raw || item.message}</p>
+                                  <p className="text-[10px] text-slate-500 mt-0.5">List the citing source in the bibliography, not the original.</p>
+                                </div>
+                                <button
+                                  onClick={() => item.para_idx !== undefined && navigateToDocPara(item.para_idx)}
+                                  className="text-[10px] font-bold text-blue-600 hover:underline shrink-0"
+                                >
+                                  Locate
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
+              })()}
 
               {/* ─── TAB 4: RAW LOGS ─── */}
               {activeTab === "logs" && (() => {

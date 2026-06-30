@@ -1033,7 +1033,7 @@ def save_xhtml_delta_and_convert(
         raise HTTPException(status_code=500, detail=f"XHTML delta save/convert failed: {str(e)}")
 
 
-REF_REVIEW_CACHE_VERSION = 3
+REF_REVIEW_CACHE_VERSION = 4
 
 
 def _ref_review_cache_path(processed_path: str) -> str:
@@ -1048,7 +1048,8 @@ def _run_validation_on_doc(
     processed_path: str,
     style: Optional[str] = None,
     citation_format: Optional[str] = None,
-    logger=None
+    logger=None,
+    et_al_threshold: Optional[int] = None,
 ) -> Dict[str, Any]:
     validation_logs = {
         "stats": {},
@@ -1090,6 +1091,12 @@ def _run_validation_on_doc(
         validation_logs["total_cites"] = num_stats.get("total_citations", 0)
         validation_logs["duplicates"] = num_stats.get("duplicate_references", [])
         validation_logs["sequence_issues"] = num_stats.get("sequence_issues", [])
+        validation_logs["broken_ranges"] = num_stats.get("broken_ranges", [])
+        validation_logs["invalid_numbers"] = num_stats.get("invalid_numbers", [])
+        validation_logs["mixed_citation_style"] = num_stats.get("mixed_citation_style")
+        validation_logs["inline_text_citations"] = num_stats.get("inline_text_citations", [])
+        validation_logs["roman_numeral_citations"] = num_stats.get("roman_numeral_citations", [])
+        validation_logs["summary"] = num_stats.get("summary", {})
         validation_logs["tagged_cites"] = sum(
             1 for para in iter_document_paragraphs(doc)
             for run in para.runs
@@ -1182,12 +1189,19 @@ def _run_validation_on_doc(
     else:
         # B. APA Name & Year Validation (APA 7th Edition)
         from app.processing.legacy.validation_core import CitationProcessor
-        cite_proc = CitationProcessor(processed_path)
+        cite_proc = CitationProcessor(processed_path, et_al_threshold=et_al_threshold)
         report = cite_proc.run()
+        report_dict = report.to_dict()
 
         validation_logs["stats"] = dict(report.stats)
-        validation_logs["total_refs"] = dict(report.stats).get("Total bibliography entries", 0)
-        validation_logs["total_cites"] = dict(report.stats).get("Total in-text citations", 0)
+        validation_logs["total_refs"] = report.total_refs
+        validation_logs["total_cites"] = report.total_cites
+
+        # Forward grouped APA issue categories
+        for key in ("et_al_issues", "name_spelling_warnings", "ordering_issues",
+                    "suffix_issues", "disambiguation_issues",
+                    "personal_comm_citations", "secondary_citations"):
+            validation_logs[key] = report_dict.get(key, [])
 
         # Collect Name & Year issues
         for issue in report.issues:
@@ -1201,6 +1215,13 @@ def _run_validation_on_doc(
             elif itype == "unused":
                 validation_logs["unused_references"].append(issue_copy)
 
+        # Build match_score lookup keyed by raw citation string
+        score_by_raw: Dict[str, float] = {
+            c["raw"]: c["match_score"]
+            for c in cite_proc.get_citation_changes()
+            if "raw" in c and "match_score" in c
+        }
+
         # Build citation_pairs and reference_entries
         bib_items = list(getattr(cite_proc, "_bib_ordered", []) or cite_proc.bibliography.values())
 
@@ -1208,14 +1229,19 @@ def _run_validation_on_doc(
         # Iterate bib in document order to build pairs
         for entry in bib_items:
             status = "ok" if entry.get("cited") else "unused"
-            citation_pairs.append({
-                "citation": f"({entry.get('display', '')}, {entry.get('year', '')})",
+            raw_cite = f"({entry.get('display', '')}, {entry.get('year', '')})"
+            pair: Dict[str, Any] = {
+                "citation": raw_cite,
                 "author": entry.get("display", ""),
                 "year": entry.get("year", ""),
                 "ref_text": entry.get("raw", ""),
                 "status": status,
                 "para_idx": entry.get("para_idx", -1),
-            })
+            }
+            score = score_by_raw.get(raw_cite)
+            if score is not None:
+                pair["match_score"] = round(score, 2)
+            citation_pairs.append(pair)
 
         # Add missing citations (cited in text but no bib entry)
         for issue in report.issues:
@@ -1245,7 +1271,7 @@ def _run_validation_on_doc(
     return validation_logs
 
 
-def build_reference_review_page_state(db: Session, *, file_id: int, style: Optional[str] = None, citation_format: Optional[str] = None, logger) -> Dict[str, Any]:
+def build_reference_review_page_state(db: Session, *, file_id: int, style: Optional[str] = None, citation_format: Optional[str] = None, et_al_threshold: Optional[int] = None, logger) -> Dict[str, Any]:
     import json
     resolved = resolve_processed_target(db, file_id=file_id)
     file_record = resolved["file_record"]
@@ -1320,7 +1346,8 @@ def build_reference_review_page_state(db: Session, *, file_id: int, style: Optio
             processed_path,
             style=detected_style,
             citation_format=citation_format,
-            logger=logger
+            logger=logger,
+            et_al_threshold=et_al_threshold,
         )
 
     except Exception as e:
@@ -1385,7 +1412,7 @@ def build_reference_review_page_state(db: Session, *, file_id: int, style: Optio
     }
 
 
-def run_validation_only(db: Session, *, file_id: int, style: Optional[str] = None, citation_format: Optional[str] = None, logger=None) -> Dict[str, Any]:
+def run_validation_only(db: Session, *, file_id: int, style: Optional[str] = None, citation_format: Optional[str] = None, et_al_threshold: Optional[int] = None, logger=None) -> Dict[str, Any]:
     """
     Run validation-only (no XHTML conversion, no re-structuring).
     Returns only validation_logs and detected_style.
@@ -1428,7 +1455,8 @@ def run_validation_only(db: Session, *, file_id: int, style: Optional[str] = Non
                 processed_path,
                 style="AMA",
                 citation_format=citation_format,
-                logger=logger
+                logger=logger,
+                et_al_threshold=et_al_threshold,
             )
 
             # Run renumbering/formatting pipeline in Referencenumvalidation
@@ -1478,7 +1506,8 @@ def run_validation_only(db: Session, *, file_id: int, style: Optional[str] = Non
                     processed_path,
                     style="AMA",
                     citation_format=citation_format,
-                    logger=logger
+                    logger=logger,
+                    et_al_threshold=et_al_threshold,
                 )
 
                 # Invalidate caches
@@ -1503,14 +1532,71 @@ def run_validation_only(db: Session, *, file_id: int, style: Optional[str] = Non
             validation_logs["pipeline_log"] = pipeline_log
             validation_logs["renumbering_map"] = mapping
         else:
+            from app.processing.legacy.validation_core import process_document_apa
+            pipeline_log.append("Started Name-Year (APA) reference validation pipeline.")
+            
+            # Run the two-pass APA validation/renumbering pipeline
+            doc, before_stats, after_stats, mapping, status_msg = process_document_apa(processed_path)
+            
+            pipeline_log.append(f"Pass 1: Reordered bibliography alphabetically and resolved suffix additions.")
+            dup_before = len(before_stats.get("duplicate_references", []))
+            dup_after = len(after_stats.get("duplicate_references", []))
+            duplicates_resolved = dup_before - dup_after
+            if duplicates_resolved > 0:
+                pipeline_log.append(f"Pass 2: Found and merged {duplicates_resolved} duplicate reference(s) and re-sorted remaining citations.")
+            else:
+                pipeline_log.append("Pass 2: No duplicate references to merge.")
+            pipeline_log.append("Successfully saved sorted and merged document.")
+            
+            # Save the updated doc, archive previous version, and bump file version
+            from app.domains.files import version_service as vs
+            try:
+                vs.archive_existing_file(
+                    db,
+                    existing_file=file_record,
+                    base_path=os.path.dirname(processed_path),
+                    uploaded_by_id=None,
+                    source_path=processed_path,
+                )
+                file_record.version += 1
+            except Exception as _e:
+                if logger:
+                    logger.warning(f"Version archive failed (non-fatal): {_e}")
+
+            doc.save(processed_path)
+            db.commit()
+
+            # Regenerate validation logs using the updated/saved document state!
             validation_logs = _run_validation_on_doc(
                 doc,
                 processed_path,
                 style="APA",
                 citation_format=citation_format,
-                logger=logger
+                logger=logger,
+                et_al_threshold=et_al_threshold,
             )
-            validation_logs["pipeline_log"] = ["APA validation completed."]
+
+            # Invalidate caches
+            invalidate_ref_review_cache(processed_path, logger=logger)
+
+            from app.domains.processing.technical_editor_service import RESULTS_DIR
+            cache_path = RESULTS_DIR / f"{file_id}_scan.json"
+            if cache_path.exists():
+                try:
+                    cache_path.unlink()
+                except Exception:
+                    pass
+
+            xhtml_path = _get_xhtml_path(processed_path)
+            if os.path.exists(xhtml_path):
+                try:
+                    os.remove(xhtml_path)
+                except Exception as e:
+                    if logger:
+                        logger.warning(f"Could not remove stale XHTML cache: {e}")
+
+            validation_logs["pipeline_log"] = pipeline_log
+            validation_logs["renumbering_map"] = mapping
 
     except Exception as e:
         if logger:

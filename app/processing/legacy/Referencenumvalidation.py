@@ -160,6 +160,21 @@ BIB_NUMBER_PATTERNS = [
     re.compile(r'^\s*(\d+)\s+'),         # 1  (space only)
 ]
 
+# ── New validation patterns ───────────────────────────────────────────────────
+_BROKEN_RANGE_PAT = re.compile(
+    r'(\d+)\s*[-–—]\s*(?!\d)'  # number-dash with nothing after
+    r'|(?<!\d)\s*[-–—]\s*(\d+)'  # dash-number with nothing before
+)
+_INLINE_TEXT_CITE_PAT = re.compile(
+    r'\b(?:see\s+)?(?:references?\s+|refs?\s+|ref\.\s*)(\d+)(?!\s*[a-zA-Z])\b'
+    r'|\bsee\s+(\d+)\b',
+    re.IGNORECASE
+)
+_ROMAN_IN_BRACKET = re.compile(
+    r'[\[(](i{1,3}|iv|vi{0,3}|ix|x{1,3})[,\-\]]',
+    re.IGNORECASE
+)
+
 
 def extract_bib_number(text):
     """Extract bibliography number from text, handling all formats: 1., [1]., (1)., etc."""
@@ -382,6 +397,123 @@ class ReferenceProcessor:
                     
         return duplicates
 
+    def _collect_broken_ranges(self):
+        """Scan citation-styled runs for broken range patterns like [1-3,5-] or [-4]."""
+        results = []
+        for para in iter_document_paragraphs(self.doc):
+            if para.style and para.style.name == "REF-N":
+                continue
+            current_group = []
+            for run in para.runs:
+                if self.is_citation_run(run):
+                    current_group.append(run)
+                else:
+                    if current_group:
+                        raw = "".join(r.text for r in current_group)
+                        for m in _BROKEN_RANGE_PAT.finditer(raw):
+                            results.append({
+                                "type": "broken_range",
+                                "raw": raw.strip(),
+                                "match": m.group(0).strip(),
+                            })
+                        current_group = []
+            if current_group:
+                raw = "".join(r.text for r in current_group)
+                for m in _BROKEN_RANGE_PAT.finditer(raw):
+                    results.append({
+                        "type": "broken_range",
+                        "raw": raw.strip(),
+                        "match": m.group(0).strip(),
+                    })
+        return results
+
+    def detect_invalid_numbers(self, all_cited_ids):
+        """Detect citation numbers less than 1 (e.g. [0], [-1])."""
+        invalid = []
+        seen = set()
+        for n in all_cited_ids:
+            if n < 1 and n not in seen:
+                seen.add(n)
+                invalid.append({
+                    "type": "invalid_number",
+                    "number": n,
+                    "message": f"Citation [{n}] is invalid — reference numbers must be ≥ 1.",
+                })
+        return invalid
+
+    def detect_mixed_citation_styles(self):
+        """Detect when both superscript and bracket/paren citation formats coexist in the document."""
+        seen_styles = set()
+        for para in iter_document_paragraphs(self.doc):
+            if para.style and para.style.name == "REF-N":
+                continue
+            for run in para.runs:
+                txt = run.text or ""
+                has_super = (
+                    (run.font and run.font.superscript) or
+                    any(c in "⁰¹²³⁴⁵⁶⁷⁸⁹" for c in txt)
+                )
+                has_bracket = bool(re.search(r'\[\s*\d+', txt))
+                has_paren = bool(re.search(r'\(\s*\d+', txt))
+                if has_super:
+                    seen_styles.add("superscript")
+                if has_bracket:
+                    seen_styles.add("bracket")
+                if has_paren:
+                    seen_styles.add("paren")
+        if len(seen_styles) > 1:
+            return {
+                "type": "mixed_citation_style",
+                "styles_found": sorted(seen_styles),
+                "message": (
+                    f"Mixed citation styles detected: {', '.join(sorted(seen_styles))}. "
+                    "Standardize to one format throughout the document."
+                ),
+            }
+        return None
+
+    def detect_inline_text_citations(self):
+        """Detect unformatted references like 'see reference 5' or 'ref. 10' outside citation spans."""
+        findings = []
+        for para in iter_document_paragraphs(self.doc):
+            if para.style and para.style.name == "REF-N":
+                continue
+            for run in para.runs:
+                if self.is_citation_run(run):
+                    continue
+                txt = run.text or ""
+                for m in _INLINE_TEXT_CITE_PAT.finditer(txt):
+                    num_str = m.group(1) or m.group(2)
+                    if num_str:
+                        findings.append({
+                            "type": "inline_text_citation",
+                            "number": int(num_str),
+                            "raw": m.group(0),
+                            "message": (
+                                f"Inline text reference '{m.group(0)}' found outside a citation span. "
+                                "Apply the cite_bib character style so this citation is tracked."
+                            ),
+                        })
+        return findings
+
+    def _detect_roman_numerals(self):
+        """Detect Roman numeral citations inside brackets/parens, e.g. [iv]."""
+        findings = []
+        for para in iter_document_paragraphs(self.doc):
+            if para.style and para.style.name == "REF-N":
+                continue
+            txt = para.text or ""
+            for m in _ROMAN_IN_BRACKET.finditer(txt):
+                findings.append({
+                    "type": "roman_numeral_citation",
+                    "raw": m.group(0),
+                    "message": (
+                        f"Possible Roman numeral citation '{m.group(0)}' detected. "
+                        "Verify this is intentional or convert to Arabic numerals."
+                    ),
+                })
+        return findings
+
     def get_validation_stats(self):
         bib_refs, ref_objects = self.get_references_in_bibliography()
         all_cited, _ = self.get_citations_in_text()
@@ -417,6 +549,12 @@ class ReferenceProcessor:
                 seen_in_seq.append(n)
                 previous_max = max(previous_max, n)
                 
+        broken_ranges = self._collect_broken_ranges()
+        invalid_numbers = self.detect_invalid_numbers(all_cited)
+        mixed_style = self.detect_mixed_citation_styles()
+        inline_cites = self.detect_inline_text_citations()
+        roman_cites = self._detect_roman_numerals()
+
         return {
             "total_references": len(bib_refs),
             "total_citations": len(all_cited),
@@ -424,7 +562,24 @@ class ReferenceProcessor:
             "unused_references": unused,
             "duplicate_references": duplicates,
             "sequence_issues": sequence_issues,
-            "is_perfect": (not missing and not unused and not sequence_issues and not duplicates)
+            "is_perfect": (
+                not missing and not unused and not sequence_issues
+                and not duplicates and not broken_ranges and not invalid_numbers
+            ),
+            # New fields
+            "broken_ranges": broken_ranges,
+            "invalid_numbers": invalid_numbers,
+            "mixed_citation_style": mixed_style,
+            "inline_text_citations": inline_cites,
+            "roman_numeral_citations": roman_cites,
+            "summary": {
+                "missing_references": len(missing),
+                "unused_references": len(unused),
+                "sequence_issues": len(sequence_issues),
+                "broken_ranges": len(broken_ranges),
+                "invalid_numbers": len(invalid_numbers),
+                "format_warnings": (1 if mixed_style else 0) + len(inline_cites),
+            },
         }
 
     def renumber(self, ignore_duplicates=False):

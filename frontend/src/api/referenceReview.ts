@@ -17,6 +17,8 @@ export interface ReferenceValidationReviewResponse {
       para_idx: number;
       message: string;
       citation?: string;
+      original_text?: string;
+      corrected_text?: string;
     }>;
     renumbering_map: Record<string, string>;
     duplicates: Array<{
@@ -55,6 +57,7 @@ export interface ReferenceValidationReviewResponse {
       author?: string;
       year?: string;
       para_idx?: number;
+      match_score?: number;
     }>;
     reference_entries?: Array<{
       number: number | null;
@@ -63,6 +66,28 @@ export interface ReferenceValidationReviewResponse {
       is_cited: boolean;
       para_idx: number;
     }>;
+    // AMA-specific additions
+    broken_ranges?: Array<{ raw: string; match: string }>;
+    invalid_numbers?: Array<{ number: number; message: string }>;
+    mixed_citation_style?: { styles_found: string[]; message: string } | null;
+    inline_text_citations?: Array<{ number: number; raw: string; message: string }>;
+    roman_numeral_citations?: Array<{ raw: string; message: string }>;
+    summary?: {
+      missing_references: number;
+      unused_references: number;
+      sequence_issues: number;
+      broken_ranges: number;
+      invalid_numbers: number;
+      format_warnings: number;
+    };
+    // APA-specific additions
+    et_al_issues?: Array<{ type: string; message: string; para_idx: number; citation?: string; original_text?: string; corrected_text?: string }>;
+    name_spelling_warnings?: Array<{ type: string; message: string; para_idx: number; original_text?: string; corrected_text?: string }>;
+    ordering_issues?: Array<{ type: string; message: string; para_idx: number; original_text?: string; corrected_text?: string }>;
+    suffix_issues?: Array<{ type: string; message: string; para_idx: number; original_text?: string; corrected_text?: string }>;
+    disambiguation_issues?: Array<{ type: string; message: string; para_idx: number }>;
+    personal_comm_citations?: Array<{ type: string; message: string; para_idx: number; raw?: string }>;
+    secondary_citations?: Array<{ type: string; message: string; para_idx: number; raw?: string }>;
   };
   save_endpoint: string;
   export_href: string;

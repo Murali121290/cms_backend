@@ -153,15 +153,26 @@ def test_admin_delete_user_blocks_self_but_deletes_other(
 
 
 def test_duplicate_admin_routes_remain_registered_in_current_order(app_env):
+    def flatten(r):
+        res = []
+        for route in getattr(r, 'routes', []):
+            if type(route).__name__ == '_IncludedRouter':
+                res.extend(flatten(route.original_router))
+            elif hasattr(route, 'routes'):
+                res.extend(flatten(route))
+            else:
+                res.append(route)
+        return res
+    all_routes = flatten(app_env["app"].router)
     password_post_routes = [
         route.endpoint.__name__
-        for route in app_env["app"].router.routes
-        if route.path == "/admin/users/{user_id}/password" and "POST" in getattr(route, "methods", set())
+        for route in all_routes
+        if getattr(route, "path", None) == "/admin/users/{user_id}/password" and "POST" in getattr(route, "methods", set())
     ]
     delete_post_routes = [
         route.endpoint.__name__
-        for route in app_env["app"].router.routes
-        if route.path == "/admin/users/{user_id}/delete" and "POST" in getattr(route, "methods", set())
+        for route in all_routes
+        if getattr(route, "path", None) == "/admin/users/{user_id}/delete" and "POST" in getattr(route, "methods", set())
     ]
 
     assert password_post_routes[:2] == ["admin_change_password_submit", "admin_change_password"]

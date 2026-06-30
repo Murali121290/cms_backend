@@ -569,4 +569,199 @@ def test_reference_review_two_pass_validation(
     assert len(bib_paras) == 3
 
 
+def test_reference_review_apa_reorder_and_block_sorting(
+    db_session,
+    temp_upload_root,
+    project_record,
+    chapter_record,
+    auth_cookie_client,
+    admin_user,
+):
+    from docx import Document
+    from docx.enum.style import WD_STYLE_TYPE
+    
+    file_path = temp_upload_root / project_record.code / chapter_record.number / "Manuscript"
+    file_path.mkdir(parents=True, exist_ok=True)
+    
+    filename = "chapter08_Processed.docx"
+    doc_path = file_path / filename
+    
+    doc = Document()
+    p = doc.add_paragraph("This is some text with citation ")
+    
+    # Ensure 'cite_bib' character style exists
+    try:
+        cite_style = doc.styles['cite_bib']
+    except KeyError:
+        cite_style = doc.styles.add_style('cite_bib', WD_STYLE_TYPE.CHARACTER)
+        cite_style.font.superscript = False
+        
+    r1 = p.add_run("(Smith, 2020)")
+    r1.style = 'cite_bib'
+    p.add_run(" and also ")
+    r2 = p.add_run("(Smith, 2020; Murali, 2025; Nive, 2020)")
+    r2.style = 'cite_bib'
+    
+    # Sibling entries live between <ref-open> and <ref-close> or have REF-U style
+    p_open = doc.add_paragraph("<ref-open>")
+    
+    bib_entries = [
+        ("Smith, J. (2020). Ref A.", "REF-U"),
+        ("Murali, A. (2025). Ref B.", "REF-U"),
+        ("Nive, K. (2020). Ref C.", "REF-U"),
+    ]
+    
+    for text, style in bib_entries:
+        p_bib = doc.add_paragraph(text)
+        try:
+            p_bib.style = style
+        except KeyError:
+            doc.styles.add_style(style, 1)
+            p_bib.style = style
+            
+    p_close = doc.add_paragraph("<ref-close>")
+    doc.save(doc_path)
+    
+    file_record = models.File(
+        project_id=project_record.id,
+        chapter_id=chapter_record.id,
+        filename=filename,
+        file_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        category="Manuscript",
+        path=str(doc_path),
+        version=1,
+    )
+    db_session.add(file_record)
+    db_session.commit()
+    db_session.refresh(file_record)
+    
+    client = auth_cookie_client(admin_user)
+    
+    response = client.get(f"/api/v2/files/{file_record.id}/reference-review/validate-only?style=APA&citation_format=auto")
+    assert response.status_code == 200
+    data = response.json()
+    
+    # Check that sorting occurred and stats look correct
+    validation_logs = data["validation_logs"]
+    assert validation_logs["detected_style"] == "APA"
+    assert validation_logs["total_refs"] == 3
+    
+    # Check document content updated
+    saved_doc = Document(file_record.path)
+    
+    # 1. The multi-citation block should be sorted: (Smith, 2020; Murali, 2025; Nive, 2020) -> (Murali, 2025; Nive, 2020; Smith, 2020)
+    first_para = saved_doc.paragraphs[0]
+    first_para_text = first_para.text
+    assert "(Murali, 2025; Nive, 2020; Smith, 2020)" in first_para_text
+    
+    # 2. Bibliography entries should be sorted alphabetically: Murali, Nive, Smith
+    bib_paras = []
+    in_bib = False
+    for p in saved_doc.paragraphs:
+        if "<ref-open>" in p.text:
+            in_bib = True
+            continue
+        if "<ref-close>" in p.text:
+            in_bib = False
+            continue
+        if in_bib and p.text.strip():
+            bib_paras.append(p.text)
+            
+    assert len(bib_paras) == 3
+    assert bib_paras[0].startswith("Murali")
+    assert bib_paras[1].startswith("Nive")
+    assert bib_paras[2].startswith("Smith")
+
+
+def test_reference_review_apa_duplicate_merge(
+    db_session,
+    temp_upload_root,
+    project_record,
+    chapter_record,
+    auth_cookie_client,
+    admin_user,
+):
+    from docx import Document
+    from docx.enum.style import WD_STYLE_TYPE
+    
+    file_path = temp_upload_root / project_record.code / chapter_record.number / "Manuscript"
+    file_path.mkdir(parents=True, exist_ok=True)
+    
+    filename = "chapter09_Processed.docx"
+    doc_path = file_path / filename
+    
+    doc = Document()
+    p = doc.add_paragraph("This has citations ")
+    
+    # Ensure 'cite_bib' character style exists
+    try:
+        cite_style = doc.styles['cite_bib']
+    except KeyError:
+        cite_style = doc.styles.add_style('cite_bib', WD_STYLE_TYPE.CHARACTER)
+        cite_style.font.superscript = False
+        
+    r1 = p.add_run("(Smith, 2020)")
+    r1.style = 'cite_bib'
+    p.add_run(" and duplicated ")
+    r2 = p.add_run("(Smith, 2020)")
+    r2.style = 'cite_bib'
+    
+    p_open = doc.add_paragraph("<ref-open>")
+    
+    # Add duplicate bibliography entries (95%+ match)
+    bib_entries = [
+        ("Smith, J. (2020). Ref A text sample to test duplicate matching algorithms.", "REF-U"),
+        ("Smith, J. (2020). Ref A text sample to test duplicate matching algorithm.", "REF-U"),
+    ]
+    
+    for text, style in bib_entries:
+        p_bib = doc.add_paragraph(text)
+        try:
+            p_bib.style = style
+        except KeyError:
+            doc.styles.add_style(style, 1)
+            p_bib.style = style
+            
+    p_close = doc.add_paragraph("<ref-close>")
+    doc.save(doc_path)
+    
+    file_record = models.File(
+        project_id=project_record.id,
+        chapter_id=chapter_record.id,
+        filename=filename,
+        file_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        category="Manuscript",
+        path=str(doc_path),
+        version=1,
+    )
+    db_session.add(file_record)
+    db_session.commit()
+    db_session.refresh(file_record)
+    
+    client = auth_cookie_client(admin_user)
+    
+    response = client.get(f"/api/v2/files/{file_record.id}/reference-review/validate-only?style=APA&citation_format=auto")
+    assert response.status_code == 200
+    data = response.json()
+    
+    # Verify that the two duplicates were merged into one
+    saved_doc = Document(file_record.path)
+    
+    bib_paras = []
+    in_bib = False
+    for p in saved_doc.paragraphs:
+        if "<ref-open>" in p.text:
+            in_bib = True
+            continue
+        if "<ref-close>" in p.text:
+            in_bib = False
+            continue
+        if in_bib and p.text.strip():
+            bib_paras.append(p.text)
+            
+    # There should only be 1 reference left in the bibliography
+    assert len(bib_paras) == 1
+
+
+
 

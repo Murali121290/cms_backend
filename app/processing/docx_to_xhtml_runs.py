@@ -334,30 +334,81 @@ def _rpr_b64(run) -> str:
         return ""
 
 
-def _run_inline_style(run) -> str:
+def _run_inline_style(fmt: dict) -> str:
     """Build a CSS style string for visible run formatting."""
     parts = []
-    font = run.font
-    if font.size is not None:
-        try:
-            parts.append(f"font-size:{font.size.pt:g}pt")
-        except Exception:
-            pass
-    if font.name:
-        parts.append(f"font-family:'{font.name}'")
-    color = getattr(font, "color", None)
-    if color is not None and getattr(color, "rgb", None):
-        try:
-            parts.append(f"color:#{str(color.rgb)}")
-        except Exception:
-            pass
-    # Highlight:
-    try:
-        if font.highlight_color is not None:
-            parts.append("background-color:yellow")
-    except Exception:
-        pass
+    if fmt["size_pt"] is not None:
+        parts.append(f"font-size:{fmt['size_pt']:g}pt")
+    if fmt["font_name"]:
+        parts.append(f"font-family:'{fmt['font_name']}'")
+    if fmt["color_rgb"]:
+        parts.append(f"color:#{fmt['color_rgb']}")
+    if fmt["highlight"]:
+        parts.append("background-color:yellow")
     return ";".join(parts)
+
+
+def _get_run_formatting(run) -> dict:
+    """
+    Directly parse formatting from <w:rPr> XML element to bypass slow python-docx property descriptors.
+    Returns a dict with: superscript, subscript, underline, italic, bold, size_pt, font_name, color_rgb, highlight
+    """
+    rpr = run._element.find(qn("w:rPr")) if run._element is not None else None
+    res = {
+        "superscript": False,
+        "subscript": False,
+        "underline": False,
+        "italic": False,
+        "bold": False,
+        "size_pt": None,
+        "font_name": None,
+        "color_rgb": None,
+        "highlight": None
+    }
+    if rpr is None:
+        return res
+
+    for child in rpr:
+        tag = child.tag
+        if tag == qn("w:vertAlign"):
+            val = child.get(qn("w:val"))
+            if val == "superscript":
+                res["superscript"] = True
+            elif val == "subscript":
+                res["subscript"] = True
+        elif tag == qn("w:u"):
+            val = child.get(qn("w:val"))
+            if val != "none":
+                res["underline"] = True
+        elif tag == qn("w:i"):
+            val = child.get(qn("w:val"))
+            if val not in ("false", "0"):
+                res["italic"] = True
+        elif tag == qn("w:b"):
+            val = child.get(qn("w:val"))
+            if val not in ("false", "0"):
+                res["bold"] = True
+        elif tag == qn("w:sz"):
+            val = child.get(qn("w:val"))
+            if val:
+                try:
+                    res["size_pt"] = float(val) / 2.0
+                except ValueError:
+                    pass
+        elif tag == qn("w:rFonts"):
+            ascii_font = child.get(qn("w:ascii"))
+            if ascii_font:
+                res["font_name"] = ascii_font
+        elif tag == qn("w:color"):
+            val = child.get(qn("w:val"))
+            if val and val != "auto":
+                res["color_rgb"] = val
+        elif tag == qn("w:highlight"):
+            val = child.get(qn("w:val"))
+            if val and val != "none":
+                res["highlight"] = val
+
+    return res
 
 
 def _run_to_html(run, para, doc, track_change_element=None, para_findings=None) -> str:
@@ -379,8 +430,8 @@ def _run_to_html(run, para, doc, track_change_element=None, para_findings=None) 
             text = delText.text
     
     # Render footnote or endnote reference markers
-    ftn_ref = run._element.find(qn("w:footnoteReference"))
-    etn_ref = run._element.find(qn("w:endnoteReference"))
+    ftn_ref = run._element.find(qn("w:footnoteReference")) if run._element is not None else None
+    etn_ref = run._element.find(qn("w:endnoteReference")) if run._element is not None else None
     if ftn_ref is not None:
         ftn_id = ftn_ref.get(qn("w:id"))
         bm_name = _get_or_create_run_bookmark(run, para, doc)
@@ -395,31 +446,26 @@ def _run_to_html(run, para, doc, track_change_element=None, para_findings=None) 
 
     inner = html.escape(text).replace("\n", "<br>")
 
-    if run.font.superscript:
+    # Parse formatting directly from XML elements
+    fmt = _get_run_formatting(run)
+
+    if fmt["superscript"]:
         inner = f"<sup>{inner}</sup>"
-    if run.font.subscript:
+    if fmt["subscript"]:
         inner = f"<sub>{inner}</sub>"
-    if run.underline:
+    if fmt["underline"]:
         inner = f"<u>{inner}</u>"
-    if run.italic:
+    if fmt["italic"]:
         inner = f"<em>{inner}</em>"
-    if run.bold:
+    if fmt["bold"]:
         inner = f"<strong>{inner}</strong>"
 
-    style = _run_inline_style(run)
+    style = _run_inline_style(fmt)
     rpr = _rpr_b64(run)
     bm_name = _get_or_create_run_bookmark(run, para, doc)
     
     # Highlight metadata mapping
-    is_yellow_highlighted = False
-    try:
-        rPr = run._element.find(qn("w:rPr"))
-        if rPr is not None:
-            highlight = rPr.find(qn("w:highlight"))
-            if highlight is not None and highlight.get(qn("w:val")) == "yellow":
-                is_yellow_highlighted = True
-    except Exception:
-        pass
+    is_yellow_highlighted = (fmt["highlight"] == "yellow")
 
     finding_replacement = None
     finding_rule_id = None
@@ -590,8 +636,8 @@ def _paragraph_content_to_html(p_elem, para, doc, findings_by_para=None, para_id
         elif tag_local == 'hyperlink':
             inner_html = _paragraph_content_to_html(child, para, doc, findings_by_para, para_idx)
             rId = child.get(qn('r:id'))
-            if rId and rId in para.part.relations:
-                url = para.part.relations[rId].target_ref
+            if rId and rId in para.part.rels:
+                url = para.part.rels[rId].target_ref
                 parts.append(f'<a href="{html.escape(url, quote=True)}">{inner_html}</a>')
             else:
                 parts.append(inner_html)

@@ -1,5 +1,6 @@
 import { SlideDrawer } from "@/components/ui/SlideDrawer";
 import { CitationCandidatePanel } from "./CitationCandidatePanel";
+import { ReferenceCandidatePanel } from "./ReferenceCandidatePanel";
 
 export interface LinkingSource {
   type: "citation" | "reference";
@@ -53,9 +54,15 @@ export function LinkingPanel({
           }}
         />
       ) : (
-        <div className="p-4 text-center text-gray-500">
-          Reference linking coming soon
-        </div>
+        <ReferenceCandidatePanel
+          fileId={fileId}
+          refText={linkingSource.text}
+          refIdx={linkingSource.refIdx || 0}
+          onLinkSuccess={(linkId) => {
+            onLinkSuccess?.(linkId);
+            onClose();
+          }}
+        />
       )}
     </SlideDrawer>
   );
