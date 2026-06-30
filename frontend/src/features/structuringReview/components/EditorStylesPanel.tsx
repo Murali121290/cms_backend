@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/Button";
-import { BookOpen, Plus, Search, X, Play, FileText, ChevronDown, ChevronRight, Folder, Tag, Layers, Table2, Check, Loader2, CircleAlert } from "lucide-react";
+import { BookOpen, Plus, Search, X, Play, FileText, ChevronDown, ChevronRight, Folder, Tag, Layers, Table2, Check, Loader2, CircleAlert, GripVertical } from "lucide-react";
 import type { Node as PmNode, Mark as PmMark } from "@tiptap/pm/model";
 import type { WysiwygEditorHandle } from "@/features/editor";
 import { NewStyleDialog } from "./NewStyleDialog";
@@ -60,6 +60,7 @@ interface ScannedElement {
   pos: number;
   nodeSize: number;
   checked: boolean;
+  depth?: number;
   children?: ScannedElement[];
   inlineSdts?: ScannedElement[];
 }
@@ -262,6 +263,39 @@ export function StylesPanel({
   const [wrapType, setWrapType] = useState<"block" | "inline">("block");
   const scanTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ── Drag & drop reordering ────────────────────────────────────────────────
+  const [draggedEl, setDraggedEl] = useState<ScannedElement | null>(null);
+  const [dragOver, setDragOver] = useState<{ id: string; pos: "before" | "after" } | null>(null);
+
+  const moveElement = (source: ScannedElement, target: ScannedElement, where: "before" | "after") => {
+    const editor = editorRef.current?.editor;
+    if (!editor) return;
+    if (source.id === target.id) return;
+    // Restrict to top-level (root) nodes — moving nodes nested inside tables,
+    // SDT blocks, etc. would violate schema in most cases.
+    if (source.depth !== 0 || target.depth !== 0) return;
+
+    const state = editor.state;
+    const srcFrom = source.pos;
+    const srcTo = source.pos + source.nodeSize;
+    const rawTarget = where === "before" ? target.pos : target.pos + target.nodeSize;
+
+    // No-op: dropping into the same slot (just before or just after itself).
+    if (rawTarget === srcFrom || rawTarget === srcTo) return;
+
+    try {
+      const tr = state.tr;
+      const slice = state.doc.slice(srcFrom, srcTo);
+      tr.delete(srcFrom, srcTo);
+      const insertAt = tr.mapping.map(rawTarget);
+      tr.insert(insertAt, slice.content);
+      tr.scrollIntoView();
+      editor.view.dispatch(tr);
+    } catch (err) {
+      console.error("Failed to reorder document element", err);
+    }
+  };
+
   const getCheckedNodesList = (): ScannedElement[] => {
     return flatNodes.filter(n => checkedIds.has(n.id));
   };
@@ -376,6 +410,9 @@ export function StylesPanel({
           }
         }
 
+        let nodeDepth = 0;
+        try { nodeDepth = editor.state.doc.resolve(t.pos).depth; } catch { nodeDepth = 0; }
+
         const el: ScannedElement = {
           id,
           type: t.type as any,
@@ -384,7 +421,8 @@ export function StylesPanel({
           preview,
           pos: t.pos,
           nodeSize: t.end - t.pos,
-          checked: false
+          checked: false,
+          depth: nodeDepth,
         };
 
         flat.push(el);
@@ -437,11 +475,31 @@ export function StylesPanel({
   }, [editorRef]);
 
   useEffect(() => {
-    const editor = editorRef.current?.editor;
-    if (!editor) return;
-    editor.on("update", scanDocument);
-    scanDocument();
-    return () => { editor.off("update", scanDocument); };
+    let cancelled = false;
+    let pollHandle: number | undefined;
+    let attachedEditor: any = null;
+
+    const attach = () => {
+      if (cancelled) return;
+      const editor = editorRef.current?.editor;
+      if (!editor) {
+        pollHandle = window.setTimeout(attach, 120);
+        return;
+      }
+      attachedEditor = editor;
+      editor.on("update", scanDocument);
+      scanDocument();
+    };
+
+    attach();
+
+    return () => {
+      cancelled = true;
+      if (pollHandle !== undefined) window.clearTimeout(pollHandle);
+      if (attachedEditor) {
+        attachedEditor.off("update", scanDocument);
+      }
+    };
   }, [editorRef, scanDocument]);
 
   const handleRunPipeline = async () => {
@@ -716,11 +774,64 @@ export function StylesPanel({
           <div className="flex flex-col pl-5">
             {items.map(el => {
               const isChecked = checkedIds.has(el.id);
+              const isReorderable = el.depth === 0;
+              const isDragging = draggedEl?.id === el.id;
+              const showTopMarker = dragOver?.id === el.id && dragOver.pos === "before";
+              const showBottomMarker = dragOver?.id === el.id && dragOver.pos === "after";
               return (
                 <div
                   key={el.id}
-                  className="flex items-center gap-1.5 py-0.5 px-1.5 hover:bg-slate-50 rounded text-xs select-none"
+                  draggable={isReorderable}
+                  onDragStart={(e) => {
+                    if (!isReorderable) { e.preventDefault(); return; }
+                    e.dataTransfer.effectAllowed = "move";
+                    try { e.dataTransfer.setData("text/plain", el.id); } catch { /* ignore */ }
+                    setDraggedEl(el);
+                  }}
+                  onDragEnd={() => {
+                    setDraggedEl(null);
+                    setDragOver(null);
+                  }}
+                  onDragOver={(e) => {
+                    if (!draggedEl || !isReorderable) return;
+                    if (draggedEl.id === el.id) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const pos = (e.clientY - rect.top) < rect.height / 2 ? "before" : "after";
+                    if (!dragOver || dragOver.id !== el.id || dragOver.pos !== pos) {
+                      setDragOver({ id: el.id, pos });
+                    }
+                  }}
+                  onDragLeave={(e) => {
+                    const next = e.relatedTarget as Node | null;
+                    if (!next || !e.currentTarget.contains(next)) {
+                      if (dragOver?.id === el.id) setDragOver(null);
+                    }
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const target = dragOver;
+                    const src = draggedEl;
+                    setDraggedEl(null);
+                    setDragOver(null);
+                    if (src && target && target.id === el.id) {
+                      moveElement(src, el, target.pos);
+                    }
+                  }}
+                  className={`relative flex items-center gap-1.5 py-0.5 px-1.5 hover:bg-slate-50 rounded text-xs select-none
+                    ${isReorderable ? "cursor-grab active:cursor-grabbing" : ""}
+                    ${isDragging ? "opacity-40" : ""}`}
                 >
+                  {showTopMarker && (
+                    <div className="absolute left-0 right-0 -top-px h-0.5 bg-blue-500 rounded-full pointer-events-none" />
+                  )}
+                  {showBottomMarker && (
+                    <div className="absolute left-0 right-0 -bottom-px h-0.5 bg-blue-500 rounded-full pointer-events-none" />
+                  )}
+                  {isReorderable && (
+                    <GripVertical className="w-3 h-3 text-slate-300 shrink-0" aria-hidden />
+                  )}
                   <input
                     type="checkbox"
                     checked={isChecked}
