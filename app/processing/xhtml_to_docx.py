@@ -373,8 +373,15 @@ class XhtmlToDocxEngine:
             has_rPr = False
 
             if char_style and char_style != "Default Paragraph Font":
+                actual_style_id = char_style
+                doc = para.part.document
+                if doc is not None and hasattr(doc, "styles") and doc.styles is not None:
+                    try:
+                        actual_style_id = doc.styles[char_style].style_id
+                    except Exception:
+                        pass
                 rs = OxmlElement('w:rStyle')
-                rs.set(qn('w:val'), char_style)
+                rs.set(qn('w:val'), actual_style_id)
                 rPr.append(rs)
                 has_rPr = True
 
@@ -731,6 +738,7 @@ def _determine_list_style(li_el) -> str:
 
 def apply_final_docx_formatting(doc):
     from docx.shared import Pt
+    from docx.oxml.ns import qn
     # 1. Update Normal style
     try:
         normal_style = doc.styles['Normal']

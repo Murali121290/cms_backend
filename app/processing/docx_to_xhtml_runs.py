@@ -19,6 +19,17 @@ from lxml import etree
 
 logger = logging.getLogger("app.processing.docx_to_xhtml_runs")
 
+# Import canonical character styles to build an ID-to-Name map
+try:
+    from app.processing.reference_char_style_applicator import REFERENCE_CHAR_STYLES
+except ImportError:
+    REFERENCE_CHAR_STYLES = []
+
+_STYLE_ID_MAP = {}
+for _name in REFERENCE_CHAR_STYLES:
+    _clean_id = _name.replace("_", "").replace("-", "").lower()
+    _STYLE_ID_MAP[_clean_id] = _name
+
 
 # ─── Track Changes Helpers ────────────────────────────────────────────────────
 
@@ -496,7 +507,16 @@ def _run_to_html(run, para, doc, track_change_element=None, para_findings=None) 
     if rpr_elem is not None:
         rstyle = rpr_elem.find(qn("w:rStyle"))
         if rstyle is not None:
-            char_style = rstyle.get(qn("w:val"), "")
+            val = rstyle.get(qn("w:val"), "")
+            if val:
+                val_lower = val.lower()
+                if val_lower in _STYLE_ID_MAP:
+                    char_style = _STYLE_ID_MAP[val_lower]
+                else:
+                    try:
+                        char_style = doc.styles[val].name
+                    except Exception:
+                        char_style = val
     if not char_style and run.style and run.style.name != "Default Paragraph Font":
         char_style = run.style.name
 

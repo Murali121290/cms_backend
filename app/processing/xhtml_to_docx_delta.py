@@ -390,8 +390,14 @@ class XhtmlToDocxDeltaEngine:
                 rPr.append(va)
                 has_rPr = True
             if char_style and char_style != "Default Paragraph Font":
+                actual_style_id = char_style
+                if doc is not None and hasattr(doc, "styles") and doc.styles is not None:
+                    try:
+                        actual_style_id = doc.styles[char_style].style_id
+                    except Exception:
+                        pass
                 rStyle = OxmlElement('w:rStyle')
-                rStyle.set(qn('w:val'), char_style)
+                rStyle.set(qn('w:val'), actual_style_id)
                 rPr.insert(0, rStyle)  # w:rStyle must be first child of w:rPr per OOXML schema
                 has_rPr = True
 

@@ -596,7 +596,7 @@ export function ReferenceValidationReviewPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
-  const [searchSource, setSearchSource] = useState<"pubmed" | "crossref" | null>(null);
+  const [searchSource, setSearchSource] = useState<"pubmed" | "crossref" | "googlebooks" | "wikipedia" | null>(null);
 
   // Ref-based cache for the parsed editor document to avoid redundant DOMParser calls
   const editorHtmlCache = useRef<{ html: string; doc: Document | null }>({ html: "", doc: null });
@@ -770,6 +770,125 @@ export function ReferenceValidationReviewPage() {
       setSearchResults(formattedResults);
     } catch (err) {
       console.error("CrossRef search failed:", err);
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  const formatGoogleBooksToStyle = (volumeInfo: any, style: "AMA" | "APA"): string => {
+    const title = volumeInfo.title || "No Title";
+    const publisher = volumeInfo.publisher || "";
+    const publishedDate = volumeInfo.publishedDate || "";
+    const year = publishedDate ? publishedDate.split("-")[0] : "";
+    const authorsList = volumeInfo.authors || [];
+
+    let authorsFormatted = "";
+    if (style === "AMA") {
+      const formatted = authorsList.map((a: string) => {
+        const parts = a.trim().split(/\s+/);
+        if (parts.length > 1) {
+          const initials = parts.slice(0, -1).map(p => p[0] || "").join("");
+          return `${parts[parts.length - 1]} ${initials}`;
+        }
+        return a;
+      });
+      if (formatted.length > 6) {
+        authorsFormatted = formatted.slice(0, 3).join(", ") + ", et al";
+      } else if (formatted.length > 0) {
+        authorsFormatted = formatted.join(", ");
+      }
+    } else {
+      const formatted = authorsList.map((a: string) => {
+        const parts = a.trim().split(/\s+/);
+        if (parts.length > 1) {
+          const last = parts[parts.length - 1];
+          const initials = parts.slice(0, -1).map(p => `${p[0] || ""}.`).join(" ");
+          return `${last}, ${initials}`;
+        }
+        return a;
+      });
+      if (formatted.length > 0) {
+        if (formatted.length > 1) {
+          authorsFormatted = formatted.slice(0, -1).join(", ") + ", & " + formatted[formatted.length - 1];
+        } else {
+          authorsFormatted = formatted[0];
+        }
+      }
+    }
+
+    if (style === "AMA") {
+      let res = "";
+      if (authorsFormatted) res += `${authorsFormatted}. `;
+      res += `${title}. `;
+      if (publisher) res += `${publisher}; `;
+      if (year) res += `${year}.`;
+      return res;
+    } else {
+      let res = "";
+      if (authorsFormatted) res += `${authorsFormatted} `;
+      if (year) res += `(${year}). `;
+      res += `${title}. `;
+      if (publisher) res += `${publisher}.`;
+      return res;
+    }
+  };
+
+  const searchGoogleBooks = async (query: string) => {
+    if (!query.trim()) return;
+    setSearchLoading(true);
+    setSearchSource("googlebooks");
+    setSearchResults([]);
+    try {
+      const searchUrl = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=3`;
+      const res = await fetch(searchUrl);
+      const data = await res.json();
+      const items = data?.items || [];
+
+      const formattedResults = items.map((item: any) => {
+        const volumeInfo = item.volumeInfo || {};
+        const formatted = formatGoogleBooksToStyle(volumeInfo, detectedStyle);
+        return {
+          id: item.id || "",
+          raw: item,
+          formatted,
+          title: volumeInfo.title || "",
+          doi: ""
+        };
+      });
+
+      setSearchResults(formattedResults);
+    } catch (err) {
+      console.error("Google Books search failed:", err);
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  const searchWikipedia = async (query: string) => {
+    if (!query.trim()) return;
+    setSearchLoading(true);
+    setSearchSource("wikipedia");
+    setSearchResults([]);
+    try {
+      const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&origin=*&srlimit=3`;
+      const res = await fetch(searchUrl);
+      const data = await res.json();
+      const items = data?.query?.search || [];
+
+      const formattedResults = items.map((item: any) => {
+        const formatted = `${item.title}. Wikipedia, The Free Encyclopedia. Retrieved ${new Date().getFullYear()}. https://en.wikipedia.org/wiki/${encodeURIComponent(item.title)}`;
+        return {
+          id: item.pageid || "",
+          raw: item,
+          formatted,
+          title: item.title,
+          doi: ""
+        };
+      });
+
+      setSearchResults(formattedResults);
+    } catch (err) {
+      console.error("Wikipedia search failed:", err);
     } finally {
       setSearchLoading(false);
     }
@@ -3521,6 +3640,8 @@ export function ReferenceValidationReviewPage() {
             setActiveTab("missing");
             setLinkingSource(null);
           }}
+          allReferences={logs?.reference_entries || []}
+          allCitations={logs?.citation_pairs || []}
         />
 
         {/* Edit Reference Modal Popup */}
@@ -3586,11 +3707,11 @@ export function ReferenceValidationReviewPage() {
                   )}
                 </div>
 
-                {/* PubMed/CrossRef Live Search */}
+                {/* PubMed/CrossRef/GoogleBooks/Wikipedia Live Search */}
                 <div className="border-t border-navy-50 pt-4 space-y-3">
                   <div className="text-[9px] uppercase font-bold text-navy-400 tracking-wider">Search Database for correct formatting ({detectedStyle} Style)</div>
-                  <div className="flex gap-2">
-                    <div className="relative flex-1">
+                  <div className="flex flex-wrap gap-2">
+                    <div className="relative flex-1 min-w-[200px]">
                       <Search className="w-3.5 h-3.5 text-navy-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                       <input
                         type="text"
@@ -3618,18 +3739,36 @@ export function ReferenceValidationReviewPage() {
                     >
                       CrossRef
                     </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => searchGoogleBooks(searchQuery)}
+                      disabled={searchLoading}
+                      className="cursor-pointer"
+                    >
+                      Google Books
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => searchWikipedia(searchQuery)}
+                      disabled={searchLoading}
+                      className="cursor-pointer"
+                    >
+                      Wikipedia
+                    </Button>
                   </div>
 
                   {searchLoading && (
                     <div className="flex items-center justify-center py-6 text-xs text-navy-500 font-semibold gap-2">
                       <RefreshCw className="w-4 h-4 animate-spin text-navy-600" />
-                      Searching {searchSource === "pubmed" ? "PubMed" : "CrossRef"}...
+                      Searching {searchSource === "pubmed" ? "PubMed" : searchSource === "crossref" ? "CrossRef" : searchSource === "googlebooks" ? "Google Books" : "Wikipedia"}...
                     </div>
                   )}
 
                   {!searchLoading && searchResults.length > 0 && (
                     <div className="space-y-2.5 max-h-[200px] overflow-y-auto border border-navy-100 rounded-lg p-3 bg-surface-50/20">
-                      <div className="text-[9px] uppercase font-bold text-navy-400 tracking-wider mb-2">Search Results ({searchSource === "pubmed" ? "PubMed" : "CrossRef"})</div>
+                      <div className="text-[9px] uppercase font-bold text-navy-400 tracking-wider mb-2">Search Results ({searchSource === "pubmed" ? "PubMed" : searchSource === "crossref" ? "CrossRef" : searchSource === "googlebooks" ? "Google Books" : "Wikipedia"})</div>
                       {searchResults.map((result: any, index: number) => (
                         <div key={index} className="p-2.5 bg-white border border-navy-100 rounded-lg shadow-sm flex items-start justify-between gap-4 hover:border-navy-300 transition-colors">
                           <div className="text-xs text-navy-800 leading-relaxed font-medium flex-1">
@@ -3652,7 +3791,7 @@ export function ReferenceValidationReviewPage() {
 
                   {!searchLoading && searchSource && searchResults.length === 0 && (
                     <div className="text-center py-6 text-navy-400 text-xs font-semibold bg-surface-50/50 rounded-lg border border-navy-100/50">
-                      No matches found on {searchSource === "pubmed" ? "PubMed" : "CrossRef"}. Try refining the query keywords.
+                      No matches found on {searchSource === "pubmed" ? "PubMed" : searchSource === "crossref" ? "CrossRef" : searchSource === "googlebooks" ? "Google Books" : "Wikipedia"}. Try refining the query keywords.
                     </div>
                   )}
                 </div>

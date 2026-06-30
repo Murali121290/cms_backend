@@ -179,3 +179,17 @@ def delete_file_and_capture_context(db: Session, *, file_id: int):
     db.delete(file_record)
     db.commit()
     return context
+
+
+def get_processed_docx_path(db: Session, file_id: int, logger=None):
+    from app.domains.review.service import resolve_processed_target
+    from fastapi import HTTPException
+    try:
+        resolved = resolve_processed_target(db, file_id=file_id)
+        return resolved["processed_path"]
+    except HTTPException:
+        return None
+    except Exception as e:
+        if logger:
+            logger.warning(f"Could not resolve processed path for file {file_id}: {e}")
+        return None

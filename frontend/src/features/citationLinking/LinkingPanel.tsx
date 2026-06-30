@@ -17,6 +17,8 @@ interface LinkingPanelProps {
   linkingSource: LinkingSource | null;
   onClose: () => void;
   onLinkSuccess?: (linkId: string) => void;
+  allReferences?: Array<{ num?: number; text: string; para_idx?: number; is_cited?: boolean }>;
+  allCitations?: Array<{ citation: string; para_idx?: number; status?: string; author?: string; year?: string }>;
 }
 
 export function LinkingPanel({
@@ -24,6 +26,8 @@ export function LinkingPanel({
   linkingSource,
   onClose,
   onLinkSuccess,
+  allReferences = [],
+  allCitations = [],
 }: LinkingPanelProps) {
   if (!linkingSource) {
     return null;
@@ -52,6 +56,7 @@ export function LinkingPanel({
             onLinkSuccess?.(linkId);
             onClose();
           }}
+          allReferences={allReferences}
         />
       ) : (
         <ReferenceCandidatePanel
@@ -62,6 +67,7 @@ export function LinkingPanel({
             onLinkSuccess?.(linkId);
             onClose();
           }}
+          allCitations={allCitations}
         />
       )}
     </SlideDrawer>
