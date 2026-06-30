@@ -404,7 +404,23 @@ const CustomItalic = TiptapItalic.extend({
   },
 });
 
-import { Node as TiptapNode } from "@tiptap/core";
+import { Node as TiptapNode, Extension } from "@tiptap/core";
+
+// Register list shortcuts through Tiptap/prosemirror-keymap (same mechanism
+// used by Bold/Italic/etc.) instead of a DOM-level keydown listener. This
+// avoids two problems: (1) racing with Tiptap's default Mod-Shift-7 binding
+// for OrderedList — the DOM listener fired AFTER Tiptap's keymap and
+// double-toggled the list — and (2) browser-level Mod-Shift-O capture
+// (Chrome's Bookmark Manager) that sometimes beats DOM listeners.
+const CustomListShortcuts = Extension.create({
+  name: "customListShortcuts",
+  addKeyboardShortcuts() {
+    return {
+      "Mod-Shift-o": () => this.editor.chain().focus().toggleOrderedList().run(),
+      "Mod-Shift-l": () => this.editor.chain().focus().toggleBulletList().run(),
+    };
+  },
+});
 
 const PageBreak = TiptapNode.create({
   name: "pageBreak",
@@ -610,6 +626,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         MathNode,
         SdtBlock,
         SdtInline,
+        CustomListShortcuts,
       ],
       content: "",
       editorProps: {
@@ -930,20 +947,14 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         }
 
         // Mod + Shift + key
+        // Note: bullet/ordered list shortcuts (Mod-Shift-L / Mod-Shift-O) are
+        // registered via the CustomListShortcuts Tiptap extension instead of
+        // here — going through prosemirror-keymap is more reliable and
+        // avoids racing with Tiptap's own Mod-Shift-7 / Mod-Shift-8 defaults.
         if (e.shiftKey && !e.altKey) {
           switch (code) {
-            case "KeyL": return fire(() => editor.chain().focus().toggleBulletList().run());
-            case "KeyO": return fire(() => editor.chain().focus().toggleOrderedList().run());
             case "KeyX": return fire(() => editor.chain().focus().toggleStrike().run());
-            // Legacy / Google-Docs-style binding for numbered list. e.code is
-            // the physical "7" key on a US layout; e.key catches non-US
-            // layouts where the digit-7 row lives elsewhere ("&" on US,
-            // "/" on German, etc.).
-            case "Digit7": return fire(() => editor.chain().focus().toggleOrderedList().run());
             case "Equal": return fire(() => editor.chain().focus().toggleSuperscript().run());
-          }
-          if (e.key === "7" || e.key === "&") {
-            return fire(() => editor.chain().focus().toggleOrderedList().run());
           }
         }
 
