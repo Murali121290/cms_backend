@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/Button";
 import { BookOpen, Plus, Search, X, Play, FileText, ChevronDown, ChevronRight, Folder, Tag, Layers, Table2, Check, Loader2, CircleAlert } from "lucide-react";
@@ -373,8 +373,9 @@ export function StylesPanel({
           name = `Paragraph (${styleLabel})`;
         }
 
-        if (t.type === "paragraph" || t.type === "heading") {
-          const words = (t.node.textContent || "").split(/\s+/).filter(Boolean);
+        {
+          const text = (t.node.textContent || "").trim();
+          const words = text.split(/\s+/).filter(Boolean);
           if (words.length === 0) {
             preview = "";
           } else {
@@ -656,8 +657,8 @@ export function StylesPanel({
         overlay.style.top = `${rect.top - 2}px`;
         overlay.style.width = `${rect.width + 4}px`;
         overlay.style.height = `${rect.height + 4}px`;
-        overlay.style.backgroundColor = "rgba(254, 215, 170, 0.7)";
-        overlay.style.outline = "2px solid #f97316";
+        overlay.style.backgroundColor = "rgba(191, 219, 254, 0.7)";
+        overlay.style.outline = "2px solid #3b82f6";
         overlay.style.borderRadius = "3px";
         overlay.style.pointerEvents = "none";
         overlay.style.zIndex = "9999";
@@ -682,6 +683,88 @@ export function StylesPanel({
       node = walker.nextNode() as Text | null;
     }
     return null;
+  };
+
+  const groupLabelFor = (el: ScannedElement): string => {
+    switch (el.type) {
+      case "heading":
+      case "paragraph":
+        return el.styleLabel || (el.type === "heading" ? "Heading" : "Normal");
+      case "table": return "Table";
+      case "bulletList": return "Bullet List";
+      case "orderedList": return "Numbered List";
+      case "blockquote": return "Blockquote";
+      case "sdtBlock": {
+        const after = el.name.replace(/^Block SDT:\s*/, "").trim();
+        return after && after !== "unnamed" ? after : "Block SDT";
+      }
+      case "sdtInline": {
+        const after = el.name.replace(/^Inline SDT:\s*/, "").trim();
+        return after && after !== "unnamed" ? after : "Inline SDT";
+      }
+      default: return el.name;
+    }
+  };
+
+  const groupedNodes = useMemo(() => {
+    const map = new Map<string, ScannedElement[]>();
+    for (const n of flatNodes) {
+      const key = groupLabelFor(n);
+      let arr = map.get(key);
+      if (!arr) { arr = []; map.set(key, arr); }
+      arr.push(n);
+    }
+    return Array.from(map.entries()).map(([label, items]) => ({ label, items }));
+  }, [flatNodes]);
+
+  const renderGroup = ({ label, items }: { label: string; items: ScannedElement[] }) => {
+    const groupKey = `group:${label}`;
+    const isExpanded = expandedIds.has(groupKey);
+    return (
+      <div key={groupKey} className="flex flex-col">
+        <button
+          type="button"
+          onClick={() => toggleExpanded(groupKey)}
+          className="flex items-center gap-1.5 py-1 px-1.5 rounded hover:bg-slate-50 text-xs select-none cursor-pointer border-none bg-transparent text-left"
+        >
+          {isExpanded
+            ? <ChevronDown className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+            : <ChevronRight className="w-3.5 h-3.5 text-slate-500 shrink-0" />}
+          <span className="font-bold text-blue-700 font-mono text-[11px] shrink-0">{label}</span>
+          <span className="text-slate-400 text-[10px]">({items.length})</span>
+        </button>
+        {isExpanded && (
+          <div className="flex flex-col pl-5">
+            {items.map(el => {
+              const isChecked = checkedIds.has(el.id);
+              return (
+                <div
+                  key={el.id}
+                  className="flex items-center gap-1.5 py-0.5 px-1.5 hover:bg-slate-50 rounded text-xs select-none"
+                >
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={(e) => handleToggleChecked(el, e.target.checked)}
+                    className="w-3.5 h-3.5 border-slate-300 rounded text-primary focus:ring-primary cursor-pointer shrink-0"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => scrollToElement(el)}
+                    className="flex-1 min-w-0 text-left truncate cursor-pointer border-none bg-transparent p-0 text-[11px] text-slate-700 hover:text-blue-700"
+                    title={el.preview || el.name}
+                  >
+                    {el.preview
+                      ? el.preview
+                      : <span className="italic text-slate-400">(empty)</span>}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
   };
 
   const renderTreeNode = (el: ScannedElement, depth = 0) => {
@@ -1015,13 +1098,13 @@ export function StylesPanel({
               )}
             </div>
 
-            <div className="flex-1 overflow-y-auto styles-scrollbar p-3 space-y-1">
-              {scannedTree.length === 0 ? (
+            <div className="flex-1 overflow-y-auto styles-scrollbar p-3 space-y-0.5">
+              {groupedNodes.length === 0 ? (
                 <p className="text-xs text-muted text-center py-4 italic">
                   No elements detected in document
                 </p>
               ) : (
-                scannedTree.map(el => renderTreeNode(el, 0))
+                groupedNodes.map(renderGroup)
               )}
             </div>
 
