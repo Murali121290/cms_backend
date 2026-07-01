@@ -20,6 +20,8 @@ from docx.oxml.ns import qn
 from docx.text.run import Run
 from lxml import etree
 
+from app.utils.utils.structuring_lib.annotator import normalize_structural_tag_case
+
 logger = logging.getLogger("app.processing.xhtml_to_docx_delta")
 
 
@@ -218,6 +220,7 @@ class XhtmlToDocxDeltaEngine:
                 new_style = new_style.split()[0] if new_style.strip() else "Normal"
                 if new_style in ("Normal", "MsoNormal", ""):
                     new_style = "Normal"
+                new_style = normalize_structural_tag_case(new_style)
 
             # 1. Retrieve the exact paragraph node in the body, table cells, or footnote parts
             para = para_index.get(bm_name)

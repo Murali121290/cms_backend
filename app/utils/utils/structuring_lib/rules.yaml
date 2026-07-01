@@ -128,12 +128,15 @@ paragraphs:
 lists:
   bullet_pattern: "^[•\\-\\–▪■●○➢>*]\\s+"
   number_pattern: "^\\d+\\.\\s+"
-  roman_pattern: "^(?i:[ivxlcdm]+)[\\.)]\\s+"
+  roman_pattern: "^[IVXLCDM]+[\\.)]\\s+"
+  lc_letter_pattern: "^[a-z][\\.)]\\s+"
   # Single capital letter followed by a tab or 2+ spaces (mnemonic-style
   # lettered lists), e.g. "A   Apple is red". Requires a tab or 2+ spaces
   # (not just 1) so ordinary sentences starting with the article "A " aren't
-  # misclassified as list items.
-  mnemonic_pattern: "^[A-Z](?:\\t|[ ]{2,4})\\S"
+  # misclassified as list items. Also matches a single capital letter
+  # immediately followed by an em-dash/en-dash (e.g. "S—Is your sleep
+  # disturbed?"), as used in mnemonic checklists like SIGECAPS.
+  mnemonic_pattern: "^[A-Z](?:\\t|[ ]{2,4}|[—–]\\s*)\\S"
 
   # Context-specific list handling
   learning_objectives:
@@ -376,12 +379,8 @@ heading_hierarchy:
     - Conclusion
     - References
 
-  # Synonym Normalization
-  # Map author text synonymous to default STM sections
-  synonym_normalization:
-    Methodology: Methods
-    Findings: Results
-    Summary: Conclusion
+  # Synonym Normalization (disabled — author text is preserved as-is)
+  synonym_normalization: {}
 
   # Valid transitions for hierarchy validation
   valid_transitions:

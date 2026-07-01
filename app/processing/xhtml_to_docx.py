@@ -20,6 +20,8 @@ import logging
 import re
 from pathlib import Path
 
+from app.utils.utils.structuring_lib.annotator import normalize_structural_tag_case
+
 logger = logging.getLogger("app.processing.xhtml_to_docx")
 
 
@@ -134,6 +136,7 @@ class XhtmlToDocxEngine:
                 style_label = style_label.split()[0] if style_label.strip() else "Normal"
                 if style_label in ("Normal", "MsoNormal", ""):
                     style_label = "Normal"
+                style_label = normalize_structural_tag_case(style_label)
 
             html_entries.append({
                 "clean": self._clean(raw_text) if not is_page_break else "__PAGE_BREAK__",
@@ -731,7 +734,8 @@ def _determine_list_style(li_el) -> str:
 
 def apply_final_docx_formatting(doc):
     from docx.shared import Pt
-    # 1. Update Normal style
+    # Only update the Normal style as a fallback for unstyled runs.
+    # Run-level rFonts/sz are left untouched so original formatting survives.
     try:
         normal_style = doc.styles['Normal']
         normal_style.font.name = 'Times New Roman'
@@ -739,17 +743,6 @@ def apply_final_docx_formatting(doc):
         normal_style.paragraph_format.line_spacing = 2.0
     except Exception as e:
         logger.warning(f"Could not set Normal style: {e}")
-
-    body = doc.element.body
-    for rFonts in body.findall(f".//{qn('w:rFonts')}"):
-        rFonts.set(qn('w:ascii'), 'Times New Roman')
-        rFonts.set(qn('w:hAnsi'), 'Times New Roman')
-        rFonts.set(qn('w:cs'), 'Times New Roman')
-
-    for sz in body.findall(f".//{qn('w:sz')}"):
-        sz.set(qn('w:val'), '24')
-    for szCs in body.findall(f".//{qn('w:szCs')}"):
-        szCs.set(qn('w:val'), '24')
 
     for para in doc.paragraphs:
         style_name = para.style.name if para.style else "Normal"

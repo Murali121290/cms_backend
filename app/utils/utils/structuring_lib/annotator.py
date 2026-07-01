@@ -6,6 +6,7 @@ Identifies and tags document elements (headings, sections, lists, etc).
 
 import re
 import logging
+import unicodedata
 from typing import List, Dict, Any, Optional
 from docx.document import Document
 from docx.text.paragraph import Paragraph
@@ -227,7 +228,7 @@ def detect_list_kind(text: str, style_name: str = "", is_word_list: bool = False
     number_pattern = list_config.get("number_pattern", r"^\d+\.\s+")
     roman_pattern = list_config.get("roman_pattern", r"^(?i:[ivxlcdm]+)[\.)]\s+")
 
-    mnemonic_pattern = list_config.get("mnemonic_pattern", r"^[A-Z](?:\t|[ ]{2,4})\S")
+    mnemonic_pattern = list_config.get("mnemonic_pattern", r"^[A-Z](?:\t|[ ]{2,4}|[—–]\s*)\S")
 
     text = (text or "").strip()
     style_name = style_name or ""
@@ -235,8 +236,17 @@ def detect_list_kind(text: str, style_name: str = "", is_word_list: bool = False
 
     if re.match(bullet_pattern, text) or "bullet" in lowered_style:
         return "bullet"
+    # Symbol bullets: any Unicode Symbol character (So/Sm/Sc/Sk) or Private-Use
+    # character (Wingdings etc.) at the start of the paragraph.
+    if text:
+        cat = unicodedata.category(text[0])
+        if cat.startswith('S') or cat == 'Co':
+            return "bullet"
     if re.match(number_pattern, text) or re.match(r"^\s*\d+[\.\)]\s+", text) or "number" in lowered_style:
         return "number"
+    lc_letter_pattern = list_config.get("lc_letter_pattern", r"^[a-z][.)]\s+")
+    if re.match(lc_letter_pattern, text):
+        return "lettered"
     if re.match(roman_pattern, text) or "roman" in lowered_style:
         return "roman"
     if re.match(mnemonic_pattern, text):
@@ -301,6 +311,23 @@ def _is_recognized_structural_tag(token: str) -> bool:
     if token_upper in {t.upper() for t in cfg.get("exact", [])}:
         return True
     return any(token_upper.startswith(p.upper()) for p in cfg.get("prefixes", []))
+
+
+def normalize_structural_tag_case(style_name: Optional[str]) -> Optional[str]:
+    """Case-insensitively match *style_name* against the structural_tags
+    registry (rules.yaml) and return its canonical uppercase form if
+    recognized (e.g. "h1" -> "H1", "bl-first" -> "BL-FIRST"); otherwise
+    return it unchanged. Built-in Word styles ("Normal", "Table Grid", ...)
+    and unrelated custom publisher styles are never in the registry, so
+    they pass through untouched. Intended for the docx/xhtml round-trip
+    save paths, where a style name read back from an existing document or
+    HTML attribute may have drifted in case from however it was originally
+    authored."""
+    if not style_name:
+        return style_name
+    if _is_recognized_structural_tag(style_name):
+        return style_name.strip().upper()
+    return style_name
 
 
 def _is_known_token(token: str, context_kind: Optional[str] = None) -> bool:
@@ -737,7 +764,25 @@ def annotate_document(doc: Document) -> List[Dict[str, Any]]:
                 elif not rule_matched and explicit_context_kind == "keyterm":
                     tag = "KT"
                     style = "KT"
-            
+                elif (
+                    not rule_matched
+                    and not current_block
+                    and explicit_context_kind is None
+                    and text
+                    and len(text.split()) < 15
+                    and text[-1] not in ".!?:;,>"
+                ):
+                    # Priority 3.6: Short standalone-phrase heading fallback.
+                    # Catches headings the stricter regex rules above miss
+                    # (e.g. a bare single word like "Healthcare" - priority
+                    # 22's Title-Case rule requires at least two words).
+                    # Recall-oriented on purpose: some non-heading fragments
+                    # without trailing punctuation will be mis-tagged too;
+                    # the hierarchy review step downstream is the backstop.
+                    tag = "H2"
+                    style = "H2"
+                    logger.debug(f"Para {para_idx}: Short standalone-phrase fallback -> H2 (`{text}`)")
+
             # Priority 3.5: Epigraph Context Logic
             if tag in ("CN", "CT", "CAU"):
                 in_chapter_preamble = True

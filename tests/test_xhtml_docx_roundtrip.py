@@ -210,6 +210,43 @@ class TestXhtmlToDocxRoundTrip:
         result = xhtml_engine.convert(str(html_path), str(sample_docx_path), username="Styler")
         assert Path(result).exists()
 
+    def test_xhtml_to_docx_lowercase_style_label_is_canonicalized(self, xhtml_engine, tmp_path):
+        """A data-style-label that drifted to lowercase (e.g. "h1", from
+        however the paragraph's style name was originally cased) must be
+        normalized to the canonical uppercase tag when written back to the
+        DOCX, not applied verbatim. The DOCX already has a custom "H1" style
+        registered, mirroring real documents that already went through the
+        AI-structuring step before reaching the manual style picker."""
+        from docx.enum.style import WD_STYLE_TYPE
+
+        doc = Document()
+        h1_style = doc.styles.add_style("H1", WD_STYLE_TYPE.PARAGRAPH)
+        h1_style.base_style = doc.styles["Normal"]
+        para = doc.add_paragraph("Test Heading")
+        para.style = "H1"
+
+        docx_path = tmp_path / "with_h1_style.docx"
+        doc.save(docx_path)
+
+        html_content = """
+        <html>
+            <body>
+                <h1 data-style-label="h1">Test Heading</h1>
+            </body>
+        </html>
+        """
+
+        html_path = tmp_path / "test_lowercase_style.html"
+        html_path.write_text(html_content)
+
+        result = xhtml_engine.convert(str(html_path), str(docx_path), username="Test User")
+        assert Path(result).exists()
+
+        doc2 = Document(result)
+        heading_para = next(p for p in doc2.paragraphs if p.text.strip() == "Test Heading")
+        assert heading_para.style.name == "H1"
+        assert "h1" not in [s.name for s in doc2.styles]
+
     def test_xhtml_to_docx_image_preservation(self, sample_docx_path, xhtml_engine, tmp_path):
         """
         Verify that images in the original DOCX are preserved during the round-trip.
