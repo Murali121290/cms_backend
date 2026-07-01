@@ -3,6 +3,7 @@ import { AppLayout } from '@/layouts/AppLayout'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { RoleGuard } from '@/components/RoleGuard'
 import { LoginPage } from '@/pages/LoginPage'
+import { WorkflowPortalPage } from '@/pages/WorkflowPortalPage'
 import { RegisterPage } from '@/pages/RegisterPage'
 import { ForgotPasswordPage } from '@/pages/ForgotPasswordPage'
 import { DashboardPage } from '@/pages/DashboardPage'
@@ -36,6 +37,7 @@ import ProjectSchedule from '@/Reports/ProjectSchedule'
 
 const router = createBrowserRouter([
   // ── Public routes ──────────────────────────────────────────────────────────
+  { path: '/portal', element: <WorkflowPortalPage /> },
   { path: '/login', element: <LoginPage /> },
   { path: '/register', element: <RegisterPage /> },
   { path: '/forgot-password', element: <ForgotPasswordPage /> },

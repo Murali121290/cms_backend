@@ -10,7 +10,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
-      navigate('/login', { state: { from: location }, replace: true })
+      navigate('/portal', { state: { from: location }, replace: true })
     }
   }, [isAuthenticated, isLoading, navigate, location])
 
