@@ -287,37 +287,31 @@ export function StylesPanel({
   const [wrapType, setWrapType] = useState<"block" | "inline">("block");
   const scanTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Drag & drop reordering ────────────────────────────────────────────────
-  const [draggedEl, setDraggedEl] = useState<ScannedElement | null>(null);
-  const [dragOver, setDragOver] = useState<{ id: string; pos: "before" | "after" } | null>(null);
+  // ── Drag & drop group reordering ──────────────────────────────────────────
+  // Dragging a style-group header onto another rearranges only the display
+  // order of groups inside the Document Elements panel. The document itself
+  // (paragraphs, headings, their content and position) is never touched.
+  const [draggedGroup, setDraggedGroup] = useState<string | null>(null);
+  const [groupDragOver, setGroupDragOver] = useState<{ label: string; pos: "before" | "after" } | null>(null);
+  const [groupOrder, setGroupOrder] = useState<string[]>([]);
 
-  const moveElement = (source: ScannedElement, target: ScannedElement, where: "before" | "after") => {
-    const editor = editorRef.current?.editor;
-    if (!editor) return;
-    if (source.id === target.id) return;
-    // Restrict to top-level (root) nodes — moving nodes nested inside tables,
-    // SDT blocks, etc. would violate schema in most cases.
-    if (source.depth !== 0 || target.depth !== 0) return;
-
-    const state = editor.state;
-    const srcFrom = source.pos;
-    const srcTo = source.pos + source.nodeSize;
-    const rawTarget = where === "before" ? target.pos : target.pos + target.nodeSize;
-
-    // No-op: dropping into the same slot (just before or just after itself).
-    if (rawTarget === srcFrom || rawTarget === srcTo) return;
-
-    try {
-      const tr = state.tr;
-      const slice = state.doc.slice(srcFrom, srcTo);
-      tr.delete(srcFrom, srcTo);
-      const insertAt = tr.mapping.map(rawTarget);
-      tr.insert(insertAt, slice.content);
-      tr.scrollIntoView();
-      editor.view.dispatch(tr);
-    } catch (err) {
-      console.error("Failed to reorder document element", err);
-    }
+  const reorderGroup = (source: string, target: string, where: "before" | "after") => {
+    if (source === target) return;
+    const currentLabels = groupedNodes.map(g => g.label);
+    setGroupOrder(prev => {
+      const base = prev.filter(l => currentLabels.includes(l));
+      for (const l of currentLabels) {
+        if (!base.includes(l)) base.push(l);
+      }
+      const srcIdx = base.indexOf(source);
+      if (srcIdx === -1) return prev;
+      base.splice(srcIdx, 1);
+      let tgtIdx = base.indexOf(target);
+      if (tgtIdx === -1) { base.push(source); return base; }
+      if (where === "after") tgtIdx += 1;
+      base.splice(tgtIdx, 0, source);
+      return base;
+    });
   };
 
   const getCheckedNodesList = (): ScannedElement[] => {
@@ -772,19 +766,83 @@ export function StylesPanel({
       if (!arr) { arr = []; map.set(key, arr); }
       arr.push(n);
     }
-    return Array.from(map.entries()).map(([label, items]) => ({ label, items }));
-  }, [flatNodes]);
+    // Merge the user-defined groupOrder with scan-order for any labels the
+    // user hasn't touched yet. Existing user ordering wins; new labels append.
+    const scanOrder = Array.from(map.keys());
+    const seen = new Set<string>();
+    const finalOrder: string[] = [];
+    for (const label of groupOrder) {
+      if (map.has(label) && !seen.has(label)) {
+        finalOrder.push(label);
+        seen.add(label);
+      }
+    }
+    for (const label of scanOrder) {
+      if (!seen.has(label)) {
+        finalOrder.push(label);
+        seen.add(label);
+      }
+    }
+    return finalOrder.map(label => ({ label, items: map.get(label) || [] }));
+  }, [flatNodes, groupOrder]);
 
   const renderGroup = ({ label, items }: { label: string; items: ScannedElement[] }) => {
     const groupKey = `group:${label}`;
     const isExpanded = expandedIds.has(groupKey);
+    const isDraggingGroup = draggedGroup === label;
+    const showTopMarker = groupDragOver?.label === label && groupDragOver.pos === "before";
+    const showBottomMarker = groupDragOver?.label === label && groupDragOver.pos === "after";
     return (
       <div key={groupKey} className="flex flex-col">
         <button
           type="button"
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.effectAllowed = "move";
+            try { e.dataTransfer.setData("text/plain", label); } catch { /* ignore */ }
+            setDraggedGroup(label);
+          }}
+          onDragEnd={() => {
+            setDraggedGroup(null);
+            setGroupDragOver(null);
+          }}
+          onDragOver={(e) => {
+            if (!draggedGroup || draggedGroup === label) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            const rect = e.currentTarget.getBoundingClientRect();
+            const pos = (e.clientY - rect.top) < rect.height / 2 ? "before" : "after";
+            if (!groupDragOver || groupDragOver.label !== label || groupDragOver.pos !== pos) {
+              setGroupDragOver({ label, pos });
+            }
+          }}
+          onDragLeave={(e) => {
+            const next = e.relatedTarget as Node | null;
+            if (!next || !e.currentTarget.contains(next)) {
+              if (groupDragOver?.label === label) setGroupDragOver(null);
+            }
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            const src = draggedGroup;
+            const over = groupDragOver;
+            setDraggedGroup(null);
+            setGroupDragOver(null);
+            if (src && over && over.label === label) {
+              reorderGroup(src, label, over.pos);
+            }
+          }}
           onClick={() => toggleExpanded(groupKey)}
-          className="flex items-center gap-1.5 py-1 px-1.5 rounded hover:bg-slate-50 text-xs select-none cursor-pointer border-none bg-transparent text-left"
+          className={`relative flex items-center gap-1.5 py-1 px-1.5 rounded hover:bg-slate-50 text-xs select-none cursor-grab active:cursor-grabbing border-none bg-transparent text-left
+            ${isDraggingGroup ? "opacity-40" : ""}`}
         >
+          {showTopMarker && (
+            <div className="absolute left-0 right-0 -top-px h-0.5 bg-blue-500 rounded-full pointer-events-none" />
+          )}
+          {showBottomMarker && (
+            <div className="absolute left-0 right-0 -bottom-px h-0.5 bg-blue-500 rounded-full pointer-events-none" />
+          )}
+          <GripVertical className="w-3 h-3 text-slate-300 shrink-0" aria-hidden />
           {isExpanded
             ? <ChevronDown className="w-3.5 h-3.5 text-slate-500 shrink-0" />
             : <ChevronRight className="w-3.5 h-3.5 text-slate-500 shrink-0" />}
@@ -795,64 +853,11 @@ export function StylesPanel({
           <div className="flex flex-col pl-5">
             {items.map(el => {
               const isChecked = checkedIds.has(el.id);
-              const isReorderable = el.depth === 0;
-              const isDragging = draggedEl?.id === el.id;
-              const showTopMarker = dragOver?.id === el.id && dragOver.pos === "before";
-              const showBottomMarker = dragOver?.id === el.id && dragOver.pos === "after";
               return (
                 <div
                   key={el.id}
-                  draggable={isReorderable}
-                  onDragStart={(e) => {
-                    if (!isReorderable) { e.preventDefault(); return; }
-                    e.dataTransfer.effectAllowed = "move";
-                    try { e.dataTransfer.setData("text/plain", el.id); } catch { /* ignore */ }
-                    setDraggedEl(el);
-                  }}
-                  onDragEnd={() => {
-                    setDraggedEl(null);
-                    setDragOver(null);
-                  }}
-                  onDragOver={(e) => {
-                    if (!draggedEl || !isReorderable) return;
-                    if (draggedEl.id === el.id) return;
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = "move";
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const pos = (e.clientY - rect.top) < rect.height / 2 ? "before" : "after";
-                    if (!dragOver || dragOver.id !== el.id || dragOver.pos !== pos) {
-                      setDragOver({ id: el.id, pos });
-                    }
-                  }}
-                  onDragLeave={(e) => {
-                    const next = e.relatedTarget as Node | null;
-                    if (!next || !e.currentTarget.contains(next)) {
-                      if (dragOver?.id === el.id) setDragOver(null);
-                    }
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const target = dragOver;
-                    const src = draggedEl;
-                    setDraggedEl(null);
-                    setDragOver(null);
-                    if (src && target && target.id === el.id) {
-                      moveElement(src, el, target.pos);
-                    }
-                  }}
-                  className={`relative flex items-center gap-1.5 py-0.5 px-1.5 hover:bg-slate-50 rounded text-xs select-none
-                    ${isReorderable ? "cursor-grab active:cursor-grabbing" : ""}
-                    ${isDragging ? "opacity-40" : ""}`}
+                  className="relative flex items-center gap-1.5 py-0.5 px-1.5 hover:bg-slate-50 rounded text-xs select-none"
                 >
-                  {showTopMarker && (
-                    <div className="absolute left-0 right-0 -top-px h-0.5 bg-blue-500 rounded-full pointer-events-none" />
-                  )}
-                  {showBottomMarker && (
-                    <div className="absolute left-0 right-0 -bottom-px h-0.5 bg-blue-500 rounded-full pointer-events-none" />
-                  )}
-                  {isReorderable && (
-                    <GripVertical className="w-3 h-3 text-slate-300 shrink-0" aria-hidden />
-                  )}
                   <input
                     type="checkbox"
                     checked={isChecked}
