@@ -17,8 +17,8 @@ function ProjectCard({ project }: { project: ProjectSummary }) {
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <p className="text-[10px] font-mono text-muted">{project.code}</p>
-          <p className="font-semibold text-text text-sm leading-snug mt-0.5 line-clamp-2" title={project.title}>
+          <p className="inline-block text-[10px] font-mono font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded mb-1">{project.code}</p>
+          <p className="font-serif font-semibold text-text text-base leading-snug group-hover:text-primary transition-colors line-clamp-2 mt-0.5" title={project.title}>
             {project.title}
           </p>
         </div>

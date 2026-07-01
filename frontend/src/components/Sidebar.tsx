@@ -36,7 +36,7 @@ export function Sidebar() {
         collapsed ? 'justify-center' : 'gap-2'
       )}>
         {collapsed ? (
-          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center flex-shrink-0 text-white font-bold text-[10px]">
+          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center flex-shrink-0 text-sidebar font-bold text-[14px] font-serif">
             S4
           </div>
         ) : !logoError ? (
@@ -47,13 +47,13 @@ export function Sidebar() {
             onError={() => setLogoError(true)}
           />
         ) : (
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center flex-shrink-0 text-white font-bold text-[10px]">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center flex-shrink-0 text-sidebar font-bold text-[14px] font-serif">
               S4
             </div>
-            <div>
-              <p className="text-white font-bold text-xs leading-tight">S4Carlisle</p>
-              <p className="text-white/60 text-[10px] leading-tight">Production Suite</p>
+            <div className="leading-tight">
+              <p className="text-white font-semibold text-[15px] font-serif tracking-tight">S4Carlisle</p>
+              <p className="text-sidebar-text/60 text-[9px] font-bold uppercase tracking-widest mt-0.5">Production Suite</p>
             </div>
           </div>
         )}
@@ -65,7 +65,7 @@ export function Sidebar() {
         collapsed ? 'overflow-visible' : 'overflow-y-auto overflow-x-hidden'
       )}>
         {!collapsed && (
-          <p className="px-4 mb-2 text-[10px] font-semibold uppercase tracking-widest text-sidebar-text/50">
+          <p className="px-4 mb-2 text-[10px] font-bold uppercase tracking-widest text-sidebar-text/50">
             Main Menu
           </p>
         )}
@@ -82,7 +82,7 @@ export function Sidebar() {
                     'flex items-center rounded-lg transition-all duration-150 group relative',
                     collapsed ? 'justify-center p-2.5' : 'gap-3 px-3 py-2.5',
                     active
-                      ? 'bg-primary text-white'
+                      ? 'bg-primary text-sidebar font-semibold'
                       : 'text-sidebar-text hover:bg-white/8 hover:text-white'
                   )}
                 >
