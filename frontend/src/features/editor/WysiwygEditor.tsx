@@ -52,6 +52,9 @@ import {
   Sigma,
   Eye,
   EyeOff,
+  Keyboard,
+  Plus,
+  History as HistoryIcon,
 } from "lucide-react";
 import { diffWords, diffArrays } from "diff";
 import { useState, useEffect, useImperativeHandle, forwardRef, useCallback, useRef } from "react";
@@ -76,6 +79,120 @@ import katex from "katex";
 /**
  * Helpers for the toolbar's eye toggle (review-mode diff overlay).
  */
+
+const IS_MAC = typeof navigator !== "undefined"
+  && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "");
+
+// Format a Windows-style shortcut string ("Ctrl+Shift+L") for the current
+// platform. On macOS swap to ⌘/⇧/⌥/⏎ glyphs so tooltips read like native apps.
+const kbd = (combo: string): string => {
+  if (!IS_MAC) return combo;
+  return combo
+    .replace(/Ctrl\+/g, "⌘")
+    .replace(/Shift\+/g, "⇧")
+    .replace(/Alt\+/g, "⌥")
+    .replace(/\bEnter\b/g, "⏎");
+};
+
+// Split a Windows-form combo ("Ctrl+Shift+X") into per-key tokens for chip
+// rendering. On macOS, modifier names are swapped for their Mac glyphs first
+// so each chip ends up as a single symbol.
+const splitCombo = (combo: string): string[] => {
+  if (!IS_MAC) return combo.split("+");
+  const macMap: Record<string, string> = { Ctrl: "⌘", Shift: "⇧", Alt: "⌥", Enter: "⏎" };
+  return combo.split("+").map((p) => macMap[p] || p);
+};
+
+// Tailwind palette tokens used to tint each shortcut category. Kept in
+// expanded form so Tailwind's JIT picks them up.
+type SectionAccent = {
+  icon: typeof Bold;
+  iconWrap: string;     // background + border for the section icon
+  iconColor: string;    // icon foreground
+  ring: string;         // group hover ring
+};
+
+const SHORTCUT_GROUPS: {
+  title: string;
+  accent: SectionAccent;
+  items: { label: string; combo: string }[];
+}[] = [
+  {
+    title: "Text Formatting",
+    accent: {
+      icon: Bold,
+      iconWrap: "bg-indigo-50 border-indigo-100",
+      iconColor: "text-indigo-600",
+      ring: "hover:ring-indigo-100",
+    },
+    items: [
+      { label: "Bold", combo: "Ctrl+B" },
+      { label: "Italic", combo: "Ctrl+I" },
+      { label: "Underline", combo: "Ctrl+U" },
+      { label: "Strikethrough", combo: "Ctrl+Shift+X" },
+      { label: "Superscript", combo: "Ctrl+Shift+=" },
+      { label: "Subscript", combo: "Ctrl+=" },
+    ],
+  },
+  {
+    title: "Paragraph & Alignment",
+    accent: {
+      icon: AlignLeft,
+      iconWrap: "bg-emerald-50 border-emerald-100",
+      iconColor: "text-emerald-600",
+      ring: "hover:ring-emerald-100",
+    },
+    items: [
+      { label: "Align Left", combo: "Ctrl+L" },
+      { label: "Align Center", combo: "Ctrl+E" },
+      { label: "Align Right", combo: "Ctrl+R" },
+      { label: "Justify", combo: "Ctrl+J" },
+      { label: "Heading 1–6", combo: "Ctrl+Alt+1…6" },
+    ],
+  },
+  {
+    title: "Lists",
+    accent: {
+      icon: List,
+      iconWrap: "bg-amber-50 border-amber-100",
+      iconColor: "text-amber-600",
+      ring: "hover:ring-amber-100",
+    },
+    items: [
+      { label: "Bullet List", combo: "Ctrl+Shift+L" },
+      { label: "Numbered List", combo: "Ctrl+Shift+O" },
+    ],
+  },
+  {
+    title: "Insert",
+    accent: {
+      icon: Plus,
+      iconWrap: "bg-violet-50 border-violet-100",
+      iconColor: "text-violet-600",
+      ring: "hover:ring-violet-100",
+    },
+    items: [
+      { label: "Insert / Edit Link", combo: "Ctrl+K" },
+      { label: "Insert Table 3×3", combo: "Ctrl+Alt+T" },
+      { label: "Insert Page Break", combo: "Ctrl+Enter" },
+      { label: "Insert Math Equation", combo: "Ctrl+Alt+E" },
+      { label: "Add Comment", combo: "Ctrl+Alt+M" },
+    ],
+  },
+  {
+    title: "History",
+    accent: {
+      icon: HistoryIcon,
+      iconWrap: "bg-slate-100 border-slate-200",
+      iconColor: "text-slate-600",
+      ring: "hover:ring-slate-200",
+    },
+    items: [
+      { label: "Undo", combo: "Ctrl+Z" },
+      { label: "Redo", combo: "Ctrl+Y" },
+    ],
+  },
+];
 
 const escapeHtml = (s: string) =>
   s
@@ -287,7 +404,23 @@ const CustomItalic = TiptapItalic.extend({
   },
 });
 
-import { Node as TiptapNode } from "@tiptap/core";
+import { Node as TiptapNode, Extension } from "@tiptap/core";
+
+// Register list shortcuts through Tiptap/prosemirror-keymap (same mechanism
+// used by Bold/Italic/etc.) instead of a DOM-level keydown listener. This
+// avoids two problems: (1) racing with Tiptap's default Mod-Shift-7 binding
+// for OrderedList — the DOM listener fired AFTER Tiptap's keymap and
+// double-toggled the list — and (2) browser-level Mod-Shift-O capture
+// (Chrome's Bookmark Manager) that sometimes beats DOM listeners.
+const CustomListShortcuts = Extension.create({
+  name: "customListShortcuts",
+  addKeyboardShortcuts() {
+    return {
+      "Mod-Shift-o": () => this.editor.chain().focus().toggleOrderedList().run(),
+      "Mod-Shift-l": () => this.editor.chain().focus().toggleBulletList().run(),
+    };
+  },
+});
 
 const PageBreak = TiptapNode.create({
   name: "pageBreak",
@@ -407,6 +540,9 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
     // Link dialog state
     const [showLinkDialog, setShowLinkDialog] = useState(false);
     const [linkUrl, setLinkUrl] = useState("");
+    // Keyboard shortcuts dialog
+    const [showShortcuts, setShowShortcuts] = useState(false);
+    const [shortcutQuery, setShortcutQuery] = useState("");
     // Review-mode toggle (eye icon): when ON, swap the editor for a read-only
     // inline diff of the originally-loaded content vs the user's current edits.
     // Turning it OFF restores the editable HTML the user was last working with.
@@ -490,6 +626,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         MathNode,
         SdtBlock,
         SdtInline,
+        CustomListShortcuts,
       ],
       content: "",
       editorProps: {
@@ -771,6 +908,74 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
       [editor, openCommentDialog],
     );
 
+    // ── Keyboard shortcuts ───────────────────────────────────────────────────
+    // Listener is attached to editor.view.dom so it only fires while the
+    // editor itself has keyboard focus (matches the "shortcuts work only when
+    // editor is focused" requirement). Mod = Ctrl on Win/Linux, Cmd on macOS.
+    useEffect(() => {
+      if (!editor) return;
+      const dom = editor.view.dom as HTMLElement;
+
+      const onKeyDown = (e: KeyboardEvent) => {
+        const mod = e.ctrlKey || e.metaKey;
+        if (!mod) return;
+        // Use e.code (physical key) instead of e.key: on macOS Option+letter
+        // produces special characters (Alt+T = "†", Alt+M = "µ", Alt+E = "´"),
+        // so e.key never matches "t"/"m"/"e". e.code stays "KeyT" / "KeyM" /
+        // "KeyE" regardless of modifiers or keyboard layout.
+        const code = e.code;
+        const fire = (fn: () => void) => { e.preventDefault(); e.stopPropagation(); fn(); };
+
+        // Mod + key (no Shift / Alt)
+        if (!e.shiftKey && !e.altKey) {
+          switch (code) {
+            case "KeyL": return fire(() => editor.chain().focus().setTextAlign("left").run());
+            case "KeyE": return fire(() => editor.chain().focus().setTextAlign("center").run());
+            case "KeyR": return fire(() => editor.chain().focus().setTextAlign("right").run());
+            case "KeyJ": return fire(() => editor.chain().focus().setTextAlign("justify").run());
+            case "KeyK": return fire(() => {
+              const existing = editor.getAttributes("link")?.href || "";
+              setLinkUrl(existing);
+              setShowLinkDialog(true);
+            });
+            case "Enter":
+            case "NumpadEnter": return fire(() =>
+              editor.chain().focus().insertContent({ type: "pageBreak" }).run()
+            );
+            case "Equal": return fire(() => editor.chain().focus().toggleSubscript().run());
+          }
+        }
+
+        // Mod + Shift + key
+        // Note: bullet/ordered list shortcuts (Mod-Shift-L / Mod-Shift-O) are
+        // registered via the CustomListShortcuts Tiptap extension instead of
+        // here — going through prosemirror-keymap is more reliable and
+        // avoids racing with Tiptap's own Mod-Shift-7 / Mod-Shift-8 defaults.
+        if (e.shiftKey && !e.altKey) {
+          switch (code) {
+            case "KeyX": return fire(() => editor.chain().focus().toggleStrike().run());
+            case "Equal": return fire(() => editor.chain().focus().toggleSuperscript().run());
+          }
+        }
+
+        // Mod + Alt + key
+        if (e.altKey && !e.shiftKey) {
+          switch (code) {
+            case "KeyT": return fire(() =>
+              editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
+            );
+            case "KeyM": return fire(() => openCommentDialog());
+            case "KeyE": return fire(() =>
+              (editor.chain().focus() as any).insertMathNode("x^2 + y^2 = z^2").run()
+            );
+          }
+        }
+      };
+
+      dom.addEventListener("keydown", onKeyDown);
+      return () => dom.removeEventListener("keydown", onKeyDown);
+    }, [editor, openCommentDialog]);
+
     const handleToggleTrackChanges = () => setTcEnabled(!tcEnabled);
 
     // Convert client-only LaTeX spans to MathML on save. Comment spans
@@ -951,22 +1156,22 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           <ToolbarDivider />
 
           {/* Text Formatting */}
-          <ToolbarButton active={editor?.isActive("bold")} onClick={() => editor?.chain().focus().toggleBold().run()} title="Bold (Ctrl+B)">
+          <ToolbarButton active={editor?.isActive("bold")} onClick={() => editor?.chain().focus().toggleBold().run()} title={`Bold (${kbd("Ctrl+B")})`}>
             <Bold className="w-4 h-4" />
           </ToolbarButton>
-          <ToolbarButton active={editor?.isActive("italic")} onClick={() => editor?.chain().focus().toggleItalic().run()} title="Italic (Ctrl+I)">
+          <ToolbarButton active={editor?.isActive("italic")} onClick={() => editor?.chain().focus().toggleItalic().run()} title={`Italic (${kbd("Ctrl+I")})`}>
             <Italic className="w-4 h-4" />
           </ToolbarButton>
-          <ToolbarButton active={editor?.isActive("underline")} onClick={() => editor?.chain().focus().toggleUnderline().run()} title="Underline (Ctrl+U)">
+          <ToolbarButton active={editor?.isActive("underline")} onClick={() => editor?.chain().focus().toggleUnderline().run()} title={`Underline (${kbd("Ctrl+U")})`}>
             <Type className="w-4 h-4" />
           </ToolbarButton>
-          <ToolbarButton active={editor?.isActive("strike")} onClick={() => editor?.chain().focus().toggleStrike().run()} title="Strikethrough">
+          <ToolbarButton active={editor?.isActive("strike")} onClick={() => editor?.chain().focus().toggleStrike().run()} title={`Strikethrough (${kbd("Ctrl+Shift+X")})`}>
             <Strikethrough className="w-4 h-4" />
           </ToolbarButton>
-          <ToolbarButton active={editor?.isActive("superscript")} onClick={() => editor?.chain().focus().toggleSuperscript().run()} title="Superscript">
+          <ToolbarButton active={editor?.isActive("superscript")} onClick={() => editor?.chain().focus().toggleSuperscript().run()} title={`Superscript (${kbd("Ctrl+Shift+=")})`}>
             <SuperscriptIcon className="w-4 h-4" />
           </ToolbarButton>
-          <ToolbarButton active={editor?.isActive("subscript")} onClick={() => editor?.chain().focus().toggleSubscript().run()} title="Subscript">
+          <ToolbarButton active={editor?.isActive("subscript")} onClick={() => editor?.chain().focus().toggleSubscript().run()} title={`Subscript (${kbd("Ctrl+=")})`}>
             <SubscriptIcon className="w-4 h-4" />
           </ToolbarButton>
 
@@ -1014,26 +1219,26 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           <ToolbarDivider />
 
           {/* Alignment */}
-          <ToolbarButton active={editor?.isActive({ textAlign: "left" })} onClick={() => editor?.chain().focus().setTextAlign("left").run()} title="Align Left">
+          <ToolbarButton active={editor?.isActive({ textAlign: "left" })} onClick={() => editor?.chain().focus().setTextAlign("left").run()} title={`Align Left (${kbd("Ctrl+L")})`}>
             <AlignLeft className="w-4 h-4" />
           </ToolbarButton>
-          <ToolbarButton active={editor?.isActive({ textAlign: "center" })} onClick={() => editor?.chain().focus().setTextAlign("center").run()} title="Align Center">
+          <ToolbarButton active={editor?.isActive({ textAlign: "center" })} onClick={() => editor?.chain().focus().setTextAlign("center").run()} title={`Align Center (${kbd("Ctrl+E")})`}>
             <AlignCenter className="w-4 h-4" />
           </ToolbarButton>
-          <ToolbarButton active={editor?.isActive({ textAlign: "right" })} onClick={() => editor?.chain().focus().setTextAlign("right").run()} title="Align Right">
+          <ToolbarButton active={editor?.isActive({ textAlign: "right" })} onClick={() => editor?.chain().focus().setTextAlign("right").run()} title={`Align Right (${kbd("Ctrl+R")})`}>
             <AlignRight className="w-4 h-4" />
           </ToolbarButton>
-          <ToolbarButton active={editor?.isActive({ textAlign: "justify" })} onClick={() => editor?.chain().focus().setTextAlign("justify").run()} title="Justify">
+          <ToolbarButton active={editor?.isActive({ textAlign: "justify" })} onClick={() => editor?.chain().focus().setTextAlign("justify").run()} title={`Justify (${kbd("Ctrl+J")})`}>
             <AlignJustify className="w-4 h-4" />
           </ToolbarButton>
 
           <ToolbarDivider />
 
           {/* Lists */}
-          <ToolbarButton active={editor?.isActive("bulletList")} onClick={() => editor?.chain().focus().toggleBulletList().run()} title="Bullet List">
+          <ToolbarButton active={editor?.isActive("bulletList")} onClick={() => editor?.chain().focus().toggleBulletList().run()} title={`Bullet List (${kbd("Ctrl+Shift+L")})`}>
             <List className="w-4 h-4" />
           </ToolbarButton>
-          <ToolbarButton active={editor?.isActive("orderedList")} onClick={() => editor?.chain().focus().toggleOrderedList().run()} title="Numbered List">
+          <ToolbarButton active={editor?.isActive("orderedList")} onClick={() => editor?.chain().focus().toggleOrderedList().run()} title={`Numbered List (${kbd("Ctrl+Shift+O")})`}>
             <ListOrdered className="w-4 h-4" />
           </ToolbarButton>
           <ToolbarButton
@@ -1062,12 +1267,12 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           <ToolbarDivider />
 
           {/* Insert Table */}
-          <ToolbarButton onClick={() => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} title="Insert Table (3x3)">
+          <ToolbarButton onClick={() => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} title={`Insert Table 3×3 (${kbd("Ctrl+Alt+T")})`}>
             <Table2 className="w-4 h-4" />
           </ToolbarButton>
 
           {/* Insert Page Break */}
-          <ToolbarButton onClick={() => editor?.chain().focus().insertContent({ type: 'pageBreak' }).run()} title="Insert Page Break">
+          <ToolbarButton onClick={() => editor?.chain().focus().insertContent({ type: 'pageBreak' }).run()} title={`Insert Page Break (${kbd("Ctrl+Enter")})`}>
             <SeparatorHorizontal className="w-4 h-4 text-emerald-400" />
           </ToolbarButton>
 
@@ -1104,7 +1309,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
                 setShowLinkDialog(true);
               }
             }}
-            title="Insert / Remove Link"
+            title={`Insert / Remove Link (${kbd("Ctrl+K")})`}
           >
             <LinkIcon className="w-4 h-4" />
           </ToolbarButton>
@@ -1112,10 +1317,10 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           <ToolbarDivider />
 
           {/* History */}
-          <ToolbarButton onClick={() => editor?.chain().focus().undo().run()} disabled={!editor?.can().undo()} title="Undo (Ctrl+Z)">
+          <ToolbarButton onClick={() => editor?.chain().focus().undo().run()} disabled={!editor?.can().undo()} title={`Undo (${kbd("Ctrl+Z")})`}>
             <Undo className="w-4 h-4" />
           </ToolbarButton>
-          <ToolbarButton onClick={() => editor?.chain().focus().redo().run()} disabled={!editor?.can().redo()} title="Redo (Ctrl+Y)">
+          <ToolbarButton onClick={() => editor?.chain().focus().redo().run()} disabled={!editor?.can().redo()} title={`Redo (${kbd("Ctrl+Y")})`}>
             <Redo className="w-4 h-4" />
           </ToolbarButton>
 
@@ -1166,7 +1371,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
               backend record are only created once the user submits text. */}
           <ToolbarButton
             onClick={openCommentDialog}
-            title="Add Comment on selection"
+            title={`Add Comment on selection (${kbd("Ctrl+Alt+M")})`}
           >
             <MessageSquare className="w-4 h-4 text-sky-400" />
           </ToolbarButton>
@@ -1177,9 +1382,17 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
               if (!editor) return;
               editor.chain().focus().insertMathNode("x^2 + y^2 = z^2").run();
             }}
-            title="Insert Math Equation"
+            title={`Insert Math Equation (${kbd("Ctrl+Alt+E")})`}
           >
             <Sigma className="w-4 h-4 text-amber-500" />
+          </ToolbarButton>
+
+          {/* Keyboard Shortcuts Reference */}
+          <ToolbarButton
+            onClick={() => setShowShortcuts(true)}
+            title="Keyboard Shortcuts"
+          >
+            <Keyboard className="w-4 h-4" />
           </ToolbarButton>
 
           <ToolbarDivider />
@@ -1365,6 +1578,160 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
             </button>
           </div>
         )}
+
+        {/* ── Keyboard Shortcuts Dialog ──────────────────────────────────────── */}
+        {showShortcuts && (() => {
+          const q = shortcutQuery.trim().toLowerCase();
+          const filtered = SHORTCUT_GROUPS
+            .map((g) => ({
+              ...g,
+              items: q
+                ? g.items.filter(
+                    (it) =>
+                      it.label.toLowerCase().includes(q) ||
+                      it.combo.toLowerCase().includes(q),
+                  )
+                : g.items,
+            }))
+            .filter((g) => g.items.length > 0);
+          const totalCount = SHORTCUT_GROUPS.reduce((s, g) => s + g.items.length, 0);
+          const close = () => { setShowShortcuts(false); setShortcutQuery(""); };
+          return (
+            <div
+              className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-md animate-in fade-in duration-150"
+              onClick={close}
+              onKeyDown={(e) => { if (e.key === "Escape") close(); }}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Keyboard shortcuts"
+            >
+              <div
+                className="relative w-[780px] max-w-full max-h-[88vh] flex flex-col bg-white rounded-2xl shadow-[0_30px_80px_-20px_rgba(15,23,42,0.45)] border border-slate-200/80 overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Header */}
+                <div className="relative px-6 pt-5 pb-4 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
+                  <div className="absolute inset-0 opacity-[0.07] pointer-events-none"
+                       style={{ backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)", backgroundSize: "16px 16px" }} />
+                  <div className="relative flex items-start justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-white/10 border border-white/15 flex items-center justify-center backdrop-blur-sm">
+                        <Keyboard className="w-5 h-5 text-amber-300" />
+                      </div>
+                      <div>
+                        <h2 className="text-base font-bold tracking-tight">Keyboard Shortcuts</h2>
+                        <p className="text-[11px] text-slate-300/90 mt-0.5">
+                          {totalCount} shortcuts · works while the editor is focused
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={close}
+                      className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
+                      aria-label="Close"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* Search */}
+                  <div className="relative mt-4">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      autoFocus
+                      type="text"
+                      value={shortcutQuery}
+                      onChange={(e) => setShortcutQuery(e.target.value)}
+                      placeholder="Search shortcuts…"
+                      className="w-full pl-9 pr-9 py-2 text-xs bg-white/95 text-slate-800 rounded-lg border border-white/20 focus:outline-none focus:ring-2 focus:ring-amber-400/60 placeholder-slate-400 shadow-inner"
+                    />
+                    {shortcutQuery && (
+                      <button
+                        onClick={() => setShortcutQuery("")}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-700 rounded"
+                        aria-label="Clear search"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Body */}
+                <div className="flex-1 overflow-y-auto p-6 bg-slate-50/50">
+                  {filtered.length === 0 ? (
+                    <div className="text-center py-12 text-slate-400 text-xs">
+                      No shortcuts match <span className="font-semibold text-slate-600">"{shortcutQuery}"</span>.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {filtered.map((group) => {
+                        const Icon = group.accent.icon;
+                        return (
+                          <section
+                            key={group.title}
+                            className={`bg-white border border-slate-200/70 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow ring-1 ring-transparent ${group.accent.ring}`}
+                          >
+                            <header className="flex items-center gap-2.5 mb-3 pb-2 border-b border-slate-100">
+                              <div className={`w-7 h-7 rounded-lg border flex items-center justify-center ${group.accent.iconWrap}`}>
+                                <Icon className={`w-3.5 h-3.5 ${group.accent.iconColor}`} />
+                              </div>
+                              <h3 className="text-[12px] font-bold text-slate-800 tracking-tight">
+                                {group.title}
+                              </h3>
+                              <span className="ml-auto text-[10px] font-semibold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full">
+                                {group.items.length}
+                              </span>
+                            </header>
+                            <ul className="space-y-1">
+                              {group.items.map((item) => {
+                                const parts = splitCombo(item.combo);
+                                return (
+                                  <li
+                                    key={item.label}
+                                    className="group flex items-center justify-between gap-3 px-2 py-1.5 rounded-md hover:bg-slate-50 transition-colors"
+                                  >
+                                    <span className="text-[12px] text-slate-700 group-hover:text-slate-900 truncate">
+                                      {item.label}
+                                    </span>
+                                    <span className="inline-flex items-center gap-1 shrink-0">
+                                      {parts.map((p, i) => (
+                                        <span key={i} className="inline-flex items-center gap-1">
+                                          {i > 0 && !IS_MAC && (
+                                            <span className="text-[10px] text-slate-400 font-medium">+</span>
+                                          )}
+                                          <kbd className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 bg-gradient-to-b from-white to-slate-50 border border-slate-300 rounded-md text-[10.5px] font-mono font-semibold text-slate-700 shadow-[0_1px_0_rgba(15,23,42,0.08),inset_0_-1px_0_rgba(15,23,42,0.04)]">
+                                            {p}
+                                          </kbd>
+                                        </span>
+                                      ))}
+                                    </span>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          </section>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Footer */}
+                <div className="px-6 py-3 border-t border-slate-200 bg-white flex items-center justify-between text-[11px] text-slate-500">
+                  <div className="flex items-center gap-1.5">
+                    <span>Press</span>
+                    <kbd className="inline-flex items-center justify-center px-1.5 h-[20px] bg-slate-100 border border-slate-300 rounded text-[10px] font-mono font-semibold text-slate-700">Esc</kbd>
+                    <span>to close</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-slate-400">
+                    <span>{IS_MAC ? "macOS" : "Windows / Linux"} bindings</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* â”€â”€ Document Area â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         <div className="flex-1 overflow-y-auto bg-gradient-to-tr from-slate-200 to-slate-100 px-6 py-6 pb-20 flex items-start justify-center overflow-x-auto">
@@ -1889,10 +2256,10 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         .ProseMirror p::after {
           content: attr(data-style-label) !important;
           position: absolute !important;
-          left: -1.25in !important;
+          left: -0.95in !important;
           top: 0.35rem !important;
-          width: 1.0in !important;
-          text-align: right !important;
+          width: 0.85in !important;
+          text-align: center !important;
           padding: 0.15rem 0.35rem !important;
           font-size: 0.6rem !important;
           font-weight: 700 !important;
