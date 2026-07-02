@@ -73,6 +73,9 @@ import { SearchReplace } from "./SearchReplace";
 import { MathNode } from "./MathNode";
 import { SdtBlock } from "./SdtBlock";
 import { SdtInline } from "./SdtInline";
+import { ImageNode } from "./ImageNode";
+import { ImageEditingToolbar } from "./ImageEditingToolbar";
+import { ImageEditingProvider, useImageEditing } from "./imageEditingContext";
 import katex from "katex";
 
 
@@ -489,6 +492,24 @@ const ToolbarButton = ({
 
 const ToolbarDivider = () => <div className="w-px h-5 bg-slate-700 mx-1" />;
 
+// Scales the document card by the current image-editor view zoom (100% by
+// default; adjusted by the Zoom In/Out buttons in the image toolbar). Zoom is
+// view-only and never touches persisted image dimensions.
+function EditorZoomWrapper({ children }: { children: React.ReactNode }) {
+  const { viewZoom } = useImageEditing();
+  return (
+    <div
+      style={{
+        transform: `scale(${viewZoom})`,
+        transformOrigin: "top center",
+        transition: "transform 120ms ease",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 export interface WysiwygEditorHandle {
   editor: any; // TipTap Editor instance
   triggerCommentDialog: () => void;
@@ -578,6 +599,9 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
     >(null);
     const [currentFontSize, setCurrentFontSize] = useState("default");
     const [currentFontFamily, setCurrentFontFamily] = useState("default");
+    // Position of the selected image node (NodeSelection), or null when the
+    // selection is in text. Drives the context-aware toolbar swap.
+    const [selectedImagePos, setSelectedImagePos] = useState<number | null>(null);
 
     const editor = useEditor({
       extensions: [
@@ -626,6 +650,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         MathNode,
         SdtBlock,
         SdtInline,
+        ImageNode,
         CustomListShortcuts,
       ],
       content: "",
@@ -642,6 +667,41 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
     });
 
     const prevInitialContentRef = useRef<string | null>(null);
+
+    // ── Image selection tracking ────────────────────────────────────────────
+    // Watches ProseMirror selection changes; when the user clicks (or arrows
+    // into) an image node, `selectedImagePos` becomes that node's position and
+    // the toolbar swaps to image-editing mode. Any other selection clears it.
+    useEffect(() => {
+      if (!editor) return;
+      const sync = () => {
+        const sel = editor.state.selection as unknown as {
+          node?: { type: { name: string } };
+          from: number;
+        };
+        if (sel.node && sel.node.type.name === "image") {
+          setSelectedImagePos(sel.from);
+        } else {
+          setSelectedImagePos(null);
+        }
+      };
+      sync();
+      editor.on("selectionUpdate", sync);
+      editor.on("transaction", sync);
+      return () => {
+        editor.off("selectionUpdate", sync);
+        editor.off("transaction", sync);
+      };
+    }, [editor]);
+
+    const handleExitImageMode = useCallback(() => {
+      if (!editor || selectedImagePos == null) return;
+      const target = Math.min(
+        editor.state.doc.content.size,
+        selectedImagePos + 1,
+      );
+      editor.chain().focus().setTextSelection(target).run();
+    }, [editor, selectedImagePos]);
 
     // Initialize content or update when parent provides new content (e.g. after apply)
     useEffect(() => {
@@ -1074,6 +1134,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
     const charCount = editor?.storage.characterCount?.characters() ?? 0;
 
     return (
+      <ImageEditingProvider>
       <div className="flex flex-col bg-[#e8e8e8] w-full" style={{ height }}>
 
         {/* Comment dialog (modal, fixed position) */}
@@ -1109,7 +1170,14 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         )}
 
         {/* â”€â”€ Toolbar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-        <div className="sticky top-0 z-10 bg-[#090d16] border-b border-slate-800 px-3 py-2 flex items-center gap-1.5 overflow-x-auto shadow-md flex-wrap">
+        <div className="sticky top-0 z-10 bg-[#090d16] border-b border-slate-800 px-3 py-2 flex items-center gap-1.5 overflow-x-auto shadow-md flex-wrap transition-colors duration-150">
+          {selectedImagePos !== null ? (
+            <ImageEditingToolbar
+              editor={editor}
+              imagePos={selectedImagePos}
+              onExit={handleExitImageMode}
+            />
+          ) : (<>
 
           {/* Font Family */}
           <select
@@ -1479,6 +1547,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
               {toolbarExtras}
             </div>
           )}
+          </>)}
         </div>
 
         {/* â”€â”€ Find & Replace Bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
@@ -1736,6 +1805,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
 
         {/* â”€â”€ Document Area â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         <div className="flex-1 overflow-y-auto bg-gradient-to-tr from-slate-200 to-slate-100 px-6 py-6 pb-20 flex items-start justify-center overflow-x-auto">
+          <EditorZoomWrapper>
           <div className={sidePanel ? "flex gap-6 max-w-[1400px] justify-start lg:justify-center" : "flex justify-center"}>
             {/* Word-style A4 Document Page — fixed width so it looks like a
                 physical sheet on the canvas, regardless of viewport width. */}
@@ -1884,6 +1954,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
               </div>
             )}
           </div>
+          </EditorZoomWrapper>
         </div>
 
         {/* â”€â”€ Save Bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
@@ -2846,6 +2917,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         }
       `}</style>
       </div>
+      </ImageEditingProvider>
     );
   }
 );
