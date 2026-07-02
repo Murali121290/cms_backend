@@ -316,7 +316,7 @@ function FileActionsMenu({
                       <Layers size={12} className="text-muted" /> View Structuring Review
                     </DropdownMenu.Item>
                   )}
-                  {hasReview && (
+                  {fid && fname.endsWith('.docx') && (
                     <DropdownMenu.Item className={itemCls} onSelect={() => navigate(uiPaths.referenceReview(projectId, chapterId, fid))}>
                       <BookCheck size={12} className="text-muted" /> Reference Review
                     </DropdownMenu.Item>

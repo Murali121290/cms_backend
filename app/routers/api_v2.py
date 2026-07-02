@@ -849,6 +849,7 @@ def api_v2_project_bootstrap(
     copyright_year: int | None = Form(None),
     manuscript_pages: int | None = Form(None),
     estimated_pages: int | None = Form(None),
+    actual_pages: int | None = Form(None),
     isbn_no: str | None = Form(None),
     billing_location: str | None = Form(None),
     due_date: str | None = Form(None),
@@ -933,7 +934,7 @@ def api_v2_project_bootstrap(
     for _f in ("division_code", "customer_contact", "category", "composition",
                "project_manager", "sales_person", "priority", "edition", "color",
                "trim_size", "copyright_year", "manuscript_pages", "estimated_pages",
-               "isbn_no", "billing_location"):
+               "actual_pages", "isbn_no", "billing_location"):
         _v = locals().get(_f)
         if _v is not None:
             setattr(project, _f, _v)
@@ -3212,6 +3213,141 @@ def api_v2_save_file_xhtml_runs(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+# ── Comments CRUD ───────────────────────────────────────────────────────────
+# Comments are attached to a File via a UUID generated client-side. The same
+# UUID appears in saved HTML as `<span data-comment-id="UUID">…</span>`, so the
+# DOCX export pipeline can pair each highlighted range with its metadata.
+
+def _serialize_comment(c: "models.Comment") -> dict:
+    return {
+        "comment_uuid": c.comment_uuid,
+        "text": c.text or "",
+        "author_id": c.author_id,
+        "author_name": c.author_name or "",
+        "created_at": (c.created_at.isoformat() if c.created_at else ""),
+        "updated_at": (c.updated_at.isoformat() if c.updated_at else ""),
+        "resolved": bool(c.resolved),
+    }
+
+
+@router.get("/files/{file_id}/comments")
+def api_v2_list_file_comments(
+    file_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+    rows = (
+        db.query(models.Comment)
+        .filter(models.Comment.file_id == file_id)
+        .order_by(models.Comment.created_at.asc(), models.Comment.id.asc())
+        .all()
+    )
+    return {"comments": [_serialize_comment(c) for c in rows]}
+
+
+@router.post("/files/{file_id}/comments")
+def api_v2_create_file_comment(
+    file_id: int,
+    payload: schemas_v2.CommentCreateRequest,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+    if not db.query(models.File).filter(models.File.id == file_id).first():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    existing = (
+        db.query(models.Comment)
+        .filter(models.Comment.file_id == file_id, models.Comment.comment_uuid == payload.comment_uuid)
+        .first()
+    )
+    if existing:
+        # Idempotent create — return what's there. Lets the editor retry safely.
+        return _serialize_comment(existing)
+
+    row = models.Comment(
+        file_id=file_id,
+        comment_uuid=payload.comment_uuid,
+        text=payload.text or "",
+        author_id=getattr(viewer, "id", None),
+        author_name=getattr(viewer, "username", "") or "",
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _serialize_comment(row)
+
+
+@router.patch("/files/{file_id}/comments/{comment_uuid}")
+def api_v2_update_file_comment(
+    file_id: int,
+    comment_uuid: str,
+    payload: schemas_v2.CommentUpdateRequest,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+    row = (
+        db.query(models.Comment)
+        .filter(models.Comment.file_id == file_id, models.Comment.comment_uuid == comment_uuid)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Comment not found")
+    if payload.text is not None:
+        row.text = payload.text
+    if payload.resolved is not None:
+        row.resolved = payload.resolved
+    db.commit()
+    db.refresh(row)
+    return _serialize_comment(row)
+
+
+@router.delete("/files/{file_id}/comments/{comment_uuid}")
+def api_v2_delete_file_comment(
+    file_id: int,
+    comment_uuid: str,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+    row = (
+        db.query(models.Comment)
+        .filter(models.Comment.file_id == file_id, models.Comment.comment_uuid == comment_uuid)
+        .first()
+    )
+    if not row:
+        return {"status": "ok"}
+    db.delete(row)
+    db.commit()
+    return {"status": "ok"}
+
+
 def _para_to_html(para) -> str:
     """Convert a docx paragraph to HTML string."""
     import html
@@ -3498,10 +3634,18 @@ def api_v2_structuring_export(
             message=detail_message,
         )
 
+    cleanup = None
+    if export_payload.get("is_temp"):
+        from starlette.background import BackgroundTask
+        import os as _os
+        tmp_path = export_payload["path"]
+        cleanup = BackgroundTask(lambda: _os.path.exists(tmp_path) and _os.unlink(tmp_path))
+
     return FileResponse(
         path=export_payload["path"],
         filename=export_payload["filename"],
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        background=cleanup,
     )
 
 
@@ -3512,6 +3656,7 @@ def api_v2_structuring_export(
 def api_v2_reference_review(
     file_id: int,
     style: Optional[str] = Query(None),
+    citation_format: Optional[str] = Query(None),
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -3528,6 +3673,7 @@ def api_v2_reference_review(
             db,
             file_id=file_id,
             style=style,
+            citation_format=citation_format,
             logger=logger,
         )
     except HTTPException as exc:
@@ -3663,6 +3809,7 @@ def api_v2_reference_export(
 def api_v2_reference_validate_only(
     file_id: int,
     style: Optional[str] = Query(None),
+    citation_format: Optional[str] = Query(None),
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -3679,6 +3826,7 @@ def api_v2_reference_validate_only(
             db,
             file_id=file_id,
             style=style,
+            citation_format=citation_format,
             logger=logger,
         )
         return result

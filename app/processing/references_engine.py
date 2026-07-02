@@ -11,7 +11,6 @@ from app.processing.reference_char_style_applicator import apply_reference_char_
 try:
     from app.processing.legacy import ReferencesStructing
     from app.processing.legacy import Referencenumvalidation
-    from app.processing.legacy import ReferenceAPAValidation
     LEGACY_AVAILABLE = True
 except Exception as e:
     import logging

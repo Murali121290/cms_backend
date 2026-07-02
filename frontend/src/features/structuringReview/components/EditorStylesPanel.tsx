@@ -1,9 +1,41 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/Button";
-import { BookOpen, Plus, Search, X, Play, FileText, ChevronDown, ChevronRight, Folder, Tag, Layers, Table2 } from "lucide-react";
+import { BookOpen, Plus, Search, X, Play, FileText, ChevronDown, ChevronRight, Folder, Tag, Layers, Table2, Check, Loader2, CircleAlert, GripVertical } from "lucide-react";
 import type { Node as PmNode, Mark as PmMark } from "@tiptap/pm/model";
 import type { WysiwygEditorHandle } from "@/features/editor";
 import { NewStyleDialog } from "./NewStyleDialog";
+
+// ── Pipeline progress types ───────────────────────────────────────────────────
+
+type StepStatus = "pending" | "running" | "ok" | "skip" | "fail";
+
+interface PipelineStepState {
+  n: number;
+  title: string;
+  status: StepStatus;
+  detail?: string;
+  startedAt?: number;
+  durationMs?: number;
+}
+
+const PIPELINE_STEPS: { n: number; title: string }[] = [
+  { n: 0,  title: "Preconversion" },
+  { n: 1,  title: "Cleanup" },
+  { n: 2,  title: "Remove Unused Styles" },
+  { n: 3,  title: "Remove Bold" },
+  { n: 4,  title: "Heading Validation" },
+  { n: 5,  title: "Text Flush" },
+  { n: 6,  title: "Remove Tags" },
+  { n: 7,  title: "Character Styles" },
+  { n: 8,  title: "Content Controls" },
+  { n: 9,  title: "Symbol & Math" },
+  { n: 10, title: "Math Symbol Styles" },
+];
+
+function initialPipelineSteps(): PipelineStepState[] {
+  return PIPELINE_STEPS.map(s => ({ ...s, status: "pending" as StepStatus }));
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -18,10 +50,17 @@ interface SdtNode {
 interface ScannedElement {
   id: string;
   type: "sdtBlock" | "sdtInline" | "table" | "bulletList" | "orderedList" | "blockquote" | "paragraph" | "heading";
+  // `styleLabel` (e.g. "CT", "TXNI") and `preview` (first ~50 chars of body
+  // text) are only populated for paragraph/heading rows so the Group panel
+  // can render an outline-like view. `name` remains the canonical label used
+  // by every other element type.
   name: string;
+  styleLabel?: string;
+  preview?: string;
   pos: number;
   nodeSize: number;
   checked: boolean;
+  depth?: number;
   children?: ScannedElement[];
   inlineSdts?: ScannedElement[];
 }
@@ -55,6 +94,28 @@ const DEFAULT_CHAR_STYLES: { group: string; styles: string[] }[] = [
 ];
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
+
+function getTagChip(el: ScannedElement): { label: string; bg: string; color: string } {
+  if (el.type === "heading") {
+    const sl = el.styleLabel ?? "";
+    if (sl === "H1") return { label: "H1",  bg: "#1C1A17", color: "#E8C896" };
+    if (sl === "H2") return { label: "H2",  bg: "#FBEFD9", color: "#A66A12" };
+    if (sl === "H3") return { label: "H3",  bg: "#FFF3E0", color: "#B45309" };
+    if (sl === "H4") return { label: "H4",  bg: "#FFF8EC", color: "#92400E" };
+    return              { label: sl.slice(0, 3) || "Hx", bg: "#F4F1EA", color: "#5E574B" };
+  }
+  if (el.type === "paragraph") {
+    const label = (el.styleLabel ?? "P").slice(0, 4);
+    return { label, bg: "#F0EADB", color: "#5E574B" };
+  }
+  if (el.type === "table")        return { label: "TBL",  bg: "#EBF3FF", color: "#1D4ED8" };
+  if (el.type === "sdtBlock")     return { label: "SDT",  bg: "#F1E6F7", color: "#7A3FA0" };
+  if (el.type === "sdtInline")    return { label: "INL",  bg: "#EEE9F8", color: "#7C3AED" };
+  if (el.type === "bulletList")   return { label: "UL",   bg: "#E9F1EB", color: "#2E7D52" };
+  if (el.type === "orderedList")  return { label: "OL",   bg: "#E9F1EB", color: "#2E7D52" };
+  if (el.type === "blockquote")   return { label: "BQ",   bg: "#F1F5F9", color: "#475569" };
+  return { label: (el.type as string).slice(0, 3).toUpperCase(), bg: "#F4F1EA", color: "#5E574B" };
+}
 
 function HighlightedText({ text, highlight }: { text: string; highlight: string }) {
   if (!highlight.trim()) return <span>{text}</span>;
@@ -93,6 +154,7 @@ export function StylesPanel({
   const [allStyles, setAllStyles] = useState<string[]>(styles);
   const [searchQuery, setSearchQuery] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [canUnwrapSdt, setCanUnwrapSdt] = useState(false);
 
   useEffect(() => { setAllStyles(styles); }, [styles]);
 
@@ -107,6 +169,7 @@ export function StylesPanel({
       } else {
         setCurrentStyle("Normal");
       }
+      setCanUnwrapSdt(editor.isActive("sdtBlock") || editor.isActive("sdtInline"));
     };
     editor.on("selectionUpdate", update);
     editor.on("update", update);
@@ -216,11 +279,40 @@ export function StylesPanel({
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [isRunningPipeline, setIsRunningPipeline] = useState(false);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
+  const [pipelineSteps, setPipelineSteps] = useState<PipelineStepState[]>(() => initialPipelineSteps());
+  const [pipelineDone, setPipelineDone] = useState(false);
   const [showWrapModal, setShowWrapModal] = useState(false);
   const [wrapAlias, setWrapAlias] = useState("");
   const [wrapTag, setWrapTag] = useState("");
   const [wrapType, setWrapType] = useState<"block" | "inline">("block");
   const scanTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Drag & drop group reordering ──────────────────────────────────────────
+  // Dragging a style-group header onto another rearranges only the display
+  // order of groups inside the Document Elements panel. The document itself
+  // (paragraphs, headings, their content and position) is never touched.
+  const [draggedGroup, setDraggedGroup] = useState<string | null>(null);
+  const [groupDragOver, setGroupDragOver] = useState<{ label: string; pos: "before" | "after" } | null>(null);
+  const [groupOrder, setGroupOrder] = useState<string[]>([]);
+
+  const reorderGroup = (source: string, target: string, where: "before" | "after") => {
+    if (source === target) return;
+    const currentLabels = groupedNodes.map(g => g.label);
+    setGroupOrder(prev => {
+      const base = prev.filter(l => currentLabels.includes(l));
+      for (const l of currentLabels) {
+        if (!base.includes(l)) base.push(l);
+      }
+      const srcIdx = base.indexOf(source);
+      if (srcIdx === -1) return prev;
+      base.splice(srcIdx, 1);
+      let tgtIdx = base.indexOf(target);
+      if (tgtIdx === -1) { base.push(source); return base; }
+      if (where === "after") tgtIdx += 1;
+      base.splice(tgtIdx, 0, source);
+      return base;
+    });
+  };
 
   const getCheckedNodesList = (): ScannedElement[] => {
     return flatNodes.filter(n => checkedIds.has(n.id));
@@ -270,25 +362,9 @@ export function StylesPanel({
       editor.state.doc.descendants((node: PmNode, pos: number) => {
         const type = node.type.name;
 
-        if (["sdtBlock", "table", "bulletList", "orderedList", "blockquote", "paragraph", "heading"].includes(type)) {
+        if (["sdtBlock", "sdtInline", "table", "bulletList", "orderedList", "blockquote", "paragraph", "heading"].includes(type)) {
           targets.push({ pos, end: pos + node.nodeSize, node, type });
         }
-
-        node.marks.forEach((mark: PmMark) => {
-          if (mark.type.name === "sdtInline") {
-            const key = `${mark.attrs.alias}-${pos}`;
-            if (key !== lastInlineSdtKey) {
-              targets.push({
-                pos,
-                end: pos + node.nodeSize,
-                node,
-                type: "sdtInline",
-                markAttrs: mark.attrs
-              });
-              lastInlineSdtKey = key;
-            }
-          }
-        });
       });
 
       targets.sort((a, b) => {
@@ -301,11 +377,13 @@ export function StylesPanel({
       targets.forEach((t) => {
         let id = `${t.type}-${t.pos}`;
         let name = "";
+        let styleLabel: string | undefined;
+        let preview: string | undefined;
 
         if (t.type === "sdtBlock") {
           name = `Block SDT: ${t.node.attrs.alias || "unnamed"}`;
         } else if (t.type === "sdtInline") {
-          name = `Inline SDT: ${t.markAttrs?.alias || "unnamed"}`;
+          name = `Inline SDT: ${t.node.attrs.alias || t.markAttrs?.alias || "unnamed"}`;
           id = `sdtInline-${t.pos}`;
         } else if (t.type === "table") {
           name = "Table";
@@ -316,18 +394,37 @@ export function StylesPanel({
         } else if (t.type === "blockquote") {
           name = "Blockquote";
         } else if (t.type === "heading") {
-          name = `Heading (${t.node.attrs.styleLabel || "H" + t.node.attrs.level})`;
+          styleLabel = t.node.attrs.styleLabel || `H${t.node.attrs.level}`;
+          name = `Heading (${styleLabel})`;
         } else if (t.type === "paragraph") {
-          name = `Paragraph (${t.node.attrs.styleLabel || "Normal"})`;
+          styleLabel = t.node.attrs.styleLabel || "Normal";
+          name = `Paragraph (${styleLabel})`;
         }
+
+        {
+          const text = (t.node.textContent || "").trim();
+          const words = text.split(/\s+/).filter(Boolean);
+          if (words.length === 0) {
+            preview = "";
+          } else {
+            const first = words.slice(0, 6).join(" ");
+            preview = words.length > 6 ? first + "…" : first;
+          }
+        }
+
+        let nodeDepth = 0;
+        try { nodeDepth = editor.state.doc.resolve(t.pos).depth; } catch { nodeDepth = 0; }
 
         const el: ScannedElement = {
           id,
           type: t.type as any,
           name,
+          styleLabel,
+          preview,
           pos: t.pos,
           nodeSize: t.end - t.pos,
-          checked: false
+          checked: false,
+          depth: nodeDepth,
         };
 
         flat.push(el);
@@ -380,11 +477,31 @@ export function StylesPanel({
   }, [editorRef]);
 
   useEffect(() => {
-    const editor = editorRef.current?.editor;
-    if (!editor) return;
-    editor.on("update", scanDocument);
-    scanDocument();
-    return () => { editor.off("update", scanDocument); };
+    let cancelled = false;
+    let pollHandle: number | undefined;
+    let attachedEditor: any = null;
+
+    const attach = () => {
+      if (cancelled) return;
+      const editor = editorRef.current?.editor;
+      if (!editor) {
+        pollHandle = window.setTimeout(attach, 120);
+        return;
+      }
+      attachedEditor = editor;
+      editor.on("update", scanDocument);
+      scanDocument();
+    };
+
+    attach();
+
+    return () => {
+      cancelled = true;
+      if (pollHandle !== undefined) window.clearTimeout(pollHandle);
+      if (attachedEditor) {
+        attachedEditor.off("update", scanDocument);
+      }
+    };
   }, [editorRef, scanDocument]);
 
   const handleRunPipeline = async () => {
@@ -392,25 +509,135 @@ export function StylesPanel({
     if (!editor || !fileId) return;
     setIsRunningPipeline(true);
     setPipelineError(null);
+    setPipelineSteps(initialPipelineSteps());
+    setPipelineDone(false);
+
+    // Minimum visible time each step spends in "Processing…" before the UI
+    // applies its completion status, plus a tiny gap before the next step's
+    // "start" event is applied. Backend keeps running at full speed — these
+    // numbers only smooth the UI transitions.
+    const MIN_RUNNING_MS = 600;
+    const MIN_GAP_MS = 100;
+    const sleep = (ms: number) => new Promise<void>(r => window.setTimeout(r, ms));
+
+    type Event =
+      | { type: "step"; step: number; status: "start" | "ok" | "skip" | "fail"; reason?: string; error?: string }
+      | { type: "summary"; status: "ok" | "error" }
+      | { type: "result"; status: "ok"; content?: string; file_id?: number }
+      | { type: "result"; status: "error"; error?: string };
+
+    const queue: Event[] = [];
+    let streamDone = false;
+    const startAppliedAt = new Map<number, number>();
+    let finalContent: string | undefined;
+    let finalError: string | undefined;
+
+    const processor = (async () => {
+      while (true) {
+        if (queue.length === 0) {
+          if (streamDone) break;
+          await sleep(40);
+          continue;
+        }
+        const ev = queue.shift()!;
+        if (ev.type === "step") {
+          if (ev.status === "start") {
+            const now = performance.now();
+            startAppliedAt.set(ev.step, now);
+            setPipelineSteps(prev =>
+              prev.map(s =>
+                s.n === ev.step
+                  ? { ...s, status: "running", startedAt: now, durationMs: undefined, detail: undefined }
+                  : s
+              )
+            );
+          } else {
+            const startedAt = startAppliedAt.get(ev.step) ?? performance.now();
+            const elapsed = performance.now() - startedAt;
+            const remaining = MIN_RUNNING_MS - elapsed;
+            if (remaining > 0) await sleep(remaining);
+            const dur = performance.now() - startedAt;
+            const finalStatus: StepStatus =
+              ev.status === "ok" ? "ok" : ev.status === "skip" ? "skip" : "fail";
+            setPipelineSteps(prev =>
+              prev.map(s =>
+                s.n === ev.step
+                  ? { ...s, status: finalStatus, durationMs: dur, detail: ev.reason ?? ev.error }
+                  : s
+              )
+            );
+            await sleep(MIN_GAP_MS);
+          }
+        } else if (ev.type === "result") {
+          if (ev.status === "ok" && typeof ev.content === "string") {
+            finalContent = ev.content;
+          } else if (ev.status === "error") {
+            finalError = ev.error || "Pipeline failed";
+          }
+        }
+        // summary events drive the header in the overlay; no extra state needed.
+      }
+
+      if (finalError) {
+        setPipelineError(finalError);
+        setPipelineSteps(prev =>
+          prev.map(s => (s.status === "running" ? { ...s, status: "fail" as StepStatus } : s))
+        );
+      } else if (finalContent) {
+        editor.commands.setContent(finalContent);
+        scanDocument();
+      }
+      setIsRunningPipeline(false);
+      setPipelineDone(true);
+    })();
+
     try {
       const res = await fetch(`/api/v1/files/${fileId}/structuring/run-pipeline`, {
         method: "POST",
         credentials: "include",
+        headers: { Accept: "application/x-ndjson" },
       });
-      if (!res.ok) {
+      if (!res.ok || !res.body) {
         const err = await res.json().catch(() => ({})) as Record<string, string>;
         throw new Error(err.detail || `Pipeline failed (${res.status})`);
       }
-      const data = await res.json() as { content?: string };
-      if (data.content) {
-        editor.commands.setContent(data.content);
-        scanDocument();
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let nl: number;
+        while ((nl = buffer.indexOf("\n")) >= 0) {
+          const line = buffer.slice(0, nl).trim();
+          buffer = buffer.slice(nl + 1);
+          if (!line) continue;
+          try {
+            queue.push(JSON.parse(line) as Event);
+          } catch {
+            // ignore malformed lines
+          }
+        }
       }
     } catch (e) {
-      setPipelineError(e instanceof Error ? e.message : String(e));
+      queue.push({
+        type: "result",
+        status: "error",
+        error: e instanceof Error ? e.message : String(e),
+      });
     } finally {
-      setIsRunningPipeline(false);
+      streamDone = true;
+      await processor;
     }
+  };
+
+  const dismissPipelineOverlay = () => {
+    setPipelineDone(false);
+    setPipelineError(null);
+    setPipelineSteps(initialPipelineSteps());
   };
 
   const handleWrap = () => {
@@ -427,23 +654,255 @@ export function StylesPanel({
     setWrapType("block");
   };
 
+  const handleUnwrap = () => {
+    const editor = editorRef.current?.editor;
+    if (!editor) return;
+    let chain = editor.chain().focus();
+    if (editor.isActive("sdtBlock")) {
+      chain = chain.unwrapSdtBlock();
+    }
+    if (editor.isActive("sdtInline")) {
+      chain = chain.unsetSdtInline();
+    }
+    chain.run();
+  };
+
+  const scrollToElement = (el: ScannedElement) => {
+    const editor = editorRef.current?.editor;
+    if (!editor) return;
+    try {
+      const dom = editor.view.nodeDOM(el.pos) as HTMLElement | null;
+      if (!dom || !(dom instanceof HTMLElement)) {
+        editor.commands.setTextSelection(el.pos);
+        editor.commands.scrollIntoView();
+        return;
+      }
+      dom.scrollIntoView({ behavior: "smooth", block: "center" });
+
+      // After the smooth-scroll settles, flash *just the first word*. We
+      // overlay a transparent positioned div on top — no edits to the editor's
+      // own DOM, so ProseMirror's view state stays untouched.
+      window.setTimeout(() => {
+        const firstText = findFirstTextNode(dom);
+        if (!firstText) return;
+        const text = firstText.nodeValue || "";
+        const match = text.match(/^(\s*)(\S+)/);
+        if (!match) return;
+        const start = match[1].length;
+        const end = start + match[2].length;
+
+        let rect: DOMRect;
+        try {
+          const range = document.createRange();
+          range.setStart(firstText, start);
+          range.setEnd(firstText, end);
+          rect = range.getBoundingClientRect();
+          range.detach?.();
+        } catch {
+          return;
+        }
+        if (rect.width === 0 && rect.height === 0) return;
+
+        const overlay = document.createElement("div");
+        overlay.style.position = "fixed";
+        overlay.style.left = `${rect.left - 2}px`;
+        overlay.style.top = `${rect.top - 2}px`;
+        overlay.style.width = `${rect.width + 4}px`;
+        overlay.style.height = `${rect.height + 4}px`;
+        overlay.style.backgroundColor = "rgba(191, 219, 254, 0.7)";
+        overlay.style.outline = "2px solid #3b82f6";
+        overlay.style.borderRadius = "3px";
+        overlay.style.pointerEvents = "none";
+        overlay.style.zIndex = "9999";
+        overlay.style.transition = "opacity 0.4s ease";
+        document.body.appendChild(overlay);
+
+        window.setTimeout(() => {
+          overlay.style.opacity = "0";
+          window.setTimeout(() => overlay.remove(), 420);
+        }, 800);
+      }, 380);
+    } catch {
+      /* scroll/flash is best-effort */
+    }
+  };
+
+  const findFirstTextNode = (root: Node): Text | null => {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode() as Text | null;
+    while (node) {
+      if ((node.nodeValue || "").trim().length > 0) return node;
+      node = walker.nextNode() as Text | null;
+    }
+    return null;
+  };
+
+  const groupLabelFor = (el: ScannedElement): string => {
+    switch (el.type) {
+      case "heading":
+      case "paragraph":
+        return el.styleLabel || (el.type === "heading" ? "Heading" : "Normal");
+      case "table": return "Table";
+      case "bulletList": return "Bullet List";
+      case "orderedList": return "Numbered List";
+      case "blockquote": return "Blockquote";
+      case "sdtBlock": {
+        const after = el.name.replace(/^Block SDT:\s*/, "").trim();
+        return after && after !== "unnamed" ? after : "Block SDT";
+      }
+      case "sdtInline": {
+        const after = el.name.replace(/^Inline SDT:\s*/, "").trim();
+        return after && after !== "unnamed" ? after : "Inline SDT";
+      }
+      default: return el.name;
+    }
+  };
+
+  const groupedNodes = useMemo(() => {
+    const map = new Map<string, ScannedElement[]>();
+    for (const n of flatNodes) {
+      const key = groupLabelFor(n);
+      let arr = map.get(key);
+      if (!arr) { arr = []; map.set(key, arr); }
+      arr.push(n);
+    }
+    // Merge the user-defined groupOrder with scan-order for any labels the
+    // user hasn't touched yet. Existing user ordering wins; new labels append.
+    const scanOrder = Array.from(map.keys());
+    const seen = new Set<string>();
+    const finalOrder: string[] = [];
+    for (const label of groupOrder) {
+      if (map.has(label) && !seen.has(label)) {
+        finalOrder.push(label);
+        seen.add(label);
+      }
+    }
+    for (const label of scanOrder) {
+      if (!seen.has(label)) {
+        finalOrder.push(label);
+        seen.add(label);
+      }
+    }
+    return finalOrder.map(label => ({ label, items: map.get(label) || [] }));
+  }, [flatNodes, groupOrder]);
+
+  const renderGroup = ({ label, items }: { label: string; items: ScannedElement[] }) => {
+    const groupKey = `group:${label}`;
+    const isExpanded = expandedIds.has(groupKey);
+    const isDraggingGroup = draggedGroup === label;
+    const showTopMarker = groupDragOver?.label === label && groupDragOver.pos === "before";
+    const showBottomMarker = groupDragOver?.label === label && groupDragOver.pos === "after";
+    return (
+      <div key={groupKey} className="flex flex-col">
+        <button
+          type="button"
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.effectAllowed = "move";
+            try { e.dataTransfer.setData("text/plain", label); } catch { /* ignore */ }
+            setDraggedGroup(label);
+          }}
+          onDragEnd={() => {
+            setDraggedGroup(null);
+            setGroupDragOver(null);
+          }}
+          onDragOver={(e) => {
+            if (!draggedGroup || draggedGroup === label) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            const rect = e.currentTarget.getBoundingClientRect();
+            const pos = (e.clientY - rect.top) < rect.height / 2 ? "before" : "after";
+            if (!groupDragOver || groupDragOver.label !== label || groupDragOver.pos !== pos) {
+              setGroupDragOver({ label, pos });
+            }
+          }}
+          onDragLeave={(e) => {
+            const next = e.relatedTarget as Node | null;
+            if (!next || !e.currentTarget.contains(next)) {
+              if (groupDragOver?.label === label) setGroupDragOver(null);
+            }
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            const src = draggedGroup;
+            const over = groupDragOver;
+            setDraggedGroup(null);
+            setGroupDragOver(null);
+            if (src && over && over.label === label) {
+              reorderGroup(src, label, over.pos);
+            }
+          }}
+          onClick={() => toggleExpanded(groupKey)}
+          className={`relative flex items-center gap-1.5 py-1 px-1.5 rounded hover:bg-slate-50 text-xs select-none cursor-grab active:cursor-grabbing border-none bg-transparent text-left
+            ${isDraggingGroup ? "opacity-40" : ""}`}
+        >
+          {showTopMarker && (
+            <div className="absolute left-0 right-0 -top-px h-0.5 bg-blue-500 rounded-full pointer-events-none" />
+          )}
+          {showBottomMarker && (
+            <div className="absolute left-0 right-0 -bottom-px h-0.5 bg-blue-500 rounded-full pointer-events-none" />
+          )}
+          <GripVertical className="w-3 h-3 text-slate-300 shrink-0" aria-hidden />
+          {isExpanded
+            ? <ChevronDown className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+            : <ChevronRight className="w-3.5 h-3.5 text-slate-500 shrink-0" />}
+          <span className="font-bold text-blue-700 font-mono text-[11px] shrink-0">{label}</span>
+          <span className="text-slate-400 text-[10px]">({items.length})</span>
+        </button>
+        {isExpanded && (
+          <div className="flex flex-col pl-5">
+            {items.map(el => {
+              const isChecked = checkedIds.has(el.id);
+              return (
+                <div
+                  key={el.id}
+                  className="relative flex items-center gap-1.5 py-0.5 px-1.5 hover:bg-slate-50 rounded text-xs select-none"
+                >
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={(e) => handleToggleChecked(el, e.target.checked)}
+                    className="w-3.5 h-3.5 border-slate-300 rounded text-primary focus:ring-primary cursor-pointer shrink-0"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => scrollToElement(el)}
+                    className="flex-1 min-w-0 text-left truncate cursor-pointer border-none bg-transparent p-0 text-[11px] text-slate-700 hover:text-blue-700"
+                    title={el.preview || el.name}
+                  >
+                    {el.preview
+                      ? el.preview
+                      : <span className="italic text-slate-400">(empty)</span>}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderTreeNode = (el: ScannedElement, depth = 0) => {
     const isExpanded = expandedIds.has(el.id);
     const hasChildren = (el.children && el.children.length > 0) || (el.inlineSdts && el.inlineSdts.length > 0);
     const isChecked = checkedIds.has(el.id);
+    const isOutlineRow = (el.type === "paragraph" || el.type === "heading") && (el.preview !== undefined);
+    const chip = getTagChip(el);
 
     return (
       <div key={el.id} className="flex flex-col">
-        <div 
-          className="flex items-center gap-1.5 py-1 px-1.5 hover:bg-slate-50 rounded transition-colors text-xs select-none"
-          style={{ paddingLeft: `${Math.max(4, depth * 12)}px` }}
+        <div
+          className="flex items-center gap-1.5 py-[5px] px-1.5 hover:bg-[#F4F1EA]/60 rounded transition-colors text-xs select-none"
+          style={{ paddingLeft: `${Math.max(4, depth * 14)}px` }}
         >
           <button
             onClick={() => toggleExpanded(el.id)}
-            className={`p-0.5 hover:bg-slate-200 rounded text-slate-400 hover:text-slate-600 border-none bg-transparent cursor-pointer shrink-0 w-4.5 h-4.5 flex items-center justify-center
+            className={`p-0.5 hover:bg-[#E6DFD1] rounded text-[#A8A091] hover:text-[#5E574B] border-none bg-transparent cursor-pointer shrink-0 flex items-center justify-center
               ${hasChildren ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+            style={{ width: 16, height: 16 }}
           >
-            {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+            {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
           </button>
 
           <input
@@ -453,19 +912,35 @@ export function StylesPanel({
             className="w-3.5 h-3.5 border-slate-300 rounded text-primary focus:ring-primary cursor-pointer shrink-0"
           />
 
-          {el.type === "sdtBlock" || el.type === "sdtInline" ? (
-            <Tag className="w-3.5 h-3.5 text-primary shrink-0" />
-          ) : el.type === "table" ? (
-            <Table2 className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-          ) : el.type.endsWith("List") ? (
-            <Layers className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-          ) : (
-            <FileText className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-          )}
+          <button
+            type="button"
+            onClick={() => scrollToElement(el)}
+            className="flex-1 min-w-0 text-left inline-flex items-center gap-1.5 truncate cursor-pointer border-none bg-transparent p-0"
+            title={isOutlineRow ? `${el.styleLabel} – ${el.preview || "(empty)"}` : el.name}
+          >
+            {/* Colored tag chip */}
+            <span
+              className="shrink-0 font-mono font-bold leading-none"
+              style={{
+                fontSize: '8.5px',
+                padding: '2px 5px',
+                borderRadius: '4px',
+                background: chip.bg,
+                color: chip.color,
+                letterSpacing: '0.04em',
+              }}
+            >
+              {chip.label}
+            </span>
 
-          <span className="font-medium text-slate-700 truncate flex-1 font-mono text-[10px]" title={el.name}>
-            {el.name}
-          </span>
+            {isOutlineRow ? (
+              <span className="text-[#3A352D] truncate text-[11.5px] hover:text-[#1C1A17]">
+                {el.preview || <span className="italic text-[#A8A091]">(empty)</span>}
+              </span>
+            ) : (
+              <span className="text-[#5E574B] truncate text-[11px]">{el.name}</span>
+            )}
+          </button>
         </div>
 
         {hasChildren && isExpanded && (
@@ -739,26 +1214,105 @@ export function StylesPanel({
               )}
             </div>
 
-            <div className="flex-1 overflow-y-auto styles-scrollbar p-3 space-y-1">
-              {scannedTree.length === 0 ? (
+            <div className="flex-1 overflow-y-auto styles-scrollbar p-3 space-y-0.5">
+              {groupedNodes.length === 0 ? (
                 <p className="text-xs text-muted text-center py-4 italic">
                   No elements detected in document
                 </p>
               ) : (
-                scannedTree.map(el => renderTreeNode(el, 0))
+                groupedNodes.map(renderGroup)
               )}
             </div>
 
-            <div className="border-t border-border p-3 space-y-2">
-              <Button
-                variant="secondary"
-                size="sm"
-                leftIcon={<Plus className="w-3 h-3" />}
-                className="w-full text-[11px]"
-                onClick={() => setShowWrapModal(true)}
-              >
-                Wrap Selection
-              </Button>
+            <div className="border-t border-border p-3 space-y-3 bg-slate-50/50">
+              <div className="space-y-1">
+                <p className="text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-1.5 px-0.5">
+                  Content Control Presets
+                </p>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-[10px] font-semibold h-8 bg-white"
+                    onClick={() => {
+                      editorRef.current?.editor?.chain().focus().wrapInSdtBlock("Figure Caption", "Figure Caption").run();
+                    }}
+                  >
+                    Fig Caption
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-[10px] font-semibold h-8 bg-white"
+                    onClick={() => {
+                      editorRef.current?.editor?.chain().focus().wrapInSdtBlock("Table Caption", "Table Caption").run();
+                    }}
+                  >
+                    Tab Caption
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-[10px] font-semibold h-8 bg-white col-span-2"
+                    onClick={() => {
+                      editorRef.current?.editor?.chain().focus().wrapInSdtBlock("TableGroup", "TableGroup").run();
+                    }}
+                  >
+                    Table Group
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-[10px] font-semibold h-8 bg-white"
+                    onClick={() => {
+                      editorRef.current?.editor?.chain().focus()
+                        .toggleSdtInline("FigureRef", "FigureRef")
+                        .toggleMark("charStyle", { class: "FigureCitation" })
+                        .run();
+                    }}
+                  >
+                    Fig Citation
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-[10px] font-semibold h-8 bg-white"
+                    onClick={() => {
+                      editorRef.current?.editor?.chain().focus()
+                        .toggleSdtInline("TableRef", "TableRef")
+                        .toggleMark("charStyle", { class: "TableCitation" })
+                        .run();
+                    }}
+                  >
+                    Tab Citation
+                  </Button>
+                </div>
+              </div>
+
+              <div className="flex gap-1.5">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  leftIcon={<Plus className="w-3 h-3" />}
+                  className="flex-1 text-[11px]"
+                  onClick={() => setShowWrapModal(true)}
+                >
+                  Custom Wrap
+                </Button>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  leftIcon={<X className="w-3 h-3" />}
+                  className={`flex-1 text-[11px] ${canUnwrapSdt ? 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100 hover:text-rose-800' : ''}`}
+                  onClick={handleUnwrap}
+                  disabled={!canUnwrapSdt}
+                >
+                  Unwrap SDT
+                </Button>
+              </div>
+
+              <div className="w-full border-t border-slate-200/60 my-1" />
 
               <Button
                 variant="primary"
@@ -876,6 +1430,213 @@ export function StylesPanel({
         .styles-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         .styles-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
       `}</style>
+
+      {(isRunningPipeline || pipelineDone) && typeof document !== "undefined" && createPortal(
+        <PipelineProgressOverlay
+          steps={pipelineSteps}
+          running={isRunningPipeline}
+          error={pipelineError}
+          onDismiss={dismissPipelineOverlay}
+        />,
+        document.body
+      )}
     </div>
+  );
+}
+
+// ── Pipeline progress overlay ─────────────────────────────────────────────────
+
+function formatDuration(ms?: number): string {
+  if (ms == null) return "";
+  if (ms < 1000) return `${(ms / 1000).toFixed(2)}s`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const m = Math.floor(ms / 60_000);
+  const s = Math.round((ms % 60_000) / 1000);
+  return `${m}m ${s}s`;
+}
+
+function PipelineProgressOverlay({
+  steps,
+  running,
+  error,
+  onDismiss,
+}: {
+  steps: PipelineStepState[];
+  running: boolean;
+  error: string | null;
+  onDismiss: () => void;
+}) {
+  const total = steps.length;
+  const completedCount = steps.filter(s => s.status === "ok" || s.status === "skip").length;
+  const failedCount = steps.filter(s => s.status === "fail").length;
+  const percent = Math.round(((completedCount + failedCount) / total) * 100);
+  const currentStep = steps.find(s => s.status === "running");
+  const lastCompleted = [...steps].reverse().find(s => s.status === "ok" || s.status === "skip");
+  const headerStep = currentStep ?? lastCompleted;
+
+  const headerTitle = running
+    ? headerStep
+      ? `Running Step ${headerStep.n + 1} of ${total} — ${headerStep.title}`
+      : "Starting pipeline…"
+    : error
+    ? "Pipeline failed"
+    : "Pipeline completed successfully.";
+
+  // Brand colors: #1B5C9E (blue) → #F5822A (orange). The gradient is used for
+  // both the in-progress and completed states; failures fall back to rose so
+  // the error remains visually distinct.
+  const barStyle: React.CSSProperties = error
+    ? { backgroundColor: "#e11d48" }
+    : { backgroundImage: "linear-gradient(90deg, #1B5C9E 0%, #F5822A 100%)" };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Pipeline progress"
+      className="fixed inset-0 z-[9999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center"
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => { if (running) e.preventDefault(); }}
+    >
+      <div className="w-[460px] max-w-[92vw] bg-white rounded-lg shadow-2xl border border-slate-200 overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-200">
+          <div className="flex items-center gap-3">
+            {running ? (
+              <Loader2 className="w-5 h-5 animate-spin" style={{ color: "#1B5C9E" }} />
+            ) : error ? (
+              <CircleAlert className="w-5 h-5 text-rose-600" />
+            ) : (
+              <Check className="w-5 h-5 text-emerald-600" />
+            )}
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold text-slate-800 truncate">
+                {headerTitle}
+              </div>
+              <div className="text-[11px] text-slate-500">
+                {completedCount}/{total} steps · {percent}%
+                {running ? " — please don't close this window" : ""}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 h-2 w-full rounded bg-slate-100 overflow-hidden">
+            <div
+              className="h-full transition-[width] duration-200 ease-out"
+              style={{ width: `${percent}%`, ...barStyle }}
+              aria-valuenow={percent}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              role="progressbar"
+            />
+          </div>
+        </div>
+
+        <ul className="max-h-[60vh] overflow-y-auto styles-scrollbar divide-y divide-slate-100">
+          {steps.map(s => (
+            <li
+              key={s.n}
+              className={`px-5 py-2.5 flex items-center gap-3 ${
+                s.status === "fail" ? "bg-rose-50" : ""
+              }`}
+              style={
+                s.status === "ok"
+                  ? { animation: "pipeline-step-complete 0.5s ease-out 1 both" }
+                  : s.status === "fail"
+                  ? { animation: "pipeline-step-fail 0.5s ease-out 1 both" }
+                  : undefined
+              }
+            >
+              <StepIcon status={s.status} />
+              <div className="flex-1 min-w-0">
+                <div className={`text-[12px] truncate ${
+                  s.status === "fail" ? "text-rose-700 font-semibold" : "text-slate-700"
+                }`}>
+                  Step {s.n} — {s.title}
+                </div>
+                {s.detail ? (
+                  <div className={`text-[10px] truncate ${
+                    s.status === "fail" ? "text-rose-600" : "text-slate-500"
+                  }`}>
+                    {s.detail}
+                  </div>
+                ) : s.status === "ok" && s.durationMs != null ? (
+                  <div className="text-[10px] text-slate-500">
+                    Completed in {formatDuration(s.durationMs)}
+                  </div>
+                ) : s.status === "skip" && s.durationMs != null ? (
+                  <div className="text-[10px] text-amber-700">
+                    Skipped after {formatDuration(s.durationMs)}
+                  </div>
+                ) : s.status === "running" ? (
+                  <div className="text-[10px]" style={{ color: "#1B5C9E" }}>Processing…</div>
+                ) : null}
+              </div>
+              <StepBadge status={s.status} />
+            </li>
+          ))}
+        </ul>
+
+        <div className="px-5 py-3 border-t border-slate-200 flex items-center justify-end gap-2 bg-slate-50">
+          {error && (
+            <div className="flex-1 text-[11px] text-rose-700 truncate" title={error}>
+              {error}
+            </div>
+          )}
+          {!running && (
+            <Button variant="primary" size="sm" onClick={onDismiss}>
+              Close
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <style>{`
+        @keyframes pipeline-step-complete {
+          0%   { background-color: rgba(16,185,129,0.22); }
+          100% { background-color: transparent; }
+        }
+        @keyframes pipeline-step-fail {
+          0%   { background-color: rgba(244,63,94,0.30); }
+          100% { background-color: rgb(255,241,242); }
+        }
+        @keyframes pipeline-icon-pop {
+          0%   { transform: scale(0.6); opacity: 0; }
+          60%  { transform: scale(1.15); opacity: 1; }
+          100% { transform: scale(1);   opacity: 1; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function StepIcon({ status }: { status: StepStatus }) {
+  const popStyle = { animation: "pipeline-icon-pop 0.32s ease-out 1 both" };
+  if (status === "running") return <Loader2 className="w-4 h-4 animate-spin" style={{ color: "#1B5C9E" }} />;
+  if (status === "ok")      return <Check     className="w-4 h-4 text-emerald-600" style={popStyle} />;
+  if (status === "skip")    return <span      className="w-4 h-4 inline-block text-amber-600 text-[14px] leading-none" style={popStyle}>⏭</span>;
+  if (status === "fail")    return <CircleAlert className="w-4 h-4 text-rose-600" style={popStyle} />;
+  return <span className="w-4 h-4 rounded-full border border-slate-300 inline-block" />;
+}
+
+function StepBadge({ status }: { status: StepStatus }) {
+  const map: Record<StepStatus, { label: string; cls: string; style?: React.CSSProperties }> = {
+    pending: { label: "Pending",     cls: "bg-slate-100 text-slate-500" },
+    running: {
+      label: "Processing…",
+      cls: "",
+      style: { backgroundColor: "rgba(27,92,158,0.12)", color: "#1B5C9E" },
+    },
+    ok:      { label: "Completed",   cls: "bg-emerald-100 text-emerald-700" },
+    skip:    { label: "Skipped",     cls: "bg-amber-100 text-amber-800" },
+    fail:    { label: "Failed",      cls: "bg-rose-100 text-rose-700" },
+  };
+  const cur = map[status];
+  return (
+    <span
+      className={`text-[9.5px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded ${cur.cls}`}
+      style={cur.style}
+    >
+      {cur.label}
+    </span>
   );
 }

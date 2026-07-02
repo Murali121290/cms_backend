@@ -1,29 +1,31 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@300;400;500;600;700;800&family=Spectral:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Spline+Sans+Mono:wght@400;500;600&display=swap');
 @import "tailwindcss";
 
-/* ── Default theme CSS variables ────────────────────────────────────────────── */
+/* ── Default theme CSS variables (S4Carlisle Warm Classic) ──────────────── */
 :root {
-  --color-sidebar:        #0f172a; /* slate-900 */
-  --color-sidebar-hover:  #1e293b; /* slate-800 */
-  --color-sidebar-text:   #94a3b8; /* slate-400 */
-  --color-sidebar-active: #34d399; /* emerald-400 */
-  --color-primary:        #10b981; /* emerald-500 */
-  --color-primary-hover:  #059669; /* emerald-600 */
-  --color-accent:         #34d399; /* emerald-400 */
-  --color-background:     #f8fafc; /* slate-50 */
+  --color-sidebar:        #1C1A17; /* S4 dark charcoal */
+  --color-sidebar-hover:  #26231F;
+  --color-sidebar-text:   #A8A091;
+  --color-sidebar-active: #E8C896; /* gold/amber */
+  --color-primary:        #C8841C; /* brand amber */
+  --color-primary-hover:  #A66A12;
+  --color-accent:         #E8C896;
+  --color-background:     #F4F1EA; /* warm cream paper-like bg */
   --color-card:           #ffffff;
-  --color-border:         #e2e8f0;
-  --color-text:           #1e293b;
-  --color-muted:          #64748b;
-  --color-success:        #10b981;
-  --color-warning:        #f59e0b;
-  --color-danger:         #ef4444;
+  --color-border:         #E6DFD1; /* warm cream border */
+  --color-text:           #211E1A; /* off-black warm text */
+  --color-muted:          #8C8475;
+  --color-success:        #2E7D52; /* warm forest green */
+  --color-warning:        #A66A12;
+  --color-danger:         #B3412C; /* rust red */
   --color-info:           #3b82f6;
 }
 
 /* ── Tailwind custom theme tokens ───────────────────────────────────────────── */
 @theme {
-  --font-sans: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'Hanken Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-serif: 'Spectral', Georgia, serif;
+  --font-mono: 'Spline Sans Mono', monospace;
 
   --color-sidebar:        var(--color-sidebar);
   --color-sidebar-hover:  var(--color-sidebar-hover);
@@ -47,14 +49,19 @@
 * { box-sizing: border-box; }
 
 body {
-  font-family: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+  font-family: 'Hanken Grotesk', ui-sans-serif, system-ui, sans-serif;
   background-color: var(--color-background);
   color: var(--color-text);
   -webkit-font-smoothing: antialiased;
 }
 
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Spectral', Georgia, serif;
+  font-weight: 600;
+}
+
 /* ── Scrollbar ──────────────────────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--color-muted); }
+::-webkit-scrollbar-thumb { background: #D9D0BE; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #C2B79F; }

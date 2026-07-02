@@ -126,17 +126,23 @@ def add_comment_to_paragraph(doc, para, text: str, author: str = "Pipeline Valid
     
     comments_el.append(comment_node)
     
-    # 4. Bind the comment marker explicitly to the user's paragraph
+    # 4. Bind the comment marker explicitly to the user's paragraph.
+    #    OOXML requires <w:pPr> to be the first child of <w:p> when present, so
+    #    commentRangeStart must come AFTER pPr — inserting at index 0 produces
+    #    a document Word will flag as needing repair.
     p_el = para._element
-    
+
+    pPr_el = p_el.find(qn('w:pPr'))
+    insert_idx = (list(p_el).index(pPr_el) + 1) if pPr_el is not None else 0
+
     c_start = OxmlElement('w:commentRangeStart')
     c_start.set(qn('w:id'), comment_id)
-    p_el.insert(0, c_start) # Wraps from start of paragraph
-    
+    p_el.insert(insert_idx, c_start)
+
     c_end = OxmlElement('w:commentRangeEnd')
     c_end.set(qn('w:id'), comment_id)
     p_el.append(c_end) # Wraps to the end of paragraph
-    
+
     r_node = OxmlElement('w:r')
     c_ref = OxmlElement('w:commentReference')
     c_ref.set(qn('w:id'), comment_id)

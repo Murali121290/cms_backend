@@ -1,5 +1,6 @@
 import { SlideDrawer } from "@/components/ui/SlideDrawer";
 import { CitationCandidatePanel } from "./CitationCandidatePanel";
+import { ReferenceCandidatePanel } from "./ReferenceCandidatePanel";
 
 export interface LinkingSource {
   type: "citation" | "reference";
@@ -16,6 +17,8 @@ interface LinkingPanelProps {
   linkingSource: LinkingSource | null;
   onClose: () => void;
   onLinkSuccess?: (linkId: string) => void;
+  allReferences?: Array<{ num?: number; text: string; para_idx?: number; is_cited?: boolean }>;
+  allCitations?: Array<{ citation: string; para_idx?: number; status?: string; author?: string; year?: string }>;
 }
 
 export function LinkingPanel({
@@ -23,6 +26,8 @@ export function LinkingPanel({
   linkingSource,
   onClose,
   onLinkSuccess,
+  allReferences = [],
+  allCitations = [],
 }: LinkingPanelProps) {
   if (!linkingSource) {
     return null;
@@ -51,11 +56,19 @@ export function LinkingPanel({
             onLinkSuccess?.(linkId);
             onClose();
           }}
+          allReferences={allReferences}
         />
       ) : (
-        <div className="p-4 text-center text-gray-500">
-          Reference linking coming soon
-        </div>
+        <ReferenceCandidatePanel
+          fileId={fileId}
+          refText={linkingSource.text}
+          refIdx={linkingSource.refIdx || 0}
+          onLinkSuccess={(linkId) => {
+            onLinkSuccess?.(linkId);
+            onClose();
+          }}
+          allCitations={allCitations}
+        />
       )}
     </SlideDrawer>
   );

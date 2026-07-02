@@ -25,6 +25,7 @@ import {
   Eye,
   CornerDownRight,
   RotateCcw,
+  ArrowLeftRight,
 } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
@@ -561,9 +562,15 @@ export function ReferenceValidationReviewPage() {
 
   const editorRef = useRef<WysiwygEditorHandle>(null);
   const [styleOverride, setStyleOverride] = useState<"AUTO" | "AMA" | "APA">("AUTO");
-  const reviewQuery = useReferenceReviewQuery(normalizedFileId, styleOverride === "AUTO" ? undefined : styleOverride);
+  const [citationFormat, setCitationFormat] = useState<"auto" | "superscript" | "bracket" | "paren" | "plain">("auto");
+  const reviewQuery = useReferenceReviewQuery(normalizedFileId, styleOverride === "AUTO" ? undefined : styleOverride, citationFormat === "auto" ? undefined : citationFormat);
   const saveMutation = useReferenceSave(normalizedFileId);
   const validateOnlyMutation = useReferenceValidateOnly(normalizedFileId ?? 0);
+
+  // Pending merge queue — merges are staged here and applied on "Apply Merges"
+  const [pendingMerges, setPendingMerges] = useState<Array<{ canonical: number; duplicate: number }>>([]);
+  const [resolvedDups, setResolvedDups] = useState<Set<string>>(new Set());
+  const [appliedFixes, setAppliedFixes] = useState<Set<string>>(new Set());
 
   // Tab
   const [activeTab, setActiveTab] = useState<"citations" | "structuring" | "logs" | "trackedChanges" | "issues" | "missing">("citations");
@@ -589,19 +596,31 @@ export function ReferenceValidationReviewPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
-  const [searchSource, setSearchSource] = useState<"pubmed" | "crossref" | null>(null);
+  const [searchSource, setSearchSource] = useState<"pubmed" | "crossref" | "googlebooks" | "wikipedia" | null>(null);
+
+  // Ref-based cache for the parsed editor document to avoid redundant DOMParser calls
+  const editorHtmlCache = useRef<{ html: string; doc: Document | null }>({ html: "", doc: null });
+
+  const getParsedEditorDoc = (): Document | null => {
+    const editor = editorRef.current?.editor;
+    if (!editor) return null;
+    const html = editor.getHTML();
+    if (editorHtmlCache.current.html === html && editorHtmlCache.current.doc) {
+      return editorHtmlCache.current.doc;
+    }
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
+    editorHtmlCache.current = { html, doc };
+    return doc;
+  };
 
   const getReferenceHTML = (paraIdx: number): string => {
-    const editor = editorRef.current?.editor;
-    if (!editor) return "";
+    const doc = getParsedEditorDoc();
+    if (!doc) return "";
 
     if (paraIdx === undefined || paraIdx === null || typeof paraIdx !== "number" || Number.isNaN(paraIdx) || paraIdx < 0) {
       return "";
     }
-
-    const html = editor.getHTML();
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, "text/html");
     
     // Find the block by its data-para-idx attribute first (accurate mapping)
     const targetBlock = doc.body.querySelector(`[data-para-idx="${paraIdx}"]`) || 
@@ -756,6 +775,125 @@ export function ReferenceValidationReviewPage() {
     }
   };
 
+  const formatGoogleBooksToStyle = (volumeInfo: any, style: "AMA" | "APA"): string => {
+    const title = volumeInfo.title || "No Title";
+    const publisher = volumeInfo.publisher || "";
+    const publishedDate = volumeInfo.publishedDate || "";
+    const year = publishedDate ? publishedDate.split("-")[0] : "";
+    const authorsList = volumeInfo.authors || [];
+
+    let authorsFormatted = "";
+    if (style === "AMA") {
+      const formatted = authorsList.map((a: string) => {
+        const parts = a.trim().split(/\s+/);
+        if (parts.length > 1) {
+          const initials = parts.slice(0, -1).map(p => p[0] || "").join("");
+          return `${parts[parts.length - 1]} ${initials}`;
+        }
+        return a;
+      });
+      if (formatted.length > 6) {
+        authorsFormatted = formatted.slice(0, 3).join(", ") + ", et al";
+      } else if (formatted.length > 0) {
+        authorsFormatted = formatted.join(", ");
+      }
+    } else {
+      const formatted = authorsList.map((a: string) => {
+        const parts = a.trim().split(/\s+/);
+        if (parts.length > 1) {
+          const last = parts[parts.length - 1];
+          const initials = parts.slice(0, -1).map(p => `${p[0] || ""}.`).join(" ");
+          return `${last}, ${initials}`;
+        }
+        return a;
+      });
+      if (formatted.length > 0) {
+        if (formatted.length > 1) {
+          authorsFormatted = formatted.slice(0, -1).join(", ") + ", & " + formatted[formatted.length - 1];
+        } else {
+          authorsFormatted = formatted[0];
+        }
+      }
+    }
+
+    if (style === "AMA") {
+      let res = "";
+      if (authorsFormatted) res += `${authorsFormatted}. `;
+      res += `${title}. `;
+      if (publisher) res += `${publisher}; `;
+      if (year) res += `${year}.`;
+      return res;
+    } else {
+      let res = "";
+      if (authorsFormatted) res += `${authorsFormatted} `;
+      if (year) res += `(${year}). `;
+      res += `${title}. `;
+      if (publisher) res += `${publisher}.`;
+      return res;
+    }
+  };
+
+  const searchGoogleBooks = async (query: string) => {
+    if (!query.trim()) return;
+    setSearchLoading(true);
+    setSearchSource("googlebooks");
+    setSearchResults([]);
+    try {
+      const searchUrl = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=3`;
+      const res = await fetch(searchUrl);
+      const data = await res.json();
+      const items = data?.items || [];
+
+      const formattedResults = items.map((item: any) => {
+        const volumeInfo = item.volumeInfo || {};
+        const formatted = formatGoogleBooksToStyle(volumeInfo, detectedStyle);
+        return {
+          id: item.id || "",
+          raw: item,
+          formatted,
+          title: volumeInfo.title || "",
+          doi: ""
+        };
+      });
+
+      setSearchResults(formattedResults);
+    } catch (err) {
+      console.error("Google Books search failed:", err);
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  const searchWikipedia = async (query: string) => {
+    if (!query.trim()) return;
+    setSearchLoading(true);
+    setSearchSource("wikipedia");
+    setSearchResults([]);
+    try {
+      const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&origin=*&srlimit=3`;
+      const res = await fetch(searchUrl);
+      const data = await res.json();
+      const items = data?.query?.search || [];
+
+      const formattedResults = items.map((item: any) => {
+        const formatted = `${item.title}. Wikipedia, The Free Encyclopedia. Retrieved ${new Date().getFullYear()}. https://en.wikipedia.org/wiki/${encodeURIComponent(item.title)}`;
+        return {
+          id: item.pageid || "",
+          raw: item,
+          formatted,
+          title: item.title,
+          doi: ""
+        };
+      });
+
+      setSearchResults(formattedResults);
+    } catch (err) {
+      console.error("Wikipedia search failed:", err);
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
   const handleSaveEditedReference = async () => {
     if (!editingEntry) return;
     const original = editingEntry.originalText;
@@ -801,6 +939,12 @@ export function ReferenceValidationReviewPage() {
 
   // Highlight active style under cursor
   const [activeStyleUnderCursor, setActiveStyleUnderCursor] = useState<string | null>(null);
+
+  // Reset local validation logs and citation pairs when style or format options change
+  useEffect(() => {
+    setLocalValidationLogs(null);
+    setLocalCitationPairs(null);
+  }, [styleOverride, citationFormat]);
 
   // Listen to cursor updates in editor
   const editorInstance = editorRef.current?.editor;
@@ -1217,6 +1361,34 @@ export function ReferenceValidationReviewPage() {
   // Derived stats for sidebar header
   const matchedCount = citationPairs.filter((p: any) => p.status === "ok").length;
   const issueCount = citationPairs.filter((p: any) => p.status !== "ok").length;
+
+  // Inline fix helper — before/after diff strip + Accept Fix / Applied button
+  const IssueFix = ({ issue }: { issue: any }) => {
+    if (!issue.original_text || !issue.corrected_text || issue.original_text === issue.corrected_text) return null;
+    const fixKey = `${issue.type}:${issue.para_idx}:${issue.original_text}`;
+    const isApplied = appliedFixes.has(fixKey);
+    return (
+      <div className="space-y-1.5 mt-1.5">
+        <div className="flex items-start gap-2 bg-white border border-slate-200 rounded px-2 py-1.5 text-[10px] font-mono leading-snug">
+          <span className="text-red-600 line-through break-all">{issue.original_text}</span>
+          <span className="text-slate-400 shrink-0">→</span>
+          <span className="text-emerald-700 font-semibold break-all">{issue.corrected_text}</span>
+        </div>
+        {isApplied ? (
+          <div className="flex items-center gap-1 text-[10px] font-bold text-emerald-700">
+            <Check className="w-3 h-3" /> Applied in editor
+          </div>
+        ) : (
+          <button
+            onClick={() => applyIssueFix(issue)}
+            className="text-[10px] font-bold px-2.5 py-1 rounded bg-navy-700 text-white hover:bg-navy-900 flex items-center gap-1 transition-colors cursor-pointer"
+          >
+            <Check className="w-3 h-3" /> Accept Fix
+          </button>
+        )}
+      </div>
+    );
+  };
 
   // Scan for cite_bib spans and update citation pair status in real-time
   const rescanCitationLinks = useCallback(() => {
@@ -1668,43 +1840,125 @@ export function ReferenceValidationReviewPage() {
     }, 100);
   };
 
-  // Merge duplicate references
-  const mergeDuplicateReferences = (dup: typeof logs.duplicates[0]) => {
+  // Queue a duplicate merge — staged; not applied to DOCX until "Apply Merges" is clicked
+  const queueMerge = (dup: { num1?: number; num2?: number }) => {
+    const num1 = dup.num1;
+    const num2 = dup.num2;
+    if (num1 === undefined || num2 === undefined) return;
+
+    const key = `${num2}→${num1}`;
+    if (resolvedDups.has(key)) return;
+
+    setPendingMerges((prev) => {
+      // Avoid duplicates in queue
+      if (prev.some((m) => m.duplicate === num2 && m.canonical === num1)) return prev;
+      return [...prev, { canonical: num1, duplicate: num2 }];
+    });
+    setResolvedDups((prev) => new Set([...prev, key]));
+  };
+
+  // Apply all queued merges to the editor (replace citations + strikethrough bib entries)
+  const applyPendingMerges = () => {
+    const editor = editorRef.current?.editor;
+    if (!editor || pendingMerges.length === 0) return;
+
+    let htmlContent = editor.getHTML();
+    const parser = new DOMParser();
+
+    for (const merge of pendingMerges) {
+      const { canonical, duplicate } = merge;
+
+      // 1. Replace in-text citations: cite_bib spans containing duplicate number
+      const patterns = [
+        `<span class="cite_bib">${duplicate}</span>`,
+        `<span class="cite_bib">[${duplicate}]</span>`,
+        `<span class="cite_bib">(${duplicate})</span>`,
+      ];
+      for (const pattern of patterns) {
+        const replacement = pattern.replace(String(duplicate), String(canonical));
+        htmlContent = htmlContent.replaceAll(pattern, replacement);
+      }
+
+      // 2. Remove duplicate bibliography paragraph
+      const doc = parser.parseFromString(htmlContent, "text/html");
+      const paragraphs = Array.from(doc.querySelectorAll("p"));
+      paragraphs.forEach((p) => {
+        const text = p.textContent?.trim() || "";
+        if (
+          text.startsWith(`[${duplicate}]`) ||
+          text.startsWith(`${duplicate}.`) ||
+          text.match(new RegExp(`^\\s*${duplicate}[\\s\\.]`))
+        ) {
+          p.remove();
+        }
+      });
+      htmlContent = doc.body.innerHTML;
+    }
+
+    editor.commands.setContent(htmlContent);
+    setPendingMerges([]);
+  };
+
+  // Legacy direct-merge kept for backward compat (used nowhere now)
+  const mergeDuplicateReferences = (dup: { num1?: number; num2?: number }) => {
+    queueMerge(dup);
+  };
+
+  // Apply a single issue's auto-correction to the editor as a tracked change
+  const applyIssueFix = (issue: any) => {
+    const { original_text, corrected_text } = issue;
+    if (!original_text || !corrected_text || original_text === corrected_text) return;
     const editor = editorRef.current?.editor;
     if (!editor) return;
 
-    const num1 = dup.num1;
-    const num2 = dup.num2;
+    const author = viewer?.username || "Editor";
+    const date = new Date().toISOString();
+    const escaped = original_text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-    if (num1 === undefined || num2 === undefined) return;
+    const currentHtml = editor.getHTML();
+    const newHtml = currentHtml.replace(
+      new RegExp(escaped),
+      `<del class="tc-delete" data-author="${author}" data-date="${date}">${original_text}</del>` +
+      `<ins class="tc-insert" data-author="${author}" data-date="${date}">${corrected_text}</ins>`
+    );
+    if (newHtml === currentHtml) return;
 
-    // 1. Replace all citations matching num2 with num1
-    // We scan paragraphs for inline <span class="cite_bib">num2</span>
-    // For numerical validation, we will perform a text search & replace in the editor
-    const htmlContent = editor.getHTML();
+    editor.commands.setContent(newHtml, false);
+    setAppliedFixes((prev) => new Set([...prev, `${issue.type}:${issue.para_idx}:${original_text}`]));
+  };
 
-    // Create regexp that matches the specific reference tag
-    const searchString = `<span class="cite_bib">${num2}</span>`;
-    const replacementString = `<span class="cite_bib">${num1}</span>`;
+  // Batch-apply all fixable corrections from a log result (called after Validate)
+  const applyAllFixes = (issueList: any[]) => {
+    const editor = editorRef.current?.editor;
+    if (!editor) return;
 
-    let updatedHtml = htmlContent;
-    // Replace citations
-    updatedHtml = updatedHtml.replaceAll(searchString, replacementString);
+    const fixable = issueList.filter(
+      (i) => i.original_text && i.corrected_text && i.original_text !== i.corrected_text
+    );
+    if (!fixable.length) return;
 
-    // 2. Remove the second duplicate paragraph from the bibliography
-    // We can parse the document blocks, find the paragraph styled as Reference or normal starting with the number, and delete it.
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(updatedHtml, "text/html");
-    const paragraphs = Array.from(doc.querySelectorAll("p"));
+    const author = viewer?.username || "Editor";
+    const date = new Date().toISOString();
+    let html = editor.getHTML();
+    const newApplied = new Set(appliedFixes);
 
-    paragraphs.forEach((p) => {
-      const text = p.textContent?.trim() || "";
-      if (text.startsWith(`[${num2}]`) || text.startsWith(`${num2}.`)) {
-        p.remove();
+    fixable.forEach((issue) => {
+      const key = `${issue.type}:${issue.para_idx}:${issue.original_text}`;
+      if (newApplied.has(key)) return;
+      const escaped = (issue.original_text as string).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const replaced = html.replace(
+        new RegExp(escaped),
+        `<del class="tc-delete" data-author="${author}" data-date="${date}">${issue.original_text}</del>` +
+        `<ins class="tc-insert" data-author="${author}" data-date="${date}">${issue.corrected_text}</ins>`
+      );
+      if (replaced !== html) {
+        html = replaced;
+        newApplied.add(key);
       }
     });
 
-    editor.commands.setContent(doc.body.innerHTML);
+    editor.commands.setContent(html, false);
+    setAppliedFixes(newApplied);
   };
 
   // Reorder / sort bibliography alphabetically (APA style)
@@ -1942,19 +2196,36 @@ export function ReferenceValidationReviewPage() {
                     v{review.file.version}
                   </span>
                 </div>
-                <select
-                  value={styleOverride}
-                  onChange={(e) => setStyleOverride(e.target.value as any)}
-                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 border focus:outline-none focus:ring-1 focus:ring-navy-400 cursor-pointer ${detectedStyle === "AMA"
-                      ? "bg-purple-50 text-purple-700 border-purple-200"
-                      : "bg-teal-50 text-teal-700 border-teal-200"
+                <div className="flex gap-1.5 items-center flex-wrap">
+                  <select
+                    value={styleOverride}
+                    onChange={(e) => setStyleOverride(e.target.value as any)}
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 border focus:outline-none focus:ring-1 focus:ring-navy-400 cursor-pointer ${
+                      detectedStyle === "AMA"
+                        ? "bg-purple-50 text-purple-700 border-purple-200"
+                        : "bg-teal-50 text-teal-700 border-teal-200"
                     }`}
-                  title="Override validation style"
-                >
-                  <option value="AUTO">Auto ({reviewQuery.data?.validation_logs?.detected_style ?? "AMA"})</option>
-                  <option value="AMA">AMA (Numbered)</option>
-                  <option value="APA">APA (Name-Year)</option>
-                </select>
+                    title="Override validation style"
+                  >
+                    <option value="AUTO">Auto ({reviewQuery.data?.validation_logs?.detected_style ?? "AMA"})</option>
+                    <option value="AMA">AMA (Numbered)</option>
+                    <option value="APA">APA (Name-Year)</option>
+                  </select>
+                  {detectedStyle === "AMA" && (
+                    <select
+                      value={citationFormat}
+                      onChange={(e) => setCitationFormat(e.target.value as any)}
+                      className="px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 border focus:outline-none focus:ring-1 focus:ring-navy-400 cursor-pointer bg-sky-50 text-sky-700 border-sky-200"
+                      title="Citation format override"
+                    >
+                      <option value="auto">Auto-detect</option>
+                      <option value="superscript">Superscript (¹)</option>
+                      <option value="bracket">Bracket [1]</option>
+                      <option value="paren">Parenthesis (1)</option>
+                      <option value="plain">Plain 1</option>
+                    </select>
+                  )}
+                </div>
               </div>
 
               {/* Row 2: Issue count chips */}
@@ -1975,107 +2246,136 @@ export function ReferenceValidationReviewPage() {
                   <Calendar className="w-3 h-3" />
                   {lastValidatedAt ? lastValidatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "Not yet validated"}
                 </span>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  className="text-[11px] px-3 py-1 bg-[#C9821A] border-[#C9821A] hover:bg-[#B3711A] text-white"
-                  onClick={async () => {
-                    if (editorRef.current?.editor) {
-                      const html = editorRef.current.editor.getHTML();
-                      await saveMutation.save(review.save_endpoint, html);
-                      const result = await validateOnlyMutation.mutateAsync(styleOverride === "AUTO" ? undefined : styleOverride);
-                      setLocalValidationLogs(result.validation_logs);
-                      setLastValidatedAt(new Date());
-                      setActiveTab("citations");
-                    }
-                  }}
-                  isLoading={saveMutation.isPending || validateOnlyMutation.isPending}
-                  leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
-                >
-                  {validateOnlyMutation.isPending ? "Validating…" : "Validate"}
-                </Button>
+                <div className="flex gap-1.5">
+                  {pendingMerges.length > 0 && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="text-[11px] px-2 py-1 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                      onClick={applyPendingMerges}
+                      title={`Apply ${pendingMerges.length} queued merge(s) to editor`}
+                    >
+                      ✅ Apply ({pendingMerges.length})
+                    </Button>
+                  )}
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="text-[11px] px-3 py-1 bg-[#C9821A] border-[#C9821A] hover:bg-[#B3711A] text-white"
+                    onClick={async () => {
+                      if (editorRef.current?.editor) {
+                        // If there are pending merges, apply them first
+                        if (pendingMerges.length > 0) applyPendingMerges();
+                        const html = editorRef.current.editor.getHTML();
+                        await saveMutation.save(review.save_endpoint, html);
+                        const result = await validateOnlyMutation.mutateAsync({
+                          style: styleOverride === "AUTO" ? undefined : styleOverride,
+                          citationFormat: citationFormat === "auto" ? undefined : citationFormat,
+                        });
+                        setLocalValidationLogs(result.validation_logs);
+                        await reviewQuery.refetch();
+                        setLastValidatedAt(new Date());
+
+                        // Batch-apply all auto-corrections as track changes
+                        const vl = result.validation_logs as any;
+                        const allFixable = [
+                          ...(vl?.et_al_issues ?? []),
+                          ...(vl?.name_spelling_warnings ?? []),
+                          ...(vl?.issues?.filter((i: any) => i.type === "year_mismatch") ?? []),
+                        ].filter((i: any) => i.original_text && i.corrected_text);
+                        if (allFixable.length > 0) {
+                          applyAllFixes(allFixable);
+                          setActiveTab("trackedChanges");
+                        } else {
+                          const hasDups = (vl?.duplicates?.length ?? 0) > 0;
+                          setActiveTab(hasDups ? "issues" : "citations");
+                        }
+                      }
+                    }}
+                    isLoading={saveMutation.isPending || validateOnlyMutation.isPending}
+                    leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
+                  >
+                    {validateOnlyMutation.isPending ? "Validating…" : "Validate"}
+                  </Button>
+                </div>
               </div>
             </div>
 
-            {/* Sidebar Tabs */}
-            <div className="flex border-b border-navy-200 bg-surface-100 px-1 pt-1 gap-0.5">
-              <button
-                onClick={() => setActiveTab("citations")}
-                className={`flex-1 py-3 text-center text-xs font-bold border-b-2 transition-all flex items-center justify-center gap-1.5 rounded-t-md ${activeTab === "citations"
-                    ? "border-navy-800 text-navy-800 bg-white shadow-sm -mb-px"
-                    : "border-transparent text-navy-400 hover:text-navy-600 hover:bg-white/60"
-                  }`}
-              >
-                <Layers className="w-3.5 h-3.5" />
-                Citations & References
-                {(logs.citation_pairs?.filter((p: any) => p.status !== "ok").length || 0) > 0 && (
-                  <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] bg-error-100 text-error-600 border border-error-100 font-bold leading-none">
-                    {logs.citation_pairs?.filter((p: any) => p.status !== "ok").length}
-                  </span>
-                )}
-              </button>
-              <button
-                onClick={() => setActiveTab("structuring")}
-                className={`flex-1 py-3 text-center text-xs font-bold border-b-2 transition-all flex items-center justify-center gap-1.5 rounded-t-md ${activeTab === "structuring"
-                    ? "border-navy-800 text-navy-800 bg-white shadow-sm -mb-px"
-                    : "border-transparent text-navy-400 hover:text-navy-600 hover:bg-white/60"
-                  }`}
-              >
-                <Hash className="w-3.5 h-3.5" />
-                Structuring Review
-                {(logs.reference_entries?.filter((e: any) => !e.is_cited).length || 0) > 0 && (
-                  <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] bg-warning-100 text-warning-600 border border-warning-100 font-bold leading-none">
-                    {logs.reference_entries?.filter((e: any) => !e.is_cited).length}
-                  </span>
-                )}
-              </button>
-              <button
-                onClick={() => setActiveTab("trackedChanges")}
-                className={`flex-1 py-3 text-center text-xs font-bold border-b-2 transition-all flex items-center justify-center gap-1.5 rounded-t-md ${activeTab === "trackedChanges"
-                    ? "border-navy-800 text-navy-800 bg-white shadow-sm -mb-px"
-                    : "border-transparent text-navy-400 hover:text-navy-600 hover:bg-white/60"
-                  }`}
-              >
-                Tracked Changes
-              </button>
-              {(logs.duplicates?.length || 0) > 0 || (logs.sequence_issues?.length || 0) > 0 ? (
-                <button
-                  onClick={() => setActiveTab("issues")}
-                  className={`flex-1 py-3 text-center text-xs font-bold border-b-2 transition-all flex items-center justify-center gap-1.5 rounded-t-md ${activeTab === "issues"
-                      ? "border-navy-800 text-navy-800 bg-white shadow-sm -mb-px"
-                      : "border-transparent text-navy-400 hover:text-navy-600 hover:bg-white/60"
-                    }`}
-                >
-                  <AlertTriangle className="w-3.5 h-3.5" />
-                  Issues
-                  <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] bg-warning-100 text-warning-600 border border-warning-100 font-bold leading-none">
-                    {(logs.duplicates?.length || 0) + (logs.sequence_issues?.length || 0)}
-                  </span>
-                </button>
-              ) : null}
-              <button
-                onClick={() => setActiveTab("missing")}
-                className={`flex-1 py-3 text-center text-xs font-bold border-b-2 transition-all flex items-center justify-center gap-1.5 rounded-t-md ${activeTab === "missing"
-                    ? "border-navy-800 text-navy-800 bg-white shadow-sm -mb-px"
-                    : "border-transparent text-navy-400 hover:text-navy-600 hover:bg-white/60"
-                  }`}
-              >
-                <AlertCircle className="w-3.5 h-3.5" />
-                Missing Refs
-              </button>
-              {logs.raw_log && (
-                <button
-                  onClick={() => setActiveTab("logs")}
-                  className={`flex-grow-0 px-4 py-3 text-center text-xs font-bold border-b-2 transition-all flex items-center justify-center gap-1.5 rounded-t-md ${activeTab === "logs"
-                      ? "border-navy-800 text-navy-800 bg-white shadow-sm -mb-px"
-                      : "border-transparent text-navy-400 hover:text-navy-600 hover:bg-white/60"
-                    }`}
-                >
-                  <Terminal className="w-3.5 h-3.5" />
-                  Logs
-                </button>
-              )}
-            </div>
+            {/* Sidebar Tabs — stacked icon + micro-label, flex-1 so all fit without scrolling */}
+            {(() => {
+              const amaIssueCount =
+                (logs.duplicates?.length ?? 0) +
+                (logs.sequence_issues?.length ?? 0) +
+                (logs.broken_ranges?.length ?? 0) +
+                (logs.invalid_numbers?.length ?? 0);
+              const apaIssueCount =
+                (logs.et_al_issues?.length ?? 0) +
+                (logs.name_spelling_warnings?.length ?? 0) +
+                (logs.ordering_issues?.length ?? 0) +
+                (logs.suffix_issues?.length ?? 0) +
+                (logs.disambiguation_issues?.length ?? 0);
+              const issueCount = detectedStyle === "AMA" ? amaIssueCount : apaIssueCount;
+              const citeBadge = logs.citation_pairs?.filter((p: any) => p.status !== "ok").length || 0;
+              const structBadge = logs.reference_entries?.filter((e: any) => !e.is_cited).length || 0;
+
+              const tabCls = (id: string) =>
+                `flex-1 py-2 flex flex-col items-center gap-0.5 border-b-2 transition-all cursor-pointer ${
+                  activeTab === id
+                    ? "border-navy-800 text-navy-800 bg-white shadow-sm"
+                    : "border-transparent text-navy-400 hover:text-navy-700 hover:bg-white/60"
+                }`;
+
+              const Badge = ({ count, color = "error" }: { count: number; color?: string }) =>
+                count > 0 ? (
+                  <span className={`absolute -top-1.5 -right-2 min-w-[14px] h-[14px] flex items-center justify-center rounded-full text-[7.5px] font-extrabold px-0.5 leading-none ${
+                    color === "error" ? "bg-red-500 text-white" :
+                    color === "warning" ? "bg-amber-500 text-white" :
+                    "bg-navy-500 text-white"
+                  }`}>{count > 99 ? "99+" : count}</span>
+                ) : null;
+
+              const Label = ({ children }: { children: string }) => (
+                <span className="text-[8px] font-bold uppercase tracking-wide leading-none">{children}</span>
+              );
+
+              return (
+                <div className="flex border-b border-navy-200 bg-surface-100 shrink-0">
+                  <button title="Citations & References" onClick={() => setActiveTab("citations")} className={tabCls("citations")}>
+                    <div className="relative"><Layers className="w-4 h-4" /><Badge count={citeBadge} color="error" /></div>
+                    <Label>Cites</Label>
+                  </button>
+
+                  <button title="Structuring Review" onClick={() => setActiveTab("structuring")} className={tabCls("structuring")}>
+                    <div className="relative"><Hash className="w-4 h-4" /><Badge count={structBadge} color="warning" /></div>
+                    <Label>Struct</Label>
+                  </button>
+
+                  <button title="Tracked Changes" onClick={() => setActiveTab("trackedChanges")} className={tabCls("trackedChanges")}>
+                    <div className="relative"><ArrowLeftRight className="w-4 h-4" /></div>
+                    <Label>Track</Label>
+                  </button>
+
+                  {issueCount > 0 && (
+                    <button title="Issues" onClick={() => setActiveTab("issues")} className={tabCls("issues")}>
+                      <div className="relative"><AlertTriangle className="w-4 h-4" /><Badge count={issueCount} color="warning" /></div>
+                      <Label>Issues</Label>
+                    </button>
+                  )}
+
+                  <button title="Missing & Unused References" onClick={() => setActiveTab("missing")} className={tabCls("missing")}>
+                    <div className="relative"><AlertCircle className="w-4 h-4" /></div>
+                    <Label>Missing</Label>
+                  </button>
+
+                  {logs.raw_log && (
+                    <button title="Raw Logs" onClick={() => setActiveTab("logs")} className={tabCls("logs")}>
+                      <div className="relative"><Terminal className="w-4 h-4" /></div>
+                      <Label>Logs</Label>
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Sidebar Body */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0 bg-surface-50/20">
@@ -2084,24 +2384,19 @@ export function ReferenceValidationReviewPage() {
               {activeTab === "citations" && (
                 <div className="space-y-4 page-enter">
 
-                  {/* Summary Stats Bar */}
-                  <div className="grid grid-cols-2 gap-2 bg-white p-3 border border-navy-100 rounded-lg shadow-sm">
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-[9px] uppercase font-bold text-navy-400 tracking-wider">Total Refs</span>
-                      <span className="text-base font-extrabold text-navy-900">{logs.total_refs || 0}</span>
-                    </div>
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-[9px] uppercase font-bold text-navy-400 tracking-wider">Citations</span>
-                      <span className="text-base font-extrabold text-navy-900">{logs.total_cites || 0}</span>
-                    </div>
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-[9px] uppercase font-bold text-success-600 tracking-wider">Matched</span>
-                      <span className="text-base font-extrabold text-success-700">{matchedCount} / {logs.total_refs || 0}</span>
-                    </div>
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-[9px] uppercase font-bold text-error-600 tracking-wider">Issues</span>
-                      <span className="text-base font-extrabold text-error-700">{issueCount}</span>
-                    </div>
+                  {/* Summary Stats Bar — compact 4-column */}
+                  <div className="grid grid-cols-4 divide-x divide-slate-200 border border-slate-200 rounded-md overflow-hidden">
+                    {([
+                      { label: "Refs",    value: logs.total_refs ?? 0,  cls: "text-navy-800" },
+                      { label: "Cites",   value: logs.total_cites ?? 0, cls: "text-navy-800" },
+                      { label: "Matched", value: matchedCount,           cls: "text-emerald-600" },
+                      { label: "Issues",  value: issueCount,             cls: issueCount > 0 ? "text-red-600" : "text-navy-800" },
+                    ] as const).map(({ label, value, cls }) => (
+                      <div key={label} className="flex flex-col items-start px-2 py-1.5 bg-slate-50">
+                        <span className={`text-[17px] font-extrabold leading-none tabular-nums ${cls}`}>{value}</span>
+                        <span className="text-[8.5px] font-bold uppercase tracking-wide text-slate-400 mt-0.5">{label}</span>
+                      </div>
+                    ))}
                   </div>
 
                   {detectedStyle === "APA" && (
@@ -2284,13 +2579,28 @@ export function ReferenceValidationReviewPage() {
                                     isUnused ? <AlertTriangle className="w-3.5 h-3.5 text-warning-500 shrink-0 mt-0.5" /> :
                                       <CheckCircle2 className="w-3.5 h-3.5 text-success-500 shrink-0 mt-0.5" />}
                                   <div className="flex-1 min-w-0">
-                                    <p className="text-[11px] font-extrabold text-navy-900 break-words leading-tight">
-                                      {pair.citation ? (
-                                        detectedStyle === "AMA" && !pair.citation.includes("[") ? `[${pair.citation}]` : pair.citation
-                                      ) : (
-                                        <span className="text-navy-400 italic">No in-text citation</span>
-                                      )}
-                                    </p>
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <p className="text-[11px] font-extrabold text-navy-900 break-words leading-tight">
+                                        {pair.citation ? (
+                                          detectedStyle === "AMA" && !pair.citation.includes("[") ? `[${pair.citation}]` : pair.citation
+                                        ) : (
+                                          <span className="text-navy-400 italic">No in-text citation</span>
+                                        )}
+                                      </p>
+                                      {detectedStyle === "APA" && isOk && pair.match_score !== undefined && (() => {
+                                        const pct = Math.min(100, Math.round((pair.match_score / 3.5) * 100));
+                                        const cls = pct >= 85
+                                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                          : pct >= 65
+                                          ? "bg-amber-50 text-amber-700 border-amber-200"
+                                          : "bg-red-50 text-red-700 border-red-200";
+                                        return (
+                                          <span className={`text-[9.5px] font-bold px-1.5 py-0.5 rounded border ${cls} shrink-0`} title="Match confidence">
+                                            {pct}%
+                                          </span>
+                                        );
+                                      })()}
+                                    </div>
                                     <p className="text-[10px] text-navy-500 mt-1 truncate">
                                       {isMissing ? "Missing reference entry" :
                                         isUnused ? "Unused reference entry" :
@@ -2330,27 +2640,12 @@ export function ReferenceValidationReviewPage() {
                               <div className="p-3 bg-surface-50/30 border-t border-navy-100/60 space-y-3">
                                 {cardIssues.length > 0 && (
                                   <div className="space-y-1.5">
-                                    {cardIssues.map((issue: any, issueIdx: number) => {
-                                      const isYearMismatch = issue.message.toLowerCase().includes("year") || issue.message.toLowerCase().includes("date") || issue.message.toLowerCase().includes("changed to");
-                                      const yearMatches = issue.message.match(/\b(19|20)\d{2}\b/g);
-                                      const expectedYear = yearMatches && yearMatches.length > 0 ? yearMatches[yearMatches.length - 1] : null;
-
-                                      return (
-                                        <div key={issueIdx} className="text-[10px] font-medium p-2 bg-red-50 text-red-800 rounded border border-red-100 flex flex-col gap-1.5">
-                                          <span>⚠️ {issue.message}</span>
-                                          {isYearMismatch && expectedYear && (
-                                            <button
-                                              onClick={() => {
-                                                quickFixYear(pair.para_idx !== undefined && pair.para_idx >= 0 ? pair.para_idx : issue.para_idx, issue.message, expectedYear);
-                                              }}
-                                              className="w-fit px-2 py-0.5 bg-red-100 hover:bg-red-200 text-red-900 border border-red-300 rounded text-[9px] font-bold transition-all cursor-pointer"
-                                            >
-                                              Quick Fix: Update year to {expectedYear}
-                                            </button>
-                                          )}
-                                        </div>
-                                      );
-                                    })}
+                                    {cardIssues.map((issue: any, issueIdx: number) => (
+                                      <div key={issueIdx} className="text-[10px] font-medium p-2 bg-red-50 text-red-800 rounded border border-red-100 flex flex-col gap-1.5">
+                                        <span>⚠️ {issue.message}</span>
+                                        <IssueFix issue={issue} />
+                                      </div>
+                                    ))}
                                   </div>
                                 )}
 
@@ -2694,29 +2989,87 @@ export function ReferenceValidationReviewPage() {
 
               {/* ─── TAB 3: ISSUES ─── */}
               {activeTab === "issues" && (
-                <div className="space-y-3 page-enter">
+                <div className="space-y-4 page-enter">
+                  {/* Pending Merge Queue Banner */}
+                  {pendingMerges.length > 0 && (
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] font-bold text-emerald-800 mb-1">
+                          ✅ {pendingMerges.length} merge{pendingMerges.length > 1 ? "s" : ""} queued
+                        </p>
+                        <ul className="space-y-0.5">
+                          {pendingMerges.map((m, i) => (
+                            <li key={i} className="text-[10px] text-emerald-700">
+                              Ref #{m.duplicate} → Ref #{m.canonical}
+                            </li>
+                          ))}
+                        </ul>
+                        <p className="text-[10px] text-emerald-600 mt-1.5">
+                          Click <strong>Apply</strong> to update editor, then <strong>Validate</strong> to renumber.
+                        </p>
+                      </div>
+                      <button
+                        onClick={applyPendingMerges}
+                        className="shrink-0 px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold rounded-md transition-colors cursor-pointer"
+                      >
+                        Apply Merges
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="space-y-3">
                   {/* Duplicates Section */}
                   {(logs.duplicates?.length || 0) > 0 && (
                     <div className="space-y-2">
                       <h4 className="text-[10px] uppercase font-extrabold text-navy-500 tracking-wider px-1">
                         Duplicate References ({logs.duplicates.length})
                       </h4>
-                      {logs.duplicates.map((dup: any, idx: number) => (
-                        <div key={idx} className="bg-white rounded-lg border border-warning-200 border-l-[3px] border-l-warning-500 p-3 space-y-2 shadow-sm">
-                          <div className="text-[10px] font-bold text-warning-700 flex items-center gap-1.5">
-                            <AlertTriangle className="w-3 h-3" />
-                            {Math.round((dup.similarity || 0) * 100)}% similarity
+                      {logs.duplicates.map((dup: any, idx: number) => {
+                        const dupKey = `${dup.num2}\u2192${dup.num1}`;
+                        const isQueued = resolvedDups.has(dupKey);
+                        const simPct = Math.round((dup.similarity || 0) * 100);
+                        return (
+                          <div key={idx} className="bg-white rounded-lg border border-warning-200 border-l-[3px] border-l-warning-500 p-3 space-y-2.5 shadow-sm">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-1.5 text-[10px] font-bold text-warning-700">
+                                <AlertTriangle className="w-3 h-3" />
+                                Possible Duplicate
+                              </div>
+                              <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded-full border ${simPct >= 95 ? "bg-red-50 text-red-700 border-red-200" : "bg-amber-50 text-amber-700 border-amber-200"}`}>
+                                {simPct}% similar
+                              </span>
+                            </div>
+                            <div className="space-y-1.5">
+                              <div className="bg-surface-50 rounded p-2 border border-navy-100">
+                                <div className="text-[9px] font-extrabold text-navy-500 uppercase tracking-wide mb-1">
+                                  Reference #{dup.num1 ?? "?"} (Keep)
+                                </div>
+                                <p className="text-[10px] text-navy-800 leading-relaxed line-clamp-3">{dup.text1}</p>
+                              </div>
+                              <div className="bg-surface-50 rounded p-2 border border-navy-100">
+                                <div className="text-[9px] font-extrabold text-navy-500 uppercase tracking-wide mb-1">
+                                  Reference #{dup.num2 ?? "?"} (Remove)
+                                </div>
+                                <p className="text-[10px] text-navy-800 leading-relaxed line-clamp-3">{dup.text2}</p>
+                              </div>
+                            </div>
+                            {isQueued ? (
+                              <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-1.5">
+                                <Check className="w-3 h-3" />
+                                Queued — will apply on next Save + Validate
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => queueMerge(dup)}
+                                className="w-full text-[10px] font-bold text-navy-700 hover:text-navy-900 bg-surface-100 hover:bg-navy-100 px-2.5 py-1.5 rounded border border-navy-200 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                              >
+                                <Layers className="w-3 h-3" />
+                                Queue Merge: #{dup.num2} → #{dup.num1}
+                              </button>
+                            )}
                           </div>
-                          <p className="text-[10px] text-navy-700 line-clamp-2 leading-relaxed">{dup.text1}</p>
-                          <button
-                            onClick={() => mergeDuplicateReferences(dup)}
-                            className="text-[10px] font-bold text-navy-700 hover:text-navy-900 bg-surface-100 hover:bg-navy-100 px-2.5 py-1 rounded border border-navy-200 flex items-center gap-1 transition-colors"
-                          >
-                            <Layers className="w-3 h-3" />
-                            Merge References
-                          </button>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
 
@@ -2740,150 +3093,524 @@ export function ReferenceValidationReviewPage() {
                       ))}
                     </div>
                   )}
+
+                  {/* ── AMA: Broken Ranges ── */}
+                  {detectedStyle === "AMA" && (logs.broken_ranges?.length || 0) > 0 && (
+                    <div className="space-y-2">
+                      <h4 className="text-[10px] uppercase font-extrabold text-red-600 tracking-wider px-1">
+                        Broken Ranges ({logs.broken_ranges!.length})
+                      </h4>
+                      {logs.broken_ranges!.map((item: any, idx: number) => (
+                        <div key={idx} className="bg-red-50/30 rounded-lg border border-red-100 border-l-[3px] border-l-red-500 p-3 space-y-1.5 shadow-sm">
+                          <div className="flex items-center gap-1.5 text-[10px] font-bold text-red-700">
+                            <AlertTriangle className="w-3 h-3" />
+                            Broken Range · Error
+                          </div>
+                          <p className="font-mono text-[10px] text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1 inline-block">{item.raw}</p>
+                          <p className="text-[11px] text-navy-700">Range is incomplete — ensure both start and end numbers are present (e.g. <span className="font-mono">[1-3]</span>).</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* ── AMA: Invalid Numbers ── */}
+                  {detectedStyle === "AMA" && (logs.invalid_numbers?.length || 0) > 0 && (
+                    <div className="space-y-2">
+                      <h4 className="text-[10px] uppercase font-extrabold text-red-600 tracking-wider px-1">
+                        Invalid Numbers ({logs.invalid_numbers!.length})
+                      </h4>
+                      {logs.invalid_numbers!.map((item: any, idx: number) => (
+                        <div key={idx} className="bg-red-50/30 rounded-lg border border-red-100 border-l-[3px] border-l-red-500 p-3 space-y-1.5 shadow-sm">
+                          <div className="flex items-center gap-1.5 text-[10px] font-bold text-red-700">
+                            <AlertTriangle className="w-3 h-3" />
+                            Invalid Number · Error
+                          </div>
+                          <p className="text-[11px] text-navy-700">{item.message}</p>
+                          <p className="text-[10px] text-slate-500">Reference numbers must be ≥ 1.</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* ── AMA: Format Warnings ── */}
+                  {detectedStyle === "AMA" && (logs.mixed_citation_style || (logs.inline_text_citations?.length || 0) > 0) && (
+                    <div className="space-y-2">
+                      <h4 className="text-[10px] uppercase font-extrabold text-amber-600 tracking-wider px-1">
+                        Format Warnings
+                      </h4>
+                      {logs.mixed_citation_style && (
+                        <div className="bg-amber-50/30 rounded-lg border border-amber-100 border-l-[3px] border-l-amber-400 p-3 space-y-1.5 shadow-sm">
+                          <div className="flex items-center gap-1.5 text-[10px] font-bold text-amber-700">
+                            <AlertTriangle className="w-3 h-3" />
+                            Mixed Citation Styles
+                          </div>
+                          <p className="text-[11px] text-navy-700">Multiple citation formats detected: {logs.mixed_citation_style.styles_found?.join(", ")}. Use a single style throughout.</p>
+                        </div>
+                      )}
+                      {(logs.inline_text_citations || []).map((item: any, idx: number) => (
+                        <div key={idx} className="bg-amber-50/30 rounded-lg border border-amber-100 border-l-[3px] border-l-amber-400 p-3 space-y-1.5 shadow-sm">
+                          <div className="flex items-center gap-1.5 text-[10px] font-bold text-amber-700">
+                            <AlertTriangle className="w-3 h-3" />
+                            Inline Text Citation
+                          </div>
+                          <p className="font-mono text-[10px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1 inline-block">"{item.raw}"</p>
+                          <p className="text-[11px] text-navy-700">{item.message}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* ── APA: et al. Issues ── */}
+                  {detectedStyle === "APA" && (logs.et_al_issues?.length || 0) > 0 && (
+                    <div className="space-y-2">
+                      <h4 className="text-[10px] uppercase font-extrabold text-blue-600 tracking-wider px-1">
+                        et al. Issues ({logs.et_al_issues!.length})
+                      </h4>
+                      {logs.et_al_issues!.map((issue: any, idx: number) => (
+                        <div key={idx} className="bg-blue-50/20 rounded-lg border border-blue-100 border-l-[3px] border-l-blue-500 p-3 space-y-1.5 shadow-sm">
+                          <div className="text-[10px] font-bold text-blue-700">et al. · APA §8.17</div>
+                          <p className="text-[11px] text-navy-800">{issue.message}</p>
+                          {issue.citation && <p className="font-mono text-[10px] text-blue-800 bg-blue-50 border border-blue-200 rounded px-2 py-1 inline-block">{issue.citation}</p>}
+                          <IssueFix issue={issue} />
+                          <button onClick={() => issue.para_idx !== undefined && navigateToDocPara(issue.para_idx)} className="text-[10px] font-bold text-blue-600 hover:underline flex items-center gap-1">
+                            <CornerDownRight className="w-3 h-3" />Locate in editor
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* ── APA: Spelling Mismatches ── */}
+                  {detectedStyle === "APA" && (logs.name_spelling_warnings?.length || 0) > 0 && (
+                    <div className="space-y-2">
+                      <h4 className="text-[10px] uppercase font-extrabold text-amber-600 tracking-wider px-1">
+                        Spelling Mismatches ({logs.name_spelling_warnings!.length})
+                      </h4>
+                      {logs.name_spelling_warnings!.map((issue: any, idx: number) => (
+                        <div key={idx} className="bg-amber-50/20 rounded-lg border border-amber-100 border-l-[3px] border-l-amber-400 p-3 space-y-1.5 shadow-sm">
+                          <div className="text-[10px] font-bold text-amber-700">Spelling · Warning</div>
+                          <p className="text-[11px] text-navy-800">{issue.message}</p>
+                          <IssueFix issue={issue} />
+                          <button onClick={() => issue.para_idx !== undefined && navigateToDocPara(issue.para_idx)} className="text-[10px] font-bold text-blue-600 hover:underline flex items-center gap-1">
+                            <CornerDownRight className="w-3 h-3" />Locate in editor
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* ── APA: Ordering Issues ── */}
+                  {detectedStyle === "APA" && (logs.ordering_issues?.length || 0) > 0 && (
+                    <div className="space-y-2">
+                      <h4 className="text-[10px] uppercase font-extrabold text-purple-600 tracking-wider px-1">
+                        Ordering Issues ({logs.ordering_issues!.length})
+                      </h4>
+                      {logs.ordering_issues!.map((issue: any, idx: number) => (
+                        <div key={idx} className="bg-purple-50/20 rounded-lg border border-purple-100 border-l-[3px] border-l-purple-500 p-3 space-y-1.5 shadow-sm">
+                          <div className="text-[10px] font-bold text-purple-700">Order · APA §9.44</div>
+                          <p className="text-[11px] text-navy-800">{issue.message}</p>
+                          <button onClick={() => issue.para_idx !== undefined && navigateToDocPara(issue.para_idx)} className="text-[10px] font-bold text-blue-600 hover:underline flex items-center gap-1">
+                            <CornerDownRight className="w-3 h-3" />Locate in editor
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* ── APA: Suffix Issues ── */}
+                  {detectedStyle === "APA" && (logs.suffix_issues?.length || 0) > 0 && (
+                    <div className="space-y-2">
+                      <h4 className="text-[10px] uppercase font-extrabold text-orange-600 tracking-wider px-1">
+                        Suffix Issues ({logs.suffix_issues!.length})
+                      </h4>
+                      {logs.suffix_issues!.map((issue: any, idx: number) => (
+                        <div key={idx} className="bg-orange-50/20 rounded-lg border border-orange-100 border-l-[3px] border-l-orange-500 p-3 space-y-1.5 shadow-sm">
+                          <div className="text-[10px] font-bold text-orange-700">Year Suffix · Warning</div>
+                          <p className="text-[11px] text-navy-800">{issue.message}</p>
+                          <IssueFix issue={issue} />
+                          <button onClick={() => issue.para_idx !== undefined && navigateToDocPara(issue.para_idx)} className="text-[10px] font-bold text-blue-600 hover:underline flex items-center gap-1">
+                            <CornerDownRight className="w-3 h-3" />Locate in editor
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* ── APA: Disambiguation ── */}
+                  {detectedStyle === "APA" && (logs.disambiguation_issues?.length || 0) > 0 && (
+                    <div className="space-y-2">
+                      <h4 className="text-[10px] uppercase font-extrabold text-teal-600 tracking-wider px-1">
+                        Disambiguation ({logs.disambiguation_issues!.length})
+                      </h4>
+                      {logs.disambiguation_issues!.map((issue: any, idx: number) => (
+                        <div key={idx} className="bg-teal-50/20 rounded-lg border border-teal-100 border-l-[3px] border-l-teal-500 p-3 space-y-1.5 shadow-sm">
+                          <div className="text-[10px] font-bold text-teal-700">Disambiguation · APA §8.20</div>
+                          <p className="text-[11px] text-navy-800">{issue.message}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* ── APA: All-clear state ── */}
+                  {detectedStyle === "APA" &&
+                    (logs.et_al_issues?.length ?? 0) === 0 &&
+                    (logs.name_spelling_warnings?.length ?? 0) === 0 &&
+                    (logs.ordering_issues?.length ?? 0) === 0 &&
+                    (logs.suffix_issues?.length ?? 0) === 0 &&
+                    (logs.disambiguation_issues?.length ?? 0) === 0 && (
+                    <div className="flex flex-col items-center justify-center py-8 text-center gap-2">
+                      <Check className="w-8 h-8 text-emerald-400" />
+                      <p className="text-[12px] font-semibold text-emerald-700">No APA issues detected</p>
+                      <p className="text-[10px] text-slate-400">et al., spelling, ordering, suffix, and disambiguation all look good.</p>
+                    </div>
+                  )}
+
+                  </div>
                 </div>
               )}
 
               {/* ─── TAB: MISSING REFERENCES ─── */}
-              {activeTab === "missing" && (
-                <div className="page-enter h-full">
-                  <MissingReferencesTab fileId={normalizedFileId || 0} />
-                </div>
-              )}
+              {activeTab === "missing" && (() => {
+                const missingPairs = logs.citation_pairs?.filter((p: any) => p.status === "missing") || [];
+                const unusedPairs = logs.citation_pairs?.filter((p: any) => p.status === "unused") || [];
 
-              {/* ─── TAB 4: RAW LOGS ─── */}
-              {activeTab === "logs" && logs.raw_log && (() => {
-                const parsed = parseLogText(logs.raw_log);
-                if (!parsed) {
+                if (detectedStyle === "AMA") {
                   return (
-                    <div className="page-enter bg-slate-950 rounded-lg p-3 shadow-inner border border-slate-900 max-h-[600px] overflow-y-auto">
-                      <pre className="text-[10px] text-emerald-400 font-mono whitespace-pre-wrap leading-relaxed select-text">
-                        {logs.raw_log}
-                      </pre>
+                    <div className="space-y-4 page-enter">
+                      <div>
+                        <h3 className="font-semibold text-gray-900 text-xs mb-1">
+                          Unresolved/Missing Citations
+                        </h3>
+                        <p className="text-xs text-gray-500">
+                          Found {missingPairs.length} citation{missingPairs.length !== 1 ? "s" : ""} cited in text with no matching bibliography entry.
+                        </p>
+                      </div>
+
+                      {missingPairs.length > 0 ? (
+                        <div className="space-y-2">
+                          {missingPairs.map((pair: any, idx: number) => (
+                            <div key={idx} className="p-3 bg-red-50/25 border border-red-200 rounded-lg flex items-center justify-between shadow-sm">
+                              <div>
+                                <span className="text-xs font-extrabold text-red-950 font-mono">
+                                  Citation {pair.citation}
+                                </span>
+                                <span className="block text-[10px] text-slate-400 mt-0.5">
+                                  Paragraph #{pair.para_idx !== undefined ? pair.para_idx + 1 : "unknown"}
+                                </span>
+                              </div>
+                              <button
+                                onClick={() =>
+                                  setLinkingSource({
+                                    type: "citation",
+                                    text: pair.citation || "",
+                                    paraIdx: pair.para_idx || 0,
+                                    key: pair.citation || "",
+                                  })
+                                }
+                                className="text-xs font-bold text-navy-700 hover:underline"
+                              >
+                                Link to Ref
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <EmptyState
+                          title="No missing references"
+                          description="All numerical citations match a bibliography entry."
+                          icon={CheckCircle2}
+                        />
+                      )}
+                    </div>
+                  );
+                } else {
+                  return (
+                    <div className="space-y-4 page-enter">
+                      {/* Section 1: Missing references */}
+                      <div className="space-y-2">
+                        <div>
+                          <h3 className="font-semibold text-gray-900 text-xs mb-1">
+                            Missing references (cited, not in Bib)
+                          </h3>
+                          <p className="text-xs text-gray-500">
+                            These citations exist in the text but have no matching reference in the bibliography list.
+                          </p>
+                        </div>
+
+                        {missingPairs.length > 0 ? (
+                          <div className="space-y-2">
+                            {missingPairs.map((pair: any, idx: number) => (
+                              <div key={idx} className="p-3 bg-red-50/25 border border-red-200 rounded-lg flex items-center justify-between shadow-sm">
+                                <div>
+                                  <span className="text-xs font-extrabold text-red-950 font-mono">
+                                    {pair.citation}
+                                  </span>
+                                  <span className="block text-[10px] text-slate-400 mt-0.5">
+                                    Paragraph #{pair.para_idx !== undefined ? pair.para_idx + 1 : "unknown"}
+                                  </span>
+                                </div>
+                                <button
+                                  onClick={() =>
+                                    setLinkingSource({
+                                      type: "citation",
+                                      text: pair.citation || "",
+                                      paraIdx: pair.para_idx || 0,
+                                      key: pair.citation || "",
+                                    })
+                                  }
+                                  className="text-xs font-bold text-navy-700 hover:underline"
+                                >
+                                  Link Ref
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <EmptyState
+                            title="No missing citations"
+                            description="All cited references exist in the bibliography."
+                            icon={CheckCircle2}
+                          />
+                        )}
+                      </div>
+
+                      {/* Section 2: Unused references */}
+                      <div className="space-y-2 pt-3 border-t border-slate-100">
+                        <div>
+                          <h3 className="font-semibold text-gray-900 text-xs mb-1">
+                            Unused references (in Bib, not cited)
+                          </h3>
+                          <p className="text-xs text-gray-500">
+                            These references exist in the bibliography but are never cited in the text.
+                          </p>
+                        </div>
+
+                        {unusedPairs.length > 0 ? (
+                          <div className="space-y-2">
+                            {unusedPairs.map((pair: any, idx: number) => (
+                              <div key={idx} className="p-3 bg-amber-50/25 border border-amber-200 rounded-lg flex items-center justify-between shadow-sm">
+                                <div className="min-w-0 flex-1 pr-3">
+                                  <span className="text-xs font-extrabold text-amber-950 font-mono block">
+                                    {pair.author ? `${pair.author} (${pair.year || ""})` : "Unused entry"}
+                                  </span>
+                                  <span className="block text-[10px] text-slate-400 truncate" title={pair.ref_text}>
+                                    {pair.ref_text}
+                                  </span>
+                                </div>
+                                <button
+                                  onClick={() =>
+                                    setLinkingSource({
+                                      type: "reference",
+                                      text: pair.ref_text || "",
+                                      refIdx: pair.para_idx || 0,
+                                    })
+                                  }
+                                  className="text-xs font-bold text-navy-700 hover:underline shrink-0"
+                                >
+                                  Link Citation
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <EmptyState
+                            title="No unused references"
+                            description="All bibliography entries are cited in the text."
+                            icon={CheckCircle2}
+                          />
+                        )}
+                      </div>
+
+                      {/* Personal Communications */}
+                      {(logs.personal_comm_citations?.length || 0) > 0 && (
+                        <div className="space-y-2 pt-3 border-t border-slate-100">
+                          <div className="flex items-center justify-between">
+                            <h3 className="font-semibold text-slate-700 text-xs">
+                              Personal Communications ({logs.personal_comm_citations!.length})
+                            </h3>
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              ✓ Excluded — APA §8.9
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-500">These citations do not require a bibliography entry.</p>
+                          <div className="space-y-1.5">
+                            {logs.personal_comm_citations!.map((item: any, idx: number) => (
+                              <div key={idx} className="bg-slate-50 rounded-lg border border-slate-200 border-l-[3px] border-l-slate-400 p-2.5">
+                                <p className="font-mono text-[10px] text-slate-700">{item.raw || item.message}</p>
+                                <p className="text-[10px] text-slate-400 mt-0.5">APA §8.9 — no bibliography entry required.</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Secondary Citations */}
+                      {(logs.secondary_citations?.length || 0) > 0 && (
+                        <div className="space-y-2 pt-3 border-t border-slate-100">
+                          <h3 className="font-semibold text-purple-700 text-xs">
+                            Secondary Citations ({logs.secondary_citations!.length})
+                          </h3>
+                          <p className="text-[10px] text-slate-500">Only the citing source needs a bibliography entry.</p>
+                          <div className="space-y-1.5">
+                            {logs.secondary_citations!.map((item: any, idx: number) => (
+                              <div key={idx} className="bg-purple-50/20 rounded-lg border border-purple-100 border-l-[3px] border-l-purple-400 p-2.5 flex items-start justify-between gap-2">
+                                <div>
+                                  <p className="font-mono text-[10px] text-purple-800">{item.raw || item.message}</p>
+                                  <p className="text-[10px] text-slate-500 mt-0.5">List the citing source in the bibliography, not the original.</p>
+                                </div>
+                                <button
+                                  onClick={() => item.para_idx !== undefined && navigateToDocPara(item.para_idx)}
+                                  className="text-[10px] font-bold text-blue-600 hover:underline shrink-0"
+                                >
+                                  Locate
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 }
+              })()}
 
-                const categories = Array.from(new Set(parsed.items.map(item => item.category)));
-
+              {/* ─── TAB 4: RAW LOGS ─── */}
+              {activeTab === "logs" && (() => {
                 return (
                   <div className="space-y-4 page-enter">
-                    {/* View mode toggle */}
-                    <div className="flex bg-surface-100 p-0.5 rounded-lg border border-navy-100 w-fit">
-                      <button
-                        onClick={() => setLogViewMode("dashboard")}
-                        className={`px-3 py-1 rounded-md text-[11px] font-bold transition-all border-none cursor-pointer ${
-                          logViewMode === "dashboard"
-                            ? "bg-white text-navy-800 shadow-sm"
-                            : "text-navy-400 hover:text-navy-600 bg-transparent"
-                        }`}
-                      >
-                        Dashboard View
-                      </button>
-                      <button
-                        onClick={() => setLogViewMode("raw")}
-                        className={`px-3 py-1 rounded-md text-[11px] font-bold transition-all border-none cursor-pointer ${
-                          logViewMode === "raw"
-                            ? "bg-white text-navy-800 shadow-sm"
-                            : "text-navy-400 hover:text-navy-600 bg-transparent"
-                        }`}
-                      >
-                        Raw Log Text
-                      </button>
+                    {/* 4-metric stats grid — always visible, reads directly from validation_logs */}
+                    <div className="grid grid-cols-2 gap-2 bg-white p-3 border border-navy-100 rounded-lg shadow-sm">
+                      {([
+                        ["Total References", logs.total_refs ?? 0],
+                        ["Total Citations", logs.total_cites ?? 0],
+                        ["Citations Tagged", (logs as any).tagged_cites ?? 0],
+                        ["Autonum Converted", (logs as any).autonum_converted ?? 0],
+                      ] as [string, number][]).map(([label, val]) => (
+                        <div key={label} className="flex flex-col gap-0.5 border-b border-navy-50 pb-1.5 last:border-b-0">
+                          <span className="text-[9px] uppercase font-bold text-navy-400 tracking-wider truncate" title={label}>
+                            {label}
+                          </span>
+                          <span className="text-xs font-extrabold text-navy-800">{val}</span>
+                        </div>
+                      ))}
                     </div>
 
-                    {logViewMode === "raw" ? (
-                      <div className="bg-slate-950 rounded-lg p-3 shadow-inner border border-slate-900 max-h-[600px] overflow-y-auto">
-                        <pre className="text-[10px] text-emerald-400 font-mono whitespace-pre-wrap leading-relaxed select-text">
-                          {logs.raw_log}
-                        </pre>
-                      </div>
-                    ) : (
-                      <div className="space-y-4">
-                        {/* Stats Dashboard Row */}
-                        <div className="grid grid-cols-2 gap-2 bg-white p-3 border border-navy-100 rounded-lg shadow-sm">
-                          {Object.entries(parsed.stats).slice(0, 6).map(([key, val]) => (
-                            <div key={key} className="flex flex-col gap-0.5 border-b border-navy-50 pb-1.5 last:border-b-0">
-                              <span className="text-[9px] uppercase font-bold text-navy-400 tracking-wider truncate" title={key}>
-                                {key}
-                              </span>
-                              <span className="text-xs font-extrabold text-navy-800">{val}</span>
-                            </div>
-                          ))}
-                          {Object.keys(parsed.stats).length === 0 && (
-                            <div className="col-span-2 text-center text-[10px] text-navy-400 font-bold py-2">
-                              No summary statistics parsed
-                            </div>
-                          )}
-                        </div>
+                    {/* Raw log section — only when raw_log is present */}
+                    {logs.raw_log && (() => {
+                      const parsed = parseLogText(logs.raw_log);
+                      if (!parsed) {
+                        return (
+                          <div className="bg-slate-950 rounded-lg p-3 shadow-inner border border-slate-900 max-h-[600px] overflow-y-auto">
+                            <pre className="text-[10px] text-emerald-400 font-mono whitespace-pre-wrap leading-relaxed select-text">
+                              {logs.raw_log}
+                            </pre>
+                          </div>
+                        );
+                      }
 
-                        {/* List grouped by category */}
-                        <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
-                          {categories.length === 0 ? (
-                            <div className="text-center py-8 bg-white border border-navy-100 rounded-lg text-xs text-navy-400 font-semibold">
-                              No log issues or conversions detected.
+                      const categories = Array.from(new Set(parsed.items.map(item => item.category)));
+
+                      return (
+                        <div className="space-y-4">
+                          {/* View mode toggle */}
+                          <div className="flex bg-surface-100 p-0.5 rounded-lg border border-navy-100 w-fit">
+                            <button
+                              onClick={() => setLogViewMode("dashboard")}
+                              className={`px-3 py-1 rounded-md text-[11px] font-bold transition-all border-none cursor-pointer ${
+                                logViewMode === "dashboard"
+                                  ? "bg-white text-navy-800 shadow-sm"
+                                  : "text-navy-400 hover:text-navy-600 bg-transparent"
+                              }`}
+                            >
+                              Dashboard View
+                            </button>
+                            <button
+                              onClick={() => setLogViewMode("raw")}
+                              className={`px-3 py-1 rounded-md text-[11px] font-bold transition-all border-none cursor-pointer ${
+                                logViewMode === "raw"
+                                  ? "bg-white text-navy-800 shadow-sm"
+                                  : "text-navy-400 hover:text-navy-600 bg-transparent"
+                              }`}
+                            >
+                              Raw Log Text
+                            </button>
+                          </div>
+
+                          {logViewMode === "raw" ? (
+                            <div className="bg-slate-950 rounded-lg p-3 shadow-inner border border-slate-900 max-h-[600px] overflow-y-auto">
+                              <pre className="text-[10px] text-emerald-400 font-mono whitespace-pre-wrap leading-relaxed select-text">
+                                {logs.raw_log}
+                              </pre>
                             </div>
                           ) : (
-                            categories.map((cat: string) => {
-                              const catItems = parsed.items.filter(item => item.category === cat);
-                              return (
-                                <div key={cat} className="space-y-1.5">
-                                  <h4 className="text-[10px] uppercase font-extrabold text-navy-500 tracking-wider px-1">
-                                    {cat} ({catItems.length})
-                                  </h4>
-                                  <div className="space-y-2">
-                                    {catItems.map((item, itemIdx) => {
-                                      const isSuccess = item.status === "success";
-                                      const isError = item.status === "error" || cat.toLowerCase().includes("error") || cat.toLowerCase().includes("mismatch") || cat.toLowerCase().includes("missing");
-                                      const isWarning = !isSuccess && !isError;
-                                      
-                                      return (
-                                        <div
-                                          key={itemIdx}
-                                          className={`p-2.5 rounded-lg border bg-white shadow-sm flex flex-col gap-1.5 border-l-[3.5px] ${
-                                            isError
-                                              ? "border-l-error-500 bg-error-50/20 border-error-100"
-                                              : isWarning
-                                                ? "border-l-warning-500 bg-warning-50/20 border-warning-100"
-                                                : "border-l-success-500 bg-success-50/20 border-success-100"
-                                          }`}
-                                        >
-                                          <div className="flex justify-between items-start gap-2 w-full text-[10px]">
-                                            <div className="flex-1 font-semibold text-navy-800 leading-relaxed break-words">
-                                              {item.id && (
-                                                <span className="font-mono bg-navy-100 text-navy-800 px-1 py-0.5 rounded text-[9px] mr-1.5">
-                                                  [{item.id}]
-                                                </span>
-                                              )}
-                                              {item.message || (item.from && `Converted from: "${item.from}"`)}
-                                            </div>
-                                            {item.para !== undefined && (
-                                              <button
-                                                onClick={() => navigateToDocPara(item.para || 0)}
-                                                className="text-[9px] font-bold text-blue-600 hover:text-blue-800 flex items-center gap-0.5 bg-blue-50 px-1.5 py-0.5 rounded cursor-pointer border-none whitespace-nowrap shrink-0 font-mono"
-                                              >
-                                                Locate <CornerDownRight className="w-2.5 h-2.5" />
-                                              </button>
-                                            )}
-                                          </div>
-
-                                          {/* For conversions, show changes diff */}
-                                          {item.from && item.to && (
-                                            <div className="text-[9px] bg-slate-900 text-slate-100 rounded p-1.5 font-mono space-y-1">
-                                              <div className="text-red-300 break-words line-through"><span className="text-slate-400 select-none">- </span>{item.from}</div>
-                                              <div className="text-green-300 break-words"><span className="text-slate-400 select-none">+ </span>{item.to}</div>
-                                            </div>
-                                          )}
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
+                            <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
+                              {categories.length === 0 ? (
+                                <div className="text-center py-8 bg-white border border-navy-100 rounded-lg text-xs text-navy-400 font-semibold">
+                                  No log issues or conversions detected.
                                 </div>
-                              );
-                            })
+                              ) : (
+                                categories.map((cat: string) => {
+                                  const catItems = parsed.items.filter(item => item.category === cat);
+                                  return (
+                                    <div key={cat} className="space-y-1.5">
+                                      <h4 className="text-[10px] uppercase font-extrabold text-navy-500 tracking-wider px-1">
+                                        {cat} ({catItems.length})
+                                      </h4>
+                                      <div className="space-y-2">
+                                        {catItems.map((item, itemIdx) => {
+                                          const isSuccess = item.status === "success";
+                                          const isError = item.status === "error" || cat.toLowerCase().includes("error") || cat.toLowerCase().includes("mismatch") || cat.toLowerCase().includes("missing");
+                                          const isWarning = !isSuccess && !isError;
+
+                                          return (
+                                            <div
+                                              key={itemIdx}
+                                              className={`p-2.5 rounded-lg border bg-white shadow-sm flex flex-col gap-1.5 border-l-[3.5px] ${
+                                                isError
+                                                  ? "border-l-error-500 bg-error-50/20 border-error-100"
+                                                  : isWarning
+                                                    ? "border-l-warning-500 bg-warning-50/20 border-warning-100"
+                                                    : "border-l-success-500 bg-success-50/20 border-success-100"
+                                              }`}
+                                            >
+                                              <div className="flex justify-between items-start gap-2 w-full text-[10px]">
+                                                <div className="flex-1 font-semibold text-navy-800 leading-relaxed break-words">
+                                                  {item.id && (
+                                                    <span className="font-mono bg-navy-100 text-navy-800 px-1 py-0.5 rounded text-[9px] mr-1.5">
+                                                      [{item.id}]
+                                                    </span>
+                                                  )}
+                                                  {item.message || (item.from && `Converted from: "${item.from}"`)}
+                                                </div>
+                                                {item.para !== undefined && (
+                                                  <button
+                                                    onClick={() => navigateToDocPara(item.para || 0)}
+                                                    className="text-[9px] font-bold text-blue-600 hover:text-blue-800 flex items-center gap-0.5 bg-blue-50 px-1.5 py-0.5 rounded cursor-pointer border-none whitespace-nowrap shrink-0 font-mono"
+                                                  >
+                                                    Locate <CornerDownRight className="w-2.5 h-2.5" />
+                                                  </button>
+                                                )}
+                                              </div>
+
+                                              {item.from && item.to && (
+                                                <div className="text-[9px] bg-slate-900 text-slate-100 rounded p-1.5 font-mono space-y-1">
+                                                  <div className="text-red-300 break-words line-through"><span className="text-slate-400 select-none">- </span>{item.from}</div>
+                                                  <div className="text-green-300 break-words"><span className="text-slate-400 select-none">+ </span>{item.to}</div>
+                                                </div>
+                                              )}
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  );
+                                })
+                              )}
+                            </div>
                           )}
                         </div>
-                      </div>
-                    )}
+                      );
+                    })()}
                   </div>
                 );
               })()}
@@ -2913,6 +3640,8 @@ export function ReferenceValidationReviewPage() {
             setActiveTab("missing");
             setLinkingSource(null);
           }}
+          allReferences={logs?.reference_entries || []}
+          allCitations={logs?.citation_pairs || []}
         />
 
         {/* Edit Reference Modal Popup */}
@@ -2978,11 +3707,11 @@ export function ReferenceValidationReviewPage() {
                   )}
                 </div>
 
-                {/* PubMed/CrossRef Live Search */}
+                {/* PubMed/CrossRef/GoogleBooks/Wikipedia Live Search */}
                 <div className="border-t border-navy-50 pt-4 space-y-3">
                   <div className="text-[9px] uppercase font-bold text-navy-400 tracking-wider">Search Database for correct formatting ({detectedStyle} Style)</div>
-                  <div className="flex gap-2">
-                    <div className="relative flex-1">
+                  <div className="flex flex-wrap gap-2">
+                    <div className="relative flex-1 min-w-[200px]">
                       <Search className="w-3.5 h-3.5 text-navy-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                       <input
                         type="text"
@@ -3010,18 +3739,36 @@ export function ReferenceValidationReviewPage() {
                     >
                       CrossRef
                     </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => searchGoogleBooks(searchQuery)}
+                      disabled={searchLoading}
+                      className="cursor-pointer"
+                    >
+                      Google Books
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => searchWikipedia(searchQuery)}
+                      disabled={searchLoading}
+                      className="cursor-pointer"
+                    >
+                      Wikipedia
+                    </Button>
                   </div>
 
                   {searchLoading && (
                     <div className="flex items-center justify-center py-6 text-xs text-navy-500 font-semibold gap-2">
                       <RefreshCw className="w-4 h-4 animate-spin text-navy-600" />
-                      Searching {searchSource === "pubmed" ? "PubMed" : "CrossRef"}...
+                      Searching {searchSource === "pubmed" ? "PubMed" : searchSource === "crossref" ? "CrossRef" : searchSource === "googlebooks" ? "Google Books" : "Wikipedia"}...
                     </div>
                   )}
 
                   {!searchLoading && searchResults.length > 0 && (
                     <div className="space-y-2.5 max-h-[200px] overflow-y-auto border border-navy-100 rounded-lg p-3 bg-surface-50/20">
-                      <div className="text-[9px] uppercase font-bold text-navy-400 tracking-wider mb-2">Search Results ({searchSource === "pubmed" ? "PubMed" : "CrossRef"})</div>
+                      <div className="text-[9px] uppercase font-bold text-navy-400 tracking-wider mb-2">Search Results ({searchSource === "pubmed" ? "PubMed" : searchSource === "crossref" ? "CrossRef" : searchSource === "googlebooks" ? "Google Books" : "Wikipedia"})</div>
                       {searchResults.map((result: any, index: number) => (
                         <div key={index} className="p-2.5 bg-white border border-navy-100 rounded-lg shadow-sm flex items-start justify-between gap-4 hover:border-navy-300 transition-colors">
                           <div className="text-xs text-navy-800 leading-relaxed font-medium flex-1">
@@ -3044,7 +3791,7 @@ export function ReferenceValidationReviewPage() {
 
                   {!searchLoading && searchSource && searchResults.length === 0 && (
                     <div className="text-center py-6 text-navy-400 text-xs font-semibold bg-surface-50/50 rounded-lg border border-navy-100/50">
-                      No matches found on {searchSource === "pubmed" ? "PubMed" : "CrossRef"}. Try refining the query keywords.
+                      No matches found on {searchSource === "pubmed" ? "PubMed" : searchSource === "crossref" ? "CrossRef" : searchSource === "googlebooks" ? "Google Books" : "Wikipedia"}. Try refining the query keywords.
                     </div>
                   )}
                 </div>

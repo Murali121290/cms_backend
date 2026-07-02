@@ -169,6 +169,105 @@ def test_inplace_same_name_versioning_and_xhtml_cascade_delete(db_session, user_
     assert not os.path.exists(xhtml_path), "Associated XHTML file was not deleted!"
 
 
+def test_build_bookmark_para_index_deep():
+    from docx import Document
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from app.processing.xhtml_to_docx_delta import _build_bookmark_para_index
+
+    doc = Document()
+    # Add a block SDT
+    sdt = OxmlElement('w:sdt')
+    sdtContent = OxmlElement('w:sdtContent')
+    sdt.append(sdtContent)
+    
+    # Add a paragraph inside SDT with a bookmark
+    p_inside = OxmlElement('w:p')
+    bm_start = OxmlElement('w:bookmarkStart')
+    bm_start.set(qn('w:name'), 'test_bm_inside_sdt')
+    bm_start.set(qn('w:id'), '100')
+    p_inside.append(bm_start)
+    sdtContent.append(p_inside)
+    
+    doc.element.body.append(sdt)
+    
+    # Build index and verify
+    index = _build_bookmark_para_index(doc)
+    assert 'test_bm_inside_sdt' in index
+    assert index['test_bm_inside_sdt']._p == p_inside
+
+
+def test_patch_paragraph_runs_removes_sdt():
+    from docx import Document
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    import lxml.html
+    from app.processing.xhtml_to_docx_delta import XhtmlToDocxDeltaEngine
+
+    doc = Document()
+    p = doc.add_paragraph()
+    
+    # Add inline SDT
+    sdt = OxmlElement('w:sdt')
+    sdtContent = OxmlElement('w:sdtContent')
+    sdt.append(sdtContent)
+    r = OxmlElement('w:r')
+    t = OxmlElement('w:t')
+    t.text = "Citation"
+    r.append(t)
+    sdtContent.append(r)
+    p._p.append(sdt)
+    
+    # Verify the sdt is inside the paragraph first
+    assert p._p.find(qn('w:sdt')) is not None
+    
+    # Patch this paragraph with simple HTML content
+    engine = XhtmlToDocxDeltaEngine()
+    html_el = lxml.html.fromstring("<p>New Content</p>")
+    engine._patch_paragraph_runs(p, html_el, doc, "Test User")
+    
+    # Verify that the sdt wrapper is completely removed from paragraph element
+    assert p._p.find(qn('w:sdt')) is None
+    # Verify the new run with "New Content" text is present
+    assert p.text == "New Content"
+
+
+def test_patch_paragraph_runs_creates_inline_sdt():
+    from docx import Document
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    import lxml.html
+    from app.processing.xhtml_to_docx_delta import XhtmlToDocxDeltaEngine
+
+    doc = Document()
+    p = doc.add_paragraph()
+    
+    # Patch this paragraph with HTML content containing sdt-inline class span
+    engine = XhtmlToDocxDeltaEngine()
+    html_el = lxml.html.fromstring(
+        '<p>Before <span class="sdt-inline" data-alias="FigureRef" data-tag="FigureRef">Figure 1.2</span> After</p>'
+    )
+    engine._patch_paragraph_runs(p, html_el, doc, "Test User")
+    
+    # Verify that the w:sdt wrapper is created in the paragraph element
+    sdt_node = p._p.find(qn('w:sdt'))
+    assert sdt_node is not None, "Inline w:sdt element was not recreated!"
+    
+    # Verify alias and tag are correct
+    sdtPr = sdt_node.find(qn('w:sdtPr'))
+    alias = sdtPr.find(qn('w:alias')).get(qn('w:val'))
+    tag = sdtPr.find(qn('w:tag')).get(qn('w:val'))
+    assert alias == "FigureRef"
+    assert tag == "FigureRef"
+    
+    # Verify text inside the sdtContent
+    sdtContent = sdt_node.find(qn('w:sdtContent'))
+    text = "".join(t.text or "" for t in sdtContent.findall(f".//{qn('w:t')}"))
+    assert text == "Figure 1.2"
+
+
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__])
+
+

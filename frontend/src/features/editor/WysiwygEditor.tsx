@@ -52,6 +52,9 @@ import {
   Sigma,
   Eye,
   EyeOff,
+  Keyboard,
+  Plus,
+  History as HistoryIcon,
 } from "lucide-react";
 import { diffWords, diffArrays } from "diff";
 import { useState, useEffect, useImperativeHandle, forwardRef, useCallback, useRef } from "react";
@@ -64,6 +67,8 @@ import { RunAnchor } from "./RunAnchor";
 import { CharStyle } from "./CharStyle";
 import { FontSize } from "./FontSize";
 import { Comment } from "./Comment";
+import { CommentDialog } from "./CommentDialog";
+import { useCommentsQuery, useCommentMutations } from "./useComments";
 import { SearchReplace } from "./SearchReplace";
 import { MathNode } from "./MathNode";
 import { SdtBlock } from "./SdtBlock";
@@ -74,6 +79,120 @@ import katex from "katex";
 /**
  * Helpers for the toolbar's eye toggle (review-mode diff overlay).
  */
+
+const IS_MAC = typeof navigator !== "undefined"
+  && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "");
+
+// Format a Windows-style shortcut string ("Ctrl+Shift+L") for the current
+// platform. On macOS swap to ⌘/⇧/⌥/⏎ glyphs so tooltips read like native apps.
+const kbd = (combo: string): string => {
+  if (!IS_MAC) return combo;
+  return combo
+    .replace(/Ctrl\+/g, "⌘")
+    .replace(/Shift\+/g, "⇧")
+    .replace(/Alt\+/g, "⌥")
+    .replace(/\bEnter\b/g, "⏎");
+};
+
+// Split a Windows-form combo ("Ctrl+Shift+X") into per-key tokens for chip
+// rendering. On macOS, modifier names are swapped for their Mac glyphs first
+// so each chip ends up as a single symbol.
+const splitCombo = (combo: string): string[] => {
+  if (!IS_MAC) return combo.split("+");
+  const macMap: Record<string, string> = { Ctrl: "⌘", Shift: "⇧", Alt: "⌥", Enter: "⏎" };
+  return combo.split("+").map((p) => macMap[p] || p);
+};
+
+// Tailwind palette tokens used to tint each shortcut category. Kept in
+// expanded form so Tailwind's JIT picks them up.
+type SectionAccent = {
+  icon: typeof Bold;
+  iconWrap: string;     // background + border for the section icon
+  iconColor: string;    // icon foreground
+  ring: string;         // group hover ring
+};
+
+const SHORTCUT_GROUPS: {
+  title: string;
+  accent: SectionAccent;
+  items: { label: string; combo: string }[];
+}[] = [
+  {
+    title: "Text Formatting",
+    accent: {
+      icon: Bold,
+      iconWrap: "bg-indigo-50 border-indigo-100",
+      iconColor: "text-indigo-600",
+      ring: "hover:ring-indigo-100",
+    },
+    items: [
+      { label: "Bold", combo: "Ctrl+B" },
+      { label: "Italic", combo: "Ctrl+I" },
+      { label: "Underline", combo: "Ctrl+U" },
+      { label: "Strikethrough", combo: "Ctrl+Shift+X" },
+      { label: "Superscript", combo: "Ctrl+Shift+=" },
+      { label: "Subscript", combo: "Ctrl+=" },
+    ],
+  },
+  {
+    title: "Paragraph & Alignment",
+    accent: {
+      icon: AlignLeft,
+      iconWrap: "bg-emerald-50 border-emerald-100",
+      iconColor: "text-emerald-600",
+      ring: "hover:ring-emerald-100",
+    },
+    items: [
+      { label: "Align Left", combo: "Ctrl+L" },
+      { label: "Align Center", combo: "Ctrl+E" },
+      { label: "Align Right", combo: "Ctrl+R" },
+      { label: "Justify", combo: "Ctrl+J" },
+      { label: "Heading 1–6", combo: "Ctrl+Alt+1…6" },
+    ],
+  },
+  {
+    title: "Lists",
+    accent: {
+      icon: List,
+      iconWrap: "bg-amber-50 border-amber-100",
+      iconColor: "text-amber-600",
+      ring: "hover:ring-amber-100",
+    },
+    items: [
+      { label: "Bullet List", combo: "Ctrl+Shift+L" },
+      { label: "Numbered List", combo: "Ctrl+Shift+O" },
+    ],
+  },
+  {
+    title: "Insert",
+    accent: {
+      icon: Plus,
+      iconWrap: "bg-violet-50 border-violet-100",
+      iconColor: "text-violet-600",
+      ring: "hover:ring-violet-100",
+    },
+    items: [
+      { label: "Insert / Edit Link", combo: "Ctrl+K" },
+      { label: "Insert Table 3×3", combo: "Ctrl+Alt+T" },
+      { label: "Insert Page Break", combo: "Ctrl+Enter" },
+      { label: "Insert Math Equation", combo: "Ctrl+Alt+E" },
+      { label: "Add Comment", combo: "Ctrl+Alt+M" },
+    ],
+  },
+  {
+    title: "History",
+    accent: {
+      icon: HistoryIcon,
+      iconWrap: "bg-slate-100 border-slate-200",
+      iconColor: "text-slate-600",
+      ring: "hover:ring-slate-200",
+    },
+    items: [
+      { label: "Undo", combo: "Ctrl+Z" },
+      { label: "Redo", combo: "Ctrl+Y" },
+    ],
+  },
+];
 
 const escapeHtml = (s: string) =>
   s
@@ -285,7 +404,23 @@ const CustomItalic = TiptapItalic.extend({
   },
 });
 
-import { Node as TiptapNode } from "@tiptap/core";
+import { Node as TiptapNode, Extension } from "@tiptap/core";
+
+// Register list shortcuts through Tiptap/prosemirror-keymap (same mechanism
+// used by Bold/Italic/etc.) instead of a DOM-level keydown listener. This
+// avoids two problems: (1) racing with Tiptap's default Mod-Shift-7 binding
+// for OrderedList — the DOM listener fired AFTER Tiptap's keymap and
+// double-toggled the list — and (2) browser-level Mod-Shift-O capture
+// (Chrome's Bookmark Manager) that sometimes beats DOM listeners.
+const CustomListShortcuts = Extension.create({
+  name: "customListShortcuts",
+  addKeyboardShortcuts() {
+    return {
+      "Mod-Shift-o": () => this.editor.chain().focus().toggleOrderedList().run(),
+      "Mod-Shift-l": () => this.editor.chain().focus().toggleBulletList().run(),
+    };
+  },
+});
 
 const PageBreak = TiptapNode.create({
   name: "pageBreak",
@@ -356,6 +491,7 @@ const ToolbarDivider = () => <div className="w-px h-5 bg-slate-700 mx-1" />;
 
 export interface WysiwygEditorHandle {
   editor: any; // TipTap Editor instance
+  triggerCommentDialog: () => void;
 }
 
 export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>(
@@ -386,7 +522,6 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
     ref
   ) {
     const [tcEnabled, setTcEnabled] = useState(trackChangesEnabled);
-    const [headingLevel, setHeadingLevel] = useState<number>(0);
     const [activeGutter, setActiveGutter] = useState<{
       pos: number;
       element: HTMLElement;
@@ -405,6 +540,9 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
     // Link dialog state
     const [showLinkDialog, setShowLinkDialog] = useState(false);
     const [linkUrl, setLinkUrl] = useState("");
+    // Keyboard shortcuts dialog
+    const [showShortcuts, setShowShortcuts] = useState(false);
+    const [shortcutQuery, setShortcutQuery] = useState("");
     // Review-mode toggle (eye icon): when ON, swap the editor for a read-only
     // inline diff of the originally-loaded content vs the user's current edits.
     // Turning it OFF restores the editable HTML the user was last working with.
@@ -419,9 +557,25 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
     // Track whether content has been initialised to avoid skipping loads
     const contentInitialised = useRef(false);
 
-    // Comments state
-    const [comments, setComments] = useState<Record<string, any>>({});
+    // Comments: server-persisted via the backend; the editor only owns the
+    // dialog state. `fileId` here is a string-or-undefined prop, so we coerce
+    // to number for the hook.
+    const numericFileId = fileId ? Number(fileId) : null;
+    const commentsQuery = useCommentsQuery(Number.isFinite(numericFileId) ? numericFileId : null);
+    const commentMutations = useCommentMutations(Number.isFinite(numericFileId) ? numericFileId : null);
+    const comments: Record<string, any> = (commentsQuery.data ?? []).reduce(
+      (acc, c) => {
+        acc[c.comment_uuid] = c;
+        return acc;
+      },
+      {} as Record<string, any>,
+    );
     const [commentPositions, setCommentPositions] = useState<Record<string, number>>({});
+    const [commentDialog, setCommentDialog] = useState<
+      | { mode: "create"; commentUuid: string; quotedText: string }
+      | { mode: "edit"; commentUuid: string; initialText: string; quotedText: string }
+      | null
+    >(null);
     const [currentFontSize, setCurrentFontSize] = useState("default");
     const [currentFontFamily, setCurrentFontFamily] = useState("default");
 
@@ -472,6 +626,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         MathNode,
         SdtBlock,
         SdtInline,
+        CustomListShortcuts,
       ],
       content: "",
       editorProps: {
@@ -555,15 +710,6 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
     useEffect(() => {
       if (editor) {
         const updateSelectionStates = () => {
-          // Heading level
-          if (editor.isActive("heading", { level: 1 })) setHeadingLevel(1);
-          else if (editor.isActive("heading", { level: 2 })) setHeadingLevel(2);
-          else if (editor.isActive("heading", { level: 3 })) setHeadingLevel(3);
-          else if (editor.isActive("heading", { level: 4 })) setHeadingLevel(4);
-          else if (editor.isActive("heading", { level: 5 })) setHeadingLevel(5);
-          else if (editor.isActive("heading", { level: 6 })) setHeadingLevel(6);
-          else setHeadingLevel(0);
-
           // Font size
           const attrs = editor.getAttributes("textStyle");
           if (attrs && attrs.fontSize) {
@@ -706,71 +852,138 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
       };
     }, [editor, updateCommentPositions]);
 
-    // Load and save comments from localStorage
+    // Click on an inline comment highlight → open the edit dialog. Attached to
+    // the ProseMirror DOM so it works regardless of which paragraph the mark
+    // lands in.
     useEffect(() => {
-      if (fileId) {
-        try {
-          const stored = localStorage.getItem(`comments-${fileId}`);
-          if (stored) {
-            setComments(JSON.parse(stored));
-          } else {
-            setComments({});
-          }
-        } catch (e) {
-          console.error("Failed to load comments", e);
-        }
-      }
-    }, [fileId]);
-
-    useEffect(() => {
-      if (fileId) {
-        localStorage.setItem(`comments-${fileId}`, JSON.stringify(comments));
-      }
-    }, [comments, fileId]);
+      if (!editor) return;
+      const dom = editor.view.dom as HTMLElement;
+      const handle = (e: MouseEvent) => {
+        const target = (e.target as HTMLElement | null)?.closest?.("span[data-comment-id]") as HTMLElement | null;
+        if (!target) return;
+        const uuid = target.getAttribute("data-comment-id");
+        if (!uuid) return;
+        const existing = comments[uuid];
+        setCommentDialog({
+          mode: "edit",
+          commentUuid: uuid,
+          initialText: existing?.text ?? "",
+          quotedText: (target.textContent || "").trim(),
+        });
+      };
+      dom.addEventListener("click", handle);
+      return () => dom.removeEventListener("click", handle);
+    }, [editor, comments]);
 
     const searchResults = (editor?.storage as any)?.searchReplace?.results || [];
     const activeSearchIndex = (editor?.storage as any)?.searchReplace?.activeIndex ?? -1;
     const searchMatchCount = searchResults.length;
     const currentSearchMatch = searchMatchCount > 0 ? activeSearchIndex + 1 : 0;
 
-    // Expose editor instance to parent via ref
-    useImperativeHandle(ref, () => ({ editor: editor as any }), [editor]);
+    // Open the comment-creation dialog from whatever is selected in the
+    // editor. Used by both the in-toolbar button and the page-level
+    // CommentsPanel (via the ref), so both entry points behave identically.
+    const openCommentDialog = useCallback(() => {
+      if (!editor) return;
+      // Make sure the editor has focus so the selection is current.
+      editor.commands.focus();
+      const { empty, from, to } = editor.state.selection;
+      if (empty) {
+        alert("Please select some text to comment on.");
+        return;
+      }
+      if (!Number.isFinite(numericFileId)) {
+        alert("Cannot add comments until the file is loaded.");
+        return;
+      }
+      const quoted = editor.state.doc.textBetween(from, to, " ").trim();
+      const commentId = crypto.randomUUID();
+      setCommentDialog({ mode: "create", commentUuid: commentId, quotedText: quoted });
+    }, [editor, numericFileId]);
+
+    // Expose editor instance + imperative comment trigger to parent via ref
+    useImperativeHandle(
+      ref,
+      () => ({ editor: editor as any, triggerCommentDialog: openCommentDialog }),
+      [editor, openCommentDialog],
+    );
+
+    // ── Keyboard shortcuts ───────────────────────────────────────────────────
+    // Listener is attached to editor.view.dom so it only fires while the
+    // editor itself has keyboard focus (matches the "shortcuts work only when
+    // editor is focused" requirement). Mod = Ctrl on Win/Linux, Cmd on macOS.
+    useEffect(() => {
+      if (!editor) return;
+      const dom = editor.view.dom as HTMLElement;
+
+      const onKeyDown = (e: KeyboardEvent) => {
+        const mod = e.ctrlKey || e.metaKey;
+        if (!mod) return;
+        // Use e.code (physical key) instead of e.key: on macOS Option+letter
+        // produces special characters (Alt+T = "†", Alt+M = "µ", Alt+E = "´"),
+        // so e.key never matches "t"/"m"/"e". e.code stays "KeyT" / "KeyM" /
+        // "KeyE" regardless of modifiers or keyboard layout.
+        const code = e.code;
+        const fire = (fn: () => void) => { e.preventDefault(); e.stopPropagation(); fn(); };
+
+        // Mod + key (no Shift / Alt)
+        if (!e.shiftKey && !e.altKey) {
+          switch (code) {
+            case "KeyL": return fire(() => editor.chain().focus().setTextAlign("left").run());
+            case "KeyE": return fire(() => editor.chain().focus().setTextAlign("center").run());
+            case "KeyR": return fire(() => editor.chain().focus().setTextAlign("right").run());
+            case "KeyJ": return fire(() => editor.chain().focus().setTextAlign("justify").run());
+            case "KeyK": return fire(() => {
+              const existing = editor.getAttributes("link")?.href || "";
+              setLinkUrl(existing);
+              setShowLinkDialog(true);
+            });
+            case "Enter":
+            case "NumpadEnter": return fire(() =>
+              editor.chain().focus().insertContent({ type: "pageBreak" }).run()
+            );
+            case "Equal": return fire(() => editor.chain().focus().toggleSubscript().run());
+          }
+        }
+
+        // Mod + Shift + key
+        // Note: bullet/ordered list shortcuts (Mod-Shift-L / Mod-Shift-O) are
+        // registered via the CustomListShortcuts Tiptap extension instead of
+        // here — going through prosemirror-keymap is more reliable and
+        // avoids racing with Tiptap's own Mod-Shift-7 / Mod-Shift-8 defaults.
+        if (e.shiftKey && !e.altKey) {
+          switch (code) {
+            case "KeyX": return fire(() => editor.chain().focus().toggleStrike().run());
+            case "Equal": return fire(() => editor.chain().focus().toggleSuperscript().run());
+          }
+        }
+
+        // Mod + Alt + key
+        if (e.altKey && !e.shiftKey) {
+          switch (code) {
+            case "KeyT": return fire(() =>
+              editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
+            );
+            case "KeyM": return fire(() => openCommentDialog());
+            case "KeyE": return fire(() =>
+              (editor.chain().focus() as any).insertMathNode("x^2 + y^2 = z^2").run()
+            );
+          }
+        }
+      };
+
+      dom.addEventListener("keydown", onKeyDown);
+      return () => dom.removeEventListener("keydown", onKeyDown);
+    }, [editor, openCommentDialog]);
 
     const handleToggleTrackChanges = () => setTcEnabled(!tcEnabled);
 
-    const handleHeadingChange = (level: number) => {
-      if (level === 0) {
-        editor?.chain().focus().setParagraph().run();
-      } else {
-        editor?.chain().focus().setHeading({ level: level as any }).run();
-      }
-      setHeadingLevel(level);
-    };
-
-    const getCurrentStyle = (): string => {
-      if (!editor) return "Normal";
-      if (editor.isActive("heading", { level: 1 })) return "H1";
-      if (editor.isActive("heading", { level: 2 })) return "H2";
-      if (editor.isActive("heading", { level: 3 })) return "H3";
-      if (editor.isActive("heading", { level: 4 })) return "H4";
-      if (editor.isActive("heading", { level: 5 })) return "H5";
-      if (editor.isActive("heading", { level: 6 })) return "H6";
-      return "Normal";
-    };
-
-    function stripCommentMarks(html: string): string {
+    // Convert client-only LaTeX spans to MathML on save. Comment spans
+    // (`span[data-comment-id]`) are intentionally preserved so the backend
+    // can pair each highlighted range with its metadata when generating DOCX.
+    function convertMathForSave(html: string): string {
       const parser = new DOMParser();
       const doc = parser.parseFromString(html, "text/html");
-      const commentSpans = doc.querySelectorAll("span[data-comment-id]");
-      commentSpans.forEach(span => {
-        const parent = span.parentNode;
-        if (parent) {
-          while (span.firstChild) {
-            parent.insertBefore(span.firstChild, span);
-          }
-          parent.removeChild(span);
-        }
-      });
 
       const mathSpans = doc.querySelectorAll("span[data-latex]");
       mathSpans.forEach(span => {
@@ -795,7 +1008,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
     const handleSave = async () => {
       if (editor) {
         const html = editor.getHTML();
-        const cleanHtml = stripCommentMarks(html);
+        const cleanHtml = convertMathForSave(html);
         await onSave(cleanHtml);
         setIsDirty(false);
         setSavedAt(new Date());
@@ -863,30 +1076,40 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
     return (
       <div className="flex flex-col bg-[#e8e8e8] w-full" style={{ height }}>
 
+        {/* Comment dialog (modal, fixed position) */}
+        {commentDialog && (
+          <CommentDialog
+            open
+            mode={commentDialog.mode}
+            author={currentUser}
+            quotedText={commentDialog.quotedText}
+            initialText={commentDialog.mode === "edit" ? commentDialog.initialText : ""}
+            onCancel={() => setCommentDialog(null)}
+            onSubmit={(text) => {
+              const uuid = commentDialog.commentUuid;
+              if (commentDialog.mode === "create") {
+                editor?.chain().focus().addComment(uuid).run();
+                commentMutations.create.mutate({ commentUuid: uuid, text });
+              } else {
+                commentMutations.update.mutate({ commentUuid: uuid, text });
+              }
+              setCommentDialog(null);
+            }}
+            onDelete={
+              commentDialog.mode === "edit"
+                ? () => {
+                  const uuid = commentDialog.commentUuid;
+                  editor?.chain().focus().removeComment(uuid).run();
+                  commentMutations.remove.mutate({ commentUuid: uuid });
+                  setCommentDialog(null);
+                }
+                : undefined
+            }
+          />
+        )}
+
         {/* â”€â”€ Toolbar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         <div className="sticky top-0 z-10 bg-[#090d16] border-b border-slate-800 px-3 py-2 flex items-center gap-1.5 overflow-x-auto shadow-md flex-wrap">
-
-          {/* Style Badge */}
-          <div className="px-2 py-1 bg-amber-950/40 text-amber-500 border border-amber-800/60 rounded-md text-[10px] font-bold tracking-wider uppercase shrink-0">
-            {getCurrentStyle()}
-          </div>
-
-          <ToolbarDivider />
-
-          {/* Heading Selector */}
-          <select
-            value={headingLevel}
-            onChange={(e) => handleHeadingChange(parseInt(e.target.value))}
-            className="px-2 py-1 text-[11px] font-bold border border-slate-700 rounded-md bg-slate-900 text-slate-200 hover:bg-slate-800 focus:outline-none shrink-0"
-          >
-            <option value={0}>Normal</option>
-            <option value={1}>Heading 1</option>
-            <option value={2}>Heading 2</option>
-            <option value={3}>Heading 3</option>
-            <option value={4}>Heading 4</option>
-            <option value={5}>Heading 5</option>
-            <option value={6}>Heading 6</option>
-          </select>
 
           {/* Font Family */}
           <select
@@ -933,22 +1156,22 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           <ToolbarDivider />
 
           {/* Text Formatting */}
-          <ToolbarButton active={editor?.isActive("bold")} onClick={() => editor?.chain().focus().toggleBold().run()} title="Bold (Ctrl+B)">
+          <ToolbarButton active={editor?.isActive("bold")} onClick={() => editor?.chain().focus().toggleBold().run()} title={`Bold (${kbd("Ctrl+B")})`}>
             <Bold className="w-4 h-4" />
           </ToolbarButton>
-          <ToolbarButton active={editor?.isActive("italic")} onClick={() => editor?.chain().focus().toggleItalic().run()} title="Italic (Ctrl+I)">
+          <ToolbarButton active={editor?.isActive("italic")} onClick={() => editor?.chain().focus().toggleItalic().run()} title={`Italic (${kbd("Ctrl+I")})`}>
             <Italic className="w-4 h-4" />
           </ToolbarButton>
-          <ToolbarButton active={editor?.isActive("underline")} onClick={() => editor?.chain().focus().toggleUnderline().run()} title="Underline (Ctrl+U)">
+          <ToolbarButton active={editor?.isActive("underline")} onClick={() => editor?.chain().focus().toggleUnderline().run()} title={`Underline (${kbd("Ctrl+U")})`}>
             <Type className="w-4 h-4" />
           </ToolbarButton>
-          <ToolbarButton active={editor?.isActive("strike")} onClick={() => editor?.chain().focus().toggleStrike().run()} title="Strikethrough">
+          <ToolbarButton active={editor?.isActive("strike")} onClick={() => editor?.chain().focus().toggleStrike().run()} title={`Strikethrough (${kbd("Ctrl+Shift+X")})`}>
             <Strikethrough className="w-4 h-4" />
           </ToolbarButton>
-          <ToolbarButton active={editor?.isActive("superscript")} onClick={() => editor?.chain().focus().toggleSuperscript().run()} title="Superscript">
+          <ToolbarButton active={editor?.isActive("superscript")} onClick={() => editor?.chain().focus().toggleSuperscript().run()} title={`Superscript (${kbd("Ctrl+Shift+=")})`}>
             <SuperscriptIcon className="w-4 h-4" />
           </ToolbarButton>
-          <ToolbarButton active={editor?.isActive("subscript")} onClick={() => editor?.chain().focus().toggleSubscript().run()} title="Subscript">
+          <ToolbarButton active={editor?.isActive("subscript")} onClick={() => editor?.chain().focus().toggleSubscript().run()} title={`Subscript (${kbd("Ctrl+=")})`}>
             <SubscriptIcon className="w-4 h-4" />
           </ToolbarButton>
 
@@ -996,26 +1219,26 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           <ToolbarDivider />
 
           {/* Alignment */}
-          <ToolbarButton active={editor?.isActive({ textAlign: "left" })} onClick={() => editor?.chain().focus().setTextAlign("left").run()} title="Align Left">
+          <ToolbarButton active={editor?.isActive({ textAlign: "left" })} onClick={() => editor?.chain().focus().setTextAlign("left").run()} title={`Align Left (${kbd("Ctrl+L")})`}>
             <AlignLeft className="w-4 h-4" />
           </ToolbarButton>
-          <ToolbarButton active={editor?.isActive({ textAlign: "center" })} onClick={() => editor?.chain().focus().setTextAlign("center").run()} title="Align Center">
+          <ToolbarButton active={editor?.isActive({ textAlign: "center" })} onClick={() => editor?.chain().focus().setTextAlign("center").run()} title={`Align Center (${kbd("Ctrl+E")})`}>
             <AlignCenter className="w-4 h-4" />
           </ToolbarButton>
-          <ToolbarButton active={editor?.isActive({ textAlign: "right" })} onClick={() => editor?.chain().focus().setTextAlign("right").run()} title="Align Right">
+          <ToolbarButton active={editor?.isActive({ textAlign: "right" })} onClick={() => editor?.chain().focus().setTextAlign("right").run()} title={`Align Right (${kbd("Ctrl+R")})`}>
             <AlignRight className="w-4 h-4" />
           </ToolbarButton>
-          <ToolbarButton active={editor?.isActive({ textAlign: "justify" })} onClick={() => editor?.chain().focus().setTextAlign("justify").run()} title="Justify">
+          <ToolbarButton active={editor?.isActive({ textAlign: "justify" })} onClick={() => editor?.chain().focus().setTextAlign("justify").run()} title={`Justify (${kbd("Ctrl+J")})`}>
             <AlignJustify className="w-4 h-4" />
           </ToolbarButton>
 
           <ToolbarDivider />
 
           {/* Lists */}
-          <ToolbarButton active={editor?.isActive("bulletList")} onClick={() => editor?.chain().focus().toggleBulletList().run()} title="Bullet List">
+          <ToolbarButton active={editor?.isActive("bulletList")} onClick={() => editor?.chain().focus().toggleBulletList().run()} title={`Bullet List (${kbd("Ctrl+Shift+L")})`}>
             <List className="w-4 h-4" />
           </ToolbarButton>
-          <ToolbarButton active={editor?.isActive("orderedList")} onClick={() => editor?.chain().focus().toggleOrderedList().run()} title="Numbered List">
+          <ToolbarButton active={editor?.isActive("orderedList")} onClick={() => editor?.chain().focus().toggleOrderedList().run()} title={`Numbered List (${kbd("Ctrl+Shift+O")})`}>
             <ListOrdered className="w-4 h-4" />
           </ToolbarButton>
           <ToolbarButton
@@ -1044,12 +1267,12 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           <ToolbarDivider />
 
           {/* Insert Table */}
-          <ToolbarButton onClick={() => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} title="Insert Table (3x3)">
+          <ToolbarButton onClick={() => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} title={`Insert Table 3×3 (${kbd("Ctrl+Alt+T")})`}>
             <Table2 className="w-4 h-4" />
           </ToolbarButton>
 
           {/* Insert Page Break */}
-          <ToolbarButton onClick={() => editor?.chain().focus().insertContent({ type: 'pageBreak' }).run()} title="Insert Page Break">
+          <ToolbarButton onClick={() => editor?.chain().focus().insertContent({ type: 'pageBreak' }).run()} title={`Insert Page Break (${kbd("Ctrl+Enter")})`}>
             <SeparatorHorizontal className="w-4 h-4 text-emerald-400" />
           </ToolbarButton>
 
@@ -1058,18 +1281,18 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
             <>
               <ToolbarDivider />
               <div className="flex items-center gap-1 bg-[#131b2e] border border-slate-700/60 rounded-md p-0.5" title="Table Tools">
-                <button onClick={() => editor.chain().focus().addRowBefore().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Row Above">R+â†‘</button>
-                <button onClick={() => editor.chain().focus().addRowAfter().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Row Below">R+â†“</button>
+                <button onClick={() => editor.chain().focus().addRowBefore().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Row Above">+ Row Above</button>
+                <button onClick={() => editor.chain().focus().addRowAfter().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Row Below">+ Row Below</button>
                 <div className="w-px h-3.5 bg-slate-800" />
-                <button onClick={() => editor.chain().focus().addColumnBefore().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Column Left">C+â†</button>
-                <button onClick={() => editor.chain().focus().addColumnAfter().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Column Right">C+â†’</button>
+                <button onClick={() => editor.chain().focus().addColumnBefore().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Column Left">+ Col Left</button>
+                <button onClick={() => editor.chain().focus().addColumnAfter().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Column Right">+ Col Right</button>
                 <div className="w-px h-3.5 bg-slate-800" />
                 <button onClick={() => editor.chain().focus().mergeCells().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Merge Cells">Merge</button>
                 <button onClick={() => editor.chain().focus().splitCell().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Split Cell">Split</button>
                 <div className="w-px h-3.5 bg-slate-800" />
-                <button onClick={() => editor.chain().focus().deleteRow().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-rose-400 rounded" title="Delete Row">R-</button>
-                <button onClick={() => editor.chain().focus().deleteColumn().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-rose-400 rounded" title="Delete Column">C-</button>
-                <button onClick={() => editor.chain().focus().deleteTable().run()} className="p-1 hover:bg-slate-850 text-[10px] font-bold text-rose-500 rounded" title="Delete Table">Del Tab</button>
+                <button onClick={() => editor.chain().focus().deleteRow().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-rose-400 rounded" title="Delete Row">Delete Row</button>
+                <button onClick={() => editor.chain().focus().deleteColumn().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-rose-400 rounded" title="Delete Column">Delete Col</button>
+                <button onClick={() => editor.chain().focus().deleteTable().run()} className="px-1.5 py-1 hover:bg-slate-850 text-[10px] font-bold text-rose-500 rounded" title="Delete Table">Delete Table</button>
               </div>
             </>
           )}
@@ -1086,7 +1309,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
                 setShowLinkDialog(true);
               }
             }}
-            title="Insert / Remove Link"
+            title={`Insert / Remove Link (${kbd("Ctrl+K")})`}
           >
             <LinkIcon className="w-4 h-4" />
           </ToolbarButton>
@@ -1094,10 +1317,10 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           <ToolbarDivider />
 
           {/* History */}
-          <ToolbarButton onClick={() => editor?.chain().focus().undo().run()} disabled={!editor?.can().undo()} title="Undo (Ctrl+Z)">
+          <ToolbarButton onClick={() => editor?.chain().focus().undo().run()} disabled={!editor?.can().undo()} title={`Undo (${kbd("Ctrl+Z")})`}>
             <Undo className="w-4 h-4" />
           </ToolbarButton>
-          <ToolbarButton onClick={() => editor?.chain().focus().redo().run()} disabled={!editor?.can().redo()} title="Redo (Ctrl+Y)">
+          <ToolbarButton onClick={() => editor?.chain().focus().redo().run()} disabled={!editor?.can().redo()} title={`Redo (${kbd("Ctrl+Y")})`}>
             <Redo className="w-4 h-4" />
           </ToolbarButton>
 
@@ -1144,31 +1367,11 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
             </>
           )}
 
-          {/* Add Comment Button */}
+          {/* Add Comment Button — opens the dialog; the Tiptap mark and the
+              backend record are only created once the user submits text. */}
           <ToolbarButton
-            onClick={() => {
-              if (!editor) return;
-              const { empty } = editor.state.selection;
-              if (empty) {
-                alert("Please select some text to comment on.");
-                return;
-              }
-              const commentId = crypto.randomUUID();
-              editor.chain().focus().addComment(commentId).run();
-              setComments((prev) => ({
-                ...prev,
-                [commentId]: {
-                  id: commentId,
-                  text: "",
-                  author: currentUser || "Unknown",
-                  date: new Date().toISOString(),
-                  resolved: false,
-                  replies: [],
-                },
-              }));
-              setTimeout(updateCommentPositions, 50);
-            }}
-            title="Add Comment"
+            onClick={openCommentDialog}
+            title={`Add Comment on selection (${kbd("Ctrl+Alt+M")})`}
           >
             <MessageSquare className="w-4 h-4 text-sky-400" />
           </ToolbarButton>
@@ -1179,9 +1382,17 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
               if (!editor) return;
               editor.chain().focus().insertMathNode("x^2 + y^2 = z^2").run();
             }}
-            title="Insert Math Equation"
+            title={`Insert Math Equation (${kbd("Ctrl+Alt+E")})`}
           >
             <Sigma className="w-4 h-4 text-amber-500" />
+          </ToolbarButton>
+
+          {/* Keyboard Shortcuts Reference */}
+          <ToolbarButton
+            onClick={() => setShowShortcuts(true)}
+            title="Keyboard Shortcuts"
+          >
+            <Keyboard className="w-4 h-4" />
           </ToolbarButton>
 
           <ToolbarDivider />
@@ -1189,11 +1400,10 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           {/* Review-mode (compare with original) Toggle */}
           <button
             onClick={handleToggleReviewMode}
-            className={`p-1.5 rounded-md transition-all duration-150 border shrink-0 ${
-              reviewMode
+            className={`p-1.5 rounded-md transition-all duration-150 border shrink-0 ${reviewMode
                 ? "bg-sky-950/40 text-sky-300 border-sky-800/80 shadow-sm"
                 : "bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800 hover:text-slate-200"
-            }`}
+              }`}
             title={
               reviewMode
                 ? "Reviewing changes vs. original — click to return to current view"
@@ -1369,21 +1579,177 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           </div>
         )}
 
-        {/* â”€â”€ Document Area â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-        <div className="flex-1 overflow-y-auto bg-gradient-to-tr from-slate-100 to-slate-50 p-2 pb-20 flex items-start overflow-x-auto">
-          <div className={sidePanel ? "flex gap-8 w-full max-w-[1400px] justify-start lg:justify-center" : "w-full"}>
-            {/* Word-style Document Page */}
+        {/* ── Keyboard Shortcuts Dialog ──────────────────────────────────────── */}
+        {showShortcuts && (() => {
+          const q = shortcutQuery.trim().toLowerCase();
+          const filtered = SHORTCUT_GROUPS
+            .map((g) => ({
+              ...g,
+              items: q
+                ? g.items.filter(
+                    (it) =>
+                      it.label.toLowerCase().includes(q) ||
+                      it.combo.toLowerCase().includes(q),
+                  )
+                : g.items,
+            }))
+            .filter((g) => g.items.length > 0);
+          const totalCount = SHORTCUT_GROUPS.reduce((s, g) => s + g.items.length, 0);
+          const close = () => { setShowShortcuts(false); setShortcutQuery(""); };
+          return (
             <div
-              className="bg-white text-sm transition-shadow duration-300 relative w-full"
+              className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-md animate-in fade-in duration-150"
+              onClick={close}
+              onKeyDown={(e) => { if (e.key === "Escape") close(); }}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Keyboard shortcuts"
+            >
+              <div
+                className="relative w-[780px] max-w-full max-h-[88vh] flex flex-col bg-white rounded-2xl shadow-[0_30px_80px_-20px_rgba(15,23,42,0.45)] border border-slate-200/80 overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Header */}
+                <div className="relative px-6 pt-5 pb-4 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
+                  <div className="absolute inset-0 opacity-[0.07] pointer-events-none"
+                       style={{ backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)", backgroundSize: "16px 16px" }} />
+                  <div className="relative flex items-start justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-white/10 border border-white/15 flex items-center justify-center backdrop-blur-sm">
+                        <Keyboard className="w-5 h-5 text-amber-300" />
+                      </div>
+                      <div>
+                        <h2 className="text-base font-bold tracking-tight">Keyboard Shortcuts</h2>
+                        <p className="text-[11px] text-slate-300/90 mt-0.5">
+                          {totalCount} shortcuts · works while the editor is focused
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={close}
+                      className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
+                      aria-label="Close"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* Search */}
+                  <div className="relative mt-4">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      autoFocus
+                      type="text"
+                      value={shortcutQuery}
+                      onChange={(e) => setShortcutQuery(e.target.value)}
+                      placeholder="Search shortcuts…"
+                      className="w-full pl-9 pr-9 py-2 text-xs bg-white/95 text-slate-800 rounded-lg border border-white/20 focus:outline-none focus:ring-2 focus:ring-amber-400/60 placeholder-slate-400 shadow-inner"
+                    />
+                    {shortcutQuery && (
+                      <button
+                        onClick={() => setShortcutQuery("")}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-700 rounded"
+                        aria-label="Clear search"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Body */}
+                <div className="flex-1 overflow-y-auto p-6 bg-slate-50/50">
+                  {filtered.length === 0 ? (
+                    <div className="text-center py-12 text-slate-400 text-xs">
+                      No shortcuts match <span className="font-semibold text-slate-600">"{shortcutQuery}"</span>.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {filtered.map((group) => {
+                        const Icon = group.accent.icon;
+                        return (
+                          <section
+                            key={group.title}
+                            className={`bg-white border border-slate-200/70 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow ring-1 ring-transparent ${group.accent.ring}`}
+                          >
+                            <header className="flex items-center gap-2.5 mb-3 pb-2 border-b border-slate-100">
+                              <div className={`w-7 h-7 rounded-lg border flex items-center justify-center ${group.accent.iconWrap}`}>
+                                <Icon className={`w-3.5 h-3.5 ${group.accent.iconColor}`} />
+                              </div>
+                              <h3 className="text-[12px] font-bold text-slate-800 tracking-tight">
+                                {group.title}
+                              </h3>
+                              <span className="ml-auto text-[10px] font-semibold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full">
+                                {group.items.length}
+                              </span>
+                            </header>
+                            <ul className="space-y-1">
+                              {group.items.map((item) => {
+                                const parts = splitCombo(item.combo);
+                                return (
+                                  <li
+                                    key={item.label}
+                                    className="group flex items-center justify-between gap-3 px-2 py-1.5 rounded-md hover:bg-slate-50 transition-colors"
+                                  >
+                                    <span className="text-[12px] text-slate-700 group-hover:text-slate-900 truncate">
+                                      {item.label}
+                                    </span>
+                                    <span className="inline-flex items-center gap-1 shrink-0">
+                                      {parts.map((p, i) => (
+                                        <span key={i} className="inline-flex items-center gap-1">
+                                          {i > 0 && !IS_MAC && (
+                                            <span className="text-[10px] text-slate-400 font-medium">+</span>
+                                          )}
+                                          <kbd className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 bg-gradient-to-b from-white to-slate-50 border border-slate-300 rounded-md text-[10.5px] font-mono font-semibold text-slate-700 shadow-[0_1px_0_rgba(15,23,42,0.08),inset_0_-1px_0_rgba(15,23,42,0.04)]">
+                                            {p}
+                                          </kbd>
+                                        </span>
+                                      ))}
+                                    </span>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          </section>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Footer */}
+                <div className="px-6 py-3 border-t border-slate-200 bg-white flex items-center justify-between text-[11px] text-slate-500">
+                  <div className="flex items-center gap-1.5">
+                    <span>Press</span>
+                    <kbd className="inline-flex items-center justify-center px-1.5 h-[20px] bg-slate-100 border border-slate-300 rounded text-[10px] font-mono font-semibold text-slate-700">Esc</kbd>
+                    <span>to close</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-slate-400">
+                    <span>{IS_MAC ? "macOS" : "Windows / Linux"} bindings</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* â”€â”€ Document Area â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+        <div className="flex-1 overflow-y-auto bg-gradient-to-tr from-slate-200 to-slate-100 px-6 py-6 pb-20 flex items-start justify-center overflow-x-auto">
+          <div className={sidePanel ? "flex gap-6 max-w-[1400px] justify-start lg:justify-center" : "flex justify-center"}>
+            {/* Word-style A4 Document Page — fixed width so it looks like a
+                physical sheet on the canvas, regardless of viewport width. */}
+            <div
+              className="bg-white text-sm transition-shadow duration-300 relative shrink-0"
               style={{
                 fontFamily: "'Times New Roman', Times, serif",
                 lineHeight: "2",
-                minHeight: "11in",
-                padding: "1.0in 1.1in",
-                boxShadow: "0 4px 20px rgba(0,0,0,0.06), 0 12px 36px rgba(0,0,0,0.04)",
-                border: "1px solid rgba(226, 232, 240, 0.8)",
+                width: "8.27in",          // A4 width (210mm)
+                minHeight: "11.69in",     // A4 height (297mm)
+                padding: "1in 1in",       // Word default margins
+                boxShadow: "0 4px 20px rgba(0,0,0,0.08), 0 12px 36px rgba(0,0,0,0.06)",
+                border: "1px solid rgba(203, 213, 225, 0.9)",
                 overflow: "visible",
-                borderRadius: "4px"
+                borderRadius: "2px",
               }}
               onClick={(e) => {
                 if (!editor) return;
@@ -1445,7 +1811,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
                   >
                     <div className="px-2 py-1 text-[10px] uppercase tracking-wider font-bold text-slate-400 border-b border-slate-800 mb-1.5 flex items-center justify-between">
                       <span>Change Style</span>
-                      <span className="px-1.5 py-0.5 bg-slate-800 text-amber-500 rounded text-[9px] font-mono">
+                      <span className="px-1.5 py-0.5 bg-slate-800 text-blue-400 rounded text-[9px] font-mono">
                         {activeGutter.styleLabel}
                       </span>
                     </div>
@@ -1472,7 +1838,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
                             setActiveGutter(null);
                           }}
                           className={`w-full text-left px-2.5 py-1.5 rounded text-xs transition-colors font-semibold flex items-center justify-between cursor-pointer ${activeGutter.styleLabel === style
-                            ? "bg-amber-600 text-white font-bold"
+                            ? "bg-blue-600 text-white font-bold"
                             : "hover:bg-slate-800 text-slate-300 hover:text-white"
                             }`}
                         >
@@ -1487,7 +1853,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
                       <input
                         type="text"
                         placeholder="Add new style..."
-                        className="w-full px-2 py-1.5 bg-slate-900 border border-slate-700/60 rounded text-xs text-slate-200 focus:outline-none focus:border-amber-500 placeholder-slate-500 font-semibold"
+                        className="w-full px-2 py-1.5 bg-slate-900 border border-slate-700/60 rounded text-xs text-slate-200 focus:outline-none focus:border-blue-500 placeholder-slate-500 font-semibold"
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
                             handleAddNewStyleFromGutter(e.currentTarget.value, activeGutter.pos);
@@ -1499,63 +1865,9 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
                   </div>
                 </>
               )}
-              {/* Comments margin rail */}
-              <div className="absolute left-[100%] top-0 ml-8 w-80 h-full pointer-events-none hidden xl:block">
-                {Object.keys(comments).length > 0 && (
-                  <div className="pointer-events-auto bg-slate-900/90 border border-slate-700/80 rounded-md p-3 mb-4 text-[10px] text-slate-300 font-bold uppercase tracking-wide flex items-center gap-1.5 shadow-md">
-                    <span className="text-amber-400">âš ï¸</span>
-                    <span>Comments are review-only; not written to exported DOCX.</span>
-                  </div>
-                )}
-                {Object.entries(comments).map(([id, comment]) => {
-                  const pos = commentPositions[id];
-                  if (pos === undefined) return null;
-                  return (
-                    <div
-                      key={id}
-                      className="absolute w-full pointer-events-auto transition-all duration-200"
-                      style={{ top: `${pos}px` }}
-                    >
-                      <CommentCard
-                        comment={comment}
-                        currentUser={currentUser || "Unknown"}
-                        onSaveText={(cid, text) => {
-                          setComments(prev => ({
-                            ...prev,
-                            [cid]: { ...prev[cid], text }
-                          }));
-                        }}
-                        onAddReply={(cid, replyText) => {
-                          setComments(prev => ({
-                            ...prev,
-                            [cid]: {
-                              ...prev[cid],
-                              replies: [
-                                ...prev[cid].replies,
-                                { text: replyText, author: currentUser || "Unknown", date: new Date().toISOString() }
-                              ]
-                            }
-                          }));
-                        }}
-                        onToggleResolve={(cid) => {
-                          setComments(prev => ({
-                            ...prev,
-                            [cid]: { ...prev[cid], resolved: !prev[cid].resolved }
-                          }));
-                        }}
-                        onDelete={(cid) => {
-                          editor?.commands.removeComment(cid);
-                          setComments(prev => {
-                            const next = { ...prev };
-                            delete next[cid];
-                            return next;
-                          });
-                        }}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
+              {/* Comments managed via Comments popover in toolbar + click dialog;
+                  old margin rail retired (its disclaimer was stale once Phase 2
+                  wired comments into DOCX export). */}
             </div>
 
             {/* Side Panel */}
@@ -1944,16 +2256,16 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         .ProseMirror p::after {
           content: attr(data-style-label) !important;
           position: absolute !important;
-          left: -1.25in !important;
+          left: -0.95in !important;
           top: 0.35rem !important;
-          width: 1.0in !important;
-          text-align: right !important;
+          width: 0.85in !important;
+          text-align: center !important;
           padding: 0.15rem 0.35rem !important;
           font-size: 0.6rem !important;
           font-weight: 700 !important;
-          background-color: rgba(245, 158, 11, 0.07) !important;
-          border: 1px solid rgba(245, 158, 11, 0.28) !important;
-          color: #b45309 !important;
+          background-color: rgba(59, 130, 246, 0.07) !important;
+          border: 1px solid rgba(59, 130, 246, 0.28) !important;
+          color: #1d4ed8 !important;
           border-radius: 0.25rem !important;
           text-transform: uppercase !important;
           letter-spacing: 0.04em !important;
@@ -1974,9 +2286,9 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         .ProseMirror h4[data-style-label]:hover::after,
         .ProseMirror h5[data-style-label]:hover::after,
         .ProseMirror h6[data-style-label]:hover::after {
-          background-color: rgba(245, 158, 11, 0.18) !important;
-          border-color: rgba(245, 158, 11, 0.6) !important;
-          color: #92400e !important;
+          background-color: rgba(59, 130, 246, 0.18) !important;
+          border-color: rgba(59, 130, 246, 0.6) !important;
+          color: #1e3a8a !important;
           box-shadow: 0 1px 3px rgba(0,0,0,0.06) !important;
         }
 
@@ -2255,8 +2567,8 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
 
         /* Custom Comment and Find/Replace Styles */
         .ProseMirror span.tc-comment {
-          background-color: rgba(254, 240, 138, 0.4) !important;
-          border-bottom: 2px solid #eab308 !important;
+          background-color: rgba(147, 197, 253, 0.4) !important;
+          border-bottom: 2px solid #2563eb !important;
           cursor: pointer;
         }
         .ProseMirror span.search-result {

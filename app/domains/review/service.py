@@ -279,6 +279,314 @@ def save_changes(
         raise HTTPException(status_code=500, detail=f"Failed to save changes: {str(exc)}")
 
 
+def import_word_comments_into_xhtml(
+    *,
+    db: Session,
+    file_id: int,
+    docx_path: str,
+    xhtml_content: str,
+    logger,
+) -> str:
+    """
+    Read native Word comments from the DOCX and:
+      1. Upsert each into the `comments` table for this file. Idempotent — keyed
+         on a deterministic UUID derived from (file_id, Word comment id), so
+         re-importing the same DOCX does not duplicate or overwrite rows.
+      2. Wrap every paragraph covered by a Word comment's range in a
+         <span data-comment-id="UUID"> in the XHTML so the in-browser editor
+         renders the comment highlight and the panel finds it.
+
+    Granularity is paragraph-level (matches the export side). Sub-paragraph
+    ranges in Word are widened to the paragraph(s) they cover.
+    """
+    import uuid as _uuid
+    from lxml import etree
+    import lxml.html
+
+    W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    def qn(tag: str) -> str:
+        return f"{{{W}}}{tag}"
+
+    try:
+        from docx import Document
+        from docx.opc.constants import RELATIONSHIP_TYPE as RT
+        doc = Document(docx_path)
+    except Exception as e:
+        logger.warning(f"Word-comment import: could not open {docx_path}: {e}")
+        return xhtml_content
+
+    comments_part = None
+    for rel in doc.part.rels.values():
+        if rel.reltype == RT.COMMENTS:
+            comments_part = rel.target_part
+            break
+    if comments_part is None:
+        return xhtml_content
+
+    try:
+        comments_root = etree.fromstring(comments_part.blob)
+    except Exception as e:
+        logger.warning(f"Word-comment import: could not parse comments.xml: {e}")
+        return xhtml_content
+
+    word_comments: Dict[str, Dict[str, str]] = {}
+    for cmt in comments_root.findall(qn("comment")):
+        cid = cmt.get(qn("id"))
+        if cid is None:
+            continue
+        word_comments[cid] = {
+            "author": cmt.get(qn("author")) or "Unknown",
+            "text": "".join(t.text or "" for t in cmt.iter(qn("t"))).strip(),
+        }
+    if not word_comments:
+        return xhtml_content
+
+    # Walk paragraphs in document order, tracking which comment ranges are open.
+    # A range can span multiple paragraphs — each one gets a span wrapper.
+    body = doc.element.body
+    open_ids: set = set()
+    bookmark_for_comment_id: Dict[str, list] = {}
+
+    def first_bookmark(p_el) -> Optional[str]:
+        for bm in p_el.iter(qn("bookmarkStart")):
+            name = bm.get(qn("name"))
+            if name:
+                return name
+        return None
+
+    for p_el in body.iter(qn("p")):
+        opens_in = set()
+        closes_in = set()
+        for child in p_el.iter():
+            if child.tag == qn("commentRangeStart"):
+                cid = child.get(qn("id"))
+                if cid is not None:
+                    opens_in.add(cid)
+                    open_ids.add(cid)
+            elif child.tag == qn("commentRangeEnd"):
+                cid = child.get(qn("id"))
+                if cid is not None:
+                    closes_in.add(cid)
+
+        covering = open_ids | opens_in
+        if covering:
+            bm = first_bookmark(p_el)
+            if bm:
+                for cid in covering:
+                    if cid in word_comments:
+                        bookmark_for_comment_id.setdefault(cid, []).append(bm)
+
+        for cid in closes_in:
+            open_ids.discard(cid)
+
+    if not bookmark_for_comment_id:
+        return xhtml_content
+
+    NAMESPACE = _uuid.uuid5(_uuid.NAMESPACE_DNS, "cms.comments")
+
+    def uuid_for(word_comment_id: str) -> str:
+        return str(_uuid.uuid5(NAMESPACE, f"file:{file_id}|wc:{word_comment_id}"))
+
+    uuid_for_wid = {cid: uuid_for(cid) for cid in bookmark_for_comment_id.keys()}
+
+    # Upsert: insert if missing, leave existing rows alone so user edits in the
+    # in-browser editor are not clobbered by a re-import.
+    from app.models import Comment as CommentModel
+    try:
+        existing_rows = (
+            db.query(CommentModel)
+            .filter(
+                CommentModel.file_id == file_id,
+                CommentModel.comment_uuid.in_(list(uuid_for_wid.values())),
+            )
+            .all()
+        )
+        existing_uuids = {r.comment_uuid for r in existing_rows}
+        inserted = 0
+        for cid, meta in word_comments.items():
+            u = uuid_for_wid.get(cid)
+            if not u or u in existing_uuids:
+                continue
+            db.add(
+                CommentModel(
+                    file_id=file_id,
+                    comment_uuid=u,
+                    text=meta["text"],
+                    author_name=meta["author"],
+                    resolved=False,
+                )
+            )
+            inserted += 1
+        if inserted:
+            db.commit()
+            logger.info(f"Imported {inserted} Word comment(s) into DB for file {file_id}")
+    except Exception as e:
+        logger.warning(f"Word-comment import: DB upsert failed: {e}", exc_info=True)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        # Continue — we can still annotate the XHTML even if the DB write failed,
+        # but realistically the panel won't show anything without the rows. Bail.
+        return xhtml_content
+
+    # Wrap matching XHTML paragraphs with <span data-comment-id="UUID">.
+    try:
+        root = lxml.html.fromstring(xhtml_content)
+    except Exception as e:
+        logger.warning(f"Word-comment import: could not parse XHTML: {e}")
+        return xhtml_content
+
+    block_by_bm: Dict[str, Any] = {}
+    for el in root.iter():
+        bm = el.get("data-bookmark")
+        if bm and bm not in block_by_bm:
+            block_by_bm[bm] = el
+
+    wrapped = 0
+    for cid, bms in bookmark_for_comment_id.items():
+        u = uuid_for_wid[cid]
+        for bm in bms:
+            block = block_by_bm.get(bm)
+            if block is None:
+                continue
+            # Idempotent: if an inner span already carries this UUID, skip.
+            if block.xpath(f'.//span[@data-comment-id="{u}"]'):
+                continue
+            span = lxml.html.Element(
+                "span",
+                attrib={"data-comment-id": u, "class": "tc-comment"},
+            )
+            span.text = block.text
+            block.text = None
+            for child in list(block):
+                span.append(child)
+            block.append(span)
+            wrapped += 1
+
+    if not wrapped:
+        return xhtml_content
+
+    logger.info(f"Wrapped {wrapped} XHTML paragraph(s) with Word-comment spans for file {file_id}")
+    return lxml.html.tostring(root, encoding="unicode")
+
+
+def _build_export_docx_with_comments(
+    *,
+    processed_path: str,
+    xhtml_path: str,
+    comments: list,
+    logger,
+) -> Optional[str]:
+    """
+    Copy the processed DOCX to a temp path and inject native Word
+    `<w:commentRangeStart>`/`<w:comment>` markers for every
+    `span[data-comment-id]` in the saved XHTML that corresponds to a stored
+    Comment record. Returns the temp file path, or None if there is nothing
+    to inject.
+
+    Granularity is paragraph-level for v1: each comment is pinned to the first
+    XHTML block that contains the matching span, mapped to the DOCX via the
+    existing `data-bookmark` ↔ Word-bookmark correspondence.
+    """
+    if not comments or not os.path.exists(xhtml_path):
+        return None
+
+    by_uuid = {c.comment_uuid: c for c in comments if c.comment_uuid}
+    if not by_uuid:
+        return None
+
+    import lxml.html
+    with open(xhtml_path, "r", encoding="utf-8") as f:
+        html_content = f.read()
+    try:
+        root = lxml.html.fromstring(html_content)
+    except Exception as e:
+        logger.warning(f"Could not parse XHTML for comment injection: {e}")
+        return None
+
+    # Map UUID -> first bookmark seen in document order. Comments that span
+    # multiple paragraphs anchor to the paragraph where the run starts.
+    BLOCK_TAGS = {"p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "td", "th"}
+    bookmark_for_uuid: Dict[str, str] = {}
+    for span in root.xpath("//span[@data-comment-id]"):
+        uuid = span.get("data-comment-id")
+        if not uuid or uuid in bookmark_for_uuid or uuid not in by_uuid:
+            continue
+        anc = span
+        bm = None
+        while anc is not None:
+            if anc.tag in BLOCK_TAGS:
+                bm = anc.get("data-bookmark")
+                if bm:
+                    break
+            # Some blocks carry the bookmark on a wrapping <div>, so keep walking
+            # up even after we've found a block-tag without a bookmark attribute.
+            if anc.get("data-bookmark"):
+                bm = anc.get("data-bookmark")
+                break
+            anc = anc.getparent()
+        if bm:
+            bookmark_for_uuid[uuid] = bm
+
+    if not bookmark_for_uuid:
+        return None
+
+    import shutil
+    import tempfile
+    fd, tmp_path = tempfile.mkstemp(suffix=".docx", prefix="export_with_comments_")
+    os.close(fd)
+    shutil.copyfile(processed_path, tmp_path)
+
+    from docx import Document
+    from app.docx_pipeline.utils.docx_helpers import add_comment_to_paragraph
+    from app.processing.xhtml_to_docx_delta import (
+        _build_bookmark_para_index,
+        _find_note_para_by_bookmark,
+    )
+
+    doc = Document(tmp_path)
+    para_index = _build_bookmark_para_index(doc)
+
+    injected = 0
+    for uuid, bm in bookmark_for_uuid.items():
+        comment = by_uuid[uuid]
+        para = para_index.get(bm) or _find_note_para_by_bookmark(doc, bm)
+        if para is None:
+            logger.info(f"Comment {uuid}: bookmark {bm} unresolved in DOCX, skipping")
+            continue
+        try:
+            add_comment_to_paragraph(
+                doc,
+                para,
+                text=comment.text or "",
+                author=comment.author_name or "Unknown",
+            )
+            injected += 1
+        except Exception as e:
+            logger.warning(f"Comment {uuid}: failed to inject: {e}", exc_info=True)
+
+    if injected == 0:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+        return None
+
+    try:
+        doc.save(tmp_path)
+    except Exception as e:
+        logger.warning(f"Failed to save DOCX with injected comments: {e}", exc_info=True)
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+        return None
+
+    logger.info(f"Injected {injected} Word comment(s) into export copy at {tmp_path}")
+    return tmp_path
+
+
 def get_export_payload(db: Session, *, file_id: int, logger):
     resolved = resolve_processed_target(db, file_id=file_id)
     processed_path = resolved["processed_path"]
@@ -288,9 +596,29 @@ def get_export_payload(db: Session, *, file_id: int, logger):
         logger.warning(f"Export failed: Processed file not found at {processed_path}")
         raise HTTPException(status_code=404, detail="Processed file not found")
 
+    # If any comments exist for this file, build a copy with native Word
+    # comments injected. Source of truth lives in the DB; the on-disk DOCX
+    # stays clean so re-saves don't accumulate stale comment XML.
+    enriched_path = None
+    try:
+        from app.models import Comment
+        stored_comments = db.query(Comment).filter(Comment.file_id == file_id).all()
+        if stored_comments:
+            xhtml_path = _get_xhtml_path(processed_path)
+            enriched_path = _build_export_docx_with_comments(
+                processed_path=processed_path,
+                xhtml_path=xhtml_path,
+                comments=stored_comments,
+                logger=logger,
+            )
+    except Exception as e:
+        logger.warning(f"Comment injection failed; falling back to plain DOCX: {e}", exc_info=True)
+        enriched_path = None
+
     return {
-        "path": processed_path,
+        "path": enriched_path or processed_path,
         "filename": processed_filename,
+        "is_temp": bool(enriched_path),
     }
 
 
@@ -300,6 +628,49 @@ def _get_xhtml_path(processed_path: str) -> str:
     base_name = os.path.splitext(os.path.basename(processed_path))[0]
     xhtml_dir = os.path.join(dir_name, "xhtml")
     return os.path.join(xhtml_dir, f"{base_name}.html")
+
+
+def _augment_with_word_comments(
+    *,
+    db: Session,
+    file_id: int,
+    docx_path: str,
+    xhtml_path: str,
+    xhtml_content: str,
+    logger,
+) -> str:
+    """
+    Run `import_word_comments_into_xhtml` and persist the result. Always safe
+    to call — idempotent thanks to deterministic UUIDs and the
+    INSERT-only DB strategy. If the XHTML didn't change, this is essentially a
+    cheap DOCX peek (early-exits when no `word/comments.xml` part is present).
+    """
+    try:
+        new_content = import_word_comments_into_xhtml(
+            db=db,
+            file_id=file_id,
+            docx_path=docx_path,
+            xhtml_content=xhtml_content,
+            logger=logger,
+        )
+    except Exception as e:
+        logger.warning(f"Word-comment import skipped: {e}", exc_info=True)
+        return xhtml_content
+
+    if new_content == xhtml_content:
+        return xhtml_content
+
+    try:
+        os.makedirs(os.path.dirname(xhtml_path), exist_ok=True)
+        with open(xhtml_path, "w", encoding="utf-8") as f:
+            f.write(new_content)
+        # Keep the XHTML cache "newer than" the DOCX so the next read still
+        # serves the cached, span-augmented content rather than regenerating.
+        docx_mtime = os.path.getmtime(docx_path)
+        os.utime(xhtml_path, (docx_mtime + 1, docx_mtime + 1))
+    except Exception as e:
+        logger.warning(f"Failed to persist XHTML with imported comment spans: {e}")
+    return new_content
 
 
 def get_xhtml_content(db: Session, *, file_id: int) -> Dict[str, Any]:
@@ -342,6 +713,13 @@ def get_xhtml_content(db: Session, *, file_id: int) -> Dict[str, Any]:
     try:
         with open(xhtml_path, "r", encoding="utf-8") as f:
             content = f.read()
+        # Pull any native Word comments (added externally in Word) into the DB
+        # and decorate the XHTML — runs on every request, but is a near no-op
+        # for DOCXs without a comments part, and idempotent otherwise.
+        content = _augment_with_word_comments(
+            db=db, file_id=file_id, docx_path=processed_path,
+            xhtml_path=xhtml_path, xhtml_content=content, logger=logger,
+        )
         mtime = os.path.getmtime(xhtml_path)
         return {
             "content": content,
@@ -373,6 +751,11 @@ def generate_xhtml(db: Session, *, file_id: int, logger) -> Dict[str, Any]:
         content = engine.convert(processed_path, file_id=file_id)
         with open(xhtml_path, "w", encoding="utf-8") as f:
             f.write(content)
+        # Pull native Word comments into DB + XHTML in a single idempotent pass.
+        _augment_with_word_comments(
+            db=db, file_id=file_id, docx_path=processed_path,
+            xhtml_path=xhtml_path, xhtml_content=content, logger=logger,
+        )
         logger.info(f"Generated XHTML runs: {xhtml_path}")
         return {
             "status": "ok",
@@ -514,6 +897,10 @@ def get_file_xhtml_runs(db: Session, *, file_id: int, logger) -> Dict[str, Any]:
         try:
             with open(xhtml_path, "r", encoding="utf-8") as f:
                 content = f.read()
+            content = _augment_with_word_comments(
+                db=db, file_id=file_id, docx_path=source_path,
+                xhtml_path=xhtml_path, xhtml_content=content, logger=logger,
+            )
             return {"content": content, "filename": file_record.filename}
         except Exception as e:
             logger.warning(f"Failed to read runs XHTML cache from {xhtml_path}: {e}")
@@ -534,7 +921,11 @@ def get_file_xhtml_runs(db: Session, *, file_id: int, logger) -> Dict[str, Any]:
                         f.write(cached["content"])
                 except Exception as ce:
                     logger.warning(f"Failed to write ref cache content to {xhtml_path}: {ce}")
-                return {"content": cached["content"], "filename": file_record.filename}
+                content = _augment_with_word_comments(
+                    db=db, file_id=file_id, docx_path=source_path,
+                    xhtml_path=xhtml_path, xhtml_content=cached["content"], logger=logger,
+                )
+                return {"content": content, "filename": file_record.filename}
         except Exception as e:
             logger.warning(f"Failed to read runs XHTML cache: {e}")
 
@@ -548,6 +939,10 @@ def get_file_xhtml_runs(db: Session, *, file_id: int, logger) -> Dict[str, Any]:
                 f.write(content)
         except Exception as ce:
             logger.warning(f"Failed to write runs XHTML cache to {xhtml_path}: {ce}")
+        content = _augment_with_word_comments(
+            db=db, file_id=file_id, docx_path=source_path,
+            xhtml_path=xhtml_path, xhtml_content=content, logger=logger,
+        )
     except Exception as e:
         logger.error(f"Run-anchored XHTML generation failed for file {file_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to generate editor content: {str(e)}")
@@ -639,7 +1034,7 @@ def save_xhtml_delta_and_convert(
         raise HTTPException(status_code=500, detail=f"XHTML delta save/convert failed: {str(e)}")
 
 
-REF_REVIEW_CACHE_VERSION = 3
+REF_REVIEW_CACHE_VERSION = 4
 
 
 def _ref_review_cache_path(processed_path: str) -> str:
@@ -649,7 +1044,235 @@ def _ref_review_cache_path(processed_path: str) -> str:
     return os.path.join(dir_name, f".{base_name}.refcache.json")
 
 
-def build_reference_review_page_state(db: Session, *, file_id: int, style: Optional[str] = None, logger) -> Dict[str, Any]:
+def _run_validation_on_doc(
+    doc,
+    processed_path: str,
+    style: Optional[str] = None,
+    citation_format: Optional[str] = None,
+    logger=None,
+    et_al_threshold: Optional[int] = None,
+) -> Dict[str, Any]:
+    validation_logs = {
+        "stats": {},
+        "total_refs": 0,
+        "total_cites": 0,
+        "issues": [],
+        "renumbering_map": {},
+        "duplicates": [],
+        "sequence_issues": [],
+        "missing_references": [],
+        "unused_references": [],
+        "pipeline_log": [],
+    }
+
+    detected_style = style
+    if not detected_style:
+        # Detect style: REF-N -> AMA, REF-U or <ref-open> -> APA
+        is_ama = False
+        is_apa = False
+        for p in doc.paragraphs:
+            style_name = (p.style.name or "") if p.style else ""
+            if "REF-N" in style_name:
+                is_ama = True
+            if "REF-U" in style_name or "<ref-open>" in p.text:
+                is_apa = True
+
+        detected_style = "APA" if is_apa else "AMA"
+
+    validation_logs["detected_style"] = detected_style
+    validation_logs["citation_format"] = citation_format or "auto"
+
+    if detected_style == "AMA":
+        # A. Numerical/Sequence Validation (AMA 11th Edition / Vancouver)
+        from app.processing.legacy.Referencenumvalidation import ReferenceProcessor, iter_document_paragraphs
+        ref_proc = ReferenceProcessor(doc, citation_format=validation_logs["citation_format"])
+        num_stats = ref_proc.get_validation_stats()
+
+        validation_logs["total_refs"] = num_stats.get("total_references", 0)
+        validation_logs["total_cites"] = num_stats.get("total_citations", 0)
+        validation_logs["duplicates"] = num_stats.get("duplicate_references", [])
+        validation_logs["sequence_issues"] = num_stats.get("sequence_issues", [])
+        validation_logs["broken_ranges"] = num_stats.get("broken_ranges", [])
+        validation_logs["invalid_numbers"] = num_stats.get("invalid_numbers", [])
+        validation_logs["mixed_citation_style"] = num_stats.get("mixed_citation_style")
+        validation_logs["inline_text_citations"] = num_stats.get("inline_text_citations", [])
+        validation_logs["roman_numeral_citations"] = num_stats.get("roman_numeral_citations", [])
+        validation_logs["summary"] = num_stats.get("summary", {})
+        validation_logs["tagged_cites"] = sum(
+            1 for para in iter_document_paragraphs(doc)
+            for run in para.runs
+            if ref_proc.is_citation_run(run)
+        )
+        validation_logs["autonum_converted"] = 0
+
+        # Map numerical missing/unused references to issues list
+        for missing_num in num_stats.get("missing_references", []):
+            msg = f"Numerical citation [{missing_num}] has no matching reference entry."
+            issue_item = {
+                "type": "missing",
+                "para_idx": -1,
+                "message": msg,
+                "citation": f"[{missing_num}]"
+            }
+            validation_logs["issues"].append(issue_item)
+            validation_logs["missing_references"].append(issue_item)
+
+        for unused_num in num_stats.get("unused_references", []):
+            msg = f"Reference [{unused_num}] is in bibliography but never cited."
+            issue_item = {
+                "type": "unused",
+                "para_idx": -1,
+                "message": msg,
+                "citation": f"[{unused_num}]"
+            }
+            validation_logs["issues"].append(issue_item)
+            validation_logs["unused_references"].append(issue_item)
+
+        # Build citation_pairs and reference_entries
+        refs_found, ref_objects = ref_proc.get_references_in_bibliography()
+        all_cited_ids, appearance_order = ref_proc.get_citations_in_text()
+        cited_set = set(all_cited_ids)
+
+        from docx.oxml.ns import qn
+        import docx.text.paragraph
+        doc_paragraphs = [docx.text.paragraph.Paragraph(p_elem, doc) for p_elem in doc.element.body.iter(qn("w:p"))]
+        para_index_map = {p._element: idx for idx, p in enumerate(doc_paragraphs)}
+
+        # Build citation_pairs: one entry per unique cited number, in appearance order
+        ref_text_map = {obj["id"]: _get_full_reference_text(obj["para"], doc_paragraphs, para_index_map) for obj in ref_objects}
+        citation_pairs = []
+        for num in appearance_order:
+            ref_para = None
+            for obj in ref_objects:
+                if obj["id"] == num:
+                    ref_para = obj["para"]
+                    break
+            citation_pairs.append({
+                "citation": str(num),
+                "ref_number": num,
+                "ref_text": ref_text_map.get(num, ""),
+                "status": "ok" if num in refs_found else "missing",
+                "para_idx": para_index_map.get(ref_para._element, -1) if ref_para else -1,
+            })
+        # Add unused entries (in bibliography but never cited)
+        for obj in ref_objects:
+            if obj["id"] not in cited_set:
+                citation_pairs.append({
+                    "citation": None,
+                    "ref_number": obj["id"],
+                    "ref_text": _get_full_reference_text(obj["para"], doc_paragraphs, para_index_map),
+                    "status": "unused",
+                    "para_idx": para_index_map.get(obj["para"]._element, -1),
+                })
+
+        # Build reference_entries with global para_idx
+        reference_entries = []
+        for p in doc_paragraphs:
+            style_name = (p.style.name or "") if p.style else ""
+            if "REF-N" in style_name:
+                ref_num = None
+                for obj in ref_objects:
+                    if obj["para"]._element == p._element:
+                        ref_num = obj["id"]
+                        break
+
+                if ref_num is not None:
+                    reference_entries.append({
+                        "number": ref_num,
+                        "text": _get_full_reference_text(p, doc_paragraphs, para_index_map),
+                        "style": "REF-N",
+                        "is_cited": ref_num in cited_set,
+                        "para_idx": para_index_map.get(p._element, -1),
+                    })
+
+        validation_logs["citation_pairs"] = citation_pairs
+        validation_logs["reference_entries"] = reference_entries
+    else:
+        # B. APA Name & Year Validation (APA 7th Edition)
+        from app.processing.legacy.validation_core import CitationProcessor
+        cite_proc = CitationProcessor(processed_path, et_al_threshold=et_al_threshold)
+        report = cite_proc.run()
+        report_dict = report.to_dict()
+
+        validation_logs["stats"] = dict(report.stats)
+        validation_logs["total_refs"] = report.total_refs
+        validation_logs["total_cites"] = report.total_cites
+
+        # Forward grouped APA issue categories
+        for key in ("et_al_issues", "name_spelling_warnings", "ordering_issues",
+                    "suffix_issues", "disambiguation_issues",
+                    "personal_comm_citations", "secondary_citations"):
+            validation_logs[key] = report_dict.get(key, [])
+
+        # Collect Name & Year issues
+        for issue in report.issues:
+            issue_copy = {k: v for k, v in issue.items() if k != "para"}
+            validation_logs["issues"].append(issue_copy)
+
+            # Map into categories
+            itype = issue_copy.get("type")
+            if itype == "missing":
+                validation_logs["missing_references"].append(issue_copy)
+            elif itype == "unused":
+                validation_logs["unused_references"].append(issue_copy)
+
+        # Build match_score lookup keyed by raw citation string
+        score_by_raw: Dict[str, float] = {
+            c["raw"]: c["match_score"]
+            for c in cite_proc.get_citation_changes()
+            if "raw" in c and "match_score" in c
+        }
+
+        # Build citation_pairs and reference_entries
+        bib_items = list(getattr(cite_proc, "_bib_ordered", []) or cite_proc.bibliography.values())
+
+        citation_pairs = []
+        # Iterate bib in document order to build pairs
+        for entry in bib_items:
+            status = "ok" if entry.get("cited") else "unused"
+            raw_cite = f"({entry.get('display', '')}, {entry.get('year', '')})"
+            pair: Dict[str, Any] = {
+                "citation": raw_cite,
+                "author": entry.get("display", ""),
+                "year": entry.get("year", ""),
+                "ref_text": entry.get("raw", ""),
+                "status": status,
+                "para_idx": entry.get("para_idx", -1),
+            }
+            score = score_by_raw.get(raw_cite)
+            if score is not None:
+                pair["match_score"] = round(score, 2)
+            citation_pairs.append(pair)
+
+        # Add missing citations (cited in text but no bib entry)
+        for issue in report.issues:
+            if issue.get("type") == "missing":
+                citation_pairs.append({
+                    "citation": issue.get("raw", issue.get("citation", "")),
+                    "author": "",
+                    "year": "",
+                    "ref_text": "",
+                    "status": "missing",
+                    "para_idx": issue.get("para_idx", -1),
+                })
+
+        reference_entries = []
+        for i, entry in enumerate(bib_items):
+            reference_entries.append({
+                "number": None,
+                "text": entry.get("raw", ""),
+                "style": "REF-U",
+                "is_cited": entry.get("cited", False),
+                "para_idx": entry.get("para_idx", -1),
+            })
+
+        validation_logs["citation_pairs"] = citation_pairs
+        validation_logs["reference_entries"] = reference_entries
+
+    return validation_logs
+
+
+def build_reference_review_page_state(db: Session, *, file_id: int, style: Optional[str] = None, citation_format: Optional[str] = None, et_al_threshold: Optional[int] = None, logger) -> Dict[str, Any]:
     import json
     resolved = resolve_processed_target(db, file_id=file_id)
     file_record = resolved["file_record"]
@@ -671,7 +1294,9 @@ def build_reference_review_page_state(db: Session, *, file_id: int, style: Optio
                 cached = json.load(cf)
             if cached.get("mtime") == docx_mtime and cached.get("cache_version") == REF_REVIEW_CACHE_VERSION:
                 cached_style = cached.get("validation_logs", {}).get("detected_style")
-                if style is None or cached_style == style:
+                cached_format = cached.get("validation_logs", {}).get("citation_format", "auto")
+                req_format = citation_format or "auto"
+                if (style is None or cached_style == style) and cached_format == req_format:
                     logger.info(f"Reference review cache HIT for file {file_id}")
                     # Styles list (static, cheap to rebuild)
                     styles = _ref_review_styles()
@@ -700,27 +1325,13 @@ def build_reference_review_page_state(db: Session, *, file_id: int, style: Optio
             detail=f"Failed to load document content: {str(e)}"
         )
 
-
-    # 2. Extract live stats and validation issues using PPH scripts
-    validation_logs = {
-        "stats": {},
-        "total_refs": 0,
-        "total_cites": 0,
-        "issues": [],
-        "renumbering_map": {},
-        "duplicates": [],
-        "sequence_issues": [],
-        "missing_references": [],
-        "unused_references": [],
-    }
-
+    # 2. Extract live stats and validation issues using refactored helper
     try:
         from docx import Document
         doc = Document(processed_path)
-        
+
         detected_style = style
         if not detected_style:
-            # Detect the style based on paragraph style names or ref-open tags
             is_ama = False
             is_apa = False
             for p in doc.paragraphs:
@@ -729,165 +1340,31 @@ def build_reference_review_page_state(db: Session, *, file_id: int, style: Optio
                     is_ama = True
                 if "REF-U" in style_name or "<ref-open>" in p.text:
                     is_apa = True
-
             detected_style = "APA" if is_apa else "AMA"
-            
-        validation_logs["detected_style"] = detected_style
-        
-        if detected_style == "AMA":
-            # A. Numerical/Sequence Validation (AMA 11th Edition / Vancouver)
-            from app.processing.legacy.Referencenumvalidation import ReferenceProcessor
-            ref_proc = ReferenceProcessor(doc)
-            num_stats = ref_proc.get_validation_stats()
-            
-            validation_logs["total_refs"] = num_stats.get("total_references", 0)
-            validation_logs["total_cites"] = num_stats.get("total_citations", 0)
-            validation_logs["duplicates"] = num_stats.get("duplicate_references", [])
-            validation_logs["sequence_issues"] = num_stats.get("sequence_issues", [])
-            
-            # Map numerical missing/unused references to issues list
-            for missing_num in num_stats.get("missing_references", []):
-                msg = f"Numerical citation [{missing_num}] has no matching reference entry."
-                issue_item = {
-                    "type": "missing",
-                    "para_idx": -1,
-                    "message": msg,
-                    "citation": f"[{missing_num}]"
-                }
-                validation_logs["issues"].append(issue_item)
-                validation_logs["missing_references"].append(issue_item)
-                
-            for unused_num in num_stats.get("unused_references", []):
-                msg = f"Reference [{unused_num}] is in bibliography but never cited."
-                issue_item = {
-                    "type": "unused",
-                    "para_idx": -1,
-                    "message": msg,
-                    "citation": f"[{unused_num}]"
-                }
-                validation_logs["issues"].append(issue_item)
-                validation_logs["unused_references"].append(issue_item)
-                
-            # Build citation_pairs and reference_entries
-            refs_found, ref_objects = ref_proc.get_references_in_bibliography()
-            all_cited_ids, appearance_order = ref_proc.get_citations_in_text()
-            cited_set = set(all_cited_ids)
 
-            from docx.oxml.ns import qn
-            import docx.text.paragraph
-            doc_paragraphs = [docx.text.paragraph.Paragraph(p_elem, doc) for p_elem in doc.element.body.iter(qn("w:p"))]
-            para_index_map = {p._element: idx for idx, p in enumerate(doc_paragraphs)}
-
-            # Build citation_pairs: one entry per unique cited number, in appearance order
-            ref_text_map = {obj["id"]: _get_full_reference_text(obj["para"], doc_paragraphs, para_index_map) for obj in ref_objects}
-            citation_pairs = []
-            for num in appearance_order:
-                ref_para = None
-                for obj in ref_objects:
-                    if obj["id"] == num:
-                        ref_para = obj["para"]
-                        break
-                citation_pairs.append({
-                    "citation": str(num),
-                    "ref_number": num,
-                    "ref_text": ref_text_map.get(num, ""),
-                    "status": "ok" if num in refs_found else "missing",
-                    "para_idx": para_index_map.get(ref_para._element, -1) if ref_para else -1,
-                })
-            # Add unused entries (in bibliography but never cited)
-            for obj in ref_objects:
-                if obj["id"] not in cited_set:
-                    citation_pairs.append({
-                        "citation": None,
-                        "ref_number": obj["id"],
-                        "ref_text": _get_full_reference_text(obj["para"], doc_paragraphs, para_index_map),
-                        "status": "unused",
-                        "para_idx": para_index_map.get(obj["para"]._element, -1),
-                    })
-
-            # Build reference_entries: all bibliography paragraphs in order
-            reference_entries = []
-            for i, obj in enumerate(ref_objects):
-                reference_entries.append({
-                    "number": obj["id"],
-                    "text": _get_full_reference_text(obj["para"], doc_paragraphs, para_index_map),
-                    "style": "REF-N",
-                    "is_cited": obj["id"] in cited_set,
-                    "para_idx": para_index_map.get(obj["para"]._element, -1),
-                })
-
-            validation_logs["citation_pairs"] = citation_pairs
-            validation_logs["reference_entries"] = reference_entries
-        else:
-            # B. APA Name & Year Validation (APA 7th Edition)
-            from app.processing.legacy.validation_core import CitationProcessor
-            cite_proc = CitationProcessor(processed_path)
-            report = cite_proc.run()
-            
-            validation_logs["stats"] = dict(report.stats)
-            validation_logs["total_refs"] = dict(report.stats).get("Total bibliography entries", 0)
-            validation_logs["total_cites"] = dict(report.stats).get("Total in-text citations", 0)
-            
-            # Collect Name & Year issues
-            for issue in report.issues:
-                issue_copy = {k: v for k, v in issue.items() if k != "para"}
-                validation_logs["issues"].append(issue_copy)
-                
-                # Map into categories
-                itype = issue_copy.get("type")
-                if itype == "missing":
-                    validation_logs["missing_references"].append(issue_copy)
-                elif itype == "unused":
-                    validation_logs["unused_references"].append(issue_copy)
-
-            # Build citation_pairs and reference_entries
-            bib_items = list(getattr(cite_proc, "_bib_ordered", []) or cite_proc.bibliography.values())
-            cited_keys = getattr(cite_proc, "_cited_keys", set())
-
-            citation_pairs = []
-            for issue in report.issues:
-                if issue.get("type") in ("missing", "unused", "duplicate_entry"):
-                    pass  # these go to reference_entries only
-
-            # Iterate bib in document order to build pairs
-            for entry in bib_items:
-                status = "ok" if entry.get("cited") else "unused"
-                citation_pairs.append({
-                    "citation": f"({entry.get('display', '')}, {entry.get('year', '')})",
-                    "author": entry.get("display", ""),
-                    "year": entry.get("year", ""),
-                    "ref_text": entry.get("raw", ""),
-                    "status": status,
-                    "para_idx": entry.get("para_idx", -1),
-                })
-
-            # Add missing citations (cited in text but no bib entry)
-            for issue in report.issues:
-                if issue.get("type") == "missing":
-                    citation_pairs.append({
-                        "citation": issue.get("raw", issue.get("citation", "")),
-                        "author": "",
-                        "year": "",
-                        "ref_text": "",
-                        "status": "missing",
-                        "para_idx": issue.get("para_idx", -1),
-                    })
-
-            reference_entries = []
-            for i, entry in enumerate(bib_items):
-                reference_entries.append({
-                    "number": None,
-                    "text": entry.get("raw", ""),
-                    "style": "REF-U",
-                    "is_cited": entry.get("cited", False),
-                    "para_idx": entry.get("para_idx", -1),
-                })
-
-            validation_logs["citation_pairs"] = citation_pairs
-            validation_logs["reference_entries"] = reference_entries
+        validation_logs = _run_validation_on_doc(
+            doc,
+            processed_path,
+            style=detected_style,
+            citation_format=citation_format,
+            logger=logger,
+            et_al_threshold=et_al_threshold,
+        )
 
     except Exception as e:
         logger.error(f"Error computing live validation stats: {e}", exc_info=True)
+        validation_logs = {
+            "stats": {},
+            "total_refs": 0,
+            "total_cites": 0,
+            "issues": [],
+            "renumbering_map": {},
+            "duplicates": [],
+            "sequence_issues": [],
+            "missing_references": [],
+            "unused_references": [],
+            "pipeline_log": [],
+        }
 
     # 3. Read log file if it exists
     try:
@@ -896,7 +1373,7 @@ def build_reference_review_page_state(db: Session, *, file_id: int, style: Optio
         clean_base = filename_base.replace("_Processed", "").replace("_Structured", "")
         log_filename = f"{clean_base}_log.txt"
         log_path = os.path.join(base_dir, log_filename)
-        
+
         if os.path.exists(log_path):
             with open(log_path, "r", encoding="utf-8") as lf:
                 raw_log = lf.read()
@@ -936,7 +1413,7 @@ def build_reference_review_page_state(db: Session, *, file_id: int, style: Optio
     }
 
 
-def run_validation_only(db: Session, *, file_id: int, style: Optional[str] = None, logger=None) -> Dict[str, Any]:
+def run_validation_only(db: Session, *, file_id: int, style: Optional[str] = None, citation_format: Optional[str] = None, et_al_threshold: Optional[int] = None, logger=None) -> Dict[str, Any]:
     """
     Run validation-only (no XHTML conversion, no re-structuring).
     Returns only validation_logs and detected_style.
@@ -949,25 +1426,12 @@ def run_validation_only(db: Session, *, file_id: int, style: Optional[str] = Non
     if not os.path.exists(processed_path):
         raise HTTPException(status_code=404, detail="Processed reference file not found.")
 
-    validation_logs = {
-        "stats": {},
-        "total_refs": 0,
-        "total_cites": 0,
-        "issues": [],
-        "renumbering_map": {},
-        "duplicates": [],
-        "sequence_issues": [],
-        "missing_references": [],
-        "unused_references": [],
-    }
-
     try:
         from docx import Document
         doc = Document(processed_path)
 
         detected_style = style
         if not detected_style:
-            # Detect style: REF-N -> AMA, REF-U or <ref-open> -> APA
             is_ama = False
             is_apa = False
             for p in doc.paragraphs:
@@ -976,161 +1440,164 @@ def run_validation_only(db: Session, *, file_id: int, style: Optional[str] = Non
                     is_ama = True
                 if "REF-U" in style_name or "<ref-open>" in p.text:
                     is_apa = True
-
             detected_style = "APA" if is_apa else "AMA"
-        validation_logs["detected_style"] = detected_style
+
+        pipeline_log = []
+        mapping = {}
 
         if detected_style == "AMA":
-            # Numerical/Sequence Validation (AMA)
-            from app.processing.legacy.Referencenumvalidation import ReferenceProcessor
-            ref_proc = ReferenceProcessor(doc)
-            num_stats = ref_proc.get_validation_stats()
+            from app.processing.legacy.Referencenumvalidation import process_document
+            pipeline_log.append("Started numeric reference validation pipeline.")
+            pipeline_log.append("Applied punctuation swapping (placed citations after punctuation).")
 
-            validation_logs["total_refs"] = num_stats.get("total_references", 0)
-            validation_logs["total_cites"] = num_stats.get("total_citations", 0)
-            validation_logs["duplicates"] = num_stats.get("duplicate_references", [])
-            validation_logs["sequence_issues"] = num_stats.get("sequence_issues", [])
+            # Run validation report on the original state BEFORE modifying the document
+            validation_logs = _run_validation_on_doc(
+                doc,
+                processed_path,
+                style="AMA",
+                citation_format=citation_format,
+                logger=logger,
+                et_al_threshold=et_al_threshold,
+            )
 
-            # Map missing/unused references to issues list
-            for missing_num in num_stats.get("missing_references", []):
-                issue_item = {
-                    "type": "missing",
-                    "para_idx": -1,
-                    "message": f"Numerical citation [{missing_num}] has no matching reference entry.",
-                    "citation": f"[{missing_num}]"
-                }
-                validation_logs["issues"].append(issue_item)
-                validation_logs["missing_references"].append(issue_item)
+            # Run renumbering/formatting pipeline in Referencenumvalidation
+            doc, before_stats, after_stats, mapping, status_msg = process_document(processed_path, citation_format=citation_format)
 
-            for unused_num in num_stats.get("unused_references", []):
-                issue_item = {
-                    "type": "unused",
-                    "para_idx": -1,
-                    "message": f"Reference [{unused_num}] is in bibliography but never cited.",
-                    "citation": f"[{unused_num}]"
-                }
-                validation_logs["issues"].append(issue_item)
-                validation_logs["unused_references"].append(issue_item)
+            pipeline_log.append(f"Initial check: {len(before_stats.get('missing_references', []))} missing, {len(before_stats.get('unused_references', []))} unused reference(s).")
 
-            # Build citation_pairs and reference_entries
-            refs_found, ref_objects = ref_proc.get_references_in_bibliography()
-            all_cited_ids, appearance_order = ref_proc.get_citations_in_text()
-            cited_set = set(all_cited_ids)
+            if before_stats.get("unused_references"):
+                pipeline_log.append("Aborted renumbering: Unused references detected in the bibliography.")
+            elif before_stats.get("missing_references"):
+                pipeline_log.append("Aborted renumbering: Missing references detected in the text.")
+            elif before_stats.get("is_perfect"):
+                pipeline_log.append("No sequence or formatting issues detected. Document is already perfect.")
+            else:
+                pipeline_log.append("Pass 1: Reordered bibliography and renumbered citations to resolve sequence issues.")
+                dup_before = len(before_stats.get("duplicate_references", []))
+                dup_after = len(after_stats.get("duplicate_references", []))
+                duplicates_resolved = dup_before - dup_after
+                if duplicates_resolved > 0:
+                    pipeline_log.append(f"Pass 2: Found and merged {duplicates_resolved} duplicate reference(s) and renumbered remaining citations.")
+                else:
+                    pipeline_log.append("Pass 2: No duplicate references to merge.")
+                pipeline_log.append("Successfully saved renumbered document.")
 
-            # Build a map of paragraph elements to their global index in the document
-            from docx.oxml.ns import qn
-            import docx.text.paragraph
-            doc_paragraphs = [docx.text.paragraph.Paragraph(p_elem, doc) for p_elem in doc.element.body.iter(qn("w:p"))]
-            para_index_map = {p._element: idx for idx, p in enumerate(doc_paragraphs)}
+            if not status_msg.startswith("Aborted:"):
+                # Save the updated doc, archive previous version, and bump file version
+                from app.domains.files import version_service as vs
+                try:
+                    vs.archive_existing_file(
+                        db,
+                        existing_file=file_record,
+                        base_path=os.path.dirname(processed_path),
+                        uploaded_by_id=None,
+                        source_path=processed_path,
+                    )
+                    file_record.version += 1
+                except Exception as _e:
+                    if logger:
+                        logger.warning(f"Version archive failed (non-fatal): {_e}")
 
-            ref_text_map = {obj["id"]: _get_full_reference_text(obj["para"], doc_paragraphs, para_index_map) for obj in ref_objects}
-            citation_pairs = []
-            for num in appearance_order:
-                ref_para = None
-                for obj in ref_objects:
-                    if obj["id"] == num:
-                        ref_para = obj["para"]
-                        break
-                citation_pairs.append({
-                    "citation": str(num),
-                    "ref_number": num,
-                    "ref_text": ref_text_map.get(num, ""),
-                    "status": "ok" if num in refs_found else "missing",
-                    "para_idx": para_index_map.get(ref_para._element, -1) if ref_para else -1,
-                })
-            for obj in ref_objects:
-                if obj["id"] not in cited_set:
-                    citation_pairs.append({
-                        "citation": None,
-                        "ref_number": obj["id"],
-                        "ref_text": _get_full_reference_text(obj["para"], doc_paragraphs, para_index_map),
-                        "status": "unused",
-                        "para_idx": para_index_map.get(obj["para"]._element, -1),
-                    })
+                doc.save(processed_path)
+                db.commit()
 
-            # Build reference_entries with global para_idx
-            reference_entries = []
-            for p in doc_paragraphs:
-                style_name = (p.style.name or "") if p.style else ""
-                if "REF-N" in style_name:
-                    # This is a bibliography paragraph
-                    ref_num = None
-                    for obj in ref_objects:
-                        if obj["para"]._element == p._element:
-                            ref_num = obj["id"]
-                            break
+                # Regenerate validation logs using the updated/saved document state!
+                validation_logs = _run_validation_on_doc(
+                    doc,
+                    processed_path,
+                    style="AMA",
+                    citation_format=citation_format,
+                    logger=logger,
+                    et_al_threshold=et_al_threshold,
+                )
 
-                    if ref_num is not None:
-                        reference_entries.append({
-                            "number": ref_num,
-                            "text": _get_full_reference_text(p, doc_paragraphs, para_index_map),
-                            "style": "REF-N",
-                            "is_cited": ref_num in cited_set,
-                            "para_idx": para_index_map.get(p._element, -1),
-                        })
+                # Invalidate caches
+                invalidate_ref_review_cache(processed_path, logger=logger)
 
-            validation_logs["citation_pairs"] = citation_pairs
-            validation_logs["reference_entries"] = reference_entries
+                from app.domains.processing.technical_editor_service import RESULTS_DIR
+                cache_path = RESULTS_DIR / f"{file_id}_scan.json"
+                if cache_path.exists():
+                    try:
+                        cache_path.unlink()
+                    except Exception:
+                        pass
+
+                xhtml_path = _get_xhtml_path(processed_path)
+                if os.path.exists(xhtml_path):
+                    try:
+                        os.remove(xhtml_path)
+                    except Exception as e:
+                        if logger:
+                            logger.warning(f"Could not remove stale XHTML cache: {e}")
+
+            validation_logs["pipeline_log"] = pipeline_log
+            validation_logs["renumbering_map"] = mapping
         else:
-            # APA Name & Year Validation
-            from app.processing.legacy.validation_core import CitationProcessor
-            cite_proc = CitationProcessor(processed_path)
-            report = cite_proc.run()
+            from app.processing.legacy.validation_core import process_document_apa
+            pipeline_log.append("Started Name-Year (APA) reference validation pipeline.")
+            
+            # Run the two-pass APA validation/renumbering pipeline
+            doc, before_stats, after_stats, mapping, status_msg = process_document_apa(processed_path)
+            
+            pipeline_log.append(f"Pass 1: Reordered bibliography alphabetically and resolved suffix additions.")
+            dup_before = len(before_stats.get("duplicate_references", []))
+            dup_after = len(after_stats.get("duplicate_references", []))
+            duplicates_resolved = dup_before - dup_after
+            if duplicates_resolved > 0:
+                pipeline_log.append(f"Pass 2: Found and merged {duplicates_resolved} duplicate reference(s) and re-sorted remaining citations.")
+            else:
+                pipeline_log.append("Pass 2: No duplicate references to merge.")
+            pipeline_log.append("Successfully saved sorted and merged document.")
+            
+            # Save the updated doc, archive previous version, and bump file version
+            from app.domains.files import version_service as vs
+            try:
+                vs.archive_existing_file(
+                    db,
+                    existing_file=file_record,
+                    base_path=os.path.dirname(processed_path),
+                    uploaded_by_id=None,
+                    source_path=processed_path,
+                )
+                file_record.version += 1
+            except Exception as _e:
+                if logger:
+                    logger.warning(f"Version archive failed (non-fatal): {_e}")
 
-            validation_logs["stats"] = dict(report.stats)
-            validation_logs["total_refs"] = dict(report.stats).get("Total bibliography entries", 0)
-            validation_logs["total_cites"] = dict(report.stats).get("Total in-text citations", 0)
+            doc.save(processed_path)
+            db.commit()
 
-            # Collect Name & Year issues
-            for issue in report.issues:
-                issue_copy = {k: v for k, v in issue.items() if k != "para"}
-                validation_logs["issues"].append(issue_copy)
+            # Regenerate validation logs using the updated/saved document state!
+            validation_logs = _run_validation_on_doc(
+                doc,
+                processed_path,
+                style="APA",
+                citation_format=citation_format,
+                logger=logger,
+                et_al_threshold=et_al_threshold,
+            )
 
-                itype = issue_copy.get("type")
-                if itype == "missing":
-                    validation_logs["missing_references"].append(issue_copy)
-                elif itype == "unused":
-                    validation_logs["unused_references"].append(issue_copy)
+            # Invalidate caches
+            invalidate_ref_review_cache(processed_path, logger=logger)
 
-            # Build citation_pairs and reference_entries
-            bib_items = list(getattr(cite_proc, "_bib_ordered", []) or cite_proc.bibliography.values())
+            from app.domains.processing.technical_editor_service import RESULTS_DIR
+            cache_path = RESULTS_DIR / f"{file_id}_scan.json"
+            if cache_path.exists():
+                try:
+                    cache_path.unlink()
+                except Exception:
+                    pass
 
-            citation_pairs = []
-            for entry in bib_items:
-                status = "ok" if entry.get("cited") else "unused"
-                citation_pairs.append({
-                    "citation": f"({entry.get('display', '')}, {entry.get('year', '')})",
-                    "author": entry.get("display", ""),
-                    "year": entry.get("year", ""),
-                    "ref_text": entry.get("raw", ""),
-                    "status": status,
-                    "para_idx": entry.get("para_idx", -1),
-                })
+            xhtml_path = _get_xhtml_path(processed_path)
+            if os.path.exists(xhtml_path):
+                try:
+                    os.remove(xhtml_path)
+                except Exception as e:
+                    if logger:
+                        logger.warning(f"Could not remove stale XHTML cache: {e}")
 
-            # Add missing citations
-            for issue in report.issues:
-                if issue.get("type") == "missing":
-                    citation_pairs.append({
-                        "citation": issue.get("raw", issue.get("citation", "")),
-                        "author": "",
-                        "year": "",
-                        "ref_text": "",
-                        "status": "missing",
-                        "para_idx": issue.get("para_idx", -1),
-                    })
-
-            reference_entries = []
-            for i, entry in enumerate(bib_items):
-                reference_entries.append({
-                    "number": None,
-                    "text": entry.get("raw", ""),
-                    "style": "REF-U",
-                    "is_cited": entry.get("cited", False),
-                    "para_idx": entry.get("para_idx", -1),
-                })
-
-            validation_logs["citation_pairs"] = citation_pairs
-            validation_logs["reference_entries"] = reference_entries
+            validation_logs["pipeline_log"] = pipeline_log
+            validation_logs["renumbering_map"] = mapping
 
     except Exception as e:
         if logger:
@@ -1163,10 +1630,13 @@ def _ref_review_styles() -> list:
     ]
 
 
-def run_structuring_pipeline(db: Session, *, file_id: int, logger) -> dict:
+def run_structuring_pipeline(db: Session, *, file_id: int, logger, on_event=None) -> dict:
     """
     Run the 10-step docx_pipeline on the current processed DOCX for a file.
     Returns {"status": "ok", "content": str, "file_id": int}.
+
+    on_event: optional callable invoked for each step + final summary event,
+    enabling streaming progress updates to the client.
     """
     import shutil
     import sys
@@ -1192,7 +1662,7 @@ def run_structuring_pipeline(db: Session, *, file_id: int, logger) -> dict:
         output_dir = Path(tmp_dir)
 
         logger.info(f"Running docx_pipeline on file {file_id}: {processed_path}")
-        result = process_file(input_path, output_dir)
+        result = process_file(input_path, output_dir, on_event=on_event)
 
         if result["status"] == "error":
             issues = "; ".join(

@@ -3,6 +3,7 @@ import { AppLayout } from '@/layouts/AppLayout'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { RoleGuard } from '@/components/RoleGuard'
 import { LoginPage } from '@/pages/LoginPage'
+import { WorkflowPortalPage } from '@/pages/WorkflowPortalPage'
 import { RegisterPage } from '@/pages/RegisterPage'
 import { ForgotPasswordPage } from '@/pages/ForgotPasswordPage'
 import { DashboardPage } from '@/pages/DashboardPage'
@@ -29,9 +30,14 @@ import { ReferenceValidationReviewPage } from '@/pages/ReferenceValidationReview
 import { FileEditorPage } from '@/pages/FileEditorPage'
 import { DocxEditorPage } from '@/pages/DocxEditorPage'
 import { StylesheetsPage } from '@/pages/StylesheetsPage'
+import { ReportsPage } from '@/pages/ReportsPage'
+import ScheduleReport from '@/Reports/ScheduleReport'
+import TodaySchedule from '@/Reports/TodaySchedule'
+import ProjectSchedule from '@/Reports/ProjectSchedule'
 
 const router = createBrowserRouter([
   // ── Public routes ──────────────────────────────────────────────────────────
+  { path: '/portal', element: <WorkflowPortalPage /> },
   { path: '/login', element: <LoginPage /> },
   { path: '/register', element: <RegisterPage /> },
   { path: '/forgot-password', element: <ForgotPasswordPage /> },
@@ -96,7 +102,10 @@ const router = createBrowserRouter([
 
       { path: 'projects', element: <ProjectsPage /> },
       { path: 'chapters', element: <Placeholder title="Chapters" /> },
-      { path: 'reports', element: <Placeholder title="Reports" /> },
+      { path: 'reports', element: <ReportsPage /> },
+      { path: 'reports/schedule', element: <ScheduleReport /> },
+      { path: 'reports/today-schedule', element: <TodaySchedule /> },
+      { path: 'reports/project-schedule', element: <ProjectSchedule /> },
 
       // ── Review pages without fileId (legacy patterns) ───────────────────────
       { path: 'projects/:projectId/chapters/:chapterId/technical-review', element: <TechnicalReviewPage /> },

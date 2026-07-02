@@ -373,9 +373,7 @@ export function FileContextMenu({
   const hasTechnicalEdit = file.available_actions.includes("technical_edit");
   const hasStructuringReview = file.available_actions.includes("structuring_review");
   const filenameLower = file.filename.toLowerCase();
-  const hasReferenceReview =
-    filenameLower.endsWith("_processed.docx") ||
-    filenameLower.endsWith("_structured.docx");
+  const hasReferenceReview = filenameLower.endsWith(".docx");
 
   if (!mounted) return null;
 

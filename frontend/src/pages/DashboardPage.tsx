@@ -59,50 +59,36 @@ export function DashboardPage() {
   return (
     <main className="page dashboard-page">
       {/* Hero banner */}
-      <div
-        className="relative rounded-2xl overflow-hidden mb-6"
-        style={{
-          background: "linear-gradient(135deg, #0f2d5c 0%, #1a5276 35%, #C9821A 80%, #e6952a 100%)",
-          minHeight: "140px",
-        }}
-      >
-        {/* Decorative circles */}
+      <div className="relative rounded-2xl overflow-hidden mb-6 bg-sidebar min-h-[140px]">
+        {/* Warm Gold Radial Glow */}
         <div
-          className="absolute -top-8 -right-8 w-48 h-48 rounded-full opacity-10"
-          style={{ background: "rgba(255,255,255,0.3)" }}
-        />
-        <div
-          className="absolute -bottom-12 right-24 w-64 h-64 rounded-full opacity-10"
-          style={{ background: "rgba(255,255,255,0.2)" }}
-        />
-        <div
-          className="absolute top-4 right-64 w-16 h-16 rounded-full opacity-20"
-          style={{ background: "rgba(255,255,255,0.4)" }}
+          className="absolute inset-0 pointer-events-none"
+          style={{ background: "radial-gradient(900px 300px at 85% -20%, rgba(200,132,28,0.30), transparent 60%)" }}
         />
 
-        <div className="relative z-10 flex items-center justify-between px-8 py-7">
+        <div className="relative z-10 flex items-end justify-between px-8 py-7 flex-wrap gap-4">
           <div>
-            <div className="flex items-center gap-3 mb-2">
-              <h1 className="text-2xl font-bold text-white tracking-tight">
-                S4Carlisle Production Suite
-              </h1>
+            <div className="inline-flex items-center gap-2 bg-primary/10 border border-primary/20 px-3 py-1 rounded-full mb-3">
+              <span className="w-1.5 h-1.5 rounded-full bg-primary" />
+              <span className="text-[10px] font-bold tracking-wider text-primary uppercase">
+                {dayOfWeek} · {formattedDate}
+              </span>
             </div>
-            <p className="text-white/70 text-sm font-medium">
-              {dayOfWeek}, {formattedDate}
-            </p>
-            <p className="text-white text-base font-semibold mt-1">
-              Good {timeOfDay}, {viewer.username} 👋
+            <h1 className="text-3xl font-serif font-medium text-[#FBF9F4] tracking-tight leading-none mb-2">
+              Good {timeOfDay}, {viewer.username}.
+            </h1>
+            <p className="text-white/60 text-sm mt-1">
+              You have <strong className="text-primary font-bold">{projects.length} active</strong> project{projects.length !== 1 ? "s" : ""} in progress.
             </p>
           </div>
 
           <div className="text-right hidden sm:block">
-            <div className="text-white/60 text-xs font-medium uppercase tracking-widest mb-1">
-              Publishing Production
+            <div className="text-white/40 text-[10px] font-bold uppercase tracking-widest mb-1.5">
+              Active Titles
             </div>
-            <div className="text-white text-4xl font-bold font-mono leading-none">
+            <div className="text-white text-5xl font-bold font-serif leading-none">
               {projects.length}
             </div>
-            <div className="text-white/70 text-xs mt-1">Active Projects</div>
           </div>
         </div>
       </div>
