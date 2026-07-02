@@ -13,6 +13,7 @@ from app.processing.docx_to_xhtml import DocxToXhtmlEngine
 from app.processing.docx_to_xhtml_runs import DocxToXhtmlRunsEngine
 from app.processing.xhtml_to_docx import XhtmlToDocxEngine
 from app.processing.xhtml_to_docx_delta import XhtmlToDocxDeltaEngine
+from app.utils.utils.structuring_lib.annotator import normalize_structural_tag_case
 import re
 
 def _get_full_reference_text(para, doc_paragraphs, para_index_map) -> str:
@@ -213,7 +214,7 @@ def save_changes(
                     # Find matching change for this paragraph block
                     for change in style_changes:
                         if change["para_index"] == block_idx:
-                            new_style = change["style_name"]
+                            new_style = normalize_structural_tag_case(change["style_name"])
                             para = doc.paragraphs[block_idx]
                             try:
                                 para.style = new_style
