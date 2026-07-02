@@ -102,7 +102,7 @@ class ProjectSummary(BaseModel):
     client_id: int | None = None
     client_name: str | None = None
     xml_standard: str
-    status: str
+    status: str | None = None
     chapter_count: int
     file_count: int
     workflow_name: str | None = None
