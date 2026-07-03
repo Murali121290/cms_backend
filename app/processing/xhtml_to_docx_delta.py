@@ -362,6 +362,16 @@ class XhtmlToDocxDeltaEngine:
         except Exception as img_err:
             logger.warning(f"Failed to insert pasted images: {img_err}", exc_info=True)
 
+        # Renumber every drawing's non-visual property ID sequentially so no two
+        # pictures collide. Prior save cycles (including pre-fix versions of
+        # this engine) can leave duplicate id="0" values on pictures we did not
+        # insert this round; Word for Mac paints those as blank placeholder
+        # rectangles. This pass guarantees uniqueness across the whole document.
+        try:
+            self._renumber_drawing_ids(doc)
+        except Exception as id_err:
+            logger.warning(f"Failed to renumber drawing IDs: {id_err}", exc_info=True)
+
         # Apply final manuscript formatting (Times New Roman, 12pt, double spacing)
         try:
             apply_final_docx_formatting(doc)
@@ -531,6 +541,47 @@ class XhtmlToDocxDeltaEngine:
             logger.info(
                 f"Pasted image pass: inserted={inserted}, skipped={skipped}"
             )
+
+    def _renumber_drawing_ids(self, doc) -> None:
+        """Rewrite every drawing's non-visual property ID sequentially.
+
+        `<pic:cNvPr id>` and `<wp:docPr id>` are treated by Word for Mac as
+        must-be-unique-per-document even though the OOXML spec scopes them per
+        drawing. Any duplicate causes the offending picture to render as a
+        blank placeholder rectangle. Rewriting all IDs to a fresh sequence
+        each save guarantees uniqueness regardless of what earlier save
+        cycles left behind.
+        """
+        pic_ns = "http://schemas.openxmlformats.org/drawingml/2006/picture"
+        wp_ns = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+
+        # Body and any header/footer parts share the same numbering space in
+        # Word's eyes; a duplicate between body picture and header picture is
+        # still a duplicate. Cover everything reachable from the document part.
+        roots = [doc.element.body]
+        try:
+            for section in doc.sections:
+                for hf in (
+                    section.header, section.footer,
+                    section.even_page_header, section.even_page_footer,
+                    section.first_page_header, section.first_page_footer,
+                ):
+                    if hf is not None and getattr(hf, "_element", None) is not None:
+                        roots.append(hf._element)
+        except Exception:
+            # Sections API can raise on templates missing sectPr — skip and
+            # renumber the body only, still fixes the primary collision.
+            pass
+
+        pic_counter = 1
+        dp_counter = 1
+        for root in roots:
+            for pic_cnvpr in root.iter(f"{{{pic_ns}}}cNvPr"):
+                pic_cnvpr.set("id", str(pic_counter))
+                pic_counter += 1
+            for docpr in root.iter(f"{{{wp_ns}}}docPr"):
+                docpr.set("id", str(dp_counter))
+                dp_counter += 1
 
     def _patch_paragraph_runs(self, para, html_el, doc, username: str) -> None:
         """Modifies and synchronizes runs inside `<w:p>` completely in-place by rebuilding them."""
