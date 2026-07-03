@@ -50,6 +50,14 @@ function isDelayed(ch: Chapter, plannedDueDates?: Map<string, StageInfo>): boole
   return !!due && new Date(due) < new Date()
 }
 
+// Effective due = planned_end_date for the chapter's current stage (dynamic), falling back to chapter.due_date
+function getEffectiveDue(ch: Chapter, plannedDueDates: Map<string, StageInfo>): { due: string | null; delayed: boolean } {
+  const info = ch.stage_name ? plannedDueDates.get(`${ch.chapters}||${ch.stage_name}`) : undefined
+  const due = info?.due ?? ch.due_date
+  const delayed = !!due && ch.status !== 'complete' && new Date(due) < new Date()
+  return { due, delayed }
+}
+
 function formatDate(d: string | null | undefined): string {
   if (!d) return '—'
   return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
@@ -146,51 +154,55 @@ function WorkflowRail({ stages, chapters, filterStage, onStageClick }: {
   )
 }
 
+// ── Assignee Select ────────────────────────────────────────────────────────────
+
+function AssigneeSelect({ value, users, onChange, disabled, widthCls = 'w-28', className, onClick }: {
+  value: string | null
+  users: AppUser[]
+  onChange: (val: string) => void
+  disabled?: boolean
+  widthCls?: string
+  className?: string
+  onClick?: (e: React.MouseEvent) => void
+}) {
+  return (
+    <div className={`relative flex items-center ${widthCls} ${className ?? ''}`} onClick={onClick}>
+      <select
+        value={value ?? ''}
+        onChange={e => onChange(e.target.value)}
+        disabled={disabled}
+        className="text-[11px] bg-background border border-border rounded-md pl-2 pr-5 py-0.5 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-60 appearance-none cursor-pointer w-full truncate"
+      >
+        <option value="">— Unassigned —</option>
+        {users.filter(u => u.active_status).map(u => (
+          <option key={u.id} value={u.user_name}>{u.user_name}</option>
+        ))}
+      </select>
+      <span className="pointer-events-none absolute right-1.5 text-muted text-[9px]">▾</span>
+    </div>
+  )
+}
+
 // ── Chapter Card ───────────────────────────────────────────────────────────────
 
 interface ChapterCardProps {
   chapter: Chapter
   users: AppUser[]
-  projectCode: string | null
   plannedDueDates: Map<string, StageInfo>
-  onUpdate: (id: number, patch: Partial<Chapter>) => void
+  onAssigneeChange: (chapter: Chapter, val: string) => Promise<void>
   onViewDetails: (chapter: Chapter) => void
 }
 
-function ChapterCard({ chapter, users, projectCode, plannedDueDates, onUpdate, onViewDetails }: ChapterCardProps) {
+function ChapterCard({ chapter, users, plannedDueDates, onAssigneeChange, onViewDetails }: ChapterCardProps) {
   const [updating, setUpdating] = useState(false)
 
   const status = statusMeta(chapter.status)
-
-  // Effective due = actual_start + sla (dynamic) or planned_end_date, falling back to chapter.due_date
-  const currentInfo = chapter.stage_name ? plannedDueDates.get(`${chapter.chapters}||${chapter.stage_name}`) : undefined
-  const effectiveDue: string | null = currentInfo?.due ?? chapter.due_date
-  const delayed = !!effectiveDue && chapter.status !== 'complete' && new Date(effectiveDue) < new Date()
+  const { due: effectiveDue, delayed } = getEffectiveDue(chapter, plannedDueDates)
 
   async function handleAssignee(val: string) {
-    const assignee = val || null
     setUpdating(true)
-    try {
-      if (projectCode && chapter.stage_name) {
-        await stageDetailsApi.assignToStage(projectCode, chapter.chapters, chapter.stage_name, assignee)
-      }
-      // When assigning someone, due = now + sla so their window is tracked from today
-      let newDue: string | null = chapter.due_date
-      if (assignee && currentInfo?.sla) {
-        const d = new Date()
-        d.setDate(d.getDate() + currentInfo.sla)
-        newDue = d.toISOString().split('T')[0]
-      }
-      const updated = await chaptersApi.update(chapter.id, {
-        current_assignee_name: assignee,
-        due_date: newDue,
-      })
-      onUpdate(chapter.id, updated)
-    } catch {
-      toast.error('Failed to update assignee')
-    } finally {
-      setUpdating(false)
-    }
+    await onAssigneeChange(chapter, val)
+    setUpdating(false)
   }
 
   return (
@@ -235,20 +247,7 @@ function ChapterCard({ chapter, users, projectCode, plannedDueDates, onUpdate, o
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5">
             <User size={11} className="text-muted flex-shrink-0" />
-            <div className="relative flex items-center w-28">
-              <select
-                value={chapter.current_assignee_name ?? ''}
-                onChange={e => handleAssignee(e.target.value)}
-                disabled={updating}
-                className="text-[11px] bg-background border border-border rounded-md pl-2 pr-5 py-0.5 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-60 appearance-none cursor-pointer w-full truncate"
-              >
-                <option value="">— Unassigned —</option>
-                {users.filter(u => u.active_status).map(u => (
-                  <option key={u.id} value={u.user_name}>{u.user_name}</option>
-                ))}
-              </select>
-              <span className="pointer-events-none absolute right-1.5 text-muted text-[9px]">▾</span>
-            </div>
+            <AssigneeSelect value={chapter.current_assignee_name} users={users} onChange={handleAssignee} disabled={updating} />
           </div>
           <div className="flex items-center gap-1 flex-shrink-0">
             <Calendar size={11} className={delayed ? 'text-red-500' : 'text-muted'} />
@@ -394,6 +393,30 @@ export function ProjectWorkflow() {
       }
       return updated
     })
+  }
+
+  async function handleAssigneeChange(chapter: Chapter, val: string) {
+    const assignee = val || null
+    const projectCode = project?.code || project?.project_code || ''
+    try {
+      if (projectCode && chapter.stage_name) {
+        await stageDetailsApi.assignToStage(projectCode, chapter.chapters, chapter.stage_name, assignee)
+      }
+      const info = chapter.stage_name ? plannedDueDates.get(`${chapter.chapters}||${chapter.stage_name}`) : undefined
+      let newDue: string | null = chapter.due_date
+      if (assignee && info?.sla) {
+        const d = new Date()
+        d.setDate(d.getDate() + info.sla)
+        newDue = d.toISOString().split('T')[0]
+      }
+      const updated = await chaptersApi.update(chapter.id, {
+        current_assignee_name: assignee,
+        due_date: newDue,
+      })
+      handleChapterUpdate(chapter.id, updated)
+    } catch {
+      toast.error('Failed to update assignee')
+    }
   }
 
   const hasFilters = filterAssignee || filterStage || filterStatus
@@ -577,9 +600,8 @@ export function ProjectWorkflow() {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {filtered.map(ch => (
                   <ChapterCard key={ch.id} chapter={ch} users={users}
-                    projectCode={project.code || project.project_code || null}
                     plannedDueDates={plannedDueDates}
-                    onUpdate={handleChapterUpdate}
+                    onAssigneeChange={handleAssigneeChange}
                     onViewDetails={openChapter} />
                 ))}
               </div>
@@ -590,9 +612,7 @@ export function ProjectWorkflow() {
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                 {filtered.map(ch => {
                   const sm = statusMeta(ch.status)
-                  const info = ch.stage_name ? plannedDueDates.get(`${ch.chapters}||${ch.stage_name}`) : undefined
-                  const due = info?.due ?? ch.due_date
-                  const delayed = !!due && ch.status !== 'complete' && new Date(due) < new Date()
+                  const { due, delayed } = getEffectiveDue(ch, plannedDueDates)
                   return (
                     <div key={ch.id} onClick={() => openChapter(ch)} className={`bg-card rounded-xl border border-border shadow-sm hover:shadow-md transition-all flex flex-col gap-1.5 p-3 cursor-pointer ${cardBorderCls(ch)}`}>
                       <div className="flex items-center justify-between gap-1">
@@ -601,9 +621,17 @@ export function ProjectWorkflow() {
                       </div>
                       <p className="text-xs font-medium text-text line-clamp-2 leading-snug">{ch.chapter_title || ch.chapters}</p>
                       {ch.stage_name && <span className="text-[9px] bg-primary/10 text-primary rounded px-1.5 py-0.5 w-fit font-semibold">{ch.stage_name}</span>}
-                      <div className="flex items-center justify-between text-[10px] text-muted mt-auto pt-1 border-t border-border">
-                        <span className="truncate">{ch.current_assignee_name ?? 'Unassigned'}</span>
-                        <span className={delayed ? 'text-red-500 font-semibold' : ''}>{formatDate(due)}</span>
+                      <div className="flex items-center justify-between gap-1 text-[10px] text-muted mt-auto pt-1 border-t border-border">
+                        <div className="min-w-0 flex-1">
+                          <AssigneeSelect
+                            widthCls="w-full"
+                            value={ch.current_assignee_name}
+                            users={users}
+                            onChange={val => handleAssigneeChange(ch, val)}
+                            onClick={e => e.stopPropagation()}
+                          />
+                        </div>
+                        <span className={`flex-shrink-0 ${delayed ? 'text-red-500 font-semibold' : ''}`}>{formatDate(due)}</span>
                       </div>
                     </div>
                   )
@@ -616,9 +644,7 @@ export function ProjectWorkflow() {
               <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
                 {filtered.map((ch, i) => {
                   const sm = statusMeta(ch.status)
-                  const info = ch.stage_name ? plannedDueDates.get(`${ch.chapters}||${ch.stage_name}`) : undefined
-                  const due = info?.due ?? ch.due_date
-                  const delayed = !!due && ch.status !== 'complete' && new Date(due) < new Date()
+                  const { due, delayed } = getEffectiveDue(ch, plannedDueDates)
                   return (
                     <div key={ch.id} onClick={() => openChapter(ch)}
                       className={`flex items-center gap-4 px-5 py-3 cursor-pointer hover:bg-surface transition-colors ${i > 0 ? 'border-t border-border' : ''} ${cardBorderCls(ch).replace('border-l-4', 'border-l-[3px]')}`}>
@@ -628,15 +654,13 @@ export function ProjectWorkflow() {
                       </div>
                       {ch.stage_name && <span className="text-[10px] bg-primary/10 text-primary rounded px-2 py-0.5 font-semibold whitespace-nowrap flex-shrink-0">{ch.stage_name}</span>}
                       <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${sm.cls}`}>{sm.label}</span>
-                      <div className="relative flex items-center flex-shrink-0 w-28" onClick={e => e.stopPropagation()}>
-                        <select value={ch.current_assignee_name ?? ''}
-                          onChange={e => handleChapterUpdate(ch.id, { current_assignee_name: e.target.value || null } as any)}
-                          className="text-[11px] bg-background border border-border rounded-md pl-2 pr-5 py-0.5 text-text focus:outline-none appearance-none cursor-pointer w-full truncate">
-                          <option value="">— Unassigned —</option>
-                          {users.filter(u => u.active_status).map(u => <option key={u.id} value={u.user_name}>{u.user_name}</option>)}
-                        </select>
-                        <span className="pointer-events-none absolute right-1.5 text-muted text-[9px]">▾</span>
-                      </div>
+                      <AssigneeSelect
+                        className="flex-shrink-0"
+                        value={ch.current_assignee_name}
+                        users={users}
+                        onChange={val => handleAssigneeChange(ch, val)}
+                        onClick={e => e.stopPropagation()}
+                      />
                       <span className={`text-xs flex-shrink-0 ${delayed ? 'text-red-600 font-semibold' : 'text-muted'}`}>{formatDate(due)}</span>
                       <ChevronRight size={14} className="text-muted flex-shrink-0" />
                     </div>
@@ -659,9 +683,7 @@ export function ProjectWorkflow() {
                   <tbody>
                     {filtered.map((ch, i) => {
                       const sm = statusMeta(ch.status)
-                      const info = ch.stage_name ? plannedDueDates.get(`${ch.chapters}||${ch.stage_name}`) : undefined
-                      const due = info?.due ?? ch.due_date
-                      const delayed = !!due && ch.status !== 'complete' && new Date(due) < new Date()
+                      const { due, delayed } = getEffectiveDue(ch, plannedDueDates)
                       return (
                         <tr key={ch.id} onClick={() => openChapter(ch)} className={`cursor-pointer hover:bg-surface transition-colors ${i > 0 ? 'border-t border-border' : ''}`}>
                           <td className="px-4 py-3 font-bold text-primary text-xs uppercase">{ch.chapters}</td>
@@ -675,15 +697,7 @@ export function ProjectWorkflow() {
                             <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${sm.cls}`}>{sm.label}</span>
                           </td>
                           <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
-                            <div className="relative flex items-center w-28">
-                              <select value={ch.current_assignee_name ?? ''}
-                                onChange={e => handleChapterUpdate(ch.id, { current_assignee_name: e.target.value || null } as any)}
-                                className="text-[11px] bg-background border border-border rounded-md pl-2 pr-5 py-0.5 text-text focus:outline-none appearance-none cursor-pointer w-full truncate">
-                                <option value="">— Unassigned —</option>
-                                {users.filter(u => u.active_status).map(u => <option key={u.id} value={u.user_name}>{u.user_name}</option>)}
-                              </select>
-                              <span className="pointer-events-none absolute right-1.5 text-muted text-[9px]">▾</span>
-                            </div>
+                            <AssigneeSelect value={ch.current_assignee_name} users={users} onChange={val => handleAssigneeChange(ch, val)} />
                           </td>
                           <td className={`px-4 py-3 text-xs whitespace-nowrap ${delayed ? 'text-red-600 font-semibold' : 'text-muted'}`}>{formatDate(due)}</td>
                           <td className="px-4 py-3 text-xs text-center text-muted">{ch.manuscript_pages ?? '—'}</td>
