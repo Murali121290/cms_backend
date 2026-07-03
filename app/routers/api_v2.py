@@ -38,6 +38,7 @@ from app.utils.timezone import now_ist_naive
 from app.utils.inject_styles import inject_publisher_styles
 from app.processing.ppd_engine import PPDEngine
 from app.processing.permissions_engine import PermissionsEngine
+from app.domains.files import image_preview_service, image_convert_service
 from app.processing.technical_engine import TechnicalEngine
 from app.processing.legacy.highlighter.technical_editor import TechnicalEditor
 from app.processing.references_engine import ReferencesEngine
@@ -752,6 +753,78 @@ def api_v2_chapter_files(
         files=[_serialize_file_record(file_record, viewer=viewer, db=db) for file_record in files],
         viewer=_serialize_viewer(viewer),
     )
+
+
+@router.get("/projects/{project_id}/images")
+def api_v2_project_images(
+    project_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Return every image file in the project across all chapters.
+
+    Powers the dedicated Image Editor page's thumbnail rail. Detects images by
+    extension rather than by category so that image assets uploaded outside the
+    "Art" category are also picked up.
+    """
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+
+    image_exts = {"jpg", "jpeg", "png", "gif", "webp", "tif", "tiff", "bmp", "eps"}
+    files = (
+        db.query(models.File)
+        .filter(models.File.project_id == project_id)
+        .order_by(models.File.chapter_id.asc(), models.File.filename.asc())
+        .all()
+    )
+
+    chapter_lookup = {
+        ch.id: ch
+        for ch in db.query(models.Chapter).filter(models.Chapter.project_id == project_id).all()
+    }
+
+    images = []
+    for f in files:
+        ext = (f.filename.rsplit(".", 1)[-1] if "." in f.filename else "").lower()
+        if ext not in image_exts:
+            continue
+        needs_transcoding = image_preview_service.source_needs_transcoding(f.filename)
+        ch = chapter_lookup.get(f.chapter_id)
+        images.append(
+            {
+                "id": f.id,
+                "project_id": f.project_id,
+                "chapter_id": f.chapter_id,
+                "chapter_number": getattr(ch, "number", None) if ch else None,
+                "chapter_title": getattr(ch, "title", None) if ch else None,
+                "filename": f.filename,
+                "file_type": f.file_type,
+                "category": f.category,
+                "version": f.version,
+                "uploaded_at": f.uploaded_at.isoformat() if f.uploaded_at else None,
+                "download_url": f"/api/v2/files/{f.id}/download",
+                "preview_url": f"/api/v2/files/{f.id}/preview?fmt=png",
+                "needs_transcoding": needs_transcoding,
+            }
+        )
+
+    return {
+        "project": _serialize_project_summary(project),
+        "images": images,
+    }
 
 
 @router.get("/notifications", response_model=schemas_v2.NotificationsResponse)
@@ -1620,6 +1693,144 @@ def api_v2_download_file(
         filename=file_record.filename,
         media_type="application/octet-stream",
     )
+
+
+@router.get("/files/{file_id}/preview")
+def api_v2_file_preview(
+    file_id: int,
+    fmt: str = Query("png", regex="^(png|jpg)$"),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Return a browser-safe raster preview of an image file.
+
+    For PNG/JPG/GIF/WEBP/BMP sources this is essentially a downscaled
+    re-encode; for TIFF and EPS it's the only way to display the image in a
+    browser at all. Results are cached under runtime/previews/ keyed by the
+    source's mtime, so an in-place save invalidates automatically.
+    """
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    file_record = file_service.get_file_for_download(db, file_id=file_id)
+    if not file_record:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="FILE_NOT_FOUND",
+            message="File not found.",
+        )
+
+    try:
+        preview_path = image_preview_service.get_or_build_preview(
+            file_record.path, file_id=file_id, fmt=fmt  # type: ignore[arg-type]
+        )
+    except FileNotFoundError:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="FILE_MISSING_ON_DISK",
+            message="File is registered but missing on disk.",
+        )
+    except RuntimeError as exc:
+        logger.warning(f"Preview build failed for file {file_id}: {exc}")
+        return _error_response(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            code="PREVIEW_UNAVAILABLE",
+            message=str(exc),
+        )
+
+    return FileResponse(
+        path=str(preview_path),
+        media_type=image_preview_service.preview_mime(fmt),  # type: ignore[arg-type]
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
+
+
+@router.post("/files/{file_id}/convert")
+def api_v2_file_convert(
+    file_id: int,
+    payload: dict,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Convert an image to a different format (EPS/TIFF ↔ PNG/JPG).
+
+    Body:
+      {
+        "target_format": "png" | "jpg" | "tif",
+        "mode":          "copy" | "in_place"    (default "copy")
+      }
+    """
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    target_format = str(payload.get("target_format", "")).lower()
+    mode = str(payload.get("mode", "copy")).lower()
+    if mode not in ("copy", "in_place"):
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="INVALID_MODE",
+            message="mode must be 'copy' or 'in_place'.",
+        )
+
+    file_record = db.query(models.File).filter(models.File.id == file_id).first()
+    if not file_record:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="FILE_NOT_FOUND",
+            message="File not found.",
+        )
+
+    try:
+        result = image_convert_service.convert_image(
+            db,
+            file_record=file_record,
+            target_format=target_format,  # type: ignore[arg-type]
+            mode=mode,  # type: ignore[arg-type]
+            uploaded_by_id=viewer.id,
+        )
+    except ValueError as exc:
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="UNSUPPORTED_FORMAT",
+            message=str(exc),
+        )
+    except FileNotFoundError:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="FILE_MISSING_ON_DISK",
+            message="File is registered but missing on disk.",
+        )
+    except RuntimeError as exc:
+        logger.warning(f"Convert failed for file {file_id}: {exc}")
+        return _error_response(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            code="CONVERT_FAILED",
+            message=str(exc),
+        )
+
+    return {
+        "status": "ok",
+        "mode": mode,
+        "file": {
+            "id": result.id,
+            "project_id": result.project_id,
+            "chapter_id": result.chapter_id,
+            "filename": result.filename,
+            "file_type": result.file_type,
+            "category": result.category,
+            "version": result.version,
+        },
+    }
 
 
 @router.delete("/files/{file_id}", response_model=schemas_v2.FileDeleteResponse)

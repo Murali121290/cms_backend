@@ -1,4 +1,4 @@
-import type { CropRect } from "./ImageNode";
+export type CropRect = { x: number; y: number; w: number; h: number } | null;
 
 export interface BakeOptions {
   rotation: number;
@@ -12,15 +12,19 @@ export interface BakeOptions {
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    if (!src.startsWith("data:")) {
-      img.crossOrigin = "anonymous";
-    }
+    if (!src.startsWith("data:")) img.crossOrigin = "anonymous";
     img.onload = () => resolve(img);
     img.onerror = () => reject(new Error("Failed to load image for baking"));
     img.src = src;
   });
 }
 
+/**
+ * Flatten the current edit state into a fresh PNG/JPEG data URL via canvas.
+ * The pipeline is crop → rotate → flip → brightness/contrast so the result
+ * matches what the user sees in the live preview (CSS applies filters after
+ * transforms).
+ */
 export async function bakeImage(src: string, opts: BakeOptions): Promise<string> {
   const img = await loadImage(src);
   const naturalW = img.naturalWidth;
@@ -29,12 +33,8 @@ export async function bakeImage(src: string, opts: BakeOptions): Promise<string>
   const crop = opts.cropRect;
   const srcX = crop ? Math.max(0, Math.round((crop.x / 100) * naturalW)) : 0;
   const srcY = crop ? Math.max(0, Math.round((crop.y / 100) * naturalH)) : 0;
-  const srcW = crop
-    ? Math.max(1, Math.round((crop.w / 100) * naturalW))
-    : naturalW;
-  const srcH = crop
-    ? Math.max(1, Math.round((crop.h / 100) * naturalH))
-    : naturalH;
+  const srcW = crop ? Math.max(1, Math.round((crop.w / 100) * naturalW)) : naturalW;
+  const srcH = crop ? Math.max(1, Math.round((crop.h / 100) * naturalH)) : naturalH;
 
   const rotation = ((opts.rotation % 360) + 360) % 360;
   const swap = rotation === 90 || rotation === 270;
@@ -67,22 +67,4 @@ export async function bakeImage(src: string, opts: BakeOptions): Promise<string>
       "Cannot export edited image — the source image is cross-origin and cannot be read from a canvas.",
     );
   }
-}
-
-export function editAttrsChanged(attrs: {
-  rotation: number;
-  flipH: boolean;
-  flipV: boolean;
-  brightness: number;
-  contrast: number;
-  cropRect: CropRect;
-}): boolean {
-  return (
-    attrs.rotation !== 0 ||
-    attrs.flipH ||
-    attrs.flipV ||
-    attrs.brightness !== 1 ||
-    attrs.contrast !== 1 ||
-    attrs.cropRect !== null
-  );
 }

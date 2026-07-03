@@ -1,32 +1,4 @@
 import { Node, mergeAttributes } from "@tiptap/core";
-import { ReactNodeViewRenderer } from "@tiptap/react";
-import { ImageNodeView } from "./ImageNodeView";
-
-export type CropRect = { x: number; y: number; w: number; h: number } | null;
-
-export interface ImageAttrs {
-  src: string;
-  alt: string | null;
-  title: string | null;
-  width: number | null;
-  height: number | null;
-  originalSrc: string | null;
-  rotation: number;
-  flipH: boolean;
-  flipV: boolean;
-  brightness: number;
-  contrast: number;
-  cropRect: CropRect;
-}
-
-export const IMAGE_DEFAULT_ATTRS = {
-  rotation: 0,
-  flipH: false,
-  flipV: false,
-  brightness: 1,
-  contrast: 1,
-  cropRect: null as CropRect,
-};
 
 declare module "@tiptap/core" {
   interface Commands<ReturnType> {
@@ -42,29 +14,11 @@ function parseNumberAttr(value: string | null): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function parseBoolAttr(value: string | null): boolean {
-  return value === "true" || value === "1";
-}
-
-function parseCropAttr(value: string | null): CropRect {
-  if (!value) return null;
-  try {
-    const parsed = JSON.parse(value);
-    if (
-      parsed &&
-      typeof parsed.x === "number" &&
-      typeof parsed.y === "number" &&
-      typeof parsed.w === "number" &&
-      typeof parsed.h === "number"
-    ) {
-      return parsed as CropRect;
-    }
-  } catch {
-    // ignore
-  }
-  return null;
-}
-
+/**
+ * Bare block-level image node so pasted images render in the editor and
+ * round-trip through the XHTML → DOCX save. Editing (crop/rotate/etc.) lives
+ * in the dedicated Image Editor page, not the document editor toolbar.
+ */
 export const ImageNode = Node.create({
   name: "image",
   group: "block",
@@ -99,66 +53,15 @@ export const ImageNode = Node.create({
         parseHTML: (el) => parseNumberAttr(el.getAttribute("height")),
         renderHTML: (attrs) => (attrs.height ? { height: String(attrs.height) } : {}),
       },
-      originalSrc: {
-        default: null,
-        parseHTML: (el) =>
-          el.getAttribute("data-original-src") ?? el.getAttribute("src") ?? null,
-        renderHTML: (attrs) =>
-          attrs.originalSrc ? { "data-original-src": attrs.originalSrc } : {},
-      },
-      rotation: {
-        default: 0,
-        parseHTML: (el) => parseNumberAttr(el.getAttribute("data-rotation")) ?? 0,
-        renderHTML: (attrs) =>
-          attrs.rotation ? { "data-rotation": String(attrs.rotation) } : {},
-      },
-      flipH: {
-        default: false,
-        parseHTML: (el) => parseBoolAttr(el.getAttribute("data-flip-h")),
-        renderHTML: (attrs) => (attrs.flipH ? { "data-flip-h": "true" } : {}),
-      },
-      flipV: {
-        default: false,
-        parseHTML: (el) => parseBoolAttr(el.getAttribute("data-flip-v")),
-        renderHTML: (attrs) => (attrs.flipV ? { "data-flip-v": "true" } : {}),
-      },
-      brightness: {
-        default: 1,
-        parseHTML: (el) => parseNumberAttr(el.getAttribute("data-brightness")) ?? 1,
-        renderHTML: (attrs) =>
-          attrs.brightness !== 1
-            ? { "data-brightness": String(attrs.brightness) }
-            : {},
-      },
-      contrast: {
-        default: 1,
-        parseHTML: (el) => parseNumberAttr(el.getAttribute("data-contrast")) ?? 1,
-        renderHTML: (attrs) =>
-          attrs.contrast !== 1 ? { "data-contrast": String(attrs.contrast) } : {},
-      },
-      cropRect: {
-        default: null,
-        parseHTML: (el) => parseCropAttr(el.getAttribute("data-crop")),
-        renderHTML: (attrs) =>
-          attrs.cropRect ? { "data-crop": JSON.stringify(attrs.cropRect) } : {},
-      },
     };
   },
 
   parseHTML() {
-    return [
-      {
-        tag: "img[src]",
-      },
-    ];
+    return [{ tag: "img[src]" }];
   },
 
   renderHTML({ HTMLAttributes }) {
     return ["img", mergeAttributes(HTMLAttributes)];
-  },
-
-  addNodeView() {
-    return ReactNodeViewRenderer(ImageNodeView);
   },
 
   addCommands() {
@@ -169,12 +72,7 @@ export const ImageNode = Node.create({
           chain()
             .insertContent({
               type: this.name,
-              attrs: {
-                src,
-                alt: alt ?? null,
-                title: title ?? null,
-                originalSrc: src,
-              },
+              attrs: { src, alt: alt ?? null, title: title ?? null },
             })
             .run(),
     };

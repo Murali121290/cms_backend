@@ -22,7 +22,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     default-jre \
     perl \
     cpanminus \
+    ghostscript \
+    imagemagick \
+    libtiff-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# ImageMagick's default policy blocks PS/EPS/PDF as a security default. We need
+# EPS decoding for the Image Review & Editor's preview + convert pipeline, so
+# relax those specific formats. Pillow shells out to Ghostscript directly, but
+# Wand/convert respect this policy.
+RUN sed -i \
+    -e 's|<policy domain="coder" rights="none" pattern="PS" />|<policy domain="coder" rights="read\|write" pattern="PS" />|' \
+    -e 's|<policy domain="coder" rights="none" pattern="EPS" />|<policy domain="coder" rights="read\|write" pattern="EPS" />|' \
+    -e 's|<policy domain="coder" rights="none" pattern="PDF" />|<policy domain="coder" rights="read\|write" pattern="PDF" />|' \
+    /etc/ImageMagick-6/policy.xml || true
 
 RUN cpanm --notest \
     Archive::Zip \

@@ -29,6 +29,7 @@ import { ReferenceValidationReviewPage } from '@/pages/ReferenceValidationReview
 import { FileEditorPage } from '@/pages/FileEditorPage'
 import { DocxEditorPage } from '@/pages/DocxEditorPage'
 import { StylesheetsPage } from '@/pages/StylesheetsPage'
+import { ImageReviewPage } from '@/features/imageReview/ImageReviewPage'
 
 const router = createBrowserRouter([
   // ── Public routes ──────────────────────────────────────────────────────────
@@ -103,6 +104,7 @@ const router = createBrowserRouter([
       { path: 'projects/:projectId/chapters/:chapterId/structuring-review', element: <StructuringReviewPage /> },
       { path: 'projects/:projectId/chapters/:chapterId/reference-review', element: <ReferenceValidationReviewPage /> },
       { path: 'projects/:projectId/stylesheets', element: <StylesheetsPage /> },
+      { path: 'projects/:projectId/image-review', element: <ImageReviewPage /> },
 
       // ── Settings: admin + manager only ───────────────────────────────────
       { path: 'settings', element: <RoleGuard allowedRoles={['admin', 'manager']}><Settings /></RoleGuard> },
