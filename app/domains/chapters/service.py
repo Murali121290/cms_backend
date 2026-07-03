@@ -10,7 +10,7 @@ from app.domains.projects.models import Project
 _CHAPTER_CATEGORIES = ["Manuscript", "Art", "InDesign", "Proof", "XML"]
 
 
-def create_chapter(db: Session, *, project_id: int, number: str, title: str, upload_dir: str):
+def create_chapter(db: Session, *, project_id: int, number: str, title: str, upload_dir: str, status: str = "In-progress"):
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         return {"project": None, "chapter": None}
@@ -32,8 +32,12 @@ def create_chapter(db: Session, *, project_id: int, number: str, title: str, upl
         project=project.project_code or "",
         chapters=number,
         chapter_title=title,
-        status="In-progress",
-        stage_name=first_stage
+        status=status,
+        stage_name=first_stage,
+        workflow=project.workflow_name or "Workflow1",
+        priority=getattr(project, "priority", None) or "Normal",
+        complexity_level=getattr(project, "composition", None) or "Medium",
+        project_manager_name=getattr(project, "project_manager", None) or None,
     )
     db.add(new_chapter)
 

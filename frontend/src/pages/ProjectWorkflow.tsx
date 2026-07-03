@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, ChevronRight,
   Calendar, Clock, Zap, BookOpen, AlertCircle, CheckCircle2,
-  RotateCcw, Layers, User, BookMarked, Info, Edit2
+  RotateCcw, Layers, User, BookMarked, Info, Edit2, Plus
 } from 'lucide-react'
 import { ViewSwitcher } from '@/components/ui/ViewSwitcher'
 import { useViewMode } from '@/hooks/useViewMode'
@@ -22,6 +22,9 @@ import { uiPaths } from '@/utils/appPaths'
 import { useStylesheetsQuery } from '@/features/stylesheets/useStylesheetsQuery'
 import { ProjectInfoModal } from './ProjectInfoModal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { Modal } from '@/components/ui/Modal'
+import { UploadZone } from '@/components/ui/UploadZone'
+import { getApiErrorMessage } from '@/api/client'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -304,6 +307,12 @@ export function ProjectWorkflow() {
   const [bulkAssigning, setBulkAssigning] = useState(false)
   const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false)
 
+  const [isAddChapterOpen, setIsAddChapterOpen] = useState(false)
+  const [newChapterNumber, setNewChapterNumber] = useState('')
+  const [newChapterFile, setNewChapterFile] = useState<File | null>(null)
+  const [addingChapter, setAddingChapter] = useState(false)
+  const [addChapterError, setAddChapterError] = useState<string | null>(null)
+
   useEffect(() => {
     if (!id) return
     setLoading(true)
@@ -368,8 +377,9 @@ export function ProjectWorkflow() {
     const inProg = chapters.filter(c => c.status === 'In-progress').length
     const hold = chapters.filter(c => c.status === 'Hold').length
     const inQuery = chapters.filter(c => c.status === 'In-query').length
+    const yts = chapters.filter(c => c.status === 'Received').length
     const delayed = chapters.filter(c => isDelayed(c, plannedDueDates)).length
-    return { total, complete, inProg, hold, inQuery, delayed }
+    return { total, complete, inProg, hold, inQuery, yts, delayed }
   }, [chapters, plannedDueDates])
 
   const assigneeOptions = useMemo(() => {
@@ -393,6 +403,13 @@ export function ProjectWorkflow() {
     () => bulkStage ? chapters.filter(c => c.stage_name === bulkStage) : [],
     [chapters, bulkStage]
   )
+
+  // Next sequential chapter number, zero-padded (e.g. "06") — chapters must be added in order, no gaps
+  const nextChapterNumber = useMemo(() => {
+    const nums = chapters.map(c => parseInt(c.chapters, 10)).filter(n => !isNaN(n))
+    const next = nums.length > 0 ? Math.max(...nums) + 1 : 1
+    return String(next).padStart(2, '0')
+  }, [chapters])
 
   function handleChapterUpdate(id: number, patch: Partial<Chapter>) {
     setChapters(prev => {
@@ -452,6 +469,33 @@ export function ProjectWorkflow() {
     setBulkAssignee('')
   }
 
+  function openAddChapter() {
+    setNewChapterNumber(nextChapterNumber)
+    setNewChapterFile(null)
+    setAddChapterError(null)
+    setIsAddChapterOpen(true)
+  }
+
+  async function handleCreateChapter() {
+    if (!newChapterFile) return
+    setAddingChapter(true)
+    setAddChapterError(null)
+    try {
+      const created = await chaptersApi.createWithManuscript(id, newChapterNumber, newChapterFile)
+      setChapters(prev => [...prev, created])
+      setIsAddChapterOpen(false)
+      if (project?.status === 'Active' || project?.status === 'Completed') {
+        toast.success(`Chapter ${created.chapters} added — visit Planning to approve its schedule`)
+      } else {
+        toast.success(`Chapter ${created.chapters} added`)
+      }
+    } catch (err) {
+      setAddChapterError(getApiErrorMessage(err, 'Failed to create chapter'))
+    } finally {
+      setAddingChapter(false)
+    }
+  }
+
   const hasFilters = filterAssignee || filterStage || filterStatus
 
   if (loading) return <FullPageSpinner />
@@ -463,6 +507,10 @@ export function ProjectWorkflow() {
   )
 
   function openChapter(ch: Chapter) {
+    if (ch.status === 'Received') {
+      toast.error(`Chapter ${ch.chapters} needs planning approval before it can be opened — approve it in Planning first.`)
+      return
+    }
     const num = ch.chapters
     const cmsId = cmsChapterIdMap.get(num) ?? cmsChapterIdMap.get(parseInt(num, 10).toString()) ?? cmsChapterIdMap.get(num.padStart(2, '0')) ?? null
     if (!cmsId) { toast.error(`Chapter "${num}" has no files yet.`); return }
@@ -545,6 +593,13 @@ export function ProjectWorkflow() {
             </span>
           )}
           <button
+            onClick={openAddChapter}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white font-medium hover:bg-primary/90 transition-colors"
+          >
+            <Plus size={12} />
+            New Chapter
+          </button>
+          <button
             onClick={() => navigate(uiPaths.projectStylesheets(id))}
             title={activeStylesheet ? `Active: ${activeStylesheet.name}` : 'No active stylesheet'}
             className="relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-surface text-text font-medium transition-colors"
@@ -574,6 +629,7 @@ export function ProjectWorkflow() {
         {/* ── Summary Widgets ── */}
         <div className="flex flex-wrap gap-3">
           <SummaryWidget label="Total" value={summary.total} icon={BookOpen} iconCls="bg-blue-50    text-blue-600" onClick={() => setFilterStatus('')} active={filterStatus === ''} />
+          {summary.yts > 0 && <SummaryWidget label="YTS" value={summary.yts} icon={Clock} iconCls="bg-indigo-50 text-indigo-600" onClick={() => setFilterStatus(prev => prev === 'Received' ? '' : 'Received')} active={filterStatus === 'Received'} />}
           {summary.delayed > 0 && <SummaryWidget label="Delayed" value={summary.delayed} icon={AlertCircle} iconCls="bg-red-50   text-red-600" onClick={() => setFilterStatus(prev => prev === '__delayed__' ? '' : '__delayed__')} active={filterStatus === '__delayed__'} />}
           <SummaryWidget label="In Progress" value={summary.inProg} icon={RotateCcw} iconCls="bg-amber-50   text-amber-600" onClick={() => setFilterStatus(prev => prev === 'In-progress' ? '' : 'In-progress')} active={filterStatus === 'In-progress'} />
           {summary.hold > 0 && <SummaryWidget label="Hold" value={summary.hold} icon={AlertCircle} iconCls="bg-slate-50 text-slate-600" onClick={() => setFilterStatus(prev => prev === 'Hold' ? '' : 'Hold')} active={filterStatus === 'Hold'} />}
@@ -814,6 +870,66 @@ export function ProjectWorkflow() {
         variant="warning"
         isLoading={bulkAssigning}
       />
+
+      {/* Add Chapter Modal */}
+      <Modal
+        isOpen={isAddChapterOpen}
+        onClose={() => { if (!addingChapter) setIsAddChapterOpen(false) }}
+        title="New Chapter"
+        description="Add the next chapter and its manuscript file. Chapters must be numbered in order with no gaps."
+        footer={
+          <div className="flex gap-3 justify-end">
+            <button
+              onClick={() => setIsAddChapterOpen(false)}
+              disabled={addingChapter}
+              className="px-4 py-2 text-sm font-medium text-text bg-background border border-border rounded-lg hover:bg-surface transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleCreateChapter}
+              disabled={addingChapter || !newChapterFile || !newChapterNumber}
+              className="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
+            >
+              {addingChapter && <Spinner size="sm" />}
+              {addingChapter ? 'Creating…' : 'Create Chapter'}
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-muted mb-1">Chapter No.</label>
+            <input
+              type="text"
+              value={newChapterNumber}
+              onChange={e => setNewChapterNumber(e.target.value.replace(/\D/g, ''))}
+              disabled={addingChapter}
+              className="w-full text-sm bg-background border border-border rounded-lg px-3 py-2 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-60"
+              placeholder={nextChapterNumber}
+            />
+            <p className="text-[11px] text-muted mt-1">
+              Next expected number is <span className="font-semibold">{nextChapterNumber}</span> — chapters must stay sequential with no gaps.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-muted mb-1">Manuscript file</label>
+            <UploadZone
+              accept=".docx"
+              onFiles={files => setNewChapterFile(files[0] ?? null)}
+              isUploading={addingChapter}
+              label={newChapterFile ? newChapterFile.name : undefined}
+            />
+          </div>
+
+          {addChapterError && (
+            <p className="text-xs text-danger flex items-center gap-1.5">
+              <AlertCircle size={12} /> {addChapterError}
+            </p>
+          )}
+        </div>
+      </Modal>
 
     </div>
   )
