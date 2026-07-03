@@ -846,6 +846,7 @@ class ProjectUpdateRequest(BaseModel):
     trim_size: str | None = None
     copyright_year: int | None = None
     actual_pages: int | None = None
+    manuscript_pages: int | None = None
     due_date: str | None = None
     division_code: str | None = None
     customer_contact: str | None = None

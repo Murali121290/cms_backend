@@ -1035,8 +1035,8 @@ def api_v2_update_project(
             project.client_name = c.company
 
     for _f in ("project_manager", "priority", "composition", "category", "edition",
-               "color", "trim_size", "copyright_year", "actual_pages", "division_code",
-               "customer_contact", "sales_person", "isbn_no", "billing_location"):
+               "color", "trim_size", "copyright_year", "actual_pages", "manuscript_pages",
+               "division_code", "customer_contact", "sales_person", "isbn_no", "billing_location"):
         _v = getattr(payload, _f, None)
         if _v is not None:
             setattr(project, _f, _v)
@@ -2084,7 +2084,11 @@ def api_v2_upload_zip(
                             ci_record.word_count = (ci_record.word_count or 0) + total_word_count
                         if total_pages > 0:
                             ci_record.manuscript_pages = (ci_record.manuscript_pages or 0) + total_pages
-                            
+
+                project.manuscript_pages = sum(
+                    ci.manuscript_pages or 0
+                    for ci in db.query(_ChapterInfo).filter(_ChapterInfo.project == project.project_code).all()
+                )
                 db.commit()
         except Exception as e:
             pass

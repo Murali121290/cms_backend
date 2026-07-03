@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { BookOpen, Layers } from 'lucide-react'
 import { projectsApi, type Project, type ProjectUpdate } from '@/api/projects'
+import { chaptersApi } from '@/api/chapters'
 import { Select } from '@/components/ui/Select'
 import { toast } from '@/store/useToastStore'
 import { Modal } from '@/components/ui/Modal'
@@ -52,6 +53,8 @@ interface ProjectInfoModalProps {
 export function ProjectInfoModal({ project, open, mode, onClose, onUpdated }: ProjectInfoModalProps) {
   const [form, setForm]     = useState<EditForm>({ composition: '', edition: '', color: '', trim_size: '', copyright_year: '', actual_pages: '' })
   const [saving, setSaving] = useState(false)
+  const [chapterManuscriptPages, setChapterManuscriptPages] = useState<number | null>(null)
+  const [chapterWordCount, setChapterWordCount] = useState<number | null>(null)
 
   useEffect(() => {
     if (project) {
@@ -66,7 +69,36 @@ export function ProjectInfoModal({ project, open, mode, onClose, onUpdated }: Pr
     }
   }, [project])
 
+  useEffect(() => {
+    if (!open || !project) {
+      setChapterManuscriptPages(null)
+      setChapterWordCount(null)
+      return
+    }
+    const projectCode = project.code || project.project_code || ''
+    if (!projectCode) {
+      setChapterManuscriptPages(null)
+      setChapterWordCount(null)
+      return
+    }
+    let cancelled = false
+    chaptersApi.getByProject(projectCode)
+      .then(chapters => {
+        if (cancelled) return
+        setChapterManuscriptPages(chapters.reduce((sum, ch) => sum + (ch.manuscript_pages ?? 0), 0))
+        setChapterWordCount(chapters.reduce((sum, ch) => sum + (ch.word_count ?? 0), 0))
+      })
+      .catch(() => {
+        setChapterManuscriptPages(null)
+        setChapterWordCount(null)
+      })
+    return () => { cancelled = true }
+  }, [open, project])
+
   if (!project) return null
+
+  const manuscriptPages = chapterManuscriptPages ?? project.manuscript_pages ?? 0
+  const cePages = Math.floor((chapterWordCount ?? 0) / 250)
 
   function set(key: keyof EditForm, value: string) {
     setForm(f => ({ ...f, [key]: value }))
@@ -192,9 +224,9 @@ export function ProjectInfoModal({ project, open, mode, onClose, onUpdated }: Pr
           </>
         )}
 
-        {/* Read-only page / chapter info */}
-        <InfoField label="Manuscript Pages" value={project.manuscript_pages} />
-        <InfoField label="CE Pages"         value={Math.floor((project.manuscript_pages ?? 0) / 250)} />
+        {/* Manuscript Pages — sum of each chapter's manuscript pages, kept in sync as chapters update */}
+        <InfoField label="Manuscript Pages" value={manuscriptPages} />
+        <InfoField label="CE Pages"         value={cePages} />
         <InfoField label="Estimated Pages"  value={project.estimated_pages} />
         <InfoField label="Chapter Count"    value={project.chapter_count} />
 

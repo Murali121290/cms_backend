@@ -5,8 +5,30 @@ export interface Theme {
 }
 
 export const themes: Theme[] = [
-  {
+    {
     name: 'default',
+    label: 'Ocean Blue',
+    variables: {
+      '--color-sidebar':        '#022B3A',
+      '--color-sidebar-hover':  '#0a3d50',
+      '--color-sidebar-text':   '#94a3b8',
+      '--color-sidebar-active': '#ffffff',
+      '--color-primary':        '#1F7A8C',
+      '--color-primary-hover':  '#165f6e',
+      '--color-accent':         '#BFDBF7',
+      '--color-background':     '#F8FAFC',
+      '--color-card':           '#FFFFFF',
+      '--color-border':         '#E2E8F0',
+      '--color-text':           '#1E293B',
+      '--color-muted':          '#64748B',
+      '--color-success':        '#22C55E',
+      '--color-warning':        '#F59E0B',
+      '--color-danger':         '#EF4444',
+      '--color-info':           '#3B82F6',
+    },
+  },
+  {
+    name: 'S4Carlisle Classic',
     label: 'S4Carlisle Classic',
     variables: {
       '--color-sidebar':        '#1C1A17',
