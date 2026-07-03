@@ -33,6 +33,10 @@ export function MultiSelect({ label, options, value, onChange, placeholder = 'Se
     onChange(value.includes(v) ? value.filter(x => x !== v) : [...value, v])
   }
 
+  const allValues = options.map(optVal)
+  const allSelected = allValues.length > 0 && allValues.every(v => value.includes(v))
+  const toggleAll = () => onChange(allSelected ? [] : allValues)
+
   const labelFor = (v: string) => {
     const match = options.find(o => optVal(o) === v)
     return match ? optLabel(match) : v
@@ -72,6 +76,21 @@ export function MultiSelect({ label, options, value, onChange, placeholder = 'Se
 
         {open && (
           <div className="absolute z-50 mt-1 w-full bg-card border border-border rounded-xl shadow-lg max-h-48 overflow-y-auto">
+            {options.length > 1 && (
+              <button
+                type="button"
+                onClick={toggleAll}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-primary hover:bg-background border-b border-border transition-colors"
+              >
+                <span className={cn(
+                  'w-4 h-4 rounded border flex items-center justify-center flex-shrink-0',
+                  allSelected ? 'bg-primary border-primary' : 'border-border'
+                )}>
+                  {allSelected && <Check size={10} className="text-white" />}
+                </span>
+                {allSelected ? 'Deselect All' : 'Select All'}
+              </button>
+            )}
             {options.map(opt => {
               const v = optVal(opt)
               const l = optLabel(opt)
