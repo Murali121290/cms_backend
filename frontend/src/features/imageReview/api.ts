@@ -52,3 +52,40 @@ export async function convertImage({
   }>(`/files/${fileId}/convert`, { target_format, mode });
   return res.data;
 }
+
+export interface ReplaceImageArgs {
+  fileId: number;
+  file: File;
+  reason: string;
+}
+
+export async function replaceImage({ fileId, file, reason }: ReplaceImageArgs) {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("reason", reason);
+  const res = await apiClient.post<{
+    status: string;
+    reason: string;
+    file: {
+      id: number;
+      project_id: number;
+      chapter_id: number | null;
+      filename: string;
+      file_type: string;
+      category: string;
+      version: number;
+    };
+  }>(`/files/${fileId}/replace`, form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return res.data;
+}
+
+export async function exportSelectedImages(projectId: number, fileIds: number[]): Promise<Blob> {
+  const res = await apiClient.post<Blob>(
+    `/projects/${projectId}/images/export`,
+    { file_ids: fileIds },
+    { responseType: "blob" },
+  );
+  return res.data;
+}

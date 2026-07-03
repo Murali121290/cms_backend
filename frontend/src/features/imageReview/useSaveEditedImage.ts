@@ -1,46 +1,47 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
-import { uploadChapterFiles } from "@/api/files";
+import { apiClient } from "@/api/client";
 import type { ProjectImage } from "./api";
 
 interface SaveArgs {
   image: ProjectImage;
   bakedBlob: Blob;
   bakedMime: string;
+  /** Optional DPI to write into the saved file's metadata. */
+  dpi?: number | null;
 }
 
-function chooseSaveFilename(image: ProjectImage, bakedMime: string): string {
-  // If the source was a browser-safe format, keep the exact filename so the
-  // upload endpoint archives + versions in place. For TIFF/EPS we can't ship
-  // the edited PNG through the same extension without a server transcode; use
-  // a ".png" sibling filename so the copy is unambiguous. The convert
-  // endpoint is available separately if the user wants to fold it back into
-  // the original format.
-  if (!image.needs_transcoding) return image.filename;
-  const stem = image.filename.includes(".")
-    ? image.filename.slice(0, image.filename.lastIndexOf("."))
-    : image.filename;
-  const ext = bakedMime === "image/jpeg" ? "jpg" : "png";
-  return `${stem}-edited.${ext}`;
+/**
+ * Save the baked image back to the file's slot. Uses the dedicated
+ * `/files/{id}/edit-save` endpoint so DPI metadata can be written server-side
+ * (canvas.toDataURL can't emit pHYs/JFIF density chunks).
+ */
+async function saveEditedImage({ image, bakedBlob, dpi }: SaveArgs) {
+  const form = new FormData();
+  form.append("file", bakedBlob, image.filename);
+  if (dpi != null && dpi > 0) form.append("dpi", String(dpi));
+  const res = await apiClient.post<{
+    status: string;
+    dpi_applied: number | null;
+    file: {
+      id: number;
+      project_id: number;
+      chapter_id: number | null;
+      filename: string;
+      file_type: string;
+      category: string;
+      version: number;
+    };
+  }>(`/files/${image.id}/edit-save`, form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return res.data;
 }
 
 export function useSaveEditedImage(projectId: number) {
   const queryClient = useQueryClient();
-
   return useMutation({
-    mutationFn: async ({ image, bakedBlob, bakedMime }: SaveArgs) => {
-      if (image.chapter_id == null) {
-        throw new Error("This image is not attached to a chapter; cannot save.");
-      }
-      const filename = chooseSaveFilename(image, bakedMime);
-      const file = new File([bakedBlob], filename, { type: bakedMime });
-      return uploadChapterFiles({
-        projectId,
-        chapterId: image.chapter_id,
-        category: image.category || "Art",
-        files: [file],
-      });
-    },
+    mutationFn: saveEditedImage,
     onSuccess: async (_data, vars) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["project-images", projectId] }),

@@ -6,24 +6,25 @@ import {
   useState,
   type RefObject,
 } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   Check,
-  Contrast as ContrastIcon,
   Crop,
+  Download,
   FileImage,
-  FlipHorizontal,
-  FlipVertical,
+  Gauge,
   Loader2,
   Maximize,
+  Maximize2,
   Minimize,
   RefreshCw,
+  Repeat,
   RotateCcw,
   RotateCw,
   Search,
-  Sun,
   Undo,
   Redo,
   X as XIcon,
@@ -31,7 +32,13 @@ import {
   ZoomOut,
 } from "lucide-react";
 
-import { getProjectImages, convertImage, type ProjectImage } from "./api";
+import {
+  getProjectImages,
+  convertImage,
+  replaceImage,
+  exportSelectedImages,
+  type ProjectImage,
+} from "./api";
 import { useSaveEditedImage } from "./useSaveEditedImage";
 import { bakeImage, type CropRect } from "./imageBaking";
 
@@ -39,40 +46,34 @@ import { bakeImage, type CropRect } from "./imageBaking";
 
 interface EditState {
   rotation: number;
-  flipH: boolean;
-  flipV: boolean;
-  brightness: number;
-  contrast: number;
   cropRect: CropRect;
-  width: number | null;
-  height: number | null;
+  /** Target output pixel dimensions. Null = keep source (post-crop, post-rotate). */
+  targetWidth: number | null;
+  targetHeight: number | null;
+  /** DPI metadata to write on save. Null = don't touch density. */
+  dpi: number | null;
 }
 
 const INITIAL_EDIT_STATE: EditState = {
   rotation: 0,
-  flipH: false,
-  flipV: false,
-  brightness: 1,
-  contrast: 1,
   cropRect: null,
-  width: null,
-  height: null,
+  targetWidth: null,
+  targetHeight: null,
+  dpi: null,
 };
 
 function editsDirty(s: EditState): boolean {
   return (
     s.rotation !== 0 ||
-    s.flipH ||
-    s.flipV ||
-    s.brightness !== 1 ||
-    s.contrast !== 1 ||
-    s.cropRect !== null
+    s.cropRect !== null ||
+    s.targetWidth !== null ||
+    s.targetHeight !== null ||
+    s.dpi !== null
   );
 }
 
-// Undo/redo stack over the whole edit state — cheap because each entry is a
-// small POJO. We snapshot on every meaningful action instead of every
-// slider tick to keep history readable.
+// ─── Undo / redo history over EditState ─────────────────────────────────────
+
 function useEditHistory(initial: EditState) {
   const [state, setState] = useState<EditState>(initial);
   const past = useRef<EditState[]>([]);
@@ -88,11 +89,6 @@ function useEditHistory(initial: EditState) {
       bump();
       return resolved;
     });
-  }, []);
-
-  const patch = useCallback((next: Partial<EditState>) => {
-    // Lightweight — no history entry. Used by sliders during drag.
-    setState((prev) => ({ ...prev, ...next }));
   }, []);
 
   const undo = useCallback(() => {
@@ -125,7 +121,6 @@ function useEditHistory(initial: EditState) {
   return {
     state,
     commit,
-    patch,
     undo,
     redo,
     reset,
@@ -135,34 +130,22 @@ function useEditHistory(initial: EditState) {
 }
 
 // ─── Visual-only status stub ────────────────────────────────────────────────
-// Backend does not yet track review status. Deterministically assign a status
-// per image so the badges match the mockup; wire to a real field later.
 type ReviewStatus = "original" | "pending" | "approved";
 
 function stubStatusFor(image: ProjectImage): ReviewStatus {
-  const seed = image.id;
-  const bucket = seed % 5;
+  const bucket = image.id % 5;
   if (bucket === 0) return "pending";
   if (bucket === 1) return "approved";
   return "original";
 }
 
 const STATUS_STYLES: Record<ReviewStatus, { label: string; className: string }> = {
-  original: {
-    label: "Original",
-    className: "bg-slate-800 text-white",
-  },
-  pending: {
-    label: "Pending Review",
-    className: "bg-amber-500 text-white",
-  },
-  approved: {
-    label: "Approved",
-    className: "bg-emerald-500 text-white",
-  },
+  original: { label: "Original", className: "bg-slate-800 text-white" },
+  pending: { label: "Pending Review", className: "bg-amber-500 text-white" },
+  approved: { label: "Approved", className: "bg-emerald-500 text-white" },
 };
 
-// ─── Crop overlay ──────────────────────────────────────────────────────────
+// ─── Crop overlay types ────────────────────────────────────────────────────
 
 type Corner = "nw" | "ne" | "sw" | "se";
 const MIN_CROP_PERCENT = 5;
@@ -175,6 +158,8 @@ interface CropDragState {
   startRect: { x: number; y: number; w: number; h: number };
   containerRect: DOMRect;
 }
+
+const DPI_PRESETS = [72, 150, 300, 600];
 
 // ─── Page ─────────────────────────────────────────────────────────────────
 
@@ -196,8 +181,10 @@ export function ImageReviewPage() {
   const projectName = query.data?.project?.name;
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
   const [search, setSearch] = useState("");
   const [saveMsg, setSaveMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [replaceDialogFor, setReplaceDialogFor] = useState<ProjectImage | null>(null);
 
   useEffect(() => {
     if (selectedId != null || images.length === 0) return;
@@ -217,16 +204,15 @@ export function ImageReviewPage() {
   );
 
   const history = useEditHistory(INITIAL_EDIT_STATE);
-  const {
-    state: edit,
-    commit,
-    patch,
-    undo,
-    redo,
-    reset,
-    canUndo,
-    canRedo,
-  } = history;
+  const { state: edit, commit, undo, redo, reset, canUndo, canRedo } = history;
+
+  const [cropMode, setCropMode] = useState(false);
+  const [viewZoom, setViewZoom] = useState(1);
+  const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [resizePopoverOpen, setResizePopoverOpen] = useState(false);
+  const [dpiPopoverOpen, setDpiPopoverOpen] = useState(false);
 
   useEffect(() => {
     reset(INITIAL_EDIT_STATE);
@@ -234,13 +220,9 @@ export function ImageReviewPage() {
     setViewZoom(1);
     setSaveMsg(null);
     setNaturalSize(null);
+    setResizePopoverOpen(false);
+    setDpiPopoverOpen(false);
   }, [selected?.id, reset]);
-
-  const [cropMode, setCropMode] = useState(false);
-  const [viewZoom, setViewZoom] = useState(1);
-  const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const saveMut = useSaveEditedImage(projectId);
   const convertMut = useMutation({
@@ -250,17 +232,59 @@ export function ImageReviewPage() {
     },
   });
 
-  // ── Actions ──────────────────────────────────────────────────────────────
+  const replaceMut = useMutation({
+    mutationFn: replaceImage,
+    onSuccess: async (res) => {
+      await queryClient.invalidateQueries({ queryKey: ["project-images", projectId] });
+      setSaveMsg({ kind: "ok", text: `Replaced ${res.file.filename} · v${res.file.version}` });
+    },
+    onError: (err: unknown) => {
+      setSaveMsg({
+        kind: "err",
+        text: err instanceof Error ? err.message : "Replace failed.",
+      });
+    },
+  });
+
+  const exportMut = useMutation({
+    mutationFn: async (ids: number[]) => exportSelectedImages(projectId, ids),
+    onSuccess: (blob) => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `project-${projectId}-images.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setSaveMsg({ kind: "ok", text: "Export ready." });
+    },
+    onError: (err: unknown) => {
+      setSaveMsg({
+        kind: "err",
+        text: err instanceof Error ? err.message : "Export failed.",
+      });
+    },
+  });
+
+  const toggleChecked = (id: number) =>
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const backTarget = useMemo(() => {
+    if (selected?.chapter_id != null) {
+      return `/projects/${projectId}/chapters/${selected.chapter_id}?folder=art`;
+    }
+    return `/projects/${projectId}`;
+  }, [projectId, selected?.chapter_id]);
+  const goBack = () => navigate(backTarget);
 
   const rotate = (dir: -1 | 1) =>
     commit((s) => ({ ...s, rotation: (((s.rotation + dir * 90) % 360) + 360) % 360 }));
-
-  const flip = (axis: "h" | "v") =>
-    commit((s) => ({
-      ...s,
-      flipH: axis === "h" ? !s.flipH : s.flipH,
-      flipV: axis === "v" ? !s.flipV : s.flipV,
-    }));
 
   const zoomIn = () => setViewZoom((z) => Math.min(4, +(z + 0.1).toFixed(2)));
   const zoomOut = () => setViewZoom((z) => Math.max(0.25, +(z - 0.1).toFixed(2)));
@@ -268,20 +292,9 @@ export function ImageReviewPage() {
   const resetAll = () => {
     reset(INITIAL_EDIT_STATE);
     setCropMode(false);
+    setResizePopoverOpen(false);
+    setDpiPopoverOpen(false);
   };
-
-  // Prefer the Art folder of the currently selected image; fall back to the
-  // project page if nothing is selected. Using an absolute route means the
-  // back button works even when the page was opened via a direct link (in
-  // which case `navigate(-1)` would bounce the user out of the SPA).
-  const backTarget = useMemo(() => {
-    if (selected?.chapter_id != null) {
-      return `/projects/${projectId}/chapters/${selected.chapter_id}?folder=art`;
-    }
-    return `/projects/${projectId}`;
-  }, [projectId, selected?.chapter_id]);
-
-  const goBack = () => navigate(backTarget);
 
   const cancel = () => {
     resetAll();
@@ -294,16 +307,12 @@ export function ImageReviewPage() {
       try {
         await document.documentElement.requestFullscreen();
         setIsFullscreen(true);
-      } catch {
-        /* ignore */
-      }
+      } catch { /* ignore */ }
     } else {
       try {
         await document.exitFullscreen();
         setIsFullscreen(false);
-      } catch {
-        /* ignore */
-      }
+      } catch { /* ignore */ }
     }
   };
 
@@ -312,6 +321,11 @@ export function ImageReviewPage() {
     document.addEventListener("fullscreenchange", onChange);
     return () => document.removeEventListener("fullscreenchange", onChange);
   }, []);
+
+  const setResolution = (w: number | null, h: number | null) =>
+    commit((s) => ({ ...s, targetWidth: w, targetHeight: h }));
+
+  const setDpi = (dpi: number | null) => commit((s) => ({ ...s, dpi }));
 
   const save = async () => {
     if (!selected) return;
@@ -324,21 +338,26 @@ export function ImageReviewPage() {
     try {
       const bakedDataUrl = await bakeImage(selected.preview_url, {
         rotation: edit.rotation,
-        flipH: edit.flipH,
-        flipV: edit.flipV,
-        brightness: edit.brightness,
-        contrast: edit.contrast,
         cropRect: edit.cropRect,
+        targetWidth: edit.targetWidth,
+        targetHeight: edit.targetHeight,
       });
       const blob = await (await fetch(bakedDataUrl)).blob();
       const mime = blob.type || "image/png";
-      await saveMut.mutateAsync({ image: selected, bakedBlob: blob, bakedMime: mime });
-      setSaveMsg({
-        kind: "ok",
-        text: selected.needs_transcoding
-          ? "Saved edited PNG (source kept intact)."
-          : `Saved v${selected.version + 1}.`,
+      const res = await saveMut.mutateAsync({
+        image: selected,
+        bakedBlob: blob,
+        bakedMime: mime,
+        dpi: edit.dpi,
       });
+      const parts: string[] = [];
+      if (res.file.filename === selected.filename) {
+        parts.push(`Saved v${res.file.version}`);
+      } else {
+        parts.push(`Saved as ${res.file.filename}`);
+      }
+      if (res.dpi_applied) parts.push(`DPI ${res.dpi_applied}`);
+      setSaveMsg({ kind: "ok", text: parts.join(" · ") });
       reset(INITIAL_EDIT_STATE);
       setCropMode(false);
     } catch (e) {
@@ -395,15 +414,11 @@ export function ImageReviewPage() {
         if (d.corner === "nw") {
           const nx = Math.max(0, Math.min(x + w - MIN_CROP_PERCENT, x + dxPct));
           const ny = Math.max(0, Math.min(y + h - MIN_CROP_PERCENT, y + dyPct));
-          w += x - nx;
-          h += y - ny;
-          x = nx;
-          y = ny;
+          w += x - nx; h += y - ny; x = nx; y = ny;
         } else if (d.corner === "ne") {
           const ny = Math.max(0, Math.min(y + h - MIN_CROP_PERCENT, y + dyPct));
           w = Math.max(MIN_CROP_PERCENT, Math.min(100 - x, w + dxPct));
-          h += y - ny;
-          y = ny;
+          h += y - ny; y = ny;
         } else if (d.corner === "sw") {
           const nx = Math.max(0, Math.min(x + w - MIN_CROP_PERCENT, x + dxPct));
           w += x - nx;
@@ -414,25 +429,21 @@ export function ImageReviewPage() {
           h = Math.max(MIN_CROP_PERCENT, Math.min(100 - y, h + dyPct));
         }
       }
-      patch({ cropRect: { x, y, w, h } });
+      // During drag we mutate state directly without pushing to history for
+      // every pointermove; a single history entry gets pushed at pointerUp.
+      commit((s) => ({ ...s, cropRect: { x, y, w, h } }));
     },
-    [patch],
+    [commit],
   );
 
   const endCropDrag = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (cropDragRef.current) {
       try {
         (e.target as HTMLElement).releasePointerCapture(e.pointerId);
-      } catch {
-        /* ignore */
-      }
-      const finalRect = cropDragRef.current.startRect;
+      } catch { /* ignore */ }
       cropDragRef.current = null;
-      // Commit as a single history entry at drag end.
-      commit((s) => ({ ...s })); // effectively a no-op that snapshots current state
-      void finalRect;
     }
-  }, [commit]);
+  }, []);
 
   // ── Search + filtered list ───────────────────────────────────────────────
   const filtered = useMemo(() => {
@@ -445,24 +456,31 @@ export function ImageReviewPage() {
     );
   }, [images, search]);
 
-  const previewFilter = `brightness(${edit.brightness}) contrast(${edit.contrast})`;
+  const previewFilter = "none";
   const previewTransform =
-    `translate(-50%, -50%) scale(${viewZoom}) rotate(${edit.rotation}deg) ` +
-    `scaleX(${edit.flipH ? -1 : 1}) scaleY(${edit.flipV ? -1 : 1})`;
+    `translate(-50%, -50%) scale(${viewZoom}) rotate(${edit.rotation}deg)`;
   const previewClipPath =
     edit.cropRect && !cropMode
       ? `inset(${edit.cropRect.y}% ${100 - (edit.cropRect.x + edit.cropRect.w)}% ${100 - (edit.cropRect.y + edit.cropRect.h)}% ${edit.cropRect.x}%)`
       : undefined;
 
+  // Effective post-crop / post-rotate dimensions we'd write on save.
+  const effectiveOutSize = useMemo(() => {
+    if (!naturalSize) return null;
+    const crop = edit.cropRect;
+    let w = crop ? Math.round((crop.w / 100) * naturalSize.w) : naturalSize.w;
+    let h = crop ? Math.round((crop.h / 100) * naturalSize.h) : naturalSize.h;
+    if (edit.rotation === 90 || edit.rotation === 270) [w, h] = [h, w];
+    if (edit.targetWidth) w = edit.targetWidth;
+    if (edit.targetHeight) h = edit.targetHeight;
+    return { w, h };
+  }, [naturalSize, edit.cropRect, edit.rotation, edit.targetWidth, edit.targetHeight]);
+
   return (
     <div className="flex flex-col h-full bg-slate-50 text-slate-800">
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-2.5 bg-white border-b border-slate-200">
-        <button
-          onClick={goBack}
-          className="p-1.5 rounded-md hover:bg-slate-100 text-slate-500"
-          title="Back"
-        >
+        <button onClick={goBack} className="p-1.5 rounded-md hover:bg-slate-100 text-slate-500" title="Back">
           <ArrowLeft className="w-4 h-4" />
         </button>
         <div className="flex flex-col leading-tight">
@@ -473,13 +491,7 @@ export function ImageReviewPage() {
         </div>
         <div className="flex-1" />
         {saveMsg && (
-          <span
-            className={
-              saveMsg.kind === "ok"
-                ? "text-[11px] text-emerald-600"
-                : "text-[11px] text-rose-600"
-            }
-          >
+          <span className={saveMsg.kind === "ok" ? "text-[11px] text-emerald-600" : "text-[11px] text-rose-600"}>
             {saveMsg.text}
           </span>
         )}
@@ -504,90 +516,74 @@ export function ImageReviewPage() {
         {/* Left: editor */}
         <div className="flex-1 min-w-0 flex flex-col bg-slate-100">
           {/* Toolbar */}
-          <div className="bg-white border-b border-slate-200 px-3 py-2 flex items-center gap-1 overflow-x-auto shadow-sm">
-            <ToolBtn
-              disabled={!selected}
-              active={cropMode}
-              onClick={() => setCropMode((v) => !v)}
-              label="Crop"
-              icon={<Crop className="w-4 h-4" />}
-            />
+          <div className="bg-white border-b border-slate-200 px-3 py-2 flex items-center flex-wrap gap-1 shadow-sm">
+            <ToolBtn disabled={!selected} active={cropMode} onClick={() => setCropMode((v) => !v)} label="Crop" icon={<Crop className="w-4 h-4" />} />
             <Divider />
-            <ToolBtn
-              disabled={!selected}
-              onClick={() => rotate(-1)}
-              label="Rotate L"
-              icon={<RotateCcw className="w-4 h-4" />}
-            />
-            <ToolBtn
-              disabled={!selected}
-              onClick={() => rotate(1)}
-              label="Rotate R"
-              icon={<RotateCw className="w-4 h-4" />}
-            />
-            <ToolBtn
-              disabled={!selected}
-              active={edit.flipH}
-              onClick={() => flip("h")}
-              label="Flip H"
-              icon={<FlipHorizontal className="w-4 h-4" />}
-            />
-            <ToolBtn
-              disabled={!selected}
-              active={edit.flipV}
-              onClick={() => flip("v")}
-              label="Flip V"
-              icon={<FlipVertical className="w-4 h-4" />}
-            />
+            <ToolBtn disabled={!selected} onClick={() => rotate(-1)} label="Rotate L" icon={<RotateCcw className="w-4 h-4" />} />
+            <ToolBtn disabled={!selected} onClick={() => rotate(1)} label="Rotate R" icon={<RotateCw className="w-4 h-4" />} />
             <Divider />
-            <ToolBtn
-              disabled={!selected || viewZoom <= 0.25}
-              onClick={zoomOut}
-              label="Zoom Out"
-              icon={<ZoomOut className="w-4 h-4" />}
-            />
-            <ToolBtn
-              disabled={!selected || viewZoom >= 4}
-              onClick={zoomIn}
-              label="Zoom In"
-              icon={<ZoomIn className="w-4 h-4" />}
-            />
+            <ToolBtn disabled={!selected || viewZoom <= 0.25} onClick={zoomOut} label="Zoom Out" icon={<ZoomOut className="w-4 h-4" />} />
+            <ToolBtn disabled={!selected || viewZoom >= 4} onClick={zoomIn} label="Zoom In" icon={<ZoomIn className="w-4 h-4" />} />
             <Divider />
-            <Slider
-              icon={<Sun className="w-3.5 h-3.5 text-amber-500" />}
-              label="Brightness"
-              value={edit.brightness}
-              disabled={!selected}
-              onChange={(v) => patch({ brightness: v })}
-              onCommit={() => commit((s) => ({ ...s }))}
-            />
-            <Slider
-              icon={<ContrastIcon className="w-3.5 h-3.5 text-slate-600" />}
-              label="Contrast"
-              value={edit.contrast}
-              disabled={!selected}
-              onChange={(v) => patch({ contrast: v })}
-              onCommit={() => commit((s) => ({ ...s }))}
-            />
+
+            {/* Resize popover */}
+            <PopoverAnchor
+              open={resizePopoverOpen}
+              onOpenChange={(v) => { setResizePopoverOpen(v); if (v) setDpiPopoverOpen(false); }}
+              trigger={(anchorRef) => (
+                <div ref={anchorRef}>
+                  <ToolBtn
+                    disabled={!selected}
+                    active={edit.targetWidth != null || edit.targetHeight != null}
+                    onClick={() => { setResizePopoverOpen((v) => !v); setDpiPopoverOpen(false); }}
+                    label="Resize"
+                    icon={<Maximize2 className="w-4 h-4" />}
+                  />
+                </div>
+              )}
+            >
+              {selected && naturalSize && (
+                <ResizePopover
+                  natural={naturalSize}
+                  rotation={edit.rotation}
+                  crop={edit.cropRect}
+                  currentW={edit.targetWidth}
+                  currentH={edit.targetHeight}
+                  onApply={(w, h) => { setResolution(w, h); setResizePopoverOpen(false); }}
+                  onClose={() => setResizePopoverOpen(false)}
+                />
+              )}
+            </PopoverAnchor>
+
+            {/* DPI popover */}
+            <PopoverAnchor
+              open={dpiPopoverOpen}
+              onOpenChange={(v) => { setDpiPopoverOpen(v); if (v) setResizePopoverOpen(false); }}
+              trigger={(anchorRef) => (
+                <div ref={anchorRef}>
+                  <ToolBtn
+                    disabled={!selected}
+                    active={edit.dpi != null}
+                    onClick={() => { setDpiPopoverOpen((v) => !v); setResizePopoverOpen(false); }}
+                    label={edit.dpi ? `DPI ${edit.dpi}` : "DPI"}
+                    icon={<Gauge className="w-4 h-4" />}
+                  />
+                </div>
+              )}
+            >
+              {selected && (
+                <DpiPopover
+                  current={edit.dpi}
+                  onApply={(v) => { setDpi(v); setDpiPopoverOpen(false); }}
+                  onClose={() => setDpiPopoverOpen(false)}
+                />
+              )}
+            </PopoverAnchor>
+
             <Divider />
-            <ToolBtn
-              disabled={!canUndo}
-              onClick={undo}
-              label="Undo"
-              icon={<Undo className="w-4 h-4" />}
-            />
-            <ToolBtn
-              disabled={!canRedo}
-              onClick={redo}
-              label="Redo"
-              icon={<Redo className="w-4 h-4" />}
-            />
-            <ToolBtn
-              disabled={!selected}
-              onClick={resetAll}
-              label="Reset"
-              icon={<RefreshCw className="w-4 h-4" />}
-            />
+            <ToolBtn disabled={!canUndo} onClick={undo} label="Undo" icon={<Undo className="w-4 h-4" />} />
+            <ToolBtn disabled={!canRedo} onClick={redo} label="Redo" icon={<Redo className="w-4 h-4" />} />
+            <ToolBtn disabled={!selected} onClick={resetAll} label="Reset" icon={<RefreshCw className="w-4 h-4" />} />
             <div className="flex-1" />
             <button
               onClick={cancel}
@@ -605,44 +601,46 @@ export function ImageReviewPage() {
             </button>
           </div>
 
-          {/* Sub-toolbar: zoom + dims */}
-          <div className="bg-slate-50 border-b border-slate-200 px-4 py-1.5 flex items-center gap-4 text-[11px] text-slate-600">
+          {/* Sub-toolbar */}
+          <div className="bg-slate-50 border-b border-slate-200 px-4 py-1.5 flex items-center gap-4 text-[11px] text-slate-600 flex-wrap">
             <span className="font-mono">{Math.round(viewZoom * 100)}%</span>
             {naturalSize && (
-              <span className="font-mono">
-                {naturalSize.w} × {naturalSize.h}
+              <span className="font-mono" title="Source pixel dimensions">
+                Source {naturalSize.w} × {naturalSize.h}
+              </span>
+            )}
+            {effectiveOutSize && (
+              <span className="font-mono text-slate-900" title="Output pixel dimensions after crop + rotate + resize">
+                Output {effectiveOutSize.w} × {effectiveOutSize.h}
+              </span>
+            )}
+            {edit.dpi != null && (
+              <span className="font-mono text-primary" title="Print density metadata that will be written on save">
+                {edit.dpi} DPI
               </span>
             )}
             {selected && (
-              <>
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 text-[10px] uppercase font-bold tracking-wider">
-                  {selected.file_type}
-                </span>
-                {selected.needs_transcoding && (
-                  <span className="text-amber-600">
-                    Preview transcoded from {selected.file_type.toUpperCase()} → PNG
-                  </span>
-                )}
-              </>
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 text-[10px] uppercase font-bold tracking-wider">
+                {selected.file_type}
+              </span>
+            )}
+            {selected?.needs_transcoding && (
+              <span className="text-amber-600">
+                Preview transcoded from {selected.file_type.toUpperCase()} → PNG
+              </span>
             )}
             <div className="flex-1" />
             {selected && (
               <div className="flex items-center gap-1.5">
                 <span className="text-slate-500">Convert →</span>
                 {(["png", "jpg", "tif"] as const).map((fmt) => {
-                  const disabled =
-                    convertMut.isPending ||
-                    selected.file_type.toLowerCase().startsWith(fmt);
+                  const disabled = convertMut.isPending || selected.file_type.toLowerCase().startsWith(fmt);
                   return (
                     <button
                       key={fmt}
                       disabled={disabled}
                       onClick={() =>
-                        convertMut.mutate({
-                          fileId: selected.id,
-                          target_format: fmt,
-                          mode: "copy",
-                        })
+                        convertMut.mutate({ fileId: selected.id, target_format: fmt, mode: "copy" })
                       }
                       className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 disabled:opacity-40"
                     >
@@ -680,9 +678,7 @@ export function ImageReviewPage() {
                       const el = e.currentTarget;
                       setNaturalSize({ w: el.naturalWidth, h: el.naturalHeight });
                     }}
-                    onError={() =>
-                      setSaveMsg({ kind: "err", text: "Failed to load preview." })
-                    }
+                    onError={() => setSaveMsg({ kind: "err", text: "Failed to load preview." })}
                     draggable={false}
                     style={{
                       position: "absolute",
@@ -694,7 +690,7 @@ export function ImageReviewPage() {
                       transformOrigin: "center center",
                       filter: previewFilter,
                       clipPath: previewClipPath,
-                      transition: "filter 100ms ease, clip-path 100ms ease",
+                      transition: "clip-path 100ms ease",
                       boxShadow: "0 8px 40px rgba(15, 23, 42, 0.15)",
                       background: "#fff",
                     }}
@@ -705,8 +701,6 @@ export function ImageReviewPage() {
                       rect={currentCrop}
                       viewZoom={viewZoom}
                       rotation={edit.rotation}
-                      flipH={edit.flipH}
-                      flipV={edit.flipV}
                       onBegin={beginCropDrag}
                       onMove={onCropDrag}
                       onEnd={endCropDrag}
@@ -725,11 +719,9 @@ export function ImageReviewPage() {
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
                 All Images ({images.length})
               </span>
-              {query.isFetching && (
-                <Loader2 className="w-3 h-3 animate-spin text-slate-400" />
-              )}
+              {query.isFetching && <Loader2 className="w-3 h-3 animate-spin text-slate-400" />}
             </div>
-            <div className="relative">
+            <div className="relative mb-2">
               <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 value={search}
@@ -738,6 +730,21 @@ export function ImageReviewPage() {
                 className="w-full pl-8 pr-2 py-1.5 text-[12px] bg-slate-50 border border-slate-200 rounded-md text-slate-800 focus:outline-none focus:border-primary focus:bg-white"
               />
             </div>
+
+            {/* Batch actions row */}
+            <RailActions
+              filtered={filtered}
+              checkedIds={checkedIds}
+              setCheckedIds={setCheckedIds}
+              onExport={() => exportMut.mutate(Array.from(checkedIds))}
+              exporting={exportMut.isPending}
+              onReplace={() => {
+                const only = Array.from(checkedIds);
+                if (only.length !== 1) return;
+                const target = images.find((i) => i.id === only[0]);
+                if (target) setReplaceDialogFor(target);
+              }}
+            />
           </div>
 
           <div className="flex-1 overflow-y-auto p-2 space-y-2">
@@ -746,7 +753,9 @@ export function ImageReviewPage() {
                 key={img.id}
                 image={img}
                 selected={img.id === selectedId}
+                checked={checkedIds.has(img.id)}
                 onClick={() => setSelectedId(img.id)}
+                onToggleCheck={() => toggleChecked(img.id)}
               />
             ))}
             {filtered.length === 0 && !query.isLoading && (
@@ -757,6 +766,24 @@ export function ImageReviewPage() {
           </div>
         </aside>
       </div>
+
+      {/* Replace dialog */}
+      {replaceDialogFor && (
+        <ReplaceDialog
+          image={replaceDialogFor}
+          onClose={() => setReplaceDialogFor(null)}
+          isSubmitting={replaceMut.isPending}
+          onSubmit={async (file, reason) => {
+            await replaceMut.mutateAsync({
+              fileId: replaceDialogFor.id,
+              file,
+              reason,
+            });
+            setReplaceDialogFor(null);
+            setCheckedIds(new Set());
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -764,11 +791,7 @@ export function ImageReviewPage() {
 // ─── Toolbar primitives ─────────────────────────────────────────────────────
 
 function ToolBtn({
-  active,
-  disabled,
-  onClick,
-  label,
-  icon,
+  active, disabled, onClick, label, icon,
 }: {
   active?: boolean;
   disabled?: boolean;
@@ -783,9 +806,7 @@ function ToolBtn({
       disabled={disabled}
       title={label}
       className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-md transition-colors min-w-[46px] ${
-        active
-          ? "bg-primary/10 text-primary"
-          : "text-slate-700 hover:bg-slate-100"
+        active ? "bg-primary/10 text-primary" : "text-slate-700 hover:bg-slate-100"
       } ${disabled ? "opacity-35 cursor-not-allowed" : "cursor-pointer"}`}
     >
       {icon}
@@ -798,44 +819,280 @@ function Divider() {
   return <div className="w-px h-8 bg-slate-200 mx-1 self-center" />;
 }
 
-function Slider({
-  icon,
-  label,
-  value,
-  onChange,
-  onCommit,
-  disabled,
+// ─── Popover anchor ────────────────────────────────────────────────────────
+// Renders the popover in a portal with fixed positioning tied to the trigger
+// element. This escapes the toolbar's `overflow-x-auto` container (which would
+// otherwise clip the popover) and keeps it visible over any adjacent content.
+
+function PopoverAnchor({
+  open,
+  onOpenChange,
+  trigger,
+  children,
 }: {
-  icon: React.ReactNode;
-  label: string;
-  value: number;
-  onChange: (v: number) => void;
-  onCommit: () => void;
-  disabled?: boolean;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  trigger: (anchorRef: React.RefObject<HTMLDivElement>) => React.ReactNode;
+  children: React.ReactNode;
 }) {
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      setPos(null);
+      return;
+    }
+    const compute = () => {
+      const el = anchorRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setPos({ top: r.bottom + 4, left: r.left });
+    };
+    compute();
+    window.addEventListener("resize", compute);
+    window.addEventListener("scroll", compute, true);
+    return () => {
+      window.removeEventListener("resize", compute);
+      window.removeEventListener("scroll", compute, true);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onOpenChange(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onOpenChange]);
+
   return (
-    <div className="flex flex-col items-center gap-0.5 px-2" title={label}>
-      <div className="flex items-center gap-1">
-        {icon}
-        <input
-          type="range"
-          min={0.3}
-          max={1.7}
-          step={0.02}
-          value={value}
-          disabled={disabled}
-          onChange={(e) => onChange(Number(e.target.value))}
-          onPointerUp={onCommit}
-          onKeyUp={onCommit}
-          className="w-24 accent-primary"
-        />
-        <span className="text-[10px] font-mono text-slate-500 w-8 text-right">
-          {Math.round(value * 100)}%
-        </span>
+    <>
+      {trigger(anchorRef)}
+      {open && pos && createPortal(
+        <div
+          style={{
+            position: "fixed",
+            top: pos.top,
+            left: pos.left,
+            zIndex: 2147483000,
+          }}
+        >
+          {children}
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
+
+// ─── Resize popover ────────────────────────────────────────────────────────
+
+function ResizePopover({
+  natural, rotation, crop, currentW, currentH, onApply, onClose,
+}: {
+  natural: { w: number; h: number };
+  rotation: number;
+  crop: CropRect;
+  currentW: number | null;
+  currentH: number | null;
+  onApply: (w: number | null, h: number | null) => void;
+  onClose: () => void;
+}) {
+  // Baseline dimensions after crop + rotate — the user's Resize acts on top of
+  // those, not the raw source, so we compute the current post-crop-rotate size
+  // and pre-populate the inputs with it.
+  const rotated = rotation === 90 || rotation === 270;
+  const cropW = crop ? Math.round((crop.w / 100) * natural.w) : natural.w;
+  const cropH = crop ? Math.round((crop.h / 100) * natural.h) : natural.h;
+  const baseW = rotated ? cropH : cropW;
+  const baseH = rotated ? cropW : cropH;
+  const aspect = baseW / Math.max(1, baseH);
+
+  const [w, setW] = useState<number>(currentW ?? baseW);
+  const [h, setH] = useState<number>(currentH ?? baseH);
+  const [lock, setLock] = useState(true);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [onClose]);
+
+  const updateW = (v: number) => {
+    setW(v);
+    if (lock) setH(Math.max(1, Math.round(v / aspect)));
+  };
+  const updateH = (v: number) => {
+    setH(v);
+    if (lock) setW(Math.max(1, Math.round(v * aspect)));
+  };
+
+  const applyScale = (pct: number) => {
+    const nw = Math.max(1, Math.round(baseW * pct));
+    const nh = Math.max(1, Math.round(baseH * pct));
+    setW(nw); setH(nh);
+  };
+
+  return (
+    <div
+      ref={rootRef}
+      className="bg-white border border-slate-200 rounded-lg shadow-xl p-3 w-64 text-[11px]"
+    >
+      <div className="font-bold text-slate-700 mb-2">Resize</div>
+      <div className="grid grid-cols-2 gap-2 mb-2">
+        <label className="flex flex-col gap-0.5">
+          <span className="text-slate-500 text-[10px]">Width (px)</span>
+          <input
+            type="number"
+            min={1}
+            value={w}
+            onChange={(e) => updateW(Math.max(1, Number(e.target.value) || 1))}
+            className="px-2 py-1 border border-slate-300 rounded font-mono text-slate-800 focus:outline-none focus:border-primary"
+          />
+        </label>
+        <label className="flex flex-col gap-0.5">
+          <span className="text-slate-500 text-[10px]">Height (px)</span>
+          <input
+            type="number"
+            min={1}
+            value={h}
+            onChange={(e) => updateH(Math.max(1, Number(e.target.value) || 1))}
+            className="px-2 py-1 border border-slate-300 rounded font-mono text-slate-800 focus:outline-none focus:border-primary"
+          />
+        </label>
       </div>
-      <span className="text-[10px] font-semibold leading-none text-slate-500">
-        {label}
-      </span>
+      <label className="flex items-center gap-1.5 mb-2 text-slate-600 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={lock}
+          onChange={(e) => setLock(e.target.checked)}
+          className="accent-primary"
+        />
+        Lock aspect ratio
+      </label>
+      <div className="flex items-center gap-1 mb-2">
+        <span className="text-slate-500">Presets:</span>
+        {[0.25, 0.5, 0.75].map((p) => (
+          <button
+            key={p}
+            onClick={() => applyScale(p)}
+            className="px-1.5 py-0.5 rounded border border-slate-200 hover:bg-slate-50 font-mono text-slate-700"
+          >
+            {Math.round(p * 100)}%
+          </button>
+        ))}
+      </div>
+      <div className="text-slate-400 text-[10px] mb-2">
+        Base after crop + rotate: {baseW} × {baseH}
+      </div>
+      <div className="flex justify-between gap-1.5">
+        <button
+          onClick={() => onApply(null, null)}
+          className="px-2 py-1 rounded border border-slate-200 text-slate-500 hover:bg-slate-50"
+        >
+          Clear
+        </button>
+        <div className="flex gap-1.5">
+          <button
+            onClick={onClose}
+            className="px-2 py-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => onApply(w, h)}
+            className="px-2 py-1 rounded bg-primary text-white hover:bg-primary/90 font-semibold"
+          >
+            Apply
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── DPI popover ───────────────────────────────────────────────────────────
+
+function DpiPopover({
+  current, onApply, onClose,
+}: {
+  current: number | null;
+  onApply: (v: number | null) => void;
+  onClose: () => void;
+}) {
+  const [value, setValue] = useState<number>(current ?? 300);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [onClose]);
+
+  return (
+    <div
+      ref={rootRef}
+      className="bg-white border border-slate-200 rounded-lg shadow-xl p-3 w-56 text-[11px]"
+    >
+      <div className="font-bold text-slate-700 mb-2">DPI (dots per inch)</div>
+      <div className="flex gap-1 mb-2 flex-wrap">
+        {DPI_PRESETS.map((p) => (
+          <button
+            key={p}
+            onClick={() => setValue(p)}
+            className={`px-2 py-1 rounded font-mono ${
+              value === p
+                ? "bg-primary text-white"
+                : "border border-slate-200 text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            {p}
+          </button>
+        ))}
+      </div>
+      <label className="flex flex-col gap-0.5 mb-2">
+        <span className="text-slate-500 text-[10px]">Custom</span>
+        <input
+          type="number"
+          min={1}
+          max={2400}
+          value={value}
+          onChange={(e) => setValue(Math.max(1, Math.min(2400, Number(e.target.value) || 1)))}
+          className="px-2 py-1 border border-slate-300 rounded font-mono text-slate-800 focus:outline-none focus:border-primary"
+        />
+      </label>
+      <div className="text-slate-400 text-[10px] mb-2">
+        Writes to the saved file's density metadata. Does not resample pixels — use
+        Resize for that.
+      </div>
+      <div className="flex justify-between gap-1.5">
+        <button
+          onClick={() => onApply(null)}
+          className="px-2 py-1 rounded border border-slate-200 text-slate-500 hover:bg-slate-50"
+        >
+          Clear
+        </button>
+        <div className="flex gap-1.5">
+          <button
+            onClick={onClose}
+            className="px-2 py-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => onApply(value)}
+            className="px-2 py-1 rounded bg-primary text-white hover:bg-primary/90 font-semibold"
+          >
+            Apply
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -843,13 +1100,13 @@ function Slider({
 // ─── Image card ─────────────────────────────────────────────────────────────
 
 function ImageCard({
-  image,
-  selected,
-  onClick,
+  image, selected, checked, onClick, onToggleCheck,
 }: {
   image: ProjectImage;
   selected: boolean;
+  checked: boolean;
   onClick: () => void;
+  onToggleCheck: () => void;
 }) {
   const [thumbError, setThumbError] = useState(false);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
@@ -857,24 +1114,24 @@ function ImageCard({
   const badge = STATUS_STYLES[status];
 
   return (
-    <button
+    <div
       onClick={onClick}
-      className={`w-full flex gap-2 p-2 rounded-lg border transition-colors text-left ${
-        selected
-          ? "border-primary bg-primary/5"
-          : "border-slate-200 bg-white hover:border-slate-300"
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onClick(); }}
+      className={`w-full flex gap-2 p-2 rounded-lg border transition-colors text-left cursor-pointer ${
+        selected ? "border-primary bg-primary/5" : "border-slate-200 bg-white hover:border-slate-300"
       }`}
     >
-      {/* Selection checkbox */}
+      {/* Multi-select checkbox (separate from the row click that focuses the editor) */}
       <div
-        className={`w-3.5 h-3.5 mt-1 shrink-0 rounded-sm border flex items-center justify-center ${
-          selected ? "bg-primary border-primary" : "border-slate-300 bg-white"
+        onClick={(e) => { e.stopPropagation(); onToggleCheck(); }}
+        className={`w-3.5 h-3.5 mt-1 shrink-0 rounded-sm border flex items-center justify-center cursor-pointer ${
+          checked ? "bg-primary border-primary" : "border-slate-300 bg-white hover:border-slate-400"
         }`}
       >
-        {selected && <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />}
+        {checked && <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />}
       </div>
-
-      {/* Thumbnail */}
       <div className="w-14 h-14 shrink-0 rounded-md overflow-hidden bg-slate-100 border border-slate-200 flex items-center justify-center">
         {thumbError ? (
           <FileImage className="w-5 h-5 text-slate-400" />
@@ -892,8 +1149,6 @@ function ImageCard({
           />
         )}
       </div>
-
-      {/* Metadata */}
       <div className="min-w-0 flex-1">
         <div className="text-[12px] font-semibold text-slate-900 truncate">
           {image.filename}
@@ -915,7 +1170,199 @@ function ImageCard({
           </span>
         </div>
       </div>
-    </button>
+    </div>
+  );
+}
+
+// ─── Rail action row (Select All / Export Selected / Replace) ──────────────
+
+function RailActions({
+  filtered, checkedIds, setCheckedIds, onExport, exporting, onReplace,
+}: {
+  filtered: ProjectImage[];
+  checkedIds: Set<number>;
+  setCheckedIds: React.Dispatch<React.SetStateAction<Set<number>>>;
+  onExport: () => void;
+  exporting: boolean;
+  onReplace: () => void;
+}) {
+  const filteredIds = useMemo(() => filtered.map((f) => f.id), [filtered]);
+  const allChecked = filteredIds.length > 0 && filteredIds.every((id) => checkedIds.has(id));
+  const someChecked = filteredIds.some((id) => checkedIds.has(id));
+  const canReplace = checkedIds.size === 1;
+  const canExport = checkedIds.size > 0;
+
+  const toggleAll = () => {
+    if (allChecked) {
+      setCheckedIds((prev) => {
+        const next = new Set(prev);
+        filteredIds.forEach((id) => next.delete(id));
+        return next;
+      });
+    } else {
+      setCheckedIds((prev) => {
+        const next = new Set(prev);
+        filteredIds.forEach((id) => next.add(id));
+        return next;
+      });
+    }
+  };
+
+  return (
+    <div className="flex items-center justify-between gap-1 text-[11px]">
+      <label className="flex items-center gap-1.5 cursor-pointer text-slate-600 select-none">
+        <span
+          className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center ${
+            allChecked
+              ? "bg-primary border-primary"
+              : someChecked
+              ? "bg-primary/50 border-primary/70"
+              : "border-slate-300 bg-white"
+          }`}
+        >
+          {(allChecked || someChecked) && (
+            <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />
+          )}
+        </span>
+        <input
+          type="checkbox"
+          className="sr-only"
+          checked={allChecked}
+          onChange={toggleAll}
+        />
+        <span onClick={toggleAll}>Select All</span>
+      </label>
+      <button
+        onClick={onExport}
+        disabled={!canExport || exporting}
+        className="flex items-center gap-1 px-2 py-1 rounded text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed"
+        title={canExport ? "Download the selected images as a ZIP" : "Select at least one image"}
+      >
+        {exporting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+        Export Selected
+      </button>
+      <button
+        onClick={onReplace}
+        disabled={!canReplace}
+        className="flex items-center gap-1 px-2 py-1 rounded text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed"
+        title={
+          canReplace
+            ? "Replace the selected image with a new upload (audit reason required)"
+            : "Select exactly one image to replace"
+        }
+      >
+        <Repeat className="w-3 h-3" />
+        Replace
+      </button>
+    </div>
+  );
+}
+
+// ─── Replace dialog ────────────────────────────────────────────────────────
+
+function ReplaceDialog({
+  image, onClose, onSubmit, isSubmitting,
+}: {
+  image: ProjectImage;
+  onClose: () => void;
+  onSubmit: (file: File, reason: string) => Promise<void> | void;
+  isSubmitting: boolean;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [reason, setReason] = useState("");
+  const reasonClean = reason.trim();
+  const reasonValid = reasonClean.length >= 3;
+  const canSubmit = !!file && reasonValid && !isSubmitting;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return createPortal(
+    <div
+      className="fixed inset-0 flex items-center justify-center p-4"
+      style={{ zIndex: 2147483000, background: "rgba(15, 23, 42, 0.45)" }}
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-xl shadow-2xl border border-slate-200 w-[440px] max-w-full p-5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-bold text-slate-900">Replace image</h2>
+          <button
+            onClick={onClose}
+            className="p-1 rounded-md text-slate-500 hover:bg-slate-100"
+            aria-label="Close"
+          >
+            <XIcon className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        <div className="text-[11px] text-slate-500 mb-3">
+          <span className="font-mono">{image.filename}</span> · v{image.version}
+        </div>
+
+        <label className="block mb-3">
+          <span className="text-[11px] font-semibold text-slate-700">New file</span>
+          <input
+            type="file"
+            accept="image/*,.tif,.tiff,.eps"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            className="mt-1 block w-full text-[12px] text-slate-700 file:mr-3 file:py-1 file:px-2 file:rounded-md file:border file:border-slate-300 file:bg-slate-50 file:text-slate-700 file:font-semibold hover:file:bg-slate-100"
+          />
+          {file && (
+            <span className="mt-1 block text-[10px] text-slate-500 font-mono truncate">
+              {file.name} · {(file.size / 1024).toFixed(1)} KB
+            </span>
+          )}
+        </label>
+
+        <label className="block mb-3">
+          <span className="text-[11px] font-semibold text-slate-700">
+            Reason <span className="text-rose-500">*</span>
+          </span>
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            rows={3}
+            placeholder="Why is this image being replaced? (recorded to the file's version history)"
+            className="mt-1 block w-full text-[12px] px-2 py-1.5 border border-slate-300 rounded-md text-slate-800 focus:outline-none focus:border-primary"
+          />
+          <span className="mt-1 block text-[10px] text-slate-400">
+            {reasonClean.length < 3
+              ? `Enter at least 3 characters (${reasonClean.length}/3)`
+              : "Saved with the archived version for audit"}
+          </span>
+        </label>
+
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 rounded-md text-[11px] font-bold uppercase tracking-wider bg-white border border-slate-300 text-slate-700 hover:bg-slate-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => file && onSubmit(file, reasonClean)}
+            disabled={!canSubmit}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-md text-[11px] font-bold uppercase tracking-wider bg-primary text-white hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {isSubmitting ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Repeat className="w-3.5 h-3.5" />
+            )}
+            {isSubmitting ? "Replacing…" : "Replace"}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -926,24 +1373,12 @@ interface CropOverlayProps {
   rect: { x: number; y: number; w: number; h: number };
   viewZoom: number;
   rotation: number;
-  flipH: boolean;
-  flipV: boolean;
   onBegin: (e: React.PointerEvent<HTMLDivElement>, mode: "move" | "resize", corner?: Corner) => void;
   onMove: (e: React.PointerEvent<HTMLDivElement>) => void;
   onEnd: (e: React.PointerEvent<HTMLDivElement>) => void;
 }
 
-function CropOverlay({
-  imgRef,
-  rect,
-  viewZoom,
-  rotation,
-  flipH,
-  flipV,
-  onBegin,
-  onMove,
-  onEnd,
-}: CropOverlayProps) {
+function CropOverlay({ imgRef, rect, viewZoom, rotation, onBegin, onMove, onEnd }: CropOverlayProps) {
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   useEffect(() => {
     const el = imgRef.current;
@@ -964,9 +1399,7 @@ function CropOverlay({
         left: "50%",
         width: size.w,
         height: size.h,
-        transform:
-          `translate(-50%, -50%) scale(${viewZoom}) rotate(${rotation}deg) ` +
-          `scaleX(${flipH ? -1 : 1}) scaleY(${flipV ? -1 : 1})`,
+        transform: `translate(-50%, -50%) scale(${viewZoom}) rotate(${rotation}deg)`,
         pointerEvents: "none",
       }}
     >

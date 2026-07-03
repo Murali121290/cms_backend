@@ -2,11 +2,10 @@ export type CropRect = { x: number; y: number; w: number; h: number } | null;
 
 export interface BakeOptions {
   rotation: number;
-  flipH: boolean;
-  flipV: boolean;
-  brightness: number;
-  contrast: number;
   cropRect: CropRect;
+  /** Target pixel resolution — resamples the crop into these dimensions. */
+  targetWidth: number | null;
+  targetHeight: number | null;
 }
 
 function loadImage(src: string): Promise<HTMLImageElement> {
@@ -21,9 +20,8 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 
 /**
  * Flatten the current edit state into a fresh PNG/JPEG data URL via canvas.
- * The pipeline is crop → rotate → flip → brightness/contrast so the result
- * matches what the user sees in the live preview (CSS applies filters after
- * transforms).
+ * Pipeline: crop → rotate → resample to target resolution. DPI metadata is
+ * applied server-side because canvas cannot embed density chunks.
  */
 export async function bakeImage(src: string, opts: BakeOptions): Promise<string> {
   const img = await loadImage(src);
@@ -37,31 +35,44 @@ export async function bakeImage(src: string, opts: BakeOptions): Promise<string>
   const srcH = crop ? Math.max(1, Math.round((crop.h / 100) * naturalH)) : naturalH;
 
   const rotation = ((opts.rotation % 360) + 360) % 360;
-  const swap = rotation === 90 || rotation === 270;
-  const outW = swap ? srcH : srcW;
-  const outH = swap ? srcW : srcH;
+  const rotated = rotation === 90 || rotation === 270;
+  const cropOutW = rotated ? srcH : srcW;
+  const cropOutH = rotated ? srcW : srcH;
 
-  const canvas = document.createElement("canvas");
-  canvas.width = outW;
-  canvas.height = outH;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Canvas 2D context unavailable");
+  const outW = opts.targetWidth && opts.targetWidth > 0 ? opts.targetWidth : cropOutW;
+  const outH = opts.targetHeight && opts.targetHeight > 0 ? opts.targetHeight : cropOutH;
 
-  ctx.save();
-  const filters: string[] = [];
-  if (opts.brightness !== 1) filters.push(`brightness(${opts.brightness})`);
-  if (opts.contrast !== 1) filters.push(`contrast(${opts.contrast})`);
-  if (filters.length) ctx.filter = filters.join(" ");
+  // Draw crop+rotate onto an intermediate canvas at natural dimensions, then
+  // (if resampling) blit onto a second canvas at the final target size. Doing
+  // the resample in a second pass lets the browser pick a smoothing filter,
+  // which is important for aggressive downscales.
+  const stage = document.createElement("canvas");
+  stage.width = cropOutW;
+  stage.height = cropOutH;
+  const sctx = stage.getContext("2d");
+  if (!sctx) throw new Error("Canvas 2D context unavailable");
+  sctx.save();
+  sctx.translate(cropOutW / 2, cropOutH / 2);
+  sctx.rotate((rotation * Math.PI) / 180);
+  sctx.drawImage(img, srcX, srcY, srcW, srcH, -srcW / 2, -srcH / 2, srcW, srcH);
+  sctx.restore();
 
-  ctx.translate(outW / 2, outH / 2);
-  ctx.rotate((rotation * Math.PI) / 180);
-  ctx.scale(opts.flipH ? -1 : 1, opts.flipV ? -1 : 1);
-  ctx.drawImage(img, srcX, srcY, srcW, srcH, -srcW / 2, -srcH / 2, srcW, srcH);
-  ctx.restore();
+  let finalCanvas: HTMLCanvasElement = stage;
+  if (outW !== cropOutW || outH !== cropOutH) {
+    const scaled = document.createElement("canvas");
+    scaled.width = outW;
+    scaled.height = outH;
+    const rctx = scaled.getContext("2d");
+    if (!rctx) throw new Error("Canvas 2D context unavailable");
+    rctx.imageSmoothingEnabled = true;
+    rctx.imageSmoothingQuality = "high";
+    rctx.drawImage(stage, 0, 0, outW, outH);
+    finalCanvas = scaled;
+  }
 
   const mime = src.startsWith("data:image/jpeg") ? "image/jpeg" : "image/png";
   try {
-    return canvas.toDataURL(mime, mime === "image/jpeg" ? 0.92 : undefined);
+    return finalCanvas.toDataURL(mime, mime === "image/jpeg" ? 0.92 : undefined);
   } catch {
     throw new Error(
       "Cannot export edited image — the source image is cross-origin and cannot be read from a canvas.",
