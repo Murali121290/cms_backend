@@ -21,6 +21,7 @@ import { FullPageSpinner, Spinner } from '@/components/ui/Spinner'
 import { uiPaths } from '@/utils/appPaths'
 import { useStylesheetsQuery } from '@/features/stylesheets/useStylesheetsQuery'
 import { ProjectInfoModal } from './ProjectInfoModal'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -189,7 +190,7 @@ interface ChapterCardProps {
   chapter: Chapter
   users: AppUser[]
   plannedDueDates: Map<string, StageInfo>
-  onAssigneeChange: (chapter: Chapter, val: string) => Promise<void>
+  onAssigneeChange: (chapter: Chapter, val: string) => Promise<boolean>
   onViewDetails: (chapter: Chapter) => void
 }
 
@@ -298,6 +299,11 @@ export function ProjectWorkflow() {
   const [filterStage, setFilterStage] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
 
+  const [bulkStage, setBulkStage] = useState('')
+  const [bulkAssignee, setBulkAssignee] = useState('')
+  const [bulkAssigning, setBulkAssigning] = useState(false)
+  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false)
+
   useEffect(() => {
     if (!id) return
     setLoading(true)
@@ -382,6 +388,12 @@ export function ProjectWorkflow() {
     .sort((a, b) => a.chapters.localeCompare(b.chapters, undefined, { numeric: true }))
     , [chapters, filterAssignee, filterStage, filterStatus, plannedDueDates])
 
+  // Chapters currently sitting in the stage picked for bulk assignment
+  const bulkTargets = useMemo(
+    () => bulkStage ? chapters.filter(c => c.stage_name === bulkStage) : [],
+    [chapters, bulkStage]
+  )
+
   function handleChapterUpdate(id: number, patch: Partial<Chapter>) {
     setChapters(prev => {
       const updated = prev.map(c => c.id === id ? { ...c, ...patch } : c)
@@ -395,7 +407,7 @@ export function ProjectWorkflow() {
     })
   }
 
-  async function handleAssigneeChange(chapter: Chapter, val: string) {
+  async function handleAssigneeChange(chapter: Chapter, val: string, opts?: { silent?: boolean }): Promise<boolean> {
     const assignee = val || null
     const projectCode = project?.code || project?.project_code || ''
     try {
@@ -414,9 +426,30 @@ export function ProjectWorkflow() {
         due_date: newDue,
       })
       handleChapterUpdate(chapter.id, updated)
+      return true
     } catch {
-      toast.error('Failed to update assignee')
+      if (!opts?.silent) toast.error('Failed to update assignee')
+      return false
     }
+  }
+
+  async function handleBulkAssign() {
+    if (!bulkStage || bulkTargets.length === 0) return
+    setBulkAssigning(true)
+    const results = await Promise.all(
+      bulkTargets.map(c => handleAssigneeChange(c, bulkAssignee, { silent: true }))
+    )
+    setBulkAssigning(false)
+    setBulkConfirmOpen(false)
+    const succeeded = results.filter(Boolean).length
+    const failed = results.length - succeeded
+    if (failed === 0) {
+      toast.success(`Assigned ${succeeded} chapter${succeeded !== 1 ? 's' : ''} in ${bulkStage}`)
+    } else {
+      toast.error(`Assigned ${succeeded}/${results.length} chapters — ${failed} failed`)
+    }
+    setBulkStage('')
+    setBulkAssignee('')
   }
 
   const hasFilters = filterAssignee || filterStage || filterStatus
@@ -548,7 +581,7 @@ export function ProjectWorkflow() {
           <SummaryWidget label="Completed" value={summary.complete} icon={CheckCircle2} iconCls="bg-emerald-50 text-emerald-600" onClick={() => setFilterStatus(prev => prev === 'complete' ? '' : 'complete')} active={filterStatus === 'complete'} />
         </div>
 
-        {/* ── Filters ── */}
+        {/* ── Filters + Group Assign ── */}
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-muted flex items-center gap-1 mr-1">
             <Clock size={11} /> Filters
@@ -572,6 +605,38 @@ export function ProjectWorkflow() {
               <RotateCcw size={11} /> Clear
             </button>
           )}
+
+          <span className="w-px h-5 bg-border mx-1" />
+
+          {/* Group Assign */}
+          <span className="text-xs text-muted flex items-center gap-1 mr-1">
+            <Layers size={11} /> Group Assign
+          </span>
+
+          <select
+            value={bulkStage}
+            onChange={e => { setBulkStage(e.target.value); setBulkAssignee('') }}
+            className="text-xs bg-card border border-border rounded-lg px-2.5 py-1.5 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 appearance-none cursor-pointer"
+          >
+            <option value="">Select stage…</option>
+            {orderedStages.map(s => <option key={s.stage_name} value={s.stage_name}>{s.stage_name}</option>)}
+          </select>
+
+          <AssigneeSelect
+            widthCls="w-36"
+            value={bulkAssignee || null}
+            users={users}
+            onChange={setBulkAssignee}
+            disabled={!bulkStage}
+          />
+
+          <button
+            onClick={() => setBulkConfirmOpen(true)}
+            disabled={!bulkStage || bulkTargets.length === 0 || bulkAssigning}
+            className="text-xs font-medium px-3 py-1.5 rounded-lg bg-primary text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-primary/90 transition-colors"
+          >
+            {bulkStage ? `Assign ${bulkTargets.length} chapter${bulkTargets.length !== 1 ? 's' : ''}` : 'Assign'}
+          </button>
 
           <span className="ml-auto text-xs text-muted">
             {filtered.length} of {summary.total} chapter{summary.total !== 1 ? 's' : ''}
@@ -736,6 +801,18 @@ export function ProjectWorkflow() {
           setProject(updated)
           setIsEditOpen(false)
         }}
+      />
+
+      {/* Group Assign Confirm */}
+      <ConfirmDialog
+        isOpen={bulkConfirmOpen}
+        onClose={() => setBulkConfirmOpen(false)}
+        onConfirm={handleBulkAssign}
+        title="Group assign chapters?"
+        description={`This will assign ${bulkTargets.length} chapter${bulkTargets.length !== 1 ? 's' : ''} in "${bulkStage}" to ${bulkAssignee || 'Unassigned'}, updating each chapter's due date based on the stage SLA.`}
+        confirmLabel="Assign"
+        variant="warning"
+        isLoading={bulkAssigning}
       />
 
     </div>
