@@ -476,7 +476,7 @@ export function ProjectPlanningPage() {
                   </td>
                 </tr>
               ) : (
-                [...chapters].sort((a, b) => a.id - b.id).map((ch, idx) => {
+                [...chapters].sort((a, b) => a.chapters.localeCompare(b.chapters, undefined, { numeric: true })).map((ch, idx) => {
                   const chSched = chapterSchedules.get(ch.id) ?? baseSchedule
                   return (
                     <tr

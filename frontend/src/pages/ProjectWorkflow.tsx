@@ -380,7 +380,7 @@ export function ProjectWorkflow() {
       if (filterStatus && filterStatus !== '__delayed__' && ch.status !== filterStatus) return false
       return true
     })
-    .sort((a, b) => a.id - b.id)
+    .sort((a, b) => a.chapters.localeCompare(b.chapters, undefined, { numeric: true }))
     , [chapters, filterAssignee, filterStage, filterStatus, plannedDueDates])
 
   function handleChapterUpdate(id: number, patch: Partial<Chapter>) {
