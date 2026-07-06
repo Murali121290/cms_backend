@@ -325,6 +325,32 @@ function FileActionsMenu({
                       <ArrowDownToLine size={12} className="text-muted" /> Download
                     </a>
                   </DropdownMenu.Item>
+                  {fid && fname.toLowerCase().endsWith('.indd') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={async () => {
+                        const confirmConversion = window.confirm("Are you sure you want to convert this InDesign file to Word?");
+                        if (!confirmConversion) return;
+                        try {
+                          const res = await fetch(`/api/v1/conversion/indesign-to-word/${fid}`, {
+                            method: "POST",
+                          });
+                          const data = await res.json();
+                          if (res.ok) {
+                            alert(data.message || "Successfully converted InDesign file to Word!");
+                            window.location.reload();
+                          } else {
+                            alert(`Error: ${data.detail || "Failed to convert file"}`);
+                          }
+                        } catch (e: any) {
+                          alert(`Error connecting to server: ${e.message}`);
+                        }
+                      }}
+                    >
+                      <FileOutput size={12} className="text-amber-500" /> InDesign to Word
+                    </DropdownMenu.Item>
+                  )}
+                  {hasReview && (
                   {hasReview && !isImage && (
                     <DropdownMenu.Item className={itemCls} onSelect={() => navigate(uiPaths.structuringReview(projectId, chapterId, fid))}>
                       <Layers size={12} className="text-muted" /> View Structuring Review

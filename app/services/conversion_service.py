@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from fastapi import UploadFile, HTTPException
 
 from app import models
-from app.services.file_service import upload_chapter_files, UPLOAD_DIR
+from app.services import file_service
 from app.domains.chapters.service import create_chapter
 from app.domains.projects.models import Project
 
@@ -108,20 +108,20 @@ class BatchConversionService:
             if not chapter_record:
                 # Create the chapter using existing domain service
                 create_res = create_chapter(
-                    db, project_id=project.id, number=chapter_num, title=f"Chapter {chapter_num}", upload_dir=UPLOAD_DIR
+                    db, project_id=project.id, number=chapter_num, title=f"Chapter {chapter_num}", upload_dir=file_service.UPLOAD_DIR
                 )
                 chapter_record = create_res["chapter"]
 
             # 1. Save uploaded .indd to the chapter's "InDesign" folder in CMS
             upload_file.file.seek(0) # Reset pointer
-            cms_upload_res = upload_chapter_files(
+            cms_upload_res = file_service.upload_chapter_files(
                 db=db,
                 project_id=project.id,
                 chapter_id=chapter_record.id,
                 category="InDesign",
                 files=[upload_file],
                 actor_user_id=actor_user_id,
-                upload_dir=UPLOAD_DIR
+                upload_dir=file_service.UPLOAD_DIR
             )
             indd_cms_file = cms_upload_res["uploaded"][0]["file"] if cms_upload_res["uploaded"] else None
 
@@ -134,49 +134,57 @@ class BatchConversionService:
             conversion_success = False
             error_message = ""
 
-            if HAS_WIN32COM:
-                # We need to initialize COM inside each thread
-                pythoncom.CoInitialize()
-                try:
-                    # InDesign COM Automation
-                    app = win32com.client.Dispatch("InDesign.Application")
-                    # Specify paths inside script arguments
-                    app.ScriptArgs.SetValue("InputFile", os.path.abspath(input_path))
-                    app.ScriptArgs.SetValue("OutputFile", os.path.abspath(output_rtf_path))
-                    
-                    jsx_script = os.path.abspath("app/services/scripts/default_export.jsx")
-                    app.DoScript(jsx_script, 1246118721) # idJavaScript
-                    
-                    # If RTF was successfully created, convert it to DOCX via Word COM
-                    if os.path.exists(output_rtf_path):
-                        word_app = win32com.client.Dispatch("Word.Application")
-                        word_app.Visible = False
-                        doc = word_app.Documents.Open(os.path.abspath(output_rtf_path))
-                        # 16 is wdFormatXMLDocument (.docx)
-                        doc.SaveAs2(os.path.abspath(output_docx_path), FileFormat=16)
-                        doc.Close()
-                        word_app.Quit()
-                        conversion_success = os.path.exists(output_docx_path)
-                        # clean up the temp RTF file
-                        if os.path.exists(output_rtf_path):
-                            os.remove(output_rtf_path)
+            from app.core.config import get_settings
+            settings = get_settings()
+
+            # 1. Enforce Remote Windows Server conversion
+            if not settings.INDESIGN_SERVER_URL:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Windows InDesign Conversion Server is not configured. Please set INDESIGN_SERVER_URL."
+                )
+
+            import requests
+            url = f"{settings.INDESIGN_SERVER_URL.rstrip('/')}/convert"
+            logger.info(f"Sending remote InDesign conversion request to: {url}")
+            try:
+                upload_file.file.seek(0)
+                response = requests.post(
+                    url,
+                    files={"file": (upload_file.filename, upload_file.file.read(), "application/octet-stream")},
+                    timeout=(3.05, 600)
+                )
+                if response.status_code == 200:
+                    with open(output_docx_path, "wb") as out_f:
+                        out_f.write(response.content)
+                    conversion_success = True
+                    logger.info(f"Remote conversion succeeded via /convert for chapter {chapter_num}")
+                else:
+                    root_url = settings.INDESIGN_SERVER_URL
+                    logger.info(f"Trying fallback remote InDesign conversion to root URL: {root_url}")
+                    upload_file.file.seek(0)
+                    response_root = requests.post(
+                        root_url,
+                        files={"file": (upload_file.filename, upload_file.file.read(), "application/octet-stream")},
+                        timeout=(3.05, 600)
+                    )
+                    if response_root.status_code == 200:
+                        with open(output_docx_path, "wb") as out_f:
+                            out_f.write(response_root.content)
+                        conversion_success = True
+                        logger.info(f"Remote conversion succeeded via root URL for chapter {chapter_num}")
                     else:
-                        error_message = "InDesign script finished, but RTF output was not found."
-                except Exception as ex:
-                    error_message = str(ex)
-                    logger.error(f"InDesign run failed for chapter {chapter_num}: {error_message}")
-                finally:
-                    pythoncom.CoUninitialize()
-            else:
-                # Dev / fall-back mode: Mock the output file by copying a dummy docx
-                mock_source = os.path.abspath("tests/fixtures/sample.docx")
-                if not os.path.exists(mock_source):
-                    # Create a dummy blank file if fixture doesn't exist
-                    os.makedirs(os.path.dirname(mock_source), exist_ok=True)
-                    with open(mock_source, "wb") as f:
-                        f.write(b"MOCK DOCX CONTENT")
-                shutil.copyfile(mock_source, output_docx_path)
-                conversion_success = True
+                        error_message = f"Remote InDesign server returned status code {response.status_code}. Response: {response.text}"
+                        logger.error(error_message)
+            except Exception as remote_ex:
+                error_message = f"Connection to remote InDesign server failed: {str(remote_ex)}"
+                logger.error(error_message)
+
+            if not conversion_success:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"InDesign to Word conversion failed on Windows Server: {error_message}"
+                )
 
             # 3. If conversion succeeded, upload DOCX file into the "Manuscript" folder
             manuscript_cms_file = None
@@ -186,14 +194,14 @@ class BatchConversionService:
                         filename=output_docx_name,
                         file=f
                     )
-                    cms_docx_res = upload_chapter_files(
+                    cms_docx_res = file_service.upload_chapter_files(
                         db=db,
                         project_id=project.id,
                         chapter_id=chapter_record.id,
                         category="Manuscript",
                         files=[docx_upload],
                         actor_user_id=actor_user_id,
-                        upload_dir=UPLOAD_DIR
+                        upload_dir=file_service.UPLOAD_DIR
                     )
                     if cms_docx_res["uploaded"]:
                         manuscript_cms_file = cms_docx_res["uploaded"][0]["file"]
@@ -288,7 +296,7 @@ class BatchConversionService:
         # Return a copy or keep it. Let's move it to a persistent output folder or return directly.
         # Since the caller needs the file path to stream it, we shouldn't delete the session dir yet,
         # but the caller can delete it after streaming. Or we copy it to UPLOAD_DIR.
-        dest_path = os.path.join(UPLOAD_DIR, f"converted_{uuid.uuid4().hex}_{os.path.splitext(file.filename)[0]}.docx")
+        dest_path = os.path.join(file_service.UPLOAD_DIR, f"converted_{uuid.uuid4().hex}_{os.path.splitext(file.filename)[0]}.docx")
         shutil.copyfile(docx_path, dest_path)
 
         try:
@@ -297,3 +305,149 @@ class BatchConversionService:
             pass
 
         return dest_path
+
+    async def convert_file_indesign_to_word(self, db: Session, file_id: int, actor_user_id: int) -> dict:
+        from app.models import File
+        file_record = db.query(File).filter(File.id == file_id).first()
+        if not file_record:
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        # Verify it's an InDesign file
+        if file_record.category != "InDesign" and not file_record.filename.endswith(".indd"):
+            raise HTTPException(status_code=400, detail="Only InDesign (.indd) files can be converted to Word.")
+            
+        project = file_record.project
+        chapter = file_record.chapter
+        if not project or not chapter:
+            raise HTTPException(status_code=400, detail="InDesign file is not associated with a project or chapter.")
+
+        # Source file path
+        source_file_path = os.path.join(file_service.UPLOAD_DIR, file_record.path)
+        if not os.path.exists(source_file_path):
+            raise HTTPException(status_code=404, detail=f"InDesign file not found on disk: {file_record.filename}")
+
+        # Unique session directories to avoid conflicts
+        session_id = str(uuid.uuid4())
+        session_dir = os.path.abspath(f"temp_conversions/{session_id}")
+        chapter_dir = os.path.join(session_dir, f"ch_{chapter.chapters}")
+        os.makedirs(chapter_dir, exist_ok=True)
+
+        # Package InDesign file, Art links, and Fonts into a single ZIP archive
+        import zipfile
+        zip_name = f"packaged_{os.path.splitext(file_record.filename)[0]}.zip"
+        zip_path = os.path.join(chapter_dir, zip_name)
+        
+        # Output document name should match the input document name exactly
+        indd_name_no_ext = os.path.splitext(file_record.filename)[0]
+        output_docx_name = f"{indd_name_no_ext}.docx"
+        output_docx_path = os.path.join(chapter_dir, output_docx_name)
+
+        # Get all files belonging to this chapter to find associated Art & Fonts
+        chapter_files = db.query(File).filter(File.chapter_id == chapter.id).all()
+        
+        logger.info(f"Packaging assets for InDesign file: {file_record.filename} in chapter {chapter.chapters}")
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            # 1. Main InDesign file (at root)
+            zf.write(source_file_path, file_record.filename)
+            
+            # 2. Add other assets in Links/ and Document Fonts/ folders
+            for f in chapter_files:
+                if f.id == file_record.id:
+                    continue
+                path = os.path.join(file_service.UPLOAD_DIR, f.path)
+                if not os.path.exists(path):
+                    if os.path.exists(f.path):
+                        path = f.path
+                    else:
+                        logger.warning(f"File {f.filename} not found on disk at {path}")
+                        continue
+                        
+                if f.category == "Art":
+                    zf.write(path, f"Links/{f.filename}")
+                elif f.category == "Misc" or f.filename.lower().endswith((".ttf", ".otf", ".woff", ".woff2")):
+                    zf.write(path, f"Document Fonts/{f.filename}")
+
+        conversion_success = False
+        error_message = ""
+
+        from app.core.config import get_settings
+        settings = get_settings()
+
+        # 1. Enforce Remote Windows Server conversion
+        if not settings.INDESIGN_SERVER_URL:
+            raise HTTPException(
+                status_code=400,
+                detail="Windows InDesign Conversion Server is not configured. Please set INDESIGN_SERVER_URL."
+            )
+
+        import requests
+        url = f"{settings.INDESIGN_SERVER_URL.rstrip('/')}/convert"
+        logger.info(f"Sending remote InDesign conversion request to: {url}")
+        try:
+            with open(zip_path, "rb") as f:
+                response = requests.post(
+                    url,
+                    files={"file": (zip_name, f.read(), "application/octet-stream")},
+                    timeout=(30.0, 900)
+                )
+            if response.status_code == 200:
+                with open(output_docx_path, "wb") as out_f:
+                    out_f.write(response.content)
+                conversion_success = True
+                logger.info(f"Remote conversion succeeded via /convert for file {file_record.filename}")
+            else:
+                root_url = settings.INDESIGN_SERVER_URL
+                logger.info(f"Trying fallback remote InDesign conversion to root URL: {root_url}")
+                with open(zip_path, "rb") as f:
+                    response_root = requests.post(
+                        root_url,
+                        files={"file": (zip_name, f.read(), "application/octet-stream")},
+                        timeout=(30.0, 900)
+                    )
+                if response_root.status_code == 200:
+                    with open(output_docx_path, "wb") as out_f:
+                        out_f.write(response_root.content)
+                    conversion_success = True
+                    logger.info(f"Remote conversion succeeded via root URL for file {file_record.filename}")
+                else:
+                    error_message = f"Remote InDesign server returned status code {response.status_code}. Response: {response.text}"
+                    logger.error(error_message)
+        except Exception as remote_ex:
+            error_message = f"Connection to remote InDesign server failed: {str(remote_ex)}"
+            logger.error(error_message)
+
+        # 3. Raise error if conversion failed
+        if not conversion_success:
+            raise HTTPException(status_code=500, detail=f"Conversion failed: {error_message}")
+
+        # 4. If conversion succeeded, upload DOCX file into the "Manuscript" folder
+        manuscript_cms_file = None
+        if conversion_success and os.path.exists(output_docx_path):
+            with open(output_docx_path, "rb") as f:
+                docx_upload = UploadFile(
+                    filename=output_docx_name,
+                    file=f
+                )
+                cms_docx_res = file_service.upload_chapter_files(
+                    db=db,
+                    project_id=project.id,
+                    chapter_id=chapter.id,
+                    category="Manuscript",
+                    files=[docx_upload],
+                    actor_user_id=actor_user_id,
+                    upload_dir=file_service.UPLOAD_DIR
+                )
+                if cms_docx_res["uploaded"]:
+                    manuscript_cms_file = cms_docx_res["uploaded"][0]["file"]
+
+        # Clean up session temp directory
+        try:
+            shutil.rmtree(session_dir)
+        except Exception:
+            pass
+
+        return {
+            "status": "success",
+            "message": f"Successfully converted InDesign file '{file_record.filename}' to Word.",
+            "manuscript_file": manuscript_cms_file
+        }

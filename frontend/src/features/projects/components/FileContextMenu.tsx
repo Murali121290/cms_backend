@@ -267,6 +267,51 @@ function MenuWordItem({ fileId, onClose }: { fileId: number; onClose: () => void
   );
 }
 
+function MenuIndesignToWordItem({ fileId, onClose }: { fileId: number; onClose: () => void }) {
+  const [hov, setHov] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const handleClick = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/v1/conversion/indesign-to-word/${fileId}`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert(data.message || "Successfully converted InDesign file to Word!");
+        window.location.reload();
+      } else {
+        alert(`Error: ${data.detail || "Failed to convert file"}`);
+      }
+    } catch (e: any) {
+      alert(`Error connecting to server: ${e.message}`);
+    } finally {
+      setLoading(false);
+      onClose();
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      style={{
+        ...ITEM_BASE,
+        backgroundColor: hov ? "#F5F4F1" : "transparent",
+        opacity: loading ? 0.6 : 1,
+      }}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      onClick={handleClick}
+      disabled={loading}
+    >
+      <FileOutput style={ICON_GOLD} aria-hidden />
+      <span>{loading ? "Converting…" : "InDesign to Word"}</span>
+    </button>
+  );
+}
+
 function MenuGroupLabel({ label }: { label: string }) {
   return (
     <p
@@ -575,6 +620,27 @@ export function FileContextMenu({
         ) : (
           <>
             {/* ── Group 1: Primary actions ─────────────────────────── */}
+            {/* <MenuLinkItem
+              icon={FilePen}
+              label="Edit in Browser"
+              to={uiPaths.fileEditor(projectId, chapterId, file.id)}
+              onClick={onClose}
+            /> */}
+            <MenuLinkItem
+              icon={FilePen}
+              label="Edit in Editor"
+              to={`${uiPaths.structuringReview(projectId, chapterId, file.id)}?tab=editor`}
+              onClick={onClose}
+            />
+            <MenuLinkItem
+              icon={FilePen}
+              label="Edit in OnlyOffice"
+              to={`${uiPaths.structuringReview(projectId, chapterId, file.id)}?tab=onlyoffice`}
+              onClick={onClose}
+            />
+            <MenuWordItem fileId={file.id} onClose={onClose} />
+            {filenameLower.endsWith(".indd") && (
+              <MenuIndesignToWordItem fileId={file.id} onClose={onClose} />
             {isImage ? (
               // Image files can't be opened in the DOCX/OnlyOffice/Word editors —
               // route Art-team edits through the dedicated Image Review page.
