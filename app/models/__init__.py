@@ -54,6 +54,11 @@ class FileVersion(Base):
     path = Column(String)
     uploaded_at = Column(DateTime, default=datetime.utcnow)
     uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    # Free-text audit trail for why a file was replaced. Populated by the Image
+    # Review & Editor's Replace dialog (which requires a reason); nullable
+    # everywhere else so legacy version rows and the auto-versioning path
+    # remain compatible.
+    reason = Column(String, nullable=True)
 
     original_file = relationship("File", back_populates="versions")
     uploaded_by = relationship("User")

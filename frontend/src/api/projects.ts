@@ -82,6 +82,7 @@ export interface ProjectUpdate {
   trim_size?: string | null
   copyright_year?: number | null
   actual_pages?: number
+  manuscript_pages?: number | null
   due_date?: string | null
 }
 

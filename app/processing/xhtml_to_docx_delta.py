@@ -11,18 +11,103 @@ import os
 import re
 import uuid
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 
 import lxml.html
 from docx import Document
 from docx.oxml import OxmlElement, parse_xml
 from docx.oxml.ns import qn
+from docx.shared import Emu, Inches
+from docx.text.paragraph import Paragraph
 from docx.text.run import Run
 from lxml import etree
 
 from app.utils.utils.structuring_lib.annotator import normalize_structural_tag_case
 
 logger = logging.getLogger("app.processing.xhtml_to_docx_delta")
+
+
+# Matches data URIs like:
+#   data:image/png;base64,iVBORw0KGgo...
+#   data:image/jpeg;charset=utf-8;base64,/9j/4AAQ...    (Safari sometimes)
+#   data:image/webp;base64,UklGRi...
+# The middle chunk (";charset=...", ";name=foo", etc.) is tolerated.
+_DATA_URI_RE = re.compile(
+    # Anchor on `;base64,` as the last segment before the payload; anything
+    # between the format and it (media-type parameters like ;charset=…) is
+    # tolerated with a repeated non-capturing group.
+    r"^data:image/([a-z0-9.+-]+)(?:;[^,]+)*;base64\s*,\s*(.+)$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+_SUPPORTED_IMAGE_FMTS = {
+    "png": "png",
+    "jpg": "jpg",
+    "jpeg": "jpg",
+    "gif": "gif",
+    "webp": "webp",
+    "bmp": "bmp",
+    # SVG cannot be embedded as a picture by python-docx — skip below.
+}
+
+
+def _decode_image_data_uri(src: str) -> tuple[bytes, str] | tuple[None, None]:
+    """Decode a base64 data: URI into (bytes, extension).
+
+    Tolerates optional media-type parameters (charset, name, etc.) and
+    whitespace in the base64 payload. Returns (None, None) for non-data-URI
+    sources, unsupported formats (SVG), or malformed payloads.
+    """
+    if not src:
+        return None, None
+    m = _DATA_URI_RE.match(src.strip())
+    if not m:
+        return None, None
+    fmt = m.group(1).lower()
+    ext = _SUPPORTED_IMAGE_FMTS.get(fmt)
+    if ext is None:
+        return None, None
+    payload = m.group(2)
+    # Strip whitespace/newlines that some pastes include mid-payload.
+    payload = re.sub(r"\s+", "", payload)
+    try:
+        blob = base64.b64decode(payload, validate=False)
+    except Exception:
+        return None, None
+    if not blob:
+        return None, None
+    return blob, ext
+
+
+def _nearest_preceding_bookmarked(el) -> "etree._Element | None":
+    """Return the nearest bookmarked block-level ancestor or preceding sibling.
+
+    Walks previous siblings first (deepest-last descendant wins there), then
+    climbs to the parent and repeats. Used to anchor pasted images relative to
+    existing DOCX paragraphs so the delta engine can insert a new paragraph in
+    roughly the right spot.
+    """
+    def _has_bm(node) -> bool:
+        return bool(node.get("data-bookmark")) if hasattr(node, "get") else False
+
+    current = el
+    while current is not None:
+        prev = current.getprevious()
+        while prev is not None:
+            if _has_bm(prev):
+                return prev
+            descendants = prev.xpath(".//*[@data-bookmark]")
+            if descendants:
+                return descendants[-1]
+            prev = prev.getprevious()
+        parent = current.getparent()
+        if parent is None:
+            return None
+        if _has_bm(parent):
+            return parent
+        current = parent
+    return None
 
 
 def _css_color_to_hex(val: str) -> str | None:
@@ -265,6 +350,24 @@ class XhtmlToDocxDeltaEngine:
 
         logger.info(f"Lossless Bookmark Delta patch: {patched} paragraph(s) updated in-place.")
 
+        # Insert images pasted into the editor (not present in the original DOCX).
+        # These arrive as top-level <img> siblings with data: URIs; the delta
+        # patch above ignores them because they have no bookmark.
+        try:
+            self._insert_new_images(root, doc, para_index)
+        except Exception as img_err:
+            logger.warning(f"Failed to insert pasted images: {img_err}", exc_info=True)
+
+        # Renumber every drawing's non-visual property ID sequentially so no two
+        # pictures collide. Prior save cycles (including pre-fix versions of
+        # this engine) can leave duplicate id="0" values on pictures we did not
+        # insert this round; Word for Mac paints those as blank placeholder
+        # rectangles. This pass guarantees uniqueness across the whole document.
+        try:
+            self._renumber_drawing_ids(doc)
+        except Exception as id_err:
+            logger.warning(f"Failed to renumber drawing IDs: {id_err}", exc_info=True)
+
         # Apply final manuscript formatting (Times New Roman, 12pt, double spacing)
         try:
             apply_final_docx_formatting(doc)
@@ -285,6 +388,196 @@ class XhtmlToDocxDeltaEngine:
         os.replace(tmp_path, out_docx_path)
         logger.info(f"Lossless Delta-patched DOCX saved: {out_docx_path}")
         return out_docx_path
+
+    def _insert_new_images(self, root, doc, para_index: dict) -> None:
+        """Insert images that were pasted into the editor into the DOCX.
+
+        The delta engine only touches paragraphs it can look up via bookmark, so
+        anything the user added while editing (pasted images, in particular) is
+        otherwise silently dropped. This walks the XHTML for <img> tags with a
+        base64 data: URI, decodes the bytes, and inserts a new paragraph after
+        the nearest preceding bookmarked block. If no anchor is found, the
+        image is appended at the end of the document.
+        """
+        all_imgs = root.xpath(".//img[@src]")
+        if not all_imgs:
+            return
+
+        inserted = 0
+        skipped = 0
+        # Per-anchor cursor: two images anchored to the same bookmark must be
+        # inserted after each other in HTML order, not both directly after the
+        # anchor (which would reverse them via addnext).
+        cursor_for_bm: dict[str, Paragraph] = {}
+
+        # Word for Mac refuses to render pictures whose <pic:cNvPr id> or
+        # <wp:docPr id> collide with another drawing in the same document —
+        # it paints a blank placeholder rectangle instead. python-docx's
+        # add_picture() hardcodes id="0" on <pic:cNvPr> and always starts
+        # <wp:docPr id> from 1, so consecutive inserts overlap unless we
+        # rewrite the IDs. Seed the counter above any existing drawing ID.
+        pic_ns = "http://schemas.openxmlformats.org/drawingml/2006/picture"
+        wp_ns = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+        used_pic_ids: set[int] = set()
+        used_dp_ids: set[int] = set()
+        for existing in doc.element.body.iter(f"{{{pic_ns}}}cNvPr"):
+            raw = existing.get("id")
+            try:
+                if raw is not None:
+                    used_pic_ids.add(int(raw))
+            except ValueError:
+                pass
+        for existing in doc.element.body.iter(f"{{{wp_ns}}}docPr"):
+            raw = existing.get("id")
+            try:
+                if raw is not None:
+                    used_dp_ids.add(int(raw))
+            except ValueError:
+                pass
+        next_pic_id = (max(used_pic_ids) + 1) if used_pic_ids else 1
+        next_dp_id = (max(used_dp_ids) + 1) if used_dp_ids else 1
+
+        for img_el in all_imgs:
+            src = img_el.get("src", "")
+            image_bytes, ext = _decode_image_data_uri(src)
+            if image_bytes is None:
+                # Non-data URI (external URL, missing src, or unsupported format
+                # like SVG). Nothing to embed without a fetch, so skip quietly.
+                skipped += 1
+                continue
+
+            # Skip if this <img> already lives inside a bookmarked paragraph —
+            # the delta pass has rebuilt that paragraph's runs from scratch and
+            # would clobber a run we insert here. This is rare given the block-
+            # level ImageNode schema but guarded against for future inline use.
+            ancestor_bm = img_el.xpath("ancestor::*[@data-bookmark][1]")
+            if ancestor_bm:
+                skipped += 1
+                continue
+
+            anchor_el = _nearest_preceding_bookmarked(img_el)
+            anchor_key = ""
+            target_para = None
+            if anchor_el is not None:
+                bm = anchor_el.get("data-bookmark") or ""
+                anchor_key = bm
+                if bm:
+                    target_para = cursor_for_bm.get(bm)
+                    if target_para is None:
+                        target_para = para_index.get(bm) or _find_note_para_by_bookmark(doc, bm)
+
+            if target_para is None:
+                # Fall back to appending at the very end of the document body.
+                anchor_key = "__doc_end__"
+                paragraphs = list(doc.paragraphs)
+                if not paragraphs:
+                    logger.warning("No anchor paragraph available for pasted image; skipping.")
+                    skipped += 1
+                    continue
+                target_para = cursor_for_bm.get(anchor_key) or paragraphs[-1]
+
+            try:
+                new_p_xml = OxmlElement("w:p")
+                target_para._element.addnext(new_p_xml)
+                new_para = Paragraph(new_p_xml, target_para._parent)
+
+                # Prefer the width the user set in the editor; fall back to a
+                # sensible 4-inch default so the picture is never zero-sized.
+                width_arg = None
+                raw_width = img_el.get("width")
+                if raw_width:
+                    try:
+                        px = float(str(raw_width).replace("px", "").strip())
+                        if px > 0:
+                            # CSS px → EMU at 96 DPI. 914400 EMU = 1 inch.
+                            width_arg = Emu(int(px / 96.0 * 914400))
+                    except (ValueError, TypeError):
+                        width_arg = None
+                if width_arg is None:
+                    width_arg = Inches(4)
+
+                run = new_para.add_run()
+                run.add_picture(BytesIO(image_bytes), width=width_arg)
+
+                # Rewrite the IDs Word Mac tests for uniqueness. Without this,
+                # a second pasted image is rendered as an empty blue rectangle.
+                for pic_cnvpr in new_p_xml.iter(f"{{{pic_ns}}}cNvPr"):
+                    pic_cnvpr.set("id", str(next_pic_id))
+                    next_pic_id += 1
+                for docpr in new_p_xml.iter(f"{{{wp_ns}}}docPr"):
+                    docpr.set("id", str(next_dp_id))
+                    next_dp_id += 1
+
+                # Center the picture — matches typical figure placement and is
+                # what the editor's block image node visually implies.
+                try:
+                    pPr = new_p_xml.find(qn("w:pPr"))
+                    if pPr is None:
+                        pPr = OxmlElement("w:pPr")
+                        new_p_xml.insert(0, pPr)
+                    for existing in pPr.findall(qn("w:jc")):
+                        pPr.remove(existing)
+                    jc = OxmlElement("w:jc")
+                    jc.set(qn("w:val"), "center")
+                    pPr.append(jc)
+                except Exception:
+                    pass
+
+                # Advance the anchor cursor so the next image anchored to the
+                # same bookmark lands after this one, preserving HTML order.
+                if anchor_key:
+                    cursor_for_bm[anchor_key] = new_para
+
+                inserted += 1
+            except Exception as e:
+                logger.warning(f"Failed to embed pasted image: {e}", exc_info=True)
+                skipped += 1
+
+        if inserted or skipped:
+            logger.info(
+                f"Pasted image pass: inserted={inserted}, skipped={skipped}"
+            )
+
+    def _renumber_drawing_ids(self, doc) -> None:
+        """Rewrite every drawing's non-visual property ID sequentially.
+
+        `<pic:cNvPr id>` and `<wp:docPr id>` are treated by Word for Mac as
+        must-be-unique-per-document even though the OOXML spec scopes them per
+        drawing. Any duplicate causes the offending picture to render as a
+        blank placeholder rectangle. Rewriting all IDs to a fresh sequence
+        each save guarantees uniqueness regardless of what earlier save
+        cycles left behind.
+        """
+        pic_ns = "http://schemas.openxmlformats.org/drawingml/2006/picture"
+        wp_ns = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+
+        # Body and any header/footer parts share the same numbering space in
+        # Word's eyes; a duplicate between body picture and header picture is
+        # still a duplicate. Cover everything reachable from the document part.
+        roots = [doc.element.body]
+        try:
+            for section in doc.sections:
+                for hf in (
+                    section.header, section.footer,
+                    section.even_page_header, section.even_page_footer,
+                    section.first_page_header, section.first_page_footer,
+                ):
+                    if hf is not None and getattr(hf, "_element", None) is not None:
+                        roots.append(hf._element)
+        except Exception:
+            # Sections API can raise on templates missing sectPr — skip and
+            # renumber the body only, still fixes the primary collision.
+            pass
+
+        pic_counter = 1
+        dp_counter = 1
+        for root in roots:
+            for pic_cnvpr in root.iter(f"{{{pic_ns}}}cNvPr"):
+                pic_cnvpr.set("id", str(pic_counter))
+                pic_counter += 1
+            for docpr in root.iter(f"{{{wp_ns}}}docPr"):
+                docpr.set("id", str(dp_counter))
+                dp_counter += 1
 
     def _patch_paragraph_runs(self, para, html_el, doc, username: str) -> None:
         """Modifies and synchronizes runs inside `<w:p>` completely in-place by rebuilding them."""

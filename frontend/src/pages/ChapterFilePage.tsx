@@ -25,8 +25,8 @@ import {
   MoreVertical, Play, ScanLine, Search, ShieldCheck, Sparkles, Trash2,
   Upload, Wrench, X, Zap, CheckCircle2, Archive,
 } from 'lucide-react'
-import { FOLDER_CONFIG, COLUMN_DEFINITIONS, getProcessingActions, fileTypeIcon } from '@/config/fileManagerConfig'
-import type { FolderKey, ColumnKey } from '@/config/fileManagerConfig'
+import { FOLDER_CONFIG, COLUMN_DEFINITIONS, getProcessingActions, fileTypeIcon, isProcessingActionVisibleForStage } from '@/config/fileManagerConfig'
+import type { FolderKey, ColumnKey, ProcessingActionKey } from '@/config/fileManagerConfig'
 import { BulkUploadModal } from '@/components/BulkUploadModal'
 import { FileDetailPanel } from '@/features/projects/components/FileDetailPanel'
 import { ReferenceCheckModal } from '@/features/projects/components/ReferenceCheckModal'
@@ -181,6 +181,12 @@ function FileActionsMenu({
   const fid = row.db_id
   const fname = row.file_name.toLowerCase()
   const hasReview = fname.endsWith('_processed.docx') || fname.endsWith('_structured.docx')
+  const isImage = /\.(jpe?g|png|gif|webp|tiff?|bmp|eps)$/i.test(fname)
+
+  // Gate stage-specific processing actions to the stage they actually belong to.
+  // The stage-to-action mapping lives in fileManagerConfig.ts (PROCESSING_ACTION_STAGE_MAP) —
+  // edit that config to add/reassign a processing action, no changes needed here.
+  const showAction = (action: ProcessingActionKey) => isProcessingActionVisibleForStage(action, stageName)
 
   const itemCls = 'flex items-center gap-2 px-3 py-2 cursor-pointer text-text hover:bg-accent hover:text-primary focus:bg-accent focus:text-primary outline-none'
   const deadCls = 'flex items-center gap-2 px-3 py-2 text-text outline-none opacity-40 pointer-events-none cursor-not-allowed'
@@ -289,23 +295,31 @@ function FileActionsMenu({
               {/* ── Group 1: Open / Edit ─────────────────────────── */}
               {fid ? (
                 <>
-                  {/* <DropdownMenu.Item className={itemCls} onSelect={() => navigate(uiPaths.fileEditor(projectId, chapterId, fid))}>
-                    <FilePen size={12} className="text-muted"/> Edit in Browser (Collabora)
-                  </DropdownMenu.Item> */}
-                  <DropdownMenu.Item className={itemCls} onSelect={() => navigate(`${uiPaths.structuringReview(projectId, chapterId, fid)}?tab=editor`)}>
-                    <FilePen size={12} className="text-muted" /> Edit in Editor
-                  </DropdownMenu.Item>
-                  <DropdownMenu.Item className={itemCls} onSelect={() => navigate(`${uiPaths.structuringReview(projectId, chapterId, fid)}?tab=onlyoffice`)}>
-                    <FilePen size={12} className="text-muted" /> Edit in Office
-                  </DropdownMenu.Item>
-                  <DropdownMenu.Item className={itemCls} onSelect={() => {
-                    fetch(`/api/v2/files/${fid}/open-in-word`)
-                      .then(r => r.json())
-                      .then(d => { if (d?.ms_word_uri) window.location.href = d.ms_word_uri; })
-                      .catch(() => { });
-                  }}>
-                    <ExternalLink size={12} className="text-muted" /> Open in MSWord
-                  </DropdownMenu.Item>
+                  {isImage ? (
+                    // Images route through the dedicated Image Review workspace;
+                    // the DOCX editors would fail on them (see structuring
+                    // engine "Package not found at *.jpeg" errors).
+                    <DropdownMenu.Item className={itemCls} onSelect={() => navigate(`/projects/${projectId}/image-review?fileId=${fid}`)}>
+                      <FilePen size={12} className="text-muted" /> Open in Image Editor
+                    </DropdownMenu.Item>
+                  ) : (
+                    <>
+                      <DropdownMenu.Item className={itemCls} onSelect={() => navigate(`${uiPaths.structuringReview(projectId, chapterId, fid)}?tab=editor`)}>
+                        <FilePen size={12} className="text-muted" /> Edit in Editor
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Item className={itemCls} onSelect={() => navigate(`${uiPaths.structuringReview(projectId, chapterId, fid)}?tab=onlyoffice`)}>
+                        <FilePen size={12} className="text-muted" /> Edit in Office
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Item className={itemCls} onSelect={() => {
+                        fetch(`/api/v2/files/${fid}/open-in-word`)
+                          .then(r => r.json())
+                          .then(d => { if (d?.ms_word_uri) window.location.href = d.ms_word_uri; })
+                          .catch(() => { });
+                      }}>
+                        <ExternalLink size={12} className="text-muted" /> Open in MSWord
+                      </DropdownMenu.Item>
+                    </>
+                  )}
                   <DropdownMenu.Item className={itemCls} asChild>
                     <a href={`/api/v2/files/${fid}/download`} download onClick={e => e.stopPropagation()}>
                       <ArrowDownToLine size={12} className="text-muted" /> Download
@@ -337,11 +351,12 @@ function FileActionsMenu({
                     </DropdownMenu.Item>
                   )}
                   {hasReview && (
+                  {hasReview && !isImage && (
                     <DropdownMenu.Item className={itemCls} onSelect={() => navigate(uiPaths.structuringReview(projectId, chapterId, fid))}>
                       <Layers size={12} className="text-muted" /> View Structuring Review
                     </DropdownMenu.Item>
                   )}
-                  {fid && fname.endsWith('.docx') && (
+                  {hasReview && !isImage && (
                     <DropdownMenu.Item className={itemCls} onSelect={() => navigate(uiPaths.referenceReview(projectId, chapterId, fid))}>
                       <BookCheck size={12} className="text-muted" /> Reference Review
                     </DropdownMenu.Item>
@@ -362,11 +377,11 @@ function FileActionsMenu({
                 <Trash2 size={12} /> Delete
               </DropdownMenu.Item>
 
-              {/* ── Group 2: Processing ──────────────────────────── */}
-              {sep}
-              {grp('Processing', !fid)}
+              {/* ── Group 2: Processing (hidden for images) ──────── */}
+              {!isImage && sep}
+              {!isImage && grp('Processing', !fid)}
 
-              {fid ? (
+              {!isImage && (fid ? (
                 <>
                   {/* Run All — placeholder */}
                   <DropdownMenu.Item className={deadCls}>
@@ -374,88 +389,106 @@ function FileActionsMenu({
                     <span className="ml-auto text-[9px] px-1 py-0.5 rounded bg-surface border border-border text-muted">Soon</span>
                   </DropdownMenu.Item>
 
-                  {/* Structuring — shows AI/Manual choice */}
-                  <DropdownMenu.Item
-                    className={itemCls}
-                    onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Structuring', jobFn: () => Promise.resolve(), isStructuringChoice: true }) }}
-                  >
-                    <Layers size={12} className="text-amber-500" /> Structuring (AI / Manual)
-                  </DropdownMenu.Item>
+                  {/* Structuring — shows AI/Manual choice — Pre-editing stage only */}
+                  {showAction('structuring') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Structuring', jobFn: () => Promise.resolve(), isStructuringChoice: true }) }}
+                    >
+                      <Layers size={12} className="text-amber-500" /> Structuring (AI / Manual)
+                    </DropdownMenu.Item>
+                  )}
 
-                  {/* Language Edit — v1 endpoint */}
-                  <DropdownMenu.Item
-                    className={itemCls}
-                    onSelect={() => void fire('Language Edit', () => startLanguageEdit(fid))}
-                  >
-                    <Languages size={12} className="text-muted" /> Language Edit
-                  </DropdownMenu.Item>
+                  {/* Reference Check — opens configuration modal — Pre-editing stage only */}
+                  {showAction('referenceValidation') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={() => onOpenReferenceCheck({
+                        id: fid!,
+                        filename: row.file_name,
+                        project_id: projectId,
+                        chapter_id: chapterId,
+                        file_type: '',
+                        category: row.subfolder,
+                        uploaded_at: row.uploaded_on,
+                        version: 1,
+                        lock: { is_locked: false, locked_by: null, locked_at: null },
+                        available_actions: [],
+                      } as unknown as FileRecord)}
+                    >
+                      <BookCheck size={12} className="text-muted" /> Reference Validation
+                    </DropdownMenu.Item>
+                  )}
 
-                  {/* Technical Edit — navigates to review page */}
-                  <DropdownMenu.Item
-                    className={itemCls}
-                    onSelect={() => navigate(uiPaths.technicalReview(projectId, chapterId, fid))}
-                  >
-                    <Wrench size={12} className="text-muted" /> Technical Edit
-                  </DropdownMenu.Item>
+                  {/* Language Edit — v1 endpoint — Copyediting stage only */}
+                  {showAction('languageEdit') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={() => void fire('Language Edit', () => startLanguageEdit(fid))}
+                    >
+                      <Languages size={12} className="text-muted" /> Language Edit
+                    </DropdownMenu.Item>
+                  )}
 
-                  {/* Reference Check — opens configuration modal */}
-                  <DropdownMenu.Item
-                    className={itemCls}
-                    onSelect={() => onOpenReferenceCheck({
-                      id: fid!,
-                      filename: row.file_name,
-                      project_id: projectId,
-                      chapter_id: chapterId,
-                      file_type: '',
-                      category: row.subfolder,
-                      uploaded_at: row.uploaded_on,
-                      version: 1,
-                      lock: { is_locked: false, locked_by: null, locked_at: null },
-                      available_actions: [],
-                    } as unknown as FileRecord)}
-                  >
-                    <BookCheck size={12} className="text-muted" /> Reference Validation
-                  </DropdownMenu.Item>
+                  {/* Technical Edit — navigates to review page — Copyediting stage only */}
+                  {showAction('technicalEdit') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={() => navigate(uiPaths.technicalReview(projectId, chapterId, fid))}
+                    >
+                      <Wrench size={12} className="text-muted" /> Technical Edit
+                    </DropdownMenu.Item>
+                  )}
 
-                  {/* Manuscript Analysis (PPD) — v2 endpoint */}
-                  <DropdownMenu.Item
-                    className={itemCls}
-                    onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Manuscript Analysis', jobFn: () => startPpdGeneration(fid) }) }}
-                  >
-                    <FileOutput size={12} className="text-muted" /> Manuscript Analysis
-                  </DropdownMenu.Item>
+                  {/* Manuscript Analysis (PPD) — v2 endpoint — Manuscript Analysis stage only */}
+                  {showAction('manuscriptAnalysis') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Manuscript Analysis', jobFn: () => startPpdGeneration(fid) }) }}
+                    >
+                      <FileOutput size={12} className="text-muted" /> Manuscript Analysis
+                    </DropdownMenu.Item>
+                  )}
 
-                  {/* Permissions Check — v2 endpoint */}
-                  <DropdownMenu.Item
-                    className={itemCls}
-                    onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Permissions Check', jobFn: () => startPermissionsCheck(fid) }) }}
-                  >
-                    <ShieldCheck size={12} className="text-muted" /> Permissions Check
-                  </DropdownMenu.Item>
+                  {/* Permissions Check — v2 endpoint — XML stage only */}
+                  {showAction('permissionsCheck') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Permissions Check', jobFn: () => startPermissionsCheck(fid) }) }}
+                    >
+                      <ShieldCheck size={12} className="text-muted" /> Permissions Check
+                    </DropdownMenu.Item>
+                  )}
 
-                  {/* AI Credit Extraction — v2 endpoint */}
-                  <DropdownMenu.Item
-                    className={itemCls}
-                    onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'AI Credit Extraction', jobFn: () => startCreditExtraction(fid) }) }}
-                  >
-                    <Sparkles size={12} className="text-muted" /> AI Credit Extraction
-                  </DropdownMenu.Item>
+                  {/* AI Credit Extraction — v2 endpoint — XML stage only */}
+                  {showAction('aiCreditExtraction') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'AI Credit Extraction', jobFn: () => startCreditExtraction(fid) }) }}
+                    >
+                      <Sparkles size={12} className="text-muted" /> AI Credit Extraction
+                    </DropdownMenu.Item>
+                  )}
 
-                  {/* Bias Scan — v2 endpoint */}
-                  <DropdownMenu.Item
-                    className={itemCls}
-                    onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Bias Scan', jobFn: () => startBiasScan(fid) }) }}
-                  >
-                    <ScanLine size={12} className="text-muted" /> Bias Scan
-                  </DropdownMenu.Item>
+                  {/* Bias Scan — v2 endpoint — XML stage only */}
+                  {showAction('biasScan') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Bias Scan', jobFn: () => startBiasScan(fid) }) }}
+                    >
+                      <ScanLine size={12} className="text-muted" /> Bias Scan
+                    </DropdownMenu.Item>
+                  )}
 
-                  {/* Word to XML — v2 endpoint */}
-                  <DropdownMenu.Item
-                    className={itemCls}
-                    onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Word to XML', jobFn: () => startWordToXml(fid) }) }}
-                  >
-                    <FileCode size={12} className="text-muted" /> Word to XML
-                  </DropdownMenu.Item>
+                  {/* Word to XML — v2 endpoint — XML stage only */}
+                  {showAction('wordToXml') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Word to XML', jobFn: () => startWordToXml(fid) }) }}
+                    >
+                      <FileCode size={12} className="text-muted" /> Word to XML
+                    </DropdownMenu.Item>
+                  )}
                 </>
               ) : (
                 /* No db_id: show stage-based fallback labels (no API call) */
@@ -464,7 +497,7 @@ function FileActionsMenu({
                     <Zap size={12} className="text-muted" /> {a}
                   </DropdownMenu.Item>
                 ))
-              )}
+              ))}
 
               {/* ── Group 3: Checkout ────────────────────────────── */}
               {sep}
@@ -613,8 +646,14 @@ export function ChapterFilePage({
     return m
   }, [filesQuery.data, chapterFolderData]) // eslint-disable-line
 
-  // Open docx viewer (full-screen viewer page)
+  // Open docx viewer (full-screen viewer page) — for image files, deep-link
+  // into the dedicated Image Review & Editor instead, since the docx viewer
+  // can't handle raster formats and the structuring review 500s on them.
   function openEditor(row: FileRow) {
+    if (row.db_id && /\.(jpe?g|png|gif|webp|tiff?|bmp|eps)$/i.test(row.file_name)) {
+      navigate(`/projects/${pid}/image-review?fileId=${row.db_id}`)
+      return
+    }
     const base = cliId
       ? `/clients/${cliId}/projects/${pid}/chapters/${cid}`
       : `/projects/${pid}/chapters/${cid}`
@@ -742,16 +781,34 @@ export function ChapterFilePage({
         const ext = name.split('.').pop() ?? ''
         const { icon, color } = fileTypeIcon(ext)
         const fid = row.original.db_id
+        const isImageRow = /\.(jpe?g|png|gif|webp|tiff?|bmp|eps)$/i.test(name)
+        const openTarget = isImageRow
+          ? `/projects/${pid}/image-review?fileId=${fid}`
+          : `${uiPaths.structuringReview(pid, cid, fid)}?tab=editor`
         return (
           <div className="flex items-center gap-2">
-            <FolderIcon name={icon} size={14} color={color}/>
+            {isImageRow && fid ? (
+              <button
+                type="button"
+                onClick={e => { e.stopPropagation(); navigate(openTarget) }}
+                title={`Open ${name} in Image Editor`}
+                className="w-6 h-6 rounded-sm overflow-hidden bg-surface border border-border shrink-0 hover:ring-2 hover:ring-primary/60 focus:outline-none focus:ring-2 focus:ring-primary/60 cursor-pointer"
+              >
+                <img
+                  src={`/api/v2/files/${fid}/preview?fmt=png`}
+                  alt=""
+                  loading="lazy"
+                  className="w-full h-full object-cover"
+                  onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                />
+              </button>
+            ) : (
+              <FolderIcon name={icon} size={14} color={color}/>
+            )}
             {fid ? (
               <button
                 type="button"
-                onClick={e => {
-                  e.stopPropagation()
-                  navigate(`${uiPaths.structuringReview(pid, cid, fid)}?tab=editor`)
-                }}
+                onClick={e => { e.stopPropagation(); navigate(openTarget) }}
                 title={name}
                 className="font-medium text-text truncate max-w-[2000px] text-left hover:text-primary hover:underline cursor-pointer"
               >
@@ -1016,6 +1073,17 @@ export function ChapterFilePage({
               ${resolvedIsAssigned ? 'bg-primary hover:bg-primary/90' : 'bg-primary/30 opacity-50 cursor-not-allowed'}`}
           >
             <Upload size={12} /> Bulk Upload
+          </button>
+        )}
+
+        {/* Open Image Review & Editor — dedicated Art-team workspace, only visible in the Art folder */}
+        {activeFolder === 'art' && pid > 0 && (
+          <button
+            onClick={() => navigate(`/projects/${pid}/image-review`)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white rounded-lg transition-colors shadow-sm bg-amber-600 hover:bg-amber-700"
+            title="Open the dedicated Image Review & Editor for this project"
+          >
+            <FilePen size={12} /> Image Review & Editor
           </button>
         )}
 

@@ -418,7 +418,10 @@ export function FileContextMenu({
   const hasTechnicalEdit = file.available_actions.includes("technical_edit");
   const hasStructuringReview = file.available_actions.includes("structuring_review");
   const filenameLower = file.filename.toLowerCase();
-  const hasReferenceReview = filenameLower.endsWith(".docx");
+  const hasReferenceReview =
+    filenameLower.endsWith("_processed.docx") ||
+    filenameLower.endsWith("_structured.docx");
+  const isImage = /\.(jpe?g|png|gif|webp|tiff?|bmp|eps)$/i.test(file.filename);
 
   if (!mounted) return null;
 
@@ -638,6 +641,31 @@ export function FileContextMenu({
             <MenuWordItem fileId={file.id} onClose={onClose} />
             {filenameLower.endsWith(".indd") && (
               <MenuIndesignToWordItem fileId={file.id} onClose={onClose} />
+            {isImage ? (
+              // Image files can't be opened in the DOCX/OnlyOffice/Word editors —
+              // route Art-team edits through the dedicated Image Review page.
+              <MenuLinkItem
+                icon={FilePen}
+                label="Open in Image Editor"
+                to={`/projects/${projectId}/image-review?fileId=${file.id}`}
+                onClick={onClose}
+              />
+            ) : (
+              <>
+                <MenuLinkItem
+                  icon={FilePen}
+                  label="Edit in Editor"
+                  to={`${uiPaths.structuringReview(projectId, chapterId, file.id)}?tab=editor`}
+                  onClick={onClose}
+                />
+                <MenuLinkItem
+                  icon={FilePen}
+                  label="Edit in OnlyOffice"
+                  to={`${uiPaths.structuringReview(projectId, chapterId, file.id)}?tab=onlyoffice`}
+                  onClick={onClose}
+                />
+                <MenuWordItem fileId={file.id} onClose={onClose} />
+              </>
             )}
             <MenuDownloadItem
               icon={ArrowDownToLine}
@@ -662,68 +690,72 @@ export function FileContextMenu({
               />
             )}
 
-            {/* ── Group 2: Processing ─────────────────────────────── */}
-            <MenuSeparator />
-            <MenuGroupLabel label="Processing" />
+            {/* ── Group 2: Processing (DOCX-only, hidden for images) ─── */}
+            {!isImage && (
+              <>
+                <MenuSeparator />
+                <MenuGroupLabel label="Processing" />
 
-            <MenuItem
-              icon={Play}
-              label="Run All Processes"
-              iconStyle={ICON_GOLD}
-              disabled
-              soon
-            />
-            <MenuItem
-              icon={Layers}
-              label="Structuring"
-              iconStyle={ICON_GOLD}
-              onClick={() => setConfirmStep({ processType: "structuring", mode: "style", actionName: "Structuring", isStructuringChoice: true })}
-            />
-            <MenuItem
-              icon={Languages}
-              label="Language Edit"
-              onClick={() => setConfirmStep({ processType: "language", mode: "style", actionName: "Language Edit" })}
-            />
-            {hasTechnicalEdit ? (
-              <MenuLinkItem
-                icon={Wrench}
-                label="Technical Edit"
-                to={uiPaths.technicalReview(projectId, chapterId, file.id)}
-                onClick={onClose}
-              />
-            ) : (
-              <MenuItem icon={Wrench} label="Technical Edit" disabled />
+                <MenuItem
+                  icon={Play}
+                  label="Run All Processes"
+                  iconStyle={ICON_GOLD}
+                  disabled
+                  soon
+                />
+                <MenuItem
+                  icon={Layers}
+                  label="Structuring"
+                  iconStyle={ICON_GOLD}
+                  onClick={() => setConfirmStep({ processType: "structuring", mode: "style", actionName: "Structuring", isStructuringChoice: true })}
+                />
+                <MenuItem
+                  icon={Languages}
+                  label="Language Edit"
+                  onClick={() => setConfirmStep({ processType: "language", mode: "style", actionName: "Language Edit" })}
+                />
+                {hasTechnicalEdit ? (
+                  <MenuLinkItem
+                    icon={Wrench}
+                    label="Technical Edit"
+                    to={uiPaths.technicalReview(projectId, chapterId, file.id)}
+                    onClick={onClose}
+                  />
+                ) : (
+                  <MenuItem icon={Wrench} label="Technical Edit" disabled />
+                )}
+                <MenuItem
+                  icon={BookCheck}
+                  label="Reference Check"
+                  onClick={() => { onClose(); onOpenReferenceCheck(); }}
+                />
+                <MenuItem
+                  icon={FileOutput}
+                  label="Manuscript Anaylsis"
+                  onClick={() => setConfirmStep({ processType: "ppd", mode: "style", actionName: "PPD Generation" })}
+                />
+                <MenuItem
+                  icon={ShieldCheck}
+                  label="Permissions Check"
+                  onClick={() => setConfirmStep({ processType: "permissions", mode: "style", actionName: "Permissions Check" })}
+                />
+                <MenuItem
+                  icon={Sparkles}
+                  label="AI Credit Extraction"
+                  onClick={() => setConfirmStep({ processType: "credit_extractor_ai", mode: "style", actionName: "AI Credit Extraction" })}
+                />
+                <MenuItem
+                  icon={ScanLine}
+                  label="Bias Scan"
+                  onClick={() => setConfirmStep({ processType: "bias_scan", mode: "style", actionName: "Bias Scan" })}
+                />
+                <MenuItem
+                  icon={FileCode}
+                  label="Word to XML"
+                  onClick={() => setConfirmStep({ processType: "word_to_xml", mode: "style", actionName: "Word to XML" })}
+                />
+              </>
             )}
-            <MenuItem
-              icon={BookCheck}
-              label="Reference Check"
-              onClick={() => { onClose(); onOpenReferenceCheck(); }}
-            />
-            <MenuItem
-              icon={FileOutput}
-              label="Manuscript Anaylsis"
-              onClick={() => setConfirmStep({ processType: "ppd", mode: "style", actionName: "PPD Generation" })}
-            />
-            <MenuItem
-              icon={ShieldCheck}
-              label="Permissions Check"
-              onClick={() => setConfirmStep({ processType: "permissions", mode: "style", actionName: "Permissions Check" })}
-            />
-            <MenuItem
-              icon={Sparkles}
-              label="AI Credit Extraction"
-              onClick={() => setConfirmStep({ processType: "credit_extractor_ai", mode: "style", actionName: "AI Credit Extraction" })}
-            />
-            <MenuItem
-              icon={ScanLine}
-              label="Bias Scan"
-              onClick={() => setConfirmStep({ processType: "bias_scan", mode: "style", actionName: "Bias Scan" })}
-            />
-            <MenuItem
-              icon={FileCode}
-              label="Word to XML"
-              onClick={() => setConfirmStep({ processType: "word_to_xml", mode: "style", actionName: "Word to XML" })}
-            />
 
             {/* ── Group 3: Checkout & Delete ─────────────────────── */}
             <MenuSeparator />
