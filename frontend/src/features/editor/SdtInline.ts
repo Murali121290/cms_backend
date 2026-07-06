@@ -1,4 +1,4 @@
-import { Mark, mergeAttributes } from "@tiptap/core";
+import { Node, mergeAttributes } from "@tiptap/core";
 
 declare module '@tiptap/core' {
   interface Commands<ReturnType> {
@@ -9,10 +9,12 @@ declare module '@tiptap/core' {
   }
 }
 
-export const SdtInline = Mark.create({
+export const SdtInline = Node.create({
   name: "sdtInline",
-  keepOnSplit: true,
-  inclusive: true,
+  group: "inline",
+  inline: true,
+  content: "inline*",
+  defining: true,
 
   addAttributes() {
     return {
@@ -48,11 +50,12 @@ export const SdtInline = Mark.create({
   addCommands() {
     return {
       toggleSdtInline: (alias: string, tag: string) => ({ commands }) => {
-        return commands.toggleMark(this.name, { alias, tag });
+        return commands.wrapIn(this.name, { alias, tag });
       },
       unsetSdtInline: () => ({ commands }) => {
-        return commands.unsetMark(this.name);
+        return commands.lift(this.name);
       },
     };
   },
 });
+

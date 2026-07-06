@@ -6,6 +6,8 @@ from docx.oxml.table import CT_Tbl
 import logging
 from typing import List, Dict, Any
 
+from .annotator import normalize_structural_tag_case
+
 logger = logging.getLogger(__name__)
 
 def iter_block_items(doc):
@@ -96,6 +98,7 @@ def update_document_structure(docx_path: str, output_path: str, updates: Dict[st
         count = 0
         
         for item_id, new_style_name in updates.items():
+            new_style_name = normalize_structural_tag_case(new_style_name)
             target_para = None
             
             # Parse ID
@@ -137,17 +140,10 @@ def update_document_structure(docx_path: str, output_path: str, updates: Dict[st
                     target_para.style = new_style_name
                     count += 1
                 except KeyError:
-                    # Style Creation Logic
-                    logger.info(f"Style '{new_style_name}' not found. Creating it.")
-                    try:
-                        styles = doc.styles
-                        new_style = styles.add_style(new_style_name, 1) # Paragraph style
-                        if 'Normal' in styles:
-                            new_style.base_style = styles['Normal']
-                        target_para.style = new_style_name
-                        count += 1
-                    except Exception as e:
-                        logger.error(f"Failed to create style '{new_style_name}': {e}")
+                    logger.warning(
+                        "Style '%s' not found in template — original style preserved.",
+                        new_style_name,
+                    )
 
         doc.save(output_path)
         logger.info(f"Updated {count} items in {output_path}")

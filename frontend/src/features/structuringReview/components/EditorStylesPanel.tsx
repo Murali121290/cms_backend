@@ -95,6 +95,28 @@ const DEFAULT_CHAR_STYLES: { group: string; styles: string[] }[] = [
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
+function getTagChip(el: ScannedElement): { label: string; bg: string; color: string } {
+  if (el.type === "heading") {
+    const sl = el.styleLabel ?? "";
+    if (sl === "H1") return { label: "H1",  bg: "#1C1A17", color: "#E8C896" };
+    if (sl === "H2") return { label: "H2",  bg: "#FBEFD9", color: "#A66A12" };
+    if (sl === "H3") return { label: "H3",  bg: "#FFF3E0", color: "#B45309" };
+    if (sl === "H4") return { label: "H4",  bg: "#FFF8EC", color: "#92400E" };
+    return              { label: sl.slice(0, 3) || "Hx", bg: "#F4F1EA", color: "#5E574B" };
+  }
+  if (el.type === "paragraph") {
+    const label = (el.styleLabel ?? "P").slice(0, 4);
+    return { label, bg: "#F0EADB", color: "#5E574B" };
+  }
+  if (el.type === "table")        return { label: "TBL",  bg: "#EBF3FF", color: "#1D4ED8" };
+  if (el.type === "sdtBlock")     return { label: "SDT",  bg: "#F1E6F7", color: "#7A3FA0" };
+  if (el.type === "sdtInline")    return { label: "INL",  bg: "#EEE9F8", color: "#7C3AED" };
+  if (el.type === "bulletList")   return { label: "UL",   bg: "#E9F1EB", color: "#2E7D52" };
+  if (el.type === "orderedList")  return { label: "OL",   bg: "#E9F1EB", color: "#2E7D52" };
+  if (el.type === "blockquote")   return { label: "BQ",   bg: "#F1F5F9", color: "#475569" };
+  return { label: (el.type as string).slice(0, 3).toUpperCase(), bg: "#F4F1EA", color: "#5E574B" };
+}
+
 function HighlightedText({ text, highlight }: { text: string; highlight: string }) {
   if (!highlight.trim()) return <span>{text}</span>;
   const regex = new RegExp(`(${highlight.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&")})`, "gi");
@@ -132,6 +154,7 @@ export function StylesPanel({
   const [allStyles, setAllStyles] = useState<string[]>(styles);
   const [searchQuery, setSearchQuery] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [canUnwrapSdt, setCanUnwrapSdt] = useState(false);
 
   useEffect(() => { setAllStyles(styles); }, [styles]);
 
@@ -146,6 +169,7 @@ export function StylesPanel({
       } else {
         setCurrentStyle("Normal");
       }
+      setCanUnwrapSdt(editor.isActive("sdtBlock") || editor.isActive("sdtInline"));
     };
     editor.on("selectionUpdate", update);
     editor.on("update", update);
@@ -338,25 +362,9 @@ export function StylesPanel({
       editor.state.doc.descendants((node: PmNode, pos: number) => {
         const type = node.type.name;
 
-        if (["sdtBlock", "table", "bulletList", "orderedList", "blockquote", "paragraph", "heading"].includes(type)) {
+        if (["sdtBlock", "sdtInline", "table", "bulletList", "orderedList", "blockquote", "paragraph", "heading"].includes(type)) {
           targets.push({ pos, end: pos + node.nodeSize, node, type });
         }
-
-        node.marks.forEach((mark: PmMark) => {
-          if (mark.type.name === "sdtInline") {
-            const key = `${mark.attrs.alias}-${pos}`;
-            if (key !== lastInlineSdtKey) {
-              targets.push({
-                pos,
-                end: pos + node.nodeSize,
-                node,
-                type: "sdtInline",
-                markAttrs: mark.attrs
-              });
-              lastInlineSdtKey = key;
-            }
-          }
-        });
       });
 
       targets.sort((a, b) => {
@@ -375,7 +383,7 @@ export function StylesPanel({
         if (t.type === "sdtBlock") {
           name = `Block SDT: ${t.node.attrs.alias || "unnamed"}`;
         } else if (t.type === "sdtInline") {
-          name = `Inline SDT: ${t.markAttrs?.alias || "unnamed"}`;
+          name = `Inline SDT: ${t.node.attrs.alias || t.markAttrs?.alias || "unnamed"}`;
           id = `sdtInline-${t.pos}`;
         } else if (t.type === "table") {
           name = "Table";
@@ -646,6 +654,19 @@ export function StylesPanel({
     setWrapType("block");
   };
 
+  const handleUnwrap = () => {
+    const editor = editorRef.current?.editor;
+    if (!editor) return;
+    let chain = editor.chain().focus();
+    if (editor.isActive("sdtBlock")) {
+      chain = chain.unwrapSdtBlock();
+    }
+    if (editor.isActive("sdtInline")) {
+      chain = chain.unsetSdtInline();
+    }
+    chain.run();
+  };
+
   const scrollToElement = (el: ScannedElement) => {
     const editor = editorRef.current?.editor;
     if (!editor) return;
@@ -867,19 +888,21 @@ export function StylesPanel({
     const hasChildren = (el.children && el.children.length > 0) || (el.inlineSdts && el.inlineSdts.length > 0);
     const isChecked = checkedIds.has(el.id);
     const isOutlineRow = (el.type === "paragraph" || el.type === "heading") && (el.preview !== undefined);
+    const chip = getTagChip(el);
 
     return (
       <div key={el.id} className="flex flex-col">
         <div
-          className="flex items-center gap-1.5 py-1 px-1.5 hover:bg-slate-50 rounded transition-colors text-xs select-none"
-          style={{ paddingLeft: `${Math.max(4, depth * 12)}px` }}
+          className="flex items-center gap-1.5 py-[5px] px-1.5 hover:bg-[#F4F1EA]/60 rounded transition-colors text-xs select-none"
+          style={{ paddingLeft: `${Math.max(4, depth * 14)}px` }}
         >
           <button
             onClick={() => toggleExpanded(el.id)}
-            className={`p-0.5 hover:bg-slate-200 rounded text-slate-400 hover:text-slate-600 border-none bg-transparent cursor-pointer shrink-0 w-4.5 h-4.5 flex items-center justify-center
+            className={`p-0.5 hover:bg-[#E6DFD1] rounded text-[#A8A091] hover:text-[#5E574B] border-none bg-transparent cursor-pointer shrink-0 flex items-center justify-center
               ${hasChildren ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+            style={{ width: 16, height: 16 }}
           >
-            {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+            {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
           </button>
 
           <input
@@ -889,26 +912,35 @@ export function StylesPanel({
             className="w-3.5 h-3.5 border-slate-300 rounded text-primary focus:ring-primary cursor-pointer shrink-0"
           />
 
-          {isOutlineRow ? (
-            <button
-              type="button"
-              onClick={() => scrollToElement(el)}
-              className="flex-1 min-w-0 text-left inline-flex items-baseline gap-1.5 truncate cursor-pointer border-none bg-transparent p-0 hover:text-sky-700"
-              title={`${el.styleLabel} – ${el.preview || "(empty)"}`}
+          <button
+            type="button"
+            onClick={() => scrollToElement(el)}
+            className="flex-1 min-w-0 text-left inline-flex items-center gap-1.5 truncate cursor-pointer border-none bg-transparent p-0"
+            title={isOutlineRow ? `${el.styleLabel} – ${el.preview || "(empty)"}` : el.name}
+          >
+            {/* Colored tag chip */}
+            <span
+              className="shrink-0 font-mono font-bold leading-none"
+              style={{
+                fontSize: '8.5px',
+                padding: '2px 5px',
+                borderRadius: '4px',
+                background: chip.bg,
+                color: chip.color,
+                letterSpacing: '0.04em',
+              }}
             >
-              <span className="font-bold text-amber-700 font-mono text-[10px] shrink-0">
-                {el.styleLabel}
-              </span>
-              <span className="text-slate-400">–</span>
-              <span className="font-normal text-slate-700 truncate text-[11px]">
-                {el.preview || <span className="italic text-slate-400">(empty)</span>}
-              </span>
-            </button>
-          ) : (
-            <span className="font-medium text-slate-700 truncate flex-1 font-mono text-[10px]" title={el.name}>
-              {el.name}
+              {chip.label}
             </span>
-          )}
+
+            {isOutlineRow ? (
+              <span className="text-[#3A352D] truncate text-[11.5px] hover:text-[#1C1A17]">
+                {el.preview || <span className="italic text-[#A8A091]">(empty)</span>}
+              </span>
+            ) : (
+              <span className="text-[#5E574B] truncate text-[11px]">{el.name}</span>
+            )}
+          </button>
         </div>
 
         {hasChildren && isExpanded && (
@@ -1192,16 +1224,95 @@ export function StylesPanel({
               )}
             </div>
 
-            <div className="border-t border-border p-3 space-y-2">
-              <Button
-                variant="secondary"
-                size="sm"
-                leftIcon={<Plus className="w-3 h-3" />}
-                className="w-full text-[11px]"
-                onClick={() => setShowWrapModal(true)}
-              >
-                Wrap Selection
-              </Button>
+            <div className="border-t border-border p-3 space-y-3 bg-slate-50/50">
+              <div className="space-y-1">
+                <p className="text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-1.5 px-0.5">
+                  Content Control Presets
+                </p>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-[10px] font-semibold h-8 bg-white"
+                    onClick={() => {
+                      editorRef.current?.editor?.chain().focus().wrapInSdtBlock("Figure Caption", "Figure Caption").run();
+                    }}
+                  >
+                    Fig Caption
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-[10px] font-semibold h-8 bg-white"
+                    onClick={() => {
+                      editorRef.current?.editor?.chain().focus().wrapInSdtBlock("Table Caption", "Table Caption").run();
+                    }}
+                  >
+                    Tab Caption
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-[10px] font-semibold h-8 bg-white col-span-2"
+                    onClick={() => {
+                      editorRef.current?.editor?.chain().focus().wrapInSdtBlock("TableGroup", "TableGroup").run();
+                    }}
+                  >
+                    Table Group
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-[10px] font-semibold h-8 bg-white"
+                    onClick={() => {
+                      editorRef.current?.editor?.chain().focus()
+                        .toggleSdtInline("FigureRef", "FigureRef")
+                        .toggleMark("charStyle", { class: "FigureCitation" })
+                        .run();
+                    }}
+                  >
+                    Fig Citation
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-[10px] font-semibold h-8 bg-white"
+                    onClick={() => {
+                      editorRef.current?.editor?.chain().focus()
+                        .toggleSdtInline("TableRef", "TableRef")
+                        .toggleMark("charStyle", { class: "TableCitation" })
+                        .run();
+                    }}
+                  >
+                    Tab Citation
+                  </Button>
+                </div>
+              </div>
+
+              <div className="flex gap-1.5">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  leftIcon={<Plus className="w-3 h-3" />}
+                  className="flex-1 text-[11px]"
+                  onClick={() => setShowWrapModal(true)}
+                >
+                  Custom Wrap
+                </Button>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  leftIcon={<X className="w-3 h-3" />}
+                  className={`flex-1 text-[11px] ${canUnwrapSdt ? 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100 hover:text-rose-800' : ''}`}
+                  onClick={handleUnwrap}
+                  disabled={!canUnwrapSdt}
+                >
+                  Unwrap SDT
+                </Button>
+              </div>
+
+              <div className="w-full border-t border-slate-200/60 my-1" />
 
               <Button
                 variant="primary"

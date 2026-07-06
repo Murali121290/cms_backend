@@ -11,7 +11,8 @@ from docx.oxml.ns import qn
 from .annotator import annotate_document, detect_list_kind, is_list_paragraph
 from .logger_config import get_logger
 from .box_prefixer import apply_box_tag_prefixes
-from .hierarchy_manager import enforce_hierarchy
+from .heading_classifier import classify_headings_by_formatting
+from .hierarchy_manager import enforce_hierarchy, demote_long_headings
 from .list_normalizer import normalize_list_positions
 from .reference_normalizer import normalize_reference_numbers
 from .zone_styles import check_zone_style_legality
@@ -298,6 +299,83 @@ def _restore_run_props(run, data):
     if data["color"]: run.font.color.rgb = data["color"]
     if data.get("highlight"): run.font.highlight_color = data["highlight"]
 
+
+def _snapshot_effective_run_formatting(para, doc):
+    """Resolve each run's effective font size and name, walking the style chain so
+    direct formatting overrides survive a paragraph-style swap."""
+    snapshots = []
+    for run in para.runs:
+        size_pt = None
+        if run.font.size is not None:
+            size_pt = run.font.size.pt
+        else:
+            style = para.style
+            while style is not None:
+                if style.font.size is not None:
+                    size_pt = style.font.size.pt
+                    break
+                style = style.base_style
+            if size_pt is None:
+                try:
+                    normal = doc.styles['Normal']
+                    if normal.font.size:
+                        size_pt = normal.font.size.pt
+                except Exception:
+                    pass
+
+        font_name = run.font.name
+        if not font_name:
+            style = para.style
+            while style is not None:
+                if style.font.name:
+                    font_name = style.font.name
+                    break
+                style = style.base_style
+
+        snapshots.append({'size_pt': size_pt, 'font_name': font_name})
+    return snapshots
+
+
+def _apply_formatting_snapshot(para, snapshots):
+    """Re-stamp direct run-level font/size after a style change to lock in original appearance."""
+    from docx.oxml.ns import qn as _qn
+    from docx.oxml import OxmlElement
+    for run, snap in zip(para.runs, snapshots):
+        rPr = run._element.get_or_add_rPr()
+        if snap['size_pt']:
+            val = str(int(snap['size_pt'] * 2))
+            for tag in ('w:sz', 'w:szCs'):
+                el = rPr.find(_qn(tag))
+                if el is None:
+                    el = OxmlElement(tag)
+                    rPr.append(el)
+                el.set(_qn('w:val'), val)
+        if snap['font_name']:
+            rFonts = rPr.find(_qn('w:rFonts'))
+            if rFonts is None:
+                rFonts = OxmlElement('w:rFonts')
+                rPr.insert(0, rFonts)
+            rFonts.set(_qn('w:ascii'), snap['font_name'])
+            rFonts.set(_qn('w:hAnsi'), snap['font_name'])
+
+
+def _ensure_style_exists(doc, style_name: str) -> bool:
+    """Create *style_name* as a Normal-based paragraph style if it is absent.
+    Returns True when the style is ready to use, False on failure."""
+    try:
+        doc.styles[style_name]
+        return True
+    except KeyError:
+        pass
+    try:
+        new_style = doc.styles.add_style(style_name, 1)  # 1 = WD_STYLE_TYPE.PARAGRAPH
+        new_style.base_style = doc.styles['Normal']
+        return True
+    except Exception as e:
+        logger.error(f"Could not create style '{style_name}': {e}")
+        return False
+
+
 def process_docx(
     input_path: str,
     output_path: str,
@@ -341,9 +419,19 @@ def process_docx(
         annotations = annotate_document(doc)
         annotations = apply_box_tag_prefixes(annotations)
 
+        try:
+            logger.info("Classifying heading levels via formatting engine")
+            annotations = classify_headings_by_formatting(doc, annotations)
+        except Exception as e:
+            logger.error(
+                f"Heading classification by formatting failed; keeping regex-engine heading levels unchanged: {e}",
+                exc_info=True,
+            )
+
         if mode == "style":
             logger.info("Enforcing heading hierarchy and validation")
             annotations = enforce_hierarchy(annotations)
+            annotations = demote_long_headings(annotations)
             annotations = normalize_list_positions(annotations)
             annotations = normalize_reference_numbers(annotations)
             result["zone_warnings"] = check_zone_style_legality(annotations)
@@ -357,22 +445,18 @@ def process_docx(
                 
                 if mode == "style":
                     try:
+                        _ensure_style_exists(doc, style)
+                        snapshots = _snapshot_effective_run_formatting(para, doc)
                         para.style = style
+                        _apply_formatting_snapshot(para, snapshots)
                         result["paragraphs_processed"] += 1
                         logger.debug(f"Paragraph {idx}: Applied style '{style}' (tag: {tag})")
-                    except KeyError:
-                        logger.warning(f"Paragraph {idx}: Style '{style}' not found in template. Creating it as default Paragraph Style.")
-                        try:
-                            # Create the style if missing
-                            styles = doc.styles
-                            new_style = styles.add_style(style, 1) # 1 is WD_STYLE_TYPE.PARAGRAPH
-                            new_style.base_style = styles['Normal']
-                            para.style = style
-                            logger.info(f"Created and applied new style '{style}'")
-                            result["paragraphs_processed"] += 1
-                        except Exception as e2:
-                            logger.error(f"Failed to create style '{style}': {e2}")
-                            result["errors"].append(f"Style '{style}' missing and creation failed: {str(e2)}")
+                    except Exception as style_err:
+                        logger.warning(
+                            "Paragraph %d: could not apply style '%s': %s",
+                            idx, style, style_err,
+                        )
+                        result["errors"].append(f"Paragraph {idx} style error: {style_err}")
                 else:  # tag mode
                     if para.runs:
                         try:

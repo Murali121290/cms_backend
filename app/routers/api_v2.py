@@ -922,6 +922,7 @@ def api_v2_project_bootstrap(
     copyright_year: int | None = Form(None),
     manuscript_pages: int | None = Form(None),
     estimated_pages: int | None = Form(None),
+    actual_pages: int | None = Form(None),
     isbn_no: str | None = Form(None),
     billing_location: str | None = Form(None),
     due_date: str | None = Form(None),
@@ -1006,7 +1007,7 @@ def api_v2_project_bootstrap(
     for _f in ("division_code", "customer_contact", "category", "composition",
                "project_manager", "sales_person", "priority", "edition", "color",
                "trim_size", "copyright_year", "manuscript_pages", "estimated_pages",
-               "isbn_no", "billing_location"):
+               "actual_pages", "isbn_no", "billing_location"):
         _v = locals().get(_f)
         if _v is not None:
             setattr(project, _f, _v)
@@ -4231,6 +4232,7 @@ def api_v2_structuring_export(
 def api_v2_reference_review(
     file_id: int,
     style: Optional[str] = Query(None),
+    citation_format: Optional[str] = Query(None),
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -4247,6 +4249,7 @@ def api_v2_reference_review(
             db,
             file_id=file_id,
             style=style,
+            citation_format=citation_format,
             logger=logger,
         )
     except HTTPException as exc:
@@ -4382,6 +4385,7 @@ def api_v2_reference_export(
 def api_v2_reference_validate_only(
     file_id: int,
     style: Optional[str] = Query(None),
+    citation_format: Optional[str] = Query(None),
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -4398,6 +4402,7 @@ def api_v2_reference_validate_only(
             db,
             file_id=file_id,
             style=style,
+            citation_format=citation_format,
             logger=logger,
         )
         return result

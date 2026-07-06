@@ -165,7 +165,6 @@ def upgrade() -> None:
         sa.Column('billing_location', sa.String(255), nullable=True),
         sa.Column('due_date', sa.Date(), nullable=True),
         sa.Column('file_details', sa.JSON(), nullable=True),
-        sa.Column('team', sa.String(), nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.ForeignKeyConstraint(['client_id'], ['clients.id'], name='fk_projects_client_id', ondelete='CASCADE'),

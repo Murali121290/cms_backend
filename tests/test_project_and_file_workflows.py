@@ -686,10 +686,21 @@ def test_project_delete_removes_project_row_and_project_directory(
 
 
 def test_duplicate_chapter_delete_routes_remain_registered(app_env):
+    def flatten(r):
+        res = []
+        for route in getattr(r, 'routes', []):
+            if type(route).__name__ == '_IncludedRouter':
+                res.extend(flatten(route.original_router))
+            elif hasattr(route, 'routes'):
+                res.extend(flatten(route))
+            else:
+                res.append(route)
+        return res
+    all_routes = flatten(app_env["app"].router)
     delete_routes = [
         route.endpoint.__name__
-        for route in app_env["app"].router.routes
-        if route.path == "/projects/{project_id}/chapter/{chapter_id}/delete"
+        for route in all_routes
+        if getattr(route, "path", None) == "/projects/{project_id}/chapter/{chapter_id}/delete"
         and "POST" in getattr(route, "methods", set())
     ]
 

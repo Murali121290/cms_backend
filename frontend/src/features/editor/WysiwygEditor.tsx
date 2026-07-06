@@ -1402,11 +1402,10 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           {/* Review-mode (compare with original) Toggle */}
           <button
             onClick={handleToggleReviewMode}
-            className={`p-1.5 rounded-md transition-all duration-150 border shrink-0 ${
-              reviewMode
+            className={`p-1.5 rounded-md transition-all duration-150 border shrink-0 ${reviewMode
                 ? "bg-sky-950/40 text-sky-300 border-sky-800/80 shadow-sm"
                 : "bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800 hover:text-slate-200"
-            }`}
+              }`}
             title={
               reviewMode
                 ? "Reviewing changes vs. original — click to return to current view"

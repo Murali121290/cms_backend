@@ -30,6 +30,7 @@ class HierarchyManager:
         constraints = self.config.get("constraints", {})
         
         current_level = 0  # 0 indicates no heading seen yet
+        prev_heading_level = None  # level of the last heading seen, None if last content was non-heading
         
         # Map style names to levels
         style_levels = {
@@ -43,17 +44,23 @@ class HierarchyManager:
             "Heading 3": 3,
             "H4": 4,
             "Heading 4": 4,
+            "H5": 5,
+            "Heading 5": 5,
+            "H6": 6,
+            "Heading 6": 6,
             "Normal": 99,
             "TXT": 99,
             "BODY_TEXT": 99
         }
-        
+
         # Reverse map for level -> style
         level_styles = {
             1: "H1",
             2: "H2",
             3: "H3",
-            4: "H4"
+            4: "H4",
+            5: "H5",
+            6: "H6"
         }
 
         refined_annotations = []
@@ -72,8 +79,11 @@ class HierarchyManager:
                 # current_level so later, non-locked paragraphs are checked
                 # against accurate context.
                 level = style_levels.get(style, 99)
-                if level <= 4:
+                if level <= 6:
                     current_level = level
+                    prev_heading_level = level
+                elif para.text.strip():
+                    prev_heading_level = None
                 refined_annotations.append(item)
                 continue
 
@@ -106,7 +116,7 @@ class HierarchyManager:
             # Check if this item determines a level
             level = style_levels.get(style, 99)
             
-            if level <= 4: # It is a heading
+            if level <= 6: # It is a heading
                 # Check constraints
                 if constraints.get("require_h1_first", False):
                     # Only enforce if skipping level 1 AND it's not a root element like Title (level 0)
@@ -133,10 +143,23 @@ class HierarchyManager:
                         level = new_level
                         style = level_styles.get(level, style)
                         tag = style
-                
+
+                # 4. Consecutive Heading Demotion (only when same level repeats)
+                if prev_heading_level is not None and level == prev_heading_level:
+                    new_level = min(level + 1, 6)
+                    logger.info(f"Demoting consecutive same-level heading '{text}' from H{level} to H{new_level}")
+                    level = new_level
+                    style = level_styles.get(level, style)
+                    tag = style
+
                 # Update current level context
                 current_level = level
-                
+                prev_heading_level = level
+
+            else:
+                if text:
+                    prev_heading_level = None
+
             item["style"] = style
             item["tag"] = tag
             refined_annotations.append(item)
@@ -146,3 +169,57 @@ class HierarchyManager:
 def enforce_hierarchy(annotations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     manager = HierarchyManager()
     return manager.refine_annotations(annotations)
+
+
+_HEADING_MAX_WORDS = 20
+
+_ALL_HEADINGS = {
+    "H1", "H2", "H3", "H4", "H5", "H6",
+    "Heading 1", "Heading 2", "Heading 3", "Heading 4", "Heading 5", "Heading 6",
+}
+
+
+def demote_long_headings(annotations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Demote headings whose text exceeds _HEADING_MAX_WORDS words to body text,
+    unless the paragraph carries an author-provided tag (locked=True).
+    TXT-FLUSH if a heading appears immediately above; TXT otherwise.
+    If the demoted heading itself was immediately followed by a TXT-FLUSH
+    paragraph, that paragraph is no longer flush against a heading (the
+    paragraph above it is now text too), so it is downgraded to plain TXT."""
+    prev_was_heading = False
+    prev_was_demoted = False
+    for item in annotations:
+        style = item.get("style", "")
+        is_heading = style in _ALL_HEADINGS
+
+        if not is_heading:
+            if prev_was_demoted and style == "TXT-FLUSH" and not item.get("locked"):
+                logger.info("Downgrading TXT-FLUSH -> TXT: preceding heading was demoted to text")
+                item["style"] = "TXT"
+                item["tag"] = "TXT"
+            prev_was_heading = False
+            prev_was_demoted = False
+            continue
+
+        if item.get("locked"):
+            prev_was_heading = True
+            prev_was_demoted = False
+            continue
+
+        para = item.get("para")
+        text = para.text.strip() if para is not None else ""
+        if len(text.split()) <= _HEADING_MAX_WORDS:
+            prev_was_heading = True
+            prev_was_demoted = False
+            continue
+
+        new_style = "TXT-FLUSH" if prev_was_heading else "TXT"
+        logger.info(
+            "Demoting long heading (%d words) %s -> %s: %r",
+            len(text.split()), style, new_style, text[:60],
+        )
+        item["style"] = new_style
+        item["tag"] = new_style
+        prev_was_heading = False
+        prev_was_demoted = True
+    return annotations

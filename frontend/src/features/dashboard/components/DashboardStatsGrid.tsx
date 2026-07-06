@@ -37,7 +37,7 @@ function MetricCard({ label, value, trendText, trendDirection = "neutral", icon,
         )}
       </div>
       <div>
-        <p className="text-3xl font-bold text-text font-mono leading-none">{value}</p>
+        <p className="text-3xl font-bold text-text font-serif leading-none">{value}</p>
         <p className="text-xs text-muted mt-1 font-medium uppercase tracking-wide">{label}</p>
       </div>
     </article>
