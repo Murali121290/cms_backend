@@ -589,11 +589,15 @@ class XhtmlToDocxDeltaEngine:
         from lxml import etree
         from docx.opc.constants import RELATIONSHIP_TYPE
 
-        # 1. Clear existing runs, ins, del, hyperlinks, and run-level bookmarks (r_bm_*)
+        # 1. Clear existing runs, ins, del, hyperlinks, math, and run-level
+        # bookmarks (r_bm_*). The math elements (m:oMath / m:oMathPara) live in
+        # a different XML namespace and would survive a plain localname-only
+        # match against the wordprocessing tag list — we match on localname here
+        # too because both namespaces use these tag names uniquely.
         p_elem = para._element
         for child in list(p_elem):
             tag_name = etree.QName(child.tag).localname
-            if tag_name in ('r', 'ins', 'del', 'hyperlink', 'sdt'):
+            if tag_name in ('r', 'ins', 'del', 'hyperlink', 'sdt', 'oMath', 'oMathPara'):
                 p_elem.remove(child)
             elif tag_name in ('bookmarkStart', 'bookmarkEnd'):
                 name = child.get(qn('w:name'), '')
@@ -945,34 +949,64 @@ class XhtmlToDocxDeltaEngine:
                     except Exception as link_err:
                         logger.warning(f"Could not build hyperlink in python-docx: {link_err}")
 
-            if tag == 'math' or el.get("data-latex"):
-                try:
-                    import latex2mathml.converter
-                    import mathml2omml
-                    
-                    if tag == 'math':
-                        # Serialize the element to MathML string
-                        mathml_str = etree.tostring(el, encoding="utf-8").decode("utf-8")
-                    else:
-                        latex_str = el.get("data-latex")
-                        mathml_str = latex2mathml.converter.convert(latex_str)
-                    
-                    omml_str = mathml2omml.convert(mathml_str)
-                    if "xmlns:m=" not in omml_str:
-                        omml_str = omml_str.replace("<m:oMath", '<m:oMath xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"', 1)
-                    
-                    omml_el = etree.fromstring(omml_str)
-                    current_xml_parent.append(omml_el)
-                except Exception as math_err:
-                    logger.warning(f"Failed to convert math to OMML: {math_err}")
-                    if el.text:
-                        add_rich_run(
-                            current_xml_parent, el.text,
-                            bold=current_bold, italic=current_italic, underline=current_underline, strike=current_strike,
-                            color=node_color, bg_color=node_bg, font_size=node_font_size, font_name=node_font_name,
-                            superscript=current_super, subscript=current_sub, is_link=current_link,
-                            is_del=current_is_del, char_style=node_char_style
-                        )
+            if tag == 'math' or el.get("data-latex") or el.get("data-mathml") or el.get("data-omml"):
+                omml_appended = False
+
+                # Priority 1 — raw OMML round-trip. When the editor round-tripped
+                # an unedited equation, data-omml carries the original DOCX bytes
+                # (base64 of the <m:oMath> or <m:oMathPara>) and we inject them
+                # back verbatim. This is byte-perfect for existing equations.
+                raw_omml_b64 = el.get("data-omml") or ""
+                if raw_omml_b64:
+                    try:
+                        import base64 as _b64
+                        raw_xml = _b64.b64decode(raw_omml_b64)
+                        omml_el = etree.fromstring(raw_xml)
+                        current_xml_parent.append(omml_el)
+                        omml_appended = True
+                    except Exception as raw_err:
+                        logger.warning(f"Raw OMML round-trip failed, falling back to MathML: {raw_err}")
+
+                # Priority 2 — MathML → OMML via mathml2omml.
+                # Priority 3 — LaTeX → MathML → OMML.
+                if not omml_appended:
+                    try:
+                        import latex2mathml.converter
+                        import mathml2omml
+
+                        # Prefer an explicit data-mathml attribute (Mathlive's
+                        # native MathML output after an edit) over the element's
+                        # own children, since Mathlive-emitted MathML is more
+                        # complete than KaTeX's default output.
+                        mathml_attr = el.get("data-mathml") or ""
+                        if mathml_attr:
+                            mathml_str = mathml_attr
+                        elif tag == 'math':
+                            mathml_str = etree.tostring(el, encoding="utf-8").decode("utf-8")
+                        else:
+                            latex_str = el.get("data-latex") or ""
+                            mathml_str = latex2mathml.converter.convert(latex_str)
+
+                        omml_str = mathml2omml.convert(mathml_str)
+                        if "xmlns:m=" not in omml_str:
+                            omml_str = omml_str.replace(
+                                "<m:oMath",
+                                '<m:oMath xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"',
+                                1,
+                            )
+
+                        omml_el = etree.fromstring(omml_str)
+                        current_xml_parent.append(omml_el)
+                    except Exception as math_err:
+                        logger.warning(f"Failed to convert math to OMML: {math_err}")
+                        if el.text:
+                            add_rich_run(
+                                current_xml_parent, el.text,
+                                bold=current_bold, italic=current_italic, underline=current_underline, strike=current_strike,
+                                color=node_color, bg_color=node_bg, font_size=node_font_size, font_name=node_font_name,
+                                superscript=current_super, subscript=current_sub, is_link=current_link,
+                                is_del=current_is_del, char_style=node_char_style
+                            )
 
                 if el.tail:
                     add_rich_run(

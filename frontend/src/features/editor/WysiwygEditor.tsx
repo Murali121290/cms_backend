@@ -968,7 +968,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
             );
             case "KeyM": return fire(() => openCommentDialog());
             case "KeyE": return fire(() =>
-              (editor.chain().focus() as any).insertMathNode("x^2 + y^2 = z^2").run()
+              (editor.chain().focus() as any).insertMathNode({ openOnMount: true }).run()
             );
           }
         }
@@ -980,27 +980,49 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
 
     const handleToggleTrackChanges = () => setTcEnabled(!tcEnabled);
 
-    // Convert client-only LaTeX spans to MathML on save. Comment spans
-    // (`span[data-comment-id]`) are intentionally preserved so the backend
+    // Convert client-only math spans to <math> elements on save. Priority:
+    //   1. data-omml (raw OMML from the source DOCX, unchanged) — the backend
+    //      will inject it byte-for-byte. Lossless round-trip.
+    //   2. data-mathml (MathML captured either from source or from Mathlive
+    //      after an edit) — backend runs it through mathml2omml.
+    //   3. data-latex (equation authored via the ∑ button and edited only in
+    //      LaTeX) — backend converts LaTeX → MathML → OMML.
+    // Comment spans (`span[data-comment-id]`) are preserved so the backend
     // can pair each highlighted range with its metadata when generating DOCX.
     function convertMathForSave(html: string): string {
       const parser = new DOMParser();
       const doc = parser.parseFromString(html, "text/html");
 
-      const mathSpans = doc.querySelectorAll("span[data-latex]");
+      const mathSpans = doc.querySelectorAll("span.math-node, span[data-latex], span[data-mathml], span[data-omml]");
       mathSpans.forEach(span => {
-        const latex = span.getAttribute("data-latex");
-        if (latex) {
-          try {
+        const latex = span.getAttribute("data-latex") || "";
+        const mathml = span.getAttribute("data-mathml") || "";
+        const omml = span.getAttribute("data-omml") || "";
+        const display = span.getAttribute("data-display") || "inline";
+
+        try {
+          let mathEl: Element | null = null;
+          if (mathml) {
             const temp = document.createElement("div");
-            temp.innerHTML = katex.renderToString(latex, { output: "mathml" });
-            const mathElement = temp.querySelector("math");
-            if (mathElement) {
-              span.parentNode?.replaceChild(mathElement, span);
-            }
-          } catch (err) {
-            console.error("Failed to convert LaTeX to MathML on save:", err);
+            temp.innerHTML = mathml;
+            mathEl = temp.querySelector("math");
           }
+          if (!mathEl && latex) {
+            const temp = document.createElement("div");
+            temp.innerHTML = katex.renderToString(latex, { output: "mathml", throwOnError: false });
+            mathEl = temp.querySelector("math");
+          }
+          if (!mathEl) {
+            // No usable math source — drop the empty node instead of leaving
+            // a phantom <span> that the delta engine would treat as text.
+            span.parentNode?.removeChild(span);
+            return;
+          }
+          if (omml) mathEl.setAttribute("data-omml", omml);
+          if (display) mathEl.setAttribute("data-display", display);
+          span.parentNode?.replaceChild(mathEl, span);
+        } catch (err) {
+          console.error("Failed to serialize math node on save:", err);
         }
       });
 
@@ -1382,7 +1404,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           <ToolbarButton
             onClick={() => {
               if (!editor) return;
-              editor.chain().focus().insertMathNode("x^2 + y^2 = z^2").run();
+              (editor.chain().focus() as any).insertMathNode({ openOnMount: true }).run();
             }}
             title={`Insert Math Equation (${kbd("Ctrl+Alt+E")})`}
           >
