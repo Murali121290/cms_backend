@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     
     DATABASE_URL: str = "postgresql://user:password@localhost/cms_db"
     REDIS_URL: str = "redis://localhost:6379/0"
+    INDESIGN_SERVER_URL: str = "http://10.1.6.108:5555"
     ALLOWED_ORIGINS: list[str] = [
         "http://localhost:8085",
         "http://localhost:8080",
