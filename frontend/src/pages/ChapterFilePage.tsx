@@ -350,7 +350,6 @@ function FileActionsMenu({
                       <FileOutput size={12} className="text-amber-500" /> InDesign to Word
                     </DropdownMenu.Item>
                   )}
-                  {hasReview && (
                   {hasReview && !isImage && (
                     <DropdownMenu.Item className={itemCls} onSelect={() => navigate(uiPaths.structuringReview(projectId, chapterId, fid))}>
                       <Layers size={12} className="text-muted" /> View Structuring Review
