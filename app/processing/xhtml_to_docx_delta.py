@@ -970,38 +970,69 @@ class XhtmlToDocxDeltaEngine:
                 # Priority 2 — MathML → OMML via mathml2omml.
                 # Priority 3 — LaTeX → MathML → OMML.
                 if not omml_appended:
-                    try:
-                        import latex2mathml.converter
-                        import mathml2omml
+                    import latex2mathml.converter
+                    import mathml2omml
 
-                        # Prefer an explicit data-mathml attribute (Mathlive's
-                        # native MathML output after an edit) over the element's
-                        # own children, since Mathlive-emitted MathML is more
-                        # complete than KaTeX's default output.
-                        mathml_attr = el.get("data-mathml") or ""
-                        if mathml_attr:
-                            mathml_str = mathml_attr
-                        elif tag == 'math':
-                            mathml_str = etree.tostring(el, encoding="utf-8").decode("utf-8")
-                        else:
-                            latex_str = el.get("data-latex") or ""
-                            mathml_str = latex2mathml.converter.convert(latex_str)
+                    # Try each source in priority order; only give up (and
+                    # emit the text run) if every conversion path fails.
+                    mathml_attr = el.get("data-mathml") or ""
+                    latex_attr = el.get("data-latex") or ""
+                    sources = []
+                    if mathml_attr:
+                        sources.append(("data-mathml", mathml_attr))
+                    if tag == 'math':
+                        sources.append(("math element", etree.tostring(el, encoding="utf-8").decode("utf-8")))
+                    if latex_attr:
+                        try:
+                            sources.append(("data-latex", latex2mathml.converter.convert(latex_attr)))
+                        except Exception as lx_err:
+                            logger.warning(f"latex→mathml failed for {latex_attr!r}: {lx_err}")
 
-                        omml_str = mathml2omml.convert(mathml_str)
-                        if "xmlns:m=" not in omml_str:
-                            omml_str = omml_str.replace(
-                                "<m:oMath",
-                                '<m:oMath xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"',
-                                1,
-                            )
+                    _M_NS_URI_LOCAL = "http://schemas.openxmlformats.org/officeDocument/2006/math"
 
-                        omml_el = etree.fromstring(omml_str)
-                        current_xml_parent.append(omml_el)
-                    except Exception as math_err:
-                        logger.warning(f"Failed to convert math to OMML: {math_err}")
-                        if el.text:
+                    for source_name, mathml_str in sources:
+                        try:
+                            # Some clients (Mathlive.getValue("math-ml")) return
+                            # bare <mrow> without the <math> root. mathml2omml
+                            # then emits <m:box> instead of <m:oMath>, which
+                            # breaks etree parsing (undeclared m: prefix) and
+                            # loses the equation. Force a <math> wrapper so the
+                            # converter always produces a proper <m:oMath> root.
+                            mm_str = mathml_str.strip()
+                            if not mm_str.lstrip().startswith("<math"):
+                                mm_str = (
+                                    '<math xmlns="http://www.w3.org/1998/Math/MathML">'
+                                    + mm_str + '</math>'
+                                )
+
+                            omml_str = mathml2omml.convert(mm_str)
+                            # If the converter still didn't produce <m:oMath>,
+                            # wrap it ourselves so the append below succeeds.
+                            if "<m:oMath" not in omml_str:
+                                omml_str = f'<m:oMath xmlns:m="{_M_NS_URI_LOCAL}">{omml_str}</m:oMath>'
+                            elif "xmlns:m=" not in omml_str:
+                                omml_str = omml_str.replace(
+                                    "<m:oMath",
+                                    f'<m:oMath xmlns:m="{_M_NS_URI_LOCAL}"',
+                                    1,
+                                )
+
+                            omml_el = etree.fromstring(omml_str)
+                            current_xml_parent.append(omml_el)
+                            omml_appended = True
+                            break
+                        except Exception as conv_err:
+                            logger.warning(f"mathml→omml failed via {source_name}: {conv_err}")
+
+                    if not omml_appended:
+                        logger.warning(
+                            f"All math conversions failed; falling back to plain text "
+                            f"(latex={latex_attr!r}, mathml_len={len(mathml_attr)})"
+                        )
+                        text_fallback = latex_attr or el.text or ""
+                        if text_fallback:
                             add_rich_run(
-                                current_xml_parent, el.text,
+                                current_xml_parent, text_fallback,
                                 bold=current_bold, italic=current_italic, underline=current_underline, strike=current_strike,
                                 color=node_color, bg_color=node_bg, font_size=node_font_size, font_name=node_font_name,
                                 superscript=current_super, subscript=current_sub, is_link=current_link,

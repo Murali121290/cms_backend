@@ -1013,12 +1013,22 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
             mathEl = temp.querySelector("math");
           }
           if (!mathEl) {
-            // No usable math source — drop the empty node instead of leaving
-            // a phantom <span> that the delta engine would treat as text.
-            span.parentNode?.removeChild(span);
-            return;
+            // Neither MathML nor KaTeX gave us a parseable <math>. Build a
+            // minimal one so the equation still round-trips: the backend has
+            // a data-omml / data-mathml / data-latex priority chain and can
+            // rebuild the OMML from any of them. Dropping the node here would
+            // silently delete the user's equation.
+            if (!omml && !mathml && !latex) {
+              // Truly nothing to save — safe to remove.
+              span.parentNode?.removeChild(span);
+              return;
+            }
+            const doc2 = span.ownerDocument || document;
+            mathEl = doc2.createElementNS("http://www.w3.org/1998/Math/MathML", "math");
           }
           if (omml) mathEl.setAttribute("data-omml", omml);
+          if (mathml) mathEl.setAttribute("data-mathml", mathml);
+          if (latex) mathEl.setAttribute("data-latex", latex);
           if (display) mathEl.setAttribute("data-display", display);
           span.parentNode?.replaceChild(mathEl, span);
         } catch (err) {
@@ -1030,12 +1040,27 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
     }
 
     const handleSave = async () => {
-      if (editor) {
-        const html = editor.getHTML();
-        const cleanHtml = convertMathForSave(html);
+      if (!editor) return;
+      let html = "";
+      let cleanHtml = "";
+      try {
+        html = editor.getHTML();
+      } catch (err) {
+        console.error("[Save] editor.getHTML failed:", err);
+        return;
+      }
+      try {
+        cleanHtml = convertMathForSave(html);
+      } catch (err) {
+        console.error("[Save] convertMathForSave failed — falling back to raw HTML:", err);
+        cleanHtml = html;
+      }
+      try {
         await onSave(cleanHtml);
         setIsDirty(false);
         setSavedAt(new Date());
+      } catch (err) {
+        console.error("[Save] onSave rejected:", err);
       }
     };
 

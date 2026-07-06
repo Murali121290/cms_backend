@@ -78,20 +78,32 @@ export const MathNode = Node.create({
         getAttrs: (node) => {
           if (typeof node === "string") return null;
           const el = node as HTMLElement;
-          const mathml = new XMLSerializer().serializeToString(el);
-          const display = el.getAttribute("display") === "block" ? "block" : "inline";
-          return { mathml, latex: "", omml: "", display };
+          // A <math> that we round-tripped through the backend carries
+          // data-omml / data-latex / data-display on the root — preserve
+          // them so the equation stays editable and the raw OMML stays
+          // available for a byte-perfect re-inject on the next save.
+          const omml = el.getAttribute("data-omml") || "";
+          const latex = el.getAttribute("data-latex") || "";
+          const explicitMathml = el.getAttribute("data-mathml") || "";
+          const display =
+            el.getAttribute("data-display") === "block" ||
+            el.getAttribute("display") === "block"
+              ? "block"
+              : "inline";
+          // Fall back to serialising the element itself when no explicit
+          // MathML attribute is provided (fresh convertMathForSave output).
+          const mathml = explicitMathml || new XMLSerializer().serializeToString(el);
+          return { mathml, latex, omml, display };
         },
       },
     ];
   },
 
   renderHTML({ HTMLAttributes }) {
-    return [
-      "span",
-      mergeAttributes(HTMLAttributes, { class: "math-node" }),
-      0,
-    ];
+    // Leaf node — no content hole. Visual rendering is entirely handled by
+    // the React NodeView; this serialization is only used when TipTap
+    // produces HTML for save/paste-out.
+    return ["span", mergeAttributes(HTMLAttributes, { class: "math-node" })];
   },
 
   addNodeView() {

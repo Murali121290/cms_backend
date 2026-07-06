@@ -18,6 +18,7 @@ from docx.oxml import OxmlElement
 from lxml import etree
 
 from app.processing.omml_to_mathml import convert_omml_element
+from app.processing.omml_to_latex import convert_omml_to_latex
 
 logger = logging.getLogger("app.processing.docx_to_xhtml_runs")
 
@@ -47,18 +48,29 @@ def _omml_element_to_math_span(omml_el, display: str = "inline") -> str:
         mathml_str = convert_omml_element(omml_el)
     except Exception as e:
         logger.warning(f"OMML→MathML conversion failed: {e}")
-        # Fallback: render text content so the equation isn't invisible.
         text_fallback = html.escape("".join(omml_el.itertext()).strip() or "[equation]")
         mathml_str = (
             '<math xmlns="http://www.w3.org/1998/Math/MathML">'
             f'<mtext>{text_fallback}</mtext></math>'
         )
 
+    # LaTeX is what actually feeds Mathlive's editor — its math-ml import is
+    # flaky for some shapes we produce. Even an imperfect LaTeX is enough
+    # because the raw OMML is preserved separately for lossless round-trip
+    # and only replaces the OMML on an actual user edit.
+    try:
+        latex_str = convert_omml_to_latex(omml_el)
+    except Exception as e:
+        logger.warning(f"OMML→LaTeX conversion failed: {e}")
+        latex_str = ""
+
     mathml_attr = html.escape(mathml_str, quote=True)
     omml_attr = html.escape(omml_b64, quote=True)
+    latex_attr = html.escape(latex_str, quote=True)
 
     return (
         f'<span class="math-node" '
+        f'data-latex="{latex_attr}" '
         f'data-mathml="{mathml_attr}" '
         f'data-omml="{omml_attr}" '
         f'data-display="{display}">'
