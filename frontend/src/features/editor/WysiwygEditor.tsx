@@ -73,6 +73,7 @@ import { SearchReplace } from "./SearchReplace";
 import { MathNode } from "./MathNode";
 import { SdtBlock } from "./SdtBlock";
 import { SdtInline } from "./SdtInline";
+import { ImageNode } from "./ImageNode";
 import katex from "katex";
 
 
@@ -626,6 +627,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         MathNode,
         SdtBlock,
         SdtInline,
+        ImageNode,
         CustomListShortcuts,
       ],
       content: "",

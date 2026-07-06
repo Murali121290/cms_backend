@@ -38,6 +38,7 @@ from app.utils.timezone import now_ist_naive
 from app.utils.inject_styles import inject_publisher_styles
 from app.processing.ppd_engine import PPDEngine
 from app.processing.permissions_engine import PermissionsEngine
+from app.domains.files import image_preview_service, image_convert_service
 from app.processing.technical_engine import TechnicalEngine
 from app.processing.legacy.highlighter.technical_editor import TechnicalEditor
 from app.processing.references_engine import ReferencesEngine
@@ -752,6 +753,78 @@ def api_v2_chapter_files(
         files=[_serialize_file_record(file_record, viewer=viewer, db=db) for file_record in files],
         viewer=_serialize_viewer(viewer),
     )
+
+
+@router.get("/projects/{project_id}/images")
+def api_v2_project_images(
+    project_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Return every image file in the project across all chapters.
+
+    Powers the dedicated Image Editor page's thumbnail rail. Detects images by
+    extension rather than by category so that image assets uploaded outside the
+    "Art" category are also picked up.
+    """
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+
+    image_exts = {"jpg", "jpeg", "png", "gif", "webp", "tif", "tiff", "bmp", "eps"}
+    files = (
+        db.query(models.File)
+        .filter(models.File.project_id == project_id)
+        .order_by(models.File.chapter_id.asc(), models.File.filename.asc())
+        .all()
+    )
+
+    chapter_lookup = {
+        ch.id: ch
+        for ch in db.query(models.Chapter).filter(models.Chapter.project_id == project_id).all()
+    }
+
+    images = []
+    for f in files:
+        ext = (f.filename.rsplit(".", 1)[-1] if "." in f.filename else "").lower()
+        if ext not in image_exts:
+            continue
+        needs_transcoding = image_preview_service.source_needs_transcoding(f.filename)
+        ch = chapter_lookup.get(f.chapter_id)
+        images.append(
+            {
+                "id": f.id,
+                "project_id": f.project_id,
+                "chapter_id": f.chapter_id,
+                "chapter_number": getattr(ch, "number", None) if ch else None,
+                "chapter_title": getattr(ch, "title", None) if ch else None,
+                "filename": f.filename,
+                "file_type": f.file_type,
+                "category": f.category,
+                "version": f.version,
+                "uploaded_at": f.uploaded_at.isoformat() if f.uploaded_at else None,
+                "download_url": f"/api/v2/files/{f.id}/download",
+                "preview_url": f"/api/v2/files/{f.id}/preview?fmt=png",
+                "needs_transcoding": needs_transcoding,
+            }
+        )
+
+    return {
+        "project": _serialize_project_summary(project),
+        "images": images,
+    }
 
 
 @router.get("/notifications", response_model=schemas_v2.NotificationsResponse)
@@ -1620,6 +1693,509 @@ def api_v2_download_file(
         path=file_record.path,
         filename=file_record.filename,
         media_type="application/octet-stream",
+    )
+
+
+@router.get("/files/{file_id}/preview")
+def api_v2_file_preview(
+    file_id: int,
+    fmt: str = Query("png", regex="^(png|jpg)$"),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Return a browser-safe raster preview of an image file.
+
+    For PNG/JPG/GIF/WEBP/BMP sources this is essentially a downscaled
+    re-encode; for TIFF and EPS it's the only way to display the image in a
+    browser at all. Results are cached under runtime/previews/ keyed by the
+    source's mtime, so an in-place save invalidates automatically.
+    """
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    file_record = file_service.get_file_for_download(db, file_id=file_id)
+    if not file_record:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="FILE_NOT_FOUND",
+            message="File not found.",
+        )
+
+    try:
+        preview_path = image_preview_service.get_or_build_preview(
+            file_record.path, file_id=file_id, fmt=fmt  # type: ignore[arg-type]
+        )
+    except FileNotFoundError:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="FILE_MISSING_ON_DISK",
+            message="File is registered but missing on disk.",
+        )
+    except RuntimeError as exc:
+        logger.warning(f"Preview build failed for file {file_id}: {exc}")
+        return _error_response(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            code="PREVIEW_UNAVAILABLE",
+            message=str(exc),
+        )
+
+    return FileResponse(
+        path=str(preview_path),
+        media_type=image_preview_service.preview_mime(fmt),  # type: ignore[arg-type]
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
+
+
+@router.post("/files/{file_id}/convert")
+def api_v2_file_convert(
+    file_id: int,
+    payload: dict,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Convert an image to a different format (EPS/TIFF ↔ PNG/JPG).
+
+    Body:
+      {
+        "target_format": "png" | "jpg" | "tif",
+        "mode":          "copy" | "in_place"    (default "copy")
+      }
+    """
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    target_format = str(payload.get("target_format", "")).lower()
+    mode = str(payload.get("mode", "copy")).lower()
+    if mode not in ("copy", "in_place"):
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="INVALID_MODE",
+            message="mode must be 'copy' or 'in_place'.",
+        )
+
+    file_record = db.query(models.File).filter(models.File.id == file_id).first()
+    if not file_record:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="FILE_NOT_FOUND",
+            message="File not found.",
+        )
+
+    try:
+        result = image_convert_service.convert_image(
+            db,
+            file_record=file_record,
+            target_format=target_format,  # type: ignore[arg-type]
+            mode=mode,  # type: ignore[arg-type]
+            uploaded_by_id=viewer.id,
+        )
+    except ValueError as exc:
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="UNSUPPORTED_FORMAT",
+            message=str(exc),
+        )
+    except FileNotFoundError:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="FILE_MISSING_ON_DISK",
+            message="File is registered but missing on disk.",
+        )
+    except RuntimeError as exc:
+        logger.warning(f"Convert failed for file {file_id}: {exc}")
+        return _error_response(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            code="CONVERT_FAILED",
+            message=str(exc),
+        )
+
+    return {
+        "status": "ok",
+        "mode": mode,
+        "file": {
+            "id": result.id,
+            "project_id": result.project_id,
+            "chapter_id": result.chapter_id,
+            "filename": result.filename,
+            "file_type": result.file_type,
+            "category": result.category,
+            "version": result.version,
+        },
+    }
+
+
+@router.post("/files/{file_id}/edit-save")
+async def api_v2_edit_save_file(
+    file_id: int,
+    file: UploadFile = FastAPIFile(...),
+    dpi: Optional[int] = Form(None),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Save an edited image back to disk with optional DPI metadata.
+
+    Called by the Image Review & Editor when a user hits Save. The frontend
+    bakes crop / rotate / resize into the uploaded PNG or JPEG via canvas
+    (canvas can't emit DPI metadata itself). If `dpi` is provided we re-encode
+    the incoming bytes through Pillow so the resulting file's pHYs/JFIF/EXIF
+    density header matches. Behaviour otherwise mirrors the upload endpoint:
+    the previous version is archived and `file.version` is incremented.
+    """
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    file_record = db.query(models.File).filter(models.File.id == file_id).first()
+    if not file_record:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="FILE_NOT_FOUND",
+            message="File not found.",
+        )
+
+    raw = await file.read()
+    if not raw:
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="EMPTY_UPLOAD",
+            message="Uploaded image is empty.",
+        )
+
+    # Guard against runaway sizes; 100 MP is the same cap used elsewhere.
+    from io import BytesIO
+    from PIL import Image, UnidentifiedImageError
+
+    try:
+        img = Image.open(BytesIO(raw))
+        img.load()
+    except (UnidentifiedImageError, OSError) as exc:
+        return _error_response(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            code="DECODE_FAILED",
+            message=f"Could not decode uploaded image: {exc}",
+        )
+
+    if img.width * img.height > 100_000_000:
+        return _error_response(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            code="IMAGE_TOO_LARGE",
+            message=f"Edited image is too large ({img.width}×{img.height}); limit is 100 MP.",
+        )
+
+    # Decide the on-disk format from the ORIGINAL file's extension: this keeps
+    # PNG saves overwriting PNG sources, JPEG saves overwriting JPEG sources.
+    # If the source was TIFF/EPS and the frontend baked a PNG, use PNG-with-
+    # -edited suffix to preserve the original vector/multi-page master.
+    import os
+    from app.domains.files import version_service
+    from app.utils.timezone import now_ist_naive
+
+    orig_name = file_record.filename
+    orig_ext = orig_name.rsplit(".", 1)[-1].lower() if "." in orig_name else ""
+    browser_safe = orig_ext in {"png", "jpg", "jpeg", "gif", "webp", "bmp"}
+
+    if browser_safe:
+        target_filename = orig_name
+        target_ext = "jpg" if orig_ext in ("jpg", "jpeg") else orig_ext
+    else:
+        stem = orig_name.rsplit(".", 1)[0] if "." in orig_name else orig_name
+        target_filename = f"{stem}-edited.png"
+        target_ext = "png"
+
+    base_path = os.path.dirname(file_record.path)
+    target_path = os.path.join(base_path, target_filename)
+
+    save_kwargs: dict = {}
+    if dpi is not None and dpi > 0:
+        save_kwargs["dpi"] = (int(dpi), int(dpi))
+
+    fmt_map = {"png": "PNG", "jpg": "JPEG", "jpeg": "JPEG"}
+    pil_format = fmt_map.get(target_ext, "PNG")
+    if pil_format == "JPEG":
+        if img.mode in ("RGBA", "LA"):
+            bg = Image.new("RGB", img.size, (255, 255, 255))
+            bg.paste(img, mask=img.split()[-1])
+            img = bg
+        elif img.mode != "RGB":
+            img = img.convert("RGB")
+        save_kwargs["quality"] = 92
+        save_kwargs["optimize"] = True
+    else:
+        if img.mode == "P":
+            img = img.convert("RGBA")
+        save_kwargs["optimize"] = True
+
+    # Archive the current version, then write the new one atomically.
+    if os.path.exists(file_record.path):
+        try:
+            version_service.archive_existing_file(
+                db,
+                existing_file=file_record,
+                base_path=base_path,
+                uploaded_by_id=viewer.id,
+            )
+        except Exception as e:
+            logger.error(f"Failed to archive existing file {file_id}: {e}")
+            return _error_response(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                code="ARCHIVE_FAILED",
+                message=f"Could not archive the previous version: {e}",
+            )
+
+    tmp_path = target_path + ".tmp"
+    try:
+        img.save(tmp_path, format=pil_format, **save_kwargs)
+        os.replace(tmp_path, target_path)
+    except Exception as e:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+        logger.error(f"Failed to write edited image {target_path}: {e}")
+        return _error_response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            code="WRITE_FAILED",
+            message=f"Could not save edited image: {e}",
+        )
+
+    # If we changed the on-disk filename (TIFF/EPS → PNG-edited copy) leave the
+    # original file record intact and create a new one so both live side by
+    # side. For same-filename overwrites, bump the existing record.
+    if target_path == file_record.path:
+        file_record.version = (file_record.version or 0) + 1
+        file_record.uploaded_at = now_ist_naive()
+        db.commit()
+        db.refresh(file_record)
+        result = file_record
+    else:
+        result = models.File(
+            project_id=file_record.project_id,
+            chapter_id=file_record.chapter_id,
+            filename=target_filename,
+            path=target_path,
+            file_type=target_ext,
+            category=file_record.category,
+            version=1,
+            uploaded_at=now_ist_naive(),
+        )
+        db.add(result)
+        db.commit()
+        db.refresh(result)
+
+    return {
+        "status": "ok",
+        "dpi_applied": dpi if dpi else None,
+        "file": {
+            "id": result.id,
+            "project_id": result.project_id,
+            "chapter_id": result.chapter_id,
+            "filename": result.filename,
+            "file_type": result.file_type,
+            "category": result.category,
+            "version": result.version,
+        },
+    }
+
+
+@router.post("/files/{file_id}/replace")
+async def api_v2_replace_file(
+    file_id: int,
+    file: UploadFile = FastAPIFile(...),
+    reason: str = Form(...),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Replace a file's bytes with a fresh upload, recording the audit reason.
+
+    Called by the Image Review & Editor's Replace dialog. The dialog requires
+    a non-empty reason before enabling the button, and this endpoint enforces
+    the same rule server-side so a malformed client can't skip the audit.
+    """
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    reason_clean = (reason or "").strip()
+    if len(reason_clean) < 3:
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="REASON_REQUIRED",
+            message="A replacement reason of at least 3 characters is required.",
+        )
+
+    file_record = db.query(models.File).filter(models.File.id == file_id).first()
+    if not file_record:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="FILE_NOT_FOUND",
+            message="File not found.",
+        )
+
+    raw = await file.read()
+    if not raw:
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="EMPTY_UPLOAD",
+            message="Uploaded replacement is empty.",
+        )
+
+    base_path = os.path.dirname(file_record.path)
+    # Archive the current version with the audit reason attached before
+    # overwriting the on-disk file.
+    if os.path.exists(file_record.path):
+        try:
+            version_service.archive_existing_file(
+                db,
+                existing_file=file_record,
+                base_path=base_path,
+                uploaded_by_id=viewer.id,
+                reason=reason_clean,
+            )
+        except Exception as e:
+            logger.error(f"Failed to archive file {file_id} during replace: {e}")
+            return _error_response(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                code="ARCHIVE_FAILED",
+                message=f"Could not archive the previous version: {e}",
+            )
+
+    # Write the new bytes atomically. Preserves the original filename +
+    # extension so downstream references stay valid; if the user uploads a
+    # different-format image, they should use the Convert action instead.
+    tmp_path = file_record.path + ".tmp"
+    try:
+        with open(tmp_path, "wb") as f:
+            f.write(raw)
+        os.replace(tmp_path, file_record.path)
+    except Exception as e:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+        logger.error(f"Failed to write replacement bytes for {file_id}: {e}")
+        return _error_response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            code="WRITE_FAILED",
+            message=f"Could not write the replacement file: {e}",
+        )
+
+    file_record.version = (file_record.version or 0) + 1
+    file_record.uploaded_at = now_ist_naive()
+    db.commit()
+    db.refresh(file_record)
+
+    return {
+        "status": "ok",
+        "reason": reason_clean,
+        "file": {
+            "id": file_record.id,
+            "project_id": file_record.project_id,
+            "chapter_id": file_record.chapter_id,
+            "filename": file_record.filename,
+            "file_type": file_record.file_type,
+            "category": file_record.category,
+            "version": file_record.version,
+        },
+    }
+
+
+@router.post("/projects/{project_id}/images/export")
+def api_v2_export_project_images(
+    project_id: int,
+    payload: dict,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Bundle selected images into a ZIP for the Export Selected action.
+
+    Body: {"file_ids": [int, ...]}. All ids must belong to the given project;
+    unauthorized ids are silently dropped rather than leaking existence.
+    """
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    ids = payload.get("file_ids") or []
+    if not isinstance(ids, list) or not all(isinstance(i, int) for i in ids):
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="INVALID_FILE_IDS",
+            message="file_ids must be an array of integers.",
+        )
+    if not ids:
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="NO_SELECTION",
+            message="Select at least one image to export.",
+        )
+
+    files = (
+        db.query(models.File)
+        .filter(models.File.project_id == project_id, models.File.id.in_(ids))
+        .all()
+    )
+    if not files:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="NOTHING_TO_EXPORT",
+            message="None of the selected files were found in this project.",
+        )
+
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    seen_names: dict[str, int] = {}
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in files:
+            if not f.path or not os.path.exists(f.path):
+                continue
+            # Prefix with chapter number so downloads are organised.
+            chapter = db.query(models.Chapter).filter(models.Chapter.id == f.chapter_id).first()
+            prefix = f"chapter-{chapter.number}" if chapter and getattr(chapter, "number", None) else "unassigned"
+            name = f"{prefix}/{f.filename}"
+            # Disambiguate any collisions rather than silently overwriting.
+            if name in seen_names:
+                seen_names[name] += 1
+                stem, dot, ext = name.rpartition(".")
+                name = f"{stem}-{seen_names[name]}.{ext}" if dot else f"{name}-{seen_names[name]}"
+            else:
+                seen_names[name] = 1
+            zf.write(f.path, arcname=name)
+
+    buf.seek(0)
+    from fastapi.responses import Response
+
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="project-{project_id}-images.zip"',
+        },
     )
 
 

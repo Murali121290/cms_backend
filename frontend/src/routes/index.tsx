@@ -30,6 +30,7 @@ import { ReferenceValidationReviewPage } from '@/pages/ReferenceValidationReview
 import { FileEditorPage } from '@/pages/FileEditorPage'
 import { DocxEditorPage } from '@/pages/DocxEditorPage'
 import { StylesheetsPage } from '@/pages/StylesheetsPage'
+import { ImageReviewPage } from '@/features/imageReview/ImageReviewPage'
 import { ReportsPage } from '@/pages/ReportsPage'
 import ScheduleReport from '@/Reports/ScheduleReport'
 import TodaySchedule from '@/Reports/TodaySchedule'
@@ -112,6 +113,7 @@ const router = createBrowserRouter([
       { path: 'projects/:projectId/chapters/:chapterId/structuring-review', element: <StructuringReviewPage /> },
       { path: 'projects/:projectId/chapters/:chapterId/reference-review', element: <ReferenceValidationReviewPage /> },
       { path: 'projects/:projectId/stylesheets', element: <StylesheetsPage /> },
+      { path: 'projects/:projectId/image-review', element: <ImageReviewPage /> },
 
       // ── Settings: admin + manager only ───────────────────────────────────
       { path: 'settings', element: <RoleGuard allowedRoles={['admin', 'manager']}><Settings /></RoleGuard> },

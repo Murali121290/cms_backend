@@ -7,7 +7,15 @@ from sqlalchemy.orm import Session
 from app import models
 
 
-def archive_existing_file(db: Session, *, existing_file: models.File, base_path: str, uploaded_by_id: int, source_path: str | None = None):
+def archive_existing_file(
+    db: Session,
+    *,
+    existing_file: models.File,
+    base_path: str,
+    uploaded_by_id: int,
+    source_path: str | None = None,
+    reason: str | None = None,
+):
     archive_dir = f"{base_path}/Archive"
     os.makedirs(archive_dir, exist_ok=True)
 
@@ -26,6 +34,7 @@ def archive_existing_file(db: Session, *, existing_file: models.File, base_path:
         version_num=old_version_num,
         path=archived_path,
         uploaded_by_id=uploaded_by_id,
+        reason=reason,
     )
     db.add(version_entry)
     return version_entry
