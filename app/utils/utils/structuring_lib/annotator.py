@@ -141,10 +141,14 @@ def is_list_paragraph(paragraph: Paragraph) -> bool:
         return False
 
 
-def get_word_list_type(para: Paragraph, doc: Document) -> Optional[str]:
+def get_word_list_type(para: Paragraph, doc: Document) -> Optional[tuple[str, Optional[str]]]:
     """
-    Determine if a Word-formatted list paragraph is bulleted or numbered
-    by querying the document's numbering.xml part.
+    Determine if a Word-formatted list paragraph is bulleted, numbered,
+    lettered, or roman by querying the document's numbering.xml part.
+
+    Returns (list_kind, case) where case is "upper"/"lower" for
+    lettered/roman kinds (derived directly from the numFmt value) and
+    None otherwise, or None if no list formatting is found.
     """
     try:
         p = para._p
@@ -182,15 +186,35 @@ def get_word_list_type(para: Paragraph, doc: Document) -> Optional[str]:
         if num_fmt is not None:
             fmt_val = num_fmt.get(f'{{{numbering_part.element.nsmap["w"]}}}val')
             if fmt_val == 'bullet':
-                return 'bullet'
-            elif fmt_val in ['decimal', 'lowerLetter', 'upperLetter']:
-                return 'number'
-            elif fmt_val in ['lowerRoman', 'upperRoman']:
-                return 'roman'
+                return ('bullet', None)
+            elif fmt_val == 'decimal':
+                return ('number', None)
+            elif fmt_val == 'lowerLetter':
+                return ('lettered', 'lower')
+            elif fmt_val == 'upperLetter':
+                return ('lettered', 'upper')
+            elif fmt_val == 'lowerRoman':
+                return ('roman', 'lower')
+            elif fmt_val == 'upperRoman':
+                return ('roman', 'upper')
     except Exception as e:
         logger.debug(f"Error determining list type from XML: {e}")
-        
+
     return None
+
+
+def get_list_indent_level(para: Paragraph) -> int:
+    """Return a Word list paragraph's 0-based indent level (w:numPr/w:ilvl),
+    or 0 if the paragraph has no list numbering. Used to distinguish a
+    top-level list item from a nested sub-item."""
+    try:
+        p = para._p
+        if p.pPr is None or p.pPr.numPr is None or p.pPr.numPr.ilvl is None:
+            return 0
+        return p.pPr.numPr.ilvl.val
+    except Exception as e:
+        logger.debug(f"Error determining list indent level: {e}")
+        return 0
 
 
 def is_references_end(text: str) -> bool:
@@ -217,14 +241,18 @@ def is_references_end(text: str) -> bool:
     return any(re.match(pattern, text) for pattern in patterns)
 
 
-def detect_list_kind(text: str, style_name: str = "", is_word_list: bool = False, para: Optional[Paragraph] = None, doc: Optional[Document] = None) -> Optional[str]:
+def detect_list_kind(text: str, style_name: str = "", is_word_list: bool = False, para: Optional[Paragraph] = None, doc: Optional[Document] = None) -> Optional[tuple[str, Optional[str]]]:
     """
     Detect the list type for a paragraph.
 
-    Returns one of: "bullet", "number", "roman", or None.
+    Returns (list_kind, case), where list_kind is one of "bullet", "number",
+    "roman", "lettered", or None if no list is detected. case is
+    "upper"/"lower" for "lettered"/"roman" kinds (indicating the marker's
+    letter case), and None for "bullet"/"number" or when case can't be
+    determined.
     """
     list_config = rules_loader.get_list_patterns()
-    bullet_pattern = list_config.get("bullet_pattern", r"^[•\-\–]\s+")
+    bullet_pattern = list_config.get("bullet_pattern", r"^[•·\-\–]\s+")
     number_pattern = list_config.get("number_pattern", r"^\d+\.\s+")
     roman_pattern = list_config.get("roman_pattern", r"^(?i:[ivxlcdm]+)[\.)]\s+")
 
@@ -235,30 +263,39 @@ def detect_list_kind(text: str, style_name: str = "", is_word_list: bool = False
     lowered_style = style_name.lower()
 
     if re.match(bullet_pattern, text) or "bullet" in lowered_style:
-        return "bullet"
+        return ("bullet", None)
     # Symbol bullets: any Unicode Symbol character (So/Sm/Sc/Sk) or Private-Use
     # character (Wingdings etc.) at the start of the paragraph.
     if text:
         cat = unicodedata.category(text[0])
         if cat.startswith('S') or cat == 'Co':
-            return "bullet"
+            return ("bullet", None)
     if re.match(number_pattern, text) or re.match(r"^\s*\d+[\.\)]\s+", text) or "number" in lowered_style:
-        return "number"
+        return ("number", None)
+    # Roman is checked before lettered: valid roman-numeral letters
+    # (ivxlcdm) are a strict subset of "any single letter", so a marker
+    # like "i." or "v." must be resolved as roman here, before the more
+    # general lettered patterns below get a chance to claim it.
+    if re.match(roman_pattern, text):
+        return ("roman", "upper" if text[:1].isupper() else "lower")
+    if "roman" in lowered_style:
+        return ("roman", None)
+    uc_letter_pattern = list_config.get("uc_letter_pattern", r"^[A-Z][.)]\s+")
+    if re.match(uc_letter_pattern, text):
+        return ("lettered", "upper")
     lc_letter_pattern = list_config.get("lc_letter_pattern", r"^[a-z][.)]\s+")
     if re.match(lc_letter_pattern, text):
-        return "lettered"
-    if re.match(roman_pattern, text) or "roman" in lowered_style:
-        return "roman"
+        return ("lettered", "lower")
     if re.match(mnemonic_pattern, text):
-        return "lettered"
+        return ("lettered", "upper")
 
     if is_word_list and para is not None and doc is not None:
         xml_type = get_word_list_type(para, doc)
         if xml_type:
             return xml_type
         # Fallback to number if xml parsing fails but it is a word list
-        return "number"
-        
+        return ("number", None)
+
     return None
 
 
@@ -446,8 +483,8 @@ def get_general_list_tag_style(list_kind: str) -> tuple[str, str]:
     key_map = {
         "bullet": ("general_bulleted", ("BL-MID", "BL-MID")),
         "number": ("general_numbered", ("NL-MID", "NL-MID")),
-        "roman": ("general_roman", ("RL-MID", "RL-MID")),
-        "lettered": ("general_lettered", ("UL-MID", "UL-MID")),
+        "roman": ("general_roman", ("OL-MID", "OL-MID")),
+        "lettered": ("general_lettered", ("LL-MID", "LL-MID")),
     }
     config_key, default = key_map.get(list_kind, ("general", ("BL-MID", "BL-MID")))
     config = list_config.get(config_key, {})
@@ -532,6 +569,7 @@ def annotate_document(doc: Document) -> List[Dict[str, Any]]:
         style = "TXT"
         bx_open_marker: Optional[str] = None
         bx_close_marker: Optional[str] = None
+        list_case: Optional[str] = None
 
         try:
             # A closing box marker trailing real content on the same line
@@ -626,7 +664,8 @@ def annotate_document(doc: Document) -> List[Dict[str, Any]]:
             
             # ===== WORD / MANUAL LISTS =====
             style_name = para.style.name if para.style else ""
-            list_kind = detect_list_kind(text, style_name, is_list_paragraph(para), para, doc)
+            list_kind_result = detect_list_kind(text, style_name, is_list_paragraph(para), para, doc)
+            list_kind, list_case = list_kind_result if list_kind_result is not None else (None, None)
             if not explicit_tag_found and list_kind is not None:
                 if current_block:
                     block_item_count += 1
@@ -639,6 +678,21 @@ def annotate_document(doc: Document) -> List[Dict[str, Any]]:
                         style = "OBJ-NL-MID"
                 elif current_block == "REFERENCES_BLOCK":
                     tag, style = get_reference_entry_tag_style(text, list_kind, para)
+                elif list_kind in ("bullet", "number", "lettered", "roman") and get_list_indent_level(para) > 0:
+                    # Nested sub-list item (indented under a parent list
+                    # item, any list kind) - always the "level 2" family,
+                    # always MID: no FIRST/LAST variant exists for it,
+                    # mirroring the existing table-nested convention
+                    # (TBL2-MID/TNL2-MID). list_case (for lettered/roman)
+                    # is carried through unchanged via the annotation's
+                    # own "list_case" field, same as the level-1 tags.
+                    tag = {
+                        "bullet": "BL2-MID",
+                        "number": "NL2-MID",
+                        "lettered": "LL2-MID",
+                        "roman": "OL2-MID",
+                    }[list_kind]
+                    style = tag
                 else:
                     tag, style = get_general_list_tag_style(list_kind)
             
@@ -832,6 +886,12 @@ def annotate_document(doc: Document) -> List[Dict[str, Any]]:
                 # box_prefixer distinguishes the two by that tag comparison.
                 "bx_open": bx_open_marker,
                 "bx_close": bx_close_marker or trailing_bx_close,
+                # Marker case ("upper"/"lower") for lettered/roman list
+                # items - None for every other tag. Carried separately from
+                # tag/style so hierarchy/validation logic (which only sees
+                # LL-*/OL-* tags) is unaffected; consumed only by the
+                # client tag-set overlay to pick Lc-/Uc- style variants.
+                "list_case": list_case,
             })
 
         except Exception as e:

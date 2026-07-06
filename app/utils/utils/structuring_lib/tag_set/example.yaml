@@ -1,0 +1,31 @@
+# Template for a new client tag set.
+#
+# Keys are canonical tag names (from rules.yaml's `structural_tags`
+# registry); values are the client-facing tag/style name to write instead.
+# Only tags that need to differ from canonical need to be listed - anything
+# absent falls through to the canonical name unchanged.
+#
+# Two value forms are supported:
+#
+# 1. Plain string - a straight rename:
+H1: HEAD-1
+H2: HEAD-2
+
+# 2. Prefix family - only valid when the client's naming is a regular
+#    prefix swap with the canonical suffix preserved as-is (e.g. "BL-MID"
+#    -> "BULLET-MID"). The key must itself be one of the prefixes in
+#    rules.yaml's `structural_tags.prefixes` list. Don't use this if the
+#    client's FIRST/MID/LAST naming isn't a simple suffix-preserving swap
+#    (e.g. Springer's tag set lists every FIRST/MID/LAST tag individually
+#    instead - see tag_sets/springer.yaml).
+BL-: BULLET-
+
+# A tag can also map to a case-dependent pair instead of a single string,
+# for the LL- (alphabetical list) / OL- (roman-numeral list) families,
+# when a client's naming distinguishes uppercase vs. lowercase list
+# markers. `case` is populated from the detected marker's letter case
+# ("upper"/"lower") at translation time; if case can't be determined, the
+# canonical name is used unchanged rather than guessed.
+# LL-MID:
+#   lower: alpha-lower
+#   upper: alpha-upper

@@ -5,10 +5,10 @@ Handles applying styles and tags to DOCX documents.
 
 import logging
 import re
-from typing import Literal, Dict, Any
+from typing import Literal, Dict, Any, Optional
 from docx import Document
 from docx.oxml.ns import qn
-from .annotator import annotate_document, detect_list_kind, is_list_paragraph
+from .annotator import annotate_document, detect_list_kind, is_list_paragraph, parse_leading_style_hint
 from .logger_config import get_logger
 from .box_prefixer import apply_box_tag_prefixes
 from .heading_classifier import classify_headings_by_formatting
@@ -17,6 +17,7 @@ from .list_normalizer import normalize_list_positions
 from .reference_normalizer import normalize_reference_numbers
 from .zone_styles import check_zone_style_legality
 from .enhanced_processor import DocumentProcessor
+from .tag_set_loader import get_tag_map, get_reverse_tag_map, translate_tag
 
 logger = get_logger(__name__)
 
@@ -55,21 +56,27 @@ def _looks_like_stub_heading(text: str) -> bool:
     return (title_cased / len(words)) >= 0.7
 
 
-def tag_tables(doc: Document, mode: Literal["style", "tag"] = "style") -> None:
+def tag_tables(doc: Document, mode: Literal["style", "tag"] = "style", tag_map: Dict[str, Any] = None) -> None:
     """
     Apply styles or tags to table cells.
-    
+
     Args:
         doc: python-docx Document object
         mode: "style" to apply Word styles, "tag" to prefix text with [TAG]
-    
+        tag_map: optional canonical -> client tag map (see tag_set_loader);
+            when provided, every tag/style written to a table cell is
+            translated through it before use. Table cells never carry
+            case-dependent (Lc-/Uc-) tags, so translation always passes
+            case=None.
+
     Raises:
         ValueError: If mode is invalid
     """
     if mode not in ("style", "tag"):
         raise ValueError(f"Invalid mode: {mode}. Must be 'style' or 'tag'")
-    
+
     rules_loader = get_rules_loader()
+    prefixes = rules_loader.get_structural_tags().get("prefixes", []) if tag_map else []
     table_config = rules_loader.get_table_config()
     header_style_name = table_config.get("header_style", "T2")
     body_style_name = table_config.get("body_style", "T")
@@ -79,7 +86,7 @@ def tag_tables(doc: Document, mode: Literal["style", "tag"] = "style") -> None:
     source_note_style_name = table_config.get("source_note_style", "TSN")
     footnote_style_name = table_config.get("footnote_style", "TFN")
     stub_heading_style_name = table_config.get("stub_heading_style", "T4")
-    header_threshold = table_config.get("header_threshold", 1.0)
+    header_threshold = table_config.get("header_threshold", 0.7)
     doc_processor = DocumentProcessor()
 
     for table_idx, table in enumerate(doc.tables):
@@ -100,7 +107,8 @@ def tag_tables(doc: Document, mode: Literal["style", "tag"] = "style") -> None:
                             tag = "TFN"
                             style = footnote_style_name
                         else:
-                            list_kind = detect_list_kind(text, style_name, is_list_paragraph(para), para, doc)
+                            list_kind_result = detect_list_kind(text, style_name, is_list_paragraph(para), para, doc)
+                            list_kind = list_kind_result[0] if list_kind_result is not None else None
 
                             if list_kind == "bullet":
                                 tag = "TBL-MID"
@@ -124,7 +132,11 @@ def tag_tables(doc: Document, mode: Literal["style", "tag"] = "style") -> None:
                                 else:
                                     tag = "T"
                                     style = body_style_name
-                        
+
+                        if tag_map:
+                            tag = translate_tag(tag, tag_map, prefixes)
+                            style = translate_tag(style, tag_map, prefixes)
+
                         if mode == "style":
                             try:
                                 para.style = style
@@ -376,19 +388,97 @@ def _ensure_style_exists(doc, style_name: str) -> bool:
         return False
 
 
+_BOX_OPEN_CLOSE_RE = re.compile(r"^box(\d+)-(open|close)$", re.IGNORECASE)
+
+
+def _canonical_box_open_close_token(bare_token: str) -> Optional[str]:
+    """Recognize Springer's simplified box marker convention -
+    "Box<N>-open" / "Box<N>-close" - and return its canonical BX-family
+    replacement token (with a leading "/" for the close side), or None if
+    *bare_token* doesn't match.
+
+    Both sides canonicalize to the same pairing suffix ("open"), since
+    box_prefixer.py's two-pass matching requires an open/close pair's full
+    marker string (base id + suffix) to match exactly - the suffix itself
+    carries no semantic meaning, it only pairs an opener with its closer.
+    """
+    match = _BOX_OPEN_CLOSE_RE.match(bare_token)
+    if not match:
+        return None
+    num, kind = match.groups()
+    canonical = f"BX{num}-open"
+    return f"/{canonical}" if kind.lower() == "close" else canonical
+
+
+def _normalize_client_tags_to_canonical(doc: Document, reverse_map: Dict[str, str]) -> None:
+    """Rewrite a document's explicit tag markers and pre-existing paragraph
+    styles from client-facing tag names back to canonical, in place, before
+    annotation runs.
+
+    Covers reprocessing a document this pipeline already styled with a
+    client's tag names (para.style.name carries the client name), and
+    hand-typed explicit markers (e.g. "<HEAD-1>") written using client tag
+    names. No-op if reverse_map is empty. Best-effort: any single
+    paragraph that can't be normalized is left as-is rather than aborting
+    the whole pass.
+    """
+    if not reverse_map:
+        return
+
+    for para in doc.paragraphs:
+        try:
+            style_name = para.style.name if para.style else None
+            if style_name and style_name in reverse_map:
+                canonical = reverse_map[style_name]
+                if _ensure_style_exists(doc, canonical):
+                    para.style = canonical
+        except Exception as e:
+            logger.warning(f"Could not normalize paragraph style back to canonical: {e}")
+
+        try:
+            full_match, token, _ = parse_leading_style_hint(para.text)
+            if not token:
+                continue
+            box_open_close = _canonical_box_open_close_token(token)
+            if box_open_close is not None:
+                replacement_token = box_open_close
+            else:
+                is_close = token.startswith("/")
+                bare_token = token[1:] if is_close else token
+                canonical_token = reverse_map.get(bare_token)
+                if canonical_token is None:
+                    continue
+                replacement_token = f"/{canonical_token}" if is_close else canonical_token
+            new_marker = full_match.replace(token, replacement_token, 1)
+            first_run = para.runs[0] if para.runs else None
+            if first_run is not None and full_match in first_run.text:
+                first_run.text = first_run.text.replace(full_match, new_marker, 1)
+        except Exception as e:
+            logger.warning(f"Could not normalize explicit tag marker back to canonical: {e}")
+
+
 def process_docx(
     input_path: str,
     output_path: str,
-    mode: Literal["style", "tag"] = "style"
+    mode: Literal["style", "tag"] = "style",
+    tag_set: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Process a DOCX document by annotating and styling paragraphs and tables.
-    
+
     Args:
         input_path: Path to input DOCX file
         output_path: Path to save output DOCX file
         mode: "style" to apply Word styles, "tag" to prefix text with [TAG]
-    
+        tag_set: optional client tag-set key (see tag_sets/*.yaml). The
+            structuring/classification engine always runs on canonical
+            tags regardless of this value; when set, the document is
+            normalized to canonical tags on the way in (in case it's a
+            reprocessing of an already client-styled document) and
+            translated to the client's tag names on the way out. None
+            (default) uses canonical tags throughout, unchanged from
+            existing behavior.
+
     Returns:
         Dictionary with processing results:
         - success: bool
@@ -415,6 +505,10 @@ def process_docx(
         logger.info(f"Opening document: {input_path}")
         doc = Document(input_path)
 
+        if tag_set:
+            logger.info(f"Normalizing client tag set '{tag_set}' back to canonical before annotation")
+            _normalize_client_tags_to_canonical(doc, get_reverse_tag_map(tag_set))
+
         logger.info(f"Annotating document with mode: {mode}")
         annotations = annotate_document(doc)
         annotations = apply_box_tag_prefixes(annotations)
@@ -436,13 +530,21 @@ def process_docx(
             annotations = normalize_reference_numbers(annotations)
             result["zone_warnings"] = check_zone_style_legality(annotations)
 
+        tag_map = get_tag_map(tag_set)
+        prefixes = get_rules_loader().get_structural_tags().get("prefixes", []) if tag_map else []
+
         # Process annotations
         for idx, item in enumerate(annotations):
             try:
                 para = item["para"]
                 tag = item["tag"]
                 style = item["style"]
-                
+
+                if tag_map:
+                    list_case = item.get("list_case")
+                    tag = translate_tag(tag, tag_map, prefixes, case=list_case)
+                    style = translate_tag(style, tag_map, prefixes, case=list_case)
+
                 if mode == "style":
                     try:
                         _ensure_style_exists(doc, style)
@@ -479,7 +581,7 @@ def process_docx(
         # Process tables
         try:
             logger.info(f"Processing tables (mode: {mode})")
-            tag_tables(doc, mode)
+            tag_tables(doc, mode, tag_map=tag_map)
             result["tables_processed"] = len(doc.tables)
         except Exception as e:
             logger.error(f"Error processing tables: {e}")
