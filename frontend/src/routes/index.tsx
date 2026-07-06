@@ -35,6 +35,7 @@ import { ReportsPage } from '@/pages/ReportsPage'
 import ScheduleReport from '@/Reports/ScheduleReport'
 import TodaySchedule from '@/Reports/TodaySchedule'
 import ProjectSchedule from '@/Reports/ProjectSchedule'
+import { PostProduction } from '@/pages/PostProduction'
 
 const router = createBrowserRouter([
   // ── Public routes ──────────────────────────────────────────────────────────
@@ -103,6 +104,7 @@ const router = createBrowserRouter([
 
       { path: 'projects', element: <ProjectsPage /> },
       { path: 'chapters', element: <Placeholder title="Chapters" /> },
+      { path: 'post-production', element: <PostProduction /> },
       { path: 'reports', element: <ReportsPage /> },
       { path: 'reports/schedule', element: <ScheduleReport /> },
       { path: 'reports/today-schedule', element: <TodaySchedule /> },

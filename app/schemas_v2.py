@@ -102,7 +102,7 @@ class ProjectSummary(BaseModel):
     client_id: int | None = None
     client_name: str | None = None
     xml_standard: str
-    status: str
+    status: str | None = None
     chapter_count: int
     file_count: int
     workflow_name: str | None = None
@@ -846,6 +846,7 @@ class ProjectUpdateRequest(BaseModel):
     trim_size: str | None = None
     copyright_year: int | None = None
     actual_pages: int | None = None
+    manuscript_pages: int | None = None
     due_date: str | None = None
     division_code: str | None = None
     customer_contact: str | None = None

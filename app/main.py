@@ -50,6 +50,10 @@ app.include_router(webdav_router.router, prefix="/webdav", tags=["WebDAV"])
 # Workflow & Clients Routers (WMS Integration)
 app.include_router(workflow.router, tags=["Workflow"])
 
+# Document Conversion Router
+from app.routers import conversion
+app.include_router(conversion.router, prefix=f"{settings.API_V1_STR}", tags=["Conversion"])
+
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the Publishing CMS API"}

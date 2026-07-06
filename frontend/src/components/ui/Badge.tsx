@@ -70,8 +70,8 @@ export function Badge({
 }
 
 // WMS compatibility: map status strings to badge variants
-export const statusToBadge = (status: string): BadgeVariant => {
-  const lower = status.toLowerCase()
+export const statusToBadge = (status?: string | null): BadgeVariant => {
+  const lower = (status || "").toLowerCase()
   if (lower.includes('success') || lower.includes('active')) return 'success'
   if (lower.includes('error') || lower.includes('failed')) return 'error'
   if (lower.includes('warning') || lower.includes('pending')) return 'warning'

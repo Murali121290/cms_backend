@@ -25,8 +25,8 @@ import {
   MoreVertical, Play, ScanLine, Search, ShieldCheck, Sparkles, Trash2,
   Upload, Wrench, X, Zap, CheckCircle2, Archive,
 } from 'lucide-react'
-import { FOLDER_CONFIG, COLUMN_DEFINITIONS, getProcessingActions, fileTypeIcon } from '@/config/fileManagerConfig'
-import type { FolderKey, ColumnKey } from '@/config/fileManagerConfig'
+import { FOLDER_CONFIG, COLUMN_DEFINITIONS, getProcessingActions, fileTypeIcon, isProcessingActionVisibleForStage } from '@/config/fileManagerConfig'
+import type { FolderKey, ColumnKey, ProcessingActionKey } from '@/config/fileManagerConfig'
 import { BulkUploadModal } from '@/components/BulkUploadModal'
 import { FileDetailPanel } from '@/features/projects/components/FileDetailPanel'
 import { ReferenceCheckModal } from '@/features/projects/components/ReferenceCheckModal'
@@ -182,6 +182,11 @@ function FileActionsMenu({
   const fname = row.file_name.toLowerCase()
   const hasReview = fname.endsWith('_processed.docx') || fname.endsWith('_structured.docx')
   const isImage = /\.(jpe?g|png|gif|webp|tiff?|bmp|eps)$/i.test(fname)
+
+  // Gate stage-specific processing actions to the stage they actually belong to.
+  // The stage-to-action mapping lives in fileManagerConfig.ts (PROCESSING_ACTION_STAGE_MAP) —
+  // edit that config to add/reassign a processing action, no changes needed here.
+  const showAction = (action: ProcessingActionKey) => isProcessingActionVisibleForStage(action, stageName)
 
   const itemCls = 'flex items-center gap-2 px-3 py-2 cursor-pointer text-text hover:bg-accent hover:text-primary focus:bg-accent focus:text-primary outline-none'
   const deadCls = 'flex items-center gap-2 px-3 py-2 text-text outline-none opacity-40 pointer-events-none cursor-not-allowed'
@@ -358,88 +363,106 @@ function FileActionsMenu({
                     <span className="ml-auto text-[9px] px-1 py-0.5 rounded bg-surface border border-border text-muted">Soon</span>
                   </DropdownMenu.Item>
 
-                  {/* Structuring — shows AI/Manual choice */}
-                  <DropdownMenu.Item
-                    className={itemCls}
-                    onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Structuring', jobFn: () => Promise.resolve(), isStructuringChoice: true }) }}
-                  >
-                    <Layers size={12} className="text-amber-500" /> Structuring (AI / Manual)
-                  </DropdownMenu.Item>
+                  {/* Structuring — shows AI/Manual choice — Pre-editing stage only */}
+                  {showAction('structuring') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Structuring', jobFn: () => Promise.resolve(), isStructuringChoice: true }) }}
+                    >
+                      <Layers size={12} className="text-amber-500" /> Structuring (AI / Manual)
+                    </DropdownMenu.Item>
+                  )}
 
-                  {/* Language Edit — v1 endpoint */}
-                  <DropdownMenu.Item
-                    className={itemCls}
-                    onSelect={() => void fire('Language Edit', () => startLanguageEdit(fid))}
-                  >
-                    <Languages size={12} className="text-muted" /> Language Edit
-                  </DropdownMenu.Item>
+                  {/* Reference Check — opens configuration modal — Pre-editing stage only */}
+                  {showAction('referenceValidation') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={() => onOpenReferenceCheck({
+                        id: fid!,
+                        filename: row.file_name,
+                        project_id: projectId,
+                        chapter_id: chapterId,
+                        file_type: '',
+                        category: row.subfolder,
+                        uploaded_at: row.uploaded_on,
+                        version: 1,
+                        lock: { is_locked: false, locked_by: null, locked_at: null },
+                        available_actions: [],
+                      } as unknown as FileRecord)}
+                    >
+                      <BookCheck size={12} className="text-muted" /> Reference Validation
+                    </DropdownMenu.Item>
+                  )}
 
-                  {/* Technical Edit — navigates to review page */}
-                  <DropdownMenu.Item
-                    className={itemCls}
-                    onSelect={() => navigate(uiPaths.technicalReview(projectId, chapterId, fid))}
-                  >
-                    <Wrench size={12} className="text-muted" /> Technical Edit
-                  </DropdownMenu.Item>
+                  {/* Language Edit — v1 endpoint — Copyediting stage only */}
+                  {showAction('languageEdit') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={() => void fire('Language Edit', () => startLanguageEdit(fid))}
+                    >
+                      <Languages size={12} className="text-muted" /> Language Edit
+                    </DropdownMenu.Item>
+                  )}
 
-                  {/* Reference Check — opens configuration modal */}
-                  <DropdownMenu.Item
-                    className={itemCls}
-                    onSelect={() => onOpenReferenceCheck({
-                      id: fid!,
-                      filename: row.file_name,
-                      project_id: projectId,
-                      chapter_id: chapterId,
-                      file_type: '',
-                      category: row.subfolder,
-                      uploaded_at: row.uploaded_on,
-                      version: 1,
-                      lock: { is_locked: false, locked_by: null, locked_at: null },
-                      available_actions: [],
-                    } as unknown as FileRecord)}
-                  >
-                    <BookCheck size={12} className="text-muted" /> Reference Validation
-                  </DropdownMenu.Item>
+                  {/* Technical Edit — navigates to review page — Copyediting stage only */}
+                  {showAction('technicalEdit') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={() => navigate(uiPaths.technicalReview(projectId, chapterId, fid))}
+                    >
+                      <Wrench size={12} className="text-muted" /> Technical Edit
+                    </DropdownMenu.Item>
+                  )}
 
-                  {/* Manuscript Analysis (PPD) — v2 endpoint */}
-                  <DropdownMenu.Item
-                    className={itemCls}
-                    onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Manuscript Analysis', jobFn: () => startPpdGeneration(fid) }) }}
-                  >
-                    <FileOutput size={12} className="text-muted" /> Manuscript Analysis
-                  </DropdownMenu.Item>
+                  {/* Manuscript Analysis (PPD) — v2 endpoint — Manuscript Analysis stage only */}
+                  {showAction('manuscriptAnalysis') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Manuscript Analysis', jobFn: () => startPpdGeneration(fid) }) }}
+                    >
+                      <FileOutput size={12} className="text-muted" /> Manuscript Analysis
+                    </DropdownMenu.Item>
+                  )}
 
-                  {/* Permissions Check — v2 endpoint */}
-                  <DropdownMenu.Item
-                    className={itemCls}
-                    onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Permissions Check', jobFn: () => startPermissionsCheck(fid) }) }}
-                  >
-                    <ShieldCheck size={12} className="text-muted" /> Permissions Check
-                  </DropdownMenu.Item>
+                  {/* Permissions Check — v2 endpoint — XML stage only */}
+                  {showAction('permissionsCheck') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Permissions Check', jobFn: () => startPermissionsCheck(fid) }) }}
+                    >
+                      <ShieldCheck size={12} className="text-muted" /> Permissions Check
+                    </DropdownMenu.Item>
+                  )}
 
-                  {/* AI Credit Extraction — v2 endpoint */}
-                  <DropdownMenu.Item
-                    className={itemCls}
-                    onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'AI Credit Extraction', jobFn: () => startCreditExtraction(fid) }) }}
-                  >
-                    <Sparkles size={12} className="text-muted" /> AI Credit Extraction
-                  </DropdownMenu.Item>
+                  {/* AI Credit Extraction — v2 endpoint — XML stage only */}
+                  {showAction('aiCreditExtraction') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'AI Credit Extraction', jobFn: () => startCreditExtraction(fid) }) }}
+                    >
+                      <Sparkles size={12} className="text-muted" /> AI Credit Extraction
+                    </DropdownMenu.Item>
+                  )}
 
-                  {/* Bias Scan — v2 endpoint */}
-                  <DropdownMenu.Item
-                    className={itemCls}
-                    onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Bias Scan', jobFn: () => startBiasScan(fid) }) }}
-                  >
-                    <ScanLine size={12} className="text-muted" /> Bias Scan
-                  </DropdownMenu.Item>
+                  {/* Bias Scan — v2 endpoint — XML stage only */}
+                  {showAction('biasScan') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Bias Scan', jobFn: () => startBiasScan(fid) }) }}
+                    >
+                      <ScanLine size={12} className="text-muted" /> Bias Scan
+                    </DropdownMenu.Item>
+                  )}
 
-                  {/* Word to XML — v2 endpoint */}
-                  <DropdownMenu.Item
-                    className={itemCls}
-                    onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Word to XML', jobFn: () => startWordToXml(fid) }) }}
-                  >
-                    <FileCode size={12} className="text-muted" /> Word to XML
-                  </DropdownMenu.Item>
+                  {/* Word to XML — v2 endpoint — XML stage only */}
+                  {showAction('wordToXml') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Word to XML', jobFn: () => startWordToXml(fid) }) }}
+                    >
+                      <FileCode size={12} className="text-muted" /> Word to XML
+                    </DropdownMenu.Item>
+                  )}
                 </>
               ) : (
                 /* No db_id: show stage-based fallback labels (no API call) */

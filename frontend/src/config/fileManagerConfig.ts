@@ -92,6 +92,42 @@ export function getProcessingActions(stageName: string): string[] {
   return found ? found[1] : []
 }
 
+// ── File Actions Menu — Processing item visibility ──────────────────────────
+//
+// Controls which "Processing" items in the per-file actions menu (⋮) are shown for a
+// given chapter stage. Each key lists the exact `stage_name` value(s) (as seeded in
+// stage_master / workflow_master, see seed.py) that action belongs to — matched
+// case-insensitively but otherwise as a full, exact stage name (no partial/substring match).
+// Use '*' for an action that should always be visible regardless of stage.
+//
+// To add a new processing action: add its key here with the stage(s) it belongs to, then
+// reference that key via `isProcessingActionVisibleForStage(key, stageName)` when rendering
+// the corresponding <DropdownMenu.Item> in ChapterFilePage.tsx — no other code changes needed.
+export type ProcessingActionKey =
+  | 'structuring' | 'referenceValidation'
+  | 'languageEdit' | 'technicalEdit'
+  | 'manuscriptAnalysis'
+  | 'permissionsCheck' | 'aiCreditExtraction' | 'biasScan' | 'wordToXml'
+
+export const PROCESSING_ACTION_STAGE_MAP: Record<ProcessingActionKey, string[] | '*'> = {
+  structuring:          ['Pre-editing'],
+  referenceValidation:  ['Pre-editing'],
+  languageEdit:         ['Copyediting'],
+  technicalEdit:        ['Copyediting'],
+  manuscriptAnalysis:   ['Manuscript Analysis'],
+  permissionsCheck:     ['XML Conversion'],
+  aiCreditExtraction:   ['XML Conversion'],
+  biasScan:             ['XML Conversion'],
+  wordToXml:            ['XML Conversion'],
+}
+
+export function isProcessingActionVisibleForStage(action: ProcessingActionKey, stageName: string): boolean {
+  const rule = PROCESSING_ACTION_STAGE_MAP[action]
+  if (rule === '*') return true
+  const key = stageName.trim().toLowerCase()
+  return rule.some(stage => stage.toLowerCase() === key)
+}
+
 export interface FileTypeIcon { icon: string; color: string }
 
 export const FILE_TYPE_ICONS: Record<string, FileTypeIcon> = {
