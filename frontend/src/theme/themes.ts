@@ -28,6 +28,28 @@ export const themes: Theme[] = [
     },
   },
   {
+  name: 'Upload Cyan',
+  label: 'Upload Cyan',
+  variables: {
+    '--color-sidebar':        '#0A171D',
+    '--color-sidebar-hover':  '#13242B',
+    '--color-sidebar-text':   '#8AB4C0',
+    '--color-sidebar-active': '#FFFFFF',
+    '--color-primary':        '#3FA8BB',
+    '--color-primary-hover':  '#1D7888',
+    '--color-accent':         '#98D1EF',
+    '--color-background':     '#F0F7FA',
+    '--color-card':           '#FFFFFF',
+    '--color-border':         '#0A171D14',
+    '--color-text':           '#0A171D',
+    '--color-muted':          '#4A6670',
+    '--color-success':        '#22C55E',
+    '--color-warning':        '#F59E0B',
+    '--color-danger':         '#E27D7D',
+    '--color-info':           '#3FA8BB',
+  },
+},
+  {
     name: 'S4Carlisle Classic',
     label: 'S4Carlisle Classic',
     variables: {
