@@ -476,6 +476,11 @@ const ToolbarButton = ({
   title?: string;
 }) => (
   <button
+    // Preserve the editor's current selection (especially a NodeSelection on
+    // a math node) by preventing the button from stealing focus on mousedown.
+    // Without this, ProseMirror re-syncs to the DOM selection on blur and
+    // our node-selected state is lost before onClick fires.
+    onMouseDown={(e) => e.preventDefault()}
     onClick={onClick}
     disabled={disabled}
     title={title}
@@ -708,20 +713,61 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
       }
     }, [currentUser, editor]);
 
+    // Helpers for routing formatting to a selected math node vs. text ranges.
+    // Detects two cases:
+    //   1. A ProseMirror NodeSelection whose node is a math node (from a
+    //      single click on the equation preview span).
+    //   2. A TextSelection whose current position happens to point at a
+    //      math node (e.g. caret placed just before the equation).
+    const getSelectedMathNodeInfo = () => {
+      if (!editor) return null;
+      const { state } = editor;
+      const sel = state.selection as any;
+      // NodeSelection carries a `node` reference to the node it wraps — but
+      // that reference goes STALE after setNodeMarkup, so always re-fetch
+      // the live node from doc.nodeAt(pos) to see the latest attrs.
+      if (sel && sel.node && sel.node.type?.name === "mathNode") {
+        const fresh = state.doc.nodeAt(sel.from);
+        const attrs = fresh && fresh.type.name === "mathNode" ? fresh.attrs : sel.node.attrs;
+        return { pos: sel.from, attrs };
+      }
+      const { from } = sel;
+      const node = state.doc.nodeAt(from);
+      if (node && node.type.name === "mathNode") {
+        return { pos: from, attrs: node.attrs };
+      }
+      return null;
+    };
+    const patchSelectedMathNode = (patch: Record<string, any>) => {
+      const info = getSelectedMathNodeInfo();
+      if (!info || !editor) return false;
+      const { tr } = editor.state;
+      tr.setNodeMarkup(info.pos, undefined, { ...info.attrs, ...patch });
+      editor.view.dispatch(tr);
+      return true;
+    };
+
     // Update heading level, font size, font family, and charStyle on selection updates
     useEffect(() => {
       if (editor) {
         const updateSelectionStates = () => {
-          // Font size
-          const attrs = editor.getAttributes("textStyle");
-          if (attrs && attrs.fontSize) {
-            setCurrentFontSize(attrs.fontSize.replace("pt", ""));
+          // If the current selection is a math node, reflect its wrapper
+          // attrs in the toolbar dropdowns so users see the current state.
+          const mathInfo = getSelectedMathNodeInfo();
+          if (mathInfo) {
+            setCurrentFontSize(mathInfo.attrs.wrapperFontSize || "default");
+            setCurrentFontFamily(mathInfo.attrs.wrapperFontFamily || "default");
           } else {
-            setCurrentFontSize("default");
+            // Font size
+            const attrs = editor.getAttributes("textStyle");
+            if (attrs && attrs.fontSize) {
+              setCurrentFontSize(attrs.fontSize.replace("pt", ""));
+            } else {
+              setCurrentFontSize("default");
+            }
+            // Font family
+            setCurrentFontFamily(attrs?.fontFamily || "default");
           }
-
-          // Font family
-          setCurrentFontFamily(attrs?.fontFamily || "default");
 
           // Active character style callback
           if (onActiveCharStyleChange) {
@@ -1030,6 +1076,22 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           if (mathml) mathEl.setAttribute("data-mathml", mathml);
           if (latex) mathEl.setAttribute("data-latex", latex);
           if (display) mathEl.setAttribute("data-display", display);
+          // Carry the wrapper formatting so the backend can inject it into
+          // every <m:r>'s <m:rPr>/<w:rPr> on the OMML side. If data-omml was
+          // preserved for a byte-perfect round-trip, wrapper attrs are still
+          // honored by post-processing the raw OMML on the server.
+          const carry = [
+            "data-wrapper-bold",
+            "data-wrapper-italic",
+            "data-wrapper-color",
+            "data-wrapper-bg",
+            "data-wrapper-size",
+            "data-wrapper-font",
+          ];
+          for (const attr of carry) {
+            const v = span.getAttribute(attr);
+            if (v) mathEl.setAttribute(attr, v);
+          }
           span.parentNode?.replaceChild(mathEl, span);
         } catch (err) {
           console.error("Failed to serialize math node on save:", err);
@@ -1165,6 +1227,10 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
             value={currentFontFamily}
             onChange={(e) => {
               const font = e.target.value;
+              if (patchSelectedMathNode({ wrapperFontFamily: font === "default" ? "" : font })) {
+                setCurrentFontFamily(font);
+                return;
+              }
               if (font === "default") {
                 editor?.chain().focus().unsetFontFamily().run();
               } else {
@@ -1186,6 +1252,10 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
             value={currentFontSize}
             onChange={(e) => {
               const size = e.target.value;
+              if (patchSelectedMathNode({ wrapperFontSize: size === "default" ? "" : size })) {
+                setCurrentFontSize(size);
+                return;
+              }
               if (size === "default") {
                 editor?.chain().focus().unsetFontSize().run();
               } else {
@@ -1205,10 +1275,32 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           <ToolbarDivider />
 
           {/* Text Formatting */}
-          <ToolbarButton active={editor?.isActive("bold")} onClick={() => editor?.chain().focus().toggleBold().run()} title={`Bold (${kbd("Ctrl+B")})`}>
+          <ToolbarButton
+            active={editor?.isActive("bold") || !!getSelectedMathNodeInfo()?.attrs.wrapperBold}
+            onClick={() => {
+              const info = getSelectedMathNodeInfo();
+              if (info) {
+                patchSelectedMathNode({ wrapperBold: !info.attrs.wrapperBold });
+                return;
+              }
+              editor?.chain().focus().toggleBold().run();
+            }}
+            title={`Bold (${kbd("Ctrl+B")})`}
+          >
             <Bold className="w-4 h-4" />
           </ToolbarButton>
-          <ToolbarButton active={editor?.isActive("italic")} onClick={() => editor?.chain().focus().toggleItalic().run()} title={`Italic (${kbd("Ctrl+I")})`}>
+          <ToolbarButton
+            active={editor?.isActive("italic") || !!getSelectedMathNodeInfo()?.attrs.wrapperItalic}
+            onClick={() => {
+              const info = getSelectedMathNodeInfo();
+              if (info) {
+                patchSelectedMathNode({ wrapperItalic: !info.attrs.wrapperItalic });
+                return;
+              }
+              editor?.chain().focus().toggleItalic().run();
+            }}
+            title={`Italic (${kbd("Ctrl+I")})`}
+          >
             <Italic className="w-4 h-4" />
           </ToolbarButton>
           <ToolbarButton active={editor?.isActive("underline")} onClick={() => editor?.chain().focus().toggleUnderline().run()} title={`Underline (${kbd("Ctrl+U")})`}>
@@ -1243,7 +1335,10 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
               ref={textColorRef}
               type="color"
               defaultValue="#000000"
-              onChange={(e) => editor?.chain().focus().setColor(e.target.value).run()}
+              onChange={(e) => {
+                if (patchSelectedMathNode({ wrapperColor: e.target.value })) return;
+                editor?.chain().focus().setColor(e.target.value).run();
+              }}
               className="absolute inset-0 opacity-0 w-0 h-0 cursor-pointer"
             />
           </div>
@@ -1260,7 +1355,10 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
               ref={highlightColorRef}
               type="color"
               defaultValue="#fef08a"
-              onChange={(e) => editor?.chain().focus().toggleHighlight({ color: e.target.value }).run()}
+              onChange={(e) => {
+                if (patchSelectedMathNode({ wrapperBgColor: e.target.value })) return;
+                editor?.chain().focus().toggleHighlight({ color: e.target.value }).run();
+              }}
               className="absolute inset-0 opacity-0 w-0 h-0 cursor-pointer"
             />
           </div>
