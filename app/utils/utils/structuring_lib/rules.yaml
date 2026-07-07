@@ -126,10 +126,15 @@ paragraphs:
 
 # List-specific patterns (detected via Word list formatting)
 lists:
-  bullet_pattern: "^[•\\-\\–▪■●○➢>*]\\s+"
+  bullet_pattern: "^[•·\\-\\–▪■●○➢>*]\\s+"
   number_pattern: "^\\d+\\.\\s+"
-  roman_pattern: "^[IVXLCDM]+[\\.)]\\s+"
+  roman_pattern: "^(?i:[ivxlcdm]+)[\\.)]\\s+"
   lc_letter_pattern: "^[a-z][\\.)]\\s+"
+  # Uppercase counterpart of lc_letter_pattern, e.g. "A. Apple is red" - a
+  # single capital letter followed immediately by a period/paren and a
+  # space. Needed to detect true alphabetical-list items (as opposed to
+  # mnemonic_pattern below, which requires a tab/2+ spaces/em-dash).
+  uc_letter_pattern: "^[A-Z][\\.)]\\s+"
   # Single capital letter followed by a tab or 2+ spaces (mnemonic-style
   # lettered lists), e.g. "A   Apple is red". Requires a tab or 2+ spaces
   # (not just 1) so ordinary sentences starting with the article "A " aren't
@@ -167,12 +172,12 @@ lists:
     style: NL-MID
 
   general_roman:
-    tag: RL-MID
-    style: RL-MID
+    tag: OL-MID
+    style: OL-MID
 
   general_lettered:
-    tag: UL-MID
-    style: UL-MID
+    tag: LL-MID
+    style: LL-MID
 
   general:
     tag: BL-MID
@@ -198,15 +203,20 @@ tables:
       weight: 0.5
       description: "Matches column name patterns"
 
-  # Threshold for classifying as header
-  header_threshold: 1.2
+  # Threshold for classifying as header. Set to the row_position weight so
+  # being the first row of the table is sufficient on its own (the
+  # dominant, most universal header signal); other heuristics (caps,
+  # keywords, short text) add confidence for non-standard cases. Previously
+  # 1.2, which required uppercase text (0.8) + row_position (0.7) together
+  # and silently misclassified any Title Case header row as body text.
+  header_threshold: 0.7
   
   # Styles
   header_style: TBCH
   body_style: TB
   bullet_style: TBL-MID
   number_style: TNL-MID
-  roman_style: TRL-MID
+  roman_style: TOL-MID
   source_note_style: TSN
   footnote_style: TFN
   stub_heading_style: T4
@@ -220,6 +230,7 @@ boxes:
     - "^BX$"
   close_patterns:
     - "^/BX$"
+    - "^/BX\\d+(?:\\.\\d+)?$"
     - "^/BXOBJ$"
     - "^/BXM$"
   open_style: PMI
@@ -308,9 +319,15 @@ structural_tags:
   prefixes:
     - "PT-H"
     - "BL-"
+    - "BL2-"
     - "NL-"
+    - "NL2-"
     - "UL-"
-    - "RL-"
+    - "UL2-"
+    - "LL-"
+    - "LL2-"
+    - "OL-"
+    - "OL2-"
     - "OBJ-"
     - "REF-"
     - "APX-"

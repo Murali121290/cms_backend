@@ -1031,7 +1031,7 @@ class IntegratedDocumentProcessor:
         if list_kind == "roman":
             return table_config.get("roman_style", "TRL-MID")
 
-        header_threshold = table_config.get("header_threshold", 1.0)
+        header_threshold = table_config.get("header_threshold", 0.7)
         score = self.doc_processor.detect_table_header_smart(text, row_idx, cell_idx, total_rows)
         if score >= header_threshold:
             return table_config.get("header_style", "TBCH")

@@ -423,7 +423,7 @@ class DocumentProcessor:
             for table_idx, table in enumerate(doc.tables):
                 try:
                     table_config = self.rules_loader.get_table_config()
-                    header_threshold = table_config.get("header_threshold", 1.0)
+                    header_threshold = table_config.get("header_threshold", 0.7)
                     header_style = table_config.get("header_style", "Table Header")
                     body_style = table_config.get("body_style", "Table Body")
                     
