@@ -423,87 +423,105 @@ function FileActionsMenu({
                   </DropdownMenu.Item>
 
                   {/* Structuring — opens tag-set selection popup */}
-                  <DropdownMenu.Item
-                    className={itemCls}
-                    onSelect={e => { e.preventDefault(); setTagSetModalOpen(true) }}
-                  >
-                    <Layers size={12} className="text-amber-500" /> Structuring
-                  </DropdownMenu.Item>
+                  {showAction('structuring') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={e => { e.preventDefault(); setTagSetModalOpen(true) }}
+                    >
+                      <Layers size={12} className="text-amber-500" /> Structuring
+                    </DropdownMenu.Item>
+                  )}
 
                   {/* Language Edit — v1 endpoint */}
-                  <DropdownMenu.Item
-                    className={itemCls}
-                    onSelect={() => void fire('Language Edit', () => startLanguageEdit(fid))}
-                  >
-                    <Languages size={12} className="text-muted" /> Language Edit
-                  </DropdownMenu.Item>
+                  {showAction('languageEdit') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={() => void fire('Language Edit', () => startLanguageEdit(fid))}
+                    >
+                      <Languages size={12} className="text-muted" /> Language Edit
+                    </DropdownMenu.Item>
+                  )}
 
                   {/* Technical Edit — navigates to review page */}
-                  <DropdownMenu.Item
-                    className={itemCls}
-                    onSelect={() => navigate(uiPaths.technicalReview(projectId, chapterId, fid))}
-                  >
-                    <Wrench size={12} className="text-muted" /> Technical Edit
-                  </DropdownMenu.Item>
+                  {showAction('technicalEdit') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={() => navigate(uiPaths.technicalReview(projectId, chapterId, fid))}
+                    >
+                      <Wrench size={12} className="text-muted" /> Technical Edit
+                    </DropdownMenu.Item>
+                  )}
 
                   {/* Reference Check — opens configuration modal */}
-                  <DropdownMenu.Item
-                    className={itemCls}
-                    onSelect={() => onOpenReferenceCheck({
-                      id: fid!,
-                      filename: row.file_name,
-                      project_id: projectId,
-                      chapter_id: chapterId,
-                      file_type: '',
-                      category: row.subfolder,
-                      uploaded_at: row.uploaded_on,
-                      version: 1,
-                      lock: { is_locked: false, locked_by: null, locked_at: null },
-                      available_actions: [],
-                    } as unknown as FileRecord)}
-                  >
-                    <BookCheck size={12} className="text-muted" /> Reference Validation
-                  </DropdownMenu.Item>
+                  {showAction('referenceValidation') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={() => onOpenReferenceCheck({
+                        id: fid!,
+                        filename: row.file_name,
+                        project_id: projectId,
+                        chapter_id: chapterId,
+                        file_type: '',
+                        category: row.subfolder,
+                        uploaded_at: row.uploaded_on,
+                        version: 1,
+                        lock: { is_locked: false, locked_by: null, locked_at: null },
+                        available_actions: [],
+                      } as unknown as FileRecord)}
+                    >
+                      <BookCheck size={12} className="text-muted" /> Reference Validation
+                    </DropdownMenu.Item>
+                  )}
 
                   {/* Manuscript Analysis (PPD) — v2 endpoint */}
-                  <DropdownMenu.Item
-                    className={itemCls}
-                    onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Manuscript Analysis', jobFn: () => startPpdGeneration(fid) }) }}
-                  >
-                    <FileOutput size={12} className="text-muted" /> Manuscript Analysis
-                  </DropdownMenu.Item>
+                  {showAction('manuscriptAnalysis') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Manuscript Analysis', jobFn: () => startPpdGeneration(fid) }) }}
+                    >
+                      <FileOutput size={12} className="text-muted" /> Manuscript Analysis
+                    </DropdownMenu.Item>
+                  )}
 
                   {/* Permissions Check — v2 endpoint */}
-                  <DropdownMenu.Item
-                    className={itemCls}
-                    onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Permissions Check', jobFn: () => startPermissionsCheck(fid) }) }}
-                  >
-                    <ShieldCheck size={12} className="text-muted" /> Permissions Check
-                  </DropdownMenu.Item>
+                  {showAction('permissionsCheck') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Permissions Check', jobFn: () => startPermissionsCheck(fid) }) }}
+                    >
+                      <ShieldCheck size={12} className="text-muted" /> Permissions Check
+                    </DropdownMenu.Item>
+                  )}
 
                   {/* AI Credit Extraction — v2 endpoint */}
-                  <DropdownMenu.Item
-                    className={itemCls}
-                    onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'AI Credit Extraction', jobFn: () => startCreditExtraction(fid) }) }}
-                  >
-                    <Sparkles size={12} className="text-muted" /> AI Credit Extraction
-                  </DropdownMenu.Item>
+                  {showAction('aiCreditExtraction') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'AI Credit Extraction', jobFn: () => startCreditExtraction(fid) }) }}
+                    >
+                      <Sparkles size={12} className="text-muted" /> AI Credit Extraction
+                    </DropdownMenu.Item>
+                  )}
 
                   {/* Bias Scan — v2 endpoint */}
-                  <DropdownMenu.Item
-                    className={itemCls}
-                    onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Bias Scan', jobFn: () => startBiasScan(fid) }) }}
-                  >
-                    <ScanLine size={12} className="text-muted" /> Bias Scan
-                  </DropdownMenu.Item>
+                  {showAction('biasScan') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Bias Scan', jobFn: () => startBiasScan(fid) }) }}
+                    >
+                      <ScanLine size={12} className="text-muted" /> Bias Scan
+                    </DropdownMenu.Item>
+                  )}
 
                   {/* Word to XML — v2 endpoint */}
-                  <DropdownMenu.Item
-                    className={itemCls}
-                    onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Word to XML', jobFn: () => startWordToXml(fid) }) }}
-                  >
-                    <FileCode size={12} className="text-muted" /> Word to XML
-                  </DropdownMenu.Item>
+                  {showAction('wordToXml') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Word to XML', jobFn: () => startWordToXml(fid) }) }}
+                    >
+                      <FileCode size={12} className="text-muted" /> Word to XML
+                    </DropdownMenu.Item>
+                  )}
                 </>
               ) : (
                 /* No db_id: show stage-based fallback labels (no API call) */
