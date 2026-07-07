@@ -230,6 +230,7 @@ boxes:
     - "^BX$"
   close_patterns:
     - "^/BX$"
+    - "^/BX\\d+(?:\\.\\d+)?$"
     - "^/BXOBJ$"
     - "^/BXM$"
   open_style: PMI

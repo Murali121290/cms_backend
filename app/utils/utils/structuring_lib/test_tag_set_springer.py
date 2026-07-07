@@ -52,6 +52,23 @@ def test_translate_tag_unmapped_tag_passes_through():
     assert translate_tag("NBX-TTL", tag_map, []) == "NBX-TTL"
 
 
+def test_translate_tag_box_heading_levels_3_to_5():
+    tag_map = get_tag_map("springer")
+    assert translate_tag("BX1-H3", tag_map, []) == "Box-01-Head3"
+    assert translate_tag("BX1-H4", tag_map, []) == "Box-01-Head4"
+    assert translate_tag("BX1-H5", tag_map, []) == "Box-01-Head5"
+
+
+def test_translate_tag_numbered_box_falls_back_to_box1_style():
+    # box_prefixer.py numbers boxes by document order (BX2-, BX3-, ...),
+    # but Springer's template has one generic box style family - any
+    # numbered box without its own tag-set entry renders as Box 1's style.
+    tag_map = get_tag_map("springer")
+    assert translate_tag("BX2-H1", tag_map, []) == "Box-01-Head1"
+    assert translate_tag("BX3-TXT", tag_map, []) == "Box-01-ParaFirstLine-Ind"
+    assert translate_tag("BX12-H3", tag_map, []) == "Box-01-Head3"
+
+
 def test_translate_tag_case_dependent_selects_variant():
     tag_map = get_tag_map("springer")
     assert translate_tag("LL-MID", tag_map, [], case="upper") == "Uc-AlphaList1"
@@ -120,14 +137,26 @@ def test_process_docx_translates_roman_to_springer():
     assert styles == ["Lc-RomanList1_first", "Lc-RomanList1_last"]
 
 
-def test_normalize_box_open_close_reverse_maps_to_canonical_bx():
-    from app.utils.utils.structuring_lib.styler import _canonical_box_open_close_token
+def test_match_springer_box_marker_pairs_open_and_close():
+    # Recognized in place by annotate_document (recognize_springer_box_markers) -
+    # no paragraph text is ever rewritten to achieve this pairing.
+    from app.utils.utils.structuring_lib.annotator import _match_springer_box_marker
 
-    assert _canonical_box_open_close_token("Box1-open") == "BX1-open"
-    assert _canonical_box_open_close_token("Box1-close") == "/BX1-open"
-    assert _canonical_box_open_close_token("box12-OPEN") == "BX12-open"
-    assert _canonical_box_open_close_token("BX1-Header") is None
-    assert _canonical_box_open_close_token("TXT") is None
+    assert _match_springer_box_marker("Box1-open") == ("BX1", False, "BX1-open", "Box1")
+    assert _match_springer_box_marker("Box1-close") == ("BX1", True, "BX1-open", "Box1")
+    assert _match_springer_box_marker("box12-OPEN") == ("BX12", False, "BX12-open", "Box12")
+    assert _match_springer_box_marker("BX1-Header") is None
+    assert _match_springer_box_marker("TXT") is None
+
+
+def test_springer_box_markers_not_recognized_without_tag_set():
+    # Recognition is gated on tag_set being active (styler.process_docx
+    # only opts annotate_document in when tag_set is truthy) - with no
+    # tag_set, "<Box1-open>"/"<Box1-close>" fall through unrecognized,
+    # exactly as before this feature existed.
+    doc = _build_doc(["<Box1-open>", "Some box content.", "<Box1-close>"])
+    _, styles = _process(doc, tag_set=None)
+    assert styles[1] != "Box-01-ParaFirstLine-Ind"
 
 
 def test_process_docx_pairs_springer_box_open_close_markers():
@@ -137,8 +166,12 @@ def test_process_docx_pairs_springer_box_open_close_markers():
         "<Box1-close>",
     ])
     _, styles = _process(doc, tag_set="springer")
-    # Content between the markers is correctly paired and prefixed by
-    # box_prefixer.py, then translated to Springer's Box-01-* style -
-    # proof that "Box1-open"/"Box1-close" successfully reverse-normalized
-    # to a matching canonical "BX1-open"/"/BX1-open" pair.
+    # Content between the markers is correctly paired (in memory, without
+    # rewriting either marker's text) and prefixed by box_prefixer.py, then
+    # translated to Springer's Box-01-* style.
     assert styles[1] == "Box-01-ParaFirstLine-Ind"
+    # The markers' own applied style keeps Springer's "Box"-spelled wording
+    # (matching the text the author actually typed) rather than switching
+    # to the canonical "BX1-open"/"BX1-close" spelling.
+    assert styles[0] == "Box1-open"
+    assert styles[2] == "Box1-close"

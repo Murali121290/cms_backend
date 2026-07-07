@@ -78,6 +78,48 @@ def _match_box_marker(token: Optional[str]):
     return base_id, is_close
 
 
+# Springer's human-word box marker convention - "Box<N>-open"/"Box<N>-close"
+# (mixed case, distinguished by the word "close" rather than a leading "/").
+# Recognized only when the caller opts in (annotate_document's
+# recognize_springer_box_markers=True, set by styler.process_docx when a
+# tag_set is active) - kept separate from _match_box_marker's native
+# "BX<N>-<suffix>" convention rather than folded in, since both sides here
+# must pair under the *same* canonical suffix ("open") regardless of which
+# word was written, whereas the native convention's suffix is an arbitrary
+# author-chosen label that must match exactly between open and close.
+_SPRINGER_BOX_OPEN_CLOSE_RE = re.compile(r"^box(\d+)-(open|close)$", re.IGNORECASE)
+
+
+def _match_springer_box_marker(token: Optional[str]):
+    """Match Springer's "Box<N>-open"/"Box<N>-close" convention - returning
+    (base_id, is_close, pairing_marker, display_prefix), or None if *token*
+    doesn't match.
+
+    *pairing_marker* is always "BX<N>-open" for both sides of a pair (never
+    "BX<N>-close"), since box_prefixer.py's two-pass matching requires an
+    open/close pair's full marker string to be identical - mirroring how
+    the now-retired _canonical_box_open_close_token in styler.py collapsed
+    both words onto the same canonical suffix. Computed here purely for
+    in-memory pairing/tagging; the paragraph's actual text is never
+    rewritten.
+
+    *display_prefix* ("Box<N>") is separate from *base_id* ("BX<N>") so the
+    applied Word *style* can keep Springer's own "Box"-spelled wording
+    (e.g. "Box1-close") instead of switching to the canonical "BX"
+    spelling - matching the marker text the author actually typed, so
+    Draft view doesn't show a confusing mismatch between the marker and
+    its own style label."""
+    if not token:
+        return None
+    match = _SPRINGER_BOX_OPEN_CLOSE_RE.match(token.strip())
+    if not match:
+        return None
+    num, kind = match.groups()
+    base_id = f"BX{num}"
+    is_close = kind.lower() == "close"
+    return base_id, is_close, f"{base_id}-open", f"Box{num}"
+
+
 # A closing box marker may now trail real paragraph content on the same
 # line (e.g. "Some paragraph text.</BX1-Header>"), unlike opening markers,
 # which must still appear only at the start of a block. This only looks for
@@ -330,9 +372,26 @@ def _resolve_box_keyword(token: Optional[str]) -> Optional[str]:
     return lookup.get(token.strip().upper())
 
 
+_BARE_NUMBERED_BOX_RE = re.compile(r"^BX(\d+)$", re.IGNORECASE)
+
+
 def resolve_box_prefix(token: Optional[str]) -> str:
-    """Resolve a box-open token to its style-prefix subtype, defaulting to 'NBX'."""
-    return _resolve_box_keyword(token) or "NBX"
+    """Resolve a box-open token to its style-prefix subtype, defaulting to
+    'NBX'.
+
+    A bare numbered token ("BX1", "BX2", ...) resolves to its own matching
+    subtype prefix ("BX1", "BX2", ...) directly - it isn't a
+    boxes.type_keywords alias (those are word-shaped, e.g. "NOTE"/"CASE
+    STUDY"), so without this it silently fell back to the generic "NBX"
+    default, losing the box's own number entirely."""
+    keyword_prefix = _resolve_box_keyword(token)
+    if keyword_prefix is not None:
+        return keyword_prefix
+    if token:
+        numbered = _BARE_NUMBERED_BOX_RE.match(token.strip())
+        if numbered:
+            return f"BX{numbered.group(1)}"
+    return "NBX"
 
 
 def _is_recognized_structural_tag(token: str) -> bool:
@@ -534,19 +593,28 @@ def get_reference_entry_tag_style(text: str, list_kind: Optional[str] = None, pa
 # Core annotator
 # =========================
 
-def annotate_document(doc: Document) -> List[Dict[str, Any]]:
+def annotate_document(
+    doc: Document, recognize_springer_box_markers: bool = False
+) -> List[Dict[str, Any]]:
     """
     Annotate all paragraphs in a document with tags and styles.
-    
+
     Args:
         doc: python-docx Document object
-    
+        recognize_springer_box_markers: when True, also recognize Springer's
+            "Box<N>-open"/"Box<N>-close" human-word box marker convention
+            (see _match_springer_box_marker) alongside the native
+            "BX<N>-<suffix>" one. Off by default so existing canonical/LWW
+            processing (and every test that doesn't pass this) is
+            unaffected; styler.process_docx opts in only when a tag_set is
+            active, matching this convention's Springer-specific origin.
+
     Returns:
         List of annotation dictionaries with keys:
         - para: Paragraph object
         - tag: String tag (e.g., "CHAPTER_TITLE", "BODY_TEXT")
         - style: Word style name (e.g., "Heading 1", "Normal")
-    
+
     Raises:
         ValueError: If document is invalid
     """
@@ -593,24 +661,51 @@ def annotate_document(doc: Document) -> List[Dict[str, Any]]:
             if explicit_token:
                 token_stripped = explicit_token.strip()
                 box_marker_match = _match_box_marker(token_stripped)
+                springer_box_marker_match = (
+                    _match_springer_box_marker(token_stripped)
+                    if recognize_springer_box_markers and not box_marker_match
+                    else None
+                )
 
-                if box_marker_match:
+                if box_marker_match or springer_box_marker_match:
                     # Two-pass BX box marker - preserved verbatim and handled
                     # entirely by the separate box_prefixer.apply_box_tag_prefixes()
                     # post-process, which needs the full marker (number + suffix)
                     # recorded here to pair opens/closes exactly. Bypass the
                     # keyword/title/body box machinery below for this token.
-                    _base_id, is_close = box_marker_match
-                    full_marker = token_stripped.lstrip("/")
+                    if box_marker_match:
+                        _base_id, is_close = box_marker_match
+                        full_marker = token_stripped.lstrip("/")
+                        display_prefix = _base_id
+                    else:
+                        # Springer's "Box<N>-open"/"Box<N>-close" convention -
+                        # full_marker is the normalized pairing key (always
+                        # "BX<N>-open"), not the literal token text, so the
+                        # differently-worded open/close still pair up. The
+                        # paragraph's actual text is left untouched either
+                        # way. display_prefix ("Box<N>") keeps the applied
+                        # style in Springer's own spelling instead of
+                        # switching to canonical "BX<N>".
+                        _base_id, is_close, full_marker, display_prefix = springer_box_marker_match
                     tag = full_marker
-                    style = full_marker
                     text = stripped_text
                     explicit_tag_found = True
                     if is_close:
                         bx_close_marker = full_marker
+                        # tag stays the full open-matching marker (needed
+                        # verbatim so box_prefixer.py's pairing/
+                        # _is_pure_marker_row check still recognizes this
+                        # row); only the applied Word *style* is given its
+                        # own "-close" name so Draft view shows a close
+                        # marker as visibly distinct from its opener
+                        # instead of both reading identically (e.g.
+                        # "BX1-open"). The author's marker text itself is
+                        # untouched either way.
+                        style = f"{display_prefix}-close"
                         logger.debug(f"Para {para_idx}: BX box close marker '{full_marker}'")
                     else:
                         bx_open_marker = full_marker
+                        style = full_marker if box_marker_match else f"{display_prefix}-open"
                         logger.debug(f"Para {para_idx}: BX box open marker '{full_marker}'")
                 else:
                     normalized_explicit_style = normalize_style_token(explicit_token, explicit_context_kind, current_box_prefix)

@@ -24,6 +24,7 @@ other.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -32,6 +33,14 @@ import yaml
 logger = logging.getLogger(__name__)
 
 TAG_SETS_DIR = Path(__file__).parent / "tag_sets"
+
+# box_prefixer.py numbers each box by document order (BX1-, BX2-, BX3-, ...),
+# but that ordinal has no bearing on which client style it should render
+# as - a client's box style family (e.g. Springer's "Box-01-*") is generic
+# and reused for every numbered box instance. So BX2-H1, BX3-TXT, etc. all
+# fall back to their BX1- equivalent when no tag-set entry exists for their
+# own specific number.
+_NUMBERED_BOX_RE = re.compile(r"^BX(\d+)(-.*)$")
 
 _tag_map_cache: Dict[str, Dict[str, Any]] = {}
 _reverse_tag_map_cache: Dict[str, Dict[str, str]] = {}
@@ -123,9 +132,10 @@ def translate_tag(
 ) -> str:
     """Translate a canonical tag *name* to its client-facing form.
 
-    Resolution order: exact match in *tag_map*, then longest matching
-    prefix (matched against *prefixes*, with only the prefix portion
-    replaced and the suffix preserved), else *name* is returned unchanged.
+    Resolution order: exact match in *tag_map*, then (for a numbered box
+    tag like "BX2-H1") its BX1- equivalent, then longest matching prefix
+    (matched against *prefixes*, with only the prefix portion replaced and
+    the suffix preserved), else *name* is returned unchanged.
 
     If the resolved value is a case-dependent dict, *case* ("upper" /
     "lower") selects the variant. If *case* is None or absent from the
@@ -136,6 +146,11 @@ def translate_tag(
         return name
 
     value = tag_map.get(name)
+
+    if value is None:
+        numbered_box = _NUMBERED_BOX_RE.match(name)
+        if numbered_box and numbered_box.group(1) != "1":
+            value = tag_map.get(f"BX1{numbered_box.group(2)}")
 
     if value is None and prefixes:
         matched_prefix = None

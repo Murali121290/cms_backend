@@ -388,28 +388,6 @@ def _ensure_style_exists(doc, style_name: str) -> bool:
         return False
 
 
-_BOX_OPEN_CLOSE_RE = re.compile(r"^box(\d+)-(open|close)$", re.IGNORECASE)
-
-
-def _canonical_box_open_close_token(bare_token: str) -> Optional[str]:
-    """Recognize Springer's simplified box marker convention -
-    "Box<N>-open" / "Box<N>-close" - and return its canonical BX-family
-    replacement token (with a leading "/" for the close side), or None if
-    *bare_token* doesn't match.
-
-    Both sides canonicalize to the same pairing suffix ("open"), since
-    box_prefixer.py's two-pass matching requires an open/close pair's full
-    marker string (base id + suffix) to match exactly - the suffix itself
-    carries no semantic meaning, it only pairs an opener with its closer.
-    """
-    match = _BOX_OPEN_CLOSE_RE.match(bare_token)
-    if not match:
-        return None
-    num, kind = match.groups()
-    canonical = f"BX{num}-open"
-    return f"/{canonical}" if kind.lower() == "close" else canonical
-
-
 def _normalize_client_tags_to_canonical(doc: Document, reverse_map: Dict[str, str]) -> None:
     """Rewrite a document's explicit tag markers and pre-existing paragraph
     styles from client-facing tag names back to canonical, in place, before
@@ -436,19 +414,22 @@ def _normalize_client_tags_to_canonical(doc: Document, reverse_map: Dict[str, st
             logger.warning(f"Could not normalize paragraph style back to canonical: {e}")
 
         try:
+            # Springer's "Box<N>-open"/"Box<N>-close" box markers are
+            # recognized directly by annotate_document (see
+            # recognize_springer_box_markers) without ever rewriting the
+            # paragraph's text, so they're intentionally not handled here -
+            # only other hand-typed explicit markers using client tag
+            # names (e.g. "<HEAD-1>") still need rewriting back to
+            # canonical before annotation.
             full_match, token, _ = parse_leading_style_hint(para.text)
             if not token:
                 continue
-            box_open_close = _canonical_box_open_close_token(token)
-            if box_open_close is not None:
-                replacement_token = box_open_close
-            else:
-                is_close = token.startswith("/")
-                bare_token = token[1:] if is_close else token
-                canonical_token = reverse_map.get(bare_token)
-                if canonical_token is None:
-                    continue
-                replacement_token = f"/{canonical_token}" if is_close else canonical_token
+            is_close = token.startswith("/")
+            bare_token = token[1:] if is_close else token
+            canonical_token = reverse_map.get(bare_token)
+            if canonical_token is None:
+                continue
+            replacement_token = f"/{canonical_token}" if is_close else canonical_token
             new_marker = full_match.replace(token, replacement_token, 1)
             first_run = para.runs[0] if para.runs else None
             if first_run is not None and full_match in first_run.text:
@@ -510,7 +491,7 @@ def process_docx(
             _normalize_client_tags_to_canonical(doc, get_reverse_tag_map(tag_set))
 
         logger.info(f"Annotating document with mode: {mode}")
-        annotations = annotate_document(doc)
+        annotations = annotate_document(doc, recognize_springer_box_markers=bool(tag_set))
         annotations = apply_box_tag_prefixes(annotations)
 
         try:
