@@ -3,9 +3,10 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { 
   ArrowLeft, RefreshCw, Download, Layers, XCircle, ChevronDown, ChevronUp, 
   ExternalLink, FileText, Image, FolderOpen, Info, CheckCircle2, AlertTriangle, 
-  File, X, Loader2 
+  File, X, Loader2, Upload 
 } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
+import { toast } from '@/store/useToastStore'
 
 interface Chapter {
   id: number
@@ -92,7 +93,7 @@ export function PostProdChaptersPage() {
       fetchProjectDetails()
     } catch (err) {
       console.error(err)
-      alert('Failed to start bulk conversion.')
+      toast.error('Failed to start bulk conversion.')
     } finally {
       setIsBulkConverting(false)
     }
@@ -182,7 +183,7 @@ export function PostProdChaptersPage() {
       window.URL.revokeObjectURL(url)
     } catch (err) {
       console.error(err)
-      alert('Failed to download the converted file.')
+      toast.error('Failed to download the converted file.')
     }
   }
 
@@ -197,7 +198,7 @@ export function PostProdChaptersPage() {
       fetchProjectDetails()
     } catch (err) {
       console.error(err)
-      alert('Failed to start conversion.')
+      toast.error('Failed to start conversion.')
     }
   }
 
@@ -221,8 +222,54 @@ export function PostProdChaptersPage() {
       window.URL.revokeObjectURL(url)
     } catch (err) {
       console.error(err)
-      alert('Failed to download file.')
+      toast.error('Failed to download file.')
     }
+  }
+
+  const triggerFileInput = (targetPath: string | null) => {
+    if (!selectedChapter) return
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0]
+      if (!file) return
+      
+      const formData = new FormData()
+      formData.append('file', file)
+      if (targetPath) {
+        formData.append('target_path', targetPath)
+      }
+      
+      setLoadingFiles(true)
+      try {
+        const res = await fetch(`/api/v2/post-prod/chapters/${selectedChapter.id}/upload-file`, {
+          method: 'POST',
+          body: formData,
+        })
+        if (res.ok) {
+          // Re-fetch files
+          const filesRes = await fetch(`/api/v2/post-prod/chapters/${selectedChapter.id}/source-files`)
+          if (filesRes.ok) {
+            const data = await filesRes.json()
+            setChapterFiles(data)
+          }
+          toast.success(targetPath ? 'File replaced successfully.' : 'File uploaded successfully.')
+        } else {
+          try {
+            const err = await res.json()
+            toast.error(err.detail || 'Upload failed.')
+          } catch {
+            toast.error('Upload failed.')
+          }
+        }
+      } catch (err) {
+        console.error(err)
+        toast.error('Upload failed.')
+      } finally {
+        setLoadingFiles(false)
+      }
+    }
+    input.click()
   }
 
   const formatBytes = (bytes: number, decimals = 2) => {
@@ -500,35 +547,46 @@ export function PostProdChaptersPage() {
 
 
               {/* File Explorer Tabs */}
-              <div className="flex border-b border-border mb-3 overflow-x-auto whitespace-nowrap scrollbar-none shrink-0">
-                {(['indesign', 'docx', 'images', 'misc'] as const).map((tab) => {
-                  let label = 'Files'
-                  if (tab === 'indesign') label = 'InDesign'
-                  else if (tab === 'docx') label = 'Word (.docx)'
-                  else if (tab === 'images') label = 'Images'
-                  else if (tab === 'misc') label = 'Fonts & Misc'
+              <div className="flex items-center justify-between border-b border-border mb-3 shrink-0">
+                <div className="flex overflow-x-auto whitespace-nowrap scrollbar-none -mb-px">
+                  {(['indesign', 'docx', 'images', 'misc'] as const).map((tab) => {
+                    let label = 'Files'
+                    if (tab === 'indesign') label = 'InDesign'
+                    else if (tab === 'docx') label = 'Word (.docx)'
+                    else if (tab === 'images') label = 'Images'
+                    else if (tab === 'misc') label = 'Fonts & Misc'
 
-                  const count = chapterFiles ? chapterFiles[tab]?.length || 0 : 0
+                    const count = chapterFiles ? chapterFiles[tab]?.length || 0 : 0
 
-                  return (
-                    <button
-                      key={tab}
-                      onClick={() => setActiveTab(tab)}
-                      className={`px-4 py-2.5 text-xs font-semibold border-b-2 transition-all -mb-px flex items-center gap-1.5 ${
-                        activeTab === tab 
-                          ? 'border-primary text-primary font-bold' 
-                          : 'border-transparent text-muted hover:text-text'
-                      }`}
-                    >
-                      {label}
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                        activeTab === tab ? 'bg-primary/10 text-primary' : 'bg-accent text-muted'
-                      }`}>
-                        {count}
-                      </span>
-                    </button>
-                  )
-                })}
+                    return (
+                      <button
+                        key={tab}
+                        onClick={() => setActiveTab(tab)}
+                        className={`px-4 py-2.5 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 ${
+                          activeTab === tab 
+                            ? 'border-primary text-primary font-bold' 
+                            : 'border-transparent text-muted hover:text-text'
+                        }`}
+                      >
+                        {label}
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                          activeTab === tab ? 'bg-primary/10 text-primary' : 'bg-accent text-muted'
+                        }`}>
+                          {count}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+                
+                <button
+                  onClick={() => triggerFileInput(null)}
+                  className="px-3 py-1.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all mb-1 shrink-0"
+                  title="Upload New Asset"
+                >
+                  <Upload size={13} />
+                  Upload Asset
+                </button>
               </div>
 
               {/* Files List */}
@@ -569,8 +627,19 @@ export function PostProdChaptersPage() {
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-3 shrink-0">
-                            <span className="text-xs text-muted">{formatBytes(file.size)}</span>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="text-xs text-muted mr-1.5">{formatBytes(file.size)}</span>
+                            
+                            {file.path !== '__converted__' && (
+                              <button
+                                onClick={() => triggerFileInput(file.path)}
+                                className="p-1.5 bg-card border border-border text-muted hover:text-text rounded-lg hover:bg-accent transition-all shadow-sm"
+                                title="Replace Asset"
+                              >
+                                <Upload size={14} />
+                              </button>
+                            )}
+
                             <button
                               onClick={() => handleDownloadSourceFile(file.path, file.name)}
                               className="p-1.5 bg-card border border-border text-muted hover:text-text rounded-lg hover:bg-accent transition-all shadow-sm"

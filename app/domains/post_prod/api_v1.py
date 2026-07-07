@@ -316,6 +316,22 @@ def download_chapter(chapter_id: int, db: Session = Depends(database.get_db), us
         filename=f"converted_Chapter_{chapter.chapter_no}.docx"
     )
 
+def get_chapter_from_string(text: str) -> str | None:
+    """
+    Attempts to find a chapter number prefix/indicator in the text (filename or path).
+    Returns the parsed chapter number as a string (e.g. '1', '2') if found, or None.
+    """
+    match = re.search(r'(?:\b|_|-)(?:ch|chap|chapter|c)[^\d\w]*(\d+)', text, re.IGNORECASE)
+    if match:
+        return str(int(match.group(1)))
+    
+    # Standalone numbers or numbers preceded by separator: e.g. "image_01.png", "01.png"
+    matches = re.findall(r'(?:\b|_|-)(\d+)(?:\b|_|-)', text)
+    if matches:
+        return str(int(matches[0]))
+        
+    return None
+
 @router.get("/chapters/{chapter_id}/source-files")
 def get_chapter_source_files(chapter_id: int, db: Session = Depends(database.get_db), user = Depends(get_current_user_from_cookie)):
     chapter = db.query(PostProdChapter).filter(PostProdChapter.id == chapter_id).first()
@@ -327,6 +343,11 @@ def get_chapter_source_files(chapter_id: int, db: Session = Depends(database.get
     
     chapter_dir = os.path.dirname(chapter.source_file_path)
     
+    # Get all chapter numbers in this project to prevent showing files belonging to other chapters
+    all_chapters = db.query(PostProdChapter).filter(PostProdChapter.project_id == chapter.project_id).all()
+    project_chapter_nos = {c.chapter_no for c in all_chapters}
+    other_source_filenames = {c.source_filename for c in all_chapters if c.id != chapter.id}
+    
     indesign_files = []
     docx_files = []
     image_files = []
@@ -337,18 +358,36 @@ def get_chapter_source_files(chapter_id: int, db: Session = Depends(database.get
             if f.startswith("._") or f.startswith("__MACOSX"):
                 continue
             
+            # Check if this file is explicitly the source filename of another chapter
+            if f in other_source_filenames:
+                continue
+                
             full_path = os.path.join(root, f)
             rel_path = os.path.relpath(full_path, chapter_dir)
+            
+            # Check if filename or relative path indicates it belongs to another chapter
+            file_chap = get_chapter_from_string(f)
+            if not file_chap:
+                file_chap = get_chapter_from_string(rel_path)
+                
+            # Font files or files in Document Fonts directories are shared/global and should never be excluded
+            is_font = f.lower().endswith((".otf", ".ttf", ".woff", ".woff2")) or "font" in rel_path.lower()
+            
+            if not is_font and file_chap and file_chap != chapter.chapter_no and file_chap in project_chapter_nos:
+                continue
+                
             size = os.path.getsize(full_path)
             
             lowered = f.lower()
             file_info = {"name": f, "path": rel_path, "size": size}
             
-            if lowered.endswith((".indd", ".idml")):
+            if file_chap is None:
+                misc_files.append(file_info)
+            elif lowered.endswith((".indd", ".idml")):
                 indesign_files.append(file_info)
             elif lowered.endswith(".docx"):
                 docx_files.append(file_info)
-            elif lowered.endswith((".png", ".jpg", ".jpeg", ".gif", ".tiff", ".eps", ".ai", ".psd", ".svg")):
+            elif lowered.endswith((".png", ".jpg", ".jpeg", ".gif", ".tiff", ".eps", ".ai", ".psd", ".svg", ".tif")):
                 image_files.append(file_info)
             else:
                 misc_files.append(file_info)
@@ -389,6 +428,56 @@ def download_chapter_source_file(chapter_id: int, path: str, db: Session = Depen
         raise HTTPException(status_code=404, detail="File not found")
         
     return FileResponse(target_path, filename=os.path.basename(target_path))
+
+@router.post("/chapters/{chapter_id}/upload-file")
+async def upload_chapter_file(
+    chapter_id: int,
+    file: UploadFile = File(...),
+    target_path: str = Form(None),
+    db: Session = Depends(database.get_db),
+    user = Depends(get_current_user_from_cookie)
+):
+    chapter = db.query(PostProdChapter).filter(PostProdChapter.id == chapter_id).first()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+        
+    if not chapter.source_file_path or not os.path.exists(chapter.source_file_path):
+        raise HTTPException(status_code=404, detail="Source directory not found")
+        
+    chapter_dir = os.path.dirname(chapter.source_file_path)
+    
+    if target_path:
+        dest_path = os.path.abspath(os.path.join(chapter_dir, target_path))
+        if not dest_path.startswith(os.path.abspath(chapter_dir)):
+            raise HTTPException(status_code=403, detail="Access denied")
+    else:
+        # Save to default folder based on extension
+        lowered = file.filename.lower()
+        if lowered.endswith((".indd", ".idml")):
+            dest_path = os.path.join(chapter_dir, file.filename)
+        elif lowered.endswith(".docx"):
+            dest_path = os.path.join(chapter_dir, file.filename)
+        elif lowered.endswith((".png", ".jpg", ".jpeg", ".gif", ".tiff", ".eps", ".ai", ".psd", ".svg", ".tif")):
+            links_dir = os.path.join(chapter_dir, "Links")
+            if os.path.exists(links_dir) and os.path.isdir(links_dir):
+                dest_path = os.path.join(links_dir, file.filename)
+            else:
+                dest_path = os.path.join(chapter_dir, file.filename)
+        else:
+            fonts_dir = os.path.join(chapter_dir, "Document Fonts")
+            if not os.path.exists(fonts_dir):
+                fonts_dir = os.path.join(chapter_dir, "Document fonts")
+            if os.path.exists(fonts_dir) and os.path.isdir(fonts_dir):
+                dest_path = os.path.join(fonts_dir, file.filename)
+            else:
+                dest_path = os.path.join(chapter_dir, file.filename)
+                
+    # Save the file
+    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+    with open(dest_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+        
+    return {"message": "File uploaded successfully", "filename": os.path.basename(dest_path), "path": os.path.relpath(dest_path, chapter_dir)}
 
 @router.post("/chapters/{chapter_id}/convert")
 def convert_chapter(
