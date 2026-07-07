@@ -36,6 +36,9 @@ import ScheduleReport from '@/Reports/ScheduleReport'
 import TodaySchedule from '@/Reports/TodaySchedule'
 import ProjectSchedule from '@/Reports/ProjectSchedule'
 import { PostProduction } from '@/pages/PostProduction'
+import { PostProduction } from '@/pages/PostProduction'
+import { PostProdWordConversion } from '@/pages/PostProdWordConversion'
+import { PostProdChaptersPage } from '@/pages/PostProdChaptersPage'
 
 const router = createBrowserRouter([
   // ── Public routes ──────────────────────────────────────────────────────────
@@ -105,6 +108,8 @@ const router = createBrowserRouter([
       { path: 'projects', element: <ProjectsPage /> },
       { path: 'chapters', element: <Placeholder title="Chapters" /> },
       { path: 'post-production', element: <PostProduction /> },
+      { path: 'post-production/word-conversion', element: <PostProdWordConversion /> },
+      { path: 'post-production/word-conversion/:projectId', element: <PostProdChaptersPage /> },
       { path: 'reports', element: <ReportsPage /> },
       { path: 'reports/schedule', element: <ScheduleReport /> },
       { path: 'reports/today-schedule', element: <TodaySchedule /> },

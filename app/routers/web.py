@@ -232,6 +232,74 @@ async def admin_delete_user(
         return RedirectResponse(url="/admin/users?msg=Cannot+delete+yourself", status_code=302)
     return RedirectResponse(url="/admin/users?msg=User+deleted", status_code=302)
 
+
+@router.get("/api/uploads/{project_id}/chapter/{chapter_name}/{subfolder}/{file_name}/download")
+async def download_backup_or_folder_file(
+    project_id: int,
+    chapter_name: str,
+    subfolder: str,
+    file_name: str,
+    user=Depends(get_current_user_from_cookie),
+    db: Session = Depends(database.get_db)
+):
+    import os
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+        
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    chapter_no = chapter_name.split("-")[-1]
+    chapter = db.query(models.ChapterInfo).filter(
+        models.ChapterInfo.project == project.code,
+        (models.ChapterInfo.chapters == chapter_no) | (models.ChapterInfo.chapters == str(int(chapter_no)))
+    ).first()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+        
+    # Resolve file path on disk:
+    # 1. If subfolder is Backup, look in the FileVersion table matching the filename
+    if subfolder == "Backup":
+        version_entry = db.query(models.FileVersion).join(
+            models.File, models.FileVersion.file_id == models.File.id
+        ).filter(
+            models.File.chapter_id == chapter.id,
+            models.FileVersion.path.like(f"%/{file_name}")
+        ).first()
+        if not version_entry or not version_entry.path or not os.path.exists(version_entry.path):
+            found_path = None
+            chapter_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters)
+            if os.path.exists(chapter_dir):
+                for cat_folder in os.listdir(chapter_dir):
+                    archive_path = os.path.join(chapter_dir, cat_folder, "Archive", file_name)
+                    if os.path.exists(archive_path):
+                        found_path = archive_path
+                        break
+            if not found_path:
+                raise HTTPException(status_code=404, detail="Backup file not found")
+            file_path = found_path
+        else:
+            file_path = version_entry.path
+    else:
+        file_path = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, subfolder, file_name)
+        if not os.path.exists(file_path):
+            # Try querying the File table
+            file_record = db.query(models.File).filter(
+                models.File.chapter_id == chapter.id,
+                models.File.filename == file_name
+            ).first()
+            if file_record and os.path.exists(os.path.join(UPLOAD_DIR, file_record.path)):
+                file_path = os.path.join(UPLOAD_DIR, file_record.path)
+            else:
+                raise HTTPException(status_code=404, detail="File not found")
+
+    return FileResponse(
+        path=file_path,
+        filename=file_name,
+        media_type='application/octet-stream'
+    )
+
 @router.post("/admin/users/{user_id}/status")
 async def toggle_user_status(
     user_id: int,

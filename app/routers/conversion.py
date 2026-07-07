@@ -89,3 +89,15 @@ async def convert_pdf_file(
         return await service.convert_file_pdf_to_word(db, file_id, user.id, engine)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/indesign-to-word/{file_id}")
+async def convert_indesign_file(
+    file_id: int,
+    user = Depends(get_current_user_from_cookie),
+    db: Session = Depends(database.get_db)
+):
+    """
+    Trigger InDesign-to-Word conversion for an existing InDesign file inside the CMS.
+    """
+    service = BatchConversionService()
+    return await service.convert_file_indesign_to_word(db, file_id, user.id)

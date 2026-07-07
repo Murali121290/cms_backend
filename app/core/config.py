@@ -3,6 +3,8 @@
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
+from app.core.paths import UPLOADS_DIR
+
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Publishing CMS"
     API_V1_STR: str = "/api/v1"
@@ -12,6 +14,7 @@ class Settings(BaseSettings):
     APP_TIMEZONE: str = "Asia/Kolkata"
     
     DATABASE_URL: str = "postgresql://user:password@localhost/cms_db"
+    UPLOAD_FOLDER: str = str(UPLOADS_DIR)
     REDIS_URL: str = "redis://localhost:6379/0"
     INDESIGN_SERVER_URL: str = "http://10.1.6.108:5555"
     ALLOWED_ORIGINS: list[str] = [

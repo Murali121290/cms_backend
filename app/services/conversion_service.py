@@ -432,6 +432,273 @@ class BatchConversionService:
                     filename=output_docx_name,
                     file=f
                 )
+                cms_docx_res = upload_chapter_files(
+                    db=db,
+                    project_id=project.id,
+                    chapter_id=chapter.id,
+                    category="Manuscript",
+                    files=[docx_upload],
+                    actor_user_id=actor_user_id,
+                    upload_dir=UPLOAD_DIR
+                )
+                if cms_docx_res["uploaded"]:
+                    manuscript_cms_file = cms_docx_res["uploaded"][0]["file"]
+
+        # Clean up session temp directory
+        try:
+            shutil.rmtree(session_dir)
+        except Exception:
+            pass
+
+        return {
+            "status": "success",
+            "message": f"Successfully converted InDesign file '{file_record.filename}' to Word.",
+            "manuscript_file": manuscript_cms_file
+        }
+
+    async def convert_file_pdf_to_word(self, db: Session, file_id: int, actor_user_id: int, engine: str = "pdf2docx") -> dict:
+        from app.models import File
+        file_record = db.query(File).filter(File.id == file_id).first()
+        if not file_record:
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        # Verify it's a PDF file
+        if not file_record.filename.lower().endswith(".pdf"):
+            raise HTTPException(status_code=400, detail="Only PDF (.pdf) files can be converted to Word.")
+            
+        project = file_record.project
+        chapter = file_record.chapter
+        if not project or not chapter:
+            raise HTTPException(status_code=400, detail="PDF file is not associated with a project or chapter.")
+
+        # Source file path
+        source_file_path = os.path.join(file_service.UPLOAD_DIR, file_record.path)
+        if not os.path.exists(source_file_path):
+            raise HTTPException(status_code=404, detail=f"PDF file not found on disk: {file_record.filename}")
+
+        # Unique session directories to avoid conflicts
+        session_id = str(uuid.uuid4())
+        session_dir = os.path.abspath(f"temp_conversions/{session_id}")
+        chapter_dir = os.path.join(session_dir, f"ch_{chapter.chapters}")
+        os.makedirs(chapter_dir, exist_ok=True)
+
+        pdf_path = os.path.join(chapter_dir, file_record.filename)
+        pdf_name_no_ext = os.path.splitext(file_record.filename)[0]
+        output_docx_name = f"{pdf_name_no_ext}.docx"
+        output_docx_path = os.path.join(chapter_dir, output_docx_name)
+
+        # Copy the PDF file to the session folder
+        shutil.copyfile(source_file_path, pdf_path)
+
+        # Run the conversion
+        if engine == "pdf2docx":
+            try:
+                from pdf2docx import Converter
+                cv = Converter(pdf_path)
+                cv.convert(output_docx_path, start=0, end=None)
+                cv.close()
+            except ImportError:
+                raise HTTPException(status_code=500, detail="pdf2docx library not installed on the server.")
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"pdf2docx conversion failed: {str(e)}")
+
+        elif engine == "word_com":
+            if not HAS_WIN32COM:
+                raise HTTPException(status_code=500, detail="win32com is not available to automate Word.")
+            
+            pythoncom.CoInitialize()
+            try:
+                word_app = win32com.client.Dispatch("Word.Application")
+                word_app.Visible = False
+                doc = word_app.Documents.Open(os.path.abspath(pdf_path))
+                doc.SaveAs2(os.path.abspath(output_docx_path), FileFormat=16) # wdFormatXMLDocument
+                doc.Close()
+                word_app.Quit()
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Word COM automation failed: {str(e)}")
+            finally:
+                pythoncom.CoUninitialize()
+
+        elif engine == "acrobat_com":
+            if not HAS_WIN32COM:
+                raise HTTPException(status_code=500, detail="win32com is not available to automate Acrobat.")
+            
+            pythoncom.CoInitialize()
+            try:
+                acrobat_app = win32com.client.Dispatch("AcroExch.PDDoc")
+                if acrobat_app.Open(os.path.abspath(pdf_path)):
+                    js_obj = acrobat_app.GetJSObject()
+                    js_obj.SaveAs(os.path.abspath(output_docx_path), "com.adobe.acrobat.docx")
+                    acrobat_app.Close()
+                else:
+                    raise RuntimeError("Failed to open PDF in Adobe Acrobat.")
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Adobe Acrobat COM automation failed: {str(e)}")
+            finally:
+                pythoncom.CoUninitialize()
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported PDF conversion engine: {engine}")
+
+        if not os.path.exists(output_docx_path):
+            raise HTTPException(status_code=500, detail="PDF conversion completed but Word file was not found.")
+
+        # Apply DOCX formatting post-processing
+        from app.services.scripts.docx_post_processor import post_process_docx
+        post_process_docx(output_docx_path)
+
+        # Upload DOCX file into the "Manuscript" folder
+        manuscript_cms_file = None
+        with open(output_docx_path, "rb") as f:
+            docx_upload = UploadFile(
+                filename=output_docx_name,
+                file=f
+            )
+            cms_docx_res = file_service.upload_chapter_files(
+                db=db,
+                project_id=project.id,
+                chapter_id=chapter.id,
+                category="Manuscript",
+                files=[docx_upload],
+                actor_user_id=actor_user_id,
+                upload_dir=file_service.UPLOAD_DIR
+            )
+            if cms_docx_res["uploaded"]:
+                manuscript_cms_file = cms_docx_res["uploaded"][0]["file"]
+
+        # Clean up session temp directory
+        try:
+            shutil.rmtree(session_dir)
+        except Exception:
+            pass
+
+        return {
+            "status": "success",
+            "message": f"Successfully converted PDF file '{file_record.filename}' to Word.",
+            "manuscript_file": manuscript_cms_file
+        }
+
+    async def convert_file_indesign_to_word(self, db: Session, file_id: int, actor_user_id: int) -> dict:
+        from app.models import File
+        file_record = db.query(File).filter(File.id == file_id).first()
+        if not file_record:
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        # Verify it's an InDesign file
+        if file_record.category != "InDesign" and not file_record.filename.endswith(".indd"):
+            raise HTTPException(status_code=400, detail="Only InDesign (.indd) files can be converted to Word.")
+            
+        project = file_record.project
+        chapter = file_record.chapter
+        if not project or not chapter:
+            raise HTTPException(status_code=400, detail="InDesign file is not associated with a project or chapter.")
+
+        # Source file path
+        source_file_path = os.path.join(file_service.UPLOAD_DIR, file_record.path)
+        if not os.path.exists(source_file_path):
+            raise HTTPException(status_code=404, detail=f"InDesign file not found on disk: {file_record.filename}")
+
+        # Unique session directories to avoid conflicts
+        session_id = str(uuid.uuid4())
+        session_dir = os.path.abspath(f"temp_conversions/{session_id}")
+        chapter_dir = os.path.join(session_dir, f"ch_{chapter.chapters}")
+        os.makedirs(chapter_dir, exist_ok=True)
+
+        # Package InDesign file, Art links, and Fonts into a single ZIP archive
+        import zipfile
+        zip_name = f"packaged_{os.path.splitext(file_record.filename)[0]}.zip"
+        zip_path = os.path.join(chapter_dir, zip_name)
+        
+        # Output document name should match the input document name exactly
+        indd_name_no_ext = os.path.splitext(file_record.filename)[0]
+        output_docx_name = f"{indd_name_no_ext}.docx"
+        output_docx_path = os.path.join(chapter_dir, output_docx_name)
+
+        # Get all files belonging to this chapter to find associated Art & Fonts
+        chapter_files = db.query(File).filter(File.chapter_id == chapter.id).all()
+        
+        logger.info(f"Packaging assets for InDesign file: {file_record.filename} in chapter {chapter.chapters}")
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            # 1. Main InDesign file (at root)
+            zf.write(source_file_path, file_record.filename)
+            
+            # 2. Add other assets in Links/ and Document Fonts/ folders
+            for f in chapter_files:
+                if f.id == file_record.id:
+                    continue
+                path = os.path.join(file_service.UPLOAD_DIR, f.path)
+                if not os.path.exists(path):
+                    if os.path.exists(f.path):
+                        path = f.path
+                    else:
+                        logger.warning(f"File {f.filename} not found on disk at {path}")
+                        continue
+                        
+                if f.category == "Art":
+                    zf.write(path, f"Links/{f.filename}")
+                elif f.category == "Misc" or f.filename.lower().endswith((".ttf", ".otf", ".woff", ".woff2")):
+                    zf.write(path, f"Document Fonts/{f.filename}")
+
+        conversion_success = False
+        error_message = ""
+
+        from app.core.config import get_settings
+        settings = get_settings()
+
+        # 1. Enforce Remote Windows Server conversion
+        if not settings.INDESIGN_SERVER_URL:
+            raise HTTPException(
+                status_code=400,
+                detail="Windows InDesign Conversion Server is not configured. Please set INDESIGN_SERVER_URL."
+            )
+
+        import requests
+        url = f"{settings.INDESIGN_SERVER_URL.rstrip('/')}/convert"
+        logger.info(f"Sending remote InDesign conversion request to: {url}")
+        try:
+            with open(zip_path, "rb") as f:
+                response = requests.post(
+                    url,
+                    files={"file": (zip_name, f.read(), "application/octet-stream")},
+                    timeout=(30.0, 900)
+                )
+            if response.status_code == 200:
+                with open(output_docx_path, "wb") as out_f:
+                    out_f.write(response.content)
+                conversion_success = True
+                logger.info(f"Remote conversion succeeded via /convert for file {file_record.filename}")
+            else:
+                root_url = settings.INDESIGN_SERVER_URL
+                logger.info(f"Trying fallback remote InDesign conversion to root URL: {root_url}")
+                with open(zip_path, "rb") as f:
+                    response_root = requests.post(
+                        root_url,
+                        files={"file": (zip_name, f.read(), "application/octet-stream")},
+                        timeout=(30.0, 900)
+                    )
+                if response_root.status_code == 200:
+                    with open(output_docx_path, "wb") as out_f:
+                        out_f.write(response_root.content)
+                    conversion_success = True
+                    logger.info(f"Remote conversion succeeded via root URL for file {file_record.filename}")
+                else:
+                    error_message = f"Remote InDesign server returned status code {response.status_code}. Response: {response.text}"
+                    logger.error(error_message)
+        except Exception as remote_ex:
+            error_message = f"Connection to remote InDesign server failed: {str(remote_ex)}"
+            logger.error(error_message)
+
+        # 3. Raise error if conversion failed
+        if not conversion_success:
+            raise HTTPException(status_code=500, detail=f"Conversion failed: {error_message}")
+
+        # 4. If conversion succeeded, upload DOCX file into the "Manuscript" folder
+        manuscript_cms_file = None
+        if conversion_success and os.path.exists(output_docx_path):
+            with open(output_docx_path, "rb") as f:
+                docx_upload = UploadFile(
+                    filename=output_docx_name,
+                    file=f
+                )
                 cms_docx_res = file_service.upload_chapter_files(
                     db=db,
                     project_id=project.id,

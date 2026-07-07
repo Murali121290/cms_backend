@@ -18,7 +18,7 @@ export function Sidebar() {
   const navItems = [
     { to: '/',         icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/clients',  icon: Users,           label: 'Clients'   },
-    { to: '/post-production', icon: Layers,   label: 'Post Production' },
+    { to: '/post-production', icon: Layers,   label: 'Backlist' },
     { to: '/reports',  icon: BarChart3,       label: 'Reports'   },
     // Settings visible only to admin and manager — add more roles here as needed
     ...(canAccess(['admin', 'manager'])

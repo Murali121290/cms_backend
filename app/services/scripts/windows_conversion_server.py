@@ -216,7 +216,11 @@ def convert_indd_to_docx(file: UploadFile = File(...)):
         
         # Disable dialog popups to prevent headless server hangs
         try:
-            indesign_app.ScriptPreferences.UserInteractionLevel = 1698829123 # idNeverInteract
+            try:
+                from win32com.client import constants
+                indesign_app.ScriptPreferences.UserInteractionLevel = constants.idNeverInteract
+            except Exception:
+                indesign_app.ScriptPreferences.UserInteractionLevel = 1698829123 # idNeverInteract
         except Exception as ui_ex:
             logger.warning(f"[{session_id}] Could not set UserInteractionLevel: {str(ui_ex)}")
         
@@ -228,7 +232,7 @@ def convert_indd_to_docx(file: UploadFile = File(...)):
         opened_doc = None
         try:
             logger.info(f"[{session_id}] Pre-opening InDesign document...")
-            opened_doc = indesign_app.Open(os.path.abspath(input_path), True)
+            opened_doc = indesign_app.Open(os.path.abspath(input_path), False)
         except Exception as open_ex:
             logger.warning(f"[{session_id}] Could not pre-open document in InDesign COM: {str(open_ex)}")
             
@@ -241,14 +245,13 @@ def convert_indd_to_docx(file: UploadFile = File(...)):
         try:
             indesign_app.DoScript(jsx_script, 1246973031, args)
         except Exception as e:
+            try:
+                while indesign_app.Documents.Count > 0:
+                    indesign_app.Documents.Item(1).Close(1852776783) # idNo
+            except Exception:
+                pass
             fallback_jsx = os.path.abspath("default_export.jsx")
             if os.path.abspath(jsx_script) == fallback_jsx:
-                # Close doc if open
-                if opened_doc:
-                    try:
-                        opened_doc.Close(1852776783) # idNo
-                    except Exception:
-                        pass
                 raise e
             logger.warning(f"[{session_id}] Custom script execution failed: {str(e)}. Falling back to default_export.jsx...")
             # Make sure default_export.jsx is generated with robust story merging export
@@ -256,12 +259,12 @@ def convert_indd_to_docx(file: UploadFile = File(...)):
                 f.write(JSX_CONTENT)
             indesign_app.DoScript(fallback_jsx, 1246973031, args)
             
-        # Close the pre-opened document
-        if opened_doc:
-            try:
-                opened_doc.Close(1852776783) # idNo
-            except Exception:
-                pass
+        # Close all leftover open documents to clean up InDesign state
+        try:
+            while indesign_app.Documents.Count > 0:
+                indesign_app.Documents.Item(1).Close(1852776783) # idNo
+        except Exception as close_ex:
+            logger.warning(f"[{session_id}] Could not close leftover documents: {str(close_ex)}")
         
         # Verify RTF export succeeded
         if not os.path.exists(output_rtf_path):

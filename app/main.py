@@ -54,12 +54,25 @@ app.include_router(workflow.router, tags=["Workflow"])
 from app.routers import conversion
 app.include_router(conversion.router, prefix=f"{settings.API_V1_STR}", tags=["Conversion"])
 
+# Document Conversion Router
+from app.routers import conversion
+app.include_router(conversion.router, prefix=f"{settings.API_V1_STR}", tags=["Conversion"])
+
+# Post Production Router
+from app.domains.post_prod import api_v1 as post_prod
+app.include_router(post_prod.router, prefix="/api/v2", tags=["Post Production"])
+
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the Publishing CMS API"}
 
 @app.on_event("startup")
 def init_data():
+    from app.database import Base, engine
+    import app.models
+    from app.domains.post_prod.models import PostProdProject, PostProdChapter
+    Base.metadata.create_all(bind=engine)
+
     import os
     env = os.getenv("ENVIRONMENT", "development").lower()
     if env in ("production", "staging") and settings.SECRET_KEY in (
