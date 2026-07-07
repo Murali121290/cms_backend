@@ -151,7 +151,6 @@ export function ChapterEditorPage() {
           // @ts-ignore
           <pdfjs-viewer-element
             src={fileUrl}
-          <pdfjs-viewer-element
             key={fileUrl}
             ref={pdfViewerRef}
             style={{ width: '100%', height: '100%', display: 'block', border: '0' }}
