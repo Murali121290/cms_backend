@@ -801,6 +801,13 @@ def api_v2_project_images(
         ext = (f.filename.rsplit(".", 1)[-1] if "." in f.filename else "").lower()
         if ext not in image_exts:
             continue
+        # Skip records whose underlying file is gone — the /preview endpoint
+        # would 404 and the UI would render "Failed to load preview" for them.
+        # Better to omit orphans from the list entirely so users only see
+        # openable images.
+        if not (f.path and os.path.exists(f.path)):
+            logger.warning(f"Skipping image file {f.id} ({f.filename!r}) — path missing on disk: {f.path!r}")
+            continue
         needs_transcoding = image_preview_service.source_needs_transcoding(f.filename)
         ch = chapter_lookup.get(f.chapter_id)
         images.append(
