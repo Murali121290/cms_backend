@@ -280,11 +280,12 @@ export interface ProcessingStartResponse {
 }
 
 export interface ProcessingStatusResponse {
-  status: "processing" | "completed";
+  status: "processing" | "completed" | "failed";
   source_file_id: number;
   process_type: string;
   derived_file_id: number | null;
   derived_filename: string | null;
+  error: string | null;
   compatibility_status: string;
   legacy_status_endpoint: string;
 }

@@ -353,6 +353,7 @@ def background_processing_task(
             file_record.is_checked_out = False
             file_record.checked_out_by_id = None
             file_record.checked_out_at = None
+            file_record.processing_error = None
 
             db.commit()
             logger.info(f"Processing success: {success_msg}")
@@ -362,6 +363,7 @@ def background_processing_task(
             logger.error(traceback.format_exc())
             file_record.is_checked_out = False
             file_record.checked_out_by_id = None
+            file_record.processing_error = str(exc)
             db.commit()
 
     finally:
@@ -408,6 +410,7 @@ def start_process(
         file_record.is_checked_out = True
         file_record.checked_out_by_id = user.id
         file_record.checked_out_at = now_ist_naive()
+        file_record.processing_error = None
         db.commit()
 
     try:
@@ -474,10 +477,14 @@ def get_structuring_status(db: Session, *, file_id: int, user):
     if not file_record:
         raise HTTPException(status_code=404, detail="File not found")
 
-    # If the file is unlocked, background structuring has completed!
-    if not file_record.is_checked_out:
-        return {"status": "completed", "new_file_id": file_record.id}
-    return {"status": "processing"}
+    if file_record.is_checked_out:
+        return {"status": "processing"}
+
+    if file_record.processing_error:
+        return {"status": "failed", "error": file_record.processing_error, "new_file_id": file_record.id}
+
+    # File is unlocked with no recorded error: background structuring completed!
+    return {"status": "completed", "new_file_id": file_record.id}
 
 
 def get_reference_validation_status(db: Session, *, file_id: int, user):
@@ -491,6 +498,9 @@ def get_reference_validation_status(db: Session, *, file_id: int, user):
     # If the parent file is still checked out, the job is still running
     if file_record.is_checked_out:
         return {"status": "processing"}
+
+    if file_record.processing_error:
+        return {"status": "failed", "error": file_record.processing_error, "new_file_id": file_record.id}
 
     # Completed! Let's find the derived Processed file or fall back to Structured or original
     derived_file = db.query(models.File).filter(

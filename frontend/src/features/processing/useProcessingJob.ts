@@ -119,6 +119,17 @@ export function useProcessingJob({
 
         try {
           const status = await getProcessingStatus(fileId, processType);
+          if (status.status === "failed") {
+            clearPolling();
+            setIsPolling(false);
+            updateToast(toastId, {
+              title: `${processType} failed`,
+              description: status.error ?? "Processing failed",
+              variant: "error",
+              duration: 0,
+            });
+            return;
+          }
           if (status.status === "completed") {
             clearPolling();
             setIsPolling(false);

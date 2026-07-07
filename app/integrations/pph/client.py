@@ -79,6 +79,13 @@ class PPHClient:
             logger.info(f"Session cookies after login: {dict(self.session.cookies)}")
             self._authenticated = True
             return True
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+            logger.error(f"PPH server unreachable at {self.base_url}: {e}")
+            self._authenticated = False
+            raise PPHClientError(
+                "PPH service is unreachable. "
+                "The server may be down or the network path is blocked. Please contact IT support."
+            )
         except Exception as e:
             logger.error(f"PPH Authentication failure: {e}")
             self._authenticated = False

@@ -587,11 +587,12 @@ class ProcessingStartResponse(BaseModel):
 
 
 class ProcessingStatusResponse(BaseModel):
-    status: Literal["processing", "completed"]
+    status: Literal["processing", "completed", "failed"]
     source_file_id: int
     process_type: str
     derived_file_id: int | None = None
     derived_filename: str | None = None
+    error: str | None = None
     compatibility_status: str
     legacy_status_endpoint: str
 
