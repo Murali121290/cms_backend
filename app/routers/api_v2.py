@@ -38,7 +38,6 @@ from app.utils.timezone import now_ist_naive
 from app.utils.inject_styles import inject_publisher_styles
 from app.processing.ppd_engine import PPDEngine
 from app.processing.permissions_engine import PermissionsEngine
-from app.domains.files import image_preview_service, image_convert_service
 from app.processing.technical_engine import TechnicalEngine
 from app.processing.legacy.highlighter.technical_editor import TechnicalEditor
 from app.processing.references_engine import ReferencesEngine
@@ -48,6 +47,7 @@ from app.processing.ai_extractor_engine import AIExtractorEngine
 from app.processing.xml_engine import XMLEngine
 from app.utils.utils.structuring_lib.doc_utils import extract_document_structure, update_document_structure
 from app.utils.utils.structuring_lib.rules_loader import get_rules_loader
+from app.utils.utils.structuring_lib.tag_set_loader import list_available_tag_sets
 from app.integrations.collabora.config import COLLABORA_PUBLIC_URL, WOPI_BASE_URL
 from app.integrations.onlyoffice import (
     ONLYOFFICE_PUBLIC_URL,
@@ -755,78 +755,6 @@ def api_v2_chapter_files(
     )
 
 
-@router.get("/projects/{project_id}/images")
-def api_v2_project_images(
-    project_id: int,
-    db: Session = Depends(database.get_db),
-    user=Depends(get_current_user_from_cookie),
-):
-    """Return every image file in the project across all chapters.
-
-    Powers the dedicated Image Editor page's thumbnail rail. Detects images by
-    extension rather than by category so that image assets uploaded outside the
-    "Art" category are also picked up.
-    """
-    viewer = _require_cookie_user(user)
-    if not viewer:
-        return _error_response(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            code="AUTH_REQUIRED",
-            message="Authentication required.",
-        )
-
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
-        return _error_response(
-            status_code=status.HTTP_404_NOT_FOUND,
-            code="PROJECT_NOT_FOUND",
-            message="Project not found.",
-        )
-
-    image_exts = {"jpg", "jpeg", "png", "gif", "webp", "tif", "tiff", "bmp", "eps"}
-    files = (
-        db.query(models.File)
-        .filter(models.File.project_id == project_id)
-        .order_by(models.File.chapter_id.asc(), models.File.filename.asc())
-        .all()
-    )
-
-    chapter_lookup = {
-        ch.id: ch
-        for ch in db.query(models.Chapter).filter(models.Chapter.project_id == project_id).all()
-    }
-
-    images = []
-    for f in files:
-        ext = (f.filename.rsplit(".", 1)[-1] if "." in f.filename else "").lower()
-        if ext not in image_exts:
-            continue
-        needs_transcoding = image_preview_service.source_needs_transcoding(f.filename)
-        ch = chapter_lookup.get(f.chapter_id)
-        images.append(
-            {
-                "id": f.id,
-                "project_id": f.project_id,
-                "chapter_id": f.chapter_id,
-                "chapter_number": getattr(ch, "number", None) if ch else None,
-                "chapter_title": getattr(ch, "title", None) if ch else None,
-                "filename": f.filename,
-                "file_type": f.file_type,
-                "category": f.category,
-                "version": f.version,
-                "uploaded_at": f.uploaded_at.isoformat() if f.uploaded_at else None,
-                "download_url": f"/api/v2/files/{f.id}/download",
-                "preview_url": f"/api/v2/files/{f.id}/preview?fmt=png",
-                "needs_transcoding": needs_transcoding,
-            }
-        )
-
-    return {
-        "project": _serialize_project_summary(project),
-        "images": images,
-    }
-
-
 @router.get("/notifications", response_model=schemas_v2.NotificationsResponse)
 def api_v2_notifications(
     limit: int = Query(5, ge=1),
@@ -1049,7 +977,7 @@ def api_v2_project_bootstrap(
     for _ch in chapters:
         if _ch.number and _ch.number not in _existing_ci:
             db.add(_ChapterInfo(
-                client=project.division_code or "",
+                client=project.client_name or "",
                 project=project.code,
                 chapters=_ch.number,
                 chapter_title=_ch.title or f"Chapter {_ch.number}",
@@ -1108,8 +1036,8 @@ def api_v2_update_project(
             project.client_name = c.company
 
     for _f in ("project_manager", "priority", "composition", "category", "edition",
-               "color", "trim_size", "copyright_year", "actual_pages", "manuscript_pages",
-               "division_code", "customer_contact", "sales_person", "isbn_no", "billing_location"):
+               "color", "trim_size", "copyright_year", "actual_pages", "division_code",
+               "customer_contact", "sales_person", "isbn_no", "billing_location"):
         _v = getattr(payload, _f, None)
         if _v is not None:
             setattr(project, _f, _v)
@@ -2627,7 +2555,7 @@ def api_v2_upload_zip(
                                 first_stage = first_stage_row.stage_name
 
                         chapter = models.Chapter(
-                            client=project.division_code or "",
+                            client=project.client_name or "",
                             project=project.project_code,
                             chapters=chapter_no_str,
                             chapter_title=f"Chapter {chapter_no_str}",
@@ -2726,7 +2654,7 @@ def api_v2_upload_zip(
         for _ch in all_cms_chapters:
             if _ch.chapters and _ch.chapters not in existing_ci_nums:
                 db.add(_ChapterInfo(
-                    client=project.division_code or "",
+                    client=project.client_name or "",
                     project=project.code,
                     chapters=_ch.chapters,
                     chapter_title=_ch.chapter_title or f"Chapter {_ch.chapters}",
@@ -2792,11 +2720,7 @@ def api_v2_upload_zip(
                             ci_record.word_count = (ci_record.word_count or 0) + total_word_count
                         if total_pages > 0:
                             ci_record.manuscript_pages = (ci_record.manuscript_pages or 0) + total_pages
-
-                project.manuscript_pages = sum(
-                    ci.manuscript_pages or 0
-                    for ci in db.query(_ChapterInfo).filter(_ChapterInfo.project == project.project_code).all()
-                )
+                            
                 db.commit()
         except Exception as e:
             pass
@@ -3056,7 +2980,9 @@ def api_v2_open_in_word(
     import urllib.parse
     token = create_access_token({"sub": viewer.username, "file_id": file_id, "mode": mode}, expires_delta=timedelta(minutes=WEBDAV_TOKEN_EXPIRE_MINUTES))
     quoted_filename = urllib.parse.quote(filename, safe="")
-    webdav_url = f"{WEBDAV_BASE_URL}/webdav/files/{file_id}/{mode}/{quoted_filename}?token={token}"
+    # Token is a path segment, not a `?token=` query param — Word (including
+    # 2019) mis-parses ms-word:ofe|u| URLs that contain a query string.
+    webdav_url = f"{WEBDAV_BASE_URL}/webdav/files/{file_id}/{mode}/{token}/{quoted_filename}"
     ms_word_uri = f"ms-word:ofe|u|{webdav_url}"
 
     return {"ms_word_uri": ms_word_uri, "webdav_url": webdav_url}
@@ -3188,6 +3114,16 @@ def api_v2_start_processing(
             else None
         ),
     )
+
+
+@router.get("/tag-sets", response_model=schemas_v2.TagSetListResponse)
+def api_v2_get_tag_sets():
+    options = [schemas_v2.TagSetOption(key="lww", label="LWW")]
+    options += [
+        schemas_v2.TagSetOption(key=key, label=key.capitalize())
+        for key in list_available_tag_sets()
+    ]
+    return schemas_v2.TagSetListResponse(tag_sets=options)
 
 
 @router.get("/files/{file_id}/processing-status", response_model=schemas_v2.ProcessingStatusResponse)
@@ -5278,125 +5214,6 @@ def api_v2_bulk_update_status(project: str, payload: BulkUpdateStatusPayload, db
     return {"updated": result.rowcount}
 
 
-@router.post("/projects/{project_id}/chapters/create-with-manuscript", response_model=ChapterInfoResponse)
-def api_v2_create_chapter_with_manuscript(
-    project_id: int,
-    number: str = Form(...),
-    file: UploadFile = FastAPIFile(...),
-    db: Session = Depends(database.get_db),
-    user=Depends(get_current_user_from_cookie),
-):
-    viewer = _require_cookie_user(user)
-    if not viewer:
-        return _error_response(status_code=status.HTTP_401_UNAUTHORIZED, code="AUTH_REQUIRED", message="Authentication required.")
-
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
-        return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="PROJECT_NOT_FOUND", message="Project not found.")
-
-    raw_number = number.strip()
-    if not raw_number.isdigit():
-        return _error_response(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            code="CHAPTER_NUMBER_INVALID",
-            message="Chapter number must be numeric, e.g. 01.",
-        )
-
-    if not file.filename or not file.filename.lower().endswith(".docx"):
-        return _error_response(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            code="INVALID_FILE_TYPE",
-            message="Only .docx files are supported.",
-        )
-
-    existing_numbers = sorted(
-        int(ci.chapters) for ci in
-        db.query(ChapterInfo).filter(ChapterInfo.project == project.project_code).all()
-        if ci.chapters and ci.chapters.isdigit()
-    )
-    new_number = int(raw_number)
-    if new_number in existing_numbers:
-        return _error_response(
-            status_code=status.HTTP_409_CONFLICT,
-            code="CHAPTER_NUMBER_DUPLICATE",
-            message=f"Chapter {raw_number.zfill(2)} already exists.",
-        )
-
-    expected_next = (existing_numbers[-1] + 1) if existing_numbers else 1
-    if new_number != expected_next:
-        return _error_response(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            code="CHAPTER_NUMBER_NOT_SEQUENTIAL",
-            message=f"Chapter numbers must be sequential. Expected {expected_next:02d}, got {raw_number.zfill(2)}.",
-        )
-
-    number_padded = f"{new_number:02d}"
-
-    result = chapter_service.create_chapter(
-        db,
-        project_id=project_id,
-        number=number_padded,
-        title=f"Chapter {number_padded}",
-        upload_dir=file_service.UPLOAD_DIR,
-        # "Received" — matches the pending-planning status used elsewhere (e.g. sync-chapters)
-        # until this chapter is planned and approved on the Planning page.
-        status="Received",
-    )
-    new_chapter = result["chapter"]
-    if not new_chapter:
-        return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="PROJECT_NOT_FOUND", message="Project not found.")
-
-    upload_result = file_service.upload_chapter_files(
-        db,
-        project_id=project_id,
-        chapter_id=new_chapter.id,
-        category="Manuscript",
-        files=[file],
-        actor_user_id=viewer.id,
-        upload_dir=file_service.UPLOAD_DIR,
-    )
-
-    # Best-effort manuscript page/word count extraction — a failure here must never
-    # block chapter creation, it just leaves manuscript_pages/word_count unset.
-    uploaded_path = (
-        upload_result["uploaded"][0]["file"].path if upload_result["uploaded"] else None
-    )
-    if uploaded_path and os.path.exists(uploaded_path):
-        word_count = None
-        page_count = None
-        try:
-            import docx
-            doc = docx.Document(uploaded_path)
-            word_count = sum(len(p.text.split()) for p in doc.paragraphs)
-        except Exception:
-            pass
-        try:
-            from lxml import etree as ET
-            NS = "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"
-            with zipfile.ZipFile(uploaded_path) as z:
-                if "docProps/app.xml" in z.namelist():
-                    with z.open("docProps/app.xml") as f:
-                        tree = ET.parse(f)
-                        pages_el = tree.find(f"{{{NS}}}Pages")
-                        if pages_el is not None and pages_el.text:
-                            page_count = int(pages_el.text)
-        except Exception:
-            pass
-
-        if word_count:
-            new_chapter.word_count = word_count
-        if page_count:
-            new_chapter.manuscript_pages = page_count
-            project.manuscript_pages = sum(
-                ci.manuscript_pages or 0
-                for ci in db.query(ChapterInfo).filter(ChapterInfo.project == project.project_code).all()
-            )
-
-    db.commit()
-    db.refresh(new_chapter)
-    return new_chapter
-
-
 @router.post("/projects/{project_id}/sync-chapters")
 def api_v2_sync_chapters(project_id: int, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
     """Sync CMS chapters → WMS chapter_details for projects created before auto-sync was added."""
@@ -5424,7 +5241,7 @@ def api_v2_sync_chapters(project_id: int, db: Session = Depends(database.get_db)
     for ch in cms_chapters:
         if ch.chapters and ch.chapters not in existing_nums:
             db.add(ChapterInfo(
-                client=project.division_code or "",
+                client=project.client_name or "",
                 project=project.code,
                 chapters=ch.chapters,
                 chapter_title=ch.chapter_title or f"Chapter {ch.chapters}",

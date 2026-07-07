@@ -29,7 +29,11 @@ def test_deep_numbering_caps_at_h4():
     assert tags == ["H4"]
 
 
-def test_lettered_heading_stays_h1_documented_limitation():
-    # Single letters have no natural sub-depth signal and stay H1.
+def test_lettered_text_detected_as_alphabetical_list_item():
+    # "A. " is now recognized as an uppercase alphabetical-list marker
+    # (uc_letter_pattern), matching how a single numbered line ("1. Text")
+    # is already treated as a list item rather than a heading. A
+    # standalone "A. Appendix Notes"-style heading needs an explicit <H1>
+    # tag (or real non-list formatting) to be classified as a heading.
     tags = _tags_for(["A. Appendix Notes"])
-    assert tags == ["H1"]
+    assert tags == ["LL-MID"]

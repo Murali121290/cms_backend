@@ -24,6 +24,7 @@ import {
 
 import type { FileRecord } from "@/types/api";
 import { uiPaths } from "@/utils/appPaths";
+import { openInWordWithFallback } from "@/utils/openInWord";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -319,20 +320,14 @@ function MenuDownloadItem({
   );
 }
 
-function MenuWordItem({ fileId, onClose }: { fileId: number; onClose: () => void }) {
+function MenuWordItem({ fileId, filename, onClose }: { fileId: number; filename: string; onClose: () => void }) {
   const [hov, setHov] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleClick = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/v2/files/${fileId}/open-in-word`);
-      const data = await res.json();
-      if (data && data.ms_word_uri) {
-        window.location.href = data.ms_word_uri;
-      }
-    } catch (e) {
-      // silently ignore; browser will show no handler error if Word not installed
+      await openInWordWithFallback(fileId, filename);
     } finally {
       setLoading(false);
       onClose();
@@ -400,6 +395,53 @@ function MenuIndesignToWordItem({ fileId, onClose }: { fileId: number; onClose: 
     >
       <FileOutput style={ICON_GOLD} aria-hidden />
       <span>{loading ? "Converting…" : "InDesign to Word"}</span>
+    </button>
+  );
+}
+
+function MenuPdfToWordItem({ fileId, onClose }: { fileId: number; onClose: () => void }) {
+  const [hov, setHov] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const handleClick = async () => {
+    const confirmConversion = window.confirm("Are you sure you want to convert this PDF file to Word?");
+    if (!confirmConversion) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/v1/conversion/pdf-to-word/${fileId}`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert(data.message || "Successfully converted PDF file to Word!");
+        window.location.reload();
+      } else {
+        alert(`Error: ${data.detail || "Failed to convert file"}`);
+      }
+    } catch (e: any) {
+      alert(`Error connecting to server: ${e.message}`);
+    } finally {
+      setLoading(false);
+      onClose();
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      style={{
+        ...ITEM_BASE,
+        backgroundColor: hov ? "#F5F4F1" : "transparent",
+        opacity: loading ? 0.6 : 1,
+      }}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      onClick={handleClick}
+      disabled={loading}
+    >
+      <FileOutput style={ICON_GOLD} aria-hidden />
+      <span>{loading ? "Converting…" : "PDF to Word"}</span>
     </button>
   );
 }
@@ -733,7 +775,7 @@ export function FileContextMenu({
                   to={`${uiPaths.structuringReview(projectId, chapterId, file.id)}?tab=onlyoffice`}
                   onClick={onClose}
                 />
-                <MenuWordItem fileId={file.id} onClose={onClose} />
+                <MenuWordItem fileId={file.id} filename={file.filename} onClose={onClose} />
               </>
             )}
             {filenameLower.endsWith(".indd") && (

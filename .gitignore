@@ -47,6 +47,7 @@ cms.db
 *.db
 uploads/
 outputs/
+temp_conversions/
 temp_reports/
 runtime/
 ref_cache.json

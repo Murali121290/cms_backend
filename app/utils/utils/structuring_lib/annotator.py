@@ -78,6 +78,48 @@ def _match_box_marker(token: Optional[str]):
     return base_id, is_close
 
 
+# Springer's human-word box marker convention - "Box<N>-open"/"Box<N>-close"
+# (mixed case, distinguished by the word "close" rather than a leading "/").
+# Recognized only when the caller opts in (annotate_document's
+# recognize_springer_box_markers=True, set by styler.process_docx when a
+# tag_set is active) - kept separate from _match_box_marker's native
+# "BX<N>-<suffix>" convention rather than folded in, since both sides here
+# must pair under the *same* canonical suffix ("open") regardless of which
+# word was written, whereas the native convention's suffix is an arbitrary
+# author-chosen label that must match exactly between open and close.
+_SPRINGER_BOX_OPEN_CLOSE_RE = re.compile(r"^box(\d+)-(open|close)$", re.IGNORECASE)
+
+
+def _match_springer_box_marker(token: Optional[str]):
+    """Match Springer's "Box<N>-open"/"Box<N>-close" convention - returning
+    (base_id, is_close, pairing_marker, display_prefix), or None if *token*
+    doesn't match.
+
+    *pairing_marker* is always "BX<N>-open" for both sides of a pair (never
+    "BX<N>-close"), since box_prefixer.py's two-pass matching requires an
+    open/close pair's full marker string to be identical - mirroring how
+    the now-retired _canonical_box_open_close_token in styler.py collapsed
+    both words onto the same canonical suffix. Computed here purely for
+    in-memory pairing/tagging; the paragraph's actual text is never
+    rewritten.
+
+    *display_prefix* ("Box<N>") is separate from *base_id* ("BX<N>") so the
+    applied Word *style* can keep Springer's own "Box"-spelled wording
+    (e.g. "Box1-close") instead of switching to the canonical "BX"
+    spelling - matching the marker text the author actually typed, so
+    Draft view doesn't show a confusing mismatch between the marker and
+    its own style label."""
+    if not token:
+        return None
+    match = _SPRINGER_BOX_OPEN_CLOSE_RE.match(token.strip())
+    if not match:
+        return None
+    num, kind = match.groups()
+    base_id = f"BX{num}"
+    is_close = kind.lower() == "close"
+    return base_id, is_close, f"{base_id}-open", f"Box{num}"
+
+
 # A closing box marker may now trail real paragraph content on the same
 # line (e.g. "Some paragraph text.</BX1-Header>"), unlike opening markers,
 # which must still appear only at the start of a block. This only looks for
@@ -141,10 +183,14 @@ def is_list_paragraph(paragraph: Paragraph) -> bool:
         return False
 
 
-def get_word_list_type(para: Paragraph, doc: Document) -> Optional[str]:
+def get_word_list_type(para: Paragraph, doc: Document) -> Optional[tuple[str, Optional[str]]]:
     """
-    Determine if a Word-formatted list paragraph is bulleted or numbered
-    by querying the document's numbering.xml part.
+    Determine if a Word-formatted list paragraph is bulleted, numbered,
+    lettered, or roman by querying the document's numbering.xml part.
+
+    Returns (list_kind, case) where case is "upper"/"lower" for
+    lettered/roman kinds (derived directly from the numFmt value) and
+    None otherwise, or None if no list formatting is found.
     """
     try:
         p = para._p
@@ -182,15 +228,35 @@ def get_word_list_type(para: Paragraph, doc: Document) -> Optional[str]:
         if num_fmt is not None:
             fmt_val = num_fmt.get(f'{{{numbering_part.element.nsmap["w"]}}}val')
             if fmt_val == 'bullet':
-                return 'bullet'
-            elif fmt_val in ['decimal', 'lowerLetter', 'upperLetter']:
-                return 'number'
-            elif fmt_val in ['lowerRoman', 'upperRoman']:
-                return 'roman'
+                return ('bullet', None)
+            elif fmt_val == 'decimal':
+                return ('number', None)
+            elif fmt_val == 'lowerLetter':
+                return ('lettered', 'lower')
+            elif fmt_val == 'upperLetter':
+                return ('lettered', 'upper')
+            elif fmt_val == 'lowerRoman':
+                return ('roman', 'lower')
+            elif fmt_val == 'upperRoman':
+                return ('roman', 'upper')
     except Exception as e:
         logger.debug(f"Error determining list type from XML: {e}")
-        
+
     return None
+
+
+def get_list_indent_level(para: Paragraph) -> int:
+    """Return a Word list paragraph's 0-based indent level (w:numPr/w:ilvl),
+    or 0 if the paragraph has no list numbering. Used to distinguish a
+    top-level list item from a nested sub-item."""
+    try:
+        p = para._p
+        if p.pPr is None or p.pPr.numPr is None or p.pPr.numPr.ilvl is None:
+            return 0
+        return p.pPr.numPr.ilvl.val
+    except Exception as e:
+        logger.debug(f"Error determining list indent level: {e}")
+        return 0
 
 
 def is_references_end(text: str) -> bool:
@@ -217,14 +283,18 @@ def is_references_end(text: str) -> bool:
     return any(re.match(pattern, text) for pattern in patterns)
 
 
-def detect_list_kind(text: str, style_name: str = "", is_word_list: bool = False, para: Optional[Paragraph] = None, doc: Optional[Document] = None) -> Optional[str]:
+def detect_list_kind(text: str, style_name: str = "", is_word_list: bool = False, para: Optional[Paragraph] = None, doc: Optional[Document] = None) -> Optional[tuple[str, Optional[str]]]:
     """
     Detect the list type for a paragraph.
 
-    Returns one of: "bullet", "number", "roman", or None.
+    Returns (list_kind, case), where list_kind is one of "bullet", "number",
+    "roman", "lettered", or None if no list is detected. case is
+    "upper"/"lower" for "lettered"/"roman" kinds (indicating the marker's
+    letter case), and None for "bullet"/"number" or when case can't be
+    determined.
     """
     list_config = rules_loader.get_list_patterns()
-    bullet_pattern = list_config.get("bullet_pattern", r"^[•\-\–]\s+")
+    bullet_pattern = list_config.get("bullet_pattern", r"^[•·\-\–]\s+")
     number_pattern = list_config.get("number_pattern", r"^\d+\.\s+")
     roman_pattern = list_config.get("roman_pattern", r"^(?i:[ivxlcdm]+)[\.)]\s+")
 
@@ -235,30 +305,39 @@ def detect_list_kind(text: str, style_name: str = "", is_word_list: bool = False
     lowered_style = style_name.lower()
 
     if re.match(bullet_pattern, text) or "bullet" in lowered_style:
-        return "bullet"
+        return ("bullet", None)
     # Symbol bullets: any Unicode Symbol character (So/Sm/Sc/Sk) or Private-Use
     # character (Wingdings etc.) at the start of the paragraph.
     if text:
         cat = unicodedata.category(text[0])
         if cat.startswith('S') or cat == 'Co':
-            return "bullet"
+            return ("bullet", None)
     if re.match(number_pattern, text) or re.match(r"^\s*\d+[\.\)]\s+", text) or "number" in lowered_style:
-        return "number"
+        return ("number", None)
+    # Roman is checked before lettered: valid roman-numeral letters
+    # (ivxlcdm) are a strict subset of "any single letter", so a marker
+    # like "i." or "v." must be resolved as roman here, before the more
+    # general lettered patterns below get a chance to claim it.
+    if re.match(roman_pattern, text):
+        return ("roman", "upper" if text[:1].isupper() else "lower")
+    if "roman" in lowered_style:
+        return ("roman", None)
+    uc_letter_pattern = list_config.get("uc_letter_pattern", r"^[A-Z][.)]\s+")
+    if re.match(uc_letter_pattern, text):
+        return ("lettered", "upper")
     lc_letter_pattern = list_config.get("lc_letter_pattern", r"^[a-z][.)]\s+")
     if re.match(lc_letter_pattern, text):
-        return "lettered"
-    if re.match(roman_pattern, text) or "roman" in lowered_style:
-        return "roman"
+        return ("lettered", "lower")
     if re.match(mnemonic_pattern, text):
-        return "lettered"
+        return ("lettered", "upper")
 
     if is_word_list and para is not None and doc is not None:
         xml_type = get_word_list_type(para, doc)
         if xml_type:
             return xml_type
         # Fallback to number if xml parsing fails but it is a word list
-        return "number"
-        
+        return ("number", None)
+
     return None
 
 
@@ -293,9 +372,26 @@ def _resolve_box_keyword(token: Optional[str]) -> Optional[str]:
     return lookup.get(token.strip().upper())
 
 
+_BARE_NUMBERED_BOX_RE = re.compile(r"^BX(\d+)$", re.IGNORECASE)
+
+
 def resolve_box_prefix(token: Optional[str]) -> str:
-    """Resolve a box-open token to its style-prefix subtype, defaulting to 'NBX'."""
-    return _resolve_box_keyword(token) or "NBX"
+    """Resolve a box-open token to its style-prefix subtype, defaulting to
+    'NBX'.
+
+    A bare numbered token ("BX1", "BX2", ...) resolves to its own matching
+    subtype prefix ("BX1", "BX2", ...) directly - it isn't a
+    boxes.type_keywords alias (those are word-shaped, e.g. "NOTE"/"CASE
+    STUDY"), so without this it silently fell back to the generic "NBX"
+    default, losing the box's own number entirely."""
+    keyword_prefix = _resolve_box_keyword(token)
+    if keyword_prefix is not None:
+        return keyword_prefix
+    if token:
+        numbered = _BARE_NUMBERED_BOX_RE.match(token.strip())
+        if numbered:
+            return f"BX{numbered.group(1)}"
+    return "NBX"
 
 
 def _is_recognized_structural_tag(token: str) -> bool:
@@ -446,8 +542,8 @@ def get_general_list_tag_style(list_kind: str) -> tuple[str, str]:
     key_map = {
         "bullet": ("general_bulleted", ("BL-MID", "BL-MID")),
         "number": ("general_numbered", ("NL-MID", "NL-MID")),
-        "roman": ("general_roman", ("RL-MID", "RL-MID")),
-        "lettered": ("general_lettered", ("UL-MID", "UL-MID")),
+        "roman": ("general_roman", ("OL-MID", "OL-MID")),
+        "lettered": ("general_lettered", ("LL-MID", "LL-MID")),
     }
     config_key, default = key_map.get(list_kind, ("general", ("BL-MID", "BL-MID")))
     config = list_config.get(config_key, {})
@@ -497,19 +593,28 @@ def get_reference_entry_tag_style(text: str, list_kind: Optional[str] = None, pa
 # Core annotator
 # =========================
 
-def annotate_document(doc: Document) -> List[Dict[str, Any]]:
+def annotate_document(
+    doc: Document, recognize_springer_box_markers: bool = False
+) -> List[Dict[str, Any]]:
     """
     Annotate all paragraphs in a document with tags and styles.
-    
+
     Args:
         doc: python-docx Document object
-    
+        recognize_springer_box_markers: when True, also recognize Springer's
+            "Box<N>-open"/"Box<N>-close" human-word box marker convention
+            (see _match_springer_box_marker) alongside the native
+            "BX<N>-<suffix>" one. Off by default so existing canonical/LWW
+            processing (and every test that doesn't pass this) is
+            unaffected; styler.process_docx opts in only when a tag_set is
+            active, matching this convention's Springer-specific origin.
+
     Returns:
         List of annotation dictionaries with keys:
         - para: Paragraph object
         - tag: String tag (e.g., "CHAPTER_TITLE", "BODY_TEXT")
         - style: Word style name (e.g., "Heading 1", "Normal")
-    
+
     Raises:
         ValueError: If document is invalid
     """
@@ -532,6 +637,7 @@ def annotate_document(doc: Document) -> List[Dict[str, Any]]:
         style = "TXT"
         bx_open_marker: Optional[str] = None
         bx_close_marker: Optional[str] = None
+        list_case: Optional[str] = None
 
         try:
             # A closing box marker trailing real content on the same line
@@ -555,24 +661,51 @@ def annotate_document(doc: Document) -> List[Dict[str, Any]]:
             if explicit_token:
                 token_stripped = explicit_token.strip()
                 box_marker_match = _match_box_marker(token_stripped)
+                springer_box_marker_match = (
+                    _match_springer_box_marker(token_stripped)
+                    if recognize_springer_box_markers and not box_marker_match
+                    else None
+                )
 
-                if box_marker_match:
+                if box_marker_match or springer_box_marker_match:
                     # Two-pass BX box marker - preserved verbatim and handled
                     # entirely by the separate box_prefixer.apply_box_tag_prefixes()
                     # post-process, which needs the full marker (number + suffix)
                     # recorded here to pair opens/closes exactly. Bypass the
                     # keyword/title/body box machinery below for this token.
-                    _base_id, is_close = box_marker_match
-                    full_marker = token_stripped.lstrip("/")
+                    if box_marker_match:
+                        _base_id, is_close = box_marker_match
+                        full_marker = token_stripped.lstrip("/")
+                        display_prefix = _base_id
+                    else:
+                        # Springer's "Box<N>-open"/"Box<N>-close" convention -
+                        # full_marker is the normalized pairing key (always
+                        # "BX<N>-open"), not the literal token text, so the
+                        # differently-worded open/close still pair up. The
+                        # paragraph's actual text is left untouched either
+                        # way. display_prefix ("Box<N>") keeps the applied
+                        # style in Springer's own spelling instead of
+                        # switching to canonical "BX<N>".
+                        _base_id, is_close, full_marker, display_prefix = springer_box_marker_match
                     tag = full_marker
-                    style = full_marker
                     text = stripped_text
                     explicit_tag_found = True
                     if is_close:
                         bx_close_marker = full_marker
+                        # tag stays the full open-matching marker (needed
+                        # verbatim so box_prefixer.py's pairing/
+                        # _is_pure_marker_row check still recognizes this
+                        # row); only the applied Word *style* is given its
+                        # own "-close" name so Draft view shows a close
+                        # marker as visibly distinct from its opener
+                        # instead of both reading identically (e.g.
+                        # "BX1-open"). The author's marker text itself is
+                        # untouched either way.
+                        style = f"{display_prefix}-close"
                         logger.debug(f"Para {para_idx}: BX box close marker '{full_marker}'")
                     else:
                         bx_open_marker = full_marker
+                        style = full_marker if box_marker_match else f"{display_prefix}-open"
                         logger.debug(f"Para {para_idx}: BX box open marker '{full_marker}'")
                 else:
                     normalized_explicit_style = normalize_style_token(explicit_token, explicit_context_kind, current_box_prefix)
@@ -626,7 +759,8 @@ def annotate_document(doc: Document) -> List[Dict[str, Any]]:
             
             # ===== WORD / MANUAL LISTS =====
             style_name = para.style.name if para.style else ""
-            list_kind = detect_list_kind(text, style_name, is_list_paragraph(para), para, doc)
+            list_kind_result = detect_list_kind(text, style_name, is_list_paragraph(para), para, doc)
+            list_kind, list_case = list_kind_result if list_kind_result is not None else (None, None)
             if not explicit_tag_found and list_kind is not None:
                 if current_block:
                     block_item_count += 1
@@ -639,6 +773,21 @@ def annotate_document(doc: Document) -> List[Dict[str, Any]]:
                         style = "OBJ-NL-MID"
                 elif current_block == "REFERENCES_BLOCK":
                     tag, style = get_reference_entry_tag_style(text, list_kind, para)
+                elif list_kind in ("bullet", "number", "lettered", "roman") and get_list_indent_level(para) > 0:
+                    # Nested sub-list item (indented under a parent list
+                    # item, any list kind) - always the "level 2" family,
+                    # always MID: no FIRST/LAST variant exists for it,
+                    # mirroring the existing table-nested convention
+                    # (TBL2-MID/TNL2-MID). list_case (for lettered/roman)
+                    # is carried through unchanged via the annotation's
+                    # own "list_case" field, same as the level-1 tags.
+                    tag = {
+                        "bullet": "BL2-MID",
+                        "number": "NL2-MID",
+                        "lettered": "LL2-MID",
+                        "roman": "OL2-MID",
+                    }[list_kind]
+                    style = tag
                 else:
                     tag, style = get_general_list_tag_style(list_kind)
             
@@ -832,6 +981,12 @@ def annotate_document(doc: Document) -> List[Dict[str, Any]]:
                 # box_prefixer distinguishes the two by that tag comparison.
                 "bx_open": bx_open_marker,
                 "bx_close": bx_close_marker or trailing_bx_close,
+                # Marker case ("upper"/"lower") for lettered/roman list
+                # items - None for every other tag. Carried separately from
+                # tag/style so hierarchy/validation logic (which only sees
+                # LL-*/OL-* tags) is unaffected; consumed only by the
+                # client tag-set overlay to pick Lc-/Uc- style variants.
+                "list_case": list_case,
             })
 
         except Exception as e:

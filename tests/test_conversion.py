@@ -664,3 +664,183 @@ def test_single_indesign_to_word_endpoint(
             os.remove(p)
         except Exception:
             pass
+
+
+def test_single_pdf_to_word_endpoint(
+    auth_cookie_client,
+    admin_user,
+    db_session,
+    app_env,
+):
+    client = auth_cookie_client(admin_user)
+    
+    from app.domains.projects.models import Project
+    from app.domains.workflow.models import ChapterInfo
+    from app.domains.clients.models import Client
+    from app.models import File
+    import os
+    
+    # Setup test DB entities
+    client_rec = Client(
+        category_type="Organization",
+        contact_type="Customer",
+        name_company="Test Client Co 3",
+        company="Test Client Co 3",
+        division="TEST_DIV3",
+        email="test3@example.com",
+        active_status=True
+    )
+    db_session.add(client_rec)
+    db_session.commit()
+    db_session.refresh(client_rec)
+    
+    project = Project(code="TEST_PROJ_PDF", title="Test PDF Project", client_id=client_rec.id, client_name="Test Client Co 3", status="In-progress")
+    db_session.add(project)
+    db_session.commit()
+    db_session.refresh(project)
+    
+    chapter = ChapterInfo(client="Test Client Co 3", project="TEST_PROJ_PDF", chapters="4", chapter_title="Chapter 4", status="In-progress")
+    db_session.add(chapter)
+    db_session.commit()
+    db_session.refresh(chapter)
+    
+    from app.services.file_service import UPLOAD_DIR
+    
+    pdf_rel_path = "TEST_PROJ_PDF/4/Proof/proof_document.pdf"
+    pdf_path = os.path.join(UPLOAD_DIR, pdf_rel_path)
+    
+    os.makedirs(os.path.dirname(pdf_path), exist_ok=True)
+    with open(pdf_path, "wb") as f:
+        f.write(b"%PDF-1.4 mock pdf data")
+        
+    pdf_file = File(
+        project_id=project.id,
+        chapter_id=chapter.id,
+        filename="proof_document.pdf",
+        path=pdf_rel_path,
+        category="Proof"
+    )
+    db_session.add(pdf_file)
+    db_session.commit()
+    
+    # Mock pdf2docx Converter class to simulate successful conversion without importing the actual library
+    import sys
+    mock_pdf2docx = MagicMock()
+    mock_converter = MagicMock()
+    mock_pdf2docx.Converter.return_value = mock_converter
+    
+    # When convert is called, we write a mock docx file so the service finds it
+    def mock_convert(docx_path, start=0, end=None):
+        with open(docx_path, "wb") as f:
+            f.write(b"MOCK DOCX BYTES")
+    mock_converter.convert.side_effect = mock_convert
+    
+    sys.modules["pdf2docx"] = mock_pdf2docx
+    try:
+        response = client.post(f"/api/v1/conversion/pdf-to-word/{pdf_file.id}")
+    finally:
+        sys.modules.pop("pdf2docx", None)
+            
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "success"
+    
+    # Check that a Manuscript file record was created with the correct name: proof_document.docx
+    manuscript = db_session.query(File).filter(
+        File.project_id == project.id,
+        File.chapter_id == chapter.id,
+        File.category == "Manuscript"
+    ).first()
+    
+    assert manuscript is not None
+    assert manuscript.filename == "proof_document.docx"
+    
+    # Clean up physical files
+    for p in [pdf_path]:
+        try:
+            os.remove(p)
+        except Exception:
+            pass
+
+
+def test_docx_post_processor():
+    from docx import Document
+    from app.services.scripts.docx_post_processor import post_process_docx
+    import tempfile
+    import os
+    from docx.oxml.ns import qn
+    
+    # Create temporary docx file
+    with tempfile.TemporaryDirectory() as tmpdir:
+        test_path = os.path.join(tmpdir, "test_format.docx")
+        
+        # 1. Create a document with two-column section, headers/footers, and styling
+        doc = Document()
+        
+        # Add a section with 2 columns
+        section = doc.sections[0]
+        sectPr = section._sectPr
+        from docx.oxml import OxmlElement
+        cols = OxmlElement('w:cols')
+        cols.set(qn('w:num'), '2')
+        sectPr.append(cols)
+        
+        # Add text to header and footer
+        section.header.paragraphs[0].text = "Header text"
+        section.footer.paragraphs[0].text = "Footer text"
+        
+        # Add paragraphs with split text
+        p1 = doc.add_paragraph("This is a word split-")
+        p2 = doc.add_paragraph("ting sentence.")
+        
+        p3 = doc.add_paragraph("Normal paragraph")
+        p4 = doc.add_paragraph("another sentence starting with lowercase.")
+        
+        # Add two consecutive tables with same columns separated by an empty paragraph
+        t1 = doc.add_table(rows=1, cols=2)
+        t1.rows[0].cells[0].text = "A1"
+        t1.rows[0].cells[1].text = "B1"
+        
+        sep = doc.add_paragraph("") # empty paragraph separator
+        
+        t2 = doc.add_table(rows=1, cols=2)
+        t2.rows[0].cells[0].text = "A2"
+        t2.rows[0].cells[1].text = "B2"
+        
+        doc.save(test_path)
+        
+        # 2. Run post-processing
+        post_process_docx(test_path)
+        
+        # 3. Reload and verify cleanups
+        doc_mod = Document(test_path)
+        
+        # Verify single column
+        cols_mod = doc_mod.sections[0]._sectPr.xpath('w:cols')
+        assert cols_mod[0].get(qn('w:num')) == '1'
+        
+        # Verify headers/footers cleared
+        assert doc_mod.sections[0].header.paragraphs[0].text == ""
+        assert doc_mod.sections[0].footer.paragraphs[0].text == ""
+        
+        # Verify paragraphs merged
+        p_texts = [p.text for p in doc_mod.paragraphs]
+        # "This is a word split-ting sentence." -> "This is a word splitting sentence." (hyphen stripped)
+        assert "This is a word splitting sentence." in p_texts
+        # "Normal paragraph" and "another sentence..." merged with a space
+        assert "Normal paragraph another sentence starting with lowercase." in p_texts
+        
+        # Verify tables merged
+        assert len(doc_mod.tables) == 1
+        assert len(doc_mod.tables[0].rows) == 2
+        assert doc_mod.tables[0].rows[0].cells[0].text == "A1"
+        assert doc_mod.tables[0].rows[1].cells[0].text == "A2"
+        
+        # Verify all runs set to Times New Roman
+        for p in doc_mod.paragraphs:
+            for r in p.runs:
+                rPr = r._r.get_or_add_rPr()
+                rFonts = rPr.xpath('w:rFonts')
+                assert rFonts[0].get(qn('w:ascii')) == 'Times New Roman'
+
+

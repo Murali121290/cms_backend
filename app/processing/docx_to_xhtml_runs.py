@@ -17,7 +17,89 @@ from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 from lxml import etree
 
+from app.processing.omml_to_mathml import convert_omml_element
+from app.processing.omml_to_latex import convert_omml_to_latex
+from app.processing.omml_wrapper_format import detect_wrapper_formatting
+
 logger = logging.getLogger("app.processing.docx_to_xhtml_runs")
+
+# Namespace URI for Office Math (OMML)
+_M_NS_URI = "http://schemas.openxmlformats.org/officeDocument/2006/math"
+
+
+def _omml_element_to_math_span(omml_el, display: str = "inline") -> str:
+    """Render an <m:oMath> or <m:oMathPara> as a TipTap math-node span.
+
+    Emits: <span class="math-node" data-mathml="..." data-omml="<b64 xml>"
+    data-display="inline|block">MathML</span>
+
+    - data-mathml: inline MathML string, used by the editor to display the eq
+      and by the delta engine as a fallback conversion source.
+    - data-omml: base64 of the raw OMML XML — used by the delta engine for
+      byte-perfect round-trip when the equation was not edited.
+    """
+    try:
+        raw_xml = etree.tostring(omml_el, encoding="utf-8")
+        omml_b64 = base64.b64encode(raw_xml).decode("ascii")
+    except Exception as e:
+        logger.warning(f"Failed to serialize OMML for preservation: {e}")
+        omml_b64 = ""
+
+    try:
+        mathml_str = convert_omml_element(omml_el)
+    except Exception as e:
+        logger.warning(f"OMML→MathML conversion failed: {e}")
+        text_fallback = html.escape("".join(omml_el.itertext()).strip() or "[equation]")
+        mathml_str = (
+            '<math xmlns="http://www.w3.org/1998/Math/MathML">'
+            f'<mtext>{text_fallback}</mtext></math>'
+        )
+
+    # LaTeX is what actually feeds Mathlive's editor — its math-ml import is
+    # flaky for some shapes we produce. Even an imperfect LaTeX is enough
+    # because the raw OMML is preserved separately for lossless round-trip
+    # and only replaces the OMML on an actual user edit.
+    try:
+        latex_str = convert_omml_to_latex(omml_el)
+    except Exception as e:
+        logger.warning(f"OMML→LaTeX conversion failed: {e}")
+        latex_str = ""
+
+    mathml_attr = html.escape(mathml_str, quote=True)
+    omml_attr = html.escape(omml_b64, quote=True)
+    latex_attr = html.escape(latex_str, quote=True)
+
+    # Detect wrapper formatting so that when the user opens an existing
+    # formatted equation, the outer toolbar's Bold/Italic/Color/etc. reflect
+    # the current state and re-saving doesn't strip it.
+    wrapper_attrs_html = ""
+    try:
+        wf = detect_wrapper_formatting(omml_el)
+        if wf["bold"]:
+            wrapper_attrs_html += ' data-wrapper-bold="true"'
+        if wf["italic"]:
+            wrapper_attrs_html += ' data-wrapper-italic="true"'
+        if wf["color"]:
+            wrapper_attrs_html += f' data-wrapper-color="#{html.escape(wf["color"], quote=True)}"'
+        if wf["bg_color"]:
+            wrapper_attrs_html += f' data-wrapper-bg="#{html.escape(wf["bg_color"], quote=True)}"'
+        if wf["size_pt"]:
+            wrapper_attrs_html += f' data-wrapper-size="{html.escape(wf["size_pt"], quote=True)}"'
+        if wf["font_family"]:
+            wrapper_attrs_html += f' data-wrapper-font="{html.escape(wf["font_family"], quote=True)}"'
+    except Exception as e:
+        logger.warning(f"Wrapper formatting detection failed: {e}")
+
+    return (
+        f'<span class="math-node" '
+        f'data-latex="{latex_attr}" '
+        f'data-mathml="{mathml_attr}" '
+        f'data-omml="{omml_attr}" '
+        f'data-display="{display}"'
+        f'{wrapper_attrs_html}>'
+        f"{mathml_str}"
+        f"</span>"
+    )
 
 # Import canonical character styles to build an ID-to-Name map
 try:
@@ -621,12 +703,21 @@ def _paragraph_content_to_html(p_elem, para, doc, findings_by_para=None, para_id
     parts = []
     
     for child in p_elem:
-        tag_local = etree.QName(child.tag).localname
-        
+        qname = etree.QName(child.tag)
+        tag_local = qname.localname
+        ns_uri = qname.namespace
+
+        # Office Math (OMML): m:oMath (inline) or m:oMathPara (block).
+        # Serialize raw OMML for lossless round-trip; render MathML for display.
+        if ns_uri == _M_NS_URI and tag_local in ("oMath", "oMathPara"):
+            display = "block" if tag_local == "oMathPara" else "inline"
+            parts.append(_omml_element_to_math_span(child, display=display))
+            continue
+
         if tag_local == 'r':
             run = Run(child, para)
             parts.append(_run_to_html(run, para, doc, track_change_element=None, para_findings=para_findings))
-            
+
         elif tag_local == 'ins':
             author_attr = f' data-author="{html.escape(child.get(qn("w:author"), ""))}"' if child.get(qn("w:author")) else ""
             date_attr = f' data-date="{html.escape(child.get(qn("w:date"), ""))}"' if child.get(qn("w:date")) else ""

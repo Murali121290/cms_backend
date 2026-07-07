@@ -50,6 +50,44 @@ def test_closing_suffix_must_match_exactly():
     assert tags == ["PMI", "TXT", "BX1-AB"]
 
 
+def test_box_title_text_pattern_gets_enclosing_boxs_own_family():
+    # rules.yaml's "^Box\s+\d+\." paragraph rule always assigns the
+    # generic "NBX1-TTL" default (annotator.py has no way to know which
+    # numbered box will end up enclosing it). Inside a "BX1-open"/"BX1-
+    # open" close pair, that guess must be corrected to "BX1-TTL", not
+    # blindly stacked into "BX1-NBX1-TTL".
+    tags = _tags_for(
+        ["<BX1-open>", "Box 12.1 Reasons to Read a Journal Article*", "</BX1-open>"]
+    )
+    assert tags == ["BX1-open", "BX1-TTL", "BX1-open"]
+
+
+def test_box_title_text_pattern_inside_a_different_numbered_box():
+    tags = _tags_for(
+        ["<BX3-open>", "Box 4.2 Some Other Title", "</BX3-open>"]
+    )
+    assert tags == ["BX3-open", "BX3-TTL", "BX3-open"]
+
+
+def _styles_for(paragraph_texts):
+    doc = Document()
+    for text in paragraph_texts:
+        doc.add_paragraph(text)
+    annotations = annotate_document(doc)
+    annotations = apply_box_tag_prefixes(annotations)
+    return [a["style"] for a in annotations]
+
+
+def test_open_and_close_markers_get_distinct_styles():
+    # Both open and close markers share the same pairing suffix ("open"),
+    # by design (see box_prefixer.py's module docstring on suffix
+    # pairing), but their applied Word *style* must still read distinctly
+    # in Draft view rather than both showing "BX1-open".
+    styles = _styles_for(["<BX1-open>", "Some box content.", "</BX1-open>"])
+    assert styles[0] == "BX1-open"
+    assert styles[2] == "BX1-close"
+
+
 def test_closing_number_must_match_exactly():
     # "</BX2-AA>" must not close "<BX1-AA>" - different number.
     tags = _tags_for(["<BX1-AA>", "<TXT> Body", "</BX2-AA>"])
