@@ -38,6 +38,7 @@ import {
 import { checkoutFile, cancelCheckout, deleteFile } from '@/api/files'
 import { useChapterFilesQuery } from '@/features/projects/useChapterFilesQuery'
 import { uiPaths } from '@/utils/appPaths'
+import { openInWordWithFallback } from '@/utils/openInWord'
 import apiClient from '@/api/client'
 import { toast } from '@/store/useToastStore'
 import type { FileRecord } from '@/types/api'
@@ -100,6 +101,16 @@ interface ChapterFilePageProps {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
+
+// Builds the ChapterEditorPage ".../view/{subfolder}/{filename}" URL for a row.
+// Shared by openEditor() (double-click) and the filename-cell single-click
+// handler, so the two never drift apart again.
+function buildFileViewPath(row: FileRow, pid: number, cid: number, cliId?: string) {
+  const base = cliId
+    ? `/clients/${cliId}/projects/${pid}/chapters/${cid}`
+    : `/projects/${pid}/chapters/${cid}`
+  return `${base}/view/${encodeURIComponent(row.subfolder)}/${encodeURIComponent(row.file_name)}`
+}
 
 function categoryToFolderKey(category: string): FolderKey {
   const c = category.toLowerCase()
@@ -182,6 +193,7 @@ function FileActionsMenu({
   const fname = row.file_name.toLowerCase()
   const hasReview = fname.endsWith('_processed.docx') || fname.endsWith('_structured.docx')
   const isImage = /\.(jpe?g|png|gif|webp|tiff?|bmp|eps)$/i.test(fname)
+  const isDocx = fname.endsWith('.docx') || fname.endsWith('.doc')
 
   // Gate stage-specific processing actions to the stage they actually belong to.
   // The stage-to-action mapping lives in fileManagerConfig.ts (PROCESSING_ACTION_STAGE_MAP) —
@@ -295,14 +307,15 @@ function FileActionsMenu({
               {/* ── Group 1: Open / Edit ─────────────────────────── */}
               {fid ? (
                 <>
-                  {isImage ? (
+                  {isImage && (
                     // Images route through the dedicated Image Review workspace;
                     // the DOCX editors would fail on them (see structuring
                     // engine "Package not found at *.jpeg" errors).
                     <DropdownMenu.Item className={itemCls} onSelect={() => navigate(`/projects/${projectId}/image-review?fileId=${fid}`)}>
                       <FilePen size={12} className="text-muted" /> Open in Image Editor
                     </DropdownMenu.Item>
-                  ) : (
+                  )}
+                  {isDocx && (
                     <>
                       <DropdownMenu.Item className={itemCls} onSelect={() => navigate(`${uiPaths.structuringReview(projectId, chapterId, fid)}?tab=editor`)}>
                         <FilePen size={12} className="text-muted" /> Edit in Editor
@@ -310,15 +323,15 @@ function FileActionsMenu({
                       <DropdownMenu.Item className={itemCls} onSelect={() => navigate(`${uiPaths.structuringReview(projectId, chapterId, fid)}?tab=onlyoffice`)}>
                         <FilePen size={12} className="text-muted" /> Edit in Office
                       </DropdownMenu.Item>
-                      <DropdownMenu.Item className={itemCls} onSelect={() => {
-                        fetch(`/api/v2/files/${fid}/open-in-word`)
-                          .then(r => r.json())
-                          .then(d => { if (d?.ms_word_uri) window.location.href = d.ms_word_uri; })
-                          .catch(() => { });
-                      }}>
+                      <DropdownMenu.Item className={itemCls} onSelect={() => void openInWordWithFallback(fid, row.file_name)}>
                         <ExternalLink size={12} className="text-muted" /> Open in MSWord
                       </DropdownMenu.Item>
                     </>
+                  )}
+                  {!isImage && !isDocx && (
+                    <DropdownMenu.Item className={itemCls} onSelect={() => onView(row)}>
+                      <Eye size={12} className="text-muted" /> Preview
+                    </DropdownMenu.Item>
                   )}
                   <DropdownMenu.Item className={itemCls} asChild>
                     <a href={`/api/v2/files/${fid}/download`} download onClick={e => e.stopPropagation()}>
@@ -348,6 +361,31 @@ function FileActionsMenu({
                       }}
                     >
                       <FileOutput size={12} className="text-amber-500" /> InDesign to Word
+                    </DropdownMenu.Item>
+                  )}
+                  {fid && fname.toLowerCase().endsWith('.pdf') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={async () => {
+                        const confirmConversion = window.confirm("Are you sure you want to convert this PDF file to Word?");
+                        if (!confirmConversion) return;
+                        try {
+                          const res = await fetch(`/api/v1/conversion/pdf-to-word/${fid}`, {
+                            method: "POST",
+                          });
+                          const data = await res.json();
+                          if (res.ok) {
+                            alert(data.message || "Successfully converted PDF file to Word!");
+                            window.location.reload();
+                          } else {
+                            alert(`Error: ${data.detail || "Failed to convert file"}`);
+                          }
+                        } catch (e: any) {
+                          alert(`Error connecting to server: ${e.message}`);
+                        }
+                      }}
+                    >
+                      <FileOutput size={12} className="text-amber-500" /> PDF to Word
                     </DropdownMenu.Item>
                   )}
                   {hasReview && !isImage && (
@@ -653,10 +691,7 @@ export function ChapterFilePage({
       navigate(`/projects/${pid}/image-review?fileId=${row.db_id}`)
       return
     }
-    const base = cliId
-      ? `/clients/${cliId}/projects/${pid}/chapters/${cid}`
-      : `/projects/${pid}/chapters/${cid}`
-    navigate(`${base}/view/${encodeURIComponent(row.subfolder)}/${encodeURIComponent(row.file_name)}`)
+    navigate(buildFileViewPath(row, pid, cid, cliId))
   }
 
   function handleDelete(row: FileRow) {
@@ -781,9 +816,12 @@ export function ChapterFilePage({
         const { icon, color } = fileTypeIcon(ext)
         const fid = row.original.db_id
         const isImageRow = /\.(jpe?g|png|gif|webp|tiff?|bmp|eps)$/i.test(name)
+        const isDocxRow = /\.docx?$/i.test(name)
         const openTarget = isImageRow
           ? `/projects/${pid}/image-review?fileId=${fid}`
-          : `${uiPaths.structuringReview(pid, cid, fid)}?tab=editor`
+          : isDocxRow
+            ? `${uiPaths.structuringReview(pid, cid, fid)}?tab=editor`
+            : buildFileViewPath(row.original, pid, cid, cliId)
         return (
           <div className="flex items-center gap-2">
             {isImageRow && fid ? (

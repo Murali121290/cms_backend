@@ -1699,7 +1699,7 @@ def api_v2_download_file(
 @router.get("/files/{file_id}/preview")
 def api_v2_file_preview(
     file_id: int,
-    fmt: str = Query("png", regex="^(png|jpg)$"),
+    fmt: str = Query("png", pattern="^(png|jpg)$"),
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -2990,7 +2990,9 @@ def api_v2_open_in_word(
     import urllib.parse
     token = create_access_token({"sub": viewer.username, "file_id": file_id, "mode": mode}, expires_delta=timedelta(minutes=WEBDAV_TOKEN_EXPIRE_MINUTES))
     quoted_filename = urllib.parse.quote(filename, safe="")
-    webdav_url = f"{WEBDAV_BASE_URL}/webdav/files/{file_id}/{mode}/{quoted_filename}?token={token}"
+    # Token is a path segment, not a `?token=` query param — Word (including
+    # 2019) mis-parses ms-word:ofe|u| URLs that contain a query string.
+    webdav_url = f"{WEBDAV_BASE_URL}/webdav/files/{file_id}/{mode}/{token}/{quoted_filename}"
     ms_word_uri = f"ms-word:ofe|u|{webdav_url}"
 
     return {"ms_word_uri": ms_word_uri, "webdav_url": webdav_url}
