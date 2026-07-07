@@ -57,13 +57,343 @@ function renderEquation(
   target.textContent = "∑";
 }
 
+// ─── Word-style ribbon for the equation editor ───────────────────────────
+//
+// Each category button opens a small floating palette showing math templates
+// as clickable KaTeX-rendered thumbnails. Clicking a template calls
+// mf.executeCommand(['insert', latex, {selectionMode:'placeholder'}]) so the
+// user types straight into the first #? slot.
+
+type PaletteItem = {
+  // Displayed preview — rendered with KaTeX so the palette shows real math,
+  // not placeholder glyphs.
+  preview: string;
+  // The LaTeX inserted into the mathfield. Use #? for tab-navigable holes.
+  insert: string;
+  title: string;
+};
+
+type RibbonCategory = {
+  id: string;
+  label: string;
+  // The icon shown on the ribbon button — rendered with KaTeX.
+  icon: string;
+  items: PaletteItem[];
+  // Column count in the palette grid; auto if omitted.
+  columns?: number;
+  // Width override for wide palettes (e.g. Greek).
+  width?: string;
+};
+
+const RIBBON: RibbonCategory[] = [
+  {
+    id: "fraction",
+    label: "Fraction",
+    icon: "\\frac{a}{b}",
+    items: [
+      { preview: "\\frac{a}{b}", insert: "\\frac{#?}{#?}", title: "Stacked fraction" },
+      { preview: "{a}/{b}", insert: "{#?}/{#?}", title: "Linear fraction" },
+      { preview: "\\frac{\\partial a}{\\partial b}", insert: "\\frac{\\partial #?}{\\partial #?}", title: "Partial derivative" },
+      { preview: "\\frac{da}{db}", insert: "\\frac{d#?}{d#?}", title: "Differential" },
+    ],
+    columns: 2,
+  },
+  {
+    id: "script",
+    label: "Script",
+    icon: "x^{a}",
+    items: [
+      { preview: "x^{a}", insert: "#?^{#?}", title: "Superscript" },
+      { preview: "x_{a}", insert: "#?_{#?}", title: "Subscript" },
+      { preview: "x_{a}^{b}", insert: "#?_{#?}^{#?}", title: "Sub-superscript" },
+      { preview: "{}^{a}x", insert: "{}^{#?}#?", title: "Left superscript" },
+      { preview: "{}_{a}x", insert: "{}_{#?}#?", title: "Left subscript" },
+      { preview: "\\bar{a}", insert: "\\bar{#?}", title: "Over-bar" },
+      { preview: "\\underline{a}", insert: "\\underline{#?}", title: "Underline" },
+      { preview: "\\overrightarrow{ab}", insert: "\\overrightarrow{#?}", title: "Right arrow above" },
+    ],
+    columns: 2,
+  },
+  {
+    id: "radical",
+    label: "Radical",
+    icon: "\\sqrt{a}",
+    items: [
+      { preview: "\\sqrt{a}", insert: "\\sqrt{#?}", title: "Square root" },
+      { preview: "\\sqrt[n]{a}", insert: "\\sqrt[#?]{#?}", title: "N-th root" },
+      { preview: "\\sqrt[3]{a}", insert: "\\sqrt[3]{#?}", title: "Cube root" },
+    ],
+    columns: 3,
+  },
+  {
+    id: "integral",
+    label: "Integral",
+    icon: "\\int",
+    items: [
+      { preview: "\\int", insert: "\\int #?", title: "Integral" },
+      { preview: "\\int_{a}^{b}", insert: "\\int_{#?}^{#?} #?", title: "Definite integral" },
+      { preview: "\\iint", insert: "\\iint #?", title: "Double integral" },
+      { preview: "\\iiint", insert: "\\iiint #?", title: "Triple integral" },
+      { preview: "\\oint", insert: "\\oint #?", title: "Contour integral" },
+      { preview: "\\oint_{a}^{b}", insert: "\\oint_{#?}^{#?} #?", title: "Contour with limits" },
+    ],
+    columns: 3,
+  },
+  {
+    id: "operator",
+    label: "Operator",
+    icon: "\\sum",
+    items: [
+      { preview: "\\sum", insert: "\\sum #?", title: "Sum" },
+      { preview: "\\sum_{a}^{b}", insert: "\\sum_{#?}^{#?} #?", title: "Sum with limits" },
+      { preview: "\\prod", insert: "\\prod #?", title: "Product" },
+      { preview: "\\prod_{a}^{b}", insert: "\\prod_{#?}^{#?} #?", title: "Product with limits" },
+      { preview: "\\coprod", insert: "\\coprod #?", title: "Coproduct" },
+      { preview: "\\bigcup", insert: "\\bigcup #?", title: "Union" },
+      { preview: "\\bigcap", insert: "\\bigcap #?", title: "Intersection" },
+      { preview: "\\lim_{n\\to\\infty}", insert: "\\lim_{#?\\to#?} #?", title: "Limit" },
+    ],
+    columns: 2,
+  },
+  {
+    id: "bracket",
+    label: "Bracket",
+    icon: "( )",
+    items: [
+      { preview: "(a)", insert: "\\left(#?\\right)", title: "Parentheses" },
+      { preview: "[a]", insert: "\\left[#?\\right]", title: "Square brackets" },
+      { preview: "\\{a\\}", insert: "\\left\\{#?\\right\\}", title: "Braces" },
+      { preview: "|a|", insert: "\\left|#?\\right|", title: "Absolute value" },
+      { preview: "\\|a\\|", insert: "\\left\\|#?\\right\\|", title: "Norm" },
+      { preview: "\\langle a\\rangle", insert: "\\left\\langle #?\\right\\rangle", title: "Angle brackets" },
+      { preview: "\\lfloor a\\rfloor", insert: "\\left\\lfloor #?\\right\\rfloor", title: "Floor" },
+      { preview: "\\lceil a\\rceil", insert: "\\left\\lceil #?\\right\\rceil", title: "Ceiling" },
+    ],
+    columns: 2,
+  },
+  {
+    id: "function",
+    label: "Function",
+    icon: "\\sin",
+    items: [
+      { preview: "\\sin", insert: "\\sin #?", title: "sin" },
+      { preview: "\\cos", insert: "\\cos #?", title: "cos" },
+      { preview: "\\tan", insert: "\\tan #?", title: "tan" },
+      { preview: "\\cot", insert: "\\cot #?", title: "cot" },
+      { preview: "\\sec", insert: "\\sec #?", title: "sec" },
+      { preview: "\\csc", insert: "\\csc #?", title: "csc" },
+      { preview: "\\arcsin", insert: "\\arcsin #?", title: "arcsin" },
+      { preview: "\\arccos", insert: "\\arccos #?", title: "arccos" },
+      { preview: "\\arctan", insert: "\\arctan #?", title: "arctan" },
+      { preview: "\\sinh", insert: "\\sinh #?", title: "sinh" },
+      { preview: "\\cosh", insert: "\\cosh #?", title: "cosh" },
+      { preview: "\\tanh", insert: "\\tanh #?", title: "tanh" },
+      { preview: "\\log", insert: "\\log #?", title: "log" },
+      { preview: "\\ln", insert: "\\ln #?", title: "ln" },
+      { preview: "\\exp", insert: "\\exp #?", title: "exp" },
+      { preview: "\\lim", insert: "\\lim #?", title: "lim" },
+    ],
+    columns: 4,
+  },
+  {
+    id: "accent",
+    label: "Accent",
+    icon: "\\hat{a}",
+    items: [
+      { preview: "\\hat{a}", insert: "\\hat{#?}", title: "Hat" },
+      { preview: "\\tilde{a}", insert: "\\tilde{#?}", title: "Tilde" },
+      { preview: "\\bar{a}", insert: "\\bar{#?}", title: "Bar" },
+      { preview: "\\vec{a}", insert: "\\vec{#?}", title: "Vector" },
+      { preview: "\\dot{a}", insert: "\\dot{#?}", title: "Dot" },
+      { preview: "\\ddot{a}", insert: "\\ddot{#?}", title: "Double dot" },
+      { preview: "\\breve{a}", insert: "\\breve{#?}", title: "Breve" },
+      { preview: "\\check{a}", insert: "\\check{#?}", title: "Check" },
+    ],
+    columns: 4,
+  },
+  {
+    id: "matrix",
+    label: "Matrix",
+    icon: "[a\\,b]",
+    items: [
+      { preview: "\\begin{pmatrix}a & b\\\\c & d\\end{pmatrix}", insert: "\\begin{pmatrix}#? & #? \\\\ #? & #?\\end{pmatrix}", title: "2×2 parenthesized" },
+      { preview: "\\begin{bmatrix}a & b\\\\c & d\\end{bmatrix}", insert: "\\begin{bmatrix}#? & #? \\\\ #? & #?\\end{bmatrix}", title: "2×2 bracketed" },
+      { preview: "\\begin{vmatrix}a & b\\\\c & d\\end{vmatrix}", insert: "\\begin{vmatrix}#? & #? \\\\ #? & #?\\end{vmatrix}", title: "2×2 determinant" },
+      { preview: "\\begin{pmatrix}a & b & c\\\\d & e & f\\\\g & h & i\\end{pmatrix}", insert: "\\begin{pmatrix}#? & #? & #? \\\\ #? & #? & #? \\\\ #? & #? & #?\\end{pmatrix}", title: "3×3 parenthesized" },
+      { preview: "\\begin{pmatrix}a\\\\b\\end{pmatrix}", insert: "\\begin{pmatrix}#? \\\\ #?\\end{pmatrix}", title: "Column vector" },
+      { preview: "\\begin{pmatrix}a & b\\end{pmatrix}", insert: "\\begin{pmatrix}#? & #?\\end{pmatrix}", title: "Row vector" },
+      { preview: "\\begin{cases}a\\\\b\\end{cases}", insert: "\\begin{cases}#? \\\\ #?\\end{cases}", title: "Cases" },
+    ],
+    columns: 2,
+  },
+  {
+    id: "greek",
+    label: "Greek",
+    icon: "\\alpha",
+    items: [
+      "\\alpha", "\\beta", "\\gamma", "\\delta", "\\epsilon", "\\varepsilon",
+      "\\zeta", "\\eta", "\\theta", "\\vartheta", "\\iota", "\\kappa",
+      "\\lambda", "\\mu", "\\nu", "\\xi", "\\pi", "\\varpi",
+      "\\rho", "\\sigma", "\\tau", "\\upsilon", "\\phi", "\\varphi",
+      "\\chi", "\\psi", "\\omega",
+      "\\Gamma", "\\Delta", "\\Theta", "\\Lambda", "\\Xi", "\\Pi",
+      "\\Sigma", "\\Upsilon", "\\Phi", "\\Psi", "\\Omega",
+    ].map((cmd) => ({ preview: cmd, insert: cmd, title: cmd })),
+    columns: 6,
+    width: "280px",
+  },
+  {
+    id: "relation",
+    label: "Relation",
+    icon: "\\leq",
+    items: [
+      "\\pm", "\\mp", "\\times", "\\div", "\\cdot", "\\ast",
+      "\\leq", "\\geq", "\\ll", "\\gg", "\\neq", "\\approx",
+      "\\equiv", "\\sim", "\\propto", "\\in", "\\notin", "\\subset",
+      "\\subseteq", "\\supset", "\\cup", "\\cap", "\\forall", "\\exists",
+      "\\infty", "\\partial", "\\nabla", "\\to", "\\leftarrow", "\\leftrightarrow",
+      "\\Rightarrow", "\\Leftarrow", "\\Leftrightarrow", "\\therefore", "\\because",
+    ].map((cmd) => ({ preview: cmd, insert: cmd, title: cmd })),
+    columns: 6,
+    width: "280px",
+  },
+];
+
+/** Render KaTeX to an HTML string once and cache. */
+const katexCache = new Map<string, string>();
+function katexToHtml(latex: string, displayMode = false): string {
+  const key = (displayMode ? "d:" : "i:") + latex;
+  const cached = katexCache.get(key);
+  if (cached !== undefined) return cached;
+  let html = "";
+  try {
+    html = katex.renderToString(latex, {
+      throwOnError: false,
+      displayMode,
+      output: "html",
+    });
+  } catch {
+    html = `<span style="font-family:monospace;font-size:11px">${latex}</span>`;
+  }
+  katexCache.set(key, html);
+  return html;
+}
+
+function RibbonButton({
+  category,
+  active,
+  onClick,
+}: {
+  category: RibbonCategory;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onMouseDown={(e) => {
+        // Keep focus in the mathfield AND prevent the panel-level "close
+        // palette" handler from firing, so toggling works.
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+      onClick={onClick}
+      title={category.label}
+      className={`flex flex-col items-center justify-center gap-1 px-3 py-1.5 rounded border cursor-pointer transition-colors ${
+        active
+          ? "bg-amber-500/20 border-amber-500 text-amber-100"
+          : "bg-slate-800 border-slate-700 text-slate-100 hover:bg-slate-700"
+      }`}
+    >
+      <span
+        className="katex-preview leading-none"
+        style={{ fontSize: "13px", color: "inherit" }}
+        // eslint-disable-next-line react/no-danger
+        dangerouslySetInnerHTML={{ __html: katexToHtml(category.icon) }}
+      />
+      <span className="text-[9px] font-semibold uppercase tracking-wide opacity-80">
+        {category.label}
+      </span>
+    </button>
+  );
+}
+
+function PaletteItemButton({
+  item,
+  onSelect,
+}: {
+  item: PaletteItem;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onMouseDown={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+      onClick={onSelect}
+      title={item.title}
+      className="min-h-[38px] px-2 py-1 flex items-center justify-center bg-slate-900 hover:bg-amber-500/20 hover:border-amber-500 border border-slate-700 rounded cursor-pointer transition-colors text-slate-100"
+    >
+      <span
+        className="katex-preview leading-none"
+        style={{ fontSize: "14px", color: "inherit" }}
+        // eslint-disable-next-line react/no-danger
+        dangerouslySetInnerHTML={{ __html: katexToHtml(item.preview) }}
+      />
+    </button>
+  );
+}
+
+// Inline sub-ribbon: appears BELOW the category buttons and above the
+// editor when a category is active. Never overlays the equation.
+function SubRibbon({
+  category,
+  onSelect,
+  onClose,
+}: {
+  category: RibbonCategory;
+  onSelect: (item: PaletteItem) => void;
+  onClose: () => void;
+}) {
+  // Column count that Greek/Relation asked for is designed for a narrow
+  // popup; on the full-width sub-ribbon we can just let items flow.
+  return (
+    <div
+      className="border-b border-slate-800 bg-slate-950/60 px-3 py-2"
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          {category.label}
+        </span>
+        <button
+          type="button"
+          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onClick={onClose}
+          title="Close panel"
+          className="text-slate-500 hover:text-slate-200 text-xs leading-none w-5 h-5 flex items-center justify-center rounded hover:bg-slate-800 border-none bg-transparent cursor-pointer"
+        >
+          ×
+        </button>
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {category.items.map((item, i) => (
+          <PaletteItemButton key={i} item={item} onSelect={() => onSelect(item)} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function MathNodeView({ node, updateAttributes, selected, editor, getPos }: NodeViewProps) {
   const openOnMount = !!node.attrs.openOnMount;
   const [isEditing, setIsEditing] = useState(openOnMount);
   const [latexInput, setLatexInput] = useState<string>(node.attrs.latex || "");
   const previewRef = useRef<HTMLSpanElement>(null);
   const mathfieldRef = useRef<HTMLElement>(null);
-  const keyboardHostRef = useRef<HTMLDivElement>(null);
+  const [openCategory, setOpenCategory] = useState<string | null>(null);
   // Snapshot of the LaTeX at the moment editing starts. On Save we only drop
   // the raw OMML if this changed — merely opening + closing the editor must
   // not compromise the byte-perfect round-trip.
@@ -245,60 +575,26 @@ export function MathNodeView({ node, updateAttributes, selected, editor, getPos 
     setIsEditing(false);
   };
 
-  // While the modal is open, pull Mathlive's virtual keyboard into a
-  // container inside the modal instead of letting it float at the bottom
-  // of the viewport. useLayoutEffect fires BEFORE the setValue effect
-  // focuses the mathfield — critical, because focus triggers keyboard.show()
-  // and once the keyboard element is built into <body>, changing `container`
-  // is a no-op. We also install a MutationObserver on <body> so that any
-  // keyboard Mathlive still attaches there gets moved into our host.
-  React.useLayoutEffect(() => {
-    if (!isEditing) return;
-    const kb = (window as any).mathVirtualKeyboard;
-    const host = keyboardHostRef.current;
-    if (!host) return;
-
-    let previousContainer: HTMLElement | null = null;
-    let previousParent: HTMLElement | null = null;
-    let keyboardEl: HTMLElement | null = null;
-
-    if (kb) {
-      previousContainer = kb.container ?? null;
-      try { kb.container = host; } catch { /* noop */ }
+  // Insert a LaTeX snippet at the caret using Mathlive's insert command.
+  // Selection mode "placeholder" makes the first #? land selected so the
+  // user can immediately type into the fraction numerator / sqrt argument /
+  // sum body / etc.
+  const insertLatex = (latex: string) => {
+    const mf = mathfieldRef.current as any;
+    if (!mf) return;
+    try {
+      mf.focus?.();
+      mf.executeCommand?.(["insert", latex, {
+        insertionMode: "replaceSelection",
+        selectionMode: "placeholder",
+        format: "latex",
+      }]);
+      const nextLatex = mf.getValue?.("latex") || mf.value || "";
+      setLatexInput(nextLatex);
+    } catch (err) {
+      console.error("Mathlive insert failed:", err);
     }
-
-    const adopt = (el: HTMLElement) => {
-      if (el.parentElement === host) return;
-      previousParent = el.parentElement;
-      host.appendChild(el);
-      keyboardEl = el;
-    };
-
-    // Grab any pre-existing keyboard from a previous open.
-    const existing = document.querySelector<HTMLElement>(".ML__keyboard");
-    if (existing) adopt(existing);
-
-    // Watch for a keyboard element that Mathlive appends anywhere later.
-    const observer = new MutationObserver(() => {
-      const el = document.querySelector<HTMLElement>(".ML__keyboard");
-      if (el && el.parentElement !== host) adopt(el);
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-
-    // Also proactively show the keyboard so it appears without needing focus.
-    try { kb?.show?.(); } catch { /* noop */ }
-
-    return () => {
-      observer.disconnect();
-      if (keyboardEl && previousParent) {
-        try { previousParent.appendChild(keyboardEl); } catch { /* noop */ }
-      }
-      if (kb) {
-        try { kb.hide?.(); } catch { /* noop */ }
-        try { kb.container = previousContainer; } catch { /* noop */ }
-      }
-    };
-  }, [isEditing]);
+  };
 
   // Escape → cancel; Ctrl/Cmd+Enter → save.
   useEffect(() => {
@@ -325,6 +621,11 @@ export function MathNodeView({ node, updateAttributes, selected, editor, getPos 
     return () => { document.body.style.overflow = prev; };
   }, [isEditing]);
 
+  // Close ribbon palette when the modal closes.
+  useEffect(() => {
+    if (!isEditing) setOpenCategory(null);
+  }, [isEditing]);
+
   const modal = isEditing ? (
     <div
       className="math-modal-root fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-2 sm:p-4"
@@ -334,8 +635,12 @@ export function MathNodeView({ node, updateAttributes, selected, editor, getPos 
       }}
     >
       <div
-        className="math-modal-panel flex flex-col rounded-xl shadow-2xl bg-[#0b1220] border border-slate-700 overflow-hidden"
-        style={{ width: "50vw", minWidth: "480px", maxWidth: "780px", height: "68vh", maxHeight: "620px" }}
+        className="math-modal-panel flex flex-col rounded-xl shadow-2xl bg-[#0b1220] border border-slate-700"
+        style={{
+          width: "min(90vw, 780px)",
+          minWidth: "640px",
+          maxHeight: "min(90vh, 600px)",
+        }}
         onMouseDown={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -353,36 +658,65 @@ export function MathNodeView({ node, updateAttributes, selected, editor, getPos 
           </button>
         </div>
 
-        {/* Body: editor on top (fixed portion), keyboard fills the rest.
-            Both share full modal width; nothing overflows because keyboard
-            host is flex-1 min-h-0 with overflow-hidden. */}
-        <div className="flex-1 min-h-0 flex flex-col gap-3 p-4">
+        {/* Word-style ribbon: category buttons on top; when one is active,
+            an inline sub-ribbon appears below it (in-flow) with the symbols
+            for that category. Clicking a symbol inserts it and closes the
+            sub-ribbon so the editor gets its full space back. The editor
+            is never covered — the modal grows to fit. */}
+        <div className="flex-shrink-0 border-b border-slate-800 bg-slate-900/60 px-2 py-1.5">
+          <div className="flex flex-wrap items-stretch gap-1">
+            {RIBBON.map((cat) => (
+              <RibbonButton
+                key={cat.id}
+                category={cat}
+                active={openCategory === cat.id}
+                onClick={() =>
+                  setOpenCategory((prev) => (prev === cat.id ? null : cat.id))
+                }
+              />
+            ))}
+          </div>
+        </div>
+
+        {(() => {
+          const active = RIBBON.find((c) => c.id === openCategory);
+          return active ? (
+            <SubRibbon
+              category={active}
+              onSelect={(item) => {
+                // Keep the panel open after inserting so users can chain
+                // multiple insertions (matches Word's Equation ribbon).
+                insertLatex(item.insert);
+              }}
+              onClose={() => setOpenCategory(null)}
+            />
+          ) : null;
+        })()}
+
+        {/* Body: sized to the equation area, not stretched. Keeps the modal
+            compact — the ribbon fits at the top, the editor is a fixed
+            reasonable height, and the footer sits right below. */}
+        <div className="flex flex-col p-3">
           {/* @ts-ignore */}
           <math-field
             ref={mathfieldRef}
             className="math-modal-field"
+            math-virtual-keyboard-policy="manual"
             style={{
               width: "100%",
-              height: "90px",
-              flexShrink: 0,
-              padding: "10px 12px",
+              minHeight: "150px",
+              maxHeight: "260px",
+              padding: "12px 14px",
               fontSize: "20px",
-              lineHeight: "1.3",
+              lineHeight: "1.4",
               boxSizing: "border-box",
             }}
-          />
-
-          <div
-            ref={keyboardHostRef}
-            className="math-modal-keyboard-host flex-1 min-h-0 w-full rounded-lg bg-slate-900/60 border border-slate-800 overflow-hidden"
           />
         </div>
 
         <style>{`
           /* Force a white surface with dark ink so the equation is legible
-             on the dark modal panel. Mathlive uses its own CSS variables
-             internally (see mathlive/mathlive.mjs for the full list) so we
-             set them explicitly on the field host. */
+             on the dark modal panel. */
           .math-modal-panel math-field.math-modal-field {
             background: #ffffff !important;
             color: #0f172a !important;
@@ -403,84 +737,16 @@ export function MathNodeView({ node, updateAttributes, selected, editor, getPos 
           .math-modal-panel math-field.math-modal-field::part(content) {
             color: #0f172a !important;
           }
-          .math-modal-panel math-field.math-modal-field::part(virtual-keyboard-toggle) {
-            color: #475569 !important;
-          }
-          /* Hide the three-dot overflow menu — none of its options are used.
-             Belt-and-suspenders: match by part selector AND directly on the
-             math-field host with the highest-specificity fallback. */
-          math-field::part(menu-toggle),
-          .math-modal-panel math-field::part(menu-toggle),
-          .math-modal-panel math-field.math-modal-field::part(menu-toggle) {
+          /* Hide the virtual keyboard toggle and the three-dot menu — we
+             render our own symbol toolbar above. */
+          .math-modal-panel math-field::part(virtual-keyboard-toggle),
+          .math-modal-panel math-field::part(menu-toggle) {
             display: none !important;
             visibility: hidden !important;
             width: 0 !important;
             height: 0 !important;
             opacity: 0 !important;
             pointer-events: none !important;
-          }
-          .math-modal-keyboard-host {
-            display: block;
-            /* Mathlive's keyboard toolbar (123 / αβγ / abc / … tabs) defaults
-               to dark text (--keyboard-toolbar-text: #2c2e2f), which is
-               invisible against our dark modal keyboard host. Override so
-               inactive tabs are clearly readable and the active one is
-               highlighted. */
-            --keyboard-toolbar-text: #cbd5e1;
-            --keyboard-toolbar-text-active: #ffffff;
-            --keyboard-toolbar-background: transparent;
-            --keyboard-toolbar-background-hover: rgba(148, 163, 184, 0.15);
-            --keyboard-toolbar-background-selected: rgba(251, 191, 36, 0.25);
-          }
-          .math-modal-keyboard-host .action {
-            color: #cbd5e1 !important;
-          }
-          .math-modal-keyboard-host .selected,
-          .math-modal-keyboard-host .action.selected {
-            color: #ffffff !important;
-          }
-          /* Once we adopt Mathlive's .ML__keyboard into our host it is no
-             longer a child of <body>, so its "body > .ML__keyboard { position: fixed }"
-             rule no longer applies and the base rule takes over
-             (position: relative; width: 100%; height: 100%). Below we
-             harden that against any conflicting Mathlive z-index, transform,
-             or transitions so the keyboard flows entirely within our host. */
-          .math-modal-keyboard-host .ML__keyboard {
-            position: relative !important;
-            top: auto !important;
-            left: auto !important;
-            right: auto !important;
-            bottom: auto !important;
-            width: 100% !important;
-            height: 100% !important;
-            max-height: 100% !important;
-            transform: none !important;
-            box-shadow: none !important;
-            border-radius: 0 !important;
-            margin: 0 !important;
-            pointer-events: auto !important;
-            visibility: visible !important;
-            opacity: 1 !important;
-            display: block !important;
-            z-index: auto !important;
-          }
-          .math-modal-keyboard-host .MLK__backdrop {
-            position: absolute !important;
-            inset: 0 !important;
-            transform: none !important;
-            transition: none !important;
-            opacity: 1 !important;
-          }
-          .math-modal-keyboard-host .MLK__plate {
-            position: relative !important;
-            width: 100% !important;
-            height: 100% !important;
-            box-sizing: border-box !important;
-          }
-          /* Give keycaps and rows a compact, responsive rhythm inside the host. */
-          .math-modal-keyboard-host .MLK__keycap {
-            min-width: 0 !important;
-            font-size: clamp(11px, 1.4vh, 14px) !important;
           }
         `}</style>
 
