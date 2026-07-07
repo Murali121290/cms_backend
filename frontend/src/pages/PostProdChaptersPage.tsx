@@ -295,7 +295,7 @@ export function PostProdChaptersPage() {
       <div className="space-y-6 max-w-7xl mx-auto p-6 text-center text-text">
         <XCircle size={48} className="mx-auto text-red-500" />
         <h2 className="text-xl font-bold">Project Not Found</h2>
-        <p className="text-sm text-muted">The requested post production project does not exist.</p>
+        <p className="text-sm text-muted">The requested backlist project does not exist.</p>
         <button onClick={() => navigate('/post-production/word-conversion')} className="text-primary underline text-sm">
           Back to Projects list
         </button>

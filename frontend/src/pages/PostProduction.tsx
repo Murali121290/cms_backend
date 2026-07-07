@@ -5,13 +5,13 @@ import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { POST_PROD_SERVICES } from '@/config/postProdConfig'
 
 export function PostProduction() {
-  useDocumentTitle('Post Production — S4Carlisle CMS')
+  useDocumentTitle('Backlist — S4Carlisle CMS')
   const navigate = useNavigate()
 
   return (
     <div className="space-y-8 max-w-7xl mx-auto p-6 text-text">
       <div>
-        <h1 className="text-3xl font-bold font-serif text-text tracking-tight">Post Production Hub</h1>
+        <h1 className="text-3xl font-bold font-serif text-text tracking-tight">Backlist Hub</h1>
         <p className="text-sm text-muted mt-1">Configurable pre-press and conversion services pipeline</p>
       </div>
 
