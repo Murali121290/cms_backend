@@ -28,3 +28,4 @@ pytz
 debugpy
 latex2mathml
 mathml2omml
+pdf2docx

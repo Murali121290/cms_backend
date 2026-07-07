@@ -786,8 +786,12 @@ async def download_backup_or_folder_file(
             else:
                 raise HTTPException(status_code=404, detail="File not found")
 
+    PREVIEWABLE_EXTS = {'.pdf', '.html', '.htm', '.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp'}
+    ext = os.path.splitext(file_name)[1].lower()
+
     return FileResponse(
         path=file_path,
         filename=file_name,
-        media_type='application/octet-stream'
+        media_type='text/html; charset=utf-8' if ext in ('.html', '.htm') else None,
+        content_disposition_type='inline' if ext in PREVIEWABLE_EXTS else 'attachment',
     )
