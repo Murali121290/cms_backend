@@ -54,6 +54,10 @@ app.include_router(workflow.router, tags=["Workflow"])
 from app.routers import conversion
 app.include_router(conversion.router, prefix=f"{settings.API_V1_STR}", tags=["Conversion"])
 
+# Document Conversion Router
+from app.routers import conversion
+app.include_router(conversion.router, prefix=f"{settings.API_V1_STR}", tags=["Conversion"])
+
 # Post Production Router
 from app.domains.post_prod import api_v1 as post_prod
 app.include_router(post_prod.router, prefix="/api/v2", tags=["Post Production"])

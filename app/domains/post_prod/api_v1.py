@@ -16,6 +16,7 @@ import requests
 from app.core.config import get_settings
 from jose import jwt
 import urllib.parse
+from app.services.scripts.docx_post_processor import post_process_docx
 
 router = APIRouter(prefix="/post-prod", tags=["Post Production"])
 logger = logging.getLogger("app.post_prod")
@@ -128,6 +129,12 @@ def run_conversion_background(chapter_id: int, session_factory):
                 error_msg = f"PDF converter failed: {str(pdf_err)}"
 
         if success:
+            try:
+                logger.info(f"Applying post-processing layout reconstruction to formatted DOCX file: {dest_path}")
+                post_process_docx(dest_path)
+            except Exception as post_err:
+                logger.warning(f"DOCX post-processor failed for {dest_path}: {post_err}")
+                
             chapter.status = "Completed"
             chapter.converted_file_path = dest_path
             chapter.completed_at = datetime.utcnow()
@@ -482,7 +489,6 @@ async def upload_chapter_file(
 @router.post("/chapters/{chapter_id}/convert")
 def convert_chapter(
     chapter_id: int,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(database.get_db),
     user = Depends(get_current_user_from_cookie)
 ):
@@ -494,6 +500,7 @@ def convert_chapter(
     chapter.error_message = None
     db.commit()
     
-    background_tasks.add_task(run_conversion_background, chapter.id, database.SessionLocal)
+    from app.core.worker import run_post_prod_conversion_task
+    run_post_prod_conversion_task.delay(chapter.id)
     return {"message": "Conversion started", "chapter_id": chapter.id}
 

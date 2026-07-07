@@ -36,3 +36,41 @@ def process_document(file_path: str, project_id: int):
         }
     except Exception as e:
         return {"status": "failed", "error": str(e)}
+
+
+@celery_app.task(acks_late=True)
+def run_post_prod_conversion_task(chapter_id: int):
+    """
+    Background task to run post-production InDesign/PDF conversion sequentially
+    using a Redis lock.
+    """
+    import redis
+    import logging
+    from app.core.config import get_settings
+    from app.domains.post_prod.api_v1 import run_conversion_background
+    from app.database import SessionLocal
+
+    logger = logging.getLogger("app.worker.post_prod")
+    settings = get_settings()
+    
+    redis_client = redis.from_url(settings.REDIS_URL)
+    
+    lock = redis_client.lock("indesign_conversion_lock", timeout=1200, blocking_timeout=1200)
+    acquired = lock.acquire()
+    if not acquired:
+        logger.error(f"Failed to acquire conversion lock for chapter {chapter_id}")
+        return {"status": "failed", "error": "Could not acquire conversion lock"}
+        
+    try:
+        logger.info(f"Acquired conversion lock. Starting conversion for chapter {chapter_id}")
+        run_conversion_background(chapter_id, SessionLocal)
+        return {"status": "completed", "chapter_id": chapter_id}
+    except Exception as e:
+        logger.exception(f"Error in Celery conversion task for chapter {chapter_id}")
+        return {"status": "failed", "error": str(e)}
+    finally:
+        try:
+            lock.release()
+            logger.info(f"Released conversion lock for chapter {chapter_id}")
+        except Exception:
+            pass

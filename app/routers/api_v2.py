@@ -1699,7 +1699,7 @@ def api_v2_download_file(
 @router.get("/files/{file_id}/preview")
 def api_v2_file_preview(
     file_id: int,
-    fmt: str = Query("png", regex="^(png|jpg)$"),
+    fmt: str = Query("png", pattern="^(png|jpg)$"),
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -2349,6 +2349,72 @@ def api_v2_upload_chapter_files(
             f"/projects/{project_id}/chapter/{chapter_id}?tab={category}&msg=Files+Uploaded+Successfully"
         ),
     )
+
+
+@router.get("/uploads/{project_id}/chapter/{chapter_name}/backup-list")
+def api_v2_backup_list(
+    project_id: int,
+    chapter_name: str,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+        
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+        
+    chapter_no = chapter_name.split("-")[-1]
+    chapter = db.query(models.ChapterInfo).filter(
+        models.ChapterInfo.project == project.code,
+        (models.ChapterInfo.chapters == chapter_no) | (models.ChapterInfo.chapters == str(int(chapter_no)))
+    ).first()
+    
+    if not chapter:
+        return {"files": []}
+        
+    versions = db.query(models.FileVersion).join(
+        models.File, models.FileVersion.file_id == models.File.id
+    ).filter(
+        models.File.chapter_id == chapter.id
+    ).all()
+    
+    files_list = []
+    for v in versions:
+        size_bytes = 0
+        if v.path and os.path.exists(v.path):
+            size_bytes = os.path.getsize(v.path)
+            
+        file_size = f"{size_bytes} B"
+        if size_bytes > 1024 * 1024:
+            file_size = f"{size_bytes / (1024 * 1024):.1f} MB"
+        elif size_bytes > 1024:
+            file_size = f"{size_bytes / 1024:.1f} KB"
+            
+        uploaded_by_username = "System"
+        if v.uploaded_by:
+            uploaded_by_username = v.uploaded_by.username
+            
+        files_list.append({
+            "file_name": os.path.basename(v.path) if v.path else f"v{v.version_num}",
+            "path": v.path or "",
+            "file_size": file_size,
+            "size_bytes": size_bytes,
+            "uploaded_by": uploaded_by_username,
+            "uploaded_on": v.uploaded_at.isoformat() if v.uploaded_at else "",
+        })
+        
+    return {"files": files_list}
 
 
 @router.get("/uploads/{project_id}/chapter/{chapter_name}/backup-list")
