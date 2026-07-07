@@ -1,0 +1,595 @@
+import React, { useState, useEffect } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
+import { 
+  ArrowLeft, RefreshCw, Download, Layers, XCircle, ChevronDown, ChevronUp, 
+  ExternalLink, FileText, Image, FolderOpen, Info, CheckCircle2, AlertTriangle, 
+  File, X, Loader2 
+} from 'lucide-react'
+import { useDocumentTitle } from '@/hooks/useDocumentTitle'
+
+interface Chapter {
+  id: number
+  chapter_no: string
+  status: string
+  source_filename: string
+  error_message?: string
+  attempts: number
+  completed_at?: string
+}
+
+interface PostProdProject {
+  id: number
+  customer_name: string
+  project_name: string
+  status: string
+  assignee?: string
+  created_at: string
+  chapters: Chapter[]
+}
+
+interface SourceFile {
+  name: string
+  path: string
+  size: number
+}
+
+interface ChapterSourceFiles {
+  indesign: SourceFile[]
+  docx: SourceFile[]
+  images: SourceFile[]
+  misc: SourceFile[]
+}
+
+export function PostProdChaptersPage() {
+  const { projectId } = useParams<{ projectId: string }>()
+  const navigate = useNavigate()
+  const [project, setProject] = useState<PostProdProject | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  // Split-screen state
+  const [selectedChapter, setSelectedChapter] = useState<Chapter | null>(null)
+  const [chapterFiles, setChapterFiles] = useState<ChapterSourceFiles | null>(null)
+  const [loadingFiles, setLoadingFiles] = useState(false)
+  const [activeTab, setActiveTab] = useState<'indesign' | 'docx' | 'images' | 'misc'>('indesign')
+  const [expandedChapterIds, setExpandedChapterIds] = useState<number[]>([])
+  const [selectedChapterIds, setSelectedChapterIds] = useState<number[]>([])
+  const [isBulkConverting, setIsBulkConverting] = useState(false)
+
+  const toggleExpand = (id: number) => {
+    setExpandedChapterIds(prev => 
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    )
+  }
+
+  const toggleSelectChapter = (id: number) => {
+    setSelectedChapterIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    )
+  }
+
+  const toggleSelectAll = () => {
+    if (!project) return
+    const allIds = project.chapters.map(c => c.id)
+    if (selectedChapterIds.length === allIds.length) {
+      setSelectedChapterIds([])
+    } else {
+      setSelectedChapterIds(allIds)
+    }
+  }
+
+  const handleBulkConvert = async () => {
+    if (selectedChapterIds.length === 0) return
+    setIsBulkConverting(true)
+    try {
+      await Promise.all(
+        selectedChapterIds.map(id =>
+          fetch(`/api/v2/post-prod/chapters/${id}/convert`, {
+            method: 'POST'
+          })
+        )
+      )
+      setSelectedChapterIds([])
+      fetchProjectDetails()
+    } catch (err) {
+      console.error(err)
+      alert('Failed to start bulk conversion.')
+    } finally {
+      setIsBulkConverting(false)
+    }
+  }
+
+  useDocumentTitle(project ? `${project.project_name} — Word Chapters` : 'Loading Chapters — S4Carlisle CMS')
+
+  const fetchProjectDetails = async () => {
+    try {
+      const res = await fetch(`/api/v2/post-prod/projects/${projectId}`)
+      if (res.ok) {
+        const data = await res.json()
+        if (data.chapters) {
+          data.chapters.sort((a: Chapter, b: Chapter) => {
+            const numA = parseInt(a.chapter_no, 10);
+            const numB = parseInt(b.chapter_no, 10);
+            if (!isNaN(numA) && !isNaN(numB)) {
+              return numA - numB;
+            }
+            return a.chapter_no.localeCompare(b.chapter_no, undefined, { numeric: true, sensitivity: 'base' });
+          });
+        }
+        setProject(data)
+        
+        // Auto-update selected chapter if it exists
+        if (selectedChapter) {
+          const updated = data.chapters.find((c: Chapter) => c.id === selectedChapter.id)
+          if (updated) {
+            setSelectedChapter(updated)
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch project details', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchProjectDetails()
+    const timer = setInterval(() => {
+      fetchProjectDetails()
+    }, 5000)
+    return () => clearInterval(timer)
+  }, [projectId, selectedChapter?.id])
+
+  // Fetch files when selected chapter changes
+  useEffect(() => {
+    if (!selectedChapter) {
+      setChapterFiles(null)
+      return
+    }
+
+    const fetchFiles = async () => {
+      setLoadingFiles(true)
+      try {
+        const res = await fetch(`/api/v2/post-prod/chapters/${selectedChapter.id}/source-files`)
+        if (res.ok) {
+          const data = await res.json()
+          setChapterFiles(data)
+        }
+      } catch (e) {
+        console.error(e)
+      } finally {
+        setLoadingFiles(false)
+      }
+    }
+
+    fetchFiles()
+  }, [selectedChapter?.id])
+
+  const handleDownloadChapter = async (chapter: Chapter) => {
+    try {
+      const res = await fetch(`/api/v2/post-prod/chapters/${chapter.id}/download`)
+      if (!res.ok) {
+        throw new Error('Download failed')
+      }
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `converted_${chapter.source_filename.replace(/\.[^/.]+$/, '')}.docx`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error(err)
+      alert('Failed to download the converted file.')
+    }
+  }
+
+  const handleConvertChapter = async (chapter: Chapter) => {
+    try {
+      const res = await fetch(`/api/v2/post-prod/chapters/${chapter.id}/convert`, {
+        method: 'POST'
+      })
+      if (!res.ok) {
+        throw new Error('Convert failed')
+      }
+      fetchProjectDetails()
+    } catch (err) {
+      console.error(err)
+      alert('Failed to start conversion.')
+    }
+  }
+
+  const handleDownloadSourceFile = async (filePath: string, fileName: string) => {
+    if (!selectedChapter) return
+    try {
+      const res = await fetch(
+        `/api/v2/post-prod/chapters/${selectedChapter.id}/download-source?path=${encodeURIComponent(filePath)}`
+      )
+      if (!res.ok) {
+        throw new Error('File download failed')
+      }
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = fileName
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error(err)
+      alert('Failed to download file.')
+    }
+  }
+
+  const formatBytes = (bytes: number, decimals = 2) => {
+    if (bytes === 0) return '0 Bytes'
+    const k = 1024
+    const dm = decimals < 0 ? 0 : decimals
+    const sizes = ['Bytes', 'KB', 'MB', 'GB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i]
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px] text-muted">
+        <RefreshCw size={24} className="animate-spin mr-2" />
+        <span>Loading project details...</span>
+      </div>
+    )
+  }
+
+  if (!project) {
+    return (
+      <div className="space-y-6 max-w-7xl mx-auto p-6 text-center text-text">
+        <XCircle size={48} className="mx-auto text-red-500" />
+        <h2 className="text-xl font-bold">Project Not Found</h2>
+        <p className="text-sm text-muted">The requested post production project does not exist.</p>
+        <button onClick={() => navigate('/post-production/word-conversion')} className="text-primary underline text-sm">
+          Back to Projects list
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="h-[calc(100vh-110px)] flex flex-col max-w-7xl mx-auto p-6 text-text overflow-hidden">
+      {/* Header / Breadcrumb */}
+      <div className="flex items-center justify-between gap-4 shrink-0 mb-5 border-b border-border pb-3.5">
+        <div className="flex items-center flex-wrap gap-x-4 gap-y-2 text-sm">
+          <button 
+            onClick={() => navigate('/post-production/word-conversion')}
+            className="flex items-center gap-1.5 text-xs bg-card hover:bg-accent text-text px-2.5 py-1.5 rounded-lg border border-border transition-colors font-semibold"
+          >
+            <ArrowLeft size={13} /> Back to Projects
+          </button>
+          
+          <div className="h-4 w-px bg-border hidden sm:block" />
+
+          <h1 className="text-base font-bold font-serif text-text tracking-tight">
+            {project.project_name}
+          </h1>
+
+          <div className="h-4 w-px bg-border hidden md:block" />
+
+          <div className="flex items-center gap-2 text-[11px] text-muted flex-wrap">
+            <span className="bg-card border border-border/80 px-2 py-0.5 rounded-md">
+              Customer: <strong className="text-text font-semibold">{project.customer_name}</strong>
+            </span>
+            <span className="bg-card border border-border/80 px-2 py-0.5 rounded-md">
+              Assignee: <strong className="text-text font-semibold">{project.assignee || 'Unassigned'}</strong>
+            </span>
+            <span className="bg-card border border-border/80 px-2 py-0.5 rounded-md">
+              Status: <strong className="text-text font-semibold">{project.status}</strong>
+            </span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <button 
+            onClick={() => fetchProjectDetails()}
+            className="p-1.5 bg-card border border-border hover:bg-accent rounded-lg text-muted hover:text-text transition-colors"
+            title="Refresh details"
+          >
+            <RefreshCw size={13} />
+          </button>
+        </div>
+      </div>
+
+      {/* Chapters Split View */}
+      <div className="flex flex-col lg:flex-row gap-6 items-stretch flex-1 min-h-0 overflow-hidden">
+        
+        {/* Left Side: Chapters List */}
+        <div className={`transition-all duration-300 flex flex-col h-full overflow-hidden ${selectedChapter ? 'w-full lg:w-[45%]' : 'w-full'}`}>
+          <div className="bg-card border border-border rounded-2xl p-5 shadow-sm flex flex-col h-full overflow-hidden">
+            <div className="flex items-center justify-between mb-4 shrink-0">
+              <h2 className="text-lg font-bold font-serif flex items-center gap-2">
+                <Layers size={18} className="text-muted" /> Chapters List
+              </h2>
+              {selectedChapterIds.length > 0 && (
+                <button
+                  onClick={handleBulkConvert}
+                  disabled={isBulkConverting}
+                  className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 disabled:bg-amber-500/50 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all"
+                >
+                  {isBulkConverting ? (
+                    <>
+                      <Loader2 size={13} className="animate-spin" />
+                      Converting...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw size={13} />
+                      Convert Selected ({selectedChapterIds.length})
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+            
+            {project.chapters.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 text-muted flex-1">
+                <Layers size={48} className="mb-4 text-muted/50" />
+                <p className="text-sm font-medium">No chapters detected</p>
+              </div>
+            ) : (
+              <div className="border border-border rounded-xl overflow-y-auto bg-surface/50 flex-1 min-h-0">
+                <table className="w-full text-left text-sm border-collapse">
+                  <thead className="sticky top-0 bg-card z-10">
+                    <tr className="border-b border-border text-muted font-medium text-xs uppercase tracking-wider">
+                      <th className="p-3.5 bg-card w-10">
+                        <input
+                          type="checkbox"
+                          checked={project.chapters.length > 0 && selectedChapterIds.length === project.chapters.length}
+                          onChange={toggleSelectAll}
+                          className="rounded border-border text-primary focus:ring-primary cursor-pointer w-4 h-4"
+                        />
+                      </th>
+                      <th className="p-3.5 bg-card">Chapter</th>
+                      {!selectedChapter && <th className="p-3.5 bg-card">Filename</th>}
+                      <th className="p-3.5 bg-card">Status</th>
+                      <th className="p-3.5 bg-card text-center">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {project.chapters.map((chap) => {
+                      const isSelected = selectedChapter?.id === chap.id
+                      const isFailed = chap.status === 'Failed'
+                      const isExpanded = expandedChapterIds.includes(chap.id)
+                      
+                      let statusCls = 'bg-accent border-border text-muted'
+                      if (chap.status === 'Completed') {
+                        statusCls = 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                      } else if (chap.status === 'Converting') {
+                        statusCls = 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400'
+                      } else if (chap.status === 'Failed') {
+                        statusCls = 'bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400'
+                      } else if (chap.status === 'YTS') {
+                        statusCls = 'bg-slate-500/10 border-slate-500/20 text-slate-600 dark:text-slate-400 font-semibold'
+                      } else if (chap.status === 'Pending') {
+                        statusCls = 'bg-blue-500/10 border-blue-500/20 text-blue-600 dark:text-blue-400 font-semibold'
+                      }
+
+                      return (
+                        <React.Fragment key={chap.id}>
+                          <tr 
+                            onClick={() => setSelectedChapter(chap)}
+                            className={`cursor-pointer transition-all hover:bg-accent/40 ${
+                              isSelected ? 'bg-primary/5 border-l-4 border-l-primary font-semibold' : ''
+                            }`}
+                          >
+                            <td className="p-3.5 w-10 text-center" onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="checkbox"
+                                checked={selectedChapterIds.includes(chap.id)}
+                                onChange={() => toggleSelectChapter(chap.id)}
+                                className="rounded border-border text-primary focus:ring-primary cursor-pointer w-4 h-4"
+                              />
+                            </td>
+                            <td className="p-3.5 font-medium text-text">
+                              Chapter {chap.chapter_no}
+                            </td>
+                            {!selectedChapter && (
+                              <td className="p-3.5 text-text font-normal truncate max-w-[200px]" title={chap.source_filename}>
+                                {chap.source_filename}
+                              </td>
+                            )}
+                            <td className="p-3.5">
+                              <span 
+                                onClick={(e) => {
+                                  if (isFailed) {
+                                    e.stopPropagation();
+                                    toggleExpand(chap.id);
+                                  }
+                                }}
+                                className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border ${statusCls} ${
+                                  isFailed ? 'cursor-pointer hover:opacity-85 select-none' : ''
+                                }`}
+                                title={isFailed ? (isExpanded ? "Hide conversion logs" : "Click to view conversion logs") : undefined}
+                              >
+                                {chap.status}
+                                {isFailed && (
+                                  <span className="ml-1 inline-block text-[8px] align-middle opacity-80">
+                                    {isExpanded ? '▲' : '▼'}
+                                  </span>
+                                )}
+                              </span>
+                            </td>
+                            <td className="p-3.5 text-center" onClick={(e) => e.stopPropagation()}>
+                              <div className="flex justify-center gap-1.5">
+                                {chap.status === 'Converting' ? (
+                                  <button
+                                    disabled
+                                    className="px-2 py-1 bg-amber-500/20 text-amber-600 rounded-lg text-xs font-semibold inline-flex items-center gap-1 cursor-not-allowed"
+                                  >
+                                    <Loader2 size={13} className="animate-spin" />
+                                    {!selectedChapter && <span className="ml-1">Converting...</span>}
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => handleConvertChapter(chap)}
+                                    className="px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-all text-xs font-semibold inline-flex items-center gap-1 shadow-sm"
+                                    title="Convert to Word"
+                                  >
+                                    <RefreshCw size={13} />
+                                    {!selectedChapter && (
+                                      <span className="ml-1">
+                                        {chap.status === 'Completed' ? 'Reconvert' : 'Convert'}
+                                      </span>
+                                    )}
+                                  </button>
+                                )}
+                                
+                                {chap.status === 'Completed' && (
+                                  <button
+                                    onClick={() => handleDownloadChapter(chap)}
+                                    className="px-2 py-1 bg-primary text-primary-foreground rounded-lg hover:bg-primary/95 transition-all text-xs font-semibold inline-flex items-center gap-1 shadow-sm"
+                                    title="Download Word File"
+                                  >
+                                    <Download size={13} />
+                                    {!selectedChapter && <span className="ml-1">Download</span>}
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                          {isFailed && isExpanded && (
+                            <tr className="bg-red-500/[0.01]">
+                              <td colSpan={selectedChapter ? 4 : 5} className="p-3 pt-0 pb-3.5">
+                                <div className="text-xs text-red-500 bg-red-500/5 border border-red-500/10 rounded-xl p-3 font-mono overflow-x-auto max-h-[120px] overflow-y-auto">
+                                  <strong className="block text-[10px] uppercase font-sans tracking-wide mb-1 text-red-600 dark:text-red-400">
+                                    Conversion Failure Logs:
+                                  </strong>
+                                  {chap.error_message || 'No error logs provided.'}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right Side: Chapter Assets Explorer */}
+        {selectedChapter && (
+          <div className="w-full lg:w-[55%] bg-card border border-border rounded-2xl p-6 shadow-sm h-full flex flex-col justify-between overflow-hidden transition-all duration-300 animate-in fade-in slide-in-from-right-4">
+            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+              {/* Close / Header */}
+              <div className="flex items-center justify-between pb-4 border-b border-border mb-4 shrink-0">
+                <div>
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-muted">Selected Assets</span>
+                  <h3 className="text-xl font-bold font-serif text-text">Chapter {selectedChapter.chapter_no}</h3>
+                </div>
+                <button 
+                  onClick={() => setSelectedChapter(null)}
+                  className="p-1.5 hover:bg-accent rounded-lg text-muted hover:text-text transition-colors"
+                  title="Close details"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+
+              {/* File Explorer Tabs */}
+              <div className="flex border-b border-border mb-3 overflow-x-auto whitespace-nowrap scrollbar-none shrink-0">
+                {(['indesign', 'docx', 'images', 'misc'] as const).map((tab) => {
+                  let label = 'Files'
+                  if (tab === 'indesign') label = 'InDesign'
+                  else if (tab === 'docx') label = 'Word (.docx)'
+                  else if (tab === 'images') label = 'Images'
+                  else if (tab === 'misc') label = 'Fonts & Misc'
+
+                  const count = chapterFiles ? chapterFiles[tab]?.length || 0 : 0
+
+                  return (
+                    <button
+                      key={tab}
+                      onClick={() => setActiveTab(tab)}
+                      className={`px-4 py-2.5 text-xs font-semibold border-b-2 transition-all -mb-px flex items-center gap-1.5 ${
+                        activeTab === tab 
+                          ? 'border-primary text-primary font-bold' 
+                          : 'border-transparent text-muted hover:text-text'
+                      }`}
+                    >
+                      {label}
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                        activeTab === tab ? 'bg-primary/10 text-primary' : 'bg-accent text-muted'
+                      }`}>
+                        {count}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* Files List */}
+              <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+                {loadingFiles ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-muted">
+                    <Loader2 size={24} className="animate-spin mb-2" />
+                    <span className="text-xs">Loading chapter files...</span>
+                  </div>
+                ) : !chapterFiles || !chapterFiles[activeTab] || chapterFiles[activeTab].length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-16 text-muted border border-dashed border-border rounded-xl">
+                    <FolderOpen size={36} className="mb-2 text-muted/40" />
+                    <span className="text-xs font-medium">No files found in this category</span>
+                  </div>
+                ) : (
+                  <div className="border border-border rounded-xl overflow-hidden divide-y divide-border bg-surface/30">
+                    {chapterFiles[activeTab].map((file, idx) => {
+                      let FileIcon = File
+                      if (activeTab === 'docx') FileIcon = FileText
+                      else if (activeTab === 'images') FileIcon = Image
+                      else if (activeTab === 'indesign') FileIcon = Layers
+
+                      return (
+                        <div key={idx} className="p-3 flex items-center justify-between gap-4 hover:bg-accent/30 transition-colors">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="p-2 bg-card border border-border rounded-lg text-muted">
+                              <FileIcon size={16} />
+                            </div>
+                            <div className="min-w-0">
+                              <span className="text-sm font-medium text-text block truncate" title={file.name}>
+                                {file.name}
+                              </span>
+                              {file.path !== '__converted__' && (
+                                <span className="text-[10px] text-muted block truncate max-w-[280px]">
+                                  {file.path}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-3 shrink-0">
+                            <span className="text-xs text-muted">{formatBytes(file.size)}</span>
+                            <button
+                              onClick={() => handleDownloadSourceFile(file.path, file.name)}
+                              className="p-1.5 bg-card border border-border text-muted hover:text-text rounded-lg hover:bg-accent transition-all shadow-sm"
+                              title="Download Asset"
+                            >
+                              <Download size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

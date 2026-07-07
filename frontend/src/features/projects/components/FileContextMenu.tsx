@@ -641,6 +641,7 @@ export function FileContextMenu({
             <MenuWordItem fileId={file.id} onClose={onClose} />
             {filenameLower.endsWith(".indd") && (
               <MenuIndesignToWordItem fileId={file.id} onClose={onClose} />
+            )}
             {isImage ? (
               // Image files can't be opened in the DOCX/OnlyOffice/Word editors —
               // route Art-team edits through the dedicated Image Review page.
