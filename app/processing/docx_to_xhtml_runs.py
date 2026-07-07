@@ -19,6 +19,7 @@ from lxml import etree
 
 from app.processing.omml_to_mathml import convert_omml_element
 from app.processing.omml_to_latex import convert_omml_to_latex
+from app.processing.omml_wrapper_format import detect_wrapper_formatting
 
 logger = logging.getLogger("app.processing.docx_to_xhtml_runs")
 
@@ -68,12 +69,34 @@ def _omml_element_to_math_span(omml_el, display: str = "inline") -> str:
     omml_attr = html.escape(omml_b64, quote=True)
     latex_attr = html.escape(latex_str, quote=True)
 
+    # Detect wrapper formatting so that when the user opens an existing
+    # formatted equation, the outer toolbar's Bold/Italic/Color/etc. reflect
+    # the current state and re-saving doesn't strip it.
+    wrapper_attrs_html = ""
+    try:
+        wf = detect_wrapper_formatting(omml_el)
+        if wf["bold"]:
+            wrapper_attrs_html += ' data-wrapper-bold="true"'
+        if wf["italic"]:
+            wrapper_attrs_html += ' data-wrapper-italic="true"'
+        if wf["color"]:
+            wrapper_attrs_html += f' data-wrapper-color="#{html.escape(wf["color"], quote=True)}"'
+        if wf["bg_color"]:
+            wrapper_attrs_html += f' data-wrapper-bg="#{html.escape(wf["bg_color"], quote=True)}"'
+        if wf["size_pt"]:
+            wrapper_attrs_html += f' data-wrapper-size="{html.escape(wf["size_pt"], quote=True)}"'
+        if wf["font_family"]:
+            wrapper_attrs_html += f' data-wrapper-font="{html.escape(wf["font_family"], quote=True)}"'
+    except Exception as e:
+        logger.warning(f"Wrapper formatting detection failed: {e}")
+
     return (
         f'<span class="math-node" '
         f'data-latex="{latex_attr}" '
         f'data-mathml="{mathml_attr}" '
         f'data-omml="{omml_attr}" '
-        f'data-display="{display}">'
+        f'data-display="{display}"'
+        f'{wrapper_attrs_html}>'
         f"{mathml_str}"
         f"</span>"
     )

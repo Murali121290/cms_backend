@@ -951,6 +951,7 @@ class XhtmlToDocxDeltaEngine:
 
             if tag == 'math' or el.get("data-latex") or el.get("data-mathml") or el.get("data-omml"):
                 omml_appended = False
+                appended_omml_el = None  # so we can post-process wrapper formatting
 
                 # Priority 1 — raw OMML round-trip. When the editor round-tripped
                 # an unedited equation, data-omml carries the original DOCX bytes
@@ -963,6 +964,7 @@ class XhtmlToDocxDeltaEngine:
                         raw_xml = _b64.b64decode(raw_omml_b64)
                         omml_el = etree.fromstring(raw_xml)
                         current_xml_parent.append(omml_el)
+                        appended_omml_el = omml_el
                         omml_appended = True
                     except Exception as raw_err:
                         logger.warning(f"Raw OMML round-trip failed, falling back to MathML: {raw_err}")
@@ -1019,6 +1021,7 @@ class XhtmlToDocxDeltaEngine:
 
                             omml_el = etree.fromstring(omml_str)
                             current_xml_parent.append(omml_el)
+                            appended_omml_el = omml_el
                             omml_appended = True
                             break
                         except Exception as conv_err:
@@ -1038,6 +1041,22 @@ class XhtmlToDocxDeltaEngine:
                                 superscript=current_super, subscript=current_sub, is_link=current_link,
                                 is_del=current_is_del, char_style=node_char_style
                             )
+
+                # Post-process: apply wrapper formatting (Phase 2) to every
+                # <m:r> inside the just-appended OMML. Injects a <m:rPr>
+                # containing <w:rPr> with bold/italic/color/size/font — the
+                # exact shape Word uses natively for styled math runs.
+                if omml_appended and appended_omml_el is not None:
+                    from app.processing.omml_wrapper_format import apply_wrapper_formatting
+                    apply_wrapper_formatting(
+                        appended_omml_el,
+                        bold=el.get("data-wrapper-bold") == "true",
+                        italic=el.get("data-wrapper-italic") == "true",
+                        color=(el.get("data-wrapper-color") or "").lstrip("#"),
+                        bg_color=(el.get("data-wrapper-bg") or "").lstrip("#"),
+                        size_pt=el.get("data-wrapper-size") or "",
+                        font_family=el.get("data-wrapper-font") or "",
+                    )
 
                 if el.tail:
                     add_rich_run(
