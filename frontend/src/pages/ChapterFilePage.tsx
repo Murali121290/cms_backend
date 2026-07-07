@@ -25,8 +25,8 @@ import {
   MoreVertical, Play, ScanLine, Search, ShieldCheck, Sparkles, Trash2,
   Upload, Wrench, X, Zap, CheckCircle2, Archive,
 } from 'lucide-react'
-import { FOLDER_CONFIG, COLUMN_DEFINITIONS, getProcessingActions, fileTypeIcon } from '@/config/fileManagerConfig'
-import type { FolderKey, ColumnKey } from '@/config/fileManagerConfig'
+import { FOLDER_CONFIG, COLUMN_DEFINITIONS, getProcessingActions, fileTypeIcon, isProcessingActionVisibleForStage } from '@/config/fileManagerConfig'
+import type { FolderKey, ColumnKey, ProcessingActionKey } from '@/config/fileManagerConfig'
 import { BulkUploadModal } from '@/components/BulkUploadModal'
 import { FileDetailPanel } from '@/features/projects/components/FileDetailPanel'
 import { ReferenceCheckModal } from '@/features/projects/components/ReferenceCheckModal'
@@ -326,7 +326,6 @@ function FileActionsMenu({
                       <ArrowDownToLine size={12} className="text-muted" /> Download
                     </a>
                   </DropdownMenu.Item>
-                  {hasReview && (
                   {fid && fname.toLowerCase().endsWith('.indd') && (
                     <DropdownMenu.Item
                       className={itemCls}
@@ -664,10 +663,6 @@ export function ChapterFilePage({
 
   // Open docx viewer (full-screen viewer page)
   function openEditor(row: FileRow) {
-    const base = cliId
-      ? `/clients/${cliId}/projects/${pid}/chapters/${cid}`
-      : `/projects/${pid}/chapters/${cid}`
-    navigate(`${base}/view/${encodeURIComponent(row.subfolder)}/${encodeURIComponent(row.file_name)}`)
     if (row.db_id && /\.(jpe?g|png|gif|webp|tiff?|bmp|eps)$/i.test(row.file_name)) {
       navigate(`/projects/${pid}/image-review?fileId=${row.db_id}`)
       return
@@ -811,7 +806,7 @@ export function ChapterFilePage({
                 type="button"
                 onClick={e => {
                   e.stopPropagation()
-                  navigate(`${uiPaths.structuringReview(pid, cid, fid)}?tab=editor`)
+                  navigate(openTarget)
                 }}
                 title={name}
                 className="font-medium text-text truncate max-w-[2000px] text-left hover:text-primary hover:underline cursor-pointer"
