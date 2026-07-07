@@ -182,6 +182,7 @@ function FileActionsMenu({
   const fname = row.file_name.toLowerCase()
   const hasReview = fname.endsWith('_processed.docx') || fname.endsWith('_structured.docx')
   const isImage = /\.(jpe?g|png|gif|webp|tiff?|bmp|eps)$/i.test(fname)
+  const isDocx = fname.endsWith('.docx') || fname.endsWith('.doc')
 
   // Gate stage-specific processing actions to the stage they actually belong to.
   // The stage-to-action mapping lives in fileManagerConfig.ts (PROCESSING_ACTION_STAGE_MAP) —
@@ -295,14 +296,15 @@ function FileActionsMenu({
               {/* ── Group 1: Open / Edit ─────────────────────────── */}
               {fid ? (
                 <>
-                  {isImage ? (
+                  {isImage && (
                     // Images route through the dedicated Image Review workspace;
                     // the DOCX editors would fail on them (see structuring
                     // engine "Package not found at *.jpeg" errors).
                     <DropdownMenu.Item className={itemCls} onSelect={() => navigate(`/projects/${projectId}/image-review?fileId=${fid}`)}>
                       <FilePen size={12} className="text-muted" /> Open in Image Editor
                     </DropdownMenu.Item>
-                  ) : (
+                  )}
+                  {isDocx && (
                     <>
                       <DropdownMenu.Item className={itemCls} onSelect={() => navigate(`${uiPaths.structuringReview(projectId, chapterId, fid)}?tab=editor`)}>
                         <FilePen size={12} className="text-muted" /> Edit in Editor
@@ -325,6 +327,56 @@ function FileActionsMenu({
                       <ArrowDownToLine size={12} className="text-muted" /> Download
                     </a>
                   </DropdownMenu.Item>
+                  {fid && fname.toLowerCase().endsWith('.indd') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={async () => {
+                        const confirmConversion = window.confirm("Are you sure you want to convert this InDesign file to Word?");
+                        if (!confirmConversion) return;
+                        try {
+                          const res = await fetch(`/api/v1/conversion/indesign-to-word/${fid}`, {
+                            method: "POST",
+                          });
+                          const data = await res.json();
+                          if (res.ok) {
+                            alert(data.message || "Successfully converted InDesign file to Word!");
+                            window.location.reload();
+                          } else {
+                            alert(`Error: ${data.detail || "Failed to convert file"}`);
+                          }
+                        } catch (e: any) {
+                          alert(`Error connecting to server: ${e.message}`);
+                        }
+                      }}
+                    >
+                      <FileOutput size={12} className="text-amber-500" /> InDesign to Word
+                    </DropdownMenu.Item>
+                  )}
+                  {fid && fname.toLowerCase().endsWith('.pdf') && (
+                    <DropdownMenu.Item
+                      className={itemCls}
+                      onSelect={async () => {
+                        const confirmConversion = window.confirm("Are you sure you want to convert this PDF file to Word?");
+                        if (!confirmConversion) return;
+                        try {
+                          const res = await fetch(`/api/v1/conversion/pdf-to-word/${fid}`, {
+                            method: "POST",
+                          });
+                          const data = await res.json();
+                          if (res.ok) {
+                            alert(data.message || "Successfully converted PDF file to Word!");
+                            window.location.reload();
+                          } else {
+                            alert(`Error: ${data.detail || "Failed to convert file"}`);
+                          }
+                        } catch (e: any) {
+                          alert(`Error connecting to server: ${e.message}`);
+                        }
+                      }}
+                    >
+                      <FileOutput size={12} className="text-amber-500" /> PDF to Word
+                    </DropdownMenu.Item>
+                  )}
                   {fid && fname.toLowerCase().endsWith('.indd') && (
                     <DropdownMenu.Item
                       className={itemCls}

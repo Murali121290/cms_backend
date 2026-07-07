@@ -87,6 +87,8 @@ services:
       redis:
         condition: service_healthy
     restart: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   # ── Celery Worker ─────────────────────────────────────────────────────────
   celery_worker:
@@ -105,7 +107,7 @@ services:
     environment:
       REDIS_URL: redis://redis:6379/0
       RUN_MIGRATIONS: "false"
-    command: celery -A app.core.celery_app worker --loglevel=info --concurrency=4
+    command: celery -A app.core.celery_app worker --loglevel=info --concurrency=4 -Q main-queue
     depends_on:
       db:
         condition: service_healthy
@@ -114,6 +116,8 @@ services:
     healthcheck:
       disable: true
     restart: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   # ── Collabora Online (LibreOffice) ────────────────────────────────────────
   # HOST_DOMAIN and HOST_PORT are read from .env.

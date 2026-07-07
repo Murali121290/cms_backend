@@ -42,6 +42,18 @@ export function ChapterEditorPage() {
       .finally(() => setLoading(false))
   }, [chapterId, projectId])
 
+  useEffect(() => {
+    const scriptId = 'pdfjs-viewer-element-script';
+    let script = document.getElementById(scriptId) as HTMLScriptElement | null;
+    if (!script) {
+      script = document.createElement('script');
+      script.id = scriptId;
+      script.type = 'module';
+      script.src = 'https://cdn.jsdelivr.net/npm/pdfjs-viewer-element/dist/pdfjs-viewer-element.js';
+      document.body.appendChild(script);
+    }
+  }, [])
+
   const decodedFilename  = filename  ? decodeURIComponent(filename)  : ''
   const decodedSubfolder = subfolder ? decodeURIComponent(subfolder) : ''
   const ext = decodedFilename.split('.').pop()?.toLowerCase() ?? ''
@@ -113,10 +125,16 @@ export function ChapterEditorPage() {
             </div>
           </div>
         ) : ext === 'pdf' ? (
+          // @ts-ignore
+          <pdfjs-viewer-element
+            src={fileUrl}
+            style={{ width: '100%', height: '100%', display: 'block', border: '0' }}
+          />
+        ) : (ext === 'html' || ext === 'htm') ? (
           <iframe
-            src={`${fileUrl}#toolbar=0&navpanes=0&scrollbar=1&pagemode=none&view=FitH`}
+            src={fileUrl}
             title={decodedFilename}
-            className="w-full h-full border-0"
+            className="w-full h-full border-0 bg-white"
           />
         ) : (ext === 'docx' || ext === 'doc') ? (
           <DocxViewer src={fileUrl} editable={isEditable} className="h-full"/>
