@@ -278,23 +278,6 @@ function FileActionsMenu({
               {/* ── Group 1: Open / Edit ─────────────────────────── */}
               {fid ? (
                 <>
-                  {/* <DropdownMenu.Item className={itemCls} onSelect={() => navigate(uiPaths.fileEditor(projectId, chapterId, fid))}>
-                    <FilePen size={12} className="text-muted"/> Edit in Browser (Collabora)
-                  </DropdownMenu.Item> */}
-                  <DropdownMenu.Item className={itemCls} onSelect={() => navigate(`${uiPaths.structuringReview(projectId, chapterId, fid)}?tab=editor`)}>
-                    <FilePen size={12} className="text-muted" /> Edit in Editor
-                  </DropdownMenu.Item>
-                  <DropdownMenu.Item className={itemCls} onSelect={() => navigate(`${uiPaths.structuringReview(projectId, chapterId, fid)}?tab=onlyoffice`)}>
-                    <FilePen size={12} className="text-muted" /> Edit in Office
-                  </DropdownMenu.Item>
-                  <DropdownMenu.Item className={itemCls} onSelect={() => {
-                    fetch(`/api/v2/files/${fid}/open-in-word`)
-                      .then(r => r.json())
-                      .then(d => { if (d?.ms_word_uri) window.location.href = d.ms_word_uri; })
-                      .catch(() => { });
-                  }}>
-                    <ExternalLink size={12} className="text-muted" /> Open in MSWord
-                  </DropdownMenu.Item>
                   {isImage && (
                     // Images route through the dedicated Image Review workspace;
                     // the DOCX editors would fail on them (see structuring
@@ -312,7 +295,7 @@ function FileActionsMenu({
                         <FilePen size={12} className="text-muted" /> Edit in Office
                       </DropdownMenu.Item>
                       <DropdownMenu.Item className={itemCls} onSelect={() => void openInWordWithFallback(fid, row.file_name)}>
-                        <ExternalLink size={12} className="text-muted" /> Open in MSWord
+                        <ExternalLink size={12} className="text-muted" /> Edit in MSWord
                       </DropdownMenu.Item>
                     </>
                   )}
