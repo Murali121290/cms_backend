@@ -755,6 +755,85 @@ def api_v2_chapter_files(
     )
 
 
+@router.get("/projects/{project_id}/images")
+def api_v2_project_images(
+    project_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Return every image file in the project across all chapters.
+
+    Powers the dedicated Image Editor page's thumbnail rail. Detects images by
+    extension rather than by category so that image assets uploaded outside the
+    "Art" category are also picked up.
+    """
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+
+    image_exts = {"jpg", "jpeg", "png", "gif", "webp", "tif", "tiff", "bmp", "eps"}
+    files = (
+        db.query(models.File)
+        .filter(models.File.project_id == project_id)
+        .order_by(models.File.chapter_id.asc(), models.File.filename.asc())
+        .all()
+    )
+
+    chapter_lookup = {
+        ch.id: ch
+        for ch in db.query(models.Chapter).filter(models.Chapter.project_id == project_id).all()
+    }
+
+    images = []
+    for f in files:
+        ext = (f.filename.rsplit(".", 1)[-1] if "." in f.filename else "").lower()
+        if ext not in image_exts:
+            continue
+        # Skip records whose underlying file is gone — the /preview endpoint
+        # would 404 and the UI would render "Failed to load preview" for them.
+        # Better to omit orphans from the list entirely so users only see
+        # openable images.
+        if not (f.path and os.path.exists(f.path)):
+            logger.warning(f"Skipping image file {f.id} ({f.filename!r}) — path missing on disk: {f.path!r}")
+            continue
+        needs_transcoding = image_preview_service.source_needs_transcoding(f.filename)
+        ch = chapter_lookup.get(f.chapter_id)
+        images.append(
+            {
+                "id": f.id,
+                "project_id": f.project_id,
+                "chapter_id": f.chapter_id,
+                "chapter_number": getattr(ch, "number", None) if ch else None,
+                "chapter_title": getattr(ch, "title", None) if ch else None,
+                "filename": f.filename,
+                "file_type": f.file_type,
+                "category": f.category,
+                "version": f.version,
+                "uploaded_at": f.uploaded_at.isoformat() if f.uploaded_at else None,
+                "download_url": f"/api/v2/files/{f.id}/download",
+                "preview_url": f"/api/v2/files/{f.id}/preview?fmt=png",
+                "needs_transcoding": needs_transcoding,
+            }
+        )
+
+    return {
+        "project": _serialize_project_summary(project),
+        "images": images,
+    }
+
+
 @router.get("/notifications", response_model=schemas_v2.NotificationsResponse)
 def api_v2_notifications(
     limit: int = Query(5, ge=1),

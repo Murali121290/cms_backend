@@ -372,6 +372,107 @@ export function ImageReviewPage() {
 
   // ── Crop overlay drag ────────────────────────────────────────────────────
   const imgRef = useRef<HTMLImageElement>(null);
+
+  // Preview loading — fetch the URL ourselves so we can surface the actual
+  // failure reason (401 / 403 / 404 / network / decode) instead of the
+  // <img>'s opaque onError. On success we hand a blob URL to the <img> so
+  // the editor initialises on a fully-decoded local resource.
+  type PreviewState =
+    | { kind: "idle" }
+    | { kind: "loading" }
+    | { kind: "ready"; url: string }
+    | { kind: "error"; message: string };
+  const [preview, setPreview] = useState<PreviewState>({ kind: "idle" });
+  useEffect(() => {
+    if (!selected) {
+      setPreview({ kind: "idle" });
+      return;
+    }
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    const controller = new AbortController();
+    setPreview({ kind: "loading" });
+
+    (async () => {
+      const url = selected.preview_url;
+      let res: Response;
+      try {
+        res = await fetch(url, {
+          credentials: "include",
+          signal: controller.signal,
+        });
+      } catch (err) {
+        if (cancelled) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[ImageReview] preview fetch network error", { url, err });
+        setPreview({ kind: "error", message: `Network error loading preview: ${msg}` });
+        return;
+      }
+
+      if (!res.ok) {
+        let detail = "";
+        try {
+          const body = await res.clone().json();
+          detail = body?.message || body?.detail || "";
+        } catch {
+          try { detail = (await res.clone().text()).slice(0, 200); } catch { /* noop */ }
+        }
+        const specific =
+          res.status === 401 ? "Authentication required (401)"
+          : res.status === 403 ? "Access denied (403)"
+          : res.status === 404 ? "Image file not found on the server (404)"
+          : res.status === 415 ? "Image format not supported for preview (415)"
+          : `Server returned HTTP ${res.status}`;
+        console.error("[ImageReview] preview HTTP error", {
+          url,
+          status: res.status,
+          statusText: res.statusText,
+          detail,
+        });
+        if (!cancelled) {
+          setPreview({
+            kind: "error",
+            message: detail ? `${specific}: ${detail}` : specific,
+          });
+        }
+        return;
+      }
+
+      let blob: Blob;
+      try {
+        blob = await res.blob();
+      } catch (err) {
+        if (cancelled) return;
+        console.error("[ImageReview] preview blob decode error", { url, err });
+        setPreview({
+          kind: "error",
+          message: `Failed to decode preview response: ${err instanceof Error ? err.message : err}`,
+        });
+        return;
+      }
+
+      if (blob.size === 0) {
+        if (!cancelled) {
+          console.error("[ImageReview] preview response is empty", { url });
+          setPreview({ kind: "error", message: "Server returned an empty preview." });
+        }
+        return;
+      }
+
+      objectUrl = URL.createObjectURL(blob);
+      if (cancelled) {
+        URL.revokeObjectURL(objectUrl);
+        return;
+      }
+      setPreview({ kind: "ready", url: objectUrl });
+    })();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [selected?.id, selected?.preview_url]);
   const cropDragRef = useRef<CropDragState | null>(null);
   const currentCrop = edit.cropRect ?? (cropMode ? { x: 10, y: 10, w: 80, h: 80 } : null);
 
@@ -666,19 +767,45 @@ export function ImageReviewPage() {
                   : "Select an image from the right panel to start editing."}
               </div>
             )}
-            {selected && (
+            {selected && preview.kind === "loading" && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-slate-500 text-sm">
+                <Loader2 className="w-5 h-5 animate-spin" />
+                Loading preview…
+              </div>
+            )}
+            {selected && preview.kind === "error" && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-6 text-center">
+                <FileImage className="w-8 h-8 text-red-400" />
+                <div className="text-sm font-semibold text-red-500">Preview unavailable</div>
+                <div className="text-xs text-slate-500 max-w-md">{preview.message}</div>
+                <div className="text-[10px] text-slate-400 font-mono break-all max-w-md">
+                  {selected.preview_url}
+                </div>
+              </div>
+            )}
+            {selected && preview.kind === "ready" && (
               <div className="absolute inset-0 flex items-center justify-center">
                 <div className="relative">
                   <img
                     key={selected.id}
                     ref={imgRef}
-                    src={selected.preview_url}
+                    src={preview.url}
                     alt={selected.filename}
                     onLoad={(e) => {
                       const el = e.currentTarget;
                       setNaturalSize({ w: el.naturalWidth, h: el.naturalHeight });
                     }}
-                    onError={() => setSaveMsg({ kind: "err", text: "Failed to load preview." })}
+                    onError={() => {
+                      // The blob URL failed to decode as an image — the fetch
+                      // succeeded but the bytes aren't a valid image.
+                      console.error("[ImageReview] <img> failed to decode blob", {
+                        source: selected.preview_url,
+                      });
+                      setPreview({
+                        kind: "error",
+                        message: "Preview downloaded but the image data could not be decoded.",
+                      });
+                    }}
                     draggable={false}
                     style={{
                       position: "absolute",
