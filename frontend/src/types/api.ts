@@ -12,6 +12,7 @@ export interface Viewer {
   email: string;
   roles: string[];
   is_active: boolean;
+  team?: string;
 }
 
 export interface SessionAuth {

@@ -12,6 +12,7 @@ import { chaptersApi, type Chapter } from '@/api/chapters'
 import { usersApi, type User } from '@/api/users'
 import { toast } from '@/store/useToastStore'
 import { useRBAC } from '@/hooks/useRBAC'
+import { ROLE_PERMISSIONS } from '@/config/rbacConfig'
 import { Badge, statusToBadge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Spinner, FullPageSpinner } from '@/components/ui/Spinner'
@@ -240,24 +241,30 @@ function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo
         <div className="flex items-center justify-between gap-2 mt-2">
           <div className="flex items-center gap-2 min-w-0">
             <span className="text-xs text-muted font-medium flex-shrink-0">PM:</span>
-            <div className="relative flex items-center">
-              <select
-                value={project.project_manager ?? ''}
-                onClick={e => e.stopPropagation()}
-                onChange={e => handlePmChange(e.target.value)}
-                disabled={pmLoading}
-                className="text-xs bg-surface border border-border rounded-md pl-2 pr-6 py-0.5 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-60 appearance-none cursor-pointer"
-              >
-                <option value="">— Unassigned —</option>
-                {pmUsers.map(u => (
-                  <option key={u.id} value={u.user_name}>{u.user_name}</option>
-                ))}
-              </select>
-              {pmLoading
-                ? <Spinner size="sm" />
-                : <span className="pointer-events-none absolute right-1.5 text-muted text-[9px]">▾</span>
-              }
-            </div>
+            {!canAccess(ROLE_PERMISSIONS.edit_assignee) ? (
+              <span className="text-xs text-text font-medium truncate">
+                {project.project_manager || '— Unassigned —'}
+              </span>
+            ) : (
+              <div className="relative flex items-center">
+                <select
+                  value={project.project_manager ?? ''}
+                  onClick={e => e.stopPropagation()}
+                  onChange={e => handlePmChange(e.target.value)}
+                  disabled={pmLoading}
+                  className="text-xs bg-surface border border-border rounded-md pl-2 pr-6 py-0.5 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-60 appearance-none cursor-pointer"
+                >
+                  <option value="">— Unassigned —</option>
+                  {pmUsers.map(u => (
+                    <option key={u.id} value={u.user_name}>{u.user_name}</option>
+                  ))}
+                </select>
+                {pmLoading
+                  ? <Spinner size="sm" />
+                  : <span className="pointer-events-none absolute right-1.5 text-muted text-[9px]">▾</span>
+                }
+              </div>
+            )}
           </div>
           {project.due_date && (
             <div className="flex items-center gap-1 flex-shrink-0">

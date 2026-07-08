@@ -76,6 +76,7 @@ services:
       - ref_cache:/opt/cms_runtime
       # Live app code — overrides baked-in image files so changes are picked up on restart
       - ./app:/app/app
+      - ./frontend/src/config/rbac_config.json:/app/app/domains/auth/rbac_config.json
     environment:
       REDIS_URL: redis://redis:6379/0
       COOKIE_SECURE: "false"
@@ -104,6 +105,7 @@ services:
       - ./temp_reports:/app/temp_reports
       - ref_cache:/opt/cms_runtime
       - ./app:/app/app
+      - ./frontend/src/config/rbac_config.json:/app/app/domains/auth/rbac_config.json
     environment:
       REDIS_URL: redis://redis:6379/0
       RUN_MIGRATIONS: "false"

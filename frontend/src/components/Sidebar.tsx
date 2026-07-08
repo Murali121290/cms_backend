@@ -6,22 +6,24 @@ import {
 } from 'lucide-react'
 import { useSidebarStore } from '@/store/useSidebarStore'
 import { useRBAC } from '@/hooks/useRBAC'
+import { ROLE_PERMISSIONS } from '@/config/rbacConfig'
 import { ThemeSwitcher } from './ThemeSwitcher'
 import { cn } from '@/utils/cn'
 
 export function Sidebar() {
   const { collapsed, toggle } = useSidebarStore()
-  const { canAccess }         = useRBAC()
+  const { canAccess, viewer } = useRBAC()
   const location              = useLocation()
   const [logoError, setLogoError] = useState(false)
 
   const navItems = [
     { to: '/',         icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/clients',  icon: Users,           label: 'Clients'   },
-    { to: '/post-production', icon: Layers,   label: 'Backlist' },
+    ...((canAccess(ROLE_PERMISSIONS.access_post_production) || viewer?.team === 'Accessibility Team')
+      ? [{ to: '/post-production', icon: Layers,   label: 'Backlist' }]
+      : []),
     { to: '/reports',  icon: BarChart3,       label: 'Reports'   },
-    // Settings visible only to admin and manager — add more roles here as needed
-    ...(canAccess(['admin', 'manager'])
+    ...(canAccess(ROLE_PERMISSIONS.access_settings)
       ? [{ to: '/settings', icon: Settings, label: 'Settings' }]
       : []),
   ]
