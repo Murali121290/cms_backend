@@ -18,6 +18,7 @@ class Viewer(BaseModel):
     email: str
     roles: list[str]
     is_active: bool
+    team: str | None = None
 
 
 class SessionAuth(BaseModel):

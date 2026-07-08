@@ -1,0 +1,8 @@
+{
+  "access_settings": ["Admin", "ProjectManager", "Project Manager"],
+  "view_all_projects": ["Admin", "ProjectManager", "Project Manager"],
+  "view_all_chapters": ["Admin", "ProjectManager", "Project Manager"],
+  "edit_assignee": ["Admin", "ProjectManager", "Project Manager", "Manager", "Team Lead"],
+  "list_users": ["Admin", "ProjectManager", "Project Manager"],
+  "access_post_production": ["Admin", "ProjectManager", "Project Manager", "Accessibility Team"]
+}

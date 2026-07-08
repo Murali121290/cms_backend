@@ -1,4 +1,4 @@
-import { createBrowserRouter, RouterProvider } from 'react-router-dom'
+import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom'
 import { AppLayout } from '@/layouts/AppLayout'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { RoleGuard } from '@/components/RoleGuard'
@@ -38,6 +38,17 @@ import ProjectSchedule from '@/Reports/ProjectSchedule'
 import { PostProduction } from '@/pages/PostProduction'
 import { PostProdWordConversion } from '@/pages/PostProdWordConversion'
 import { PostProdChaptersPage } from '@/pages/PostProdChaptersPage'
+import { ROLE_PERMISSIONS } from '@/config/rbacConfig'
+import { useRBAC } from '@/hooks/useRBAC'
+
+function PostProdGuard({ children }: { children: React.ReactNode }) {
+  const { canAccess, viewer } = useRBAC()
+  const hasAccess = canAccess(ROLE_PERMISSIONS.access_post_production) || viewer?.team === 'Accessibility Team'
+  if (!hasAccess) {
+    return <Navigate to="/" replace />
+  }
+  return <>{children}</>
+}
 
 const router = createBrowserRouter([
   // ── Public routes ──────────────────────────────────────────────────────────
@@ -106,9 +117,9 @@ const router = createBrowserRouter([
 
       { path: 'projects', element: <ProjectsPage /> },
       { path: 'chapters', element: <Placeholder title="Chapters" /> },
-      { path: 'post-production', element: <PostProduction /> },
-      { path: 'post-production/word-conversion', element: <PostProdWordConversion /> },
-      { path: 'post-production/word-conversion/:projectId', element: <PostProdChaptersPage /> },
+      { path: 'post-production', element: <PostProdGuard><PostProduction /></PostProdGuard> },
+      { path: 'post-production/word-conversion', element: <PostProdGuard><PostProdWordConversion /></PostProdGuard> },
+      { path: 'post-production/word-conversion/:projectId', element: <PostProdGuard><PostProdChaptersPage /></PostProdGuard> },
       { path: 'reports', element: <ReportsPage /> },
       { path: 'reports/schedule', element: <ScheduleReport /> },
       { path: 'reports/today-schedule', element: <TodaySchedule /> },
@@ -122,13 +133,13 @@ const router = createBrowserRouter([
       { path: 'projects/:projectId/image-review', element: <ImageReviewPage /> },
 
       // ── Settings: admin + manager only ───────────────────────────────────
-      { path: 'settings', element: <RoleGuard allowedRoles={['admin', 'manager']}><Settings /></RoleGuard> },
-      { path: 'settings/users', element: <RoleGuard allowedRoles={['admin', 'manager']}><UserManagement /></RoleGuard> },
-      { path: 'settings/customers', element: <RoleGuard allowedRoles={['admin', 'manager']}><CustomerManagement /></RoleGuard> },
-      { path: 'settings/stages', element: <RoleGuard allowedRoles={['admin', 'manager']}><StageManagement /></RoleGuard> },
-      { path: 'settings/roles', element: <RoleGuard allowedRoles={['admin', 'manager']}><RolesManagement /></RoleGuard> },
-      { path: 'settings/workflow', element: <RoleGuard allowedRoles={['admin', 'manager']}><WorkflowManagement /></RoleGuard> },
-      { path: 'settings/system', element: <RoleGuard allowedRoles={['admin', 'manager']}><Placeholder title="System Settings" /></RoleGuard> },
+      { path: 'settings', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><Settings /></RoleGuard> },
+      { path: 'settings/users', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><UserManagement /></RoleGuard> },
+      { path: 'settings/customers', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><CustomerManagement /></RoleGuard> },
+      { path: 'settings/stages', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><StageManagement /></RoleGuard> },
+      { path: 'settings/roles', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><RolesManagement /></RoleGuard> },
+      { path: 'settings/workflow', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><WorkflowManagement /></RoleGuard> },
+      { path: 'settings/system', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><Placeholder title="System Settings" /></RoleGuard> },
     ],
   },
 ])

@@ -8,6 +8,7 @@ import { stageDetailsApi } from '@/api/stageDetails'
 import { ChapterFilePage } from '@/pages/ChapterFilePage'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import { toast } from '@/store/useToastStore'
+import { useRBAC } from '@/hooks/useRBAC'
 
 function orderStages(stages: WorkflowStage[]): WorkflowStage[] {
   const byName = new Map(stages.map(s => [s.stage_name, s]))
@@ -45,6 +46,7 @@ export function ChapterDetailPage() {
     chapterId:  string
   }>()
   const navigate = useNavigate()
+  const { viewer } = useRBAC()
 
   const [chapter,        setChapter]        = useState<import('@/api/chapters').Chapter | null>(null)
   const [project,        setProject]        = useState<any | null>(null)
@@ -164,7 +166,7 @@ export function ChapterDetailPage() {
       clientName={project.client_name ?? undefined}
       projectName={project.project_title ?? project.code ?? project.project_code ?? undefined}
       stageName={chapter.stage_name ?? ''}
-      isAssigned={!!chapter.current_assignee_name}
+      isAssigned={chapter.current_assignee_name === viewer?.username}
       onRefresh={() => setRefreshKey(k => k + 1)}
       onProceed={proceedLoading ? undefined : handleProceed}
     />

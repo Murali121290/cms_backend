@@ -25,6 +25,8 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Modal } from '@/components/ui/Modal'
 import { UploadZone } from '@/components/ui/UploadZone'
 import { getApiErrorMessage } from '@/api/client'
+import { useRBAC } from '@/hooks/useRBAC'
+import { ROLE_PERMISSIONS } from '@/config/rbacConfig'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -169,6 +171,17 @@ function AssigneeSelect({ value, users, onChange, disabled, widthCls = 'w-28', c
   className?: string
   onClick?: (e: React.MouseEvent) => void
 }) {
+  const { canAccess } = useRBAC()
+  const canEdit = canAccess(ROLE_PERMISSIONS.edit_assignee)
+
+  if (!canEdit) {
+    return (
+      <span className={`text-[11px] text-text font-medium px-2 py-0.5 border border-transparent truncate block ${widthCls} ${className ?? ''}`}>
+        {value || 'Unassigned'}
+      </span>
+    )
+  }
+
   return (
     <div className={`relative flex items-center ${widthCls} ${className ?? ''}`} onClick={onClick}>
       <select

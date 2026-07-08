@@ -18,7 +18,14 @@ from jose import jwt
 import urllib.parse
 from app.services.scripts.docx_post_processor import post_process_docx
 
-router = APIRouter(prefix="/post-prod", tags=["Post Production"])
+from app.domains.auth.rbac_config import has_post_prod_access
+
+def check_post_prod_access(user = Depends(get_current_user_from_cookie)):
+    if not user or not has_post_prod_access(user):
+        raise HTTPException(status_code=403, detail="Access denied to Post Production / Backlist.")
+    return user
+
+router = APIRouter(prefix="/post-prod", tags=["Post Production"], dependencies=[Depends(check_post_prod_access)])
 logger = logging.getLogger("app.post_prod")
 
 def parse_chapter_number(filename: str) -> str:

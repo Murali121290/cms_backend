@@ -22,13 +22,13 @@ export function useRBAC() {
   /** True if the current user has any of the given roles (case-insensitive). */
   function canAccess(allowedRoles: string[]): boolean {
     if (!roles.length) return false
-    const allowed = allowedRoles.map(r => r.toLowerCase())
-    return roles.some(r => allowed.includes(r.toLowerCase()))
+    const allowed = allowedRoles.map(r => r.toLowerCase().replace(/\s+/g, ''))
+    return roles.some(r => allowed.includes(r.toLowerCase().replace(/\s+/g, '')))
   }
 
   /** True if the user has this role. */
   function hasRole(r: string): boolean {
-    return roles.map(x => x.toLowerCase()).includes(r.toLowerCase())
+    return roles.map(x => x.toLowerCase().replace(/\s+/g, '')).includes(r.toLowerCase().replace(/\s+/g, ''))
   }
 
   return {
