@@ -2026,6 +2026,7 @@ async def api_v2_edit_save_file(
     if target_path == file_record.path:
         file_record.version = (file_record.version or 0) + 1
         file_record.uploaded_at = now_ist_naive()
+        file_record.uploaded_by_id = viewer.id
         db.commit()
         db.refresh(file_record)
         result = file_record
@@ -2039,6 +2040,7 @@ async def api_v2_edit_save_file(
             category=file_record.category,
             version=1,
             uploaded_at=now_ist_naive(),
+            uploaded_by_id=viewer.id,
         )
         db.add(result)
         db.commit()
@@ -2727,6 +2729,7 @@ def api_v2_upload_zip(
                         path=dest_path,
                         version=1,
                         uploaded_at=now_ist_naive(),
+                        uploaded_by_id=viewer.id,
                     )
                     db.add(db_file)
 
