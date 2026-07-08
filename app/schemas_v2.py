@@ -153,6 +153,10 @@ class FileRecord(BaseModel):
     version: int
     lock: LockState
     available_actions: list[str] = Field(default_factory=list)
+    size_bytes: int | None = None
+    file_size: str | None = None
+    uploaded_by: str | None = None
+    page_count: int | None = None
 
 
 class DashboardResponse(BaseModel):

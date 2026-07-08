@@ -13,5 +13,5 @@ def upload_file(
     db: Session = Depends(database.get_db),
     current_user = Depends(get_current_user)
 ):
-    cms_file = file_service.create_file_record(db, project_id, file)
+    cms_file = file_service.create_file_record(db, project_id, file, actor_user_id=current_user.id)
     return {"file_id": cms_file.id, "path": cms_file.path}

@@ -204,6 +204,10 @@ export interface FileRecord {
   version: number;
   lock: LockState;
   available_actions: string[];
+  size_bytes?: number | null;
+  file_size?: string | null;
+  uploaded_by?: string | null;
+  page_count?: number | null;
 }
 
 export interface FileDeleteInfo {

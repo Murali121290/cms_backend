@@ -48,6 +48,8 @@ class File(Base):
     processing_error = Column(Text, nullable=True)
     
     checked_out_by = relationship("User", foreign_keys=[checked_out_by_id])
+    uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
     versions = relationship("FileVersion", back_populates="original_file", cascade="all, delete-orphan")
 
 

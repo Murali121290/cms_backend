@@ -60,6 +60,9 @@ export interface FileRow {
   isLocked?: boolean
   lockedBy?: string | null
   lockedAt?: string | null
+  webdavLocked?: boolean
+  webdavLockedBy?: string | null
+  webdavLockedAt?: string | null
   pageCount?: number
   dpi?: number
   width?: number
@@ -678,9 +681,9 @@ export function ChapterFilePage({
           db_id: f.id,
           subfolder: sfLabel,
           file_name: f.filename,
-          file_size: '—',
-          size_bytes: 0,
-          uploaded_by: '—',
+          file_size: f.file_size || '—',
+          size_bytes: f.size_bytes || 0,
+          uploaded_by: f.uploaded_by || '—',
           uploaded_on: f.uploaded_at,
           path: '',
           isLocked: f.lock?.is_checked_out ?? false,
@@ -689,6 +692,7 @@ export function ChapterFilePage({
           webdavLocked: f.lock?.webdav_locked ?? false,
           webdavLockedBy: f.lock?.webdav_locked_by ?? null,
           webdavLockedAt: f.lock?.webdav_locked_at ?? null,
+          pageCount: f.page_count ?? undefined,
         }))
     }
 

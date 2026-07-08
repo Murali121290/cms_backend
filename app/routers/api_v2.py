@@ -299,6 +299,41 @@ def _serialize_file_record(file_record: models.File, *, viewer: models.User, db:
         actions.append("checkout")
     if file_record.category == "Manuscript":
         actions.append("structuring_review")
+
+    size_bytes = None
+    file_size = None
+    if file_record.path and os.path.exists(file_record.path):
+        try:
+            size_bytes = os.path.getsize(file_record.path)
+            if size_bytes < 1024:
+                file_size = f"{size_bytes} B"
+            elif size_bytes < 1024 * 1024:
+                file_size = f"{size_bytes / 1024:.1f} KB"
+            else:
+                file_size = f"{size_bytes / (1024 * 1024):.1f} MB"
+        except Exception:
+            pass
+
+    page_count = None
+    if file_record.filename.endswith(".docx") and file_record.path and os.path.exists(file_record.path):
+        try:
+            import zipfile
+            from lxml import etree as ET
+            NS = "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"
+            with zipfile.ZipFile(file_record.path) as z:
+                if "docProps/app.xml" in z.namelist():
+                    with z.open("docProps/app.xml") as f:
+                        tree = ET.parse(f)
+                        pages_el = tree.find(f"{{{NS}}}Pages")
+                        if pages_el is not None and pages_el.text:
+                            page_count = int(pages_el.text)
+        except Exception:
+            pass
+
+    uploaded_by = None
+    if file_record.uploaded_by:
+        uploaded_by = file_record.uploaded_by.username
+
     return schemas_v2.FileRecord(
         id=file_record.id,
         project_id=file_record.project_id,
@@ -310,6 +345,10 @@ def _serialize_file_record(file_record: models.File, *, viewer: models.User, db:
         version=file_record.version,
         lock=_serialize_lock(file_record, db=db),
         available_actions=actions,
+        size_bytes=size_bytes,
+        file_size=file_size,
+        uploaded_by=uploaded_by,
+        page_count=page_count,
     )
 
 
