@@ -20,7 +20,8 @@ interface Chapter {
 
 interface PostProdProject {
   id: number
-  customer_name: string
+  client: string
+  client_code?: string
   project_name: string
   status: string
   assignee?: string
@@ -57,7 +58,7 @@ export function PostProdChaptersPage() {
   const [isBulkConverting, setIsBulkConverting] = useState(false)
 
   const toggleExpand = (id: number) => {
-    setExpandedChapterIds(prev => 
+    setExpandedChapterIds(prev =>
       prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
     )
   }
@@ -117,7 +118,7 @@ export function PostProdChaptersPage() {
           });
         }
         setProject(data)
-        
+
         // Auto-update selected chapter if it exists
         if (selectedChapter) {
           const updated = data.chapters.find((c: Chapter) => c.id === selectedChapter.id)
@@ -187,6 +188,29 @@ export function PostProdChaptersPage() {
     }
   }
 
+  const handleOpenInWord = async (chapter: Chapter) => {
+    try {
+      const res = await fetch(`/api/v2/post-prod/chapters/${chapter.id}/open-in-word`)
+      if (!res.ok) {
+        throw new Error('Failed to get Word editing link')
+      }
+      const data = await res.json()
+      if (!data?.ms_word_uri) return
+      window.location.href = data.ms_word_uri
+
+      // Setup fallback check
+      setTimeout(() => {
+        if (document.visibilityState === 'visible') {
+          toast.info(`Word didn't open — downloading instead.`)
+          handleDownloadChapter(chapter)
+        }
+      }, 2000)
+    } catch (err) {
+      console.error(err)
+      toast.error('Failed to open the file in Word.')
+    }
+  }
+
   const handleConvertChapter = async (chapter: Chapter) => {
     try {
       const res = await fetch(`/api/v2/post-prod/chapters/${chapter.id}/convert`, {
@@ -233,13 +257,13 @@ export function PostProdChaptersPage() {
     input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0]
       if (!file) return
-      
+
       const formData = new FormData()
       formData.append('file', file)
       if (targetPath) {
         formData.append('target_path', targetPath)
       }
-      
+
       setLoadingFiles(true)
       try {
         const res = await fetch(`/api/v2/post-prod/chapters/${selectedChapter.id}/upload-file`, {
@@ -314,7 +338,7 @@ export function PostProdChaptersPage() {
           >
             <ArrowLeft size={18} />
           </button>
-          
+
           <div className="h-4 w-px bg-border hidden sm:block" />
 
           <div>
@@ -327,7 +351,7 @@ export function PostProdChaptersPage() {
               </span>
             </div>
             <div className="flex items-center gap-3 mt-1 flex-wrap text-xs text-muted">
-              <span>{project.customer_name}</span>
+              <span>{project.client} {project.client_code && `(${project.client_code})`}</span>
               <span className="inline-flex items-center gap-1">
                 <User size={11} /> {project.assignee || 'Unassigned'}
               </span>
@@ -339,7 +363,7 @@ export function PostProdChaptersPage() {
 
       {/* Chapters Split View */}
       <div className="flex flex-col lg:flex-row gap-6 items-stretch flex-1 min-h-0 overflow-hidden">
-        
+
         {/* Left Side: Chapters List */}
         <div className={`transition-all duration-300 flex flex-col h-full overflow-hidden ${selectedChapter ? 'w-full lg:w-[45%]' : 'w-full'}`}>
           <div className="bg-card border border-border rounded-2xl p-5 shadow-sm flex flex-col h-full overflow-hidden">
@@ -367,7 +391,7 @@ export function PostProdChaptersPage() {
                 </button>
               )}
             </div>
-            
+
             {project.chapters.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 text-muted flex-1">
                 <Layers size={48} className="mb-4 text-muted/50" />
@@ -397,7 +421,7 @@ export function PostProdChaptersPage() {
                       const isSelected = selectedChapter?.id === chap.id
                       const isFailed = chap.status === 'Failed'
                       const isExpanded = expandedChapterIds.includes(chap.id)
-                      
+
                       let statusCls = 'bg-accent border-border text-muted'
                       if (chap.status === 'Completed') {
                         statusCls = 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
@@ -413,11 +437,10 @@ export function PostProdChaptersPage() {
 
                       return (
                         <React.Fragment key={chap.id}>
-                          <tr 
+                          <tr
                             onClick={() => setSelectedChapter(chap)}
-                            className={`cursor-pointer transition-all hover:bg-accent/40 ${
-                              isSelected ? 'bg-primary/5 border-l-4 border-l-primary font-semibold' : ''
-                            }`}
+                            className={`cursor-pointer transition-all hover:bg-accent/40 ${isSelected ? 'bg-primary/5 border-l-4 border-l-primary font-semibold' : ''
+                              }`}
                           >
                             <td className="p-3.5 w-10 text-center" onClick={(e) => e.stopPropagation()}>
                               <input
@@ -436,16 +459,15 @@ export function PostProdChaptersPage() {
                               </td>
                             )}
                             <td className="p-3.5">
-                              <span 
+                              <span
                                 onClick={(e) => {
                                   if (isFailed) {
                                     e.stopPropagation();
                                     toggleExpand(chap.id);
                                   }
                                 }}
-                                className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border ${statusCls} ${
-                                  isFailed ? 'cursor-pointer hover:opacity-85 select-none' : ''
-                                }`}
+                                className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border ${statusCls} ${isFailed ? 'cursor-pointer hover:opacity-85 select-none' : ''
+                                  }`}
                                 title={isFailed ? (isExpanded ? "Hide conversion logs" : "Click to view conversion logs") : undefined}
                               >
                                 {chap.status}
@@ -461,35 +483,38 @@ export function PostProdChaptersPage() {
                                 {chap.status === 'Converting' ? (
                                   <button
                                     disabled
-                                    className="px-2 py-1 bg-amber-500/20 text-amber-600 rounded-lg text-xs font-semibold inline-flex items-center gap-1 cursor-not-allowed"
+                                    className="p-1.5 border border-amber-200/40 bg-amber-500/5 text-amber-500/60 rounded-lg cursor-not-allowed"
+                                    title="Converting..."
                                   >
                                     <Loader2 size={13} className="animate-spin" />
-                                    {!selectedChapter && <span className="ml-1">Converting...</span>}
                                   </button>
                                 ) : (
                                   <button
                                     onClick={() => handleConvertChapter(chap)}
-                                    className="px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-all text-xs font-semibold inline-flex items-center gap-1 shadow-sm"
-                                    title="Convert to Word"
+                                    className="p-1.5 border border-amber-200/80 bg-amber-500/5 hover:bg-amber-500/15 text-amber-600 hover:text-amber-700 rounded-lg transition-all shadow-sm"
+                                    title={chap.status === 'Completed' ? 'Reconvert' : 'Convert'}
                                   >
                                     <RefreshCw size={13} />
-                                    {!selectedChapter && (
-                                      <span className="ml-1">
-                                        {chap.status === 'Completed' ? 'Reconvert' : 'Convert'}
-                                      </span>
-                                    )}
                                   </button>
                                 )}
-                                
+
                                 {chap.status === 'Completed' && (
-                                  <button
-                                    onClick={() => handleDownloadChapter(chap)}
-                                    className="px-2 py-1 bg-primary text-primary-foreground rounded-lg hover:bg-primary/95 transition-all text-xs font-semibold inline-flex items-center gap-1 shadow-sm"
-                                    title="Download Word File"
-                                  >
-                                    <Download size={13} />
-                                    {!selectedChapter && <span className="ml-1">Download</span>}
-                                  </button>
+                                  <>
+                                    <button
+                                      onClick={() => handleOpenInWord(chap)}
+                                      className="p-1.5 border border-emerald-200/80 bg-emerald-500/5 hover:bg-emerald-500/15 text-emerald-600 hover:text-emerald-700 rounded-lg transition-all shadow-sm"
+                                      title="Open in Word"
+                                    >
+                                      <FileText size={13} />
+                                    </button>
+                                    <button
+                                      onClick={() => handleDownloadChapter(chap)}
+                                      className="p-1.5 border border-blue-200/80 bg-blue-500/5 hover:bg-blue-500/15 text-blue-600 hover:text-blue-700 rounded-lg transition-all shadow-sm"
+                                      title="Download Word File"
+                                    >
+                                      <Download size={13} />
+                                    </button>
+                                  </>
                                 )}
                               </div>
                             </td>
@@ -526,7 +551,7 @@ export function PostProdChaptersPage() {
                   <span className="text-[10px] uppercase font-bold tracking-wider text-muted">Selected Assets</span>
                   <h3 className="text-xl font-bold font-serif text-text">Chapter {selectedChapter.chapter_no}</h3>
                 </div>
-                <button 
+                <button
                   onClick={() => setSelectedChapter(null)}
                   className="p-1.5 hover:bg-accent rounded-lg text-muted hover:text-text transition-colors"
                   title="Close details"
@@ -542,9 +567,9 @@ export function PostProdChaptersPage() {
                   {(['indesign', 'docx', 'images', 'misc'] as const).map((tab) => {
                     let label = 'Files'
                     if (tab === 'indesign') label = 'InDesign'
-                    else if (tab === 'docx') label = 'Word (.docx)'
+                    else if (tab === 'docx') label = 'Word'
                     else if (tab === 'images') label = 'Images'
-                    else if (tab === 'misc') label = 'Fonts & Misc'
+                    else if (tab === 'misc') label = 'Misc'
 
                     const count = chapterFiles ? chapterFiles[tab]?.length || 0 : 0
 
@@ -552,23 +577,21 @@ export function PostProdChaptersPage() {
                       <button
                         key={tab}
                         onClick={() => setActiveTab(tab)}
-                        className={`px-4 py-2.5 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 ${
-                          activeTab === tab 
-                            ? 'border-primary text-primary font-bold' 
-                            : 'border-transparent text-muted hover:text-text'
-                        }`}
+                        className={`px-4 py-2.5 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 ${activeTab === tab
+                          ? 'border-primary text-primary font-bold'
+                          : 'border-transparent text-muted hover:text-text'
+                          }`}
                       >
                         {label}
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                          activeTab === tab ? 'bg-primary/10 text-primary' : 'bg-accent text-muted'
-                        }`}>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${activeTab === tab ? 'bg-primary/10 text-primary' : 'bg-accent text-muted'
+                          }`}>
                           {count}
                         </span>
                       </button>
                     )
                   })}
                 </div>
-                
+
                 <button
                   onClick={() => triggerFileInput(null)}
                   className="px-3 py-1.5 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all mb-1 shrink-0"
@@ -619,7 +642,7 @@ export function PostProdChaptersPage() {
 
                           <div className="flex items-center gap-1.5 shrink-0">
                             <span className="text-xs text-muted mr-1.5">{formatBytes(file.size)}</span>
-                            
+
                             {file.path !== '__converted__' && (
                               <button
                                 onClick={() => triggerFileInput(file.path)}

@@ -44,7 +44,7 @@ def run_conversion_background(chapter_id: int, session_factory):
         db.commit()
 
         settings = get_settings()
-        project_dir = os.path.join(settings.UPLOAD_FOLDER, "post_prod", f"project_{chapter.project_id}")
+        project_dir = os.path.join(settings.UPLOAD_FOLDER, "post_prod", chapter.client_code or "default_client", chapter.project_name or "default_project")
         output_dir = os.path.join(project_dir, "converted")
         os.makedirs(output_dir, exist_ok=True)
         
@@ -168,7 +168,8 @@ def get_project(
         raise HTTPException(status_code=404, detail="Project not found")
     return {
         "id": p.id,
-        "customer_name": p.customer_name,
+        "client": p.client,
+        "client_code": p.client_code,
         "project_name": p.project_name,
         "status": p.status,
         "assignee": p.assignee,
@@ -214,7 +215,8 @@ def update_project(
     db.refresh(project)
     return {
         "id": project.id,
-        "customer_name": project.customer_name,
+        "client": project.client,
+        "client_code": project.client_code,
         "project_name": project.project_name,
         "status": project.status,
         "assignee": project.assignee
@@ -226,7 +228,8 @@ def list_projects(db: Session = Depends(database.get_db), user = Depends(get_cur
     return [
         {
             "id": p.id,
-            "customer_name": p.customer_name,
+            "client": p.client,
+            "client_code": p.client_code,
             "project_name": p.project_name,
             "status": p.status,
             "assignee": p.assignee,
@@ -248,7 +251,8 @@ def list_projects(db: Session = Depends(database.get_db), user = Depends(get_cur
 @router.post("/projects")
 async def create_project(
     background_tasks: BackgroundTasks,
-    customer_name: str = Form(...),
+    client: str = Form(...),
+    client_code: str = Form(...),
     project_name: str = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(database.get_db),
@@ -258,7 +262,8 @@ async def create_project(
         raise HTTPException(status_code=400, detail="Uploaded file must be a ZIP file.")
     
     project = PostProdProject(
-        customer_name=customer_name,
+        client=client,
+        client_code=client_code,
         project_name=project_name,
         status="Active",
         assignee=user.username if user else "System"
@@ -268,10 +273,10 @@ async def create_project(
     db.refresh(project)
 
     settings = get_settings()
-    project_dir = os.path.join(settings.UPLOAD_FOLDER, "post_prod", f"project_{project.id}")
+    project_dir = os.path.join(settings.UPLOAD_FOLDER, "post_prod", client_code, project_name)
     os.makedirs(project_dir, exist_ok=True)
     
-    zip_path = os.path.join(project_dir, "input.zip")
+    zip_path = os.path.join(project_dir, file.filename)
     with open(zip_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
     
@@ -295,7 +300,8 @@ async def create_project(
                 source_path = os.path.join(root, f_name)
                 
                 chapter = PostProdChapter(
-                    project_id=project.id,
+                    client_code=client_code,
+                    project_name=project_name,
                     chapter_no=chapter_no,
                     status="YTS",
                     source_filename=f_name,
@@ -351,7 +357,10 @@ def get_chapter_source_files(chapter_id: int, db: Session = Depends(database.get
     chapter_dir = os.path.dirname(chapter.source_file_path)
     
     # Get all chapter numbers in this project to prevent showing files belonging to other chapters
-    all_chapters = db.query(PostProdChapter).filter(PostProdChapter.project_id == chapter.project_id).all()
+    all_chapters = db.query(PostProdChapter).filter(
+        PostProdChapter.project_name == chapter.project_name,
+        PostProdChapter.client_code == chapter.client_code
+    ).all()
     project_chapter_nos = {c.chapter_no for c in all_chapters}
     other_source_filenames = {c.source_filename for c in all_chapters if c.id != chapter.id}
     
@@ -503,4 +512,39 @@ def convert_chapter(
     from app.core.worker import run_post_prod_conversion_task
     run_post_prod_conversion_task.delay(chapter.id)
     return {"message": "Conversion started", "chapter_id": chapter.id}
+
+
+@router.get("/chapters/{chapter_id}/open-in-word")
+def api_post_prod_open_in_word(
+    chapter_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+        
+    chapter = db.query(PostProdChapter).filter(PostProdChapter.id == chapter_id).first()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+        
+    if chapter.status != "Completed" or not chapter.converted_file_path or not os.path.exists(chapter.converted_file_path):
+        raise HTTPException(status_code=400, detail="Converted file not available for editing.")
+        
+    from datetime import timedelta
+    from app.domains.auth.security import create_access_token
+    from app.integrations.webdav.config import WEBDAV_BASE_URL, WEBDAV_TOKEN_EXPIRE_MINUTES
+    import urllib.parse
+
+    token = create_access_token(
+        {"sub": user.username, "chapter_id": chapter_id},
+        expires_delta=timedelta(minutes=WEBDAV_TOKEN_EXPIRE_MINUTES)
+    )
+    
+    filename = f"Chapter_{chapter.chapter_no}.docx"
+    quoted_filename = urllib.parse.quote(filename, safe="")
+    webdav_url = f"{WEBDAV_BASE_URL}/webdav/post-prod/chapters/{chapter_id}/{token}/{quoted_filename}"
+    ms_word_uri = f"ms-word:ofe|u|{webdav_url}"
+    
+    return {"ms_word_uri": ms_word_uri, "webdav_url": webdav_url}
+
 
