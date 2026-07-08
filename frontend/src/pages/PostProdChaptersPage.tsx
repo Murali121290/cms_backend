@@ -207,7 +207,7 @@ export function PostProdChaptersPage() {
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `converted_${chapter.source_filename.replace(/\.[^/.]+$/, '')}.docx`
+      a.download = `${chapter.source_filename.replace(/\.[^/.]+$/, '')}.docx`
       document.body.appendChild(a)
       a.click()
       a.remove()

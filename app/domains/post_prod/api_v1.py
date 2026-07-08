@@ -65,7 +65,8 @@ def run_conversion_background(chapter_id: int, session_factory):
         output_dir = os.path.join(project_dir, "converted")
         os.makedirs(output_dir, exist_ok=True)
         
-        dest_filename = f"Chapter_{chapter.chapter_no}.docx"
+        source_base = os.path.splitext(chapter.source_filename)[0]
+        dest_filename = f"{source_base}.docx"
         dest_path = os.path.join(output_dir, dest_filename)
 
         success = False
@@ -385,10 +386,11 @@ def download_chapter(chapter_id: int, db: Session = Depends(database.get_db), us
     if chapter.status != "Completed" or not chapter.converted_file_path or not os.path.exists(chapter.converted_file_path):
         raise HTTPException(status_code=400, detail="Converted file not available for download.")
     
+    source_base = os.path.splitext(chapter.source_filename)[0]
     return FileResponse(
         path=chapter.converted_file_path,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        filename=f"converted_Chapter_{chapter.chapter_no}.docx"
+        filename=f"{source_base}.docx"
     )
 
 def get_chapter_from_string(text: str) -> str | None:
