@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app import database, models, schemas_v2
 from app.domains.projects.models import Project, ProjectStylesheet
 from app.domains.auth.security import get_current_user_from_cookie
+from app.domains.files import image_preview_service
 from app.core.config import get_settings
 from app.services import (
     activity_service,
