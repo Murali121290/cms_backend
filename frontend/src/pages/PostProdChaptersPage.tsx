@@ -56,6 +56,7 @@ export function PostProdChaptersPage() {
   const [expandedChapterIds, setExpandedChapterIds] = useState<number[]>([])
   const [selectedChapterIds, setSelectedChapterIds] = useState<number[]>([])
   const [isBulkConverting, setIsBulkConverting] = useState(false)
+  const [isBulkDownloading, setIsBulkDownloading] = useState(false)
 
   const toggleExpand = (id: number) => {
     setExpandedChapterIds(prev =>
@@ -97,6 +98,35 @@ export function PostProdChaptersPage() {
       toast.error('Failed to start bulk conversion.')
     } finally {
       setIsBulkConverting(false)
+    }
+  }
+
+  const handleBulkDownload = async () => {
+    if (selectedChapterIds.length === 0) return
+    setIsBulkDownloading(true)
+    try {
+      const chapterIdsStr = selectedChapterIds.join(',')
+      const res = await fetch(`/api/v2/post-prod/projects/${projectId}/bulk-download-chapters?chapter_ids=${chapterIdsStr}`)
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.detail || 'Download failed')
+      }
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `converted_chapters_${projectId}.zip`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+      
+      setSelectedChapterIds([])
+    } catch (err: any) {
+      console.error(err)
+      toast.error(err.message || 'Failed to download the selected chapters.')
+    } finally {
+      setIsBulkDownloading(false)
     }
   }
 
@@ -372,23 +402,42 @@ export function PostProdChaptersPage() {
                 <Layers size={18} className="text-muted" /> Chapters List
               </h2>
               {selectedChapterIds.length > 0 && (
-                <button
-                  onClick={handleBulkConvert}
-                  disabled={isBulkConverting}
-                  className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 disabled:bg-amber-500/50 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all"
-                >
-                  {isBulkConverting ? (
-                    <>
-                      <Loader2 size={13} className="animate-spin" />
-                      Converting...
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCw size={13} />
-                      Convert Selected ({selectedChapterIds.length})
-                    </>
-                  )}
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleBulkConvert}
+                    disabled={isBulkConverting || isBulkDownloading}
+                    className="px-3 py-1.5 border border-amber-200/80 bg-amber-500/5 hover:bg-amber-500/15 text-amber-600 hover:text-amber-700 disabled:bg-amber-500/2 disabled:text-amber-600/40 disabled:border-amber-200/20 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all"
+                  >
+                    {isBulkConverting ? (
+                      <>
+                        <Loader2 size={13} className="animate-spin" />
+                        Converting...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw size={13} />
+                        Convert Selected ({selectedChapterIds.length})
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={handleBulkDownload}
+                    disabled={isBulkConverting || isBulkDownloading}
+                    className="px-3 py-1.5 border border-blue-200/80 bg-blue-500/5 hover:bg-blue-500/15 text-blue-600 hover:text-blue-700 disabled:bg-blue-500/2 disabled:text-blue-600/40 disabled:border-blue-200/20 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all"
+                  >
+                    {isBulkDownloading ? (
+                      <>
+                        <Loader2 size={13} className="animate-spin" />
+                        Downloading...
+                      </>
+                    ) : (
+                      <>
+                        <Download size={13} />
+                        Download Selected ({selectedChapterIds.length})
+                      </>
+                    )}
+                  </button>
+                </div>
               )}
             </div>
 
