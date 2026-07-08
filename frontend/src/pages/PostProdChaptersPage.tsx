@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { 
-  ArrowLeft, RefreshCw, Download, Layers, XCircle, ChevronDown, ChevronUp, 
-  ExternalLink, FileText, Image, FolderOpen, Info, CheckCircle2, AlertTriangle, 
-  File, X, Loader2, Upload 
+import {
+  ArrowLeft, RefreshCw, Download, Layers, XCircle, ChevronDown, ChevronUp,
+  ExternalLink, FileText, Image, FolderOpen, Info, CheckCircle2, AlertTriangle,
+  File, X, Loader2, Upload, User
 } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { toast } from '@/store/useToastStore'
@@ -308,43 +308,33 @@ export function PostProdChaptersPage() {
       {/* Header / Breadcrumb */}
       <div className="flex items-center justify-between gap-4 shrink-0 mb-5 border-b border-border pb-3.5">
         <div className="flex items-center flex-wrap gap-x-4 gap-y-2 text-sm">
-          <button 
+          <button
             onClick={() => navigate('/post-production/word-conversion')}
-            className="flex items-center gap-1.5 text-xs bg-card hover:bg-accent text-text px-2.5 py-1.5 rounded-lg border border-border transition-colors font-semibold"
+            className="p-2 rounded-lg hover:bg-surface text-muted hover:text-text transition-colors"
           >
-            <ArrowLeft size={13} /> Back to Projects
+            <ArrowLeft size={18} />
           </button>
           
           <div className="h-4 w-px bg-border hidden sm:block" />
 
-          <h1 className="text-base font-bold font-serif text-text tracking-tight">
-            {project.project_name}
-          </h1>
-
-          <div className="h-4 w-px bg-border hidden md:block" />
-
-          <div className="flex items-center gap-2 text-[11px] text-muted flex-wrap">
-            <span className="bg-card border border-border/80 px-2 py-0.5 rounded-md">
-              Customer: <strong className="text-text font-semibold">{project.customer_name}</strong>
-            </span>
-            <span className="bg-card border border-border/80 px-2 py-0.5 rounded-md">
-              Assignee: <strong className="text-text font-semibold">{project.assignee || 'Unassigned'}</strong>
-            </span>
-            <span className="bg-card border border-border/80 px-2 py-0.5 rounded-md">
-              Status: <strong className="text-text font-semibold">{project.status}</strong>
-            </span>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-lg font-bold font-serif text-text tracking-tight leading-tight">
+                {project.project_name}
+              </h1>
+              <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-50 text-gray-600 border border-gray-200">
+                {project.status}
+              </span>
+            </div>
+            <div className="flex items-center gap-3 mt-1 flex-wrap text-xs text-muted">
+              <span>{project.customer_name}</span>
+              <span className="inline-flex items-center gap-1">
+                <User size={11} /> {project.assignee || 'Unassigned'}
+              </span>
+            </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
-          <button 
-            onClick={() => fetchProjectDetails()}
-            className="p-1.5 bg-card border border-border hover:bg-accent rounded-lg text-muted hover:text-text transition-colors"
-            title="Refresh details"
-          >
-            <RefreshCw size={13} />
-          </button>
-        </div>
       </div>
 
       {/* Chapters Split View */}
