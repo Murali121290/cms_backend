@@ -41,6 +41,11 @@ class File(Base):
     is_checked_out = Column(Boolean, default=False)
     checked_out_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     checked_out_at = Column(DateTime, nullable=True)
+
+    # Set when the last background processing job (structuring, PPD, etc.) raised
+    # an error; cleared on the next successful run. Lets status endpoints report
+    # "failed" instead of "completed" just because the file lock was released.
+    processing_error = Column(Text, nullable=True)
     
     checked_out_by = relationship("User", foreign_keys=[checked_out_by_id])
     versions = relationship("FileVersion", back_populates="original_file", cascade="all, delete-orphan")

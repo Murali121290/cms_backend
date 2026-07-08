@@ -34,7 +34,7 @@ import { TagSetSelectModal } from '@/features/projects/components/TagSetSelectMo
 import {
   startLanguageEdit,
   startPpdGeneration, startPermissionsCheck, startCreditExtraction,
-  startBiasScan, startWordToXml,
+  startBiasScan, startWordToXml, getProcessingStatus,
 } from '@/api/processing'
 import { checkoutFile, cancelCheckout, deleteFile } from '@/api/files'
 import { useChapterFilesQuery } from '@/features/projects/useChapterFilesQuery'
@@ -171,7 +171,15 @@ const col = createColumnHelper<FileRow>()
 type ConfirmStep = {
   actionName: string
   jobFn: () => Promise<unknown>
+  // When set, fire() polls /processing-status after the job starts so a
+  // background failure (e.g. an unreachable PPH server) surfaces as a toast
+  // instead of silently leaving the user with only the "started" message.
+  pollFileId?: number
+  pollProcessType?: string
 }
+
+const POLL_INTERVAL_MS = 5_000
+const POLL_TIMEOUT_MS = 600_000 // 10 minutes, matches structuring's poll timeout
 
 function FileActionsMenu({
   row, onView, onDelete, onViewDetails, onOpenReferenceCheck, stageName, isAssigned, projectId, chapterId,
@@ -205,13 +213,37 @@ function FileActionsMenu({
   const deadCls = 'flex items-center gap-2 px-3 py-2 text-text outline-none opacity-40 pointer-events-none cursor-not-allowed'
   const redCls = 'flex items-center gap-2 px-3 py-2 text-red-600 cursor-pointer hover:bg-red-50 focus:bg-red-50 outline-none'
 
-  async function fire(label: string, fn: () => Promise<unknown>) {
+  async function fire(label: string, fn: () => Promise<unknown>, pollFileId?: number, pollProcessType?: string) {
     try {
       await fn()
       toast.success(`${label} started for ${row.file_name}`)
     } catch {
       toast.error(`Failed: ${label}`)
+      return
     }
+
+    if (!pollFileId || !pollProcessType) return
+
+    const startedAt = Date.now()
+    const interval = setInterval(async () => {
+      if (Date.now() - startedAt >= POLL_TIMEOUT_MS) {
+        clearInterval(interval)
+        toast.error(`${label} timed out for ${row.file_name}`)
+        return
+      }
+      try {
+        const result = await getProcessingStatus(pollFileId, pollProcessType)
+        if (result.status === 'failed') {
+          clearInterval(interval)
+          toast.error(`${label} failed for ${row.file_name}: ${result.error ?? 'Unknown error'}`)
+        } else if (result.status === 'completed') {
+          clearInterval(interval)
+          toast.success(`${label} completed for ${row.file_name}`)
+        }
+      } catch {
+        // Transient poll error — let the timeout handle a genuinely stuck job.
+      }
+    }, POLL_INTERVAL_MS)
   }
 
   async function handleCheckout() {
@@ -266,7 +298,7 @@ function FileActionsMenu({
                   onClick={() => {
                     const s = confirmStep
                     setConfirmStep(null)
-                    void fire(s.actionName, s.jobFn)
+                    void fire(s.actionName, s.jobFn, s.pollFileId, s.pollProcessType)
                   }}
                 >
                   Confirm <ChevronRight size={11} />
@@ -477,7 +509,7 @@ function FileActionsMenu({
                   {showAction('manuscriptAnalysis') && (
                     <DropdownMenu.Item
                       className={itemCls}
-                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Manuscript Analysis', jobFn: () => startPpdGeneration(fid) }) }}
+                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Manuscript Analysis', jobFn: () => startPpdGeneration(fid), pollFileId: fid, pollProcessType: 'ppd' }) }}
                     >
                       <FileOutput size={12} className="text-muted" /> Manuscript Analysis
                     </DropdownMenu.Item>
@@ -497,7 +529,7 @@ function FileActionsMenu({
                   {showAction('aiCreditExtraction') && (
                     <DropdownMenu.Item
                       className={itemCls}
-                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'AI Credit Extraction', jobFn: () => startCreditExtraction(fid) }) }}
+                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'AI Credit Extraction', jobFn: () => startCreditExtraction(fid), pollFileId: fid, pollProcessType: 'credit_extractor_ai' }) }}
                     >
                       <Sparkles size={12} className="text-muted" /> AI Credit Extraction
                     </DropdownMenu.Item>
@@ -507,7 +539,7 @@ function FileActionsMenu({
                   {showAction('biasScan') && (
                     <DropdownMenu.Item
                       className={itemCls}
-                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Bias Scan', jobFn: () => startBiasScan(fid) }) }}
+                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Bias Scan', jobFn: () => startBiasScan(fid), pollFileId: fid, pollProcessType: 'bias_scan' }) }}
                     >
                       <ScanLine size={12} className="text-muted" /> Bias Scan
                     </DropdownMenu.Item>
@@ -517,7 +549,7 @@ function FileActionsMenu({
                   {showAction('wordToXml') && (
                     <DropdownMenu.Item
                       className={itemCls}
-                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Word to XML', jobFn: () => startWordToXml(fid) }) }}
+                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Word to XML', jobFn: () => startWordToXml(fid), pollFileId: fid, pollProcessType: 'word_to_xml' }) }}
                     >
                       <FileCode size={12} className="text-muted" /> Word to XML
                     </DropdownMenu.Item>
