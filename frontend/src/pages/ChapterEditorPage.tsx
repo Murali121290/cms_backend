@@ -5,10 +5,11 @@
  *
  * Route: …/chapters/:chapterId/view/:subfolder/:filename
  */
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, FileText, Save, Loader2, Download } from 'lucide-react'
 import { DocxViewer } from '@/components/DocxViewer'
+import 'pdfjs-viewer-element'
 import { projectsApi } from '@/api/projects'
 import { chaptersApi } from '@/api/chapters'
 import { FullPageSpinner } from '@/components/ui/Spinner'
@@ -42,6 +43,18 @@ export function ChapterEditorPage() {
       .finally(() => setLoading(false))
   }, [chapterId, projectId])
 
+  useEffect(() => {
+    const scriptId = 'pdfjs-viewer-element-script';
+    let script = document.getElementById(scriptId) as HTMLScriptElement | null;
+    if (!script) {
+      script = document.createElement('script');
+      script.id = scriptId;
+      script.type = 'module';
+      script.src = 'https://cdn.jsdelivr.net/npm/pdfjs-viewer-element/dist/pdfjs-viewer-element.js';
+      document.body.appendChild(script);
+    }
+  }, [])
+
   const decodedFilename  = filename  ? decodeURIComponent(filename)  : ''
   const decodedSubfolder = subfolder ? decodeURIComponent(subfolder) : ''
   const ext = decodedFilename.split('.').pop()?.toLowerCase() ?? ''
@@ -49,14 +62,36 @@ export function ChapterEditorPage() {
   // Build download / view URL from the API
   const fileUrl = chapterId && projectId && decodedSubfolder && decodedFilename
     ? `/api/uploads/${projectId}/chapter/${(() => {
-        // Derive chapter_name from project file_details
-        if (!project?.file_details) return `chapter-${chapterId}`
+        // Derive chapter_name from project file_details — match the chapter
+        // this page is actually viewing (by chapter number), not just the
+        // first entry in the array (see ChapterDetailPage.tsx for the same
+        // pattern already working there).
+        const chNo = chapter?.chapters?.match(/\d+/)?.[0]
+        if (!project?.file_details || !chNo) return `chapter-${chNo ?? chapterId}`
         const cf = (project.file_details as { chapter_folders?: { chapters?: Array<{ chapter_name: string }> } }).chapter_folders
-        return cf?.chapters?.find(() => true)?.chapter_name ?? `chapter-${chapterId}`
+        return cf?.chapters?.find(c => c.chapter_name === `chapter-${chNo}`)?.chapter_name ?? `chapter-${chNo}`
       })()}/${decodedSubfolder}/${encodeURIComponent(decodedFilename)}/download`
     : null
 
   const isEditable = !!chapter?.current_assignee_name
+
+  // pdfjs-viewer-element only reacts to a `src` attribute change once its
+  // internal viewer app has finished bootstrapping (its attributeChangedCallback
+  // no-ops until then) — setting `src` as a plain JSX prop loses that race,
+  // since React applies it before the element is even connected to the DOM.
+  // Waiting on the element's own `initPromise` before setting it imperatively
+  // sidesteps that entirely.
+  const pdfViewerRef = useRef<(HTMLElement & { initPromise?: Promise<unknown> }) | null>(null)
+  useEffect(() => {
+    if (ext !== 'pdf' || !fileUrl) return
+    const el = pdfViewerRef.current
+    if (!el) return
+    let cancelled = false
+    Promise.resolve(el.initPromise).then(() => {
+      if (!cancelled) el.setAttribute('src', fileUrl)
+    })
+    return () => { cancelled = true }
+  }, [ext, fileUrl])
 
   if (loading) return <FullPageSpinner/>
 
@@ -113,10 +148,19 @@ export function ChapterEditorPage() {
             </div>
           </div>
         ) : ext === 'pdf' ? (
+          // @ts-ignore
+          <pdfjs-viewer-element
+            src={fileUrl}
+            key={fileUrl}
+            ref={pdfViewerRef}
+            style={{ width: '100%', height: '100%', display: 'block', border: '0' }}
+          />
+        ) : (ext === 'html' || ext === 'htm') ? (
           <iframe
-            src={`${fileUrl}#toolbar=0&navpanes=0&scrollbar=1&pagemode=none&view=FitH`}
+            src={fileUrl}
             title={decodedFilename}
-            className="w-full h-full border-0"
+            sandbox="allow-scripts"
+            className="w-full h-full border-0 bg-white"
           />
         ) : (ext === 'docx' || ext === 'doc') ? (
           <DocxViewer src={fileUrl} editable={isEditable} className="h-full"/>

@@ -102,7 +102,7 @@ class ProjectSummary(BaseModel):
     client_id: int | None = None
     client_name: str | None = None
     xml_standard: str
-    status: str
+    status: str | None = None
     chapter_count: int
     file_count: int
     workflow_name: str | None = None
@@ -564,6 +564,15 @@ class ProcessingStartRequest(BaseModel):
     process_type: str
     mode: str = "style"
     options: dict[str, Any] | None = None
+
+
+class TagSetOption(BaseModel):
+    key: str
+    label: str
+
+
+class TagSetListResponse(BaseModel):
+    tag_sets: list[TagSetOption]
 
 
 class ProcessingStartResponse(BaseModel):

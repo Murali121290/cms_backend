@@ -21,13 +21,16 @@ class StructuringEngine:
     processed DOCX back into the CMS storage.
     """
 
-    def process_document(self, file_path: str, mode: str = "style") -> List[str]:
+    def process_document(self, file_path: str, mode: str = "style", tag_set: str = None) -> List[str]:
         """
         Run structuring process on a DOCX file.
 
         Args:
             file_path: Absolute path to the input .docx file
             mode: "style" (Apply Styles & Validate) or "tag" (Add Tags Only)
+            tag_set: optional client tag-set key (e.g. "springer"); None uses
+                canonical/LWW tags. Only applies to local structuring - the
+                AI-offload branch has no tag_set concept.
 
         Returns:
             List of generated file paths (usually just one processed file)
@@ -92,7 +95,8 @@ class StructuringEngine:
         result = process_docx(
             input_path=file_path,
             output_path=output_path,
-            mode=mode
+            mode=mode,
+            tag_set=tag_set
         )
 
         if not result.get("success", False):

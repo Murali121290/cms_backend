@@ -33,7 +33,9 @@ prefix, and the outer prefix is simply added on top, compounding correctly
 
 import logging
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+from .rules_loader import get_rules_loader
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +44,27 @@ _BOX_MARKER_RE = re.compile(r"^(BX\d+)[-_].+$|^(NBX\d+)-.+$")
 # Mirrors annotator.py's _BARE_BOX_MARKERS - fixed-keyword markers with no
 # number/suffix, where the bare token is itself the box id.
 _BARE_BOX_MARKERS = {"COUT"}
+
+
+def _generic_box_placeholder_role(tag: str) -> Optional[str]:
+    """If *tag* is one of rules.yaml boxes.title_style/body_style/
+    first_body_style (e.g. "NBX1-TTL"), return the bare role suffix
+    ("TTL") it stands for.
+
+    These defaults are assigned by annotator.py's text-pattern-only box
+    title/body rules (e.g. the "^Box\\s+\\d+\\." title rule), which run
+    before this module's marker-pairing pass and so have no way to know
+    which numbered box (BX1, BX2, NBX1, ...) will actually enclose the
+    paragraph - they always guess the generic "NBX1"/"NBX" family. Once
+    the real enclosing box_id is known here, that guess needs to be
+    replaced rather than blindly prefixed on top of (which would produce
+    a double-family tag like "BX1-NBX1-TTL" instead of "BX1-TTL")."""
+    box_cfg = get_rules_loader().get_box_config()
+    for key in ("title_style", "body_style", "first_body_style"):
+        default_value = box_cfg.get(key)
+        if default_value and default_value == tag and "-" in default_value:
+            return default_value.split("-", 1)[1]
+    return None
 
 
 def _box_id(full_marker: str) -> str:
@@ -91,8 +114,15 @@ def _prefix_range(annotations: List[Dict[str, Any]], start_idx: int, end_idx: in
             continue
         if _already_has_box_prefix(item["tag"], box_id):
             continue
-        item["tag"] = f"{box_id}-{item['tag']}"
-        item["style"] = f"{box_id}-{item['style']}"
+        placeholder_role = _generic_box_placeholder_role(item["tag"])
+        if placeholder_role is not None:
+            # Replace the generic NBX1/NBX guess with this box's own
+            # family instead of stacking a second prefix on top of it.
+            item["tag"] = f"{box_id}-{placeholder_role}"
+            item["style"] = f"{box_id}-{placeholder_role}"
+        else:
+            item["tag"] = f"{box_id}-{item['tag']}"
+            item["style"] = f"{box_id}-{item['style']}"
 
 
 def apply_box_tag_prefixes(annotations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

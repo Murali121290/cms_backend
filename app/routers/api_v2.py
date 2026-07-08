@@ -38,7 +38,6 @@ from app.utils.timezone import now_ist_naive
 from app.utils.inject_styles import inject_publisher_styles
 from app.processing.ppd_engine import PPDEngine
 from app.processing.permissions_engine import PermissionsEngine
-from app.domains.files import image_preview_service, image_convert_service
 from app.processing.technical_engine import TechnicalEngine
 from app.processing.legacy.highlighter.technical_editor import TechnicalEditor
 from app.processing.references_engine import ReferencesEngine
@@ -48,6 +47,7 @@ from app.processing.ai_extractor_engine import AIExtractorEngine
 from app.processing.xml_engine import XMLEngine
 from app.utils.utils.structuring_lib.doc_utils import extract_document_structure, update_document_structure
 from app.utils.utils.structuring_lib.rules_loader import get_rules_loader
+from app.utils.utils.structuring_lib.tag_set_loader import list_available_tag_sets
 from app.integrations.collabora.config import COLLABORA_PUBLIC_URL, WOPI_BASE_URL
 from app.integrations.onlyoffice import (
     ONLYOFFICE_PUBLIC_URL,
@@ -1706,7 +1706,7 @@ def api_v2_download_file(
 @router.get("/files/{file_id}/preview")
 def api_v2_file_preview(
     file_id: int,
-    fmt: str = Query("png", regex="^(png|jpg)$"),
+    fmt: str = Query("png", pattern="^(png|jpg)$"),
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -2358,6 +2358,138 @@ def api_v2_upload_chapter_files(
     )
 
 
+@router.get("/uploads/{project_id}/chapter/{chapter_name}/backup-list")
+def api_v2_backup_list(
+    project_id: int,
+    chapter_name: str,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+        
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+        
+    chapter_no = chapter_name.split("-")[-1]
+    chapter = db.query(models.ChapterInfo).filter(
+        models.ChapterInfo.project == project.code,
+        (models.ChapterInfo.chapters == chapter_no) | (models.ChapterInfo.chapters == str(int(chapter_no)))
+    ).first()
+    
+    if not chapter:
+        return {"files": []}
+        
+    versions = db.query(models.FileVersion).join(
+        models.File, models.FileVersion.file_id == models.File.id
+    ).filter(
+        models.File.chapter_id == chapter.id
+    ).all()
+    
+    files_list = []
+    for v in versions:
+        size_bytes = 0
+        if v.path and os.path.exists(v.path):
+            size_bytes = os.path.getsize(v.path)
+            
+        file_size = f"{size_bytes} B"
+        if size_bytes > 1024 * 1024:
+            file_size = f"{size_bytes / (1024 * 1024):.1f} MB"
+        elif size_bytes > 1024:
+            file_size = f"{size_bytes / 1024:.1f} KB"
+            
+        uploaded_by_username = "System"
+        if v.uploaded_by:
+            uploaded_by_username = v.uploaded_by.username
+            
+        files_list.append({
+            "file_name": os.path.basename(v.path) if v.path else f"v{v.version_num}",
+            "path": v.path or "",
+            "file_size": file_size,
+            "size_bytes": size_bytes,
+            "uploaded_by": uploaded_by_username,
+            "uploaded_on": v.uploaded_at.isoformat() if v.uploaded_at else "",
+        })
+        
+    return {"files": files_list}
+
+
+@router.get("/uploads/{project_id}/chapter/{chapter_name}/backup-list")
+def api_v2_backup_list(
+    project_id: int,
+    chapter_name: str,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+        
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+        
+    chapter_no = chapter_name.split("-")[-1]
+    chapter = db.query(models.ChapterInfo).filter(
+        models.ChapterInfo.project == project.code,
+        (models.ChapterInfo.chapters == chapter_no) | (models.ChapterInfo.chapters == str(int(chapter_no)))
+    ).first()
+    
+    if not chapter:
+        return {"files": []}
+        
+    versions = db.query(models.FileVersion).join(
+        models.File, models.FileVersion.file_id == models.File.id
+    ).filter(
+        models.File.chapter_id == chapter.id
+    ).all()
+    
+    files_list = []
+    for v in versions:
+        size_bytes = 0
+        if v.path and os.path.exists(v.path):
+            size_bytes = os.path.getsize(v.path)
+            
+        file_size = f"{size_bytes} B"
+        if size_bytes > 1024 * 1024:
+            file_size = f"{size_bytes / (1024 * 1024):.1f} MB"
+        elif size_bytes > 1024:
+            file_size = f"{size_bytes / 1024:.1f} KB"
+            
+        uploaded_by_username = "System"
+        if v.uploaded_by:
+            uploaded_by_username = v.uploaded_by.username
+            
+        files_list.append({
+            "file_name": os.path.basename(v.path) if v.path else f"v{v.version_num}",
+            "path": v.path or "",
+            "file_size": file_size,
+            "size_bytes": size_bytes,
+            "uploaded_by": uploaded_by_username,
+            "uploaded_on": v.uploaded_at.isoformat() if v.uploaded_at else "",
+        })
+        
+    return {"files": files_list}
+
+
 @router.post(
     "/uploads/{customer_code}/{project_code}",
     response_model=schemas_v2.UploadZipResponse,
@@ -2927,7 +3059,9 @@ def api_v2_open_in_word(
     import urllib.parse
     token = create_access_token({"sub": viewer.username, "file_id": file_id, "mode": mode}, expires_delta=timedelta(minutes=WEBDAV_TOKEN_EXPIRE_MINUTES))
     quoted_filename = urllib.parse.quote(filename, safe="")
-    webdav_url = f"{WEBDAV_BASE_URL}/webdav/files/{file_id}/{mode}/{quoted_filename}?token={token}"
+    # Token is a path segment, not a `?token=` query param — Word (including
+    # 2019) mis-parses ms-word:ofe|u| URLs that contain a query string.
+    webdav_url = f"{WEBDAV_BASE_URL}/webdav/files/{file_id}/{mode}/{token}/{quoted_filename}"
     ms_word_uri = f"ms-word:ofe|u|{webdav_url}"
 
     return {"ms_word_uri": ms_word_uri, "webdav_url": webdav_url}
@@ -3059,6 +3193,16 @@ def api_v2_start_processing(
             else None
         ),
     )
+
+
+@router.get("/tag-sets", response_model=schemas_v2.TagSetListResponse)
+def api_v2_get_tag_sets():
+    options = [schemas_v2.TagSetOption(key="lww", label="LWW")]
+    options += [
+        schemas_v2.TagSetOption(key=key, label=key.capitalize())
+        for key in list_available_tag_sets()
+    ]
+    return schemas_v2.TagSetListResponse(tag_sets=options)
 
 
 @router.get("/files/{file_id}/processing-status", response_model=schemas_v2.ProcessingStatusResponse)

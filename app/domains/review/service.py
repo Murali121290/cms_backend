@@ -64,6 +64,13 @@ def resolve_processed_target(db: Session, *, file_id: int):
     if not file_record:
         raise HTTPException(status_code=404, detail="File not found")
 
+    filename_lower = file_record.filename.lower()
+    if not (filename_lower.endswith(".docx") or filename_lower.endswith(".doc")):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Technical or structuring review is only supported for Word documents. Got: {file_record.filename}"
+        )
+
     original_path = file_record.path
     if original_path.endswith("_Processed.docx"):
         processed_path = original_path

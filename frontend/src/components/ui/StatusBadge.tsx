@@ -7,7 +7,7 @@ type BadgeVariant = ComponentProps<typeof Badge>["variant"];
 type StatusSize = "sm" | "md";
 
 interface StatusBadgeProps {
-  status: string;
+  status?: string | null;
   size?: StatusSize;
   className?: string;
 }
@@ -18,8 +18,8 @@ interface StatusConfig {
   pulse: boolean;
 }
 
-function getStatusConfig(status: string): StatusConfig {
-  const normalized = status.toLowerCase().trim();
+function getStatusConfig(status?: string | null): StatusConfig {
+  const normalized = (status || "").toLowerCase().trim();
 
   switch (normalized) {
     case "processing":

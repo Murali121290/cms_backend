@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, CheckCircle2, Layers, Calendar, Flag } from 'lucide-react'
 import { projectsApi } from '@/api/projects'
@@ -109,6 +109,41 @@ function buildChapterSchedule(
   return result
 }
 
+// ── Planning Table Header ────────────────────────────────────────────────────────
+
+function PlanningTableHeader({ stages }: { stages: StageSchedule[] }) {
+  return (
+    <thead>
+      <tr className="bg-background border-b-2 border-border">
+        <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-0 z-20 bg-background whitespace-nowrap w-[144px] min-w-[144px] max-w-[144px] shadow-[inset_-1px_0_0_var(--color-border)]">
+          Chapter
+        </th>
+        <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-[144px] z-20 bg-background whitespace-nowrap w-[176px] min-w-[176px] max-w-[176px] shadow-[inset_-1px_0_0_var(--color-border)]">
+          File Name
+        </th>
+        <th className="px-4 py-3 text-center text-xs font-semibold text-muted uppercase tracking-wider sticky left-[320px] z-20 bg-background whitespace-nowrap w-[112px] min-w-[112px] max-w-[112px] shadow-[inset_-1px_0_0_var(--color-border)]">
+          MS Pages
+        </th>
+        <th className="px-4 py-3 text-center text-xs font-semibold text-muted uppercase tracking-wider sticky left-[432px] z-20 bg-background whitespace-nowrap w-[96px] min-w-[96px] max-w-[96px] shadow-[inset_-2px_0_0_var(--color-border)]">
+          CE Pages
+        </th>
+        {stages.map(s => (
+          <th key={s.stageName} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider whitespace-nowrap min-w-56 border-r border-border last:border-r-0">
+            <div className="flex flex-col gap-0.5">
+              <span>{s.stageName}</span>
+              {s.slaDays != null && (
+                <span className="text-[10px] font-normal normal-case tracking-normal text-muted/70">
+                  Default: {s.slaDays}d
+                </span>
+              )}
+            </div>
+          </th>
+        ))}
+      </tr>
+    </thead>
+  )
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────────
 
 export function ProjectPlanningPage() {
@@ -122,86 +157,93 @@ export function ProjectPlanningPage() {
   const [stageMasters, setStageMasters] = useState<Stage[]>([])
   const [loading,      setLoading]      = useState(true)
   const [approving,    setApproving]    = useState(false)
+  const [approvingNew, setApprovingNew] = useState(false)
   const [previewComposition, setPreviewComposition] = useState<string | null>(null)
   const [cellSlas, setCellSlas] = useState<Record<number, Record<string, number | null>>>({})
   const [delayMap,  setDelayMap]  = useState<Map<string, number>>(new Map())
   const [actualFinalDue, setActualFinalDue] = useState<Date | null>(null)
   const [dbDates, setDbDates] = useState<Record<string, { start: Date; due: Date }>>({})
 
-  useEffect(() => {
+  const loadPlanningData = useCallback(async (opts?: { silent?: boolean }) => {
     if (!id) return
-    setLoading(true)
-    projectsApi.getById(id)
-      .then(async response => {
-        const proj = response.project as unknown as Project
-        setProject(proj)
-        setPreviewComposition(proj.composition ?? 'Medium')
-        const projectCode = proj.code || proj.project_code || ''
-        const workflowName = proj.workflow_name || ''
+    if (!opts?.silent) setLoading(true)
+    try {
+      const response = await projectsApi.getById(id)
+      const proj = response.project as unknown as Project
+      setProject(proj)
+      setPreviewComposition(proj.composition ?? 'Medium')
+      const projectCode = proj.code || proj.project_code || ''
+      const workflowName = proj.workflow_name || ''
 
-        // Ensure WMS chapter_details are in sync with CMS chapters
-        await import('@/api/client').then(m => m.default.post(`/projects/${id}/sync-chapters`)).catch(() => undefined)
+      // Ensure WMS chapter_details are in sync with CMS chapters
+      await import('@/api/client').then(m => m.default.post(`/projects/${id}/sync-chapters`)).catch(() => undefined)
 
-        const [chs, wf, masters, stageDetails] = await Promise.all([
-          chaptersApi.getByProject(projectCode).catch(() => [] as Chapter[]),
-          workflowName
-            ? workflowsApi.getWorkflow(workflowName).catch(() => [] as WorkflowStage[])
-            : Promise.resolve([] as WorkflowStage[]),
-          stagesApi.list().catch(() => [] as Stage[]),
-          projectCode
-            ? stageDetailsApi.listByProject(projectCode).catch(() => [])
-            : Promise.resolve([]),
-        ])
-        setChapters(chs)
-        setWfStages(wf)
-        setStageMasters(masters)
+      const [chs, wf, masters, stageDetails] = await Promise.all([
+        chaptersApi.getByProject(projectCode).catch(() => [] as Chapter[]),
+        workflowName
+          ? workflowsApi.getWorkflow(workflowName).catch(() => [] as WorkflowStage[])
+          : Promise.resolve([] as WorkflowStage[]),
+        stagesApi.list().catch(() => [] as Stage[]),
+        projectCode
+          ? stageDetailsApi.listByProject(projectCode).catch(() => [])
+          : Promise.resolve([]),
+      ])
+      setChapters(chs)
+      setWfStages(wf)
+      setStageMasters(masters)
 
-        if (stageDetails.length > 0 && chs.length > 0) {
-          const sorted = [...stageDetails].sort(
-            (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-          )
-          const slaSeen = new Set<string>()
-          const loaded: Record<number, Record<string, number | null>> = {}
-          const dMap = new Map<string, number>()
-          const datesMap: Record<string, { start: Date; due: Date }> = {}
-          let maxDue: Date | null = null
+      // Reset before rebuilding so chapters that lost their planning rows don't keep stale data
+      let loaded: Record<number, Record<string, number | null>> = {}
+      let dMap = new Map<string, number>()
+      let datesMap: Record<string, { start: Date; due: Date }> = {}
+      let maxDue: Date | null = null
 
-          for (const d of sorted) {
-            const key = `${d.chapters}||${d.stage_name}`
-            if (!slaSeen.has(key) && d.sla != null) {
-              slaSeen.add(key)
-              const ch = chs.find(c => c.chapters === d.chapters)
-              if (ch) {
-                if (!loaded[ch.id]) loaded[ch.id] = {}
-                loaded[ch.id][d.stage_name] = d.sla
-              }
-            }
-            if (d.planned_start_date && d.planned_end_date) {
-              if (!datesMap[key]) {
-                datesMap[key] = {
-                  start: new Date(d.planned_start_date),
-                  due: new Date(d.planned_end_date)
-                }
-              }
-            }
-            if (d.delayed && d.delay_days != null && d.delay_days > 0) {
-              const existing = dMap.get(key) ?? 0
-              if (d.delay_days > existing) dMap.set(key, d.delay_days)
-            }
-            if (d.planned_end_date) {
-              const due = new Date(d.planned_end_date)
-              if (!maxDue || due > maxDue) maxDue = due
+      if (stageDetails.length > 0 && chs.length > 0) {
+        const sorted = [...stageDetails].sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        )
+        const slaSeen = new Set<string>()
+
+        for (const d of sorted) {
+          const key = `${d.chapters}||${d.stage_name}`
+          if (!slaSeen.has(key) && d.sla != null) {
+            slaSeen.add(key)
+            const ch = chs.find(c => c.chapters === d.chapters)
+            if (ch) {
+              if (!loaded[ch.id]) loaded[ch.id] = {}
+              loaded[ch.id][d.stage_name] = d.sla
             }
           }
-          setCellSlas(loaded)
-          setDelayMap(dMap)
-          setDbDates(datesMap)
-          if (maxDue) setActualFinalDue(maxDue)
+          if (d.planned_start_date && d.planned_end_date) {
+            if (!datesMap[key]) {
+              datesMap[key] = {
+                start: new Date(d.planned_start_date),
+                due: new Date(d.planned_end_date)
+              }
+            }
+          }
+          if (d.delayed && d.delay_days != null && d.delay_days > 0) {
+            const existing = dMap.get(key) ?? 0
+            if (d.delay_days > existing) dMap.set(key, d.delay_days)
+          }
+          if (d.planned_end_date) {
+            const due = new Date(d.planned_end_date)
+            if (!maxDue || due > maxDue) maxDue = due
+          }
         }
-      })
-      .catch(() => toast.error('Failed to load project'))
-      .finally(() => setLoading(false))
+      }
+      setCellSlas(loaded)
+      setDelayMap(dMap)
+      setDbDates(datesMap)
+      setActualFinalDue(maxDue)
+    } catch {
+      toast.error('Failed to load project')
+    } finally {
+      if (!opts?.silent) setLoading(false)
+    }
   }, [id])
+
+  useEffect(() => { loadPlanningData() }, [loadPlanningData])
 
   useEffect(() => { setCellSlas({}) }, [previewComposition])
 
@@ -224,14 +266,30 @@ export function ProjectPlanningPage() {
     return m
   }, [baseSchedule])
 
+  const alreadyApproved = project?.status === 'Active' || project?.status === 'Completed'
+
+  // Chapters with at least one persisted StageDetail row (i.e. already planned/approved).
+  // A chapter added after the project was approved has none of these yet and needs its
+  // own pass through planning — it must never be silently folded into the locked table.
+  const plannedChapterNumbers = useMemo(() => {
+    const s = new Set<string>()
+    Object.keys(dbDates).forEach(key => s.add(key.split('||')[0]))
+    return s
+  }, [dbDates])
+
   const chapterSchedules = useMemo(() => {
     if (!project || chapters.length === 0 || orderedStages.length === 0) return new Map<number, StageSchedule[]>()
     const result = new Map<number, StageSchedule[]>()
     for (const ch of chapters) {
-      result.set(ch.id, buildChapterSchedule(ch.id, orderedStages, baseSlaMap, cellSlas, project.created_at || ''))
+      // A chapter added after the project was already approved has no history tied to
+      // project.created_at — anchor its schedule to its own upload time instead, otherwise
+      // it would start (and appear "delayed") back on the original project approval date.
+      const isUnplanned = alreadyApproved && !plannedChapterNumbers.has(ch.chapters)
+      const anchor = isUnplanned ? (ch.created_at || project.created_at || '') : (project.created_at || '')
+      result.set(ch.id, buildChapterSchedule(ch.id, orderedStages, baseSlaMap, cellSlas, anchor))
     }
     return result
-  }, [project, chapters, orderedStages, baseSlaMap, cellSlas])
+  }, [project, chapters, orderedStages, baseSlaMap, cellSlas, alreadyApproved, plannedChapterNumbers])
 
   function handleCellSlaChange(chId: number, stageName: string, raw: string) {
     if (raw === '') {
@@ -248,7 +306,15 @@ export function ProjectPlanningPage() {
     }
   }
 
-  const alreadyApproved = project?.status === 'Active' || project?.status === 'Completed'
+  const unplannedChapters = useMemo(
+    () => alreadyApproved ? chapters.filter(ch => !plannedChapterNumbers.has(ch.chapters)) : [],
+    [alreadyApproved, chapters, plannedChapterNumbers]
+  )
+
+  const plannedChapters = useMemo(
+    () => alreadyApproved ? chapters.filter(ch => plannedChapterNumbers.has(ch.chapters)) : chapters,
+    [alreadyApproved, chapters, plannedChapterNumbers]
+  )
 
   const finalDue = useMemo(() => {
     if (baseSchedule.length === 0) return null
@@ -336,6 +402,140 @@ export function ProjectPlanningPage() {
     setApproving(false)
   }
 
+  // Scoped approval for chapters added after the project's planning was already approved.
+  // Only ever submits `unplannedChapters` — never re-submits chapters that already have
+  // StageDetail rows, since createPlanningRows has no upsert/dedupe and would duplicate them.
+  async function handleApproveNewChapters() {
+    if (!project || unplannedChapters.length === 0) return
+    setApprovingNew(true)
+    const prjCode = project.code || project.project_code
+    const wfName = project.workflow_name
+    try {
+      if (prjCode) {
+        if (previewComposition) {
+          await Promise.all(unplannedChapters.map(ch =>
+            chaptersApi.update(ch.id, { complexity_level: previewComposition })
+          )).catch(e => console.error('[New chapter planning] complexity update failed', e))
+        }
+
+        const items = unplannedChapters.flatMap(ch => {
+          const chSched = chapterSchedules.get(ch.id) ?? baseSchedule
+          return chSched.map(s => ({
+            chapters:           ch.chapters,
+            stage_name:         s.stageName,
+            planned_start_date: toLocalISOString(s.start),
+            planned_end_date:   toLocalISOString(s.due),
+            sla:                s.slaDays,
+          }))
+        })
+        await stageDetailsApi.createPlanningRows({
+          client:               project.division_code ?? '',
+          project:              prjCode,
+          workflow:             wfName ?? '',
+          complexity_level:     previewComposition,
+          project_manager_name: project.project_manager ?? null,
+          items,
+        })
+
+        await Promise.all(unplannedChapters.map(ch => {
+          const chSched = chapterSchedules.get(ch.id) ?? baseSchedule
+          const stageSched = ch.stage_name
+            ? (chSched.find(s => s.stageName === ch.stage_name) ?? chSched[0])
+            : chSched[0]
+          if (!stageSched) return Promise.resolve()
+          return chaptersApi.update(ch.id, { due_date: toLocalDateStr(stageSched.due), status: 'In-progress' })
+        })).catch(e => console.error('[New chapter planning] due date update failed', e))
+      }
+      toast.success(`Planning approved for ${unplannedChapters.length} new chapter${unplannedChapters.length !== 1 ? 's' : ''}`)
+      await loadPlanningData({ silent: true })
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      toast.error(`Failed to approve new chapter planning: ${msg}`)
+    } finally {
+      setApprovingNew(false)
+    }
+  }
+
+  // `editable` is per-row, not the global `alreadyApproved` flag — a chapter added after
+  // approval must show editable SLA inputs even while the rest of the project is locked.
+  function renderChapterRow(ch: Chapter, editable: boolean) {
+    const chSched = chapterSchedules.get(ch.id) ?? baseSchedule
+    return (
+      <tr
+        key={ch.id}
+        className="border-b border-border hover:bg-accent transition-colors group bg-card"
+      >
+        <td className="px-4 py-3 font-semibold text-text sticky left-0 z-10 whitespace-nowrap w-[144px] min-w-[144px] max-w-[144px] shadow-[inset_-1px_0_0_var(--color-border)] bg-card group-hover:bg-accent transition-colors">
+          {ch.chapters}
+        </td>
+        <td className="px-4 py-3 text-xs text-muted sticky left-[144px] z-10 whitespace-nowrap w-[176px] min-w-[176px] max-w-[176px] shadow-[inset_-1px_0_0_var(--color-border)] max-w-[176px] truncate bg-card group-hover:bg-accent transition-colors">
+          {ch.chapter_title || '—'}
+        </td>
+        <td className="px-4 py-3 text-xs text-center sticky left-[320px] z-10 whitespace-nowrap w-[112px] min-w-[112px] max-w-[112px] shadow-[inset_-1px_0_0_var(--color-border)] font-medium text-text bg-card group-hover:bg-accent transition-colors">
+          {ch.manuscript_pages != null ? ch.manuscript_pages : '—'}
+        </td>
+        <td className="px-4 py-3 text-xs text-center sticky left-[432px] z-10 whitespace-nowrap w-[96px] min-w-[96px] max-w-[96px] shadow-[inset_-2px_0_0_var(--color-border)] font-medium text-text bg-card group-hover:bg-accent transition-colors">
+          {ch.word_count != null ? Math.floor(ch.word_count / 250) : '—'}
+        </td>
+        {chSched.map(s => {
+          const isCellEdited = s.slaDays !== (baseSlaMap.get(s.stageName) ?? null)
+          const delayDays    = delayMap.get(`${ch.chapters}||${s.stageName}`)
+                            ?? (ch.delayed_stages?.[s.stageName] ?? 0)
+          const dbKey = `${ch.chapters}||${s.stageName}`
+          const displayStart = !editable && dbDates[dbKey] ? dbDates[dbKey].start : s.start
+          const displayDue = !editable && dbDates[dbKey] ? dbDates[dbKey].due : s.due
+          return (
+            <td key={s.stageName} className="px-4 py-3 border-r border-border/50 last:border-r-0">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="w-9 text-[10px] font-semibold text-muted uppercase tracking-wide">Start</span>
+                  <span className="text-text font-medium">{fmt(displayStart)}</span>
+                </div>
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="w-9 text-[10px] font-semibold text-muted uppercase tracking-wide">Due</span>
+                  <span className={`font-medium ${isCellEdited ? 'text-primary font-bold' : 'text-text'}`}>
+                    {fmt(displayDue)}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="w-9 text-[10px] font-semibold text-muted uppercase tracking-wide">SLA</span>
+                  {!editable ? (
+                    <>
+                      {s.slaDays != null && (
+                        <span className="text-[10px] font-bold text-primary">{s.slaDays}d</span>
+                      )}
+                      {delayDays > 0 && (
+                        <span className="inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200 ml-1">
+                          +{delayDays}d
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min={0}
+                        value={s.slaDays ?? ''}
+                        onChange={e => handleCellSlaChange(ch.id, s.stageName, e.target.value)}
+                        placeholder="—"
+                        className={`w-12 text-[11px] border rounded px-1.5 py-0.5 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 ${
+                          isCellEdited
+                            ? 'border-amber-400 bg-amber-50/60 text-amber-800'
+                            : 'bg-background border-border'
+                        }`}
+                      />
+                      <span className="text-[10px] text-muted">d</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </td>
+          )
+        })}
+      </tr>
+    )
+  }
+
   async function handleBack() {
     if (project && finalDue && alreadyApproved) {
       const s = toLocalDateStr(finalDue)
@@ -382,7 +582,7 @@ export function ProjectPlanningPage() {
             <select
               value={previewComposition ?? 'Medium'}
               onChange={e => setPreviewComposition(e.target.value)}
-              disabled={alreadyApproved}
+              disabled={alreadyApproved && unplannedChapters.length === 0}
               className="text-xs bg-surface border border-border rounded-lg px-2.5 py-1.5 text-text focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <option value="Low">Low (Level 1)</option>
@@ -439,123 +639,56 @@ export function ProjectPlanningPage() {
             <p className="text-sm">No workflow stages found. Assign a workflow to this project first.</p>
           </div>
         ) : (
+          <>
+          {alreadyApproved && unplannedChapters.length > 0 && (
+            <div className="sticky left-0 z-30 w-fit min-w-full px-4 pt-4 pb-2 flex items-center justify-between gap-3 bg-amber-50 border-b border-amber-200">
+              <p className="text-xs text-amber-800 flex items-center gap-1.5">
+                <Calendar size={13} />
+                {unplannedChapters.length} new chapter{unplannedChapters.length !== 1 ? 's' : ''} added after approval — plan and approve below to give {unplannedChapters.length !== 1 ? 'them' : 'it'} due dates.
+              </p>
+              <Button
+                onClick={handleApproveNewChapters}
+                disabled={approvingNew}
+                isLoading={approvingNew}
+                leftIcon={<CheckCircle2 size={14} />}
+              >
+                {approvingNew ? "Approving…" : `Approve ${unplannedChapters.length} New Chapter${unplannedChapters.length !== 1 ? 's' : ''}`}
+              </Button>
+            </div>
+          )}
           <table className="w-full border-collapse text-sm min-w-max">
-            <thead>
-              <tr className="bg-background border-b-2 border-border">
-                <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-0 z-20 bg-background whitespace-nowrap w-[144px] min-w-[144px] max-w-[144px] shadow-[inset_-1px_0_0_var(--color-border)]">
-                  Chapter
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-[144px] z-20 bg-background whitespace-nowrap w-[176px] min-w-[176px] max-w-[176px] shadow-[inset_-1px_0_0_var(--color-border)]">
-                  File Name
-                </th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-muted uppercase tracking-wider sticky left-[320px] z-20 bg-background whitespace-nowrap w-[112px] min-w-[112px] max-w-[112px] shadow-[inset_-1px_0_0_var(--color-border)]">
-                  MS Pages
-                </th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-muted uppercase tracking-wider sticky left-[432px] z-20 bg-background whitespace-nowrap w-[96px] min-w-[96px] max-w-[96px] shadow-[inset_-2px_0_0_var(--color-border)]">
-                  CE Pages
-                </th>
-                {baseSchedule.map(s => (
-                  <th key={s.stageName} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider whitespace-nowrap min-w-56 border-r border-border last:border-r-0">
-                    <div className="flex flex-col gap-0.5">
-                      <span>{s.stageName}</span>
-                      {s.slaDays != null && (
-                        <span className="text-[10px] font-normal normal-case tracking-normal text-muted/70">
-                          Default: {s.slaDays}d
-                        </span>
-                      )}
-                    </div>
-                  </th>
-                ))}
-              </tr>
-            </thead>
+            <PlanningTableHeader stages={baseSchedule} />
             <tbody>
-              {chapters.length === 0 ? (
+              {plannedChapters.length === 0 ? (
                 <tr>
-                  <td colSpan={3 + baseSchedule.length} className="px-4 py-16 text-center text-sm text-muted">
+                  <td colSpan={4 + baseSchedule.length} className="px-4 py-16 text-center text-sm text-muted">
                     No chapters found. Upload a zip file to add chapters first.
                   </td>
                 </tr>
               ) : (
-                [...chapters].sort((a, b) => a.id - b.id).map((ch, idx) => {
-                  const chSched = chapterSchedules.get(ch.id) ?? baseSchedule
-                  return (
-                    <tr
-                      key={ch.id}
-                      className="border-b border-border hover:bg-accent transition-colors group bg-card"
-                    >
-                      <td className="px-4 py-3 font-semibold text-text sticky left-0 z-10 whitespace-nowrap w-[144px] min-w-[144px] max-w-[144px] shadow-[inset_-1px_0_0_var(--color-border)] bg-card group-hover:bg-accent transition-colors">
-                        {ch.chapters}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-muted sticky left-[144px] z-10 whitespace-nowrap w-[176px] min-w-[176px] max-w-[176px] shadow-[inset_-1px_0_0_var(--color-border)] max-w-[176px] truncate bg-card group-hover:bg-accent transition-colors">
-                        {ch.chapter_title || '—'}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-center sticky left-[320px] z-10 whitespace-nowrap w-[112px] min-w-[112px] max-w-[112px] shadow-[inset_-1px_0_0_var(--color-border)] font-medium text-text bg-card group-hover:bg-accent transition-colors">
-                        {ch.manuscript_pages != null ? ch.manuscript_pages : '—'}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-center sticky left-[432px] z-10 whitespace-nowrap w-[96px] min-w-[96px] max-w-[96px] shadow-[inset_-2px_0_0_var(--color-border)] font-medium text-text bg-card group-hover:bg-accent transition-colors">
-                        {ch.word_count != null ? Math.floor(ch.word_count / 250) : '—'}
-                      </td>
-                      {chSched.map(s => {
-                        const isCellEdited = s.slaDays !== (baseSlaMap.get(s.stageName) ?? null)
-                        const delayDays    = delayMap.get(`${ch.chapters}||${s.stageName}`)
-                                          ?? (ch.delayed_stages?.[s.stageName] ?? 0)
-                        const dbKey = `${ch.chapters}||${s.stageName}`
-                        const displayStart = alreadyApproved && dbDates[dbKey] ? dbDates[dbKey].start : s.start
-                        const displayDue = alreadyApproved && dbDates[dbKey] ? dbDates[dbKey].due : s.due
-                        return (
-                          <td key={s.stageName} className="px-4 py-3 border-r border-border/50 last:border-r-0">
-                            <div className="space-y-1">
-                              <div className="flex items-center gap-2 text-xs">
-                                <span className="w-9 text-[10px] font-semibold text-muted uppercase tracking-wide">Start</span>
-                                <span className="text-text font-medium">{fmt(displayStart)}</span>
-                              </div>
-                              <div className="flex items-center gap-2 text-xs">
-                                <span className="w-9 text-[10px] font-semibold text-muted uppercase tracking-wide">Due</span>
-                                <span className={`font-medium ${isCellEdited ? 'text-primary font-bold' : 'text-text'}`}>
-                                  {fmt(displayDue)}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-2 text-xs">
-                                <span className="w-9 text-[10px] font-semibold text-muted uppercase tracking-wide">SLA</span>
-                                {alreadyApproved ? (
-                                  <>
-                                    {s.slaDays != null && (
-                                      <span className="text-[10px] font-bold text-primary">{s.slaDays}d</span>
-                                    )}
-                                    {delayDays > 0 && (
-                                      <span className="inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200 ml-1">
-                                        +{delayDays}d
-                                      </span>
-                                    )}
-                                  </>
-                                ) : (
-                                  <div className="flex items-center gap-1">
-                                    <input
-                                      type="number"
-                                      min={0}
-                                      value={s.slaDays ?? ''}
-                                      onChange={e => handleCellSlaChange(ch.id, s.stageName, e.target.value)}
-                                      placeholder="—"
-                                      className={`w-12 text-[11px] border rounded px-1.5 py-0.5 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 ${
-                                        isCellEdited
-                                          ? 'border-amber-400 bg-amber-50/60 text-amber-800'
-                                          : 'bg-background border-border'
-                                      }`}
-                                    />
-                                    <span className="text-[10px] text-muted">d</span>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </td>
-                        )
-                      })}
-                    </tr>
-                  )
-                })
+                [...plannedChapters]
+                  .sort((a, b) => a.chapters.localeCompare(b.chapters, undefined, { numeric: true }))
+                  .map(ch => renderChapterRow(ch, !alreadyApproved))
               )}
             </tbody>
           </table>
+
+          {alreadyApproved && unplannedChapters.length > 0 && (
+            <>
+              <div className="sticky left-0 z-30 w-fit min-w-full mt-6 px-4 py-2 text-left text-xs font-semibold text-amber-800 bg-amber-50 border-y border-amber-200">
+                New Chapters — Pending Planning
+              </div>
+              <table className="w-full border-collapse text-sm min-w-max">
+                <PlanningTableHeader stages={baseSchedule} />
+                <tbody>
+                  {[...unplannedChapters]
+                    .sort((a, b) => a.chapters.localeCompare(b.chapters, undefined, { numeric: true }))
+                    .map(ch => renderChapterRow(ch, true))}
+                </tbody>
+              </table>
+            </>
+          )}
+          </>
         )}
       </div>
     </div>

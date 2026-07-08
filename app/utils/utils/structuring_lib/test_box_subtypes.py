@@ -56,3 +56,27 @@ def test_plain_note_keeps_generic_default_subtype_regression():
     assert tags[0] == "PMI"
     assert tags[1] == "NBX-TXT"  # unchanged default, NOTE maps to generic NBX
     assert tags[2] == "PMI"
+
+
+def test_bare_numbered_box_tag_resolves_to_its_own_subtype():
+    # A bare numbered LWW box token ("<BX1>") isn't a boxes.type_keywords
+    # word alias (those are things like "NOTE"/"CASE STUDY") - it must
+    # resolve to its own matching subtype directly instead of silently
+    # losing its number and falling back to the generic NBX default.
+    annotations = _annotate(
+        [
+            "<BX2>",
+            "Box 7.3 Warning Title",
+            "Body content in the box.",
+            "</BX2>",
+            "Text after the box.",
+        ]
+    )
+    tags = [a["tag"] for a in annotations]
+    assert tags[0] == "PMI"
+    assert tags[1] == "BX2-TTL"
+    assert tags[2] == "BX2-TXT"
+    assert tags[3] == "PMI"
+    # The box context must actually close - content after "</BX2>" must
+    # not keep inheriting box styling.
+    assert tags[4] == "TXT"

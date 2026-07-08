@@ -294,6 +294,9 @@ export function UserManagement() {
               <input
                 value={search} onChange={e => setSearch(e.target.value)}
                 placeholder="Search by name or email..."
+                type="search"
+                name="user-management-search"
+                autoComplete="off"
                 className="w-full pl-9 pr-4 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all text-text placeholder:text-muted"
               />
             </div>

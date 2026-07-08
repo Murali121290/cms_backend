@@ -10,9 +10,12 @@ interface DashboardProjectGridProps {
 }
 
 function ProjectCard({ project }: { project: ProjectSummary }) {
+  // A project still in Planning has no approved schedule yet — send the user to the
+  // Planning page to approve it instead of the chapters/workflow page (matches ClientProjects.tsx).
+  const isPlanning = project.status === 'Planning'
   return (
     <Link
-      to={uiPaths.projectDetail(project.id)}
+      to={isPlanning ? `/projects/${project.id}/planning` : uiPaths.projectDetail(project.id)}
       className="group bg-card border border-border rounded-xl p-4 hover:border-primary/40 hover:shadow-sm transition-all duration-150 flex flex-col gap-3"
     >
       <div className="flex items-start justify-between gap-2">

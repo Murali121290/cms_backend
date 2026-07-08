@@ -1,0 +1,192 @@
+# Springer tag set: canonical tag -> Springer-facing tag/style name.
+#
+# Source: "Standard Tags(Lww-SPRINGER).xlsx" (LWW canonical column vs.
+# Springer column), 108 rows.
+#
+# Two corrections applied relative to the raw spreadsheet (see
+# per_client_tag_sets_plan.md / the tag-set execution plan for the
+# reasoning, confirmed with the requester):
+#   - EXT-LAST: spreadsheet lists "eXtractTxt1_first" (a copy/paste typo
+#     duplicating EXT-FIRST's value); corrected here to "eXtractTxt1_last"
+#     to follow the _first/_mid/_last convention used everywhere else.
+#   - NBX-* (unnumbered-box family, rows 79-93): spreadsheet marks these
+#     "No" (Springer's template has no equivalent). Intentionally omitted
+#     here rather than given an entry - absent tags fall through to their
+#     canonical name unchanged, same as any other tag no client overrides.
+#
+# LL- (alphabetical list) and OL- (roman-numeral list) entries are
+# case-dependent: Springer splits each by the list marker's letter case
+# (Lc-/Uc- prefixes), which the canonical tag name alone doesn't carry.
+# These are the only dict-valued entries in this file; every other tag is
+# a plain exact-match string. See tag_set_loader.translate_tag() for how
+# `case` ("upper"/"lower", sourced from an annotation's `list_case`) is
+# used to pick between them.
+#
+# FIRST/MID/LAST tags are listed individually (not via the prefix-family
+# shortcut) because Springer's naming isn't a regular prefix swap - e.g.
+# BL-MID has no suffix at all ("BulletList1") while BL-FIRST/BL-LAST do
+# ("BulletList1_first"/"_last").
+
+# List Heading
+LH: ListHeading
+
+# Numbered List
+NL-FIRST: NumberList1_first
+NL-MID: NumberList1
+NL-LAST: NumberList1_last
+NL-TXT: ListItemPara-FL1
+
+# Bullet List
+BL-FIRST: BulletList1_first
+BL-MID: BulletList1
+BL-LAST: BulletList1_last
+BL-TXT: ListItemPara-FL1
+
+# UnNumbered List
+UL-FIRST: UnNumberedList1_first
+UL-MID: UnNumberedList1
+UL-LAST: UnNumberedList1_last
+
+# Nested/sub-list "level 2" families - always MID, no FIRST/LAST variant,
+# mirroring the existing table-nested convention (TBL2-MID/TNL2-MID/
+# TUL2-MID below) but for lists nested in ordinary body text.
+NL2-MID: NumberList2
+BL2-MID: BulletList2
+UL2-MID: UnNumberedList2
+
+# Alphabetical List (case-dependent)
+LL-FIRST:
+  lower: Lc-AlphaList1_first
+  upper: Uc-AlphaList1_first
+LL-MID:
+  lower: Lc-AlphaList1
+  upper: Uc-AlphaList1
+LL-LAST:
+  lower: Lc-AlphaList1_last
+  upper: Uc-AlphaList1_last
+
+# Roman List (case-dependent)
+OL-FIRST:
+  lower: Lc-RomanList1_first
+  upper: Uc-RomanList1_first
+OL-MID:
+  lower: Lc-RomanList1
+  upper: Uc-RomanList1
+OL-LAST:
+  lower: Lc-RomanList1_last
+  upper: Uc-RomanList1_last
+
+# Nested/sub-list "level 2" - lettered and roman (case-dependent, always
+# MID, no FIRST/LAST variant - same rationale as NL2-/BL2-/UL2-MID above).
+LL2-MID:
+  lower: Lc-AlphaList2
+  upper: Uc-AlphaList2
+OL2-MID:
+  lower: Lc-RomanList2
+  upper: Uc-RomanList2
+
+# Chapter metadata
+CN: ChapterNumber
+CT: ChapterTitle
+CST: ChapterSubtitle
+CAU: ChapterAuthor
+CAUF: ChapAuthorAffiliation
+
+# Learning Objectives
+OBJ-TTL: LearnObjHeading
+OBJ-TXT-FIRST: LearnObj-Para-FL
+OBJ-NL-FIRST: LearnObj-NumberList1_first
+OBJ-NL-MID: LearnObj-NumberList1
+OBJ-NL-LAST: LearnObj-NumberList1_last
+OBJ-BL-FIRST: LearnObj-BulletList1_first
+OBJ-BL-MID: LearnObj-BulletList1
+OBJ-BL-LAST: LearnObj-BulletList1_last
+
+# Headings
+H1: Head1
+H2: Head2
+H3: Head3
+H4: Head4
+H5: Head5
+
+# Body text
+TXT-FLUSH: Para-FL
+TXT: ParaFirstLine-Ind
+
+# Figures
+FIG-LEG: FigureLegend
+FIG-SRC: FigureSource
+
+# Tables
+T1: TableCaption
+T2: TableColumnHead1
+T3: TableColumnHead2
+T: TableBody
+TBL-MID: TB-BulletList1
+TNL-MID: TB-NumberList1
+TUL-MID: TB-UnNumberedList1
+TBL2-MID: TB-BulletList2
+TNL2-MID: TB-NumberList2
+TUL2-MID: TB-UnNumberedList2
+TFN: TableNote
+TSN: TableSource
+
+# UnNumbered Tables/Figures
+UNFIG-LEG: UnFigureLegend
+UNFIG-SRC: UnFigureSource
+UNT-T1: UN-TableCaption
+UNT-T2: UN-TableColumnHead1
+UNT-T3: UN-TableColumnHead2
+UNT: UN-TableBody
+UNT-BL-MID: UN-TB-BulletList1
+UNT-NL-MID: UN-TB-NumberList1
+UNT-UL-MID: UN-TB-UnNumberList1
+UNT-SN: UN-TableSource
+UNT-FN: UN-TableNote
+
+# Box 1
+BX1-TTL: Box-01-BoxTitle
+BX1-H1: Box-01-Head1
+BX1-H2: Box-01-Head2
+BX1-TXT-FIRST: Box-01-Para-FL
+BX1-TXT: Box-01-ParaFirstLine-Ind
+BX1-BL-FIRST: Box-01-BulletList1_first
+BX1-BL-MID: Box-01-BulletList1
+BX1-BL-LAST: Box-01-BulletList1_last
+BX1-NL-FIRST: Box-01-NumberList1_first
+BX1-NL-MID: Box-01-NumberList1
+BX1-NL-LAST: Box-01-NumberList1_last
+BX1-UL-FIRST: Box-01-UnNumberList1_first
+BX1-UL-MID: Box-01-UnNumberList1
+BX1-UL-LAST: Box-01-UnNumberList1_last
+BX1-SRC: Box-01-Source
+
+# UnNumbered Box (NBX-*) family intentionally omitted - Springer sheet
+# marks all of these "No"; they fall through to their canonical name.
+
+# References
+REFH1: ReferencesHeading1
+REF-N: Reference-Numbered
+REF-U: ReferenceAlphabetical
+
+# Key Terms
+KT1: KeyTermsHeading
+KT-BL-MID: KeyTermsBulletList1
+KT-NL-MID: KeyTermsNumberList1
+KT-UL-MID: KeyTermsUnNumberList1
+
+# Extract Text
+EXT-FIRST: eXtractTxt1_first
+EXT-MID: eXtractTxt1
+EXT-LAST: eXtractTxt1_last  # corrected; spreadsheet had "eXtractTxt1_first"
+
+# Epigraph
+EPI: Epigraph
+EPI_S: EpigraphSource
+
+# Special Headings
+SP-H1: SpecialHeading1
+SP-H2: SpecialHeading2
+
+# PMI (<Placement> marker) intentionally omitted - spreadsheet leaves
+# Springer's column blank (invisible placement marker, no visible style).

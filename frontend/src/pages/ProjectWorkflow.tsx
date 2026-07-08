@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, ChevronRight,
   Calendar, Clock, Zap, BookOpen, AlertCircle, CheckCircle2,
-  RotateCcw, Layers, User, BookMarked, Info, Edit2
+  RotateCcw, Layers, User, BookMarked, Info, Edit2, Plus
 } from 'lucide-react'
 import { ViewSwitcher } from '@/components/ui/ViewSwitcher'
 import { useViewMode } from '@/hooks/useViewMode'
@@ -21,6 +21,10 @@ import { FullPageSpinner, Spinner } from '@/components/ui/Spinner'
 import { uiPaths } from '@/utils/appPaths'
 import { useStylesheetsQuery } from '@/features/stylesheets/useStylesheetsQuery'
 import { ProjectInfoModal } from './ProjectInfoModal'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { Modal } from '@/components/ui/Modal'
+import { UploadZone } from '@/components/ui/UploadZone'
+import { getApiErrorMessage } from '@/api/client'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -48,6 +52,14 @@ function isDelayed(ch: Chapter, plannedDueDates?: Map<string, StageInfo>): boole
     ? (plannedDueDates.get(`${ch.chapters}||${ch.stage_name}`)?.due ?? ch.due_date)
     : ch.due_date
   return !!due && new Date(due) < new Date()
+}
+
+// Effective due = planned_end_date for the chapter's current stage (dynamic), falling back to chapter.due_date
+function getEffectiveDue(ch: Chapter, plannedDueDates: Map<string, StageInfo>): { due: string | null; delayed: boolean } {
+  const info = ch.stage_name ? plannedDueDates.get(`${ch.chapters}||${ch.stage_name}`) : undefined
+  const due = info?.due ?? ch.due_date
+  const delayed = !!due && ch.status !== 'complete' && new Date(due) < new Date()
+  return { due, delayed }
 }
 
 function formatDate(d: string | null | undefined): string {
@@ -146,51 +158,55 @@ function WorkflowRail({ stages, chapters, filterStage, onStageClick }: {
   )
 }
 
+// ── Assignee Select ────────────────────────────────────────────────────────────
+
+function AssigneeSelect({ value, users, onChange, disabled, widthCls = 'w-28', className, onClick }: {
+  value: string | null
+  users: AppUser[]
+  onChange: (val: string) => void
+  disabled?: boolean
+  widthCls?: string
+  className?: string
+  onClick?: (e: React.MouseEvent) => void
+}) {
+  return (
+    <div className={`relative flex items-center ${widthCls} ${className ?? ''}`} onClick={onClick}>
+      <select
+        value={value ?? ''}
+        onChange={e => onChange(e.target.value)}
+        disabled={disabled}
+        className="text-[11px] bg-background border border-border rounded-md pl-2 pr-5 py-0.5 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-60 appearance-none cursor-pointer w-full truncate"
+      >
+        <option value="">— Unassigned —</option>
+        {users.filter(u => u.active_status).map(u => (
+          <option key={u.id} value={u.user_name}>{u.user_name}</option>
+        ))}
+      </select>
+      <span className="pointer-events-none absolute right-1.5 text-muted text-[9px]">▾</span>
+    </div>
+  )
+}
+
 // ── Chapter Card ───────────────────────────────────────────────────────────────
 
 interface ChapterCardProps {
   chapter: Chapter
   users: AppUser[]
-  projectCode: string | null
   plannedDueDates: Map<string, StageInfo>
-  onUpdate: (id: number, patch: Partial<Chapter>) => void
+  onAssigneeChange: (chapter: Chapter, val: string) => Promise<boolean>
   onViewDetails: (chapter: Chapter) => void
 }
 
-function ChapterCard({ chapter, users, projectCode, plannedDueDates, onUpdate, onViewDetails }: ChapterCardProps) {
+function ChapterCard({ chapter, users, plannedDueDates, onAssigneeChange, onViewDetails }: ChapterCardProps) {
   const [updating, setUpdating] = useState(false)
 
   const status = statusMeta(chapter.status)
-
-  // Effective due = actual_start + sla (dynamic) or planned_end_date, falling back to chapter.due_date
-  const currentInfo = chapter.stage_name ? plannedDueDates.get(`${chapter.chapters}||${chapter.stage_name}`) : undefined
-  const effectiveDue: string | null = currentInfo?.due ?? chapter.due_date
-  const delayed = !!effectiveDue && chapter.status !== 'complete' && new Date(effectiveDue) < new Date()
+  const { due: effectiveDue, delayed } = getEffectiveDue(chapter, plannedDueDates)
 
   async function handleAssignee(val: string) {
-    const assignee = val || null
     setUpdating(true)
-    try {
-      if (projectCode && chapter.stage_name) {
-        await stageDetailsApi.assignToStage(projectCode, chapter.chapters, chapter.stage_name, assignee)
-      }
-      // When assigning someone, due = now + sla so their window is tracked from today
-      let newDue: string | null = chapter.due_date
-      if (assignee && currentInfo?.sla) {
-        const d = new Date()
-        d.setDate(d.getDate() + currentInfo.sla)
-        newDue = d.toISOString().split('T')[0]
-      }
-      const updated = await chaptersApi.update(chapter.id, {
-        current_assignee_name: assignee,
-        due_date: newDue,
-      })
-      onUpdate(chapter.id, updated)
-    } catch {
-      toast.error('Failed to update assignee')
-    } finally {
-      setUpdating(false)
-    }
+    await onAssigneeChange(chapter, val)
+    setUpdating(false)
   }
 
   return (
@@ -235,20 +251,7 @@ function ChapterCard({ chapter, users, projectCode, plannedDueDates, onUpdate, o
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5">
             <User size={11} className="text-muted flex-shrink-0" />
-            <div className="relative flex items-center w-28">
-              <select
-                value={chapter.current_assignee_name ?? ''}
-                onChange={e => handleAssignee(e.target.value)}
-                disabled={updating}
-                className="text-[11px] bg-background border border-border rounded-md pl-2 pr-5 py-0.5 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-60 appearance-none cursor-pointer w-full truncate"
-              >
-                <option value="">— Unassigned —</option>
-                {users.filter(u => u.active_status).map(u => (
-                  <option key={u.id} value={u.user_name}>{u.user_name}</option>
-                ))}
-              </select>
-              <span className="pointer-events-none absolute right-1.5 text-muted text-[9px]">▾</span>
-            </div>
+            <AssigneeSelect value={chapter.current_assignee_name} users={users} onChange={handleAssignee} disabled={updating} />
           </div>
           <div className="flex items-center gap-1 flex-shrink-0">
             <Calendar size={11} className={delayed ? 'text-red-500' : 'text-muted'} />
@@ -298,6 +301,17 @@ export function ProjectWorkflow() {
   const [filterAssignee, setFilterAssignee] = useState('')
   const [filterStage, setFilterStage] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
+
+  const [bulkStage, setBulkStage] = useState('')
+  const [bulkAssignee, setBulkAssignee] = useState('')
+  const [bulkAssigning, setBulkAssigning] = useState(false)
+  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false)
+
+  const [isAddChapterOpen, setIsAddChapterOpen] = useState(false)
+  const [newChapterNumber, setNewChapterNumber] = useState('')
+  const [newChapterFile, setNewChapterFile] = useState<File | null>(null)
+  const [addingChapter, setAddingChapter] = useState(false)
+  const [addChapterError, setAddChapterError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!id) return
@@ -363,8 +377,9 @@ export function ProjectWorkflow() {
     const inProg = chapters.filter(c => c.status === 'In-progress').length
     const hold = chapters.filter(c => c.status === 'Hold').length
     const inQuery = chapters.filter(c => c.status === 'In-query').length
+    const yts = chapters.filter(c => c.status === 'Received').length
     const delayed = chapters.filter(c => isDelayed(c, plannedDueDates)).length
-    return { total, complete, inProg, hold, inQuery, delayed }
+    return { total, complete, inProg, hold, inQuery, yts, delayed }
   }, [chapters, plannedDueDates])
 
   const assigneeOptions = useMemo(() => {
@@ -380,8 +395,21 @@ export function ProjectWorkflow() {
       if (filterStatus && filterStatus !== '__delayed__' && ch.status !== filterStatus) return false
       return true
     })
-    .sort((a, b) => a.id - b.id)
+    .sort((a, b) => a.chapters.localeCompare(b.chapters, undefined, { numeric: true }))
     , [chapters, filterAssignee, filterStage, filterStatus, plannedDueDates])
+
+  // Chapters currently sitting in the stage picked for bulk assignment
+  const bulkTargets = useMemo(
+    () => bulkStage ? chapters.filter(c => c.stage_name === bulkStage) : [],
+    [chapters, bulkStage]
+  )
+
+  // Next sequential chapter number, zero-padded (e.g. "06") — chapters must be added in order, no gaps
+  const nextChapterNumber = useMemo(() => {
+    const nums = chapters.map(c => parseInt(c.chapters, 10)).filter(n => !isNaN(n))
+    const next = nums.length > 0 ? Math.max(...nums) + 1 : 1
+    return String(next).padStart(2, '0')
+  }, [chapters])
 
   function handleChapterUpdate(id: number, patch: Partial<Chapter>) {
     setChapters(prev => {
@@ -396,6 +424,78 @@ export function ProjectWorkflow() {
     })
   }
 
+  async function handleAssigneeChange(chapter: Chapter, val: string, opts?: { silent?: boolean }): Promise<boolean> {
+    const assignee = val || null
+    const projectCode = project?.code || project?.project_code || ''
+    try {
+      if (projectCode && chapter.stage_name) {
+        await stageDetailsApi.assignToStage(projectCode, chapter.chapters, chapter.stage_name, assignee)
+      }
+      const info = chapter.stage_name ? plannedDueDates.get(`${chapter.chapters}||${chapter.stage_name}`) : undefined
+      let newDue: string | null = chapter.due_date
+      if (assignee && info?.sla) {
+        const d = new Date()
+        d.setDate(d.getDate() + info.sla)
+        newDue = d.toISOString().split('T')[0]
+      }
+      const updated = await chaptersApi.update(chapter.id, {
+        current_assignee_name: assignee,
+        due_date: newDue,
+      })
+      handleChapterUpdate(chapter.id, updated)
+      return true
+    } catch {
+      if (!opts?.silent) toast.error('Failed to update assignee')
+      return false
+    }
+  }
+
+  async function handleBulkAssign() {
+    if (!bulkStage || bulkTargets.length === 0) return
+    setBulkAssigning(true)
+    const results = await Promise.all(
+      bulkTargets.map(c => handleAssigneeChange(c, bulkAssignee, { silent: true }))
+    )
+    setBulkAssigning(false)
+    setBulkConfirmOpen(false)
+    const succeeded = results.filter(Boolean).length
+    const failed = results.length - succeeded
+    if (failed === 0) {
+      toast.success(`Assigned ${succeeded} chapter${succeeded !== 1 ? 's' : ''} in ${bulkStage}`)
+    } else {
+      toast.error(`Assigned ${succeeded}/${results.length} chapters — ${failed} failed`)
+    }
+    setBulkStage('')
+    setBulkAssignee('')
+  }
+
+  function openAddChapter() {
+    setNewChapterNumber(nextChapterNumber)
+    setNewChapterFile(null)
+    setAddChapterError(null)
+    setIsAddChapterOpen(true)
+  }
+
+  async function handleCreateChapter() {
+    if (!newChapterFile) return
+    setAddingChapter(true)
+    setAddChapterError(null)
+    try {
+      const created = await chaptersApi.createWithManuscript(id, newChapterNumber, newChapterFile)
+      setChapters(prev => [...prev, created])
+      setIsAddChapterOpen(false)
+      if (project?.status === 'Active' || project?.status === 'Completed') {
+        toast.success(`Chapter ${created.chapters} added — visit Planning to approve its schedule`)
+      } else {
+        toast.success(`Chapter ${created.chapters} added`)
+      }
+    } catch (err) {
+      setAddChapterError(getApiErrorMessage(err, 'Failed to create chapter'))
+    } finally {
+      setAddingChapter(false)
+    }
+  }
+
   const hasFilters = filterAssignee || filterStage || filterStatus
 
   if (loading) return <FullPageSpinner />
@@ -407,6 +507,10 @@ export function ProjectWorkflow() {
   )
 
   function openChapter(ch: Chapter) {
+    if (ch.status === 'Received') {
+      toast.error(`Chapter ${ch.chapters} needs planning approval before it can be opened — approve it in Planning first.`)
+      return
+    }
     const num = ch.chapters
     const cmsId = cmsChapterIdMap.get(num) ?? cmsChapterIdMap.get(parseInt(num, 10).toString()) ?? cmsChapterIdMap.get(num.padStart(2, '0')) ?? null
     if (!cmsId) { toast.error(`Chapter "${num}" has no files yet.`); return }
@@ -489,6 +593,13 @@ export function ProjectWorkflow() {
             </span>
           )}
           <button
+            onClick={openAddChapter}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white font-medium hover:bg-primary/90 transition-colors"
+          >
+            <Plus size={12} />
+            New Chapter
+          </button>
+          <button
             onClick={() => navigate(uiPaths.projectStylesheets(id))}
             title={activeStylesheet ? `Active: ${activeStylesheet.name}` : 'No active stylesheet'}
             className="relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-surface text-text font-medium transition-colors"
@@ -518,6 +629,7 @@ export function ProjectWorkflow() {
         {/* ── Summary Widgets ── */}
         <div className="flex flex-wrap gap-3">
           <SummaryWidget label="Total" value={summary.total} icon={BookOpen} iconCls="bg-blue-50    text-blue-600" onClick={() => setFilterStatus('')} active={filterStatus === ''} />
+          {summary.yts > 0 && <SummaryWidget label="YTS" value={summary.yts} icon={Clock} iconCls="bg-indigo-50 text-indigo-600" onClick={() => setFilterStatus(prev => prev === 'Received' ? '' : 'Received')} active={filterStatus === 'Received'} />}
           {summary.delayed > 0 && <SummaryWidget label="Delayed" value={summary.delayed} icon={AlertCircle} iconCls="bg-red-50   text-red-600" onClick={() => setFilterStatus(prev => prev === '__delayed__' ? '' : '__delayed__')} active={filterStatus === '__delayed__'} />}
           <SummaryWidget label="In Progress" value={summary.inProg} icon={RotateCcw} iconCls="bg-amber-50   text-amber-600" onClick={() => setFilterStatus(prev => prev === 'In-progress' ? '' : 'In-progress')} active={filterStatus === 'In-progress'} />
           {summary.hold > 0 && <SummaryWidget label="Hold" value={summary.hold} icon={AlertCircle} iconCls="bg-slate-50 text-slate-600" onClick={() => setFilterStatus(prev => prev === 'Hold' ? '' : 'Hold')} active={filterStatus === 'Hold'} />}
@@ -525,7 +637,7 @@ export function ProjectWorkflow() {
           <SummaryWidget label="Completed" value={summary.complete} icon={CheckCircle2} iconCls="bg-emerald-50 text-emerald-600" onClick={() => setFilterStatus(prev => prev === 'complete' ? '' : 'complete')} active={filterStatus === 'complete'} />
         </div>
 
-        {/* ── Filters ── */}
+        {/* ── Filters + Group Assign ── */}
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-muted flex items-center gap-1 mr-1">
             <Clock size={11} /> Filters
@@ -549,6 +661,38 @@ export function ProjectWorkflow() {
               <RotateCcw size={11} /> Clear
             </button>
           )}
+
+          <span className="w-px h-5 bg-border mx-1" />
+
+          {/* Group Assign */}
+          <span className="text-xs text-muted flex items-center gap-1 mr-1">
+            <Layers size={11} /> Group Assign
+          </span>
+
+          <select
+            value={bulkStage}
+            onChange={e => { setBulkStage(e.target.value); setBulkAssignee('') }}
+            className="text-xs bg-card border border-border rounded-lg px-2.5 py-1.5 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 appearance-none cursor-pointer"
+          >
+            <option value="">Select stage…</option>
+            {orderedStages.map(s => <option key={s.stage_name} value={s.stage_name}>{s.stage_name}</option>)}
+          </select>
+
+          <AssigneeSelect
+            widthCls="w-36"
+            value={bulkAssignee || null}
+            users={users}
+            onChange={setBulkAssignee}
+            disabled={!bulkStage}
+          />
+
+          <button
+            onClick={() => setBulkConfirmOpen(true)}
+            disabled={!bulkStage || bulkTargets.length === 0 || bulkAssigning}
+            className="text-xs font-medium px-3 py-1.5 rounded-lg bg-primary text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-primary/90 transition-colors"
+          >
+            {bulkStage ? `Assign ${bulkTargets.length} chapter${bulkTargets.length !== 1 ? 's' : ''}` : 'Assign'}
+          </button>
 
           <span className="ml-auto text-xs text-muted">
             {filtered.length} of {summary.total} chapter{summary.total !== 1 ? 's' : ''}
@@ -577,9 +721,8 @@ export function ProjectWorkflow() {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {filtered.map(ch => (
                   <ChapterCard key={ch.id} chapter={ch} users={users}
-                    projectCode={project.code || project.project_code || null}
                     plannedDueDates={plannedDueDates}
-                    onUpdate={handleChapterUpdate}
+                    onAssigneeChange={handleAssigneeChange}
                     onViewDetails={openChapter} />
                 ))}
               </div>
@@ -590,9 +733,7 @@ export function ProjectWorkflow() {
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                 {filtered.map(ch => {
                   const sm = statusMeta(ch.status)
-                  const info = ch.stage_name ? plannedDueDates.get(`${ch.chapters}||${ch.stage_name}`) : undefined
-                  const due = info?.due ?? ch.due_date
-                  const delayed = !!due && ch.status !== 'complete' && new Date(due) < new Date()
+                  const { due, delayed } = getEffectiveDue(ch, plannedDueDates)
                   return (
                     <div key={ch.id} onClick={() => openChapter(ch)} className={`bg-card rounded-xl border border-border shadow-sm hover:shadow-md transition-all flex flex-col gap-1.5 p-3 cursor-pointer ${cardBorderCls(ch)}`}>
                       <div className="flex items-center justify-between gap-1">
@@ -601,9 +742,17 @@ export function ProjectWorkflow() {
                       </div>
                       <p className="text-xs font-medium text-text line-clamp-2 leading-snug">{ch.chapter_title || ch.chapters}</p>
                       {ch.stage_name && <span className="text-[9px] bg-primary/10 text-primary rounded px-1.5 py-0.5 w-fit font-semibold">{ch.stage_name}</span>}
-                      <div className="flex items-center justify-between text-[10px] text-muted mt-auto pt-1 border-t border-border">
-                        <span className="truncate">{ch.current_assignee_name ?? 'Unassigned'}</span>
-                        <span className={delayed ? 'text-red-500 font-semibold' : ''}>{formatDate(due)}</span>
+                      <div className="flex items-center justify-between gap-1 text-[10px] text-muted mt-auto pt-1 border-t border-border">
+                        <div className="min-w-0 flex-1">
+                          <AssigneeSelect
+                            widthCls="w-full"
+                            value={ch.current_assignee_name}
+                            users={users}
+                            onChange={val => handleAssigneeChange(ch, val)}
+                            onClick={e => e.stopPropagation()}
+                          />
+                        </div>
+                        <span className={`flex-shrink-0 ${delayed ? 'text-red-500 font-semibold' : ''}`}>{formatDate(due)}</span>
                       </div>
                     </div>
                   )
@@ -616,9 +765,7 @@ export function ProjectWorkflow() {
               <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
                 {filtered.map((ch, i) => {
                   const sm = statusMeta(ch.status)
-                  const info = ch.stage_name ? plannedDueDates.get(`${ch.chapters}||${ch.stage_name}`) : undefined
-                  const due = info?.due ?? ch.due_date
-                  const delayed = !!due && ch.status !== 'complete' && new Date(due) < new Date()
+                  const { due, delayed } = getEffectiveDue(ch, plannedDueDates)
                   return (
                     <div key={ch.id} onClick={() => openChapter(ch)}
                       className={`flex items-center gap-4 px-5 py-3 cursor-pointer hover:bg-surface transition-colors ${i > 0 ? 'border-t border-border' : ''} ${cardBorderCls(ch).replace('border-l-4', 'border-l-[3px]')}`}>
@@ -628,15 +775,13 @@ export function ProjectWorkflow() {
                       </div>
                       {ch.stage_name && <span className="text-[10px] bg-primary/10 text-primary rounded px-2 py-0.5 font-semibold whitespace-nowrap flex-shrink-0">{ch.stage_name}</span>}
                       <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${sm.cls}`}>{sm.label}</span>
-                      <div className="relative flex items-center flex-shrink-0 w-28" onClick={e => e.stopPropagation()}>
-                        <select value={ch.current_assignee_name ?? ''}
-                          onChange={e => handleChapterUpdate(ch.id, { current_assignee_name: e.target.value || null } as any)}
-                          className="text-[11px] bg-background border border-border rounded-md pl-2 pr-5 py-0.5 text-text focus:outline-none appearance-none cursor-pointer w-full truncate">
-                          <option value="">— Unassigned —</option>
-                          {users.filter(u => u.active_status).map(u => <option key={u.id} value={u.user_name}>{u.user_name}</option>)}
-                        </select>
-                        <span className="pointer-events-none absolute right-1.5 text-muted text-[9px]">▾</span>
-                      </div>
+                      <AssigneeSelect
+                        className="flex-shrink-0"
+                        value={ch.current_assignee_name}
+                        users={users}
+                        onChange={val => handleAssigneeChange(ch, val)}
+                        onClick={e => e.stopPropagation()}
+                      />
                       <span className={`text-xs flex-shrink-0 ${delayed ? 'text-red-600 font-semibold' : 'text-muted'}`}>{formatDate(due)}</span>
                       <ChevronRight size={14} className="text-muted flex-shrink-0" />
                     </div>
@@ -659,9 +804,7 @@ export function ProjectWorkflow() {
                   <tbody>
                     {filtered.map((ch, i) => {
                       const sm = statusMeta(ch.status)
-                      const info = ch.stage_name ? plannedDueDates.get(`${ch.chapters}||${ch.stage_name}`) : undefined
-                      const due = info?.due ?? ch.due_date
-                      const delayed = !!due && ch.status !== 'complete' && new Date(due) < new Date()
+                      const { due, delayed } = getEffectiveDue(ch, plannedDueDates)
                       return (
                         <tr key={ch.id} onClick={() => openChapter(ch)} className={`cursor-pointer hover:bg-surface transition-colors ${i > 0 ? 'border-t border-border' : ''}`}>
                           <td className="px-4 py-3 font-bold text-primary text-xs uppercase">{ch.chapters}</td>
@@ -675,15 +818,7 @@ export function ProjectWorkflow() {
                             <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${sm.cls}`}>{sm.label}</span>
                           </td>
                           <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
-                            <div className="relative flex items-center w-28">
-                              <select value={ch.current_assignee_name ?? ''}
-                                onChange={e => handleChapterUpdate(ch.id, { current_assignee_name: e.target.value || null } as any)}
-                                className="text-[11px] bg-background border border-border rounded-md pl-2 pr-5 py-0.5 text-text focus:outline-none appearance-none cursor-pointer w-full truncate">
-                                <option value="">— Unassigned —</option>
-                                {users.filter(u => u.active_status).map(u => <option key={u.id} value={u.user_name}>{u.user_name}</option>)}
-                              </select>
-                              <span className="pointer-events-none absolute right-1.5 text-muted text-[9px]">▾</span>
-                            </div>
+                            <AssigneeSelect value={ch.current_assignee_name} users={users} onChange={val => handleAssigneeChange(ch, val)} />
                           </td>
                           <td className={`px-4 py-3 text-xs whitespace-nowrap ${delayed ? 'text-red-600 font-semibold' : 'text-muted'}`}>{formatDate(due)}</td>
                           <td className="px-4 py-3 text-xs text-center text-muted">{ch.manuscript_pages ?? '—'}</td>
@@ -723,6 +858,78 @@ export function ProjectWorkflow() {
           setIsEditOpen(false)
         }}
       />
+
+      {/* Group Assign Confirm */}
+      <ConfirmDialog
+        isOpen={bulkConfirmOpen}
+        onClose={() => setBulkConfirmOpen(false)}
+        onConfirm={handleBulkAssign}
+        title="Group assign chapters?"
+        description={`This will assign ${bulkTargets.length} chapter${bulkTargets.length !== 1 ? 's' : ''} in "${bulkStage}" to ${bulkAssignee || 'Unassigned'}, updating each chapter's due date based on the stage SLA.`}
+        confirmLabel="Assign"
+        variant="warning"
+        isLoading={bulkAssigning}
+      />
+
+      {/* Add Chapter Modal */}
+      <Modal
+        isOpen={isAddChapterOpen}
+        onClose={() => { if (!addingChapter) setIsAddChapterOpen(false) }}
+        title="New Chapter"
+        description="Add the next chapter and its manuscript file. Chapters must be numbered in order with no gaps."
+        footer={
+          <div className="flex gap-3 justify-end">
+            <button
+              onClick={() => setIsAddChapterOpen(false)}
+              disabled={addingChapter}
+              className="px-4 py-2 text-sm font-medium text-text bg-background border border-border rounded-lg hover:bg-surface transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleCreateChapter}
+              disabled={addingChapter || !newChapterFile || !newChapterNumber}
+              className="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
+            >
+              {addingChapter && <Spinner size="sm" />}
+              {addingChapter ? 'Creating…' : 'Create Chapter'}
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-muted mb-1">Chapter No.</label>
+            <input
+              type="text"
+              value={newChapterNumber}
+              onChange={e => setNewChapterNumber(e.target.value.replace(/\D/g, ''))}
+              disabled={addingChapter}
+              className="w-full text-sm bg-background border border-border rounded-lg px-3 py-2 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-60"
+              placeholder={nextChapterNumber}
+            />
+            <p className="text-[11px] text-muted mt-1">
+              Next expected number is <span className="font-semibold">{nextChapterNumber}</span> — chapters must stay sequential with no gaps.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-muted mb-1">Manuscript file</label>
+            <UploadZone
+              accept=".docx"
+              onFiles={files => setNewChapterFile(files[0] ?? null)}
+              isUploading={addingChapter}
+              label={newChapterFile ? newChapterFile.name : undefined}
+            />
+          </div>
+
+          {addChapterError && (
+            <p className="text-xs text-danger flex items-center gap-1.5">
+              <AlertCircle size={12} /> {addChapterError}
+            </p>
+          )}
+        </div>
+      </Modal>
 
     </div>
   )

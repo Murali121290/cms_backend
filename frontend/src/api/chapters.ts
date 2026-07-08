@@ -60,4 +60,13 @@ export const chaptersApi = {
 
   bulkUpdateStatus: (project: string, status: string) =>
     api.put<{ updated: number }>(`/chapters/project/${encodeURIComponent(project)}/status`, { status }).then(r => r.data),
+
+  createWithManuscript: (projectId: number, number: string, file: File) => {
+    const formData = new FormData()
+    formData.append('number', number)
+    formData.append('file', file)
+    return api.post<Chapter>(`/projects/${projectId}/chapters/create-with-manuscript`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
 }
