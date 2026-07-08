@@ -17,7 +17,8 @@ interface Chapter {
 
 interface PostProdProject {
   id: number
-  customer_name: string
+  client: string
+  client_code?: string
   project_name: string
   status: string
   assignee?: string
@@ -28,6 +29,7 @@ interface PostProdProject {
 interface ClientCompany {
   id: number
   company: string
+  division?: string
 }
 
 export function PostProdWordConversion() {
@@ -41,6 +43,7 @@ export function PostProdWordConversion() {
   // Form states
   const [showAddProjectModal, setShowAddProjectModal] = useState(false)
   const [customerName, setCustomerName] = useState('')
+  const [clientCode, setClientCode] = useState('')
   const [projectName, setProjectName] = useState('')
   const [zipFile, setZipFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
@@ -101,7 +104,8 @@ export function PostProdWordConversion() {
     setUploading(true)
     setErrorMsg(null)
     const formData = new FormData()
-    formData.append('customer_name', customerName)
+    formData.append('client', customerName)
+    formData.append('client_code', clientCode)
     formData.append('project_name', projectName)
     formData.append('file', zipFile)
 
@@ -116,6 +120,7 @@ export function PostProdWordConversion() {
       }
       
       setCustomerName('')
+      setClientCode('')
       setProjectName('')
       setZipFile(null)
       setShowAddProjectModal(false)
@@ -142,7 +147,8 @@ export function PostProdWordConversion() {
     const query = searchQuery.trim().toLowerCase()
     const matchesSearch = !query
       || p.project_name.toLowerCase().includes(query)
-      || p.customer_name.toLowerCase().includes(query)
+      || p.client.toLowerCase().includes(query)
+      || (p.client_code && p.client_code.toLowerCase().includes(query))
     const matchesStatus = statusFilter === 'all' || p.status === statusFilter
     const matchesAssignee = assigneeFilter === 'all'
       || (assigneeFilter === 'unassigned' ? !p.assignee : p.assignee === assigneeFilter)
@@ -306,7 +312,7 @@ export function PostProdWordConversion() {
                   <div className="flex justify-between items-start gap-2">
                     <div className="min-w-0">
                       <h3 className="font-semibold text-sm text-text truncate m-0" title={proj.project_name}>{proj.project_name}</h3>
-                      <p className="text-[11px] text-muted mt-0.5">{proj.customer_name}</p>
+                      <p className="text-[11px] text-muted mt-0.5">{proj.client} {proj.client_code && `(${proj.client_code})`}</p>
                     </div>
                     <ChevronRight size={16} className="shrink-0 mt-0.5 transition-colors text-muted" />
                   </div>
@@ -402,18 +408,39 @@ export function PostProdWordConversion() {
 
             <form onSubmit={handleAddProject} className="space-y-3.5">
               <div>
-                <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Customer Name</label>
+                <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Client Name</label>
                 <select 
                   value={customerName} 
-                  onChange={e => setCustomerName(e.target.value)} 
+                  onChange={e => {
+                    const selectedVal = e.target.value;
+                    setCustomerName(selectedVal);
+                    const matched = clients.find(c => c.company === selectedVal);
+                    if (matched && matched.division) {
+                      setClientCode(matched.division);
+                    } else {
+                      setClientCode('');
+                    }
+                  }} 
                   className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-primary transition-colors"
                   required
                 >
-                  <option value="">Select Customer</option>
+                  <option value="">Select Client</option>
                   {clients.map(c => (
                     <option key={c.id} value={c.company}>{c.company}</option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Client Code</label>
+                <input 
+                  type="text" 
+                  value={clientCode} 
+                  onChange={e => setClientCode(e.target.value)} 
+                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-primary transition-colors placeholder:text-muted/40"
+                  placeholder="e.g. BIO101"
+                  required
+                />
               </div>
 
               <div>

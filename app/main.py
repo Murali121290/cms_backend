@@ -68,11 +68,6 @@ def read_root():
 
 @app.on_event("startup")
 def init_data():
-    from app.database import Base, engine
-    import app.models
-    from app.domains.post_prod.models import PostProdProject, PostProdChapter
-    Base.metadata.create_all(bind=engine)
-
     import os
     env = os.getenv("ENVIRONMENT", "development").lower()
     if env in ("production", "staging") and settings.SECRET_KEY in (
@@ -81,7 +76,9 @@ def init_data():
     ):
         raise ValueError("SECRET_KEY must be changed from the default value in production/staging environments!")
 
-    from app.database import SessionLocal
+    from app.database import SessionLocal, Base, engine
+    import app.models
+    from app.domains.post_prod.models import PostProdProject, PostProdChapter
     from app.domains.workflow.models import RolesMaster
     from sqlalchemy import text
     db = SessionLocal()
@@ -89,6 +86,8 @@ def init_data():
         # Use advisory lock on PostgreSQL to serialize initialization across concurrent workers
         if db.bind.dialect.name == "postgresql":
             db.execute(text("SELECT pg_advisory_xact_lock(424242);"))
+            
+        Base.metadata.create_all(bind=engine)
             
         # Define all required roles in RolesMaster
         roles = [
