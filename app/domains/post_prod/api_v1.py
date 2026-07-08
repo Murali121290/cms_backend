@@ -82,12 +82,38 @@ def run_conversion_background(chapter_id: int, session_factory):
                 zip_name = f"packaged_{os.path.splitext(chapter.source_filename)[0]}.zip"
                 temp_zip_path = os.path.join(project_dir, zip_name)
                 
+                # Exclude other chapters' source filenames to only send this chapter
+                all_chaps = db.query(PostProdChapter).filter(
+                    PostProdChapter.project_name == chapter.project_name,
+                    PostProdChapter.client_code == chapter.client_code
+                ).all()
+                other_source_filenames = {c.source_filename for c in all_chaps if c.id != chapter.id}
+                other_chapter_nos = {c.chapter_no for c in all_chaps if c.id != chapter.id}
+                
                 try:
                     logger.info(f"Packaging chapter directory {chapter_dir} into ZIP: {temp_zip_path}")
                     with zipfile.ZipFile(temp_zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
                         for root, _, filenames in os.walk(chapter_dir):
+                            # Check if the folder path belongs to another chapter
+                            rel_root = os.path.relpath(root, chapter_dir)
+                            path_parts = rel_root.replace("\\", "/").lower().split("/")
+                            
+                            is_other_chapter_folder = False
+                            for part in path_parts:
+                                for other_no in other_chapter_nos:
+                                    if other_no and (f"ch{other_no}" in part or f"chap{other_no}" in part or part == other_no):
+                                        is_other_chapter_folder = True
+                                        break
+                                if is_other_chapter_folder:
+                                    break
+                                    
+                            if is_other_chapter_folder:
+                                continue
+                                
                             for f in filenames:
                                 if f.startswith("._") or f.startswith("__MACOSX") or f == zip_name:
+                                    continue
+                                if f in other_source_filenames:
                                     continue
                                 full_file_path = os.path.join(root, f)
                                 rel_path = os.path.relpath(full_file_path, chapter_dir)
