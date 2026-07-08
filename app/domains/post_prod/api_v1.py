@@ -32,6 +32,23 @@ def parse_chapter_number(filename: str) -> str:
     if match_digits:
         return str(int(match_digits.group(1)))
     return "1"
+def check_and_update_project_status(db: Session, project_name: str, client_code: str):
+    project = db.query(PostProdProject).filter(
+        PostProdProject.project_name == project_name,
+        PostProdProject.client_code == client_code
+    ).first()
+    if not project:
+        return
+        
+    chapters = db.query(PostProdChapter).filter(
+        PostProdChapter.project_name == project_name,
+        PostProdChapter.client_code == client_code
+    ).all()
+    
+    if chapters and all(c.status == "Completed" for c in chapters):
+        project.status = "Completed"
+        db.commit()
+
 def run_conversion_background(chapter_id: int, session_factory):
     db = session_factory()
     try:
@@ -143,6 +160,10 @@ def run_conversion_background(chapter_id: int, session_factory):
             chapter.error_message = error_msg or "Unknown error"
         
         db.commit()
+        try:
+            check_and_update_project_status(db, chapter.project_name, chapter.client_code)
+        except Exception as check_err:
+            logger.warning(f"Failed to check and update project status: {check_err}")
 
     except Exception as e:
         logger.exception("Error in background conversion task")
@@ -314,6 +335,47 @@ async def create_project(
     db.commit()
     
     return {"message": "Project created successfully and extraction completed.", "project_id": project.id}
+
+from fastapi.responses import FileResponse, StreamingResponse
+import io
+
+@router.get("/projects/{project_id}/bulk-download-chapters")
+def bulk_download_chapters(
+    project_id: int, 
+    chapter_ids: str, 
+    db: Session = Depends(database.get_db), 
+    user = Depends(get_current_user_from_cookie)
+):
+    ids_list = [int(i.strip()) for i in chapter_ids.split(",") if i.strip().isdigit()]
+    if not ids_list:
+        raise HTTPException(status_code=400, detail="No valid chapter IDs provided")
+        
+    chapters = db.query(PostProdChapter).filter(
+        PostProdChapter.id.in_(ids_list)
+    ).all()
+    
+    if not chapters:
+        raise HTTPException(status_code=404, detail="No chapters found")
+        
+    downloadable = [c for c in chapters if c.converted_file_path and os.path.exists(c.converted_file_path)]
+    if not downloadable:
+        raise HTTPException(status_code=400, detail="No completed files are available for download among selected chapters.")
+        
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
+        for chap in downloadable:
+            base_name = os.path.basename(chap.converted_file_path)
+            if not base_name.endswith(".docx"):
+                base_name = f"Chapter_{chap.chapter_no}.docx"
+            zip_file.write(chap.converted_file_path, base_name)
+            
+    zip_buffer.seek(0)
+    
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=converted_chapters.zip"}
+    )
 
 @router.get("/chapters/{chapter_id}/download")
 def download_chapter(chapter_id: int, db: Session = Depends(database.get_db), user = Depends(get_current_user_from_cookie)):
