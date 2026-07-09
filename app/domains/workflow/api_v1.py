@@ -304,6 +304,8 @@ def stage_transition(project: str, chapters: str, payload: TransitionPayload, db
     if payload.dt:
         try:
             transition_time = datetime.fromisoformat(payload.dt.replace("Z", "+00:00"))
+            if transition_time.tzinfo is not None:
+                transition_time = transition_time.replace(tzinfo=None)
         except ValueError:
             pass
             
@@ -311,7 +313,9 @@ def stage_transition(project: str, chapters: str, payload: TransitionPayload, db
         from_detail.stage_status = "Completed"
         from_detail.actual_end_date = transition_time
         if from_detail.actual_start_date:
-            delta = transition_time - from_detail.actual_start_date
+            t_naive = transition_time.replace(tzinfo=None) if transition_time.tzinfo is not None else transition_time
+            s_naive = from_detail.actual_start_date.replace(tzinfo=None) if from_detail.actual_start_date.tzinfo is not None else from_detail.actual_start_date
+            delta = t_naive - s_naive
             from_detail.total_time_taken = delta.total_seconds() / 3600.0
         
         # Calculate completion delay

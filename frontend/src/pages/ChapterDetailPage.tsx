@@ -9,6 +9,8 @@ import { ChapterFilePage } from '@/pages/ChapterFilePage'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import { toast } from '@/store/useToastStore'
 import { useRBAC } from '@/hooks/useRBAC'
+import apiClient from '@/api/client'
+import { TransitionConfirmModal } from '@/components/TransitionConfirmModal'
 
 function orderStages(stages: WorkflowStage[]): WorkflowStage[] {
   const byName = new Map(stages.map(s => [s.stage_name, s]))
@@ -57,6 +59,18 @@ export function ChapterDetailPage() {
   const [error,          setError]          = useState<string | null>(null)
   const [proceedLoading, setProceedLoading] = useState(false)
   const [refreshKey,     setRefreshKey]     = useState(0)
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false)
+  const [transitionConfig, setTransitionConfig] = useState<{
+    custom_message?: string;
+    to: string[];
+    cc: string[];
+    subject: string;
+    body: string;
+  } | null>(null)
+  const [transitionParams, setTransitionParams] = useState<{
+    fromStage: string;
+    toStage: string;
+  } | null>(null)
 
   useEffect(() => {
     if (!chapterId || !projectId) return
@@ -88,6 +102,28 @@ export function ChapterDetailPage() {
   }, [chapterId, projectId, refreshKey])
 
   // Proceed: same logic as the old ChapterDetailModal's confirmProceed
+  async function executeTransitionAndEmail() {
+    if (!chapter || !transitionParams || !transitionConfig) return
+    setProceedLoading(true)
+    try {
+      await apiClient.post(`/chapters/${chapter.id}/transition-email`, {
+        from_stage: transitionParams.fromStage,
+        to_stage: transitionParams.toStage,
+        to_emails: transitionConfig.to,
+        cc_emails: transitionConfig.cc,
+        subject: transitionConfig.subject,
+        body: transitionConfig.body,
+      })
+      toast.success(`Moved to ${transitionParams.toStage}`)
+      setConfirmModalOpen(false)
+      navigate(-1)
+    } catch {
+      toast.error('Failed to transition stage')
+    } finally {
+      setProceedLoading(false)
+    }
+  }
+
   async function handleProceed() {
     if (!chapter || !project) return
     const projectCode = project.code || project.project_code
@@ -113,18 +149,25 @@ export function ChapterDetailPage() {
 
     setProceedLoading(true)
     try {
-      const result = await stageDetailsApi.stageTransition(
-        projectCode, chapter.chapters, currentStage ?? '', nextStage
-      )
-      const isLastStage = orderedStages.length > 0 && nextStage === orderedStages[orderedStages.length - 1].stage_name
-      await chaptersApi.update(chapter.id, {
-        stage_name:            nextStage,
-        current_assignee_name: null,
-        status:                isLastStage ? 'complete' : chapter.status,
-        due_date:              result?.planned_end_date ? result.planned_end_date.split('T')[0] : chapter.due_date,
-      })
-      toast.success(`Moved to ${nextStage}`)
-      navigate(-1)
+      const { data } = await apiClient.get(`/chapters/${chapter.id}/transition-config?next_stage=${encodeURIComponent(nextStage)}`)
+      if (data && data.has_config) {
+        setTransitionConfig(data)
+        setTransitionParams({ fromStage: currentStage ?? '', toStage: nextStage })
+        setConfirmModalOpen(true)
+      } else {
+        const result = await stageDetailsApi.stageTransition(
+          projectCode, chapter.chapters, currentStage ?? '', nextStage
+        )
+        const isLastStage = orderedStages.length > 0 && nextStage === orderedStages[orderedStages.length - 1].stage_name
+        await chaptersApi.update(chapter.id, {
+          stage_name:            nextStage,
+          current_assignee_name: null,
+          status:                isLastStage ? 'complete' : chapter.status,
+          due_date:              result?.planned_end_date ? result.planned_end_date.split('T')[0] : chapter.due_date,
+        })
+        toast.success(`Moved to ${nextStage}`)
+        navigate(-1)
+      }
     } catch {
       toast.error('Failed to proceed')
     } finally {
@@ -156,19 +199,33 @@ export function ChapterDetailPage() {
   }
 
   return (
-    <ChapterFilePage
-      chapterFolderData={chapterFolderData}
-      projectId={project.id}
-      chapterId={chapter.id}
-      chapterName={chapter.chapters}
-      chapterTitle={chapter.chapter_title}
-      clientId={clientId}
-      clientName={project.client_name ?? undefined}
-      projectName={project.project_title ?? project.code ?? project.project_code ?? undefined}
-      stageName={chapter.stage_name ?? ''}
-      isAssigned={chapter.current_assignee_name === viewer?.username}
-      onRefresh={() => setRefreshKey(k => k + 1)}
-      onProceed={proceedLoading ? undefined : handleProceed}
-    />
+    <>
+      <ChapterFilePage
+        chapterFolderData={chapterFolderData}
+        projectId={project.id}
+        chapterId={chapter.id}
+        chapterName={chapter.chapters}
+        chapterTitle={chapter.chapter_title}
+        clientId={clientId}
+        clientName={project.client_name ?? undefined}
+        projectName={project.project_title ?? project.code ?? project.project_code ?? undefined}
+        stageName={chapter.stage_name ?? ''}
+        isAssigned={chapter.current_assignee_name === viewer?.username}
+        onRefresh={() => setRefreshKey(k => k + 1)}
+        onProceed={proceedLoading ? undefined : handleProceed}
+      />
+
+      {transitionConfig && transitionParams && (
+        <TransitionConfirmModal
+          isOpen={confirmModalOpen}
+          onClose={() => setConfirmModalOpen(false)}
+          onConfirm={executeTransitionAndEmail}
+          loading={proceedLoading}
+          currentStage={transitionParams.fromStage}
+          nextStage={transitionParams.toStage}
+          config={transitionConfig}
+        />
+      )}
+    </>
   )
 }
