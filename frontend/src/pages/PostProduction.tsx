@@ -21,7 +21,14 @@ export function PostProduction() {
           return (
             <div 
               key={service.id}
-              onClick={() => isEnabled && navigate(`/post-production/${service.id}`)}
+              onClick={() => {
+                if (!isEnabled) return
+                if (service.externalUrl) {
+                  window.open(service.externalUrl, '_blank', 'noopener,noreferrer')
+                } else {
+                  navigate(`/post-production/${service.id}`)
+                }
+              }}
               className={`p-5 rounded-xl border transition-all duration-300 flex flex-col justify-between ${
                 isEnabled 
                   ? 'bg-card border-border hover:border-primary/60 hover:-translate-y-0.5 hover:shadow-md cursor-pointer' 
