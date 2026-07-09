@@ -16,6 +16,8 @@ import type { WorkflowStage } from '@/api/workflows'
 import { usersApi } from '@/api/users'
 import type { User as AppUser } from '@/api/users'
 import { stageDetailsApi } from '@/api/stageDetails'
+import { stagesApi } from '@/api/stages'
+import type { Stage } from '@/api/stages'
 import { toast } from '@/store/useToastStore'
 import { FullPageSpinner, Spinner } from '@/components/ui/Spinner'
 import { uiPaths } from '@/utils/appPaths'
@@ -109,19 +111,53 @@ function SummaryWidget({ label, value, icon: Icon, iconCls, onClick, active }: {
   )
 }
 
+// ── Role config ────────────────────────────────────────────────────────────────
+
+// Roles that work across every stage rather than owning a specific one — edit this
+// list to change which roles are exempt from workflow-rail highlighting and always
+// selectable in assignee dropdowns regardless of stage role mapping.
+const PRIVILEGED_ROLES = ['project manager', 'admin', 'team lead']
+
+function isPrivilegedRole(role: string): boolean {
+  const norm = role.toLowerCase()
+  return PRIVILEGED_ROLES.some(p => norm.includes(p))
+}
+
+function normalizeRole(role: string): string {
+  return role.toLowerCase().replace(/\s+/g, '')
+}
+
+// True if `userRole` should be assignable/highlighted for `stageName`, given the
+// stage → role-name mapping fetched from stagesApi. Stages with no roles mapped
+// impose no restriction (fail open) so untouched stages keep working as before.
+function isRoleAllowedForStage(userRole: string, stageName: string | null | undefined, stageRolesMap: Map<string, string[]>): boolean {
+  if (isPrivilegedRole(userRole)) return true
+  if (!stageName) return true
+  const stageRoles = stageRolesMap.get(stageName)
+  if (!stageRoles || stageRoles.length === 0) return true
+  const norm = normalizeRole(userRole)
+  return stageRoles.some(r => normalizeRole(r) === norm)
+}
+
 // ── Workflow Rail ──────────────────────────────────────────────────────────────
 
-function WorkflowRail({ stages, chapters, filterStage, onStageClick }: {
+function WorkflowRail({ stages, chapters, filterStage, onStageClick, stageRolesMap }: {
   stages: WorkflowStage[]
   chapters: Chapter[]
   filterStage: string
   onStageClick: (s: string) => void
+  stageRolesMap: Map<string, string[]>
 }) {
+  const { roles, canAccess } = useRBAC()
+
   const countByStage = useMemo(() => {
     const m = new Map<string, number>()
     chapters.forEach(c => { if (c.stage_name) m.set(c.stage_name, (m.get(c.stage_name) ?? 0) + 1) })
     return m
   }, [chapters])
+
+  // PM/Admin/Team Lead roles work across all stages, so they get no per-stage highlight.
+  const isHighlightExempt = roles.some(isPrivilegedRole)
 
   if (stages.length === 0) return null
 
@@ -132,13 +168,17 @@ function WorkflowRail({ stages, chapters, filterStage, onStageClick }: {
         {stages.map((stage, i) => {
           const cnt = countByStage.get(stage.stage_name) ?? 0
           const active = filterStage === stage.stage_name
+          const isMyStage = !isHighlightExempt
+            && canAccess(stageRolesMap.get(stage.stage_name) ?? [])
           return (
             <span key={stage.stage_name} className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={() => onStageClick(stage.stage_name)}
                 className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${active
                   ? 'bg-primary text-white'
-                  : 'bg-card border border-border text-text hover:bg-accent'
+                  : isMyStage
+                    ? 'bg-amber-50 border border-amber-300 text-amber-800 hover:bg-amber-100'
+                    : 'bg-card border border-border text-text hover:bg-accent'
                   }`}
               >
                 {/* <span className={`w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center flex-shrink-0 ${
@@ -146,7 +186,7 @@ function WorkflowRail({ stages, chapters, filterStage, onStageClick }: {
                 }`}>{i + 1}</span> */}
                 {stage.stage_name}
                 {cnt > 0 && (
-                  <span className={`px-1 py-0.5 rounded text-[9px] font-bold ${active ? 'bg-white/20 text-white' : 'bg-primary/10 text-primary'
+                  <span className={`px-1 py-0.5 rounded text-[9px] font-bold ${active ? 'bg-white/20 text-white' : isMyStage ? 'bg-amber-500/20 text-amber-800' : 'bg-primary/10 text-primary'
                     }`}>{cnt}</span>
                 )}
               </button>
@@ -161,7 +201,7 @@ function WorkflowRail({ stages, chapters, filterStage, onStageClick }: {
 
 // ── Assignee Select ────────────────────────────────────────────────────────────
 
-function AssigneeSelect({ value, users, onChange, disabled, widthCls = 'w-28', className, onClick, updating }: {
+function AssigneeSelect({ value, users, onChange, disabled, widthCls = 'w-28', className, onClick, updating, stageName, stageRolesMap }: {
   value: string | null
   users: AppUser[]
   onChange: (val: string) => void
@@ -170,6 +210,11 @@ function AssigneeSelect({ value, users, onChange, disabled, widthCls = 'w-28', c
   className?: string
   onClick?: (e: React.MouseEvent) => void
   updating?: boolean
+  // When provided, the dropdown is restricted to users whose role is mapped to
+  // this stage (plus PRIVILEGED_ROLES) — the currently-assigned user is always
+  // kept as an option even if their role no longer matches the stage mapping.
+  stageName?: string | null
+  stageRolesMap?: Map<string, string[]>
 }) {
   const { canAccess } = useRBAC()
   const canEdit = canAccess(ROLE_PERMISSIONS.edit_assignee)
@@ -182,6 +227,11 @@ function AssigneeSelect({ value, users, onChange, disabled, widthCls = 'w-28', c
     )
   }
 
+  const active = users.filter(u => u.active_status)
+  const assignable = stageRolesMap
+    ? active.filter(u => isRoleAllowedForStage(u.role, stageName, stageRolesMap) || u.user_name === value)
+    : active
+
   return (
     <div className={`relative flex items-center ${widthCls} ${className ?? ''}`} onClick={onClick}>
       <select
@@ -191,7 +241,7 @@ function AssigneeSelect({ value, users, onChange, disabled, widthCls = 'w-28', c
         className="text-[11px] bg-background border border-border rounded-md pl-2 pr-6 py-0.5 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-60 appearance-none cursor-pointer w-full truncate"
       >
         <option value="">— Unassigned —</option>
-        {users.filter(u => u.active_status).map(u => (
+        {assignable.map(u => (
           <option key={u.id} value={u.user_name}>{u.user_name}</option>
         ))}
       </select>
@@ -212,11 +262,12 @@ interface ChapterCardProps {
   chapter: Chapter
   users: AppUser[]
   plannedDueDates: Map<string, StageInfo>
+  stageRolesMap: Map<string, string[]>
   onAssigneeChange: (chapter: Chapter, val: string) => Promise<boolean>
   onViewDetails: (chapter: Chapter) => void
 }
 
-function ChapterCard({ chapter, users, plannedDueDates, onAssigneeChange, onViewDetails }: ChapterCardProps) {
+function ChapterCard({ chapter, users, plannedDueDates, stageRolesMap, onAssigneeChange, onViewDetails }: ChapterCardProps) {
   const [updating, setUpdating] = useState(false)
 
   const status = statusMeta(chapter.status)
@@ -270,7 +321,7 @@ function ChapterCard({ chapter, users, plannedDueDates, onAssigneeChange, onView
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5">
             <User size={11} className="text-muted flex-shrink-0" />
-            <AssigneeSelect value={chapter.current_assignee_name} users={users} onChange={handleAssignee} disabled={updating} updating={updating} />
+            <AssigneeSelect value={chapter.current_assignee_name} users={users} onChange={handleAssignee} disabled={updating} updating={updating} stageName={chapter.stage_name} stageRolesMap={stageRolesMap} />
           </div>
           <div className="flex items-center gap-1 flex-shrink-0">
             <Calendar size={11} className={delayed ? 'text-red-500' : 'text-muted'} />
@@ -295,6 +346,7 @@ export function ProjectWorkflow() {
   const [project, setProject] = useState<Project | null>(null)
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [workflowStages, setWorkflowStages] = useState<WorkflowStage[]>([])
+  const [stageRolesMap, setStageRolesMap] = useState<Map<string, string[]>>(new Map())
   const [users, setUsers] = useState<AppUser[]>([])
   const [plannedDueDates, setPlannedDueDates] = useState<Map<string, StageInfo>>(new Map())
   // Maps WMS chapter number (e.g. "01") → CMS chapter DB id for correct navigation
@@ -340,7 +392,7 @@ export function ProjectWorkflow() {
         setProject(p)
         const projectCode = p.code || p.project_code || ''
         const workflowName = p.workflow_name || ''
-        const [chs, stages, details, cmsChapters] = await Promise.all([
+        const [chs, stages, details, cmsChapters, allStages] = await Promise.all([
           chaptersApi.getByProject(projectCode).catch(() => [] as Chapter[]),
           workflowName
             ? workflowsApi.getWorkflow(workflowName).catch(() => [] as WorkflowStage[])
@@ -349,9 +401,11 @@ export function ProjectWorkflow() {
             ? stageDetailsApi.listByProject(projectCode).catch(() => [])
             : Promise.resolve([]),
           projectsApi.getProjectChapters(id).catch(() => ({ project: null, chapters: [] })),
+          stagesApi.list().catch(() => [] as Stage[]),
         ])
         setChapters(chs)
         setWorkflowStages(stages)
+        setStageRolesMap(new Map(allStages.map(s => [s.stage_name, s.roles])))
         // Build number → CMS chapter id map with multiple normalizations for robust matching
         // WMS uses "01", CMS might use "1" or "01" — store all variants
         const idMap = new Map<string, number>()
@@ -664,6 +718,7 @@ export function ProjectWorkflow() {
         chapters={chapters}
         filterStage={filterStage}
         onStageClick={s => setFilterStage(prev => prev === s ? '' : s)}
+        stageRolesMap={stageRolesMap}
       />
 
       <div className="flex-1 px-6 py-5 space-y-5">
@@ -759,6 +814,7 @@ export function ProjectWorkflow() {
                 {filtered.map(ch => (
                   <ChapterCard key={ch.id} chapter={ch} users={users}
                     plannedDueDates={plannedDueDates}
+                    stageRolesMap={stageRolesMap}
                     onAssigneeChange={handleAssigneeChange}
                     onViewDetails={openChapter} />
                 ))}
@@ -787,6 +843,8 @@ export function ProjectWorkflow() {
                             users={users}
                             onChange={val => handleAssigneeChange(ch, val)}
                             onClick={e => e.stopPropagation()}
+                            stageName={ch.stage_name}
+                            stageRolesMap={stageRolesMap}
                           />
                         </div>
                         <span className={`flex-shrink-0 ${delayed ? 'text-red-500 font-semibold' : ''}`}>{formatDate(due)}</span>
@@ -818,6 +876,8 @@ export function ProjectWorkflow() {
                         users={users}
                         onChange={val => handleAssigneeChange(ch, val)}
                         onClick={e => e.stopPropagation()}
+                        stageName={ch.stage_name}
+                        stageRolesMap={stageRolesMap}
                       />
                       <span className={`text-xs flex-shrink-0 ${delayed ? 'text-red-600 font-semibold' : 'text-muted'}`}>{formatDate(due)}</span>
                       <ChevronRight size={14} className="text-muted flex-shrink-0" />
@@ -855,7 +915,7 @@ export function ProjectWorkflow() {
                             <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${sm.cls}`}>{sm.label}</span>
                           </td>
                           <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
-                            <AssigneeSelect value={ch.current_assignee_name} users={users} onChange={val => handleAssigneeChange(ch, val)} />
+                            <AssigneeSelect value={ch.current_assignee_name} users={users} onChange={val => handleAssigneeChange(ch, val)} stageName={ch.stage_name} stageRolesMap={stageRolesMap} />
                           </td>
                           <td className={`px-4 py-3 text-xs whitespace-nowrap ${delayed ? 'text-red-600 font-semibold' : 'text-muted'}`}>{formatDate(due)}</td>
                           <td className="px-4 py-3 text-xs text-center text-muted">{ch.manuscript_pages ?? '—'}</td>
@@ -925,7 +985,7 @@ export function ProjectWorkflow() {
         <div className="space-y-4">
           <div>
             <label className="block text-xs font-medium text-muted mb-1">Assign to</label>
-            <AssigneeSelect widthCls="w-full" value={bulkAssignee || null} users={users} onChange={setBulkAssignee} />
+            <AssigneeSelect widthCls="w-full" value={bulkAssignee || null} users={users} onChange={setBulkAssignee} stageName={bulkStage} stageRolesMap={stageRolesMap} />
           </div>
 
           <div>
