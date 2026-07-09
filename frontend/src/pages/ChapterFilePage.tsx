@@ -16,6 +16,7 @@ import {
   useReactTable,
   type SortingState,
 } from '@tanstack/react-table'
+import { useQueryClient } from '@tanstack/react-query'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import {
@@ -202,6 +203,9 @@ function FileActionsMenu({
   const { isAdmin } = useRBAC()
   const [confirmStep, setConfirmStep] = useState<ConfirmStep | null>(null)
   const [tagSetModalOpen, setTagSetModalOpen] = useState(false)
+  const queryClient = useQueryClient()
+  const invalidateFiles = () =>
+    queryClient.invalidateQueries({ queryKey: ['chapter-files', projectId, chapterId] })
 
   const fid = row.db_id
   const fname = row.file_name.toLowerCase()
@@ -222,6 +226,8 @@ function FileActionsMenu({
     try {
       await fn()
       toast.success(`${label} started for ${row.file_name}`)
+      // Refetch immediately so the row flips to "Processing…" without a manual refresh.
+      void invalidateFiles()
     } catch {
       toast.error(`Failed: ${label}`)
       return
@@ -234,6 +240,7 @@ function FileActionsMenu({
       if (Date.now() - startedAt >= POLL_TIMEOUT_MS) {
         clearInterval(interval)
         toast.error(`${label} timed out for ${row.file_name}`)
+        void invalidateFiles()
         return
       }
       try {
@@ -241,9 +248,11 @@ function FileActionsMenu({
         if (result.status === 'failed') {
           clearInterval(interval)
           toast.error(`${label} failed for ${row.file_name}: ${result.error ?? 'Unknown error'}`)
+          void invalidateFiles()
         } else if (result.status === 'completed') {
           clearInterval(interval)
           toast.success(`${label} completed for ${row.file_name}`)
+          void invalidateFiles()
         }
       } catch {
         // Transient poll error — let the timeout handle a genuinely stuck job.
@@ -253,13 +262,13 @@ function FileActionsMenu({
 
   async function handleCheckout() {
     if (!fid) return
-    try { await checkoutFile(fid); toast.success(`${row.file_name} checked out`) }
+    try { await checkoutFile(fid); toast.success(`${row.file_name} checked out`); void invalidateFiles() }
     catch { toast.error('Checkout failed') }
   }
 
   async function handleReleaseLock() {
     if (!fid) return
-    try { await cancelCheckout(fid); toast.success('Lock released') }
+    try { await cancelCheckout(fid); toast.success('Lock released'); void invalidateFiles() }
     catch { toast.error('Release lock failed') }
   }
 
@@ -908,41 +917,26 @@ export function ChapterFilePage({
       header: 'Uploaded On',
       cell: i => <span className="text-muted text-[11px] whitespace-nowrap">{i.getValue() ? fmtDate(i.getValue()) : '—'}</span>,
     }),
-    // ── Status column ─────────────────────────────────────────────────────
+    // ── Status column (includes lock info) ────────────────────────────────
     col.display({
       id: 'status',
       header: 'Status',
-      size: 120,
-      cell: ({ row }) => {
-        const { isLocked } = row.original
-        if (isLocked) {
-          return (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 whitespace-nowrap">
-              <Loader2 size={9} className="animate-spin flex-shrink-0" />
-              Processing…
-            </span>
-          )
-        }
-        return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 whitespace-nowrap">
-            <CheckCircle2 size={9} className="flex-shrink-0" />
-            Ready
-          </span>
-        )
-      },
-    }),
-    // ── Lock column ───────────────────────────────────────────────────────
-    col.display({
-      id: 'lock',
-      header: 'Lock',
-      size: 140,
+      size: 160,
       cell: ({ row }) => {
         const { isLocked, lockedBy, lockedAt, webdavLocked, webdavLockedBy, webdavLockedAt } = row.original
-        if (!isLocked && !webdavLocked) {
-          return <span className="text-muted text-[11px]">—</span>
-        }
         return (
           <div className="flex flex-col gap-1">
+            {isLocked ? (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 whitespace-nowrap w-fit">
+                <Loader2 size={9} className="animate-spin flex-shrink-0" />
+                Processing…
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 whitespace-nowrap w-fit">
+                <CheckCircle2 size={9} className="flex-shrink-0" />
+                Ready
+              </span>
+            )}
             {isLocked && (
               <div className="flex flex-col gap-0.5">
                 <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 whitespace-nowrap">
