@@ -5,21 +5,22 @@ import {
   BOOK_HUBS,
   JOURNAL_HUBS,
   GENERAL_HUBS,
+  PEOPLE_HUBS,
   LIFECYCLE_STEPS,
   type HubData,
   type LifecycleStep
 } from '@/config/portalConfig'
 
-type Screen = 'choose' | 'portal' | 'journal' | 'general'
+type Screen = 'choose' | 'portal' | 'journal' | 'general' | 'people'
 
 const css = `
   .ink-root *, .ink-root *::before, .ink-root *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   .ink-root, .ink-root[data-theme=""] {
-    --accent:#E8C896; --accent-2:#C8841C; --accent-deep:#A66A12; --accent-soft:#F0D5A8; --accent-wash:#FBEFD9;
-    --surface:#1C1A17; --surface-2:#242019; --surface-3:#2A251D; --surface-2b:#201D18; --surface-deep:#161412; --surface-line:#34302A; --border-dark:#3A352D;
-    --n-0:#FFFFFF; --n-50:#FBF9F4; --n-100:#FAF7F0; --n-page:#F4F1EA; --n-soft:#F0EADB; --border:#E6DFD1;
-    --n-line:#C7BEAC; --n-mid:#B5AC9B; --n-muted:#8C8475; --n-dim:#6B6357; --ink:#211E1A;
+    --accent:#F48B29; --accent-2:#1B4F9C; --accent-deep:#0F366E; --accent-soft:#FFD8B3; --accent-wash:#EEF5FC;
+    --surface:#131922; --surface-2:#1B2330; --surface-3:#222D3D; --surface-2b:#18202B; --surface-deep:#0D1218; --surface-line:#2C3B50; --border-dark:#33455D;
+    --n-0:#FFFFFF; --n-50:#F8FAFC; --n-100:#F1F4F9; --n-page:#EBF1F7; --n-soft:#DEE7F2; --border:#CFDCEB;
+    --n-line:#9AB0C9; --n-mid:#839BB8; --n-muted:#68809D; --n-dim:#4F6580; --ink:#121822;
   }
   .ink-root[data-theme="ocean"] {
     --accent:#86B7E6; --accent-2:#2A6FDB; --accent-deep:#1B4F9C; --accent-soft:#AFD0F0; --accent-wash:#E3EEFB;
@@ -69,19 +70,19 @@ const css = `
   @keyframes pulseDot { 0%,100%{opacity:1} 50%{opacity:.4} }
 
   .ink-hubcard { transition: transform .22s ease, box-shadow .22s ease, border-color .22s ease, background .22s ease; cursor: pointer; }
-  .ink-hubcard:hover { transform: translateY(-3px); border-color: var(--accent-2) !important; background: linear-gradient(165deg, var(--surface-3) 0%, var(--surface-2b) 100%) !important; box-shadow: 0 14px 34px rgba(0,0,0,0.4); }
-  .ink-hubcard:hover .ink-hubicon { background: var(--accent) !important; color: var(--surface) !important; }
-  .ink-hubcard:hover .ink-enter { opacity: 1 !important; color: var(--accent) !important; }
+  .ink-hubcard:hover { transform: translateY(-3px); border-color: var(--accent-2) !important; background: var(--n-0) !important; box-shadow: 0 12px 28px rgba(19, 25, 34, 0.08) !important; }
+  .ink-hubcard:hover .ink-hubicon { background: var(--accent-2) !important; color: var(--n-0) !important; }
+  .ink-hubcard:hover .ink-enter { background: var(--accent) !important; color: var(--n-0) !important; }
 
   .ink-pill { transition: border-color .2s ease, box-shadow .2s ease, background .2s ease; cursor: pointer; }
   .ink-pill:hover { border-color: var(--accent-2) !important; background: var(--n-0) !important; box-shadow: 0 6px 18px color-mix(in srgb, var(--accent-2) 12%, transparent); }
   .ink-pill:hover .ink-pillicon { background: var(--accent-wash) !important; color: var(--accent-deep) !important; }
 
-  .ink-choicecard { transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease; cursor: pointer; }
-  .ink-choicecard:hover { transform: translateY(-4px); border-color: var(--accent-2) !important; box-shadow: 0 20px 46px rgba(0,0,0,0.42); }
+  .ink-choicecard { transition: transform .22s ease, box-shadow .22s ease, border-color .22s ease; cursor: pointer; }
+  .ink-choicecard:hover { transform: translateY(-3px); border-color: var(--accent-2) !important; box-shadow: 0 12px 28px rgba(19, 25, 34, 0.08) !important; }
   .ink-choicecard:hover .ink-choiceglow { opacity: 1 !important; }
-  .ink-choicecard:hover .ink-choiceicon { transform: scale(1.06) rotate(-3deg); }
-  .ink-choicecard:hover .ink-choiceenter { background: var(--accent-soft) !important; }
+  .ink-choicecard:hover .ink-choiceicon { transform: scale(1.06) rotate(-2deg); background: var(--accent-2) !important; color: var(--n-0) !important; }
+  .ink-choicecard:hover .ink-choiceenter { background: var(--accent) !important; color: var(--n-0) !important; }
 
   .ink-swatch-item { transition: background .16s ease; cursor: pointer; }
   .ink-swatch-item:hover { background: var(--accent-wash) !important; }
@@ -116,13 +117,13 @@ function NavBar({ subtitle }: { subtitle: string }) {
           <img src="/portal-assets/s4c-logo.png" alt="S4Carlisle Publishing Services" style={{ height: 40, width: 'auto', display: 'block' }} />
           <div style={{ width: 1, height: 30, background: 'var(--border)' }} />
           <div>
-            <div style={{ fontFamily: 'Spectral, serif', fontSize: 20, fontWeight: 700, color: 'var(--surface)', lineHeight: 1, letterSpacing: '-0.01em' }}>
-              Inkflow <span style={{ color: 'var(--accent-deep)' }}>Platform</span>
+            <div style={{ fontFamily: 'Spectral, serif', fontSize: 20, fontWeight: 700, color: 'var(--accent-2)', lineHeight: 1, letterSpacing: '-0.01em' }}>
+              <span style={{ color: 'var(--accent)' }}>Ninja</span> Inkflow
             </div>
             <div style={{ fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--n-muted)', fontWeight: 600, marginTop: 5 }}>{subtitle}</div>
           </div>
         </div>
-        <div style={{ fontFamily: 'Spectral, serif', fontStyle: 'italic', fontSize: 14, color: 'var(--n-muted)' }}>Streamline. Collaborate. Deliver Excellence.</div>
+        <div style={{ fontFamily: 'Spectral, serif', fontWeight: 700, fontSize: 14, color: 'var(--accent-2)' }}>Streamline. Collaborate. Deliver Excellence.</div>
       </div>
     </nav>
   )
@@ -138,98 +139,110 @@ function PortalFooter() {
 
 function HubCard({ hub, onLogin }: { hub: HubData; onLogin: () => void }) {
   return (
-    <div onClick={onLogin} className="ink-hubcard" style={{ display: 'flex', flexDirection: 'column', background: 'linear-gradient(165deg, var(--surface-2) 0%, var(--surface) 100%)', border: '1.5px solid var(--border-dark)', borderRadius: 15, padding: '22px 20px 18px', color: 'inherit' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14 }}>
-        <span className="ink-hubicon" style={{ width: 42, height: 42, borderRadius: 12, background: 'color-mix(in srgb, var(--accent) 14%, transparent)', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'background .22s, color .22s' }}>
+    <div onClick={onLogin} className="ink-hubcard" style={{ display: 'flex', flexDirection: 'column', background: '#FFFFFF', border: '1px solid var(--border)', borderRadius: 8, padding: '22px 20px 18px', color: 'var(--ink)', boxShadow: '0 4px 12px rgba(19, 25, 34, 0.04)' }}>
+      <div style={{ marginBottom: 14 }}>
+        <span className="ink-hubicon" style={{ width: 42, height: 42, borderRadius: 12, background: 'var(--accent-wash)', color: 'var(--accent-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'background .22s, color .22s', border: '1px solid var(--border)' }}>
           <HubIcon paths={hub.svg} />
         </span>
-        <span style={{ fontFamily: 'Spline Sans Mono, monospace', fontSize: 11, fontWeight: 600, color: 'var(--n-dim)', marginTop: 4 }}>{hub.num}</span>
       </div>
-      <div style={{ fontFamily: 'Spectral, serif', fontSize: 16, fontWeight: 600, color: 'var(--n-50)', lineHeight: 1.28, marginBottom: 7 }}>{hub.title}</div>
-      <div style={{ fontSize: 12.5, color: 'var(--n-mid)', lineHeight: 1.6, flex: 1, marginBottom: 16 }}>{hub.desc}</div>
-      <div className="ink-enter" style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, color: 'var(--accent)', letterSpacing: '0.07em', textTransform: 'uppercase', opacity: 0, transition: 'opacity .22s, color .22s', marginTop: 'auto' }}>
+      <div style={{ fontFamily: 'Spectral, serif', fontSize: 16, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.28, marginBottom: 7 }}>{hub.title}</div>
+      <div style={{ fontSize: 12.5, color: 'var(--n-muted)', lineHeight: 1.6, flex: 1, marginBottom: 16 }}>{hub.desc}</div>
+      <div className="ink-enter" style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        fontSize: 11,
+        fontWeight: 700,
+        color: '#FFFFFF',
+        background: 'var(--accent-2)',
+        borderRadius: 8,
+        padding: '8px 14px',
+        width: 'fit-content',
+        transition: 'background-color .22s, transform .22s',
+        marginTop: 'auto'
+      }}>
         Enter Hub <ArrowRight size={12} />
       </div>
     </div>
   )
 }
 
-function ChooseScreen({ onBook, onJournal, onGeneral }: { onBook: () => void; onJournal: () => void; onGeneral: () => void }) {
+function ChooseScreen({ onBook, onJournal, onGeneral, onPeople }: { onBook: () => void; onJournal: () => void; onGeneral: () => void; onPeople: () => void }) {
   const cardStyle: React.CSSProperties = {
     position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column',
-    background: 'linear-gradient(165deg, var(--surface-2) 0%, var(--surface) 100%)',
-    border: '1.5px solid var(--border-dark)', borderRadius: 14,
-    padding: '18px 18px 16px', color: 'inherit', boxShadow: '0 8px 28px rgba(28,26,23,0.20)',
+    background: '#FFFFFF',
+    border: '1px solid var(--border)', borderRadius: 8,
+    padding: '24px', color: 'var(--ink)', boxShadow: '0 4px 12px rgba(19, 25, 34, 0.04)',
   }
   const iconStyle: React.CSSProperties = {
-    width: 42, height: 42, borderRadius: 11, background: 'var(--accent)', color: 'var(--surface)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'transform .25s',
+    width: 44, height: 44, borderRadius: 12, background: 'var(--accent-wash)', color: 'var(--accent-2)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'transform .25s, background-color .25s, color .25s',
+    border: '1px solid var(--border)',
   }
   const tagStyle: React.CSSProperties = {
-    fontSize: 10, fontWeight: 600, color: 'var(--accent)',
-    background: 'color-mix(in srgb, var(--accent) 10%, transparent)',
-    border: '1px solid color-mix(in srgb, var(--accent) 28%, transparent)',
+    fontSize: 10.5, fontWeight: 600, color: 'var(--accent-deep)',
+    background: 'var(--accent-wash)',
+    border: '1px solid var(--border)',
     padding: '3px 8px', borderRadius: 6,
   }
   const ctaStyle: React.CSSProperties = {
     position: 'relative', display: 'inline-flex', alignItems: 'center',
-    gap: 6, fontSize: 12, fontWeight: 700, color: 'var(--surface)', background: 'var(--accent)',
-    borderRadius: 8, padding: '8px 12px', width: 'fit-content', transition: 'background .2s',
+    gap: 6, fontSize: 12, fontWeight: 700, color: 'var(--n-0)', background: 'var(--accent-2)',
+    borderRadius: 8, padding: '8px 14px', width: 'fit-content', transition: 'background-color .2s, transform .2s',
+    marginTop: 'auto',
   }
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <NavBar subtitle="Workflow Management Portal" />
+      <NavBar subtitle="Workflow Management Hubs" />
 
       {/* Hero band — spacious */}
-      <div style={{ position: 'relative', overflow: 'hidden', background: 'var(--surface)', flexShrink: 0, padding: '36px 36px', minHeight: 180, display: 'flex', alignItems: 'center' }}>
-        <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(900px 360px at 80% 10%, color-mix(in srgb, var(--accent-2) 26%, transparent), transparent 60%)' }} />
-        <img src="/portal-assets/workflow-hero.png" alt="" style={{ position: 'absolute', top: 0, right: 0, bottom: 0, height: '100%', width: '64%', objectFit: 'cover', objectPosition: 'right center', mixBlendMode: 'lighten', WebkitMaskImage: 'linear-gradient(90deg, transparent 0%, #000 34%)', maskImage: 'linear-gradient(90deg, transparent 0%, #000 34%)' }} />
+      <div style={{ position: 'relative', overflow: 'hidden', background: '#F2F2F2', flexShrink: 0, padding: '48px 36px', minHeight: 200, display: 'flex', alignItems: 'center', borderBottom: '1px solid #E5E5E5' }}>
+        <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(1000px 400px at 80% 10%, rgba(27, 79, 156, 0.05), transparent)' }} />
+        <img src="/portal-assets/workflow-hero.png" alt="" style={{ position: 'absolute', top: 0, right: 0, bottom: 0, height: '100%', width: '64%', objectFit: 'cover', objectPosition: 'right center', opacity: 0.9, WebkitMaskImage: 'linear-gradient(90deg, transparent 0%, #000 34%)', maskImage: 'linear-gradient(90deg, transparent 0%, #000 34%)' }} />
         <div style={{ position: 'relative', zIndex: 2, maxWidth: 1320, margin: '0 auto', width: '100%' }}>
-          <div style={{ fontSize: 11, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--accent)', fontWeight: 700, marginBottom: 8 }}>S4C Inkflow Platform · 2026</div>
-          <h1 style={{ fontFamily: 'Spectral, serif', fontSize: 32, fontWeight: 700, color: 'var(--n-50)', lineHeight: 1.18, letterSpacing: '-0.02em', marginBottom: 6, textShadow: '0 2px 16px rgba(0,0,0,0.5)' }}>
-            Choose your <em style={{ color: 'var(--accent)', fontStyle: 'italic' }}>production line</em>
+          <div style={{ fontSize: 11, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--accent-2)', fontWeight: 800, marginBottom: 8 }}>S4C Ninja Inkflow</div>
+          <h1 style={{ fontFamily: 'Spectral, serif', fontSize: 34, fontWeight: 700, color: '#262626', lineHeight: 1.18, letterSpacing: '-0.02em', marginBottom: 6 }}>
+            Choose your <em style={{ color: 'var(--accent-2)', fontStyle: 'italic' }}>production line</em>
           </h1>
-          <p style={{ fontSize: 14.5, color: 'var(--n-line)', textShadow: '0 1px 10px rgba(0,0,0,0.5)' }}>Select a publishing stream to enter its dedicated workflow hubs.</p>
+          <p style={{ fontSize: 14.5, color: '#505050', maxWidth: 580 }}>Select a publishing stream to enter its dedicated workflow hubs. Designed with professional corporate layouts.</p>
         </div>
       </div>
 
-      {/* Choice cards — compact, always 3 columns */}
-      <main style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', maxWidth: 1040, margin: '0 auto', padding: '16px 36px 20px', boxSizing: 'border-box' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, width: '100%' }}>
+      {/* Choice cards — compact, always 4 columns */}
+      <main style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', maxWidth: 1320, margin: '0 auto', padding: '16px 36px 20px', boxSizing: 'border-box' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, width: '100%' }}>
 
           {/* Book card */}
           <div onClick={onBook} className="ink-choicecard" style={cardStyle}>
-            <div className="ink-choiceglow" style={{ position: 'absolute', top: -40, right: -40, width: 200, height: 200, borderRadius: '50%', background: 'radial-gradient(circle, color-mix(in srgb, var(--accent-2) 14%, transparent), transparent 70%)', opacity: 0, transition: 'opacity .25s' }} />
-            <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <div className="ink-choiceglow" style={{ position: 'absolute', top: -40, right: -40, width: 200, height: 200, borderRadius: '50%', background: 'radial-gradient(circle, rgba(27, 79, 156, 0.06), transparent 70%)', opacity: 0, transition: 'opacity .25s' }} />
+            <div style={{ position: 'relative', marginBottom: 12 }}>
               <span className="ink-choiceicon" style={iconStyle}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v18H6.5A2.5 2.5 0 0 0 4 22.5z" /><path d="M4 4.5A2.5 2.5 0 0 0 6.5 7H20" /><path d="M9 12h7" />
                 </svg>
               </span>
-              <span style={{ fontFamily: 'Spline Sans Mono, monospace', fontSize: 11, fontWeight: 600, color: 'var(--n-dim)' }}>01</span>
             </div>
-            <h2 style={{ position: 'relative', fontFamily: 'Spectral, serif', fontSize: 19, fontWeight: 700, color: 'var(--n-50)', marginBottom: 6 }}>Book Production</h2>
-            <p style={{ position: 'relative', fontSize: 12, color: 'var(--n-mid)', lineHeight: 1.6, marginBottom: 12 }}>End-to-end monograph and textbook publishing — manuscript analysis, copyediting, XML, pages and accessibility across {BOOK_HUBS.length} dedicated hubs.</p>
+            <h2 style={{ position: 'relative', fontFamily: 'Spectral, serif', fontSize: 19, fontWeight: 700, color: 'var(--ink)', marginBottom: 6 }}>Book Production</h2>
+            <p style={{ position: 'relative', fontSize: 12, color: 'var(--n-muted)', lineHeight: 1.6, marginBottom: 12 }}>End-to-end monograph and textbook publishing — manuscript analysis, copyediting, XML, pages and accessibility across {BOOK_HUBS.length} dedicated hubs.</p>
             <div style={{ position: 'relative', display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
-              {[`${BOOK_HUBS.length} Hubs`, '11-step pipeline', 'NLM XML'].map(tag => <span key={tag} style={tagStyle}>{tag}</span>)}
+              {[`${BOOK_HUBS.length} Stages`, '15-step pipeline', 'NLM XML'].map(tag => <span key={tag} style={tagStyle}>{tag}</span>)}
             </div>
             <div className="ink-choiceenter" style={ctaStyle}>Enter Book Workflow <ArrowRight size={13} /></div>
           </div>
 
           {/* Journal card */}
           <div onClick={onJournal} className="ink-choicecard" style={cardStyle}>
-            <div className="ink-choiceglow" style={{ position: 'absolute', top: -40, right: -40, width: 200, height: 200, borderRadius: '50%', background: 'radial-gradient(circle, color-mix(in srgb, var(--accent-2) 14%, transparent), transparent 70%)', opacity: 0, transition: 'opacity .25s' }} />
-            <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <div className="ink-choiceglow" style={{ position: 'absolute', top: -40, right: -40, width: 200, height: 200, borderRadius: '50%', background: 'radial-gradient(circle, rgba(27, 79, 156, 0.06), transparent 70%)', opacity: 0, transition: 'opacity .25s' }} />
+            <div style={{ position: 'relative', marginBottom: 12 }}>
               <span className="ink-choiceicon" style={iconStyle}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M4 5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v15a1 1 0 0 1-1.4.9L13 19l-2.6 1.9A1 1 0 0 1 9 20V5z" /><path d="M17 6h1a2 2 0 0 1 2 2v11" /><path d="M7 7h6M7 10.5h6" />
                 </svg>
               </span>
-              <span style={{ fontFamily: 'Spline Sans Mono, monospace', fontSize: 11, fontWeight: 600, color: 'var(--n-dim)' }}>02</span>
             </div>
-            <h2 style={{ position: 'relative', fontFamily: 'Spectral, serif', fontSize: 19, fontWeight: 700, color: 'var(--n-50)', marginBottom: 6 }}>Journal Production</h2>
-            <p style={{ position: 'relative', fontSize: 12, color: 'var(--n-mid)', lineHeight: 1.6, marginBottom: 12 }}>Full journal lifecycle from submission and peer review through JATS XML, typesetting, proofing and online publication — {JOURNAL_HUBS.length} vendor stages.</p>
+            <h2 style={{ position: 'relative', fontFamily: 'Spectral, serif', fontSize: 19, fontWeight: 700, color: 'var(--ink)', marginBottom: 6 }}>Journal Production</h2>
+            <p style={{ position: 'relative', fontSize: 12, color: 'var(--n-muted)', lineHeight: 1.6, marginBottom: 12 }}>Full journal lifecycle from submission and peer review through JATS XML, typesetting, proofing and online publication — {JOURNAL_HUBS.length} vendor stages.</p>
             <div style={{ position: 'relative', display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
               {[`${JOURNAL_HUBS.length} Stages`, 'Peer review', 'JATS · DOI'].map(tag => <span key={tag} style={tagStyle}>{tag}</span>)}
             </div>
@@ -238,21 +251,41 @@ function ChooseScreen({ onBook, onJournal, onGeneral }: { onBook: () => void; on
 
           {/* Operations & Services card */}
           <div onClick={onGeneral} className="ink-choicecard" style={cardStyle}>
-            <div className="ink-choiceglow" style={{ position: 'absolute', top: -40, right: -40, width: 200, height: 200, borderRadius: '50%', background: 'radial-gradient(circle, color-mix(in srgb, var(--accent-2) 14%, transparent), transparent 70%)', opacity: 0, transition: 'opacity .25s' }} />
-            <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <div className="ink-choiceglow" style={{ position: 'absolute', top: -40, right: -40, width: 200, height: 200, borderRadius: '50%', background: 'radial-gradient(circle, rgba(27, 79, 156, 0.06), transparent 70%)', opacity: 0, transition: 'opacity .25s' }} />
+            <div style={{ position: 'relative', marginBottom: 12 }}>
               <span className="ink-choiceicon" style={iconStyle}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
                   <rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" />
                 </svg>
               </span>
-              <span style={{ fontFamily: 'Spline Sans Mono, monospace', fontSize: 11, fontWeight: 600, color: 'var(--n-dim)' }}>03</span>
             </div>
-            <h2 style={{ position: 'relative', fontFamily: 'Spectral, serif', fontSize: 19, fontWeight: 700, color: 'var(--n-50)', marginBottom: 6 }}>Operations & Services</h2>
-            <p style={{ position: 'relative', fontSize: 12, color: 'var(--n-mid)', lineHeight: 1.6, marginBottom: 12 }}>Internal operations, client services and admin hubs — HR, billing, reporting, archive and support — all in one portal.</p>
+            <h2 style={{ position: 'relative', fontFamily: 'Spectral, serif', fontSize: 19, fontWeight: 700, color: 'var(--ink)', marginBottom: 6 }}>Operations & Services</h2>
+            <p style={{ position: 'relative', fontSize: 12, color: 'var(--n-muted)', lineHeight: 1.6, marginBottom: 12 }}>Internal operations, client services and admin hubs — HR, billing, reporting, archive and support — all in one portal.</p>
             <div style={{ position: 'relative', display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
-              {[`${GENERAL_HUBS.length} Hubs`, 'HR · Billing', 'Reports'].map(tag => <span key={tag} style={tagStyle}>{tag}</span>)}
+              {[`${GENERAL_HUBS.length} services`, 'Support', 'Billing', 'Reports'].map(tag => <span key={tag} style={tagStyle}>{tag}</span>)}
             </div>
             <div className="ink-choiceenter" style={ctaStyle}>Enter Operations Hub <ArrowRight size={13} /></div>
+          </div>
+
+          {/* People Hub card */}
+          <div onClick={onPeople} className="ink-choicecard" style={cardStyle}>
+            <div className="ink-choiceglow" style={{ position: 'absolute', top: -40, right: -40, width: 200, height: 200, borderRadius: '50%', background: 'radial-gradient(circle, rgba(27, 79, 156, 0.06), transparent 70%)', opacity: 0, transition: 'opacity .25s' }} />
+            <div style={{ position: 'relative', marginBottom: 12 }}>
+              <span className="ink-choiceicon" style={iconStyle}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                  <circle cx="9" cy="7" r="4" />
+                  <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                </svg>
+              </span>
+            </div>
+            <h2 style={{ position: 'relative', fontFamily: 'Spectral, serif', fontSize: 19, fontWeight: 700, color: 'var(--ink)', marginBottom: 6 }}>S4C People Hub</h2>
+            <p style={{ position: 'relative', fontSize: 12, color: 'var(--n-muted)', lineHeight: 1.6, marginBottom: 12 }}>Manage employee directory, staff onboarding workflows, benefits packages, and payroll operations.</p>
+            <div style={{ position: 'relative', display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
+              {[`${PEOPLE_HUBS.length} services`, 'HR · Payroll', 'Staff directory'].map(tag => <span key={tag} style={tagStyle}>{tag}</span>)}
+            </div>
+            <div className="ink-choiceenter" style={ctaStyle}>Enter People Hub <ArrowRight size={13} /></div>
           </div>
 
         </div>
@@ -266,34 +299,34 @@ function ChooseScreen({ onBook, onJournal, onGeneral }: { onBook: () => void; on
 function BookPortalScreen({ onBack, onLogin }: { onBack: () => void; onLogin: () => void }) {
   return (
     <>
-      <NavBar subtitle="Workflow Management Portal" />
+      <NavBar subtitle="Book Prodution Hubs" />
 
       {/* Hero */}
-      <div style={{ position: 'relative', overflow: 'hidden', background: 'var(--surface)', minHeight: 210, padding: '36px 36px' }}>
-        <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(900px 360px at 80% 10%, color-mix(in srgb, var(--accent-2) 26%, transparent), transparent 60%)' }} />
-        <img src="/portal-assets/book-hero.png" alt="" style={{ position: 'absolute', top: 0, right: 0, bottom: 0, height: '100%', width: '58%', objectFit: 'cover', objectPosition: 'right center', mixBlendMode: 'lighten', WebkitMaskImage: 'linear-gradient(90deg, transparent 0%, #000 38%)', maskImage: 'linear-gradient(90deg, transparent 0%, #000 38%)' }} />
+      <div style={{ position: 'relative', overflow: 'hidden', background: '#F2F2F2', minHeight: 200, padding: '36px 36px', borderBottom: '1px solid #E5E5E5' }}>
+        <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(900px 360px at 80% 10%, rgba(27, 79, 156, 0.05), transparent)' }} />
+        <img src="/portal-assets/book-hero.png" alt="" style={{ position: 'absolute', top: 0, right: 0, bottom: 0, height: '100%', width: '58%', objectFit: 'cover', objectPosition: 'right center', opacity: 0.9, WebkitMaskImage: 'linear-gradient(90deg, transparent 0%, #000 38%)', maskImage: 'linear-gradient(90deg, transparent 0%, #000 38%)' }} />
         <div style={{ position: 'relative', zIndex: 2, maxWidth: 1320, margin: '0 auto' }}>
           <div onClick={onBack} className="ink-back" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, color: 'var(--n-muted)', marginBottom: 12 }}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M11 6l-6 6 6 6" /></svg>
             All workflows
           </div>
-          <div style={{ fontSize: 11, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--accent)', fontWeight: 700, marginBottom: 11 }}>Book Production · S4C Inkflow</div>
-          <h1 style={{ fontFamily: 'Spectral, serif', fontSize: 34, fontWeight: 700, color: 'var(--n-50)', lineHeight: 1.18, letterSpacing: '-0.02em', marginBottom: 9, textShadow: '0 2px 16px rgba(0,0,0,0.5)' }}>
-            Book <em style={{ color: 'var(--accent)', fontStyle: 'italic' }}>Workflow Hubs</em>
+          <div style={{ fontSize: 11, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--accent-2)', fontWeight: 800, marginBottom: 11 }}>Book Production · S4C Ninja Inkflow</div>
+          <h1 style={{ fontFamily: 'Spectral, serif', fontSize: 34, fontWeight: 700, color: '#262626', lineHeight: 1.18, letterSpacing: '-0.02em', marginBottom: 9 }}>
+            Book <em style={{ color: 'var(--accent-2)', fontStyle: 'italic' }}>Prodution Hubs</em>
           </h1>
-          <p style={{ fontSize: 14.5, color: 'var(--n-line)', maxWidth: 500, textShadow: '0 1px 10px rgba(0,0,0,0.5)' }}>Select a hub below to access your workspace. All hubs require authentication.</p>
+          <p style={{ fontSize: 14.5, color: '#505050', maxWidth: 500 }}>Select a hub below to access your workspace. All hubs require authentication.</p>
         </div>
       </div>
 
       {/* Main panel */}
-      <main style={{ maxWidth: 1320, margin: '0 auto', padding: '36px 36px 48px' }}>
+      <main style={{ flex: 1, width: '100%', maxWidth: 1320, margin: '0 auto', padding: '36px 36px 48px' }}>
         <div style={{ background: 'var(--n-0)', border: '1px solid var(--border)', borderRadius: 20, padding: 36, boxShadow: '0 4px 28px rgba(28,26,23,0.05)' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 26, flexWrap: 'wrap', gap: 8 }}>
             <h2 style={{ fontFamily: 'Spectral, serif', fontSize: 22, fontWeight: 700, color: 'var(--ink)' }}>Publishing Workflow Hubs</h2>
-            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--n-muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>{BOOK_HUBS.length} Hubs Available</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--n-muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>{BOOK_HUBS.length} Stages Available</span>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
-            {BOOK_HUBS.map(hub => <HubCard key={hub.num} hub={hub} onLogin={onLogin} />)}
+            {BOOK_HUBS.map(hub => <HubCard key={hub.title} hub={hub} onLogin={onLogin} />)}
           </div>
 
         </div>
@@ -307,26 +340,26 @@ function BookPortalScreen({ onBack, onLogin }: { onBack: () => void; onLogin: ()
 function JournalPortalScreen({ onBack, onLogin }: { onBack: () => void; onLogin: () => void }) {
   return (
     <>
-      <NavBar subtitle="Journal Management System" />
+      <NavBar subtitle="Journal Prodution Hubs" />
 
       {/* Hero */}
-      <div style={{ position: 'relative', overflow: 'hidden', background: 'var(--surface)', minHeight: 210, padding: '36px 36px' }}>
-        <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(900px 360px at 80% 10%, color-mix(in srgb, var(--accent-2) 26%, transparent), transparent 60%)' }} />
-        <img src="/portal-assets/journal-hero.png" alt="" style={{ position: 'absolute', top: 0, right: 0, bottom: 0, height: '100%', width: '58%', objectFit: 'cover', objectPosition: 'right center', mixBlendMode: 'lighten', WebkitMaskImage: 'linear-gradient(90deg, transparent 0%, #000 38%)', maskImage: 'linear-gradient(90deg, transparent 0%, #000 38%)' }} />
+      <div style={{ position: 'relative', overflow: 'hidden', background: '#F2F2F2', minHeight: 200, padding: '36px 36px', borderBottom: '1px solid #E5E5E5' }}>
+        <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(900px 360px at 80% 10%, rgba(27, 79, 156, 0.05), transparent)' }} />
+        <img src="/portal-assets/journal-hero.png" alt="" style={{ position: 'absolute', top: 0, right: 0, bottom: 0, height: '100%', width: '58%', objectFit: 'cover', objectPosition: 'right center', opacity: 0.9, WebkitMaskImage: 'linear-gradient(90deg, transparent 0%, #000 38%)', maskImage: 'linear-gradient(90deg, transparent 0%, #000 38%)' }} />
         <div style={{ position: 'relative', zIndex: 2, maxWidth: 1320, margin: '0 auto' }}>
           <div onClick={onBack} className="ink-back" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, color: 'var(--n-muted)', marginBottom: 12 }}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M11 6l-6 6 6 6" /></svg>
             All workflows
           </div>
-          <div style={{ fontSize: 11, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--accent)', fontWeight: 700, marginBottom: 11 }}>Journal Production · S4C Inkflow</div>
-          <h1 style={{ fontFamily: 'Spectral, serif', fontSize: 34, fontWeight: 700, color: 'var(--n-50)', lineHeight: 1.18, letterSpacing: '-0.02em', marginBottom: 9, textShadow: '0 2px 16px rgba(0,0,0,0.5)' }}>
-            Journal <em style={{ color: 'var(--accent)', fontStyle: 'italic' }}>Workflow Hubs</em>
+          <div style={{ fontSize: 11, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--accent-2)', fontWeight: 800, marginBottom: 11 }}>Journal Production · S4C Ninja Inkflow</div>
+          <h1 style={{ fontFamily: 'Spectral, serif', fontSize: 34, fontWeight: 700, color: '#262626', lineHeight: 1.18, letterSpacing: '-0.02em', marginBottom: 9 }}>
+            Journal <em style={{ color: 'var(--accent-2)', fontStyle: 'italic' }}>Prodution Hubs</em>
           </h1>
-          <p style={{ fontSize: 14.5, color: 'var(--n-line)', maxWidth: 520, textShadow: '0 1px 10px rgba(0,0,0,0.5)' }}>From manuscript submission through peer review to online publication.</p>
+          <p style={{ fontSize: 14.5, color: '#505050', maxWidth: 520 }}>From manuscript submission through peer review to online publication.</p>
         </div>
       </div>
 
-      <main style={{ maxWidth: 1320, margin: '0 auto', padding: '36px 36px 48px', display: 'flex', flexDirection: 'column', gap: 22 }}>
+      <main style={{ flex: 1, width: '100%', maxWidth: 1320, margin: '0 auto', padding: '36px 36px 48px', display: 'flex', flexDirection: 'column', gap: 22 }}>
 
         {/* Editorial Lifecycle */}
         <div style={{ background: 'var(--n-0)', border: '1px solid var(--border)', borderRadius: 20, padding: '30px 36px', boxShadow: '0 4px 28px rgba(28,26,23,0.05)' }}>
@@ -365,7 +398,7 @@ function JournalPortalScreen({ onBack, onLogin }: { onBack: () => void; onLogin:
             <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--n-muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>{JOURNAL_HUBS.length} Stages Available</span>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(232px, 1fr))', gap: 16 }}>
-            {JOURNAL_HUBS.map(hub => <HubCard key={hub.num} hub={hub} onLogin={onLogin} />)}
+            {JOURNAL_HUBS.map(hub => <HubCard key={hub.title} hub={hub} onLogin={onLogin} />)}
           </div>
         </div>
       </main>
@@ -381,31 +414,71 @@ function GeneralPortalScreen({ onBack, onLogin }: { onBack: () => void; onLogin:
       <NavBar subtitle="Operations & Services Portal" />
 
       {/* Hero */}
-      <div style={{ position: 'relative', overflow: 'hidden', background: 'var(--surface)', minHeight: 210, padding: '36px 36px' }}>
-        <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(900px 360px at 80% 10%, color-mix(in srgb, var(--accent-2) 26%, transparent), transparent 60%)' }} />
-        <img src="/portal-assets/workflow-hero.png" alt="" style={{ position: 'absolute', top: 0, right: 0, bottom: 0, height: '100%', width: '58%', objectFit: 'cover', objectPosition: 'right center', mixBlendMode: 'lighten', WebkitMaskImage: 'linear-gradient(90deg, transparent 0%, #000 38%)', maskImage: 'linear-gradient(90deg, transparent 0%, #000 38%)' }} />
+      <div style={{ position: 'relative', overflow: 'hidden', background: '#F2F2F2', minHeight: 200, padding: '36px 36px', borderBottom: '1px solid #E5E5E5' }}>
+        <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(900px 360px at 80% 10%, rgba(27, 79, 156, 0.05), transparent)' }} />
+        <img src="/portal-assets/operations-hero.png" alt="" style={{ position: 'absolute', top: 0, right: 0, bottom: 0, height: '100%', width: '58%', objectFit: 'cover', objectPosition: 'right center', opacity: 0.9, WebkitMaskImage: 'linear-gradient(90deg, transparent 0%, #000 38%)', maskImage: 'linear-gradient(90deg, transparent 0%, #000 38%)' }} />
         <div style={{ position: 'relative', zIndex: 2, maxWidth: 1320, margin: '0 auto' }}>
           <div onClick={onBack} className="ink-back" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, color: 'var(--n-muted)', marginBottom: 12 }}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M11 6l-6 6 6 6" /></svg>
             All workflows
           </div>
-          <div style={{ fontSize: 11, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--accent)', fontWeight: 700, marginBottom: 11 }}>Operations · S4C Inkflow</div>
-          <h1 style={{ fontFamily: 'Spectral, serif', fontSize: 34, fontWeight: 700, color: 'var(--n-50)', lineHeight: 1.18, letterSpacing: '-0.02em', marginBottom: 9, textShadow: '0 2px 16px rgba(0,0,0,0.5)' }}>
-            Operations <em style={{ color: 'var(--accent)', fontStyle: 'italic' }}>&amp; Services</em>
+          <div style={{ fontSize: 11, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--accent-2)', fontWeight: 800, marginBottom: 11 }}>Operations · S4C Ninja Inkflow</div>
+          <h1 style={{ fontFamily: 'Spectral, serif', fontSize: 34, fontWeight: 700, color: '#262626', lineHeight: 1.18, letterSpacing: '-0.02em', marginBottom: 9 }}>
+            Operations <em style={{ color: 'var(--accent-2)', fontStyle: 'italic' }}>&amp; Services</em>
           </h1>
-          <p style={{ fontSize: 14.5, color: 'var(--n-line)', maxWidth: 500, textShadow: '0 1px 10px rgba(0,0,0,0.5)' }}>Access HR, billing, reporting and admin hubs. All hubs require authentication.</p>
+          <p style={{ fontSize: 14.5, color: '#505050', maxWidth: 500 }}>Access Billing, Reporting and Admin hubs. All hubs require authentication.</p>
         </div>
       </div>
 
       {/* Main panel */}
-      <main style={{ maxWidth: 1320, margin: '0 auto', padding: '36px 36px 48px' }}>
+      <main style={{ flex: 1, width: '100%', maxWidth: 1320, margin: '0 auto', padding: '36px 36px 48px' }}>
         <div style={{ background: 'var(--n-0)', border: '1px solid var(--border)', borderRadius: 20, padding: 36, boxShadow: '0 4px 28px rgba(28,26,23,0.05)' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 26, flexWrap: 'wrap', gap: 8 }}>
             <h2 style={{ fontFamily: 'Spectral, serif', fontSize: 22, fontWeight: 700, color: 'var(--ink)' }}>Operations Hubs</h2>
-            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--n-muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>{GENERAL_HUBS.length} Hubs Available</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--n-muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>{GENERAL_HUBS.length} Services Available</span>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
-            {GENERAL_HUBS.map(hub => <HubCard key={hub.num} hub={hub} onLogin={onLogin} />)}
+            {GENERAL_HUBS.map(hub => <HubCard key={hub.title} hub={hub} onLogin={onLogin} />)}
+          </div>
+        </div>
+      </main>
+
+      <PortalFooter />
+    </>
+  )
+}
+
+function PeoplePortalScreen({ onBack, onLogin }: { onBack: () => void; onLogin: () => void }) {
+  return (
+    <>
+      <NavBar subtitle="People Management Hubs" />
+
+      {/* Hero */}
+      <div style={{ position: 'relative', overflow: 'hidden', background: '#F2F2F2', minHeight: 200, padding: '36px 36px', borderBottom: '1px solid #E5E5E5' }}>
+        <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(900px 360px at 80% 10%, rgba(27, 79, 156, 0.05), transparent)' }} />
+        <img src="/portal-assets/people-hero.png" alt="" style={{ position: 'absolute', top: 0, right: 0, bottom: 0, height: '100%', width: '58%', objectFit: 'cover', objectPosition: 'right center', opacity: 0.9, WebkitMaskImage: 'linear-gradient(90deg, transparent 0%, #000 38%)', maskImage: 'linear-gradient(90deg, transparent 0%, #000 38%)' }} />
+        <div style={{ position: 'relative', zIndex: 2, maxWidth: 1320, margin: '0 auto' }}>
+          <div onClick={onBack} className="ink-back" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, color: 'var(--n-muted)', marginBottom: 12 }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M11 6l-6 6 6 6" /></svg>
+            All workflows
+          </div>
+          <div style={{ fontSize: 11, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--accent-2)', fontWeight: 800, marginBottom: 11 }}>HRMS · S4C People Hub</div>
+          <h1 style={{ fontFamily: 'Spectral, serif', fontSize: 34, fontWeight: 700, color: '#262626', lineHeight: 1.18, letterSpacing: '-0.02em', marginBottom: 9 }}>
+            S4C People <em style={{ color: 'var(--accent-2)', fontStyle: 'italic' }}>Hubs</em>
+          </h1>
+          <p style={{ fontSize: 14.5, color: '#505050', maxWidth: 500 }}>Secure HR records, staff onboarding status, benefits packages, and payroll operations hub.</p>
+        </div>
+      </div>
+
+      {/* Main panel */}
+      <main style={{ flex: 1, width: '100%', maxWidth: 1320, margin: '0 auto', padding: '36px 36px 48px' }}>
+        <div style={{ background: 'var(--n-0)', border: '1px solid var(--border)', borderRadius: 20, padding: 36, boxShadow: '0 4px 28px rgba(28,26,23,0.05)' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 26, flexWrap: 'wrap', gap: 8 }}>
+            <h2 style={{ fontFamily: 'Spectral, serif', fontSize: 22, fontWeight: 700, color: 'var(--ink)' }}>People & HR Hubs</h2>
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--n-muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>{PEOPLE_HUBS.length} Services Available</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
+            {PEOPLE_HUBS.map(hub => <HubCard key={hub.title} hub={hub} onLogin={onLogin} />)}
           </div>
         </div>
       </main>
@@ -473,10 +546,11 @@ export function WorkflowPortalPage() {
         </button>
       </div>
 
-      {screen === 'choose'  && <ChooseScreen onBook={() => goTo('portal')} onJournal={() => goTo('journal')} onGeneral={() => goTo('general')} />}
-      {screen === 'portal'  && <BookPortalScreen onBack={() => goTo('choose')} onLogin={goLogin} />}
+      {screen === 'choose' && <ChooseScreen onBook={() => goTo('portal')} onJournal={() => goTo('journal')} onGeneral={() => goTo('general')} onPeople={() => goTo('people')} />}
+      {screen === 'portal' && <BookPortalScreen onBack={() => goTo('choose')} onLogin={goLogin} />}
       {screen === 'journal' && <JournalPortalScreen onBack={() => goTo('choose')} onLogin={goLogin} />}
       {screen === 'general' && <GeneralPortalScreen onBack={() => goTo('choose')} onLogin={goLogin} />}
+      {screen === 'people' && <PeoplePortalScreen onBack={() => goTo('choose')} onLogin={goLogin} />}
     </div>
   )
 }

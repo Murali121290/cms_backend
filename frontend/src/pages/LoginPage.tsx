@@ -20,10 +20,10 @@ const css = `
   .ink-root *, .ink-root *::before, .ink-root *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   .ink-root, .ink-root[data-theme=""] {
-    --accent:#E8C896; --accent-2:#C8841C; --accent-deep:#A66A12; --accent-soft:#F0D5A8; --accent-wash:#FBEFD9;
-    --surface:#1C1A17; --surface-2:#242019; --surface-3:#2A251D; --surface-2b:#201D18; --surface-deep:#161412; --surface-line:#34302A; --border-dark:#3A352D;
-    --n-0:#FFFFFF; --n-50:#FBF9F4; --n-100:#FAF7F0; --n-page:#F4F1EA; --n-soft:#F0EADB; --border:#E6DFD1;
-    --n-line:#C7BEAC; --n-mid:#B5AC9B; --n-muted:#8C8475; --n-dim:#6B6357; --ink:#211E1A;
+    --accent:#F48B29; --accent-2:#1B4F9C; --accent-deep:#0F366E; --accent-soft:#FFD8B3; --accent-wash:#EEF5FC;
+    --surface:#131922; --surface-2:#1B2330; --surface-3:#222D3D; --surface-2b:#18202B; --surface-deep:#0D1218; --surface-line:#2C3B50; --border-dark:#33455D;
+    --n-0:#FFFFFF; --n-50:#F8FAFC; --n-100:#F1F4F9; --n-page:#EBF1F7; --n-soft:#DEE7F2; --border:#CFDCEB;
+    --n-line:#9AB0C9; --n-mid:#839BB8; --n-muted:#68809D; --n-dim:#4F6580; --ink:#121822;
   }
   .ink-root[data-theme="ocean"] {
     --accent:#86B7E6; --accent-2:#2A6FDB; --accent-deep:#1B4F9C; --accent-soft:#AFD0F0; --accent-wash:#E3EEFB;
@@ -150,12 +150,12 @@ export function LoginPage() {
             <img src="/portal-assets/s4c-logo.png" alt="S4Carlisle" style={{ height: 44, width: 'auto', display: 'block' }} />
           </Link>
           <div style={{ width: 1, height: 30, background: 'var(--border)' }} />
-          <div style={{ fontFamily: 'Spectral, serif', fontSize: 26, fontWeight: 700, color: 'var(--surface)', lineHeight: 1, letterSpacing: '-0.01em' }}>
-            Inkflow <span style={{ color: 'var(--accent-deep)' }}>Platform</span>
+          <div style={{ fontFamily: 'Spectral, serif', fontSize: 26, fontWeight: 700, color: 'var(--accent-2)', lineHeight: 1, letterSpacing: '-0.01em' }}>
+            <span style={{ color: 'var(--accent)' }}>Ninja</span> Inkflow
           </div>
         </div>
-        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--n-muted)', letterSpacing: '0.07em', textTransform: 'uppercase' }}>
-          Your Partner in Publishing Excellence
+        <div style={{ fontFamily: 'Spectral, serif', fontWeight: 700, fontSize: 13, color: 'var(--accent-2)' }}>
+          Streamline. Collaborate. Deliver Excellence.
         </div>
       </header>
 
@@ -175,7 +175,7 @@ export function LoginPage() {
           <div style={{ flex: '1 1 380px', minWidth: 300 }}>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'color-mix(in srgb, var(--accent-2) 18%, transparent)', border: '1px solid color-mix(in srgb, var(--accent-2) 40%, transparent)', color: 'var(--accent)', fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', padding: '5px 13px', borderRadius: 100, backdropFilter: 'blur(4px)' }}>
               <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', animation: 'pulseDot 2s ease-in-out infinite', display: 'inline-block' }} />
-              S4C INKFLOW PLATFORM
+              S4C NINJA INKFLOW PLATFORM
             </div>
           </div>
 
@@ -183,7 +183,7 @@ export function LoginPage() {
           <div style={{ flex: '0 0 auto', width: '100%', maxWidth: 392, background: 'rgba(28,26,23,0.34)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 20, padding: '36px 38px', boxShadow: '0 24px 60px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.10)', backdropFilter: 'blur(20px) saturate(135%)', WebkitBackdropFilter: 'blur(20px) saturate(135%)' }}>
 
             <div style={{ fontFamily: 'Spectral, serif', fontSize: 25, fontWeight: 700, color: 'var(--n-50)', textAlign: 'center', marginBottom: 5 }}>Welcome back</div>
-            <div style={{ fontSize: 13, color: 'var(--n-line)', textAlign: 'center', marginBottom: 28 }}>Sign in to your Inkflow workspace</div>
+            <div style={{ fontSize: 13, color: 'var(--n-line)', textAlign: 'center', marginBottom: 28 }}>Sign in to your Ninja Inkflow workspace</div>
 
             {errorMsg && (
               <div role="alert" style={{ padding: '10px 14px', borderRadius: 10, fontSize: 13, marginBottom: 16, background: 'rgba(220,60,60,0.18)', border: '1px solid rgba(220,60,60,0.35)', color: '#ff9090' }}>
