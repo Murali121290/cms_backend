@@ -16,8 +16,8 @@ export const POST_PROD_SERVICES: PostProdService[] = [
     enabled: true,
   },
   {
-    id: 'ppt-formatter',
-    title: 'PPT Formatter',
+    id: 'slide-formatter',
+    title: 'SlideFormatter',
     description: 'Format, style, and structure slide decks using automated layouts and template compliance checks.',
     icon: 'Layers',
     enabled: true,
