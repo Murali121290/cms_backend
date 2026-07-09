@@ -1,8 +1,19 @@
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from app import models, schemas_v2
 from app.domains.projects.models import ProjectStylesheet
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    """Naive datetimes in the DB come from `datetime.utcnow()`. Attach UTC
+    tzinfo so JSON serialization includes the offset and browsers parse them
+    as UTC (not as local time)."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _deserialize_ia_rows(raw: str) -> list[schemas_v2.IARow]:
@@ -20,17 +31,39 @@ def _deserialize_file_ids(raw: str | None) -> list[int]:
         return []
 
 
-def _serialize_stylesheet(ss: ProjectStylesheet) -> schemas_v2.StylesheetSummary:
+def _serialize_stylesheet(
+    ss: ProjectStylesheet,
+    db: Session | None = None,
+) -> schemas_v2.StylesheetSummary:
+    file_ids = _deserialize_file_ids(ss.analyzed_file_ids)
+    source_files: list[schemas_v2.StylesheetSourceFile] = []
+    if db is not None and file_ids:
+        # Preserve the order in `analyzed_file_ids` so the UI shows the same
+        # sequence the user picked during analysis.
+        rows = (
+            db.query(models.File.id, models.File.filename)
+            .filter(models.File.id.in_(file_ids))
+            .all()
+        )
+        by_id = {row.id: row.filename for row in rows}
+        source_files = [
+            schemas_v2.StylesheetSourceFile(id=fid, filename=by_id[fid])
+            for fid in file_ids
+            if fid in by_id
+        ]
+
     return schemas_v2.StylesheetSummary(
         id=ss.id,
         project_id=ss.project_id,
         name=ss.name,
         description=ss.description,
         is_active=ss.is_active,
-        created_at=ss.created_at,
+        created_at=_as_utc(ss.created_at),
+        updated_at=_as_utc(getattr(ss, "updated_at", None) or ss.created_at),
         created_by_id=ss.created_by_id,
         selected_ia_rows=_deserialize_ia_rows(ss.selected_ia_rows),
-        analyzed_file_ids=_deserialize_file_ids(ss.analyzed_file_ids),
+        analyzed_file_ids=file_ids,
+        source_files=source_files,
     )
 
 

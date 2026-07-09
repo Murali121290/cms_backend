@@ -1410,8 +1410,8 @@ def api_v2_list_stylesheets(
             message="Project not found.",
         )
     result = stylesheet_service.get_stylesheets_for_project(db, project_id=project_id)
-    serialized = [stylesheet_service._serialize_stylesheet(s) for s in result["stylesheets"]]
-    active = stylesheet_service._serialize_stylesheet(result["active"]) if result["active"] else None
+    serialized = [stylesheet_service._serialize_stylesheet(s, db=db) for s in result["stylesheets"]]
+    active = stylesheet_service._serialize_stylesheet(result["active"], db=db) if result["active"] else None
     return schemas_v2.StylesheetsListResponse(
         project_id=project_id,
         stylesheets=serialized,
@@ -1454,7 +1454,7 @@ def api_v2_create_stylesheet(
         analyzed_file_ids=payload.analyzed_file_ids,
     )
     return schemas_v2.StylesheetCreateResponse(
-        stylesheet=stylesheet_service._serialize_stylesheet(ss)
+        stylesheet=stylesheet_service._serialize_stylesheet(ss, db=db)
     )
 
 
@@ -1492,7 +1492,7 @@ def api_v2_update_stylesheet(
             message="Stylesheet not found.",
         )
     return schemas_v2.StylesheetUpdateResponse(
-        stylesheet=stylesheet_service._serialize_stylesheet(ss)
+        stylesheet=stylesheet_service._serialize_stylesheet(ss, db=db)
     )
 
 
@@ -3369,7 +3369,7 @@ def api_v2_technical_scan(
             db, project_id=file_record.project_id
         )
         if active_ss:
-            active_stylesheet = stylesheet_service._serialize_stylesheet(active_ss)
+            active_stylesheet = stylesheet_service._serialize_stylesheet(active_ss, db=db)
 
     # Annotate findings with stylesheet matching if stylesheet_id provided
     findings = raw_scan.get("findings", [])

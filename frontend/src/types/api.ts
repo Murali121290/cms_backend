@@ -608,6 +608,11 @@ export interface IATemplateRow {
   example: string | null;
 }
 
+export interface StylesheetSourceFile {
+  id: number;
+  filename: string;
+}
+
 export interface StylesheetSummary {
   id: number;
   project_id: number;
@@ -615,9 +620,11 @@ export interface StylesheetSummary {
   description: string | null;
   is_active: boolean;
   created_at: string;
+  updated_at: string | null;
   created_by_id: number | null;
   selected_ia_rows: IARow[];
   analyzed_file_ids: number[];
+  source_files: StylesheetSourceFile[];
 }
 
 export interface StylesheetsListResponse {

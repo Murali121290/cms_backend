@@ -1,16 +1,18 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { BookOpen, Edit2, Trash2, Check, ChevronDown, ChevronRight, Loader, FileSpreadsheet, Table2, Globe, Download } from "lucide-react";
+import { useQueries } from "@tanstack/react-query";
+import { BookOpen, Edit2, Trash2, Check, ChevronDown, ChevronUp, GripVertical, Loader, FileSpreadsheet, Table2, Globe, Download } from "lucide-react";
 
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SkeletonCard } from "@/components/ui/SkeletonLoader";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { useToast } from "@/components/ui/useToast";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { uiPaths } from "@/utils/appPaths";
 import { useStylesheetsQuery, useIATemplateQuery, useStylesheetMutations, useAnalyzeFilesMutation } from "@/features/stylesheets/useStylesheetsQuery";
 import { useProjectChaptersQuery } from "@/features/projects/useProjectChaptersQuery";
-import { useChapterFilesQuery } from "@/features/projects/useChapterFilesQuery";
+import { getChapterFiles } from "@/api/projects";
 import { StylesheetFormDrawer } from "@/features/stylesheets/StylesheetFormDrawer";
 import type { StylesheetSummary, TriggeredIARule, FileRecord } from "@/types/api";
 
@@ -31,7 +33,6 @@ export function StylesheetsPage() {
   // Workflow state
   const [workflowStep, setWorkflowStep] = useState<WorkflowStep>("select-files");
   const [selectedFileIds, setSelectedFileIds] = useState<Set<number>>(new Set());
-  const [expandedChapters, setExpandedChapters] = useState<Set<number>>(new Set());
   const [analyzeResult, setAnalyzeResult] = useState<{ triggered_rules: TriggeredIARule[]; analyzed_files: any[]; total_findings: number } | null>(null);
   const [selectedRuleKeys, setSelectedRuleKeys] = useState<Set<string>>(new Set());
   const [workflowName, setWorkflowName] = useState("");
@@ -42,6 +43,7 @@ export function StylesheetsPage() {
   const iaTemplateQuery = useIATemplateQuery();
   const mutations = useStylesheetMutations(normalizedProjectId || 0);
   const analyzeFilesMutation = useAnalyzeFilesMutation(normalizedProjectId || 0);
+  const { addToast } = useToast();
 
   useDocumentTitle("Stylesheets — S4 Carlisle CMS");
 
@@ -109,15 +111,6 @@ export function StylesheetsPage() {
     mutations.activate.mutate(stylesheetId);
   };
 
-  const toggleChapter = (chapterId: number) => {
-    setExpandedChapters(prev => {
-      const next = new Set(prev);
-      if (next.has(chapterId)) next.delete(chapterId);
-      else next.add(chapterId);
-      return next;
-    });
-  };
-
   const toggleFileSelection = (fileId: number) => {
     setSelectedFileIds(prev => {
       const next = new Set(prev);
@@ -127,10 +120,11 @@ export function StylesheetsPage() {
     });
   };
 
-  const handleAnalyzeFiles = () => {
-    if (selectedFileIds.size === 0) return;
+  const handleAnalyzeFiles = (orderedFileIds: number[]) => {
+    const ids = orderedFileIds.filter(id => selectedFileIds.has(id));
+    if (ids.length === 0) return;
     setWorkflowStep("analyzing");
-    analyzeFilesMutation.mutate(Array.from(selectedFileIds), {
+    analyzeFilesMutation.mutate(ids, {
       onSuccess: (data) => {
         setAnalyzeResult(data);
         // Pre-check all rules
@@ -171,7 +165,7 @@ export function StylesheetsPage() {
           subtype: r.subtype,
           pattern: r.pattern,
         })),
-        analyzed_file_ids: Array.from(selectedFileIds),
+        analyzed_file_ids: analyzeResult!.analyzed_files.map((f: any) => f.id),
       },
       {
         onSuccess: () => {
@@ -183,6 +177,10 @@ export function StylesheetsPage() {
           setWorkflowName("");
           setWorkflowDescription("");
           setActiveTab("manage");
+          addToast({
+            title: "Stylesheet created successfully.",
+            variant: "success",
+          });
         },
         onError: () => {
           alert("Failed to save stylesheet");
@@ -251,31 +249,14 @@ export function StylesheetsPage() {
                 setEditingStylesheet(null);
                 setIsDrawerOpen(true);
               }}
-              className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md bg-gold-600 text-white hover:bg-gold-700 border border-gold-600 shadow-subtle transition-all duration-150"
+              className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md bg-primary text-white hover:bg-[color:var(--color-primary-hover)] border border-primary shadow-subtle transition-all duration-150"
             >
               <BookOpen className="w-4 h-4" />
               New Stylesheet
             </button>
           </div>
 
-          {stylesheets.length === 0 ? (
-            <EmptyState
-              title="No stylesheets yet"
-              description="Create your first stylesheet to define editorial style rules for this project."
-              action={
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditingStylesheet(null);
-                    setIsDrawerOpen(true);
-                  }}
-                  className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md bg-gold-600 text-white hover:bg-gold-700 border border-gold-600 shadow-subtle transition-all duration-150"
-                >
-                  Create first stylesheet
-                </button>
-              }
-            />
-          ) : (
+          {stylesheets.length > 0 ? (
             <div className="grid gap-4">
               {stylesheets.map((stylesheet) => (
                 <StylesheetCard
@@ -289,6 +270,28 @@ export function StylesheetsPage() {
                 />
               ))}
             </div>
+          ) : stylesheetsQuery.isFetching ? (
+            <div className="grid gap-4">
+              <SkeletonCard />
+              <SkeletonCard />
+            </div>
+          ) : (
+            <EmptyState
+              title="No stylesheets yet"
+              description="Create your first stylesheet to define editorial style rules for this project."
+              action={
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingStylesheet(null);
+                    setIsDrawerOpen(true);
+                  }}
+                  className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md bg-primary text-white hover:bg-[color:var(--color-primary-hover)] border border-primary shadow-subtle transition-all duration-150"
+                >
+                  Create first stylesheet
+                </button>
+              }
+            />
           )}
         </div>
       )}
@@ -298,10 +301,9 @@ export function StylesheetsPage() {
         <div>
           {workflowStep === "select-files" && (
             <SelectFilesStep
+              projectId={normalizedProjectId}
               chapters={chapters}
-              expandedChapters={expandedChapters}
               selectedFileIds={selectedFileIds}
-              onToggleChapter={toggleChapter}
               onToggleFile={toggleFileSelection}
               onAnalyze={handleAnalyzeFiles}
               isLoading={analyzeFilesMutation.isPending}
@@ -390,17 +392,28 @@ function StylesheetCard({
   isDeleting,
 }: StylesheetCardProps) {
   const isActive = stylesheet.is_active;
+  const [showAllRules, setShowAllRules] = useState(false);
+  const ruleCount = stylesheet.selected_ia_rows.length;
+  const previewLimit = 5;
+  const visibleRules =
+    showAllRules || ruleCount <= previewLimit
+      ? stylesheet.selected_ia_rows
+      : stylesheet.selected_ia_rows.slice(0, previewLimit);
+  const sourceFiles = stylesheet.source_files ?? [];
+  const sourceFileCount = sourceFiles.length || stylesheet.analyzed_file_ids?.length || 0;
 
   return (
     <div
-      className={`bg-white rounded-lg shadow-card border-l-4 p-4 transition-all ${
+      className={`bg-white rounded-lg shadow-card border-l-4 p-5 transition-all ${
         isActive ? "border-gold-500" : "border-navy-100"
       }`}
     >
       <div className="flex items-start justify-between gap-4">
-        <div className="flex-1">
-          <div className="flex items-center gap-2 mb-1">
-            <h3 className="text-sm font-semibold text-navy-900">{stylesheet.name}</h3>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
+            <h3 className="text-lg font-bold text-navy-900 tracking-tight break-words">
+              {stylesheet.name}
+            </h3>
             {isActive && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gold-50 text-gold-700 text-xs font-medium">
                 <Check className="w-3 h-3" />
@@ -409,9 +422,33 @@ function StylesheetCard({
             )}
           </div>
           {stylesheet.description && (
-            <p className="text-xs text-navy-500 mb-3">{stylesheet.description}</p>
+            <p className="text-sm text-navy-500 mb-3">{stylesheet.description}</p>
           )}
-          {stylesheet.selected_ia_rows.length > 0 && (
+
+          {/* Metadata row */}
+          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 mb-4 text-[11px]">
+            <MetaField label="Created" value={formatDateTime(stylesheet.created_at)} />
+            <MetaField
+              label="Last Modified"
+              value={formatDateTime(stylesheet.updated_at || stylesheet.created_at)}
+            />
+            <MetaField
+              label="Total Rules"
+              value={`${ruleCount} rule${ruleCount === 1 ? "" : "s"}`}
+            />
+            <MetaField
+              label={`Source Document${sourceFileCount === 1 ? "" : "s"}`}
+              value={
+                sourceFiles.length > 0
+                  ? sourceFiles.map((f) => f.filename).join(", ")
+                  : sourceFileCount > 0
+                  ? `${sourceFileCount} file${sourceFileCount === 1 ? "" : "s"}`
+                  : "—"
+              }
+            />
+          </dl>
+
+          {ruleCount > 0 && (
             <div className="overflow-x-auto">
               <table className="text-xs border-collapse w-full">
                 <thead>
@@ -422,7 +459,7 @@ function StylesheetCard({
                   </tr>
                 </thead>
                 <tbody>
-                  {stylesheet.selected_ia_rows.slice(0, 5).map((row, i) => (
+                  {visibleRules.map((row, i) => (
                     <tr key={i} className="border-b border-navy-50">
                       <td className="py-1.5 px-2 font-medium text-navy-800">{row.element}</td>
                       <td className="py-1.5 px-2 text-navy-600">{row.subtype}</td>
@@ -431,10 +468,24 @@ function StylesheetCard({
                   ))}
                 </tbody>
               </table>
-              {stylesheet.selected_ia_rows.length > 5 && (
-                <p className="text-xs text-navy-400 mt-1">
-                  +{stylesheet.selected_ia_rows.length - 5} more rules
-                </p>
+              {ruleCount > previewLimit && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllRules((v) => !v)}
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700 mt-2"
+                >
+                  {showAllRules ? (
+                    <>
+                      <ChevronUp className="w-3.5 h-3.5" />
+                      Show less
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="w-3.5 h-3.5" />
+                      Show {ruleCount - previewLimit} more rule{ruleCount - previewLimit === 1 ? "" : "s"}
+                    </>
+                  )}
+                </button>
               )}
             </div>
           )}
@@ -452,7 +503,7 @@ function StylesheetCard({
                   download
                 >
                   <button type="button" className="inline-flex items-center gap-1.5 h-7 px-2.5 text-[11px] font-semibold rounded bg-white border border-navy-200 text-navy-700 hover:bg-navy-50 shadow-sm transition-all">
-                    <FileSpreadsheet className="w-3 h-3 text-navy-500" /> Excel
+                    <FileSpreadsheet className="w-3 h-3 text-navy-500" /> Export Excel
                   </button>
                 </a>
                 <a
@@ -461,7 +512,7 @@ function StylesheetCard({
                   download
                 >
                   <button type="button" className="inline-flex items-center gap-1.5 h-7 px-2.5 text-[11px] font-semibold rounded bg-white border border-navy-200 text-navy-700 hover:bg-navy-50 shadow-sm transition-all">
-                    <Table2 className="w-3 h-3 text-navy-500" /> IA Excel
+                    <Table2 className="w-3 h-3 text-navy-500" /> Export IA
                   </button>
                 </a>
                 <a
@@ -470,7 +521,7 @@ function StylesheetCard({
                   download
                 >
                   <button type="button" className="inline-flex items-center gap-1.5 h-7 px-2.5 text-[11px] font-semibold rounded bg-white border border-navy-200 text-navy-700 hover:bg-navy-50 shadow-sm transition-all">
-                    <Globe className="w-3 h-3 text-navy-500" /> HTML
+                    <Globe className="w-3 h-3 text-navy-500" /> Export HTML
                   </button>
                 </a>
               </div>
@@ -484,7 +535,8 @@ function StylesheetCard({
               onClick={onActivate}
               disabled={isActivating}
               className="p-2 text-navy-600 hover:bg-navy-50 rounded-md transition-colors disabled:opacity-50"
-              title="Make active"
+              title="Apply this stylesheet to the project"
+              aria-label="Apply stylesheet"
             >
               <Check className="w-4 h-4" />
             </button>
@@ -493,7 +545,8 @@ function StylesheetCard({
             type="button"
             onClick={onEdit}
             className="p-2 text-navy-600 hover:bg-navy-50 rounded-md transition-colors"
-            title="Edit"
+            title="Edit stylesheet name, description, and rules"
+            aria-label="Edit stylesheet"
           >
             <Edit2 className="w-4 h-4" />
           </button>
@@ -502,7 +555,8 @@ function StylesheetCard({
             onClick={onDelete}
             disabled={isDeleting}
             className="p-2 text-red-600 hover:bg-red-50 rounded-md transition-colors disabled:opacity-50"
-            title="Delete"
+            title="Delete stylesheet"
+            aria-label="Delete stylesheet"
           >
             <Trash2 className="w-4 h-4" />
           </button>
@@ -512,117 +566,234 @@ function StylesheetCard({
   );
 }
 
-interface SelectFilesStepProps {
-  chapters: any[];
-  expandedChapters: Set<number>;
-  selectedFileIds: Set<number>;
-  onToggleChapter: (chapterId: number) => void;
-  onToggleFile: (fileId: number) => void;
-  onAnalyze: () => void;
-  isLoading: boolean;
-}
-
-function SelectFilesStep({
-  chapters,
-  expandedChapters,
-  selectedFileIds,
-  onToggleChapter,
-  onToggleFile,
-  onAnalyze,
-  isLoading,
-}: SelectFilesStepProps) {
+function MetaField({ label, value }: { label: string; value: string }) {
   return (
-    <div className="bg-white rounded-lg shadow-card p-6">
-      <h3 className="text-sm font-semibold text-navy-900 mb-4">Select Files to Analyze</h3>
-      <div className="space-y-2 mb-6 max-h-96 overflow-y-auto">
-        {chapters.length === 0 ? (
-          <p className="text-sm text-navy-500">No chapters found in this project</p>
-        ) : (
-          chapters.map((chapter) => (
-            <ChapterAccordion
-              key={chapter.id}
-              chapter={chapter}
-              isExpanded={expandedChapters.has(chapter.id)}
-              onToggle={() => onToggleChapter(chapter.id)}
-              selectedFileIds={selectedFileIds}
-              onToggleFile={onToggleFile}
-            />
-          ))
-        )}
-      </div>
-      <div className="flex items-center justify-between pt-4 border-t border-navy-100">
-        <span className="text-sm text-navy-600">{selectedFileIds.size} files selected</span>
-        <button
-          onClick={onAnalyze}
-          disabled={selectedFileIds.size === 0 || isLoading}
-          className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md bg-gold-600 text-white hover:bg-gold-700 border border-gold-600 shadow-subtle transition-all duration-150 disabled:opacity-50"
-        >
-          Analyze Selected Files
-        </button>
-      </div>
+    <div className="flex items-baseline gap-2 min-w-0">
+      <dt className="text-navy-400 uppercase tracking-wide text-[10px] shrink-0">{label}</dt>
+      <dd className="text-navy-700 font-medium truncate" title={value}>
+        {value}
+      </dd>
     </div>
   );
 }
 
-interface ChapterAccordionProps {
-  chapter: any;
-  isExpanded: boolean;
-  onToggle: () => void;
-  selectedFileIds: Set<number>;
-  onToggleFile: (fileId: number) => void;
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
-function ChapterAccordion({
-  chapter,
-  isExpanded,
-  onToggle,
+interface SelectFilesStepProps {
+  projectId: number;
+  chapters: any[];
+  selectedFileIds: Set<number>;
+  onToggleFile: (fileId: number) => void;
+  onAnalyze: (orderedFileIds: number[]) => void;
+  isLoading: boolean;
+}
+
+interface FlatFile {
+  file: FileRecord;
+  chapterNumber: string;
+  chapterTitle: string;
+}
+
+function SelectFilesStep({
+  projectId,
+  chapters,
   selectedFileIds,
   onToggleFile,
-}: ChapterAccordionProps) {
-  const { data: filesData } = useChapterFilesQuery(chapter.project_id, chapter.id);
-  const files = filesData?.files || [];
-  const manuscriptFiles = files.filter(f => f.category === "Manuscript");
+  onAnalyze,
+  isLoading,
+}: SelectFilesStepProps) {
+  // Fetch files for every chapter in parallel. React Query caches each query
+  // under the same key ["chapter-files", ...] so revisits are instant.
+  const fileQueries = useQueries({
+    queries: chapters.map((c: any) => ({
+      queryKey: ["chapter-files", projectId, c.id] as const,
+      queryFn: () => getChapterFiles(projectId, c.id),
+      staleTime: 30_000,
+    })),
+  });
+
+  const allLoaded = fileQueries.length === 0 || fileQueries.every(q => !q.isPending);
+  const anyLoading = fileQueries.some(q => q.isPending);
+
+  // Flatten all manuscript files across chapters into a single list. The
+  // natural order (chapter order → filename order) seeds the initial ordering;
+  // the user then reorders via drag-and-drop.
+  const flatFiles: FlatFile[] = useMemo(() => {
+    const out: FlatFile[] = [];
+    chapters.forEach((c: any, idx: number) => {
+      const files = fileQueries[idx]?.data?.files ?? [];
+      files
+        .filter(f => f.category === "Manuscript")
+        .forEach(f => {
+          out.push({
+            file: f,
+            chapterNumber: c.number,
+            chapterTitle: c.title,
+          });
+        });
+    });
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chapters, ...fileQueries.map(q => q.data)]);
+
+  // User-visible ordering. Kept as a plain array of file IDs so drag-reorders
+  // are cheap. Reconciled when the fetched flat list changes: existing IDs
+  // keep their position, newly-arrived IDs append, missing IDs drop out.
+  const [orderedIds, setOrderedIds] = useState<number[]>([]);
+  useEffect(() => {
+    setOrderedIds(prev => {
+      const known = new Set(flatFiles.map(f => f.file.id));
+      const preserved = prev.filter(id => known.has(id));
+      const preservedSet = new Set(preserved);
+      const appended = flatFiles.map(f => f.file.id).filter(id => !preservedSet.has(id));
+      return [...preserved, ...appended];
+    });
+  }, [flatFiles]);
+
+  const filesById = useMemo(() => {
+    const m = new Map<number, FlatFile>();
+    for (const f of flatFiles) m.set(f.file.id, f);
+    return m;
+  }, [flatFiles]);
+
+  const orderedFiles: FlatFile[] = useMemo(
+    () => orderedIds.map(id => filesById.get(id)).filter((x): x is FlatFile => !!x),
+    [orderedIds, filesById],
+  );
+
+  // Drag state — matches the native-DnD pattern used elsewhere in the app
+  // (see EditorStylesPanel). We track the dragged file ID and the row currently
+  // under the cursor (with position: before / after).
+  const [draggedId, setDraggedId] = useState<number | null>(null);
+  const [dragOver, setDragOver] = useState<{ id: number; pos: "before" | "after" } | null>(null);
+
+  const reorder = (srcId: number, targetId: number, pos: "before" | "after") => {
+    if (srcId === targetId) return;
+    setOrderedIds(prev => {
+      const next = prev.filter(id => id !== srcId);
+      const targetIdx = next.indexOf(targetId);
+      if (targetIdx === -1) return prev;
+      const insertAt = pos === "before" ? targetIdx : targetIdx + 1;
+      next.splice(insertAt, 0, srcId);
+      return next;
+    });
+  };
 
   return (
-    <div className="border border-navy-100 rounded-md">
-      <button
-        onClick={onToggle}
-        className="w-full flex items-center justify-between p-3 hover:bg-navy-50 transition-colors"
-      >
-        <span className="text-sm font-medium text-navy-700">
-          Chapter {chapter.number}: {chapter.title}
-        </span>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-navy-400">{manuscriptFiles.length} files</span>
-          {isExpanded ? (
-            <ChevronDown className="w-4 h-4 text-navy-400" />
-          ) : (
-            <ChevronRight className="w-4 h-4 text-navy-400" />
-          )}
-        </div>
-      </button>
-      {isExpanded && (
-        <div className="border-t border-navy-100 bg-navy-50 p-3 space-y-2">
-          {manuscriptFiles.length === 0 ? (
-            <p className="text-xs text-navy-500">No manuscript files in this chapter</p>
-          ) : (
-            manuscriptFiles.map((file) => (
-              <label
-                key={file.id}
-                className="flex items-center gap-2 text-xs cursor-pointer hover:bg-white p-1 rounded"
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedFileIds.has(file.id)}
-                  onChange={() => onToggleFile(file.id)}
-                  className="rounded border-navy-300"
-                />
-                <span className="text-navy-700">{file.filename}</span>
-              </label>
-            ))
-          )}
-        </div>
-      )}
+    <div className="bg-white rounded-lg shadow-card p-6">
+      <h3 className="text-sm font-semibold text-navy-900 mb-1">Select Files to Analyze</h3>
+      <p className="text-xs text-navy-500 mb-4">
+        Drag rows to reorder. The order is preserved when the files are analyzed.
+      </p>
+
+      <div className="border border-navy-100 rounded-md mb-6 max-h-96 overflow-y-auto">
+        {chapters.length === 0 ? (
+          <p className="text-sm text-navy-500 p-4">No chapters found in this project</p>
+        ) : anyLoading && flatFiles.length === 0 ? (
+          <div className="p-4 flex items-center gap-2 text-sm text-navy-500">
+            <Loader className="w-4 h-4 animate-spin" />
+            Loading files…
+          </div>
+        ) : allLoaded && flatFiles.length === 0 ? (
+          <p className="text-sm text-navy-500 p-4">No manuscript files available in this project.</p>
+        ) : (
+          <ul className="divide-y divide-navy-100">
+            {orderedFiles.map(({ file, chapterNumber }) => {
+              const isChecked = selectedFileIds.has(file.id);
+              const isDragging = draggedId === file.id;
+              const showTop = dragOver?.id === file.id && dragOver.pos === "before";
+              const showBottom = dragOver?.id === file.id && dragOver.pos === "after";
+              return (
+                <li
+                  key={file.id}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.effectAllowed = "move";
+                    try { e.dataTransfer.setData("text/plain", String(file.id)); } catch { /* ignore */ }
+                    setDraggedId(file.id);
+                  }}
+                  onDragEnd={() => { setDraggedId(null); setDragOver(null); }}
+                  onDragOver={(e) => {
+                    if (draggedId == null || draggedId === file.id) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const pos = (e.clientY - rect.top) < rect.height / 2 ? "before" : "after";
+                    if (!dragOver || dragOver.id !== file.id || dragOver.pos !== pos) {
+                      setDragOver({ id: file.id, pos });
+                    }
+                  }}
+                  onDragLeave={(e) => {
+                    const next = e.relatedTarget as Node | null;
+                    if (!next || !e.currentTarget.contains(next)) {
+                      if (dragOver?.id === file.id) setDragOver(null);
+                    }
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const src = draggedId;
+                    const over = dragOver;
+                    setDraggedId(null);
+                    setDragOver(null);
+                    if (src != null && over && over.id === file.id) {
+                      reorder(src, file.id, over.pos);
+                    }
+                  }}
+                  className={`relative flex items-center gap-2 px-3 py-2 text-sm select-none group hover:bg-navy-50 ${
+                    isDragging ? "opacity-40" : ""
+                  }`}
+                >
+                  {showTop && (
+                    <div className="absolute left-0 right-0 -top-px h-0.5 bg-gold-500 rounded-full pointer-events-none" />
+                  )}
+                  {showBottom && (
+                    <div className="absolute left-0 right-0 -bottom-px h-0.5 bg-gold-500 rounded-full pointer-events-none" />
+                  )}
+                  <GripVertical
+                    className="w-4 h-4 text-navy-300 cursor-grab active:cursor-grabbing shrink-0"
+                    aria-hidden
+                  />
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={() => onToggleFile(file.id)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="rounded border-navy-300 shrink-0"
+                  />
+                  <span className="text-navy-700 truncate flex-1" title={file.filename}>
+                    {file.filename}
+                  </span>
+                  <span className="text-[10px] font-mono text-navy-400 shrink-0">
+                    Ch {chapterNumber}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
+      <div className="flex items-center justify-between pt-4 border-t border-navy-100">
+        <span className="text-sm text-navy-600">{selectedFileIds.size} files selected</span>
+        <button
+          onClick={() => onAnalyze(orderedIds)}
+          disabled={selectedFileIds.size === 0 || isLoading}
+          className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 border border-blue-600 shadow-subtle transition-all duration-150 disabled:opacity-50"
+        >
+          Analyze Selected Files
+        </button>
+      </div>
     </div>
   );
 }
@@ -662,18 +833,18 @@ function ReviewRulesStep({
             return (
               <>
                 <a href={`${base}&format=excel`} className="no-underline" download>
-                  <button type="button" className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-semibold rounded bg-gold-600 text-white hover:bg-gold-700 shadow-sm transition-all">
-                    <Download className="w-3.5 h-3.5" /> Excel (All)
+                  <button type="button" className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-semibold rounded bg-blue-600 text-white hover:bg-blue-700 shadow-sm transition-all">
+                    <Download className="w-3.5 h-3.5" /> Export Excel
                   </button>
                 </a>
                 <a href={`${base}&format=ia-excel`} className="no-underline" download>
                   <button type="button" className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-semibold rounded bg-white border border-navy-200 text-navy-700 hover:bg-navy-50 shadow-sm transition-all">
-                    <Download className="w-3.5 h-3.5" /> IA Excel (All)
+                    <Download className="w-3.5 h-3.5" /> Export IA
                   </button>
                 </a>
                 <a href={`${base}&format=html`} className="no-underline" download>
                   <button type="button" className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-semibold rounded bg-navy-700 text-white hover:bg-navy-800 shadow-sm transition-all">
-                    <Download className="w-3.5 h-3.5" /> HTML (All)
+                    <Download className="w-3.5 h-3.5" /> Export HTML
                   </button>
                 </a>
               </>
@@ -823,7 +994,7 @@ function ReviewRulesStep({
       <button
         onClick={onNext}
         disabled={selectedRuleKeys.size === 0}
-        className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md bg-gold-600 text-white hover:bg-gold-700 border border-gold-600 shadow-subtle transition-all duration-150 disabled:opacity-50"
+        className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md bg-primary text-white hover:bg-[color:var(--color-primary-hover)] border border-primary shadow-subtle transition-all duration-150 disabled:opacity-50"
       >
         Next: Name & Save
       </button>
@@ -887,7 +1058,7 @@ function SaveStylesheetStep({
         <button
           onClick={onSave}
           disabled={!name.trim() || isLoading}
-          className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md bg-gold-600 text-white hover:bg-gold-700 border border-gold-600 shadow-subtle transition-all duration-150 disabled:opacity-50"
+          className="inline-flex items-center gap-2 h-9 px-4 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 border border-blue-600 shadow-subtle transition-all duration-150 disabled:opacity-50"
         >
           {isLoading ? "Saving..." : "Save Stylesheet"}
         </button>
