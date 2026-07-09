@@ -5418,16 +5418,19 @@ def api_v2_update_chapter(chapter_id: int, payload: ChapterInfoUpdate, db: Sessi
             message="Authentication required.",
         )
     
-    update_data = payload.model_dump(exclude_unset=True)
-    if "current_assignee_name" in update_data:
-        from app.domains.auth.rbac_config import has_permission
-        if not has_permission(viewer, "edit_assignee"):
-            raise HTTPException(status_code=403, detail="Permission denied to edit assignee.")
-
     from sqlalchemy import select
     chapter = db.execute(select(ChapterInfo).where(ChapterInfo.id == chapter_id)).scalars().first()
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
+    
+    update_data = payload.model_dump(exclude_unset=True)
+    if "current_assignee_name" in update_data:
+        new_assignee = update_data["current_assignee_name"]
+        if chapter.current_assignee_name != new_assignee:
+            from app.domains.auth.rbac_config import has_permission
+            is_viewer_clearing_themselves = (new_assignee is None and chapter.current_assignee_name == viewer.username)
+            if not (has_permission(viewer, "edit_assignee") or is_viewer_clearing_themselves):
+                raise HTTPException(status_code=403, detail="Permission denied to edit assignee.")
     
     for field, value in update_data.items():
         setattr(chapter, field, value)
