@@ -13,16 +13,20 @@ import { cn } from '@/utils/cn'
 export function Sidebar() {
   const { collapsed, toggle } = useSidebarStore()
   const { canAccess, viewer } = useRBAC()
-  const location              = useLocation()
+  const location = useLocation()
   const [logoError, setLogoError] = useState(false)
 
   const navItems = [
-    { to: '/',         icon: LayoutDashboard, label: 'Dashboard' },
-    { to: '/clients',  icon: Users,           label: 'Clients'   },
-    ...((canAccess(ROLE_PERMISSIONS.access_post_production) || viewer?.team === 'Accessibility Team')
-      ? [{ to: '/post-production', icon: Layers,   label: 'Backlist' }]
+    ...(viewer?.team !== 'Accessibility Team'
+      ? [{ to: '/', icon: LayoutDashboard, label: 'Dashboard' }]
       : []),
-    { to: '/reports',  icon: BarChart3,       label: 'Reports'   },
+    ...(viewer?.team !== 'Accessibility Team'
+      ? [{ to: '/clients', icon: Users, label: 'Clients' }]
+      : []),
+    ...((canAccess(ROLE_PERMISSIONS.access_post_production) || viewer?.team === 'Accessibility Team')
+      ? [{ to: '/post-production', icon: Layers, label: 'Backlist' }]
+      : []),
+    { to: '/reports', icon: BarChart3, label: 'Reports' },
     ...(canAccess(ROLE_PERMISSIONS.access_settings)
       ? [{ to: '/settings', icon: Settings, label: 'Settings' }]
       : []),

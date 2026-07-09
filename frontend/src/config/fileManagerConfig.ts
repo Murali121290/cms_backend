@@ -104,7 +104,7 @@ export function getProcessingActions(stageName: string): string[] {
 // reference that key via `isProcessingActionVisibleForStage(key, stageName)` when rendering
 // the corresponding <DropdownMenu.Item> in ChapterFilePage.tsx — no other code changes needed.
 export type ProcessingActionKey =
-  | 'structuring' | 'referenceValidation'
+  | 'structuring' | 'referenceValidation' | 'referenceReview'
   | 'languageEdit' | 'technicalEdit'
   | 'manuscriptAnalysis'
   | 'permissionsCheck' | 'aiCreditExtraction' | 'biasScan' | 'wordToXml'
@@ -112,6 +112,7 @@ export type ProcessingActionKey =
 export const PROCESSING_ACTION_STAGE_MAP: Record<ProcessingActionKey, string[] | '*'> = {
   structuring:          ['Pre-editing'],
   referenceValidation:  ['Pre-editing'],
+  referenceReview:      ['Pre-editing'],
   languageEdit:         ['Copyediting'],
   technicalEdit:        ['Copyediting'],
   manuscriptAnalysis:   ['Manuscript Analysis'],

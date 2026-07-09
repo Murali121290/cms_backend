@@ -43,6 +43,7 @@ import { openInWordWithFallback } from '@/utils/openInWord'
 import apiClient from '@/api/client'
 import { toast } from '@/store/useToastStore'
 import type { FileRecord } from '@/types/api'
+import { useRBAC } from '@/hooks/useRBAC'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -198,6 +199,7 @@ function FileActionsMenu({
   chapterId: number
 }) {
   const navigate = useNavigate()
+  const { isAdmin } = useRBAC()
   const [confirmStep, setConfirmStep] = useState<ConfirmStep | null>(null)
   const [tagSetModalOpen, setTagSetModalOpen] = useState(false)
 
@@ -313,7 +315,7 @@ function FileActionsMenu({
               {/* ── Group 1: Open / Edit ─────────────────────────── */}
               {fid ? (
                 <>
-                  {isImage && (
+                  {isAssigned && isImage && (
                     // Images route through the dedicated Image Review workspace;
                     // the DOCX editors would fail on them (see structuring
                     // engine "Package not found at *.jpeg" errors).
@@ -321,14 +323,14 @@ function FileActionsMenu({
                       <FilePen size={12} className="text-muted" /> Open in Image Editor
                     </DropdownMenu.Item>
                   )}
-                  {isDocx && (
+                  {isAssigned && isDocx && (
                     <>
-                      <DropdownMenu.Item className={itemCls} onSelect={() => navigate(`${uiPaths.structuringReview(projectId, chapterId, fid)}?tab=editor`)}>
+                      {/* <DropdownMenu.Item className={itemCls} onSelect={() => navigate(`${uiPaths.structuringReview(projectId, chapterId, fid)}?tab=editor`)}>
                         <FilePen size={12} className="text-muted" /> Edit in Editor
                       </DropdownMenu.Item>
                       <DropdownMenu.Item className={itemCls} onSelect={() => navigate(`${uiPaths.structuringReview(projectId, chapterId, fid)}?tab=onlyoffice`)}>
                         <FilePen size={12} className="text-muted" /> Edit in Office
-                      </DropdownMenu.Item>
+                      </DropdownMenu.Item> */}
                       <DropdownMenu.Item className={itemCls} onSelect={() => void openInWordWithFallback(fid, row.file_name)}>
                         <ExternalLink size={12} className="text-muted" /> Edit in MSWord
                       </DropdownMenu.Item>
@@ -344,7 +346,7 @@ function FileActionsMenu({
                       <ArrowDownToLine size={12} className="text-muted" /> Download
                     </a>
                   </DropdownMenu.Item>
-                  {fid && fname.toLowerCase().endsWith('.indd') && (
+                  {isAssigned && fid && fname.toLowerCase().endsWith('.indd') && (
                     <DropdownMenu.Item
                       className={itemCls}
                       onSelect={async () => {
@@ -369,7 +371,7 @@ function FileActionsMenu({
                       <FileOutput size={12} className="text-amber-500" /> InDesign to Word
                     </DropdownMenu.Item>
                   )}
-                  {fid && fname.toLowerCase().endsWith('.pdf') && (
+                  {isAssigned && fid && fname.toLowerCase().endsWith('.pdf') && (
                     <DropdownMenu.Item
                       className={itemCls}
                       onSelect={async () => {
@@ -394,7 +396,7 @@ function FileActionsMenu({
                       <FileOutput size={12} className="text-amber-500" /> PDF to Word
                     </DropdownMenu.Item>
                   )}
-                  {fid && fname.toLowerCase().endsWith('.indd') && (
+                  {isAssigned && fid && fname.toLowerCase().endsWith('.indd') && (
                     <DropdownMenu.Item
                       className={itemCls}
                       onSelect={async () => {
@@ -419,16 +421,6 @@ function FileActionsMenu({
                       <FileOutput size={12} className="text-amber-500" /> InDesign to Word
                     </DropdownMenu.Item>
                   )}
-                  {hasReview && !isImage && (
-                    <DropdownMenu.Item className={itemCls} onSelect={() => navigate(uiPaths.structuringReview(projectId, chapterId, fid))}>
-                      <Layers size={12} className="text-muted" /> View Structuring Review
-                    </DropdownMenu.Item>
-                  )}
-                  {fid && fname.endsWith('.docx') && (
-                    <DropdownMenu.Item className={itemCls} onSelect={() => navigate(uiPaths.referenceReview(projectId, chapterId, fid))}>
-                      <BookCheck size={12} className="text-muted" /> Reference Review
-                    </DropdownMenu.Item>
-                  )}
                 </>
               ) : (
                 <DropdownMenu.Item className={itemCls} onSelect={() => onView(row)}>
@@ -437,151 +429,169 @@ function FileActionsMenu({
               )}
 
               {/* Delete */}
-              <DropdownMenu.Item
-                disabled={!isAssigned}
-                onSelect={() => isAssigned && onDelete(row)}
-                className={isAssigned ? redCls : `${deadCls} text-red-400`}
-              >
-                <Trash2 size={12} /> Delete
-              </DropdownMenu.Item>
-
-              {/* ── Group 2: Processing ──────────────────────────── */}
-              {sep}
-              {grp('Processing', !fid)}
-
-              {fid ? (
-                <>
-                  {/* Run All — placeholder */}
-                  <DropdownMenu.Item className={deadCls}>
-                    <Play size={12} /> Run All Processes
-                    <span className="ml-auto text-[9px] px-1 py-0.5 rounded bg-surface border border-border text-muted">Soon</span>
-                  </DropdownMenu.Item>
-
-                  {/* Structuring — opens tag-set selection popup */}
-                  {showAction('structuring') && (
-                    <DropdownMenu.Item
-                      className={itemCls}
-                      onSelect={e => { e.preventDefault(); setTagSetModalOpen(true) }}
-                    >
-                      <Layers size={12} className="text-amber-500" /> Structuring
-                    </DropdownMenu.Item>
-                  )}
-
-                  {/* Language Edit — v1 endpoint */}
-                  {showAction('languageEdit') && (
-                    <DropdownMenu.Item
-                      className={itemCls}
-                      onSelect={() => void fire('Language Edit', () => startLanguageEdit(fid))}
-                    >
-                      <Languages size={12} className="text-muted" /> Language Edit
-                    </DropdownMenu.Item>
-                  )}
-
-                  {/* Technical Edit — navigates to review page */}
-                  {showAction('technicalEdit') && (
-                    <DropdownMenu.Item
-                      className={itemCls}
-                      onSelect={() => navigate(uiPaths.technicalReview(projectId, chapterId, fid))}
-                    >
-                      <Wrench size={12} className="text-muted" /> Technical Edit
-                    </DropdownMenu.Item>
-                  )}
-
-                  {/* Reference Check — opens configuration modal */}
-                  {showAction('referenceValidation') && (
-                    <DropdownMenu.Item
-                      className={itemCls}
-                      onSelect={() => onOpenReferenceCheck({
-                        id: fid!,
-                        filename: row.file_name,
-                        project_id: projectId,
-                        chapter_id: chapterId,
-                        file_type: '',
-                        category: row.subfolder,
-                        uploaded_at: row.uploaded_on,
-                        version: 1,
-                        lock: { is_locked: false, locked_by: null, locked_at: null },
-                        available_actions: [],
-                      } as unknown as FileRecord)}
-                    >
-                      <BookCheck size={12} className="text-muted" /> Reference Validation
-                    </DropdownMenu.Item>
-                  )}
-
-                  {/* Manuscript Analysis (PPD) — v2 endpoint */}
-                  {showAction('manuscriptAnalysis') && (
-                    <DropdownMenu.Item
-                      className={itemCls}
-                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Manuscript Analysis', jobFn: () => startPpdGeneration(fid), pollFileId: fid, pollProcessType: 'ppd' }) }}
-                    >
-                      <FileOutput size={12} className="text-muted" /> Manuscript Analysis
-                    </DropdownMenu.Item>
-                  )}
-
-                  {/* Permissions Check — v2 endpoint */}
-                  {showAction('permissionsCheck') && (
-                    <DropdownMenu.Item
-                      className={itemCls}
-                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Permissions Check', jobFn: () => startPermissionsCheck(fid) }) }}
-                    >
-                      <ShieldCheck size={12} className="text-muted" /> Permissions Check
-                    </DropdownMenu.Item>
-                  )}
-
-                  {/* AI Credit Extraction — v2 endpoint */}
-                  {showAction('aiCreditExtraction') && (
-                    <DropdownMenu.Item
-                      className={itemCls}
-                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'AI Credit Extraction', jobFn: () => startCreditExtraction(fid), pollFileId: fid, pollProcessType: 'credit_extractor_ai' }) }}
-                    >
-                      <Sparkles size={12} className="text-muted" /> AI Credit Extraction
-                    </DropdownMenu.Item>
-                  )}
-
-                  {/* Bias Scan — v2 endpoint */}
-                  {showAction('biasScan') && (
-                    <DropdownMenu.Item
-                      className={itemCls}
-                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Bias Scan', jobFn: () => startBiasScan(fid), pollFileId: fid, pollProcessType: 'bias_scan' }) }}
-                    >
-                      <ScanLine size={12} className="text-muted" /> Bias Scan
-                    </DropdownMenu.Item>
-                  )}
-
-                  {/* Word to XML — v2 endpoint */}
-                  {showAction('wordToXml') && (
-                    <DropdownMenu.Item
-                      className={itemCls}
-                      onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Word to XML', jobFn: () => startWordToXml(fid), pollFileId: fid, pollProcessType: 'word_to_xml' }) }}
-                    >
-                      <FileCode size={12} className="text-muted" /> Word to XML
-                    </DropdownMenu.Item>
-                  )}
-                </>
-              ) : (
-                /* No db_id: show stage-based fallback labels (no API call) */
-                getProcessingActions(stageName).map(a => (
-                  <DropdownMenu.Item key={a} className={deadCls}>
-                    <Zap size={12} className="text-muted" /> {a}
-                  </DropdownMenu.Item>
-                ))
+              {isAdmin && (
+                <DropdownMenu.Item
+                  onSelect={() => onDelete(row)}
+                  className={redCls}
+                >
+                  <Trash2 size={12} /> Delete
+                </DropdownMenu.Item>
               )}
 
-              {/* ── Group 3: Checkout ────────────────────────────── */}
+              {/* ── Group 2: Processing ──────────────────────────── */}
+              {isAssigned && (
+                <>
+                  {sep}
+                  {grp('Processing', !fid)}
+
+                  {fid ? (
+                    <>
+                      {/* Run All — placeholder */}
+                      {isAssigned && (
+                        <DropdownMenu.Item className={deadCls}>
+                          <Play size={12} /> Run All Processes
+                          <span className="ml-auto text-[9px] px-1 py-0.5 rounded bg-surface border border-border text-muted">Soon</span>
+                        </DropdownMenu.Item>
+                      )}
+
+                      {/* Structuring — opens tag-set selection popup */}
+                      {isAssigned && showAction('structuring') && (
+                        <DropdownMenu.Item
+                          className={itemCls}
+                          onSelect={e => { e.preventDefault(); setTagSetModalOpen(true) }}
+                        >
+                          <Layers size={12} className="text-amber-500" /> Structuring
+                        </DropdownMenu.Item>
+                      )}
+
+                      {/* Reference Review */}
+                      {showAction('referenceReview') && fid && fname.endsWith('.docx') && (
+                        <DropdownMenu.Item
+                          className={itemCls}
+                          onSelect={() => navigate(uiPaths.referenceReview(projectId, chapterId, fid))}
+                        >
+                          <BookCheck size={12} className="text-muted" /> Reference Review
+                        </DropdownMenu.Item>
+                      )}
+
+                      {/* Language Edit — v1 endpoint */}
+                      {isAssigned && showAction('languageEdit') && (
+                        <DropdownMenu.Item
+                          className={itemCls}
+                          onSelect={() => void fire('Language Edit', () => startLanguageEdit(fid))}
+                        >
+                          <Languages size={12} className="text-muted" /> Language Edit
+                        </DropdownMenu.Item>
+                      )}
+
+                      {/* Technical Edit — navigates to review page */}
+                      {isAssigned && showAction('technicalEdit') && (
+                        <DropdownMenu.Item
+                          className={itemCls}
+                          onSelect={() => navigate(uiPaths.technicalReview(projectId, chapterId, fid))}
+                        >
+                          <Wrench size={12} className="text-muted" /> Technical Edit
+                        </DropdownMenu.Item>
+                      )}
+
+                      {/* Reference Check — opens configuration modal */}
+                      {isAssigned && showAction('referenceValidation') && (
+                        <DropdownMenu.Item
+                          className={itemCls}
+                          onSelect={() => onOpenReferenceCheck({
+                            id: fid!,
+                            filename: row.file_name,
+                            project_id: projectId,
+                            chapter_id: chapterId,
+                            file_type: '',
+                            category: row.subfolder,
+                            uploaded_at: row.uploaded_on,
+                            version: 1,
+                            lock: { is_locked: false, locked_by: null, locked_at: null },
+                            available_actions: [],
+                          } as unknown as FileRecord)}
+                        >
+                          <BookCheck size={12} className="text-muted" /> Reference Validation
+                        </DropdownMenu.Item>
+                      )}
+
+                      {/* Manuscript Analysis (PPD) — v2 endpoint */}
+                      {isAssigned && showAction('manuscriptAnalysis') && (
+                        <DropdownMenu.Item
+                          className={itemCls}
+                          onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Manuscript Analysis', jobFn: () => startPpdGeneration(fid), pollFileId: fid, pollProcessType: 'ppd' }) }}
+                        >
+                          <FileOutput size={12} className="text-muted" /> Manuscript Analysis
+                        </DropdownMenu.Item>
+                      )}
+
+                      {/* Permissions Check — v2 endpoint */}
+                      {isAssigned && showAction('permissionsCheck') && (
+                        <DropdownMenu.Item
+                          className={itemCls}
+                          onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Permissions Check', jobFn: () => startPermissionsCheck(fid) }) }}
+                        >
+                          <ShieldCheck size={12} className="text-muted" /> Permissions Check
+                        </DropdownMenu.Item>
+                      )}
+
+                      {/* AI Credit Extraction — v2 endpoint */}
+                      {isAssigned && showAction('aiCreditExtraction') && (
+                        <DropdownMenu.Item
+                          className={itemCls}
+                          onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'AI Credit Extraction', jobFn: () => startCreditExtraction(fid), pollFileId: fid, pollProcessType: 'credit_extractor_ai' }) }}
+                        >
+                          <Sparkles size={12} className="text-muted" /> AI Credit Extraction
+                        </DropdownMenu.Item>
+                      )}
+
+                      {/* Bias Scan — v2 endpoint */}
+                      {isAssigned && showAction('biasScan') && (
+                        <DropdownMenu.Item
+                          className={itemCls}
+                          onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Bias Scan', jobFn: () => startBiasScan(fid), pollFileId: fid, pollProcessType: 'bias_scan' }) }}
+                        >
+                          <ScanLine size={12} className="text-muted" /> Bias Scan
+                        </DropdownMenu.Item>
+                      )}
+
+                      {/* Word to XML — v2 endpoint */}
+                      {isAssigned && showAction('wordToXml') && (
+                        <DropdownMenu.Item
+                          className={itemCls}
+                          onSelect={e => { e.preventDefault(); setConfirmStep({ actionName: 'Word to XML', jobFn: () => startWordToXml(fid), pollFileId: fid, pollProcessType: 'word_to_xml' }) }}
+                        >
+                          <FileCode size={12} className="text-muted" /> Word to XML
+                        </DropdownMenu.Item>
+                      )}
+                    </>
+                  ) : (
+                    /* No db_id: show stage-based fallback labels (no API call) */
+                    isAssigned && getProcessingActions(stageName).map(a => (
+                      <DropdownMenu.Item key={a} className={deadCls}>
+                        <Zap size={12} className="text-muted" /> {a}
+                      </DropdownMenu.Item>
+                    ))
+                  )}
+                </>
+              )}
+
+              {/* ── Group 3: Checkout (Commented out) ──────────────
               {sep}
               {grp('Checkout')}
               {fid ? (
                 <>
-                  <DropdownMenu.Item className={itemCls} onSelect={() => void handleCheckout()}>
+                  <DropdownMenu.Item className={isAssigned ? itemCls : deadCls} disabled={!isAssigned} onSelect={() => void handleCheckout()}>
                     <LogOut size={12} className="text-muted" /> Check Out
                   </DropdownMenu.Item>
-                  <DropdownMenu.Item className={itemCls} onSelect={() => void handleReleaseLock()}>
+                  <DropdownMenu.Item className={isAssigned ? itemCls : deadCls} disabled={!isAssigned} onSelect={() => void handleReleaseLock()}>
                     <LogIn size={12} className="text-muted" /> Release Lock
                   </DropdownMenu.Item>
                 </>
               ) : (
                 <DropdownMenu.Item className={deadCls}><LogOut size={12} /> Check Out</DropdownMenu.Item>
               )}
+              */}
 
               {/* ── Group 4: Details ─────────────────────────────── */}
               {sep}
@@ -725,6 +735,7 @@ export function ChapterFilePage({
 
   // Open docx viewer (full-screen viewer page)
   function openEditor(row: FileRow) {
+    if (!resolvedIsAssigned) return
     if (row.db_id && /\.(jpe?g|png|gif|webp|tiff?|bmp|eps)$/i.test(row.file_name)) {
       navigate(`/projects/${pid}/image-review?fileId=${row.db_id}`)
       return
@@ -862,16 +873,19 @@ export function ChapterFilePage({
             : buildFileViewPath(row.original, pid, cid, cliId)
         return (
           <div className="flex items-center gap-2">
-            <FolderIcon name={icon} size={14} color={color}/>
+            <FolderIcon name={icon} size={14} color={color} />
             {fid ? (
               <button
                 type="button"
+                disabled={!resolvedIsAssigned}
                 onClick={e => {
                   e.stopPropagation()
                   navigate(openTarget)
                 }}
                 title={name}
-                className="font-medium text-text truncate max-w-[2000px] text-left hover:text-primary hover:underline cursor-pointer"
+                className={resolvedIsAssigned
+                  ? "font-medium text-text truncate max-w-[2000px] text-left hover:text-primary hover:underline cursor-pointer"
+                  : "font-medium text-text opacity-50 truncate max-w-[2000px] text-left cursor-not-allowed"}
               >
                 {name}
               </button>

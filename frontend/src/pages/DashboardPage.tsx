@@ -4,6 +4,8 @@ import { useDashboardQuery } from "@/features/dashboard/useDashboardQuery";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { getSsrUrl, ssrPaths } from "@/utils/appPaths";
 
+import { BookOpen } from "lucide-react";
+
 function getGreeting(): { timeOfDay: string; dayOfWeek: string; formattedDate: string } {
   const now = new Date();
   const hour = now.getHours();
@@ -106,17 +108,11 @@ export function DashboardPage() {
         </div>
 
         {projects.length === 0 ? (
-          <div className="dashboard-empty">
-            <div className="dashboard-empty__icon">📘</div>
-            <p className="dashboard-empty__title">No projects yet</p>
-            <p className="dashboard-empty__copy">
-              Project summaries will appear here once books are created through the current backend flows.
-            </p>
-            <div className="dashboard-empty__actions">
-              <a className="button" href={getSsrUrl(ssrPaths.projectCreate)}>
-                Open SSR project creation
-              </a>
+          <div className="flex flex-col items-center justify-center text-center p-12 bg-gradient-to-br from-card to-background border border-border rounded-2xl shadow-subtle min-h-[300px] mt-6">
+            <div className="w-16 h-16 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mb-6 animate-pulse">
+              <BookOpen size={32} />
             </div>
+            <h3 className="text-xl font-bold text-text mb-2">No Projects Assigned</h3>
           </div>
         ) : (
           <DashboardProjectGrid projects={projects} />

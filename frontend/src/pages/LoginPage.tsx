@@ -129,7 +129,9 @@ export function LoginPage() {
   }
 
   if (sessionQuery.data?.authenticated) {
-    return <Navigate replace to={from} />
+    const isAccessTeam = sessionQuery.data.viewer?.team === 'Accessibility Team'
+    const destination = isAccessTeam && (from === '/' || from === '/dashboard') ? '/post-production' : from
+    return <Navigate replace to={destination} />
   }
 
   const errorMsg = loginMutation.isError ? getLoginErrorMessage(loginMutation.error) : ''

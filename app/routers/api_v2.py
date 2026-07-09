@@ -5418,16 +5418,19 @@ def api_v2_update_chapter(chapter_id: int, payload: ChapterInfoUpdate, db: Sessi
             message="Authentication required.",
         )
     
-    update_data = payload.model_dump(exclude_unset=True)
-    if "current_assignee_name" in update_data:
-        from app.domains.auth.rbac_config import has_permission
-        if not has_permission(viewer, "edit_assignee"):
-            raise HTTPException(status_code=403, detail="Permission denied to edit assignee.")
-
     from sqlalchemy import select
     chapter = db.execute(select(ChapterInfo).where(ChapterInfo.id == chapter_id)).scalars().first()
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
+    
+    update_data = payload.model_dump(exclude_unset=True)
+    if "current_assignee_name" in update_data:
+        new_assignee = update_data["current_assignee_name"]
+        if chapter.current_assignee_name != new_assignee:
+            from app.domains.auth.rbac_config import has_permission
+            is_viewer_clearing_themselves = (new_assignee is None and chapter.current_assignee_name == viewer.username)
+            if not (has_permission(viewer, "edit_assignee") or is_viewer_clearing_themselves):
+                raise HTTPException(status_code=403, detail="Permission denied to edit assignee.")
     
     for field, value in update_data.items():
         setattr(chapter, field, value)
@@ -5696,5 +5699,222 @@ def api_v2_set_client_status(client_id: int, body: ClientStatusUpdate, db: Sessi
     if not updated:
         raise HTTPException(status_code=404, detail="Client not found")
     return updated
+
+class TransitionConfigResponse(BaseModel):
+    has_config: bool
+    custom_message: Optional[str] = None
+    to: List[str] = []
+    cc: List[str] = []
+    subject: Optional[str] = None
+    body: Optional[str] = None
+    from_email: Optional[str] = None
+
+class TransitionEmailRequest(BaseModel):
+    from_stage: str
+    to_stage: str
+    dt: Optional[str] = None
+    to_emails: List[str]
+    cc_emails: List[str]
+    subject: str
+    body: str
+
+def _get_stage_notification_config(client_name: str, stage_name: str) -> Optional[dict]:
+    import json
+    import os
+    config_dir = os.path.join(os.path.dirname(__file__), "..", "config", "stage_transition")
+    
+    # 1. Try client config file
+    if client_name:
+        client_file = f"{client_name.strip()}.json"
+        client_config_path = os.path.join(config_dir, client_file)
+        if os.path.exists(client_config_path):
+            try:
+                with open(client_config_path, "r") as f:
+                    data = json.load(f)
+                stage_cfg = data.get(stage_name)
+                if stage_cfg:
+                    return stage_cfg
+            except Exception as e:
+                print(f"Error loading stage notification config for client {client_name}: {e}")
+                
+    # 2. Try default config file
+    default_config_path = os.path.join(config_dir, "default.json")
+    if os.path.exists(default_config_path):
+        try:
+            with open(default_config_path, "r") as f:
+                data = json.load(f)
+            return data.get(stage_name)
+        except Exception as e:
+            print(f"Error loading default stage notification config: {e}")
+            
+    return None
+
+def _resolve_placeholders(text: str, chapter, project, client, current_stage: str, next_stage: str) -> str:
+    placeholders = {
+        "{chapter_name}": chapter.chapters,
+        "{chapter_title}": chapter.chapter_title or "",
+        "{current_stage}": current_stage,
+        "{next_stage}": next_stage,
+        "{project_code}": chapter.project or "",
+        "{author_email}": getattr(project, "customer_contact", None) or getattr(client, "email", None) or "author@example.com",
+        "{client_email}": getattr(client, "email", None) or "client@example.com",
+        "{copyediting_team_email}": "copyediting_team@example.com",
+        "{pre_editing_team_email}": "pre_editing_team@example.com",
+        "{next_stage_team_email}": f"{next_stage.lower().replace(' ', '_').replace('-', '_').replace('+', '')}_team@example.com",
+    }
+    resolved = text
+    for key, value in placeholders.items():
+        resolved = resolved.replace(key, str(value))
+    return resolved
+
+@router.get("/chapters/{chapter_id}/transition-config", response_model=TransitionConfigResponse)
+def api_v2_get_chapter_transition_config(
+    chapter_id: int,
+    next_stage: str = Query(...),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie)
+):
+    _require_cookie_user(user)
+    from sqlalchemy import select
+    from app.domains.workflow.models import ChapterInfo
+    from app.domains.projects.models import Project
+    from app.domains.clients.models import Client
+    
+    chapter = db.execute(select(ChapterInfo).where(ChapterInfo.id == chapter_id)).scalars().first()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+        
+    project = db.execute(select(Project).where(Project.project_code == chapter.project)).scalars().first()
+    client = None
+    if project and project.client_id:
+        client = db.execute(select(Client).where(Client.id == project.client_id)).scalars().first()
+        
+    client_name = project.client_name if project else chapter.client
+    client_identifier = client.division if (client and client.division) else client_name
+    current_stage = chapter.stage_name or ""
+    
+    cfg = _get_stage_notification_config(client_identifier, current_stage)
+    if not cfg:
+        return TransitionConfigResponse(has_config=False)
+        
+    custom_msg = _resolve_placeholders(cfg.get("custom_message", ""), chapter, project, client, current_stage, next_stage)
+    to_resolved = [_resolve_placeholders(e, chapter, project, client, current_stage, next_stage) for e in cfg.get("to", [])]
+    cc_resolved = [_resolve_placeholders(e, chapter, project, client, current_stage, next_stage) for e in cfg.get("cc", [])]
+    subj_resolved = _resolve_placeholders(cfg.get("subject", ""), chapter, project, client, current_stage, next_stage)
+    body_resolved = _resolve_placeholders(cfg.get("body", ""), chapter, project, client, current_stage, next_stage)
+    
+    return TransitionConfigResponse(
+        has_config=True,
+        custom_message=custom_msg,
+        to=to_resolved,
+        cc=cc_resolved,
+        subject=subj_resolved,
+        body=body_resolved,
+        from_email=settings.SMTP_FROM
+    )
+
+@router.post("/chapters/{chapter_id}/transition-email")
+def api_v2_chapter_transition_email(
+    chapter_id: int,
+    payload: TransitionEmailRequest,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie)
+):
+    _require_cookie_user(user)
+    from sqlalchemy import select
+    from app.domains.workflow.models import ChapterInfo, WorkflowMaster
+    from app.domains.projects.models import Project
+    from app.domains.workflow.api_v1 import stage_transition as internal_stage_transition, TransitionPayload
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+    
+    chapter = db.execute(select(ChapterInfo).where(ChapterInfo.id == chapter_id)).scalars().first()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+        
+    project = db.execute(select(Project).where(Project.project_code == chapter.project)).scalars().first()
+    project_code = project.code if project else chapter.project
+    if not project_code:
+        raise HTTPException(status_code=400, detail="Project code not found")
+        
+    # Execute stage transition
+    transition_payload = TransitionPayload(
+        from_stage=payload.from_stage,
+        to_stage=payload.to_stage,
+        dt=payload.dt
+    )
+    # Transition stage details table
+    internal_stage_transition(project_code, chapter.chapters, transition_payload, db=db)
+    
+    # Update ChapterInfo table
+    chapter.stage_name = payload.to_stage
+    chapter.current_assignee_name = None
+    
+    # Check if last stage
+    stages = []
+    if project and project.workflow_name:
+        try:
+            stages = db.execute(
+                select(WorkflowMaster)
+                .where(WorkflowMaster.workflow_name == project.workflow_name)
+            ).scalars().all()
+        except Exception:
+            pass
+            
+    is_last_stage = False
+    if stages:
+        last_stage_obj = next((s for s in stages if not s.next_stage), None)
+        if last_stage_obj and last_stage_obj.stage_name == payload.to_stage:
+            is_last_stage = True
+            
+    if is_last_stage:
+        chapter.status = "complete"
+        
+    db.commit()
+    db.refresh(chapter)
+    
+    # Send transition email via SMTP (log failure but proceed)
+    if payload.to_emails:
+        msg = MIMEMultipart()
+        msg['From'] = settings.SMTP_FROM
+        msg['To'] = ", ".join(payload.to_emails)
+        if payload.cc_emails:
+            msg['Cc'] = ", ".join(payload.cc_emails)
+        msg['Subject'] = payload.subject
+        msg.attach(MIMEText(payload.body, 'plain'))
+        
+        print("================== SENDING TRANSITION EMAIL ==================")
+        print(f"TO: {payload.to_emails}")
+        print(f"CC: {payload.cc_emails}")
+        print(f"SUBJECT: {payload.subject}")
+        print(f"BODY:\n{payload.body}")
+        print("==============================================================")
+        
+        try:
+            if settings.SMTP_USE_SSL:
+                server = smtplib.SMTP_SSL(settings.SMTP_HOST, settings.SMTP_PORT)
+            else:
+                server = smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT)
+                
+            server.ehlo()
+            if not settings.SMTP_USE_SSL and settings.SMTP_USE_TLS:
+                server.starttls()
+                server.ehlo()
+                
+            if settings.SMTP_USERNAME and settings.SMTP_PASSWORD:
+                server.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
+                
+            recipients = payload.to_emails + (payload.cc_emails if payload.cc_emails else [])
+            server.sendmail(msg['From'], recipients, msg.as_string())
+            server.quit()
+        except Exception as e:
+            print(f"SMTP send failed: {e}")
+            
+    return {"message": "Transition completed and email processed", "chapter": {
+        "id": chapter.id,
+        "stage_name": chapter.stage_name,
+        "status": chapter.status
+    }}
 
 
