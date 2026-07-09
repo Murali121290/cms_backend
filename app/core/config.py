@@ -2,6 +2,7 @@
 # pyrefly: ignore [missing-import]
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+from typing import Optional
 
 from app.core.paths import UPLOADS_DIR
 
@@ -50,6 +51,14 @@ class Settings(BaseSettings):
     # PPH Reference Conversion settings (for reference_structuring process type)
     REF_SOURCE_STYLE: str = "Auto"  # Auto, AMA, APA, CGRN
     REF_TARGET_STYLE: str = "APA"   # AMA, APA, CGRN
+
+    SMTP_FROM: str = "inkflow-noreply@example.com"
+    SMTP_HOST: str = "localhost"
+    SMTP_PORT: int = 25
+    SMTP_USERNAME: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+    SMTP_USE_TLS: bool = False
+    SMTP_USE_SSL: bool = False
 
     class Config:
         env_file = (".env", ".env.local")  # .env.local overrides .env (last wins in pydantic-settings v2)

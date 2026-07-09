@@ -340,7 +340,7 @@ export function PostProdWordConversion() {
                         className="bg-transparent border-0 text-primary font-medium focus:ring-0 focus:outline-none cursor-pointer p-0 text-[11px] hover:text-primary-hover"
                       >
                         <option value="" className="text-text bg-card">Unassigned</option>
-                        {users.map(u => (
+                        {users.filter(u => u.active_status).map(u => (
                           <option key={u.id} value={u.user_name} className="text-text bg-card">{u.user_name}</option>
                         ))}
                       </select>

@@ -162,7 +162,7 @@ function WorkflowRail({ stages, chapters, filterStage, onStageClick }: {
 
 // ── Assignee Select ────────────────────────────────────────────────────────────
 
-function AssigneeSelect({ value, users, onChange, disabled, widthCls = 'w-28', className, onClick }: {
+function AssigneeSelect({ value, users, onChange, disabled, widthCls = 'w-28', className, onClick, updating }: {
   value: string | null
   users: AppUser[]
   onChange: (val: string) => void
@@ -170,6 +170,7 @@ function AssigneeSelect({ value, users, onChange, disabled, widthCls = 'w-28', c
   widthCls?: string
   className?: string
   onClick?: (e: React.MouseEvent) => void
+  updating?: boolean
 }) {
   const { canAccess } = useRBAC()
   const canEdit = canAccess(ROLE_PERMISSIONS.edit_assignee)
@@ -187,15 +188,21 @@ function AssigneeSelect({ value, users, onChange, disabled, widthCls = 'w-28', c
       <select
         value={value ?? ''}
         onChange={e => onChange(e.target.value)}
-        disabled={disabled}
-        className="text-[11px] bg-background border border-border rounded-md pl-2 pr-5 py-0.5 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-60 appearance-none cursor-pointer w-full truncate"
+        disabled={disabled || updating}
+        className="text-[11px] bg-background border border-border rounded-md pl-2 pr-6 py-0.5 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-60 appearance-none cursor-pointer w-full truncate"
       >
         <option value="">— Unassigned —</option>
         {users.filter(u => u.active_status).map(u => (
           <option key={u.id} value={u.user_name}>{u.user_name}</option>
         ))}
       </select>
-      <span className="pointer-events-none absolute right-1.5 text-muted text-[9px]">▾</span>
+      {updating ? (
+        <span className="absolute right-1.5 flex items-center justify-center pointer-events-none">
+          <Spinner size="sm" className="w-3 h-3 border-primary/30 border-t-primary" />
+        </span>
+      ) : (
+        <span className="pointer-events-none absolute right-1.5 text-muted text-[9px]">▾</span>
+      )}
     </div>
   )
 }
@@ -264,7 +271,7 @@ function ChapterCard({ chapter, users, plannedDueDates, onAssigneeChange, onView
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5">
             <User size={11} className="text-muted flex-shrink-0" />
-            <AssigneeSelect value={chapter.current_assignee_name} users={users} onChange={handleAssignee} disabled={updating} />
+            <AssigneeSelect value={chapter.current_assignee_name} users={users} onChange={handleAssignee} disabled={updating} updating={updating} />
           </div>
           <div className="flex items-center gap-1 flex-shrink-0">
             <Calendar size={11} className={delayed ? 'text-red-500' : 'text-muted'} />
@@ -274,12 +281,6 @@ function ChapterCard({ chapter, users, plannedDueDates, onAssigneeChange, onView
           </div>
         </div>
       </div>
-
-      {updating && (
-        <div className="px-3 py-2 border-t border-border flex justify-end">
-          <Spinner size="sm" />
-        </div>
-      )}
     </div>
   )
 }
@@ -456,6 +457,13 @@ export function ProjectWorkflow() {
         due_date: newDue,
       })
       handleChapterUpdate(chapter.id, updated)
+      if (!opts?.silent) {
+        if (assignee) {
+          toast.success(`Assigned to ${assignee}`)
+        } else {
+          toast.success('Chapter unassigned successfully')
+        }
+      }
       return true
     } catch {
       if (!opts?.silent) toast.error('Failed to update assignee')
@@ -474,7 +482,7 @@ export function ProjectWorkflow() {
     const succeeded = results.filter(Boolean).length
     const failed = results.length - succeeded
     if (failed === 0) {
-      toast.success(`Assigned ${succeeded} chapter${succeeded !== 1 ? 's' : ''} in ${bulkStage}`)
+      toast.success(`Assigned ${succeeded} chapter${succeeded !== 1 ? 's' : ''} in ${bulkStage} to ${bulkAssignee || 'Unassigned'}`)
     } else {
       toast.error(`Assigned ${succeeded}/${results.length} chapters — ${failed} failed`)
     }

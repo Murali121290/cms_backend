@@ -1,8 +1,54 @@
 {
-  "access_settings": ["Admin", "ProjectManager", "Project Manager"],
-  "view_all_projects": ["Admin", "ProjectManager", "Project Manager"],
-  "view_all_chapters": ["Admin", "ProjectManager", "Project Manager"],
-  "edit_assignee": ["Admin", "ProjectManager", "Project Manager", "Manager", "Team Lead"],
-  "list_users": ["Admin", "ProjectManager", "Project Manager"],
-  "access_post_production": ["Admin", "ProjectManager", "Project Manager", "Accessibility Team"]
+  "access_settings": [
+    "Admin"
+  ],
+  "view_all_projects": [
+    "Admin",
+    "Team Lead - Editorial",
+    "Team Lead - Production",
+    "Index Manager",
+    "Non-XML Manager",
+    "XML Manager",
+    "Graphics Manager",
+    "Template Team Manager",
+    "Production Manager",
+    "Editorial Manager",
+    "Project Manager",
+    "Senior Project Manager",
+    "Asst General Manager"
+  ],
+  "view_all_chapters": [
+    "Admin",
+    "Team Lead - Editorial",
+    "Team Lead - Production",
+    "Index Manager",
+    "Non-XML Manager",
+    "XML Manager",
+    "Graphics Manager",
+    "Template Team Manager",
+    "Production Manager",
+    "Editorial Manager",
+    "Project Manager",
+    "Senior Project Manager",
+    "Asst General Manager"
+  ],
+  "edit_assignee": [
+    "Admin",
+    "Team Lead - Editorial",
+    "Team Lead - Production",
+    "Index Manager",
+    "Non-XML Manager",
+    "XML Manager",
+    "Graphics Manager",
+    "Template Team Manager",
+    "Production Manager",
+    "Editorial Manager",
+    "Project Manager",
+    "Senior Project Manager",
+    "Asst General Manager"
+  ],
+  "access_post_production": [
+    "Admin",
+    "Accessibility Team"
+  ]
 }
