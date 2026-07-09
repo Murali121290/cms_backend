@@ -21,7 +21,6 @@ import { FullPageSpinner, Spinner } from '@/components/ui/Spinner'
 import { uiPaths } from '@/utils/appPaths'
 import { useStylesheetsQuery } from '@/features/stylesheets/useStylesheetsQuery'
 import { ProjectInfoModal } from './ProjectInfoModal'
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Modal } from '@/components/ui/Modal'
 import { UploadZone } from '@/components/ui/UploadZone'
 import { getApiErrorMessage } from '@/api/client'
@@ -319,7 +318,8 @@ export function ProjectWorkflow() {
   const [bulkStage, setBulkStage] = useState('')
   const [bulkAssignee, setBulkAssignee] = useState('')
   const [bulkAssigning, setBulkAssigning] = useState(false)
-  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false)
+  const [bulkAssignModalOpen, setBulkAssignModalOpen] = useState(false)
+  const [selectedBulkChapterIds, setSelectedBulkChapterIds] = useState<Set<number>>(new Set())
 
   const [isAddChapterOpen, setIsAddChapterOpen] = useState(false)
   const [newChapterNumber, setNewChapterNumber] = useState('')
@@ -412,10 +412,30 @@ export function ProjectWorkflow() {
     .sort((a, b) => a.chapters.localeCompare(b.chapters, undefined, { numeric: true }))
     , [chapters, filterAssignee, filterStage, filterStatus, plannedDueDates])
 
-  // Chapters currently sitting in the stage picked for bulk assignment
+  // Chapters currently sitting in the stage picked for bulk assignment, ascending by chapter number
   const bulkTargets = useMemo(
-    () => bulkStage ? chapters.filter(c => c.stage_name === bulkStage) : [],
+    () => bulkStage
+      ? chapters
+        .filter(c => c.stage_name === bulkStage)
+        .sort((a, b) => a.chapters.localeCompare(b.chapters, undefined, { numeric: true }))
+      : [],
     [chapters, bulkStage]
+  )
+
+  // Ids of chapters in the picked stage that have no assignee yet
+  const unassignedBulkIds = useMemo(
+    () => new Set(bulkTargets.filter(c => !c.current_assignee_name).map(c => c.id)),
+    [bulkTargets]
+  )
+
+  const isOnlyUnassignedSelected = unassignedBulkIds.size > 0
+    && selectedBulkChapterIds.size === unassignedBulkIds.size
+    && [...selectedBulkChapterIds].every(id => unassignedBulkIds.has(id))
+
+  // Subset of bulkTargets the user has checked off in the Group Assign modal
+  const selectedBulkChapters = useMemo(
+    () => bulkTargets.filter(c => selectedBulkChapterIds.has(c.id)),
+    [bulkTargets, selectedBulkChapterIds]
   )
 
   // Next sequential chapter number, zero-padded (e.g. "06") — chapters must be added in order, no gaps
@@ -472,13 +492,13 @@ export function ProjectWorkflow() {
   }
 
   async function handleBulkAssign() {
-    if (!bulkStage || bulkTargets.length === 0) return
+    if (!bulkStage || selectedBulkChapters.length === 0) return
     setBulkAssigning(true)
     const results = await Promise.all(
-      bulkTargets.map(c => handleAssigneeChange(c, bulkAssignee, { silent: true }))
+      selectedBulkChapters.map(c => handleAssigneeChange(c, bulkAssignee, { silent: true }))
     )
     setBulkAssigning(false)
-    setBulkConfirmOpen(false)
+    setBulkAssignModalOpen(false)
     const succeeded = results.filter(Boolean).length
     const failed = results.length - succeeded
     if (failed === 0) {
@@ -488,6 +508,7 @@ export function ProjectWorkflow() {
     }
     setBulkStage('')
     setBulkAssignee('')
+    setSelectedBulkChapterIds(new Set())
   }
 
   function openAddChapter() {
@@ -692,27 +713,22 @@ export function ProjectWorkflow() {
 
           <select
             value={bulkStage}
-            onChange={e => { setBulkStage(e.target.value); setBulkAssignee('') }}
+            onChange={e => { setBulkStage(e.target.value); setBulkAssignee(''); setSelectedBulkChapterIds(new Set()) }}
             className="text-xs bg-card border border-border rounded-lg px-2.5 py-1.5 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 appearance-none cursor-pointer"
           >
             <option value="">Select stage…</option>
             {orderedStages.map(s => <option key={s.stage_name} value={s.stage_name}>{s.stage_name}</option>)}
           </select>
 
-          <AssigneeSelect
-            widthCls="w-36"
-            value={bulkAssignee || null}
-            users={users}
-            onChange={setBulkAssignee}
-            disabled={!bulkStage}
-          />
-
           <button
-            onClick={() => setBulkConfirmOpen(true)}
-            disabled={!bulkStage || bulkTargets.length === 0 || bulkAssigning}
+            onClick={() => {
+              setSelectedBulkChapterIds(new Set(bulkTargets.map(c => c.id)))
+              setBulkAssignModalOpen(true)
+            }}
+            disabled={!bulkStage || bulkTargets.length === 0}
             className="text-xs font-medium px-3 py-1.5 rounded-lg bg-primary text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-primary/90 transition-colors"
           >
-            {bulkStage ? `Assign ${bulkTargets.length} chapter${bulkTargets.length !== 1 ? 's' : ''}` : 'Assign'}
+            {bulkStage ? `Select chapters (${bulkTargets.length})` : 'Assign'}
           </button>
 
           <span className="ml-auto text-xs text-muted">
@@ -880,17 +896,94 @@ export function ProjectWorkflow() {
         }}
       />
 
-      {/* Group Assign Confirm */}
-      <ConfirmDialog
-        isOpen={bulkConfirmOpen}
-        onClose={() => setBulkConfirmOpen(false)}
-        onConfirm={handleBulkAssign}
-        title="Group assign chapters?"
-        description={`This will assign ${bulkTargets.length} chapter${bulkTargets.length !== 1 ? 's' : ''} in "${bulkStage}" to ${bulkAssignee || 'Unassigned'}, updating each chapter's due date based on the stage SLA.`}
-        confirmLabel="Assign"
-        variant="warning"
-        isLoading={bulkAssigning}
-      />
+      {/* Group Assign — pick chapters + assignee */}
+      <Modal
+        isOpen={bulkAssignModalOpen}
+        onClose={() => { if (!bulkAssigning) setBulkAssignModalOpen(false) }}
+        title="Group Assign Chapters"
+        description={`Choose which chapters in "${bulkStage}" to assign. Each chapter's due date updates based on the stage SLA.`}
+        footer={
+          <div className="flex gap-3 justify-end">
+            <button
+              onClick={() => setBulkAssignModalOpen(false)}
+              disabled={bulkAssigning}
+              className="px-4 py-2 text-sm font-medium text-text bg-background border border-border rounded-lg hover:bg-surface transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleBulkAssign}
+              disabled={bulkAssigning || selectedBulkChapters.length === 0}
+              className="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
+            >
+              {bulkAssigning && <Spinner size="sm" />}
+              {bulkAssigning ? 'Assigning…' : `Assign ${selectedBulkChapters.length} chapter${selectedBulkChapters.length !== 1 ? 's' : ''}`}
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-muted mb-1">Assign to</label>
+            <AssigneeSelect widthCls="w-full" value={bulkAssignee || null} users={users} onChange={setBulkAssignee} />
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-medium text-muted">
+                Chapters ({selectedBulkChapters.length}/{bulkTargets.length} selected)
+              </label>
+              <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setSelectedBulkChapterIds(
+                    isOnlyUnassignedSelected ? new Set() : new Set(unassignedBulkIds)
+                  )}
+                  disabled={unassignedBulkIds.size === 0}
+                  className="text-xs text-primary hover:underline disabled:opacity-40 disabled:cursor-not-allowed disabled:no-underline"
+                >
+                  {isOnlyUnassignedSelected ? 'Deselect unassigned' : 'Select unassigned'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedBulkChapterIds(
+                    selectedBulkChapterIds.size === bulkTargets.length
+                      ? new Set()
+                      : new Set(bulkTargets.map(c => c.id))
+                  )}
+                  className="text-xs text-primary hover:underline"
+                >
+                  {selectedBulkChapterIds.size === bulkTargets.length ? 'Deselect all' : 'Select all'}
+                </button>
+              </div>
+            </div>
+            <div className="max-h-64 overflow-y-auto border border-border rounded-lg divide-y divide-border">
+              {bulkTargets.map(c => (
+                <label key={c.id} className="flex items-center gap-2.5 px-3 py-2 text-sm cursor-pointer hover:bg-surface">
+                  <input
+                    type="checkbox"
+                    checked={selectedBulkChapterIds.has(c.id)}
+                    onChange={() => {
+                      setSelectedBulkChapterIds(prev => {
+                        const next = new Set(prev)
+                        if (next.has(c.id)) next.delete(c.id)
+                        else next.add(c.id)
+                        return next
+                      })
+                    }}
+                    className="rounded border-border"
+                  />
+                  <span className="font-semibold text-primary text-xs uppercase w-8 flex-shrink-0">{c.chapters}</span>
+                  <span className="truncate text-text flex-1 min-w-0">{c.chapter_title || c.chapters}</span>
+                  <span className={`text-xs flex-shrink-0 ${c.current_assignee_name ? 'text-muted' : 'text-muted/60 italic'}`}>
+                    {c.current_assignee_name || 'Unassigned'}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+      </Modal>
 
       {/* Add Chapter Modal */}
       <Modal
