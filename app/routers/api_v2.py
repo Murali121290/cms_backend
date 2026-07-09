@@ -623,8 +623,16 @@ def api_v2_dashboard(
     projects_list = query.all()
     
     total_projects = len(projects_list)
+    
+    # Gather all chapters
+    all_chapters = []
+    for p in projects_list:
+        all_chapters.extend(p.chapters)
+        
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    
+    # 1. Delayed Count
     delayed_count = 0
-    from datetime import datetime as _dt
     for p in projects_list:
         is_delayed = False
         for ch in p.chapters:
@@ -640,18 +648,158 @@ def api_v2_dashboard(
         if is_delayed:
             delayed_count += 1
 
+    # 2. On Time Rate
+    chapters_with_due = [c for c in all_chapters if c.due_date is not None]
+    total_chapters_with_due = len(chapters_with_due)
+    
+    on_time_chapters_count = 0
+    for ch in chapters_with_due:
+        due_dt = ch.due_date
+        if due_dt.tzinfo is not None:
+            now_dt = _dt.now(due_dt.tzinfo)
+        else:
+            now_dt = _dt.now()
+            
+        if ch.status == "complete":
+            comp_dt = ch.updated_at
+            if comp_dt.tzinfo is None and due_dt.tzinfo is not None:
+                comp_dt = comp_dt.replace(tzinfo=_tz.utc)
+            elif comp_dt.tzinfo is not None and due_dt.tzinfo is None:
+                comp_dt = comp_dt.replace(tzinfo=None)
+            if comp_dt <= due_dt:
+                on_time_chapters_count += 1
+        else:
+            if due_dt >= now_dt:
+                on_time_chapters_count += 1
+                
+    if total_chapters_with_due > 0:
+        on_time_rate = int(round((on_time_chapters_count / total_chapters_with_due) * 100))
+    else:
+        on_time_rate = 100
+
+    # 3. Trends & Averages (using 30-day window)
+    now_utc = _dt.now(_tz.utc)
+    threshold_date = now_utc - _td(days=30)
+    
+    recent_chapters = []
+    prior_chapters = []
+    for ch in chapters_with_due:
+        target_dt = ch.updated_at if ch.status == "complete" else ch.due_date
+        if target_dt.tzinfo is None:
+            target_dt = target_dt.replace(tzinfo=_tz.utc)
+        if target_dt >= threshold_date:
+            recent_chapters.append(ch)
+        else:
+            prior_chapters.append(ch)
+            
+    def _calc_on_time_rate(ch_list):
+        if not ch_list:
+            return 100.0
+        ot_count = 0
+        for ch in ch_list:
+            due_dt = ch.due_date
+            if due_dt.tzinfo is not None:
+                now_dt = _dt.now(due_dt.tzinfo)
+            else:
+                now_dt = _dt.now()
+            if ch.status == "complete":
+                comp_dt = ch.updated_at
+                if comp_dt.tzinfo is None and due_dt.tzinfo is not None:
+                    comp_dt = comp_dt.replace(tzinfo=_tz.utc)
+                elif comp_dt.tzinfo is not None and due_dt.tzinfo is None:
+                    comp_dt = comp_dt.replace(tzinfo=None)
+                if comp_dt <= due_dt:
+                    ot_count += 1
+            else:
+                if due_dt >= now_dt:
+                    ot_count += 1
+        return (ot_count / len(ch_list)) * 100.0
+        
+    recent_rate = _calc_on_time_rate(recent_chapters)
+    prior_rate = _calc_on_time_rate(prior_chapters)
+    rate_diff = int(round(recent_rate - prior_rate))
+    if rate_diff >= 0:
+        on_time_trend = f"+{rate_diff}%"
+    else:
+        on_time_trend = f"{rate_diff}%"
+
+    completed_chapters = [c for c in all_chapters if c.status == "complete"]
+    def _calc_avg_days(ch_list):
+        if not ch_list:
+            return 0.0
+        durations = []
+        for ch in ch_list:
+            dt_start = ch.created_at
+            dt_end = ch.updated_at
+            if dt_start.tzinfo is None and dt_end.tzinfo is not None:
+                dt_start = dt_start.replace(tzinfo=_tz.utc)
+            elif dt_start.tzinfo is not None and dt_end.tzinfo is None:
+                dt_end = dt_end.replace(tzinfo=_tz.utc)
+            diff = (dt_end - dt_start).total_seconds() / 86400.0
+            durations.append(max(0.1, diff))
+        return sum(durations) / len(durations)
+        
+    if completed_chapters:
+        avg_days = round(_calc_avg_days(completed_chapters), 1)
+    else:
+        avg_days = 0.0
+        
+    recent_completed = [c for c in completed_chapters if (c.updated_at.replace(tzinfo=_tz.utc) if c.updated_at.tzinfo is None else c.updated_at) >= threshold_date]
+    prior_completed = [c for c in completed_chapters if (c.updated_at.replace(tzinfo=_tz.utc) if c.updated_at.tzinfo is None else c.updated_at) < threshold_date]
+    
+    if recent_completed and prior_completed:
+        avg_recent = _calc_avg_days(recent_completed)
+        avg_prior = _calc_avg_days(prior_completed)
+        days_diff = round(avg_recent - avg_prior, 1)
+        if days_diff >= 0:
+            avg_days_trend = f"+{days_diff} days"
+        else:
+            avg_days_trend = f"{days_diff} days"
+    else:
+        avg_days_trend = "Stable"
+
+    recent_delayed = 0
+    prior_delayed = 0
+    for p in projects_list:
+        p_recent_delayed = False
+        p_prior_delayed = False
+        for ch in p.chapters:
+            if ch.status != "complete" and ch.due_date:
+                due_dt = ch.due_date
+                if due_dt.tzinfo is None:
+                    due_dt = due_dt.replace(tzinfo=_tz.utc)
+                if due_dt.tzinfo is not None:
+                    now_dt = _dt.now(due_dt.tzinfo)
+                else:
+                    now_dt = _dt.now()
+                if due_dt < now_dt:
+                    if due_dt >= threshold_date:
+                        p_recent_delayed = True
+                    else:
+                        p_prior_delayed = True
+        if p_recent_delayed:
+            recent_delayed += 1
+        if p_prior_delayed:
+            prior_delayed += 1
+            
+    delayed_diff = recent_delayed - prior_delayed
+    if delayed_diff >= 0:
+        delayed_trend = f"+{delayed_diff}"
+    else:
+        delayed_trend = f"{delayed_diff}"
+
     serialized_projects = [_serialize_project_summary(p) for p in projects_list[:100]] if include_projects else []
     
     return schemas_v2.DashboardResponse(
         viewer=_serialize_viewer(viewer),
         stats=schemas_v2.DashboardStats(
             total_projects=total_projects,
-            on_time_rate=94,
-            on_time_trend="+12%",
-            avg_days=8.5,
-            avg_days_trend="-2 days",
+            on_time_rate=on_time_rate,
+            on_time_trend=on_time_trend,
+            avg_days=avg_days,
+            avg_days_trend=avg_days_trend,
             delayed_count=delayed_count,
-            delayed_trend="0",
+            delayed_trend=delayed_trend,
         ),
         projects=serialized_projects,
     )

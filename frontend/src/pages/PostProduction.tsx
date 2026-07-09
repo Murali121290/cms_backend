@@ -12,14 +12,14 @@ export function PostProduction() {
     <div className="space-y-6 max-w-7xl mx-auto p-6 text-text">
       {/* Title section with tight spacing */}
       <div className="border-b border-border/60 pb-4">
-        <h1 className="text-2xl font-bold font-serif text-text tracking-tight m-0">Backlist Hub</h1>
+        <h1 className="text-2xl font-bold font-serif text-text tracking-tight m-0">S4C Backlist Hub</h1>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {POST_PROD_SERVICES.map((service) => {
           const isEnabled = service.enabled
           return (
-            <div 
+            <div
               key={service.id}
               onClick={() => {
                 if (!isEnabled) return
@@ -29,11 +29,10 @@ export function PostProduction() {
                   navigate(`/post-production/${service.id}`)
                 }
               }}
-              className={`p-5 rounded-xl border transition-all duration-300 flex flex-col justify-between ${
-                isEnabled 
-                  ? 'bg-card border-border hover:border-primary/60 hover:-translate-y-0.5 hover:shadow-md cursor-pointer' 
-                  : 'bg-card/50 border-border/60 opacity-60 cursor-not-allowed'
-              }`}
+              className={`p-5 rounded-xl border transition-all duration-300 flex flex-col justify-between ${isEnabled
+                ? 'bg-card border-border hover:border-primary/60 hover:-translate-y-0.5 hover:shadow-md cursor-pointer'
+                : 'bg-card/50 border-border/60 opacity-60 cursor-not-allowed'
+                }`}
             >
               <div className="space-y-3.5">
                 <div className="flex items-start justify-between">

@@ -208,12 +208,12 @@ def test_api_v2_dashboard_returns_viewer_stats_and_projects(
     assert body["viewer"]["username"] == admin_user.username
     assert body["stats"] == {
         "total_projects": 2,
-        "on_time_rate": 94,
-        "on_time_trend": "+12%",
-        "avg_days": 8.5,
-        "avg_days_trend": "-2 days",
+        "on_time_rate": 100,
+        "on_time_trend": "+0%",
+        "avg_days": 0.0,
+        "avg_days_trend": "Stable",
         "delayed_count": 0,
-        "delayed_trend": "0",
+        "delayed_trend": "+0",
     }
     assert sorted(project["code"] for project in body["projects"]) == ["BOOK100", "BOOK200"]
 
