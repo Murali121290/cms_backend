@@ -58,6 +58,12 @@ class ProjectStylesheet(Base):
     analyzed_file_ids = Column(String, nullable=True, default="[]")  # JSON list of file IDs used to build this stylesheet
     is_active = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
     created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
 
     project = relationship("Project", back_populates="stylesheets")

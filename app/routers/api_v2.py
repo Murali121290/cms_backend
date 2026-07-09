@@ -60,6 +60,7 @@ from app.integrations.onlyoffice.config import ONLYOFFICE_INTERNAL_URL
 from app.integrations.wopi import service as wopi_service
 from app.integrations.webdav.config import WEBDAV_BASE_URL, WEBDAV_TOKEN_EXPIRE_MINUTES
 from app.domains.auth.security import create_access_token
+from app.domains.files import image_preview_service, image_convert_service
 
 settings = get_settings()
 router = APIRouter()
@@ -1515,8 +1516,8 @@ def api_v2_list_stylesheets(
             message="Project not found.",
         )
     result = stylesheet_service.get_stylesheets_for_project(db, project_id=project_id)
-    serialized = [stylesheet_service._serialize_stylesheet(s) for s in result["stylesheets"]]
-    active = stylesheet_service._serialize_stylesheet(result["active"]) if result["active"] else None
+    serialized = [stylesheet_service._serialize_stylesheet(s, db=db) for s in result["stylesheets"]]
+    active = stylesheet_service._serialize_stylesheet(result["active"], db=db) if result["active"] else None
     return schemas_v2.StylesheetsListResponse(
         project_id=project_id,
         stylesheets=serialized,
@@ -1559,7 +1560,7 @@ def api_v2_create_stylesheet(
         analyzed_file_ids=payload.analyzed_file_ids,
     )
     return schemas_v2.StylesheetCreateResponse(
-        stylesheet=stylesheet_service._serialize_stylesheet(ss)
+        stylesheet=stylesheet_service._serialize_stylesheet(ss, db=db)
     )
 
 
@@ -1597,7 +1598,7 @@ def api_v2_update_stylesheet(
             message="Stylesheet not found.",
         )
     return schemas_v2.StylesheetUpdateResponse(
-        stylesheet=stylesheet_service._serialize_stylesheet(ss)
+        stylesheet=stylesheet_service._serialize_stylesheet(ss, db=db)
     )
 
 
@@ -1862,6 +1863,52 @@ def api_v2_file_preview(
         media_type=image_preview_service.preview_mime(fmt),  # type: ignore[arg-type]
         headers={"Cache-Control": "private, max-age=3600"},
     )
+
+
+@router.get("/files/{file_id}/metadata")
+def api_v2_file_metadata(
+    file_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Return organized image metadata (file info, EXIF, ICC, TIFF, Photoshop)
+    for the Image Editor's Metadata panel.
+    """
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    file_record = file_service.get_file_for_download(db, file_id=file_id)
+    if not file_record:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="FILE_NOT_FOUND",
+            message="File not found.",
+        )
+
+    from app.domains.files import image_metadata_service
+    try:
+        data = image_metadata_service.extract_metadata(
+            file_record.path, filename=file_record.filename
+        )
+    except FileNotFoundError:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="FILE_MISSING_ON_DISK",
+            message="File is registered but missing on disk.",
+        )
+
+    return {
+        "file": {
+            "id": file_record.id,
+            "filename": file_record.filename,
+        },
+        **data,
+    }
 
 
 @router.post("/files/{file_id}/convert")
@@ -3441,7 +3488,7 @@ def api_v2_technical_scan(
             db, project_id=file_record.project_id
         )
         if active_ss:
-            active_stylesheet = stylesheet_service._serialize_stylesheet(active_ss)
+            active_stylesheet = stylesheet_service._serialize_stylesheet(active_ss, db=db)
 
     # Annotate findings with stylesheet matching if stylesheet_id provided
     findings = raw_scan.get("findings", [])

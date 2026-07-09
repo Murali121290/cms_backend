@@ -712,6 +712,11 @@ class IATemplateRow(BaseModel):
     example: str | None = None
 
 
+class StylesheetSourceFile(BaseModel):
+    id: int
+    filename: str
+
+
 class StylesheetSummary(BaseModel):
     id: int
     project_id: int
@@ -719,9 +724,11 @@ class StylesheetSummary(BaseModel):
     description: str | None = None
     is_active: bool
     created_at: datetime
+    updated_at: datetime | None = None
     created_by_id: int | None = None
     selected_ia_rows: list[IARow] = Field(default_factory=list)
     analyzed_file_ids: list[int] = Field(default_factory=list)
+    source_files: list[StylesheetSourceFile] = Field(default_factory=list)
 
 
 class StylesheetCreateRequest(BaseModel):

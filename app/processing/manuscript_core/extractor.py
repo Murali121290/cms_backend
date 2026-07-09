@@ -376,15 +376,29 @@ def extract_segments(
     footnotes = _read_notes(docx_path, "footnotes")
     endnotes = _read_notes(docx_path, "endnotes")
 
+    # If the manuscript uses no <body>/<front> region markers, the whole
+    # document would otherwise stay classified as front-matter (the default),
+    # which causes the analyzer to skip every rule. Detect the absence of
+    # region markers up front and start in "body" so untagged manuscripts get
+    # analyzed. Manuscripts that *do* use region tags keep the original
+    # "front → body → references" flow driven by the tags themselves.
+    body_paragraphs = list(_iter_body_paragraphs(doc))
+    has_region_markers = any(
+        "<front>" in (p.text or "").lower()
+        or "<body>" in (p.text or "").lower()
+        or "<ref-open>" in (p.text or "").lower()
+        for _, p in body_paragraphs
+    )
+
     segments: list[Segment] = []
     current_page = 1
     running_word_count = 0
     in_reference_block = False
     in_extract_tag_block = False
-    current_region = "front"
+    current_region = "front" if has_region_markers else "body"
     para_idx = 0
 
-    for source, p in _iter_body_paragraphs(doc):
+    for source, p in body_paragraphs:
         text = (p.text or "").rstrip()
         text_lower = text.lower()
         style_name = p.style.name if p.style else ""
