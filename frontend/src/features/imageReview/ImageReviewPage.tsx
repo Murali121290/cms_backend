@@ -16,6 +16,7 @@ import {
   Download,
   FileImage,
   Gauge,
+  Info,
   Loader2,
   Maximize,
   Maximize2,
@@ -41,6 +42,7 @@ import {
 } from "./api";
 import { useSaveEditedImage } from "./useSaveEditedImage";
 import { bakeImage, type CropRect } from "./imageBaking";
+import { MetadataPanel } from "./MetadataPanel";
 
 // ─── Editing state model ────────────────────────────────────────────────────
 
@@ -213,6 +215,7 @@ export function ImageReviewPage() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [resizePopoverOpen, setResizePopoverOpen] = useState(false);
   const [dpiPopoverOpen, setDpiPopoverOpen] = useState(false);
+  const [metadataOpen, setMetadataOpen] = useState(false);
 
   useEffect(() => {
     reset(INITIAL_EDIT_STATE);
@@ -222,6 +225,7 @@ export function ImageReviewPage() {
     setNaturalSize(null);
     setResizePopoverOpen(false);
     setDpiPopoverOpen(false);
+    setMetadataOpen(false);
   }, [selected?.id, reset]);
 
   const saveMut = useSaveEditedImage(projectId);
@@ -682,6 +686,13 @@ export function ImageReviewPage() {
             </PopoverAnchor>
 
             <Divider />
+            <ToolBtn
+              disabled={!selected}
+              onClick={() => setMetadataOpen(true)}
+              label="Metadata"
+              icon={<Info className="w-4 h-4" />}
+            />
+            <Divider />
             <ToolBtn disabled={!canUndo} onClick={undo} label="Undo" icon={<Undo className="w-4 h-4" />} />
             <ToolBtn disabled={!canRedo} onClick={redo} label="Redo" icon={<Redo className="w-4 h-4" />} />
             <ToolBtn disabled={!selected} onClick={resetAll} label="Reset" icon={<RefreshCw className="w-4 h-4" />} />
@@ -893,6 +904,15 @@ export function ImageReviewPage() {
           </div>
         </aside>
       </div>
+
+      {/* Metadata panel */}
+      {metadataOpen && selected && (
+        <MetadataPanel
+          fileId={selected.id}
+          filename={selected.filename}
+          onClose={() => setMetadataOpen(false)}
+        />
+      )}
 
       {/* Replace dialog */}
       {replaceDialogFor && (

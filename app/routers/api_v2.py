@@ -59,6 +59,7 @@ from app.integrations.onlyoffice.config import ONLYOFFICE_INTERNAL_URL
 from app.integrations.wopi import service as wopi_service
 from app.integrations.webdav.config import WEBDAV_BASE_URL, WEBDAV_TOKEN_EXPIRE_MINUTES
 from app.domains.auth.security import create_access_token
+from app.domains.files import image_preview_service, image_convert_service
 
 settings = get_settings()
 router = APIRouter()
@@ -1756,6 +1757,52 @@ def api_v2_file_preview(
         media_type=image_preview_service.preview_mime(fmt),  # type: ignore[arg-type]
         headers={"Cache-Control": "private, max-age=3600"},
     )
+
+
+@router.get("/files/{file_id}/metadata")
+def api_v2_file_metadata(
+    file_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Return organized image metadata (file info, EXIF, ICC, TIFF, Photoshop)
+    for the Image Editor's Metadata panel.
+    """
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    file_record = file_service.get_file_for_download(db, file_id=file_id)
+    if not file_record:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="FILE_NOT_FOUND",
+            message="File not found.",
+        )
+
+    from app.domains.files import image_metadata_service
+    try:
+        data = image_metadata_service.extract_metadata(
+            file_record.path, filename=file_record.filename
+        )
+    except FileNotFoundError:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="FILE_MISSING_ON_DISK",
+            message="File is registered but missing on disk.",
+        )
+
+    return {
+        "file": {
+            "id": file_record.id,
+            "filename": file_record.filename,
+        },
+        **data,
+    }
 
 
 @router.post("/files/{file_id}/convert")

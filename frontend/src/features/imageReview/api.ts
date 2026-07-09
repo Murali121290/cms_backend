@@ -81,6 +81,27 @@ export async function replaceImage({ fileId, file, reason }: ReplaceImageArgs) {
   return res.data;
 }
 
+export type MetadataValue = string | number | boolean | null;
+export type MetadataSection = Record<string, MetadataValue>;
+
+export interface ImageMetadataResponse {
+  file: { id: number; filename: string };
+  sections: {
+    file_information: MetadataSection;
+    image_properties: MetadataSection;
+    color_profile: MetadataSection | null;
+    tiff_information: MetadataSection | null;
+    photoshop_information: MetadataSection | null;
+    exif_xmp: MetadataSection | null;
+  };
+  raw: Record<string, unknown>;
+}
+
+export async function getImageMetadata(fileId: number): Promise<ImageMetadataResponse> {
+  const res = await apiClient.get<ImageMetadataResponse>(`/files/${fileId}/metadata`);
+  return res.data;
+}
+
 export async function exportSelectedImages(projectId: number, fileIds: number[]): Promise<Blob> {
   const res = await apiClient.post<Blob>(
     `/projects/${projectId}/images/export`,
