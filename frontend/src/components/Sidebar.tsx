@@ -44,7 +44,7 @@ export function Sidebar() {
       )}>
         {collapsed ? (
           <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center flex-shrink-0 text-sidebar font-bold text-[14px] font-serif">
-            S4
+            S4C
           </div>
         ) : !logoError ? (
           <img
@@ -56,7 +56,7 @@ export function Sidebar() {
         ) : (
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center flex-shrink-0 text-sidebar font-bold text-[14px] font-serif">
-              S4
+              S4C
             </div>
             <div className="leading-tight">
               <p className="text-white font-semibold text-[15px] font-serif tracking-tight">S4Carlisle</p>
