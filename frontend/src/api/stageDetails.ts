@@ -12,14 +12,12 @@ export interface StageDetail {
   actual_start_date: string | null
   actual_end_date: string | null
   stage_name: string
-  stage_activity: string | null
   total_time_taken: number | null
   workflow: string
   complexity_level: string | null
   stage_level: number | null
   sla: number | null
   stage_status: string
-  stage_activity_status: string
   delayed: boolean
   delay_days: number | null
   remarks: string | null

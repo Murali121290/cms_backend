@@ -76,23 +76,12 @@ class RolesMaster(Base):
         return map_role_to_capitalized(self.role_name)
 
 
-class StageActivityMaster(Base):
-    __tablename__ = "stage_activity_master"
-
-    id                  = Column(BigInteger, primary_key=True, autoincrement=True)
-    stage_activity_name = Column(String(150), unique=True, nullable=False, index=True)
-    description         = Column(Text, nullable=True)
-    active_status       = Column(Boolean, nullable=False, default=True)
-    created_at          = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-
-
 class StageMaster(Base):
     __tablename__ = "stage_master"
 
     id               = Column(BigInteger, primary_key=True, autoincrement=True)
     stage_name       = Column(String(100), unique=True, nullable=False, index=True)
     description      = Column(Text, nullable=True)
-    stage_activities = Column(ARRAY(BigInteger), nullable=False, server_default="{}")  # array of stage_activity_master IDs
     sla_level1       = Column(Integer,           nullable=True)                        # SLA in days for Level 1
     sla_level2       = Column(Integer,           nullable=True)                        # SLA in days for Level 2
     sla_level3       = Column(Integer,           nullable=True)                        # SLA in days for Level 3
@@ -122,14 +111,12 @@ class StageDetail(Base):
     actual_start_date     = Column(DateTime(timezone=True), nullable=True)
     actual_end_date       = Column(DateTime(timezone=True), nullable=True)
     stage_name            = Column(String(100), ForeignKey("stage_master.stage_name",                  ondelete="RESTRICT",  onupdate="CASCADE"), nullable=False)
-    stage_activity        = Column(String(100), ForeignKey("stage_activity_master.stage_activity_name", ondelete="RESTRICT", onupdate="CASCADE"), nullable=True)
     total_time_taken      = Column(Float,       nullable=True)
     workflow              = Column(Text,        nullable=False, default="Workflow1")
     complexity_level      = Column(String(20),  nullable=True)
     stage_level           = Column(Integer,     nullable=True)
     sla                   = Column(Integer,     nullable=True)
     stage_status          = Column(String(20),  nullable=False, default="In-progress")
-    stage_activity_status = Column(String(20),  nullable=False, default="In-progress")
     delayed               = Column(Boolean,     nullable=False, default=False)
     delay_days            = Column(Integer,     nullable=True)
     remarks               = Column(Text,        nullable=True)
@@ -162,7 +149,6 @@ class ChapterInfo(Base):
     project_manager_name   = Column(String(150), ForeignKey("users.username",          ondelete="SET NULL", onupdate="CASCADE"), nullable=True)
     due_date               = Column(DateTime(timezone=True), nullable=True)
     stage_name             = Column(String(100), ForeignKey("stage_master.stage_name",  ondelete="SET NULL", onupdate="CASCADE"), nullable=True)
-    current_stage_activity = Column(String(100), ForeignKey("stage_activity_master.stage_activity_name", ondelete="SET NULL", onupdate="CASCADE"), nullable=True)
     current_assignee_name  = Column(String(150), ForeignKey("users.username",          ondelete="SET NULL", onupdate="CASCADE"), nullable=True)
     status                 = Column(String(20),  nullable=False, default="In-progress")
     complexity_level       = Column(String(20),  nullable=True,  default="Medium")

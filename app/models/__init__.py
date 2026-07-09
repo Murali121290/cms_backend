@@ -109,7 +109,6 @@ class WebDAVLock(Base):
 from app.domains.clients.models import Client  # noqa: F401
 from app.domains.workflow.models import (  # noqa: F401
     RolesMaster,
-    StageActivityMaster,
     StageMaster,
     StageDetail,
     WorkflowMaster,

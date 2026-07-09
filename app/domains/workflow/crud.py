@@ -3,12 +3,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.domains.workflow.models import (
-    RolesMaster, StageMaster, StageActivityMaster, StageDetail, WorkflowMaster, ChapterInfo
+    RolesMaster, StageMaster, StageDetail, WorkflowMaster, ChapterInfo
 )
 from app.domains.workflow.schemas import (
     RolesMasterCreate, RolesMasterUpdate,
     StageMasterCreate, StageMasterUpdate,
-    StageActivityMasterCreate, StageActivityMasterUpdate,
     StageDetailCreate, StageDetailUpdate,
     WorkflowCreate, WorkflowUpdate,
     ChapterInfoCreate, ChapterInfoUpdate
@@ -55,44 +54,6 @@ def delete_role(db: Session, role_id: int) -> bool:
     if not db_role:
         return False
     db.delete(db_role)
-    db.commit()
-    return True
-
-
-# ── StageActivityMaster CRUD ──────────────────────────────────────────────────
-
-def create_stage_activity(db: Session, data: StageActivityMasterCreate) -> StageActivityMaster:
-    db_activity = StageActivityMaster(**data.model_dump())
-    db.add(db_activity)
-    db.commit()
-    db.refresh(db_activity)
-    return db_activity
-
-
-def get_stage_activity(db: Session, activity_id: int) -> Optional[StageActivityMaster]:
-    return db.execute(select(StageActivityMaster).where(StageActivityMaster.id == activity_id)).scalars().first()
-
-
-def get_stage_activities(db: Session, skip: int = 0, limit: int = 100) -> List[StageActivityMaster]:
-    return list(db.execute(select(StageActivityMaster).offset(skip).limit(limit)).scalars().all())
-
-
-def update_stage_activity(db: Session, activity_id: int, data: StageActivityMasterUpdate) -> Optional[StageActivityMaster]:
-    db_activity = get_stage_activity(db, activity_id)
-    if not db_activity:
-        return None
-    for field, value in data.model_dump(exclude_unset=True).items():
-        setattr(db_activity, field, value)
-    db.commit()
-    db.refresh(db_activity)
-    return db_activity
-
-
-def delete_stage_activity(db: Session, activity_id: int) -> bool:
-    db_activity = get_stage_activity(db, activity_id)
-    if not db_activity:
-        return False
-    db.delete(db_activity)
     db.commit()
     return True
 

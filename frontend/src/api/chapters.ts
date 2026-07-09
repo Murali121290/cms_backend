@@ -9,7 +9,6 @@ export interface Chapter {
   project_manager_name: string | null
   due_date: string | null
   stage_name: string | null
-  current_stage_activity: string | null
   current_assignee_name: string | null
   status: string
   complexity_level: string
@@ -27,7 +26,6 @@ export interface Chapter {
 
 export interface ChapterUpdate {
   stage_name?:             string | null
-  current_stage_activity?: string | null
   current_assignee_name?:  string | null
   status?:                 string | null
   priority?:               string | null
