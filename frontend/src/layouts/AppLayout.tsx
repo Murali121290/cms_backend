@@ -1,16 +1,22 @@
 import { useEffect } from 'react'
-import { Outlet, useLocation } from 'react-router-dom'
+import { Outlet, useLocation, Navigate } from 'react-router-dom'
 import { Sidebar } from '@/components/Sidebar'
 import { Topbar } from '@/components/Topbar'
 import { useSidebarStore } from '@/store/useSidebarStore'
 import { useAutoLogout } from '@/hooks/useAutoLogout'
+import { useRBAC } from '@/hooks/useRBAC'
 
 const VIEW_RE = /^\/clients\/\d+\/projects\/\d+\/chapters\/\d+\/view(\/.*)?$/
 
 export function AppLayout() {
   const { pathname } = useLocation()
   const { setCollapsed } = useSidebarStore()
+  const { viewer } = useRBAC()
   useAutoLogout()
+
+  if (viewer?.team === 'Accessibility Team' && (pathname === '/' || pathname === '/dashboard')) {
+    return <Navigate to="/post-production" replace />
+  }
 
   // Keep sidebar expanded only on the root page (/), collapse on all other pages
   useEffect(() => {

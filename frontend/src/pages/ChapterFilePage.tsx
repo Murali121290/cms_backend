@@ -317,19 +317,19 @@ function FileActionsMenu({
                     // Images route through the dedicated Image Review workspace;
                     // the DOCX editors would fail on them (see structuring
                     // engine "Package not found at *.jpeg" errors).
-                    <DropdownMenu.Item className={itemCls} onSelect={() => navigate(`/projects/${projectId}/image-review?fileId=${fid}`)}>
+                    <DropdownMenu.Item className={isAssigned ? itemCls : deadCls} disabled={!isAssigned} onSelect={() => navigate(`/projects/${projectId}/image-review?fileId=${fid}`)}>
                       <FilePen size={12} className="text-muted" /> Open in Image Editor
                     </DropdownMenu.Item>
                   )}
                   {isDocx && (
                     <>
-                      <DropdownMenu.Item className={itemCls} onSelect={() => navigate(`${uiPaths.structuringReview(projectId, chapterId, fid)}?tab=editor`)}>
+                      <DropdownMenu.Item className={isAssigned ? itemCls : deadCls} disabled={!isAssigned} onSelect={() => navigate(`${uiPaths.structuringReview(projectId, chapterId, fid)}?tab=editor`)}>
                         <FilePen size={12} className="text-muted" /> Edit in Editor
                       </DropdownMenu.Item>
-                      <DropdownMenu.Item className={itemCls} onSelect={() => navigate(`${uiPaths.structuringReview(projectId, chapterId, fid)}?tab=onlyoffice`)}>
+                      <DropdownMenu.Item className={isAssigned ? itemCls : deadCls} disabled={!isAssigned} onSelect={() => navigate(`${uiPaths.structuringReview(projectId, chapterId, fid)}?tab=onlyoffice`)}>
                         <FilePen size={12} className="text-muted" /> Edit in Office
                       </DropdownMenu.Item>
-                      <DropdownMenu.Item className={itemCls} onSelect={() => void openInWordWithFallback(fid, row.file_name)}>
+                      <DropdownMenu.Item className={isAssigned ? itemCls : deadCls} disabled={!isAssigned} onSelect={() => void openInWordWithFallback(fid, row.file_name)}>
                         <ExternalLink size={12} className="text-muted" /> Edit in MSWord
                       </DropdownMenu.Item>
                     </>
@@ -725,6 +725,7 @@ export function ChapterFilePage({
 
   // Open docx viewer (full-screen viewer page)
   function openEditor(row: FileRow) {
+    if (!resolvedIsAssigned) return
     if (row.db_id && /\.(jpe?g|png|gif|webp|tiff?|bmp|eps)$/i.test(row.file_name)) {
       navigate(`/projects/${pid}/image-review?fileId=${row.db_id}`)
       return
@@ -866,12 +867,15 @@ export function ChapterFilePage({
             {fid ? (
               <button
                 type="button"
+                disabled={!resolvedIsAssigned}
                 onClick={e => {
                   e.stopPropagation()
                   navigate(openTarget)
                 }}
                 title={name}
-                className="font-medium text-text truncate max-w-[2000px] text-left hover:text-primary hover:underline cursor-pointer"
+                className={resolvedIsAssigned
+                  ? "font-medium text-text truncate max-w-[2000px] text-left hover:text-primary hover:underline cursor-pointer"
+                  : "font-medium text-text opacity-50 truncate max-w-[2000px] text-left cursor-not-allowed"}
               >
                 {name}
               </button>
