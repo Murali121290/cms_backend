@@ -22,8 +22,8 @@ import * as Tooltip from '@radix-ui/react-tooltip'
 import {
   ArrowDownToLine, ArrowLeft, BookCheck, ChevronRight, ChevronUp, ChevronDown,
   Code2, Download, ExternalLink, Eye, File, FileCode, FileOutput, FilePen, FileText,
-  FolderOpen, Image, Info, Languages, Layers, Loader2, LogIn, LogOut,
-  MoreVertical, Play, ScanLine, Search, ShieldCheck, Sparkles, Trash2,
+  FolderOpen, History, Image, Languages, Layers, Loader2, LogIn, LogOut,
+  MoreVertical, ScanLine, Search, ShieldCheck, Sparkles, Trash2,
   Upload, Wrench, X, Zap, CheckCircle2, Archive,
 } from 'lucide-react'
 import { FOLDER_CONFIG, COLUMN_DEFINITIONS, getProcessingActions, fileTypeIcon, isProcessingActionVisibleForStage } from '@/config/fileManagerConfig'
@@ -187,12 +187,11 @@ const POLL_INTERVAL_MS = 5_000
 const POLL_TIMEOUT_MS = 600_000 // 10 minutes, matches structuring's poll timeout
 
 function FileActionsMenu({
-  row, onView, onDelete, onViewDetails, onOpenReferenceCheck, stageName, isAssigned, projectId, chapterId,
+  row, onView, onDelete, onOpenReferenceCheck, stageName, isAssigned, projectId, chapterId,
 }: {
   row: FileRow
   onView: (row: FileRow) => void
   onDelete: (row: FileRow) => void
-  onViewDetails: (row: FileRow) => void
   onOpenReferenceCheck: (file: FileRecord) => void
   stageName: string
   isAssigned: boolean
@@ -455,14 +454,6 @@ function FileActionsMenu({
 
                   {fid ? (
                     <>
-                      {/* Run All — placeholder */}
-                      {isAssigned && (
-                        <DropdownMenu.Item className={deadCls}>
-                          <Play size={12} /> Run All Processes
-                          <span className="ml-auto text-[9px] px-1 py-0.5 rounded bg-surface border border-border text-muted">Soon</span>
-                        </DropdownMenu.Item>
-                      )}
-
                       {/* Structuring — opens tag-set selection popup */}
                       {isAssigned && showAction('structuring') && (
                         <DropdownMenu.Item
@@ -602,12 +593,6 @@ function FileActionsMenu({
               )}
               */}
 
-              {/* ── Group 4: Details ─────────────────────────────── */}
-              {sep}
-              {grp('Details')}
-              <DropdownMenu.Item className={itemCls} onSelect={() => onViewDetails(row)}>
-                <Info size={12} className="text-muted" /> View Meta &amp; Version Details
-              </DropdownMenu.Item>
             </>
           )}
         </DropdownMenu.Content>
@@ -972,7 +957,6 @@ export function ChapterFilePage({
             row={i.row.original}
             onView={openEditor}
             onDelete={handleDelete}
-            onViewDetails={setSelectedFile}
             onOpenReferenceCheck={setRefCheckFile}
             stageName={resolvedStageName}
             isAssigned={resolvedIsAssigned}
@@ -982,6 +966,27 @@ export function ChapterFilePage({
         </div>
       ),
     })] : []),
+    col.display({
+      id: 'history', header: 'History', size: 70,
+      cell: ({ row }) => (
+        <div className="flex items-center justify-center">
+          <Tooltip.Provider>
+            <Tooltip.Root>
+              <Tooltip.Trigger asChild>
+                <button
+                  type="button"
+                  className="p-1 rounded text-muted hover:text-text hover:bg-surface transition-colors"
+                  onClick={() => setSelectedFile(row.original)}
+                >
+                  <History size={14} />
+                </button>
+              </Tooltip.Trigger>
+              <Tooltip.Content side="left" className="bg-text text-card text-[11px] px-2 py-1 rounded">View Meta &amp; Version Details</Tooltip.Content>
+            </Tooltip.Root>
+          </Tooltip.Provider>
+        </div>
+      ),
+    }),
   ], [dynamicCols, pid, cid, resolvedStageName, resolvedIsAssigned, activeFolder]) // eslint-disable-line
 
   const table = useReactTable({
