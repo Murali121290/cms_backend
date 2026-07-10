@@ -15,7 +15,7 @@ from app.models import Base
 # Import new domain models for Alembic autogenerate
 from app.domains.clients.models import Client
 from app.domains.workflow.models import (
-    RolesMaster, StageMaster, StageActivityMaster, StageDetail, WorkflowMaster, ChapterInfo
+    RolesMaster, StageMaster, StageDetail, WorkflowMaster, ChapterInfo
 )
 
 # this is the Alembic Config object, which provides
