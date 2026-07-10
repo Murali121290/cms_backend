@@ -817,7 +817,14 @@ export function ChapterFilePage({
             {resolvedIsAssigned && (
               <IconTooltipButton
                 title="Edit"
-                onClick={() => openEditor(r)}
+                onClick={() => {
+                  const isDocx = /\.docx?$/i.test(r.file_name)
+                  if (isDocx && fid) {
+                    void openInWordWithFallback(fid, r.file_name)
+                  } else {
+                    openEditor(r)
+                  }
+                }}
                 className="text-muted hover:text-text hover:bg-surface"
               >
                 <FilePen size={13} />
