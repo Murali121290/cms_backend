@@ -35,7 +35,7 @@
     "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
     "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
   },
-  "Pre-editing": {
+    "Pre-editing": {
     "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [
       "hemamalinik@s4carlisle.com",
@@ -47,7 +47,31 @@
     "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
     "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
   },
-  "Copyediting": {
+    "Pre-editing QA": {
+    "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
+    "to": [
+      "hemamalinik@s4carlisle.com",
+      "MuthukumarS@s4carlisle.com",
+      "muraliba@s4carlisle.com",
+      "selvabharathp@s4carlisle.com"
+    ],
+    "cc": [],
+    "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
+    "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+  },
+  "Language Editing": {
+    "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
+    "to": [
+      "hemamalinik@s4carlisle.com",
+      "MuthukumarS@s4carlisle.com",
+      "muraliba@s4carlisle.com",
+      "selvabharathp@s4carlisle.com"
+    ],
+    "cc": [],
+    "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
+    "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
+  },
+    "Language Editing QA": {
     "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [
       "hemamalinik@s4carlisle.com",

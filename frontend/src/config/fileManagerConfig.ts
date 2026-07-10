@@ -110,16 +110,16 @@ export type ProcessingActionKey =
   | 'permissionsCheck' | 'aiCreditExtraction' | 'biasScan' | 'wordToXml'
 
 export const PROCESSING_ACTION_STAGE_MAP: Record<ProcessingActionKey, string[] | '*'> = {
-  structuring:          ['Pre-editing'],
-  referenceValidation:  ['Pre-editing'],
-  referenceReview:      ['Pre-editing'],
-  languageEdit:         ['Copyediting'],
-  technicalEdit:        ['Copyediting'],
+  structuring:          ['Pre-editing','Pre-editing QA'],
+  referenceValidation:  ['Pre-editing','Pre-editing QA'],
+  referenceReview:      ['Pre-editing','Pre-editing QA'],
+  languageEdit:         ['Language Editing', 'Language Editing QA'],
+  technicalEdit:        ['Language Editing','Language Editing QA'],
   manuscriptAnalysis:   ['Manuscript Analysis'],
-  permissionsCheck:     ['XML Conversion'],
-  aiCreditExtraction:   ['XML Conversion'],
-  biasScan:             ['XML Conversion'],
-  wordToXml:            ['XML Conversion'],
+  permissionsCheck:     ['Digital Processing'],
+  aiCreditExtraction:   ['Digital Processing'],
+  biasScan:             ['Digital Processing'],
+  wordToXml:            ['XML Conversion']
 }
 
 export function isProcessingActionVisibleForStage(action: ProcessingActionKey, stageName: string): boolean {
