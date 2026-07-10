@@ -67,7 +67,7 @@ PROCESS_PERMISSIONS = {
     "structuring": ["Editor", "CopyEditor", "Admin"],
     "bias_scan": ["Editor", "CopyEditor", "Admin", "ProjectManager"],
     "credit_extractor_ai": ["PermissionsManager", "ProjectManager", "Admin"],
-    "word_to_xml": ["PPD", "ProjectManager", "Admin"],
+    "word_to_xml": ["PPD", "ProjectManager", "Admin", "XML Manager", "Xml manager"],
 }
 
 
