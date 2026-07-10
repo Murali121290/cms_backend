@@ -3,7 +3,6 @@ import {
   ArrowLeft,
   CheckCircle2,
   ChevronRight,
-  Download,
   FileText,
   Info,
   Maximize2,
@@ -924,6 +923,15 @@ export function ReferenceValidationReviewPage() {
   const [linkingSource, setLinkingSource] = useState<LinkingSource | null>(null);
 
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const pageRootRef = useRef<HTMLElement>(null);
+
+  // Toggling fullscreen removes/restores the page header, which shifts page
+  // height abruptly — without this, the scroll container keeps its old
+  // scrollTop and the remaining content ends up scrolled partly off-screen,
+  // clipped under the app's sticky topbar.
+  useEffect(() => {
+    pageRootRef.current?.closest(".overflow-y-auto")?.scrollTo({ top: 0 });
+  }, [isFullscreen]);
   const [trackChangesEnabled, setTrackChangesEnabled] = useState(false);
   const [selectedCitationText, setSelectedCitationText] = useState<string | null>(null);
   const [isRefetching, setIsRefetching] = useState(false);
@@ -2016,16 +2024,18 @@ export function ReferenceValidationReviewPage() {
   });
 
   return (
-    <main className={`page-enter min-h-screen bg-surface-100 flex flex-col ${isFullscreen ? "p-2" : "p-6"}`}>
+    <main ref={pageRootRef} className={`page-enter min-h-screen bg-surface-100 flex flex-col ${isFullscreen ? "p-2" : "px-6 pt-3 pb-6"}`}>
       {isFullscreen && (
-        <button
-          onClick={() => setIsFullscreen(false)}
-          className="fixed top-3 right-4 z-50 flex items-center gap-1.5 px-3 py-1.5 bg-navy-900/90 hover:bg-navy-800 text-white text-[11px] font-bold rounded-lg shadow-lg backdrop-blur-sm border border-navy-700/60 transition-all"
-          title="Exit Fullscreen (Esc)"
-        >
-          <Minimize2 className="w-3.5 h-3.5" />
-          Exit Fullscreen
-        </button>
+        <div style={{ position: "fixed", top: "16px", right: "16px", zIndex: 1000 }}>
+          <Button
+            variant="secondary"
+            leftIcon={<Minimize2 className="w-4 h-4" />}
+            onClick={() => setIsFullscreen(false)}
+            style={{ boxShadow: "0 4px 12px rgba(0,0,0,0.15)", backgroundColor: "#FFFFFF" }}
+          >
+            Exit Fullscreen
+          </Button>
+        </div>
       )}
       <div className={`w-full flex-1 flex flex-col ${isFullscreen ? "max-w-none px-0" : "max-w-[1650px] mx-auto px-2 space-y-6"}`}>
 
@@ -2091,29 +2101,20 @@ export function ReferenceValidationReviewPage() {
         {!isFullscreen && (
           <PageHeader
             breadcrumb={
-              <span className="flex items-center gap-1.5 text-sm text-navy-400">
-                <Link className="hover:text-navy-700 transition-colors" to={uiPaths.projects}>
-                  Projects
-                </Link>
-                <span>/</span>
-                <Link
-                  className="hover:text-navy-700 transition-colors"
-                  to={uiPaths.chapterDetail(normalizedProjectId, normalizedChapterId)}
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => navigate(uiPaths.chapterDetail(normalizedProjectId, normalizedChapterId))}
+                  className="p-2 rounded-lg hover:bg-surface text-muted hover:text-text transition-colors -ml-2"
                 >
-                  Chapter
-                </Link>
-                <span>/</span>
-                <span className="text-navy-700">Reference Validation Workspace</span>
-              </span>
+                  <ArrowLeft size={18} />
+                </button>
+                <span className="text-sm font-medium text-navy-700 whitespace-nowrap">Back to Chapter</span>
+                <span className="text-navy-300">·</span>
+                <span className="text-sm font-semibold text-text truncate">{review.file.filename}</span>
+              </div>
             }
-            title="Reference Validation & Styling Review"
-            subtitle={review.file.filename}
+            title=""
             secondaryActions={[
-              <a key="export" href={review.export_href} className="no-underline" download>
-                <Button variant="secondary" leftIcon={<Download className="w-4 h-4" />}>
-                  Export Final DOCX
-                </Button>
-              </a>,
               <Button
                 key="fullscreen"
                 variant="secondary"
@@ -2121,14 +2122,6 @@ export function ReferenceValidationReviewPage() {
                 onClick={() => setIsFullscreen(true)}
               >
                 Fullscreen
-              </Button>,
-              <Button
-                key="back"
-                variant="secondary"
-                leftIcon={<ArrowLeft />}
-                onClick={() => navigate(-1)}
-              >
-                Back
               </Button>,
             ]}
           />
