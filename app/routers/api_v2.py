@@ -824,7 +824,7 @@ def api_v2_project_images(
                 "version": f.version,
                 "uploaded_at": f.uploaded_at.isoformat() if f.uploaded_at else None,
                 "download_url": f"/api/v2/files/{f.id}/download",
-                "preview_url": f"/api/v2/files/{f.id}/preview?fmt=png",
+                "preview_url": f"/api/v2/files/{f.id}/preview?fmt=png&v={f.version or 1}",
                 "needs_transcoding": needs_transcoding,
             }
         )
@@ -1900,10 +1900,12 @@ async def api_v2_edit_save_file(
 
     Called by the Image Review & Editor when a user hits Save. The frontend
     bakes crop / rotate / resize into the uploaded PNG or JPEG via canvas
-    (canvas can't emit DPI metadata itself). If `dpi` is provided we re-encode
-    the incoming bytes through Pillow so the resulting file's pHYs/JFIF/EXIF
-    density header matches. Behaviour otherwise mirrors the upload endpoint:
-    the previous version is archived and `file.version` is incremented.
+    (canvas can't emit DPI metadata itself, nor can it produce TIFF/WebP/etc.).
+    Pillow re-encodes the incoming bytes into the original file's format so a
+    TIFF upload stays TIFF, a WebP stays WebP, etc. If `dpi` is provided the
+    resulting file's pHYs/JFIF/EXIF density header is updated to match.
+    Behaviour otherwise mirrors the upload endpoint: the previous version is
+    archived and `file.version` is incremented.
     """
     viewer = _require_cookie_user(user)
     if not viewer:
@@ -1950,25 +1952,38 @@ async def api_v2_edit_save_file(
             message=f"Edited image is too large ({img.width}×{img.height}); limit is 100 MP.",
         )
 
-    # Decide the on-disk format from the ORIGINAL file's extension: this keeps
-    # PNG saves overwriting PNG sources, JPEG saves overwriting JPEG sources.
-    # If the source was TIFF/EPS and the frontend baked a PNG, use PNG-with-
-    # -edited suffix to preserve the original vector/multi-page master.
+    # Preserve the ORIGINAL file's format: TIFF stays TIFF, WebP stays WebP,
+    # etc. Pillow has no EPS encoder (only a Ghostscript-backed reader), so
+    # EPS falls back to a `-edited.png` sibling to preserve the vector master.
     import os
     from app.domains.files import version_service
     from app.utils.timezone import now_ist_naive
 
+    # ext → PIL format name. Everything here is encodable by Pillow's default
+    # build. EPS is intentionally absent (read-only in Pillow).
+    FORMAT_MAP = {
+        "png":  "PNG",
+        "jpg":  "JPEG",
+        "jpeg": "JPEG",
+        "gif":  "GIF",
+        "webp": "WEBP",
+        "bmp":  "BMP",
+        "tif":  "TIFF",
+        "tiff": "TIFF",
+    }
+
     orig_name = file_record.filename
     orig_ext = orig_name.rsplit(".", 1)[-1].lower() if "." in orig_name else ""
-    browser_safe = orig_ext in {"png", "jpg", "jpeg", "gif", "webp", "bmp"}
+    pil_format = FORMAT_MAP.get(orig_ext)
 
-    if browser_safe:
+    if pil_format is not None:
         target_filename = orig_name
-        target_ext = "jpg" if orig_ext in ("jpg", "jpeg") else orig_ext
+        target_ext = "jpg" if orig_ext == "jpeg" else orig_ext
     else:
         stem = orig_name.rsplit(".", 1)[0] if "." in orig_name else orig_name
         target_filename = f"{stem}-edited.png"
         target_ext = "png"
+        pil_format = "PNG"
 
     base_path = os.path.dirname(file_record.path)
     target_path = os.path.join(base_path, target_filename)
@@ -1977,21 +1992,30 @@ async def api_v2_edit_save_file(
     if dpi is not None and dpi > 0:
         save_kwargs["dpi"] = (int(dpi), int(dpi))
 
-    fmt_map = {"png": "PNG", "jpg": "JPEG", "jpeg": "JPEG"}
-    pil_format = fmt_map.get(target_ext, "PNG")
-    if pil_format == "JPEG":
+    # Per-format mode conversion & encoder options. JPEG/BMP need RGB (no
+    # alpha); GIF needs a palette; PNG/WEBP/TIFF accept RGBA natively.
+    if pil_format in ("JPEG", "BMP"):
         if img.mode in ("RGBA", "LA"):
             bg = Image.new("RGB", img.size, (255, 255, 255))
             bg.paste(img, mask=img.split()[-1])
             img = bg
         elif img.mode != "RGB":
             img = img.convert("RGB")
-        save_kwargs["quality"] = 92
-        save_kwargs["optimize"] = True
-    else:
+        if pil_format == "JPEG":
+            save_kwargs["quality"] = 92
+            save_kwargs["optimize"] = True
+    elif pil_format == "PNG":
         if img.mode == "P":
             img = img.convert("RGBA")
         save_kwargs["optimize"] = True
+    elif pil_format == "WEBP":
+        save_kwargs["quality"] = 92
+    elif pil_format == "GIF":
+        if img.mode not in ("P", "L", "1"):
+            img = img.convert("P", palette=Image.ADAPTIVE)
+    elif pil_format == "TIFF":
+        # LZW is lossless and widely supported by print/prepress toolchains.
+        save_kwargs["compression"] = "tiff_lzw"
 
     # Archive the current version, then write the new one atomically.
     if os.path.exists(file_record.path):
