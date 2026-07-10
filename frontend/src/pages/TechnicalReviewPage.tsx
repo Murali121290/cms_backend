@@ -6,7 +6,6 @@ import {
   Info,
   LayoutDashboard,
   FileText,
-  Download,
   AlertTriangle,
   Search,
   CheckSquare,
@@ -565,47 +564,33 @@ export function TechnicalReviewPage() {
     : "";
 
   return (
-    <main className={`page-enter min-h-screen bg-surface-100 flex flex-col TEST-CLASSES-DEPLOYED ${isFullscreen ? "p-2" : "p-6"}`}>
-      <div className={`w-full flex-1 flex flex-col ${isFullscreen ? "max-w-none px-0" : "max-w-[1600px] mx-auto px-4 space-y-6"}`}>
+    <main className={`page-enter min-h-screen bg-surface-100 flex flex-col TEST-CLASSES-DEPLOYED ${isFullscreen ? "p-2" : "px-6 pt-3 pb-6"}`}>
+      <div className={`w-full flex-1 flex flex-col ${isFullscreen ? "max-w-none px-0" : "max-w-[1600px] mx-auto px-4 space-y-3"}`}>
         {/* Page Header */}
         {!isFullscreen && (
           <PageHeader
             breadcrumb={
-              <span className="flex items-center gap-1.5 text-sm text-navy-400">
-                <Link className="hover:text-navy-700 transition-colors" to={uiPaths.projects}>
-                  Projects
-                </Link>
-                <span>/</span>
-                <Link
-                  className="hover:text-navy-700 transition-colors"
-                  to={uiPaths.chapterDetail(normalizedProjectId, normalizedChapterId)}
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => navigate(uiPaths.chapterDetail(normalizedProjectId, normalizedChapterId))}
+                  className="p-2 rounded-lg hover:bg-surface text-muted hover:text-text transition-colors -ml-2"
                 >
-                  Chapter
-                </Link>
-                <span>/</span>
-                <span className="text-navy-700">Technical Editor</span>
-              </span>
+                  <ArrowLeft size={18} />
+                </button>
+                <span className="text-sm font-medium text-navy-700 whitespace-nowrap">Back to Chapter</span>
+                <span className="text-navy-300">·</span>
+                <span className="text-sm font-semibold text-text truncate">{file.filename}</span>
+              </div>
             }
-            title="Advanced Manuscript consistency reviewer"
-            subtitle={file.filename}
+            title=""
             secondaryActions={[
-              <a
-                key="download-docx"
-                href={`/api/v2/files/${fileId}/download`}
-                className="no-underline"
-                download
-              >
-                <Button variant="secondary" leftIcon={<Download className="w-4 h-4" />}>
-                  Export DOCX
-                </Button>
-              </a>,
               <Button
-                key="back"
+                key="fullscreen"
                 variant="secondary"
-                leftIcon={<ArrowLeft />}
-                onClick={() => navigate(-1)}
+                leftIcon={<Maximize2 className="w-4 h-4" />}
+                onClick={() => setIsFullscreen(true)}
               >
-                Back
+                Fullscreen
               </Button>,
             ]}
           />
@@ -1159,18 +1144,6 @@ export function TechnicalReviewPage() {
                       </>
                     )}
                   </div>
-
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => setIsFullscreen(!isFullscreen)}
-                      leftIcon={isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
-                      className="text-navy-700 hover:text-navy-900 font-semibold text-[11px] py-1 px-2.5 h-8 flex items-center gap-1"
-                    >
-                      {isFullscreen ? "Exit Full Screen" : "Full Screen"}
-                    </Button>
-                  </div>
                 </div>
 
                 <div className="flex-1 bg-surface-200 relative flex flex-col min-h-0 overflow-hidden">
@@ -1480,6 +1453,20 @@ export function TechnicalReviewPage() {
           </div>
         )}
       </div>
+
+      {/* Floating Fullscreen Exit Button */}
+      {isFullscreen && (
+        <div style={{ position: "fixed", top: "16px", right: "16px", zIndex: 1000 }}>
+          <Button
+            variant="secondary"
+            leftIcon={<Minimize2 className="w-4 h-4" />}
+            onClick={() => setIsFullscreen(false)}
+            style={{ boxShadow: "0 4px 12px rgba(0,0,0,0.15)", backgroundColor: "#FFFFFF" }}
+          >
+            Exit Fullscreen
+          </Button>
+        </div>
+      )}
     </main>
   );
 }
