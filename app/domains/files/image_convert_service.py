@@ -28,7 +28,7 @@ from app.utils.timezone import now_ist_naive
 
 logger = logging.getLogger("app.domains.files.image_convert_service")
 
-TargetFormat = Literal["png", "jpg", "jpeg", "tiff", "tif"]
+TargetFormat = Literal["png", "jpg", "jpeg", "tiff", "tif", "eps"]
 WriteMode = Literal["copy", "in_place"]
 
 _PIL_FORMAT_BY_EXT = {
@@ -37,6 +37,9 @@ _PIL_FORMAT_BY_EXT = {
     "jpeg": "JPEG",
     "tif": "TIFF",
     "tiff": "TIFF",
+    # Pillow ships a Level-2 EPS encoder that embeds the raster as ASCII-hex.
+    # It has no alpha, so RGBA/LA sources are flattened onto white below.
+    "eps": "EPS",
 }
 
 # Max source dimensions we're willing to load. Guards against a 500 MP TIFF
@@ -86,9 +89,9 @@ def convert_image(
 
         img = ImageOps.exif_transpose(img) or img
 
-        # JPEG can't hold alpha; flatten onto white so the result matches
-        # what a user would expect from a Save As in an image editor.
-        if pil_format == "JPEG":
+        # JPEG and EPS can't hold alpha; flatten onto white so the result
+        # matches what a user would expect from a Save As in an image editor.
+        if pil_format in ("JPEG", "EPS"):
             if img.mode in ("RGBA", "LA"):
                 bg = Image.new("RGB", img.size, (255, 255, 255))
                 bg.paste(img, mask=img.split()[-1])
@@ -108,6 +111,8 @@ def convert_image(
                 img.save(buf, format="PNG", optimize=True)
             elif pil_format == "TIFF":
                 img.save(buf, format="TIFF", compression="tiff_lzw")
+            elif pil_format == "EPS":
+                img.save(buf, format="EPS")
         except (OSError, UnidentifiedImageError) as e:
             raise RuntimeError(f"Failed to encode target: {e}") from e
 

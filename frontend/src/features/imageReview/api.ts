@@ -29,7 +29,7 @@ export async function getProjectImages(projectId: number): Promise<ProjectImages
 
 export interface ConvertImageArgs {
   fileId: number;
-  target_format: "png" | "jpg" | "tif";
+  target_format: "png" | "jpg" | "tif" | "eps";
   mode?: "copy" | "in_place";
 }
 

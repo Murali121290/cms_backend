@@ -752,7 +752,7 @@ export function ImageReviewPage() {
             {selected && (
               <div className="flex items-center gap-1.5">
                 <span className="text-slate-500">Convert →</span>
-                {(["png", "jpg", "tif"] as const).map((fmt) => {
+                {(["png", "jpg", "tif", "eps"] as const).map((fmt) => {
                   const disabled = convertMut.isPending || selected.file_type.toLowerCase().startsWith(fmt);
                   return (
                     <button

@@ -1813,11 +1813,11 @@ def api_v2_file_convert(
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
-    """Convert an image to a different format (EPS/TIFF ↔ PNG/JPG).
+    """Convert an image to a different format (EPS/TIFF ↔ PNG/JPG/EPS).
 
     Body:
       {
-        "target_format": "png" | "jpg" | "tif",
+        "target_format": "png" | "jpg" | "tif" | "eps",
         "mode":          "copy" | "in_place"    (default "copy")
       }
     """
