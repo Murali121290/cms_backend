@@ -285,47 +285,33 @@ export function StructuringReviewPage() {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <main className={`page-enter min-h-screen bg-surface-100 flex flex-col ${isFullscreen ? "p-2" : "p-6"}`}>
+    <main className={`page-enter min-h-screen bg-surface-100 flex flex-col ${isFullscreen ? "p-2" : "px-6 pt-3 pb-6"}`}>
       <div className={`w-full flex-1 flex flex-col ${
         isFullscreen
           ? "max-w-none px-0"
           : activeTab === "editor"
-            ? "px-4 space-y-6"
-            : "max-w-[1600px] mx-auto px-4 space-y-6"
+            ? "px-4 space-y-3"
+            : "max-w-[1600px] mx-auto px-4 space-y-3"
       }`}>
 
         {/* Page Header */}
         {!isFullscreen && (
           <PageHeader
             breadcrumb={
-              <span className="flex items-center gap-1.5 text-sm text-navy-400">
-                <Link className="hover:text-navy-700 transition-colors" to={uiPaths.projects}>
-                  Projects
-                </Link>
-                <span>/</span>
-                <Link
-                  className="hover:text-navy-700 transition-colors"
-                  to={uiPaths.chapterDetail(normalizedProjectId, normalizedChapterId)}
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => navigate(uiPaths.chapterDetail(normalizedProjectId, normalizedChapterId))}
+                  className="p-2 rounded-lg hover:bg-surface text-muted hover:text-text transition-colors -ml-2"
                 >
-                  Chapter
-                </Link>
-                <span>/</span>
-                <span className="text-navy-700">Structuring Review</span>
-              </span>
+                  <ArrowLeft size={18} />
+                </button>
+                <span className="text-sm font-medium text-navy-700 whitespace-nowrap">Back to Chapter</span>
+                <span className="text-navy-300">·</span>
+                <span className="text-sm font-semibold text-text truncate">{review.file.filename}</span>
+              </div>
             }
-            title="Document Structuring Workspace"
-            subtitle={review.file.filename}
+            title=""
             secondaryActions={[
-              <a
-                key="export"
-                href={review.actions.export_href}
-                className="no-underline"
-                download
-              >
-                <Button variant="secondary" leftIcon={<Download className="w-4 h-4" />}>
-                  Export Processed File
-                </Button>
-              </a>,
               <Button
                 key="fullscreen"
                 variant="secondary"
@@ -333,14 +319,6 @@ export function StructuringReviewPage() {
                 onClick={() => setIsFullscreen(true)}
               >
                 Fullscreen
-              </Button>,
-              <Button
-                key="back"
-                variant="secondary"
-                leftIcon={<ArrowLeft />}
-                onClick={() => navigate(-1)}
-              >
-                Back
               </Button>,
             ]}
           />
@@ -588,7 +566,7 @@ export function StructuringReviewPage() {
 
         {/* ── TAB 2: EDITOR WORKSPACE ────────────────────────────── */}
         {(activeTab === "editor" || isFullscreen) && activeTab !== "onlyoffice" && (
-          <div className="flex-1 flex flex-col min-h-0 page-enter">
+          <div className={`flex-1 flex flex-col min-h-0 page-enter ${isFullscreen ? "" : "mt-3"}`}>
             {xhtmlQuery.isPending && !xsltContent ? (
               <div style={{ padding: "24px", textAlign: "center" }}>Loading document…</div>
             ) : (

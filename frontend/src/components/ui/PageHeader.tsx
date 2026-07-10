@@ -28,12 +28,16 @@ export function PageHeader({
           <div className="mb-1.5 text-sm text-muted">{breadcrumb}</div>
         )}
 
-        <div className="flex items-center gap-2.5 flex-wrap">
-          <h1 className="text-2xl font-semibold text-text leading-tight truncate">
-            {title}
-          </h1>
-          {badge && <div className="shrink-0">{badge}</div>}
-        </div>
+        {(title || badge) && (
+          <div className="flex items-center gap-2.5 flex-wrap">
+            {title && (
+              <h1 className="text-2xl font-semibold text-text leading-tight truncate">
+                {title}
+              </h1>
+            )}
+            {badge && <div className="shrink-0">{badge}</div>}
+          </div>
+        )}
 
         {subtitle && (
           <p className="mt-1 text-sm text-muted leading-snug">{subtitle}</p>
