@@ -10,6 +10,7 @@ export interface ProjectImage {
   file_type: string;
   category: string;
   version: number;
+  is_original: boolean;
   uploaded_at: string | null;
   download_url: string;
   preview_url: string;

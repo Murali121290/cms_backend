@@ -822,6 +822,7 @@ def api_v2_project_images(
                 "file_type": f.file_type,
                 "category": f.category,
                 "version": f.version,
+                "is_original": bool(f.is_original),
                 "uploaded_at": f.uploaded_at.isoformat() if f.uploaded_at else None,
                 "download_url": f"/api/v2/files/{f.id}/download",
                 "preview_url": f"/api/v2/files/{f.id}/preview?fmt=png&v={f.version or 1}",
@@ -2070,6 +2071,9 @@ async def api_v2_edit_save_file(
             category=file_record.category,
             version=1,
             uploaded_at=now_ist_naive(),
+            # Fallback path for formats Pillow can't encode (e.g. EPS): we
+            # write a `-edited.png` sibling. It's derived, not an upload.
+            is_original=False,
         )
         db.add(result)
         db.commit()

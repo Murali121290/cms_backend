@@ -156,6 +156,9 @@ def _write_in_place(
     file_record.file_type = new_ext
     file_record.version = (file_record.version or 0) + 1
     file_record.uploaded_at = now_ist_naive()
+    # An in-place convert replaces the row's bytes with a derived encoding, so
+    # the slot is no longer the original upload — clear the flag.
+    file_record.is_original = False
     db.commit()
     db.refresh(file_record)
     return file_record
@@ -204,6 +207,7 @@ def _write_copy(
         category=file_record.category,
         version=1,
         uploaded_at=now_ist_naive(),
+        is_original=False,
     )
     db.add(new_record)
     db.commit()

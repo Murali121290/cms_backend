@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, DateTime, Date, JSON, Enum as SQLEnum, TypeDecorator, BigInteger, Text, func
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, DateTime, Date, JSON, Enum as SQLEnum, TypeDecorator, BigInteger, Text, func, true as sa_true
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY, JSONB
 from sqlalchemy.orm import relationship, synonym
 from datetime import datetime
@@ -33,7 +33,11 @@ class File(Base):
     path = Column(String)
     uploaded_at = Column(DateTime, default=datetime.utcnow)
     version = Column(Integer, default=1)
-    
+    # True when this row represents an actually-uploaded file; False when the
+    # row was produced by a conversion, processing pipeline, or edit-derived
+    # sibling. Drives the "Original" vs "Converted" badge in Image Review.
+    is_original = Column(Boolean, default=True, server_default=sa_true(), nullable=False)
+
     project = relationship("Project", back_populates="files")
     chapter = relationship("ChapterInfo", back_populates="files")
     

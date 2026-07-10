@@ -131,18 +131,25 @@ function useEditHistory(initial: EditState) {
   };
 }
 
-// ─── Visual-only status stub ────────────────────────────────────────────────
-type ReviewStatus = "original" | "pending" | "approved";
+// ─── Review status ──────────────────────────────────────────────────────────
+// Derived from the file's origin + version:
+//   uploaded, unedited            → Original
+//   uploaded, edited (v > 1)      → Original (edits happen in-place on the
+//                                   original slot; treat the record as still
+//                                   representing the uploaded master)
+//   converted / pipeline-derived  → Converted
+//   converted + edited (v > 1)    → Pending Review
+// Approved is reserved for a future explicit approval action.
+type ReviewStatus = "original" | "converted" | "pending" | "approved";
 
-function stubStatusFor(image: ProjectImage): ReviewStatus {
-  const bucket = image.id % 5;
-  if (bucket === 0) return "pending";
-  if (bucket === 1) return "approved";
-  return "original";
+function statusFor(image: ProjectImage): ReviewStatus {
+  if (image.is_original) return "original";
+  return (image.version ?? 1) > 1 ? "pending" : "converted";
 }
 
 const STATUS_STYLES: Record<ReviewStatus, { label: string; className: string }> = {
   original: { label: "Original", className: "bg-slate-800 text-white" },
+  converted: { label: "Converted", className: "bg-sky-600 text-white" },
   pending: { label: "Pending Review", className: "bg-amber-500 text-white" },
   approved: { label: "Approved", className: "bg-emerald-500 text-white" },
 };
@@ -1257,7 +1264,7 @@ function ImageCard({
 }) {
   const [thumbError, setThumbError] = useState(false);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
-  const status = stubStatusFor(image);
+  const status = statusFor(image);
   const badge = STATUS_STYLES[status];
 
   return (
