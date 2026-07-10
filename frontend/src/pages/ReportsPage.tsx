@@ -19,6 +19,7 @@ export function ReportsPage() {
       icon: FileText,
       path: '/reports/schedule',
       color: 'text-emerald-500 bg-emerald-50 dark:bg-emerald-950/30',
+      comingSoon: true,
     },
     {
       title: 'Daily Operations Dashboard',
@@ -26,6 +27,7 @@ export function ReportsPage() {
       icon: CalendarDays,
       path: '/reports/today-schedule',
       color: 'text-violet-500 bg-violet-50 dark:bg-violet-950/30',
+      comingSoon: true,
     },
   ]
 
@@ -44,13 +46,22 @@ export function ReportsPage() {
           return (
             <Card
               key={card.path}
-              className="cursor-pointer group hover:border-primary/50 transition-all duration-200"
-              onClick={() => navigate(card.path)}
+              className={card.comingSoon
+                ? 'opacity-60 cursor-not-allowed relative'
+                : 'cursor-pointer group hover:border-primary/50 transition-all duration-200'}
+              onClick={() => { if (!card.comingSoon) navigate(card.path) }}
             >
               <CardBody className="flex flex-col h-full justify-between p-6 gap-6">
                 <div className="space-y-4">
-                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${card.color}`}>
-                    <Icon size={24} />
+                  <div className="flex items-center justify-between">
+                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${card.color}`}>
+                      <Icon size={24} />
+                    </div>
+                    {card.comingSoon && (
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-surface border border-border text-muted uppercase tracking-wider">
+                        Coming Soon
+                      </span>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <h3 className="text-lg font-semibold text-text group-hover:text-primary transition-colors">
@@ -62,10 +73,12 @@ export function ReportsPage() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 text-xs font-semibold text-primary group-hover:translate-x-1 transition-transform">
-                  <span>Open Report</span>
-                  <ArrowRight size={14} />
-                </div>
+                {!card.comingSoon && (
+                  <div className="flex items-center gap-2 text-xs font-semibold text-primary group-hover:translate-x-1 transition-transform">
+                    <span>Open Report</span>
+                    <ArrowRight size={14} />
+                  </div>
+                )}
               </CardBody>
             </Card>
           )

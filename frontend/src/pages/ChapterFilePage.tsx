@@ -362,7 +362,7 @@ function ProcessingActionsMenu({
           </button>
         )}
 
-        <button
+        {/* <button
           disabled={!fid || !fname.endsWith('.indd')}
           className={btnCls}
           onClick={() => void handleConvert('indesign-to-word', 'InDesign file')}
@@ -376,7 +376,7 @@ function ProcessingActionsMenu({
           onClick={() => void handleConvert('pdf-to-word', 'PDF file')}
         >
           <FileOutput size={12} className="text-amber-500" /> PDF to Word
-        </button>
+        </button> */}
 
         {showAction('manuscriptAnalysis') && (
           <button
