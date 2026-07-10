@@ -1,5 +1,5 @@
 {
-  "_README": "How to add configurations: Create a separate file named '{Customer Name}.json' in this folder (e.g., 'Artech House.json'). Define the configuration per stage. Allowed placeholders in string values: {chapter_name}, {chapter_title}, {current_stage}, {next_stage}, {project_code}, {author_email}, {client_email}, {copyediting_team_email}, {pre_editing_team_email}, {next_stage_team_email}.",
+  "_README": "How to add configurations: Create a separate file named '{Customer Name}.json' in this folder (e.g., 'Artech House.json'). Define the configuration per stage. Allowed placeholders in string values: {chapter_name}, {chapter_title}, {current_stage}, {next_stage}, {project_code}, {author_email}, {client_email}, {languageediting_team_email}, {pre_editing_team_email}, {next_stage_team_email}.",
   "Job Initiation": {
     "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [
@@ -36,7 +36,7 @@
     "subject": "{project_code} - {chapter_name} | {current_stage} \u2192 {next_stage} | Stage Transition Notification",
     "body": "Hi Team,\n\nThe {current_stage} stage has been completed for Chapter {chapter_name}.\n\nThe chapter has been moved to the {next_stage} stage and is now ready for processing.\n\nRegards,\n{current_stage} Team\n\nNote : This is an automated mail and please do not reply."
   },
-  "Copyediting": {
+  "Language Editing": {
     "custom_message": "The {current_stage} stage has been completed. The chapter has been moved to the {next_stage} stage.",
     "to": [
       "{next_stage_team_email}"

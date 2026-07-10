@@ -5953,7 +5953,7 @@ def _resolve_placeholders(text: str, chapter, project, client, current_stage: st
         "{project_code}": chapter.project or "",
         "{author_email}": getattr(project, "customer_contact", None) or getattr(client, "email", None) or "author@example.com",
         "{client_email}": getattr(client, "email", None) or "client@example.com",
-        "{copyediting_team_email}": "copyediting_team@example.com",
+        "{languageediting_team_email}": "languageediting_team@example.com",
         "{pre_editing_team_email}": "pre_editing_team@example.com",
         "{next_stage_team_email}": f"{next_stage.lower().replace(' ', '_').replace('-', '_').replace('+', '')}_team@example.com",
     }
