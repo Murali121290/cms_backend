@@ -218,8 +218,8 @@ function IconTooltipButton({
         <Tooltip.Trigger asChild>
           {asChild
             ? cloneElement(children, {
-                className: `inline-flex p-1 rounded transition-colors ${className}`,
-              })
+              className: `inline-flex p-1 rounded transition-colors ${className}`,
+            })
             : (
               <button
                 type="button"
@@ -844,8 +844,14 @@ export function ChapterFilePage({
           <div className="flex items-center justify-center gap-1">
             {resolvedIsAssigned && (
               <IconTooltipButton
-                title="Edit"
-                onClick={() => openEditor(r)}
+                title={r.file_name.toLowerCase().endsWith('.docx') ? "Open in Word" : "Edit"}
+                onClick={() => {
+                  if (r.file_name.toLowerCase().endsWith('.docx') && fid) {
+                    void openInWordWithFallback(fid, r.file_name)
+                  } else {
+                    openEditor(r)
+                  }
+                }}
                 className="text-muted hover:text-text hover:bg-surface"
               >
                 <FilePen size={13} />
