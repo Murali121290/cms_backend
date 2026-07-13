@@ -2853,6 +2853,7 @@ def api_v2_upload_zip(
 
         zip_archive_dir = os.path.join(file_service.UPLOAD_DIR, project.code)
         os.makedirs(zip_archive_dir, exist_ok=True)
+        project_service.create_predefined_project_folders(zip_archive_dir)
         zip_archive_path = os.path.join(zip_archive_dir, f"{project.code}_manuscript.zip")
         shutil.copy2(zip_path, zip_archive_path)
 
@@ -2934,13 +2935,31 @@ def api_v2_upload_zip(
                 rel_path = os.path.relpath(full_path, temp_dir)
                 category, ext = determine_category_and_type(fname)
 
-                chapter_no_str = extract_chapter_number(fname)
-                if not chapter_no_str:
-                    path_parts = rel_path.replace("\\", "/").split("/")
-                    for part in path_parts[:-1]:
-                        chapter_no_str = extract_chapter_number(part)
-                        if chapter_no_str:
-                            break
+                path_parts = rel_path.replace("\\", "/").split("/")
+                is_design_path = any(part.lower() == "design" for part in path_parts[:-1])
+                is_ce_path = any(part.lower() == "ce support" for part in path_parts[:-1])
+
+                if is_design_path:
+                    chapter_no_str = "Design"
+                    design_idx = [i for i, part in enumerate(path_parts) if part.lower() == "design"][0]
+                    if len(path_parts) > design_idx + 2:
+                        category = path_parts[design_idx + 1]
+                    else:
+                        category = "Indesign"
+                elif is_ce_path:
+                    chapter_no_str = "CE support"
+                    ce_idx = [i for i, part in enumerate(path_parts) if part.lower() == "ce support"][0]
+                    if len(path_parts) > ce_idx + 2:
+                        category = path_parts[ce_idx + 1]
+                    else:
+                        category = "Style sheet template"
+                else:
+                    chapter_no_str = extract_chapter_number(fname)
+                    if not chapter_no_str:
+                        for part in path_parts[:-1]:
+                            chapter_no_str = extract_chapter_number(part)
+                            if chapter_no_str:
+                                break
 
                 chapter = None
                 if chapter_no_str:
@@ -2964,7 +2983,7 @@ def api_v2_upload_zip(
                             client=project.division_code or "",
                             project=project.project_code,
                             chapters=chapter_no_str,
-                            chapter_title=f"Chapter {chapter_no_str}",
+                            chapter_title=chapter_no_str if chapter_no_str in ["Design", "CE support"] else f"Chapter {chapter_no_str}",
                             workflow=project.workflow_name or "",
                             status="Received",
                             complexity_level=getattr(project, "composition", None) or "Medium",

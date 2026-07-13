@@ -129,9 +129,11 @@ def run_conversion_background(chapter_id: int, session_factory):
                     url = f"{settings.INDESIGN_SERVER_URL.rstrip('/')}/convert"
                     try:
                         logger.info(f"Sending packaged ZIP to remote InDesign server: {url}")
+                        client_name = chapter.project.client if chapter.project else None
                         with open(temp_zip_path, "rb") as zip_file:
                             response = requests.post(
                                 url,
+                                params={"client": client_name},
                                 files={"file": (zip_name, zip_file.read(), "application/octet-stream")},
                                 timeout=(30.0, 900)
                             )
@@ -148,6 +150,7 @@ def run_conversion_background(chapter_id: int, session_factory):
                             with open(temp_zip_path, "rb") as zip_file:
                                 response_fb = requests.post(
                                     url_fallback,
+                                    params={"client": client_name},
                                     files={"file": (zip_name, zip_file.read(), "application/octet-stream")},
                                     timeout=(30.0, 900)
                                 )
@@ -170,14 +173,34 @@ def run_conversion_background(chapter_id: int, session_factory):
                             logger.warning(f"Could not remove temp zip file {temp_zip_path}: {rm_err}")
         
         elif chapter.source_filename.lower().endswith(".pdf"):
-            try:
-                from pdf2docx import Converter
-                cv = Converter(chapter.source_file_path)
-                cv.convert(dest_path, start=0, end=None)
-                cv.close()
-                success = True
-            except Exception as pdf_err:
-                error_msg = f"PDF converter failed: {str(pdf_err)}"
+            settings = get_settings()
+            if settings.INDESIGN_SERVER_URL:
+                url = f"{settings.INDESIGN_SERVER_URL.rstrip('/')}/convert-pdf"
+                try:
+                    logger.info(f"Sending remote PDF conversion request to: {url}")
+                    with open(chapter.source_file_path, "rb") as pdf_file:
+                        response = requests.post(
+                            url,
+                            files={"file": (chapter.source_filename, pdf_file.read(), "application/octet-stream")},
+                            timeout=(30.0, 900)
+                        )
+                    if response.status_code == 200:
+                        with open(dest_path, "wb") as out_f:
+                            out_f.write(response.content)
+                        success = True
+                    else:
+                        raise Exception(f"Remote PDF server returned {response.status_code}: {response.text}")
+                except Exception as pdf_err:
+                    error_msg = f"Remote PDF conversion failed: {str(pdf_err)}"
+            else:
+                try:
+                    from pdf2docx import Converter
+                    cv = Converter(chapter.source_file_path)
+                    cv.convert(dest_path, start=0, end=None)
+                    cv.close()
+                    success = True
+                except Exception as pdf_err:
+                    error_msg = f"PDF converter failed: {str(pdf_err)}"
 
         if success:
             try:
@@ -237,6 +260,7 @@ def get_project(
                 "source_filename": c.source_filename,
                 "error_message": c.error_message,
                 "attempts": c.attempts,
+                "created_at": c.created_at,
                 "completed_at": c.completed_at
             } for c in p.chapters
         ]
@@ -297,6 +321,7 @@ def list_projects(db: Session = Depends(database.get_db), user = Depends(get_cur
                     "source_filename": c.source_filename,
                     "error_message": c.error_message,
                     "attempts": c.attempts,
+                    "created_at": c.created_at,
                     "completed_at": c.completed_at
                 } for c in p.chapters
             ]

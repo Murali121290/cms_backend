@@ -440,18 +440,20 @@ export function ProjectWorkflow() {
   const orderedStages = useMemo(() => orderStages(workflowStages), [workflowStages])
 
   const summary = useMemo(() => {
-    const total = chapters.length
-    const complete = chapters.filter(c => c.status === 'complete').length
-    const inProg = chapters.filter(c => c.status === 'In-progress').length
-    const hold = chapters.filter(c => c.status === 'Hold').length
-    const inQuery = chapters.filter(c => c.status === 'In-query').length
-    const yts = chapters.filter(c => c.status === 'Received').length
-    const delayed = chapters.filter(c => isDelayed(c, plannedDueDates)).length
+    const actual = chapters.filter(c => c.chapters.toLowerCase() !== 'design' && c.chapters.toLowerCase() !== 'ce support')
+    const total = actual.length
+    const complete = actual.filter(c => c.status === 'complete').length
+    const inProg = actual.filter(c => c.status === 'In-progress').length
+    const hold = actual.filter(c => c.status === 'Hold').length
+    const inQuery = actual.filter(c => c.status === 'In-query').length
+    const yts = actual.filter(c => c.status === 'Received').length
+    const delayed = actual.filter(c => isDelayed(c, plannedDueDates)).length
     return { total, complete, inProg, hold, inQuery, yts, delayed }
   }, [chapters, plannedDueDates])
 
   const assigneeOptions = useMemo(() => {
-    const set = new Set(chapters.map(c => c.current_assignee_name).filter(Boolean) as string[])
+    const actual = chapters.filter(c => c.chapters.toLowerCase() !== 'design' && c.chapters.toLowerCase() !== 'ce support')
+    const set = new Set(actual.map(c => c.current_assignee_name).filter(Boolean) as string[])
     return Array.from(set).sort()
   }, [chapters])
 

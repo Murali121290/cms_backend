@@ -23,9 +23,9 @@ import {
   Code2, Download, ExternalLink, Eye, File, FileCode, FileOutput, FilePen, FileText,
   FolderOpen, History, Image, Languages, Layers, Loader2, LogIn, LogOut,
   ScanLine, Search, ShieldCheck, Sparkles, Trash2,
-  Upload, Wrench, X, CheckCircle2, Archive,
+  Upload, Wrench, X, CheckCircle2, Archive, ClipboardCheck, Type, FolderArchive, Layout, Printer,
 } from 'lucide-react'
-import { FOLDER_CONFIG, COLUMN_DEFINITIONS, fileTypeIcon, isProcessingActionVisibleForStage } from '@/config/fileManagerConfig'
+import { FOLDER_CONFIG, COLUMN_DEFINITIONS, fileTypeIcon, isProcessingActionVisibleForStage, getFolderConfigForChapter } from '@/config/fileManagerConfig'
 import type { FolderKey, ColumnKey, ProcessingActionKey } from '@/config/fileManagerConfig'
 import { BulkUploadModal } from '@/components/BulkUploadModal'
 import { FileDetailPanel } from '@/features/projects/components/FileDetailPanel'
@@ -117,8 +117,21 @@ function buildFileViewPath(row: FileRow, pid: number, cid: number, cliId?: strin
   return `${base}/view/${encodeURIComponent(row.subfolder)}/${encodeURIComponent(row.file_name)}`
 }
 
-function categoryToFolderKey(category: string): FolderKey {
+function categoryToFolderKey(category: string, chapterName: string): FolderKey {
   const c = category.toLowerCase()
+  const chName = chapterName.toLowerCase()
+  if (chName === 'design') {
+    if (c === 'indesign') return 'indesign'
+    if (c === 'common art') return 'common_art'
+    if (c === 'pdf') return 'pdf'
+    if (c === 'font') return 'font'
+    if (c === 'library') return 'library'
+    if (c === 'template') return 'template'
+    if (c === 'print preset') return 'print_preset'
+  }
+  if (chName === 'ce support') {
+    if (c === 'style sheet template') return 'stylesheet_template'
+  }
   if (c === 'manuscript') return 'manuscript'
   if (c === 'art') return 'art'
   if (c === 'indesign') return 'indesign'
@@ -144,8 +157,13 @@ function FolderIcon({ name, size = 14, color }: { name: string; size?: number; c
     case 'Layers': return <Layers size={size} style={s} className="flex-shrink-0" />
     case 'Code2': return <Code2 size={size} style={s} className="flex-shrink-0" />
     case 'FolderOpen': return <FolderOpen size={size} style={s} className="flex-shrink-0" />
-    case 'ClipboardCheck': return <CheckCircle2 size={size} style={s} className="flex-shrink-0" />
+    case 'ClipboardCheck': return <ClipboardCheck size={size} style={s} className="flex-shrink-0" />
     case 'Archive': return <Archive size={size} style={s} className="flex-shrink-0" />
+    case 'Type': return <Type size={size} style={s} className="flex-shrink-0" />
+    case 'FolderArchive': return <FolderArchive size={size} style={s} className="flex-shrink-0" />
+    case 'Layout': return <Layout size={size} style={s} className="flex-shrink-0" />
+    case 'Printer': return <Printer size={size} style={s} className="flex-shrink-0" />
+    case 'FileCode': return <FileCode size={size} style={s} className="flex-shrink-0" />
     default: return <File size={size} style={s} className="flex-shrink-0" />
   }
 }
@@ -200,8 +218,8 @@ function IconTooltipButton({
         <Tooltip.Trigger asChild>
           {asChild
             ? cloneElement(children, {
-                className: `inline-flex p-1 rounded transition-colors ${className}`,
-              })
+              className: `inline-flex p-1 rounded transition-colors ${className}`,
+            })
             : (
               <button
                 type="button"
@@ -509,11 +527,21 @@ export function ChapterFilePage({
   const resolvedProjectName = propProjectName ?? filesQuery.data?.project?.title ?? ''
   const resolvedChapterLabel = filesQuery.data?.chapter?.number ?? String(cid)
 
-  const FOLDER_KEYS = Object.keys(FOLDER_CONFIG) as FolderKey[]
+  const activeFolderConfig = useMemo(() => {
+    return getFolderConfigForChapter(resolvedChapterName)
+  }, [resolvedChapterName])
+
+  const FOLDER_KEYS = useMemo(() => {
+    return Object.keys(activeFolderConfig) as FolderKey[]
+  }, [activeFolderConfig])
+
   const [searchParams, setSearchParams] = useSearchParams()
   const activeFolderParam = searchParams.get('folder') as FolderKey | null
-  const activeFolder: FolderKey =
-    activeFolderParam && activeFolderParam in FOLDER_CONFIG ? activeFolderParam : 'manuscript'
+  const activeFolder: FolderKey = useMemo(() => {
+    return activeFolderParam && activeFolderParam in activeFolderConfig
+      ? activeFolderParam
+      : (FOLDER_KEYS[0] || 'manuscript')
+  }, [activeFolderParam, activeFolderConfig, FOLDER_KEYS])
 
   const setActiveFolder = (key: FolderKey) => {
     setSearchParams(prev => { prev.set('folder', key); return prev }, { replace: true })
@@ -533,11 +561,11 @@ export function ChapterFilePage({
 
   // ── Build FileRow[] — prefer API data (has db_id) over legacy prop ───────
   const rows = useMemo<FileRow[]>(() => {
-    const sfLabel = FOLDER_CONFIG[activeFolder].label
+    const sfLabel = activeFolderConfig[activeFolder]?.label || activeFolder
 
     if (filesQuery.data?.files?.length) {
       return filesQuery.data.files
-        .filter(f => categoryToFolderKey(f.category) === activeFolder)
+        .filter(f => categoryToFolderKey(f.category, resolvedChapterName) === activeFolder)
         .map(f => ({
           id: `${sfLabel}::${f.filename}`,
           db_id: f.id,
@@ -569,21 +597,21 @@ export function ChapterFilePage({
       uploaded_on: f.uploaded_on,
       path: f.path,
     }))
-  }, [filesQuery.data, chapterFolderData, activeFolder])
+  }, [filesQuery.data, chapterFolderData, activeFolder, activeFolderConfig, resolvedChapterName])
 
   // ── File counts per folder tab ───────────────────────────────────────────
   const fileCounts = useMemo(() => {
     const m: Record<string, number> = {}
     FOLDER_KEYS.forEach(k => {
       if (filesQuery.data?.files)
-        m[k] = filesQuery.data.files.filter(f => categoryToFolderKey(f.category) === k).length
+        m[k] = filesQuery.data.files.filter(f => categoryToFolderKey(f.category, resolvedChapterName) === k).length
       else if (chapterFolderData)
-        m[k] = chapterFolderData.files[FOLDER_CONFIG[k].label]?.length ?? 0
+        m[k] = chapterFolderData.files[activeFolderConfig[k]?.label || k]?.length ?? 0
       else
         m[k] = 0
     })
     return m
-  }, [filesQuery.data, chapterFolderData]) // eslint-disable-line
+  }, [filesQuery.data, chapterFolderData, FOLDER_KEYS, activeFolderConfig, resolvedChapterName])
 
   // Open docx viewer (full-screen viewer page)
   function openEditor(row: FileRow) {
@@ -685,10 +713,10 @@ export function ChapterFilePage({
       }),
     }
 
-    return FOLDER_CONFIG[activeFolder].columns
+    return (activeFolderConfig[activeFolder]?.columns || [])
       .filter(key => !BASE.has(key) && key in RENDERERS)
       .map(key => RENDERERS[key]!)
-  }, [activeFolder])
+  }, [activeFolder, activeFolderConfig])
 
   const columns = useMemo(() => [
     col.display({
@@ -930,7 +958,7 @@ export function ChapterFilePage({
       const url = URL.createObjectURL(new Blob([res.data as BlobPart], { type: 'application/zip' }))
       const a = document.createElement('a')
       a.href = url
-      a.download = `${chapterLabel}_${FOLDER_CONFIG[activeFolder].label}.zip`
+      a.download = `${chapterLabel}_${activeFolderConfig[activeFolder]?.label || activeFolder}.zip`
       document.body.appendChild(a); a.click(); document.body.removeChild(a)
       URL.revokeObjectURL(url)
     } catch {
@@ -1007,7 +1035,7 @@ export function ChapterFilePage({
         </div>
 
         {/* Bulk Download */}
-        {FOLDER_CONFIG[activeFolder].allowDownload && (
+        {activeFolderConfig[activeFolder]?.allowDownload && (
           <button
             onClick={() => selectedCount > 0 ? void handleBulkDownload() : undefined}
             disabled={downloadBusy}
@@ -1028,7 +1056,7 @@ export function ChapterFilePage({
         )}
 
         {/* Bulk Upload */}
-        {FOLDER_CONFIG[activeFolder].allowUpload && (
+        {activeFolderConfig[activeFolder]?.allowUpload && (
           <button
             onClick={() => setShowBulkUpload(true)}
             disabled={!resolvedIsAssigned}
@@ -1072,7 +1100,7 @@ export function ChapterFilePage({
             <p className="text-[10px] font-bold text-muted uppercase tracking-widest">Folders</p>
           </div>
           {FOLDER_KEYS.map(k => {
-            const cfg = FOLDER_CONFIG[k]
+            const cfg = activeFolderConfig[k]
             const count = fileCounts[k] ?? 0
             const active = k === activeFolder
             return (
@@ -1096,8 +1124,8 @@ export function ChapterFilePage({
 
             {/* Folder breadcrumb bar */}
             <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-card flex-shrink-0">
-              <FolderIcon name={FOLDER_CONFIG[activeFolder].icon} size={13} color="var(--color-muted)" />
-              <span className="text-xs font-semibold text-text">{FOLDER_CONFIG[activeFolder].label}</span>
+              <FolderIcon name={activeFolderConfig[activeFolder]?.icon || 'FolderOpen'} size={13} color="var(--color-muted)" />
+              <span className="text-xs font-semibold text-text">{activeFolderConfig[activeFolder]?.label || activeFolder}</span>
               <span className="text-xs text-muted">({table.getFilteredRowModel().rows.length} files)</span>
               {filesQuery.isFetching && <Loader2 size={11} className="animate-spin text-muted ml-1" />}
               <div className="flex-1" />
@@ -1133,9 +1161,9 @@ export function ChapterFilePage({
                   <p className="text-sm font-medium text-muted">
                     {globalFilter
                       ? `No files match "${globalFilter}"`
-                      : `No files in ${FOLDER_CONFIG[activeFolder].label}`}
+                      : `No files in ${activeFolderConfig[activeFolder]?.label || activeFolder}`}
                   </p>
-                  {!globalFilter && FOLDER_CONFIG[activeFolder].allowUpload && resolvedIsAssigned && (
+                  {!globalFilter && activeFolderConfig[activeFolder]?.allowUpload && resolvedIsAssigned && (
                     <button
                       onClick={() => setShowBulkUpload(true)}
                       className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary border border-primary/30 rounded-lg hover:bg-accent"
@@ -1207,7 +1235,7 @@ export function ChapterFilePage({
         projectId={pid}
         chapterId={cid}
         chapterName={chapterFolderData?.chapter_name ?? resolvedChapterLabel}
-        subfolder={FOLDER_CONFIG[activeFolder].label}
+        subfolder={activeFolderConfig[activeFolder]?.label || activeFolder}
         stageName={resolvedStageName}
         existingFileNames={rows.map(r => r.file_name)}
         onComplete={() => { setShowBulkUpload(false); onRefresh?.(); void filesQuery.refetch() }}

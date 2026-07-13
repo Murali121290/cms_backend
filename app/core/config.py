@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     APP_TIMEZONE: str = "Asia/Kolkata"
     
+    HOST_DOMAIN: str = "localhost"
+    HOST_PORT: int = 8085
+    
     DATABASE_URL: str = "postgresql://user:password@localhost/cms_db"
     UPLOAD_FOLDER: str = str(UPLOADS_DIR)
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -27,6 +30,10 @@ class Settings(BaseSettings):
         "http://127.0.0.1:8080",
         "http://127.0.0.1:5173",
         "http://127.0.0.1:3000",
+        "http://10.1.1.18:8085",
+        "http://10.1.1.18",
+        "https://10.1.1.18:8085",
+        "https://10.1.1.18",
     ]
 
     # Optional external AI Structuring service integration (disabled by default)
@@ -59,6 +66,21 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: Optional[str] = None
     SMTP_USE_TLS: bool = False
     SMTP_USE_SSL: bool = False
+
+    def __init__(self, **values):
+        super().__init__(**values)
+        # Dynamically append host domain/port to ALLOWED_ORIGINS
+        host_origin = f"http://{self.HOST_DOMAIN}"
+        if self.HOST_PORT not in (80, 443):
+            host_origin = f"http://{self.HOST_DOMAIN}:{self.HOST_PORT}"
+        
+        host_origin_https = f"https://{self.HOST_DOMAIN}"
+        if self.HOST_PORT not in (80, 443):
+            host_origin_https = f"https://{self.HOST_DOMAIN}:{self.HOST_PORT}"
+            
+        for origin in [host_origin, host_origin_https, f"http://{self.HOST_DOMAIN}", f"https://{self.HOST_DOMAIN}"]:
+            if origin not in self.ALLOWED_ORIGINS:
+                self.ALLOWED_ORIGINS.append(origin)
 
     class Config:
         env_file = (".env", ".env.local")  # .env.local overrides .env (last wins in pydantic-settings v2)

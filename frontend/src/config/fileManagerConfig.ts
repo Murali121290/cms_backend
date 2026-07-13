@@ -34,7 +34,10 @@ export interface ChapterFile {
   processingStatus: ProcessingStatus
 }
 
-export type FolderKey = 'manuscript' | 'art' | 'indesign' | 'proof' | 'xml' | 'misc' | 'backup'
+export type FolderKey =
+  | 'manuscript' | 'art' | 'indesign' | 'proof' | 'xml' | 'misc' | 'backup'
+  | 'common_art' | 'pdf' | 'font' | 'library' | 'template' | 'print_preset'
+  | 'stylesheet_template'
 
 export type ColumnKey =
   | 'fileName' | 'fileType' | 'size' | 'uploadedBy' | 'uploadedOn'
@@ -65,7 +68,7 @@ export const COLUMN_DEFINITIONS: Record<ColumnKey, ColumnDefinition> = {
 
 export interface FolderConfig { label: string; icon: string; allowUpload: boolean; allowDownload: boolean; columns: ColumnKey[] }
 
-export const FOLDER_CONFIG: Record<FolderKey, FolderConfig> = {
+export const FOLDER_CONFIG: Record<string, FolderConfig> = {
   manuscript: { label:'Manuscript', icon:'FileText',      allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','pageCount','size','uploadedBy','uploadedOn'] },
   art:        { label:'Art',        icon:'Image',         allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','dimensions','dpi','colorProfile','size','uploadedBy','uploadedOn'] },
   indesign:   { label:'Indesign',   icon:'Layers',        allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','packageStatus','size','uploadedBy','uploadedOn'] },
@@ -73,6 +76,27 @@ export const FOLDER_CONFIG: Record<FolderKey, FolderConfig> = {
   xml:        { label:'XML',        icon:'Code2',         allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','xmlType','validationStatus','size','uploadedBy','uploadedOn'] },
   misc:       { label:'Misc',       icon:'FolderOpen',    allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
   backup:     { label:'Backup',     icon:'Archive',       allowUpload:false, allowDownload:true,  columns:['fileName','fileType','size','uploadedOn'] },
+}
+
+export const DESIGN_FOLDER_CONFIG: Record<string, FolderConfig> = {
+  indesign:     { label:'Indesign',   icon:'Layers',        allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','packageStatus','size','uploadedBy','uploadedOn'] },
+  common_art:   { label:'Common Art', icon:'Image',         allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
+  pdf:          { label:'Pdf',        icon:'FileText',      allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
+  font:         { label:'Font',       icon:'Type',          allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
+  library:      { label:'Library',    icon:'FolderArchive', allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
+  template:     { label:'template',   icon:'Layout',        allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
+  print_preset: { label:'Print Preset',icon:'Printer',     allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
+}
+
+export const CE_SUPPORT_FOLDER_CONFIG: Record<string, FolderConfig> = {
+  stylesheet_template: { label:'Style sheet template', icon:'FileCode', allowUpload:true, allowDownload:true, columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
+}
+
+export function getFolderConfigForChapter(chapterName: string): Record<string, FolderConfig> {
+  const name = chapterName.toLowerCase()
+  if (name === 'design') return DESIGN_FOLDER_CONFIG
+  if (name === 'ce support') return CE_SUPPORT_FOLDER_CONFIG
+  return FOLDER_CONFIG
 }
 
 export const PROCESSING_ACTIONS: Record<string, string[]> = {

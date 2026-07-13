@@ -15,6 +15,7 @@ interface Chapter {
   source_filename: string
   error_message?: string
   attempts: number
+  created_at?: string
   completed_at?: string
 }
 
@@ -326,6 +327,27 @@ export function PostProdChaptersPage() {
     input.click()
   }
 
+  const formatDate = (value?: string) => {
+    if (!value) return '—'
+    const date = new Date(value)
+    if (isNaN(date.getTime())) return '—'
+    return date.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' })
+  }
+
+  const formatDuration = (start?: string, end?: string) => {
+    if (!start || !end) return '—'
+    const startMs = new Date(start).getTime()
+    const endMs = new Date(end).getTime()
+    if (isNaN(startMs) || isNaN(endMs) || endMs < startMs) return '—'
+    const totalSeconds = Math.floor((endMs - startMs) / 1000)
+    const hours = Math.floor(totalSeconds / 3600)
+    const minutes = Math.floor((totalSeconds % 3600) / 60)
+    const seconds = totalSeconds % 60
+    if (hours > 0) return `${hours}h ${minutes}m`
+    if (minutes > 0) return `${minutes}m ${seconds}s`
+    return `${seconds}s`
+  }
+
   const formatBytes = (bytes: number, decimals = 2) => {
     if (bytes === 0) return '0 Bytes'
     const k = 1024
@@ -447,8 +469,8 @@ export function PostProdChaptersPage() {
                 <p className="text-sm font-medium">No chapters detected</p>
               </div>
             ) : (
-              <div className="border border-border rounded-xl overflow-y-auto bg-surface/50 flex-1 min-h-0">
-                <table className="w-full text-left text-sm border-collapse">
+              <div className="border border-border rounded-xl overflow-y-auto overflow-x-auto bg-surface/50 flex-1 min-h-0">
+                <table className="w-full min-w-[760px] text-left text-sm border-collapse">
                   <thead className="sticky top-0 bg-card z-10">
                     <tr className="border-b border-border text-muted font-medium text-xs uppercase tracking-wider">
                       <th className="p-3.5 bg-card w-10">
@@ -462,6 +484,9 @@ export function PostProdChaptersPage() {
                       <th className="p-3.5 bg-card">Chapter</th>
                       {!selectedChapter && <th className="p-3.5 bg-card">Filename</th>}
                       <th className="p-3.5 bg-card">Status</th>
+                      <th className="p-3.5 bg-card">Created</th>
+                      <th className="p-3.5 bg-card">Completed</th>
+                      <th className="p-3.5 bg-card">Duration</th>
                       <th className="p-3.5 bg-card text-center">Actions</th>
                     </tr>
                   </thead>
@@ -527,6 +552,15 @@ export function PostProdChaptersPage() {
                                 )}
                               </span>
                             </td>
+                            <td className="p-3.5 text-muted whitespace-nowrap">
+                              {formatDate(chap.created_at)}
+                            </td>
+                            <td className="p-3.5 text-muted whitespace-nowrap">
+                              {formatDate(chap.completed_at)}
+                            </td>
+                            <td className="p-3.5 text-muted whitespace-nowrap">
+                              {formatDuration(chap.created_at, chap.completed_at)}
+                            </td>
                             <td className="p-3.5 text-center" onClick={(e) => e.stopPropagation()}>
                               <div className="flex justify-center gap-1.5">
                                 {chap.status === 'Converting' ? (
@@ -570,7 +604,7 @@ export function PostProdChaptersPage() {
                           </tr>
                           {isFailed && isExpanded && (
                             <tr className="bg-red-500/[0.01]">
-                              <td colSpan={selectedChapter ? 4 : 5} className="p-3 pt-0 pb-3.5">
+                              <td colSpan={selectedChapter ? 7 : 8} className="p-3 pt-0 pb-3.5">
                                 <div className="text-xs text-red-500 bg-red-500/5 border border-red-500/10 rounded-xl p-3 font-mono overflow-x-auto max-h-[120px] overflow-y-auto">
                                   <strong className="block text-[10px] uppercase font-sans tracking-wide mb-1 text-red-600 dark:text-red-400">
                                     Conversion Failure Logs:

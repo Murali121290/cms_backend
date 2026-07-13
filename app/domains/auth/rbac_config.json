@@ -4,8 +4,6 @@
   ],
   "view_all_projects": [
     "Admin",
-    "Team Lead - Editorial",
-    "Team Lead - Production",
     "Index Manager",
     "Non-XML Manager",
     "XML Manager",
@@ -19,8 +17,6 @@
   ],
   "view_all_chapters": [
     "Admin",
-    "Team Lead - Editorial",
-    "Team Lead - Production",
     "Index Manager",
     "Non-XML Manager",
     "XML Manager",
@@ -36,6 +32,8 @@
     "Admin",
     "Team Lead - Editorial",
     "Team Lead - Production",
+    "Team lead - prediting",
+    "Team lead - language editing",
     "Index Manager",
     "Non-XML Manager",
     "XML Manager",
