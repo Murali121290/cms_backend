@@ -840,13 +840,15 @@ export function ChapterFilePage({
       cell: i => {
         const r = i.row.original
         const fid = r.db_id
+        const hideEdit = /\.(xlsx?|indd)$/i.test(r.file_name)
         return (
           <div className="flex items-center justify-center gap-1">
-            {resolvedIsAssigned && (
+            {resolvedIsAssigned && !hideEdit && (
               <IconTooltipButton
-                title={r.file_name.toLowerCase().endsWith('.docx') ? "Open in Word" : "Edit"}
+                title="Edit"
                 onClick={() => {
-                  if (r.file_name.toLowerCase().endsWith('.docx') && fid) {
+                  const isDocx = /\.docx?$/i.test(r.file_name)
+                  if (isDocx && fid) {
                     void openInWordWithFallback(fid, r.file_name)
                   } else {
                     openEditor(r)
@@ -1202,7 +1204,6 @@ export function ChapterFilePage({
                       <tr
                         key={row.id}
                         className="hover:bg-accent/30 transition-colors cursor-default"
-                        onDoubleClick={() => openEditor(row.original)}
                       >
                         {row.getVisibleCells().map(cell => (
                           <td key={cell.id} className="px-3 py-2.5 text-xs overflow-hidden">
