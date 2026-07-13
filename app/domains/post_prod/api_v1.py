@@ -18,7 +18,14 @@ from jose import jwt
 import urllib.parse
 from app.services.scripts.docx_post_processor import post_process_docx
 
-router = APIRouter(prefix="/post-prod", tags=["Post Production"])
+from app.domains.auth.rbac_config import has_post_prod_access
+
+def check_post_prod_access(user = Depends(get_current_user_from_cookie)):
+    if not user or not has_post_prod_access(user):
+        raise HTTPException(status_code=403, detail="Access denied to Post Production / Backlist.")
+    return user
+
+router = APIRouter(prefix="/post-prod", tags=["Post Production"], dependencies=[Depends(check_post_prod_access)])
 logger = logging.getLogger("app.post_prod")
 
 def parse_chapter_number(filename: str) -> str:
@@ -32,6 +39,23 @@ def parse_chapter_number(filename: str) -> str:
     if match_digits:
         return str(int(match_digits.group(1)))
     return "1"
+def check_and_update_project_status(db: Session, project_name: str, client_code: str):
+    project = db.query(PostProdProject).filter(
+        PostProdProject.project_name == project_name,
+        PostProdProject.client_code == client_code
+    ).first()
+    if not project:
+        return
+        
+    chapters = db.query(PostProdChapter).filter(
+        PostProdChapter.project_name == project_name,
+        PostProdChapter.client_code == client_code
+    ).all()
+    
+    if chapters and all(c.status == "Completed" for c in chapters):
+        project.status = "Completed"
+        db.commit()
+
 def run_conversion_background(chapter_id: int, session_factory):
     db = session_factory()
     try:
@@ -44,11 +68,12 @@ def run_conversion_background(chapter_id: int, session_factory):
         db.commit()
 
         settings = get_settings()
-        project_dir = os.path.join(settings.UPLOAD_FOLDER, "post_prod", f"project_{chapter.project_id}")
+        project_dir = os.path.join(settings.UPLOAD_FOLDER, "post_prod", chapter.client_code or "default_client", chapter.project_name or "default_project")
         output_dir = os.path.join(project_dir, "converted")
         os.makedirs(output_dir, exist_ok=True)
         
-        dest_filename = f"Chapter_{chapter.chapter_no}.docx"
+        source_base = os.path.splitext(chapter.source_filename)[0]
+        dest_filename = f"{source_base}.docx"
         dest_path = os.path.join(output_dir, dest_filename)
 
         success = False
@@ -64,12 +89,38 @@ def run_conversion_background(chapter_id: int, session_factory):
                 zip_name = f"packaged_{os.path.splitext(chapter.source_filename)[0]}.zip"
                 temp_zip_path = os.path.join(project_dir, zip_name)
                 
+                # Exclude other chapters' source filenames to only send this chapter
+                all_chaps = db.query(PostProdChapter).filter(
+                    PostProdChapter.project_name == chapter.project_name,
+                    PostProdChapter.client_code == chapter.client_code
+                ).all()
+                other_source_filenames = {c.source_filename for c in all_chaps if c.id != chapter.id}
+                other_chapter_nos = {c.chapter_no for c in all_chaps if c.id != chapter.id}
+                
                 try:
                     logger.info(f"Packaging chapter directory {chapter_dir} into ZIP: {temp_zip_path}")
                     with zipfile.ZipFile(temp_zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
                         for root, _, filenames in os.walk(chapter_dir):
+                            # Check if the folder path belongs to another chapter
+                            rel_root = os.path.relpath(root, chapter_dir)
+                            path_parts = rel_root.replace("\\", "/").lower().split("/")
+                            
+                            is_other_chapter_folder = False
+                            for part in path_parts:
+                                for other_no in other_chapter_nos:
+                                    if other_no and (f"ch{other_no}" in part or f"chap{other_no}" in part or part == other_no):
+                                        is_other_chapter_folder = True
+                                        break
+                                if is_other_chapter_folder:
+                                    break
+                                    
+                            if is_other_chapter_folder:
+                                continue
+                                
                             for f in filenames:
                                 if f.startswith("._") or f.startswith("__MACOSX") or f == zip_name:
+                                    continue
+                                if f in other_source_filenames:
                                     continue
                                 full_file_path = os.path.join(root, f)
                                 rel_path = os.path.relpath(full_file_path, chapter_dir)
@@ -78,9 +129,11 @@ def run_conversion_background(chapter_id: int, session_factory):
                     url = f"{settings.INDESIGN_SERVER_URL.rstrip('/')}/convert"
                     try:
                         logger.info(f"Sending packaged ZIP to remote InDesign server: {url}")
+                        client_name = chapter.project.client if chapter.project else None
                         with open(temp_zip_path, "rb") as zip_file:
                             response = requests.post(
                                 url,
+                                params={"client": client_name},
                                 files={"file": (zip_name, zip_file.read(), "application/octet-stream")},
                                 timeout=(30.0, 900)
                             )
@@ -97,6 +150,7 @@ def run_conversion_background(chapter_id: int, session_factory):
                             with open(temp_zip_path, "rb") as zip_file:
                                 response_fb = requests.post(
                                     url_fallback,
+                                    params={"client": client_name},
                                     files={"file": (zip_name, zip_file.read(), "application/octet-stream")},
                                     timeout=(30.0, 900)
                                 )
@@ -119,14 +173,34 @@ def run_conversion_background(chapter_id: int, session_factory):
                             logger.warning(f"Could not remove temp zip file {temp_zip_path}: {rm_err}")
         
         elif chapter.source_filename.lower().endswith(".pdf"):
-            try:
-                from pdf2docx import Converter
-                cv = Converter(chapter.source_file_path)
-                cv.convert(dest_path, start=0, end=None)
-                cv.close()
-                success = True
-            except Exception as pdf_err:
-                error_msg = f"PDF converter failed: {str(pdf_err)}"
+            settings = get_settings()
+            if settings.INDESIGN_SERVER_URL:
+                url = f"{settings.INDESIGN_SERVER_URL.rstrip('/')}/convert-pdf"
+                try:
+                    logger.info(f"Sending remote PDF conversion request to: {url}")
+                    with open(chapter.source_file_path, "rb") as pdf_file:
+                        response = requests.post(
+                            url,
+                            files={"file": (chapter.source_filename, pdf_file.read(), "application/octet-stream")},
+                            timeout=(30.0, 900)
+                        )
+                    if response.status_code == 200:
+                        with open(dest_path, "wb") as out_f:
+                            out_f.write(response.content)
+                        success = True
+                    else:
+                        raise Exception(f"Remote PDF server returned {response.status_code}: {response.text}")
+                except Exception as pdf_err:
+                    error_msg = f"Remote PDF conversion failed: {str(pdf_err)}"
+            else:
+                try:
+                    from pdf2docx import Converter
+                    cv = Converter(chapter.source_file_path)
+                    cv.convert(dest_path, start=0, end=None)
+                    cv.close()
+                    success = True
+                except Exception as pdf_err:
+                    error_msg = f"PDF converter failed: {str(pdf_err)}"
 
         if success:
             try:
@@ -143,6 +217,10 @@ def run_conversion_background(chapter_id: int, session_factory):
             chapter.error_message = error_msg or "Unknown error"
         
         db.commit()
+        try:
+            check_and_update_project_status(db, chapter.project_name, chapter.client_code)
+        except Exception as check_err:
+            logger.warning(f"Failed to check and update project status: {check_err}")
 
     except Exception as e:
         logger.exception("Error in background conversion task")
@@ -168,7 +246,8 @@ def get_project(
         raise HTTPException(status_code=404, detail="Project not found")
     return {
         "id": p.id,
-        "customer_name": p.customer_name,
+        "client": p.client,
+        "client_code": p.client_code,
         "project_name": p.project_name,
         "status": p.status,
         "assignee": p.assignee,
@@ -181,6 +260,7 @@ def get_project(
                 "source_filename": c.source_filename,
                 "error_message": c.error_message,
                 "attempts": c.attempts,
+                "created_at": c.created_at,
                 "completed_at": c.completed_at
             } for c in p.chapters
         ]
@@ -214,7 +294,8 @@ def update_project(
     db.refresh(project)
     return {
         "id": project.id,
-        "customer_name": project.customer_name,
+        "client": project.client,
+        "client_code": project.client_code,
         "project_name": project.project_name,
         "status": project.status,
         "assignee": project.assignee
@@ -226,7 +307,8 @@ def list_projects(db: Session = Depends(database.get_db), user = Depends(get_cur
     return [
         {
             "id": p.id,
-            "customer_name": p.customer_name,
+            "client": p.client,
+            "client_code": p.client_code,
             "project_name": p.project_name,
             "status": p.status,
             "assignee": p.assignee,
@@ -239,6 +321,7 @@ def list_projects(db: Session = Depends(database.get_db), user = Depends(get_cur
                     "source_filename": c.source_filename,
                     "error_message": c.error_message,
                     "attempts": c.attempts,
+                    "created_at": c.created_at,
                     "completed_at": c.completed_at
                 } for c in p.chapters
             ]
@@ -248,7 +331,8 @@ def list_projects(db: Session = Depends(database.get_db), user = Depends(get_cur
 @router.post("/projects")
 async def create_project(
     background_tasks: BackgroundTasks,
-    customer_name: str = Form(...),
+    client: str = Form(...),
+    client_code: str = Form(...),
     project_name: str = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(database.get_db),
@@ -258,7 +342,8 @@ async def create_project(
         raise HTTPException(status_code=400, detail="Uploaded file must be a ZIP file.")
     
     project = PostProdProject(
-        customer_name=customer_name,
+        client=client,
+        client_code=client_code,
         project_name=project_name,
         status="Active",
         assignee=user.username if user else "System"
@@ -268,10 +353,10 @@ async def create_project(
     db.refresh(project)
 
     settings = get_settings()
-    project_dir = os.path.join(settings.UPLOAD_FOLDER, "post_prod", f"project_{project.id}")
+    project_dir = os.path.join(settings.UPLOAD_FOLDER, "post_prod", client_code, project_name)
     os.makedirs(project_dir, exist_ok=True)
     
-    zip_path = os.path.join(project_dir, "input.zip")
+    zip_path = os.path.join(project_dir, file.filename)
     with open(zip_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
     
@@ -295,7 +380,8 @@ async def create_project(
                 source_path = os.path.join(root, f_name)
                 
                 chapter = PostProdChapter(
-                    project_id=project.id,
+                    client_code=client_code,
+                    project_name=project_name,
                     chapter_no=chapter_no,
                     status="YTS",
                     source_filename=f_name,
@@ -309,6 +395,47 @@ async def create_project(
     
     return {"message": "Project created successfully and extraction completed.", "project_id": project.id}
 
+from fastapi.responses import FileResponse, StreamingResponse
+import io
+
+@router.get("/projects/{project_id}/bulk-download-chapters")
+def bulk_download_chapters(
+    project_id: int, 
+    chapter_ids: str, 
+    db: Session = Depends(database.get_db), 
+    user = Depends(get_current_user_from_cookie)
+):
+    ids_list = [int(i.strip()) for i in chapter_ids.split(",") if i.strip().isdigit()]
+    if not ids_list:
+        raise HTTPException(status_code=400, detail="No valid chapter IDs provided")
+        
+    chapters = db.query(PostProdChapter).filter(
+        PostProdChapter.id.in_(ids_list)
+    ).all()
+    
+    if not chapters:
+        raise HTTPException(status_code=404, detail="No chapters found")
+        
+    downloadable = [c for c in chapters if c.converted_file_path and os.path.exists(c.converted_file_path)]
+    if not downloadable:
+        raise HTTPException(status_code=400, detail="No completed files are available for download among selected chapters.")
+        
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
+        for chap in downloadable:
+            base_name = os.path.basename(chap.converted_file_path)
+            if not base_name.endswith(".docx"):
+                base_name = f"Chapter_{chap.chapter_no}.docx"
+            zip_file.write(chap.converted_file_path, base_name)
+            
+    zip_buffer.seek(0)
+    
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=converted_chapters.zip"}
+    )
+
 @router.get("/chapters/{chapter_id}/download")
 def download_chapter(chapter_id: int, db: Session = Depends(database.get_db), user = Depends(get_current_user_from_cookie)):
     chapter = db.query(PostProdChapter).filter(PostProdChapter.id == chapter_id).first()
@@ -317,10 +444,11 @@ def download_chapter(chapter_id: int, db: Session = Depends(database.get_db), us
     if chapter.status != "Completed" or not chapter.converted_file_path or not os.path.exists(chapter.converted_file_path):
         raise HTTPException(status_code=400, detail="Converted file not available for download.")
     
+    source_base = os.path.splitext(chapter.source_filename)[0]
     return FileResponse(
         path=chapter.converted_file_path,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        filename=f"converted_Chapter_{chapter.chapter_no}.docx"
+        filename=f"{source_base}.docx"
     )
 
 def get_chapter_from_string(text: str) -> str | None:
@@ -351,7 +479,10 @@ def get_chapter_source_files(chapter_id: int, db: Session = Depends(database.get
     chapter_dir = os.path.dirname(chapter.source_file_path)
     
     # Get all chapter numbers in this project to prevent showing files belonging to other chapters
-    all_chapters = db.query(PostProdChapter).filter(PostProdChapter.project_id == chapter.project_id).all()
+    all_chapters = db.query(PostProdChapter).filter(
+        PostProdChapter.project_name == chapter.project_name,
+        PostProdChapter.client_code == chapter.client_code
+    ).all()
     project_chapter_nos = {c.chapter_no for c in all_chapters}
     other_source_filenames = {c.source_filename for c in all_chapters if c.id != chapter.id}
     
@@ -503,4 +634,39 @@ def convert_chapter(
     from app.core.worker import run_post_prod_conversion_task
     run_post_prod_conversion_task.delay(chapter.id)
     return {"message": "Conversion started", "chapter_id": chapter.id}
+
+
+@router.get("/chapters/{chapter_id}/open-in-word")
+def api_post_prod_open_in_word(
+    chapter_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+        
+    chapter = db.query(PostProdChapter).filter(PostProdChapter.id == chapter_id).first()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+        
+    if chapter.status != "Completed" or not chapter.converted_file_path or not os.path.exists(chapter.converted_file_path):
+        raise HTTPException(status_code=400, detail="Converted file not available for editing.")
+        
+    from datetime import timedelta
+    from app.domains.auth.security import create_access_token
+    from app.integrations.webdav.config import WEBDAV_BASE_URL, WEBDAV_TOKEN_EXPIRE_MINUTES
+    import urllib.parse
+
+    token = create_access_token(
+        {"sub": user.username, "chapter_id": chapter_id},
+        expires_delta=timedelta(minutes=WEBDAV_TOKEN_EXPIRE_MINUTES)
+    )
+    
+    filename = f"Chapter_{chapter.chapter_no}.docx"
+    quoted_filename = urllib.parse.quote(filename, safe="")
+    webdav_url = f"{WEBDAV_BASE_URL}/webdav/post-prod/chapters/{chapter_id}/{token}/{quoted_filename}"
+    ms_word_uri = f"ms-word:ofe|u|{webdav_url}"
+    
+    return {"ms_word_uri": ms_word_uri, "webdav_url": webdav_url}
+
 

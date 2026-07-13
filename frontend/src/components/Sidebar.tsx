@@ -6,22 +6,28 @@ import {
 } from 'lucide-react'
 import { useSidebarStore } from '@/store/useSidebarStore'
 import { useRBAC } from '@/hooks/useRBAC'
+import { ROLE_PERMISSIONS } from '@/config/rbacConfig'
 import { ThemeSwitcher } from './ThemeSwitcher'
 import { cn } from '@/utils/cn'
 
 export function Sidebar() {
   const { collapsed, toggle } = useSidebarStore()
-  const { canAccess }         = useRBAC()
-  const location              = useLocation()
+  const { canAccess, viewer } = useRBAC()
+  const location = useLocation()
   const [logoError, setLogoError] = useState(false)
 
   const navItems = [
-    { to: '/',         icon: LayoutDashboard, label: 'Dashboard' },
-    { to: '/clients',  icon: Users,           label: 'Clients'   },
-    { to: '/post-production', icon: Layers,   label: 'Backlist' },
-    { to: '/reports',  icon: BarChart3,       label: 'Reports'   },
-    // Settings visible only to admin and manager — add more roles here as needed
-    ...(canAccess(['admin', 'manager'])
+    ...(viewer?.team !== 'Accessibility Team'
+      ? [{ to: '/', icon: LayoutDashboard, label: 'Dashboard' }]
+      : []),
+    ...(viewer?.team !== 'Accessibility Team'
+      ? [{ to: '/clients', icon: Users, label: 'Clients' }]
+      : []),
+    ...((canAccess(ROLE_PERMISSIONS.access_post_production) || viewer?.team === 'Accessibility Team')
+      ? [{ to: '/post-production', icon: Layers, label: 'Backlist' }]
+      : []),
+    { to: '/reports', icon: BarChart3, label: 'Reports' },
+    ...(canAccess(ROLE_PERMISSIONS.access_settings)
       ? [{ to: '/settings', icon: Settings, label: 'Settings' }]
       : []),
   ]
@@ -38,7 +44,7 @@ export function Sidebar() {
       )}>
         {collapsed ? (
           <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center flex-shrink-0 text-sidebar font-bold text-[14px] font-serif">
-            S4
+            S4C
           </div>
         ) : !logoError ? (
           <img
@@ -50,7 +56,7 @@ export function Sidebar() {
         ) : (
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center flex-shrink-0 text-sidebar font-bold text-[14px] font-serif">
-              S4
+              S4C
             </div>
             <div className="leading-tight">
               <p className="text-white font-semibold text-[15px] font-serif tracking-tight">S4Carlisle</p>

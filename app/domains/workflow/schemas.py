@@ -34,35 +34,10 @@ class RolesMasterResponse(RolesMasterBase):
     model_config = {"from_attributes": True}
 
 
-# StageActivityMaster Schemas
-class StageActivityMasterBase(BaseModel):
-    stage_activity_name: str
-    description: Optional[str] = None
-    active_status: bool = True
-
-
-class StageActivityMasterCreate(StageActivityMasterBase):
-    pass
-
-
-class StageActivityMasterUpdate(BaseModel):
-    stage_activity_name: Optional[str] = None
-    description: Optional[str] = None
-    active_status: Optional[bool] = None
-
-
-class StageActivityMasterResponse(StageActivityMasterBase):
-    id: int
-    created_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
 # StageMaster Schemas
 class StageMasterBase(BaseModel):
     stage_name: str
     description: Optional[str] = None
-    stage_activities: List[int] = []
     sla_level1: Optional[int] = None
     sla_level2: Optional[int] = None
     sla_level3: Optional[int] = None
@@ -77,7 +52,6 @@ class StageMasterCreate(StageMasterBase):
 class StageMasterUpdate(BaseModel):
     stage_name: Optional[str] = None
     description: Optional[str] = None
-    stage_activities: Optional[List[int]] = None
     sla_level1: Optional[int] = None
     sla_level2: Optional[int] = None
     sla_level3: Optional[int] = None
@@ -104,13 +78,11 @@ class StageDetailBase(BaseModel):
     actual_start_date: Optional[datetime] = None
     actual_end_date: Optional[datetime] = None
     stage_name: str
-    stage_activity: Optional[str] = None
     workflow: str = "Workflow1"
     complexity_level: Optional[str] = None
     stage_level: Optional[int] = None
     sla: Optional[int] = None
     stage_status: str = "In-progress"
-    stage_activity_status: str = "In-progress"
     delayed: bool = False
     delay_days: Optional[int] = None
     remarks: Optional[str] = None
@@ -143,13 +115,11 @@ class StageDetailUpdate(BaseModel):
     actual_start_date: Optional[datetime] = None
     actual_end_date: Optional[datetime] = None
     stage_name: Optional[str] = None
-    stage_activity: Optional[str] = None
     workflow: Optional[str] = None
     complexity_level: Optional[str] = None
     stage_level: Optional[int] = None
     sla: Optional[int] = None
     stage_status: Optional[str] = None
-    stage_activity_status: Optional[str] = None
     delayed: Optional[bool] = None
     delay_days: Optional[int] = None
     remarks: Optional[str] = None
@@ -232,7 +202,6 @@ class ChapterInfoBase(BaseModel):
     project_manager_name: Optional[str] = None
     due_date: Optional[date] = None
     stage_name: Optional[str] = None
-    current_stage_activity: Optional[str] = None
     current_assignee_name: Optional[str] = None
     status: str = "In-progress"
     complexity_level: str = "Medium"
@@ -272,7 +241,6 @@ class ChapterInfoUpdate(BaseModel):
     project_manager_name: Optional[str] = None
     due_date: Optional[date] = None
     stage_name: Optional[str] = None
-    current_stage_activity: Optional[str] = None
     current_assignee_name: Optional[str] = None
     status: Optional[str] = None
     complexity_level: Optional[str] = None

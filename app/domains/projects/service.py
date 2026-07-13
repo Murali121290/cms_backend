@@ -16,6 +16,17 @@ class ProjectBootstrapValidationError(Exception):
 
 
 _CHAPTER_CATEGORIES = ["Manuscript", "Art", "InDesign", "Proof", "XML"]
+_DESIGN_CATEGORIES = [
+    "Indesign",
+    "Common Art",
+    "Pdf",
+    "Font",
+    "Library",
+    "template",
+    "Print Preset"
+]
+_CE_SUPPORT_CATEGORIES = ["Style sheet template"]
+
 
 
 def _derive_safe_filename_stem(filename: str) -> str:
@@ -62,6 +73,30 @@ def _build_project_bootstrap_upload_plan(
 
     return upload_plan
 
+def create_predefined_project_folders(base_path: str):
+    predefined_folders = [
+        "Design/Indesign",
+        "Design/Common Art",
+        "Design/Pdf",
+        "Design/Font",
+        "Design/Library",
+        "Design/template",
+        "Design/Print Preset",
+        "CE support/Style sheet template",
+    ]
+    for folder in predefined_folders:
+        os.makedirs(os.path.join(base_path, folder), exist_ok=True)
+
+    # Copy files from D:\Main\cms_backend\app\processing\results if any exist
+    source_results_dir = r"D:\Main\cms_backend\app\processing\results"
+    if os.path.exists(source_results_dir) and os.path.isdir(source_results_dir):
+        dest_dir = os.path.join(base_path, "CE support", "Style sheet template")
+        for item in os.listdir(source_results_dir):
+            item_path = os.path.join(source_results_dir, item)
+            if os.path.isfile(item_path):
+                if not item.endswith("_scan.json"):
+                    shutil.copy2(item_path, os.path.join(dest_dir, item))
+
 def create_project(db: Session, project: ProjectCreate):
     db_project = Project(**project.dict(), status="Planning")
     db.add(db_project)
@@ -101,6 +136,7 @@ def create_project_with_initial_files(
 
         base_path = f"{upload_dir}/{code}"
         os.makedirs(base_path, exist_ok=True)
+        create_predefined_project_folders(base_path)
 
         for i in range(1, chapter_count + 1):
             chapter_number = f"{i:02d}"
@@ -118,6 +154,32 @@ def create_project_with_initial_files(
             chapter_base_path = f"{base_path}/{chapter_number}"
             for category in _CHAPTER_CATEGORIES:
                 os.makedirs(f"{chapter_base_path}/{category}", exist_ok=True)
+
+        from app.domains.workflow.models import WorkflowMaster as _WorkflowMaster
+        from sqlalchemy import or_ as _or
+        first_stage = None
+        if db_project.workflow_name:
+            first_stage_row = db.query(_WorkflowMaster).filter(
+                _WorkflowMaster.workflow_name == db_project.workflow_name,
+                _or(_WorkflowMaster.previous_stage.is_(None), _WorkflowMaster.previous_stage == "")
+            ).first()
+            if first_stage_row:
+                first_stage = first_stage_row.stage_name
+
+        for virt_num, virt_title in [("Design", "Design"), ("CE support", "CE support")]:
+            chapter = models.ChapterInfo(
+                client=db_project.division_code or "",
+                project=db_project.project_code or "",
+                chapters=virt_num,
+                chapter_title=virt_title,
+                status="In-progress",
+                workflow=db_project.workflow_name or "",
+                stage_level=1,
+                stage_name=first_stage,
+            )
+            db.add(chapter)
+            db.commit()
+            db.refresh(chapter)
 
         return db_project
 
@@ -141,6 +203,7 @@ def create_project_with_initial_files(
 
     base_path = f"{upload_dir}/{code}"
     os.makedirs(base_path, exist_ok=True)
+    create_predefined_project_folders(base_path)
 
     for plan_item in upload_plan:
         chapter_number = plan_item["chapter_number"]
@@ -176,6 +239,32 @@ def create_project_with_initial_files(
             path=file_path,
         )
         db.add(db_file)
+
+    from app.domains.workflow.models import WorkflowMaster as _WorkflowMaster
+    from sqlalchemy import or_ as _or
+    first_stage = None
+    if db_project.workflow_name:
+        first_stage_row = db.query(_WorkflowMaster).filter(
+            _WorkflowMaster.workflow_name == db_project.workflow_name,
+            _or(_WorkflowMaster.previous_stage.is_(None), _WorkflowMaster.previous_stage == "")
+        ).first()
+        if first_stage_row:
+            first_stage = first_stage_row.stage_name
+
+    for virt_num, virt_title in [("Design", "Design"), ("CE support", "CE support")]:
+        chapter = models.ChapterInfo(
+            client=db_project.division_code or "",
+            project=db_project.project_code or "",
+            chapters=virt_num,
+            chapter_title=virt_title,
+            status="In-progress",
+            workflow=db_project.workflow_name or "",
+            stage_level=1,
+            stage_name=first_stage,
+        )
+        db.add(chapter)
+        db.commit()
+        db.refresh(chapter)
 
     db.commit()
 

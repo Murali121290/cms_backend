@@ -69,19 +69,10 @@ export interface RolesMaster {
   created_at: string;
 }
 
-export interface StageActivityMaster {
-  id: number;
-  stage_activity_name: string;
-  description?: string;
-  active_status: boolean;
-  created_at: string;
-}
-
 export interface StageMaster {
   id: number;
   stage_name: string;
   description?: string;
-  stage_activities: number[];
   sla_level1?: number;
   sla_level2?: number;
   sla_level3?: number;
@@ -102,13 +93,11 @@ export interface StageDetail {
   actual_start_date?: string;
   actual_end_date?: string;
   stage_name: string;
-  stage_activity?: string;
   workflow: string;
   complexity_level?: string;
   stage_level?: number;
   sla?: number;
   stage_status: string;
-  stage_activity_status: string;
   delayed: boolean;
   delay_days?: number;
   remarks?: string;
@@ -126,7 +115,6 @@ export interface ChapterInfo {
   project_manager_name?: string;
   due_date?: string;
   stage_name?: string;
-  current_stage_activity?: string;
   current_assignee_name?: string;
   status: string;
   complexity_level: string;
@@ -166,24 +154,6 @@ export const rolesApi = {
 
   delete: (id: number) =>
     apiClient.delete(`/api/v1/roles-master/${id}`),
-};
-
-// Stage Activities API
-export const stageActivitiesApi = {
-  list: () =>
-    apiClient.get<StageActivityMaster[]>("/api/v1/stage-activities").then((r) => r.data),
-
-  getById: (id: number) =>
-    apiClient.get<StageActivityMaster>(`/api/v1/stage-activities/${id}`).then((r) => r.data),
-
-  create: (data: Omit<StageActivityMaster, "id" | "created_at">) =>
-    apiClient.post<StageActivityMaster>("/api/v1/stage-activities", data).then((r) => r.data),
-
-  update: (id: number, data: Partial<Omit<StageActivityMaster, "id" | "created_at">>) =>
-    apiClient.put<StageActivityMaster>(`/api/v1/stage-activities/${id}`, data).then((r) => r.data),
-
-  delete: (id: number) =>
-    apiClient.delete(`/api/v1/stage-activities/${id}`),
 };
 
 // Stages API

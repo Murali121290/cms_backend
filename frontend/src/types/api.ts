@@ -12,6 +12,7 @@ export interface Viewer {
   email: string;
   roles: string[];
   is_active: boolean;
+  team?: string;
 }
 
 export interface SessionAuth {
@@ -204,6 +205,10 @@ export interface FileRecord {
   version: number;
   lock: LockState;
   available_actions: string[];
+  size_bytes?: number | null;
+  file_size?: string | null;
+  uploaded_by?: string | null;
+  page_count?: number | null;
 }
 
 export interface FileDeleteInfo {
@@ -280,11 +285,12 @@ export interface ProcessingStartResponse {
 }
 
 export interface ProcessingStatusResponse {
-  status: "processing" | "completed";
+  status: "processing" | "completed" | "failed";
   source_file_id: number;
   process_type: string;
   derived_file_id: number | null;
   derived_filename: string | null;
+  error: string | null;
   compatibility_status: string;
   legacy_status_endpoint: string;
 }

@@ -20,7 +20,7 @@ def save_upload_file(upload_file: UploadFile, destination: str):
     finally:
         upload_file.file.close()
 
-def create_file_record(db: Session, project_id: int, file: UploadFile):
+def create_file_record(db: Session, project_id: int, file: UploadFile, actor_user_id: int | None = None):
     # Determine local path (mocking S3 for now)
     # Using timestamp to avoid collisions
     timestamp = now_ist_naive().strftime("%Y%m%d%H%M%S")
@@ -33,7 +33,8 @@ def create_file_record(db: Session, project_id: int, file: UploadFile):
         project_id=project_id,
         path=path,
         file_type=file.content_type,
-        version=1 # Logic for version bumping can be added here
+        version=1, # Logic for version bumping can be added here
+        uploaded_by_id=actor_user_id,
     )
     db.add(db_file)
     db.commit()
@@ -101,6 +102,7 @@ def upload_chapter_files(
 
             existing_file.version += 1
             existing_file.uploaded_at = now_ist_naive()
+            existing_file.uploaded_by_id = actor_user_id
             checkout_service.reset_checkout_after_overwrite(existing_file)
             uploaded_results.append(
                 {
@@ -123,6 +125,7 @@ def upload_chapter_files(
                 category=category,
                 path=file_path,
                 version=1,
+                uploaded_by_id=actor_user_id,
             )
             db.add(db_file)
             uploaded_results.append(

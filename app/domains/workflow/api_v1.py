@@ -9,11 +9,10 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.domains.workflow import crud
-from app.domains.workflow.models import StageDetail, StageMaster, StageActivityMaster
+from app.domains.workflow.models import StageDetail, StageMaster
 from app.domains.workflow.schemas import (
     RolesMasterCreate, RolesMasterResponse, RolesMasterUpdate,
     StageMasterCreate, StageMasterResponse, StageMasterUpdate,
-    StageActivityMasterCreate, StageActivityMasterResponse, StageActivityMasterUpdate,
     StageDetailCreate, StageDetailResponse, StageDetailUpdate, BulkPlannedCreate,
     WorkflowCreate, WorkflowStageResponse, WorkflowUpdate,
     ChapterInfoCreate, ChapterInfoResponse, ChapterInfoUpdate
@@ -54,61 +53,6 @@ def update_role(role_id: int, data: RolesMasterUpdate, db: Session = Depends(get
 def delete_role(role_id: int, db: Session = Depends(get_db)):
     if not crud.delete_role(db, role_id):
         raise HTTPException(status_code=404, detail="Role not found")
-
-
-# ── StageActivityMaster Endpoints ─────────────────────────────────────────────
-
-@router.post("/stage-activities", response_model=StageActivityMasterResponse, status_code=status.HTTP_201_CREATED)
-def create_stage_activity(data: StageActivityMasterCreate, db: Session = Depends(get_db)):
-    return crud.create_stage_activity(db, data)
-
-
-@router.get("/stage-activities", response_model=List[StageActivityMasterResponse])
-def list_stage_activities(skip: int = 0, limit: int = 500, db: Session = Depends(get_db)):
-    return crud.get_stage_activities(db, skip=skip, limit=limit)
-
-
-def resolve_activity(db: Session, identifier: str):
-    from sqlalchemy import select
-    if identifier.isdigit():
-        return db.execute(select(StageActivityMaster).where(StageActivityMaster.id == int(identifier))).scalars().first()
-    else:
-        return db.execute(select(StageActivityMaster).where(StageActivityMaster.stage_activity_name == identifier)).scalars().first()
-
-
-@router.get("/stage-activities/{activity_id_or_name}", response_model=StageActivityMasterResponse)
-def get_stage_activity(activity_id_or_name: str, db: Session = Depends(get_db)):
-    activity = resolve_activity(db, activity_id_or_name)
-    if not activity:
-        raise HTTPException(status_code=404, detail="Stage activity not found")
-    return activity
-
-
-@router.put("/stage-activities/{activity_id_or_name}", response_model=StageActivityMasterResponse)
-def update_stage_activity(activity_id_or_name: str, data: StageActivityMasterUpdate, db: Session = Depends(get_db)):
-    activity = resolve_activity(db, activity_id_or_name)
-    if not activity:
-        raise HTTPException(status_code=404, detail="Stage activity not found")
-    updated = crud.update_stage_activity(db, activity.id, data)
-    return updated
-
-
-@router.delete("/stage-activities/{activity_id_or_name}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_stage_activity(activity_id_or_name: str, db: Session = Depends(get_db)):
-    activity = resolve_activity(db, activity_id_or_name)
-    if not activity or not crud.delete_stage_activity(db, activity.id):
-        raise HTTPException(status_code=404, detail="Stage activity not found")
-
-
-@router.patch("/stage-activities/{activity_id_or_name}/status", response_model=StageActivityMasterResponse)
-def set_stage_activity_status(activity_id_or_name: str, payload: StatusPayload, db: Session = Depends(get_db)):
-    activity = resolve_activity(db, activity_id_or_name)
-    if not activity:
-        raise HTTPException(status_code=404, detail="Stage activity not found")
-    activity.active_status = payload.active_status
-    db.commit()
-    db.refresh(activity)
-    return activity
 
 
 # ── StageMaster Endpoints ─────────────────────────────────────────────────────
@@ -216,7 +160,6 @@ def create_planning_rows(payload: BulkPlannedCreate, db: Session = Depends(get_d
             planned_end_date=item.planned_end_date,
             sla=item.sla,
             stage_status="In-progress",
-            stage_activity_status="In-progress",
         )
         db.add(db_detail)
         details.append(db_detail)
@@ -304,6 +247,8 @@ def stage_transition(project: str, chapters: str, payload: TransitionPayload, db
     if payload.dt:
         try:
             transition_time = datetime.fromisoformat(payload.dt.replace("Z", "+00:00"))
+            if transition_time.tzinfo is not None:
+                transition_time = transition_time.replace(tzinfo=None)
         except ValueError:
             pass
             
@@ -311,7 +256,9 @@ def stage_transition(project: str, chapters: str, payload: TransitionPayload, db
         from_detail.stage_status = "Completed"
         from_detail.actual_end_date = transition_time
         if from_detail.actual_start_date:
-            delta = transition_time - from_detail.actual_start_date
+            t_naive = transition_time.replace(tzinfo=None) if transition_time.tzinfo is not None else transition_time
+            s_naive = from_detail.actual_start_date.replace(tzinfo=None) if from_detail.actual_start_date.tzinfo is not None else from_detail.actual_start_date
+            delta = t_naive - s_naive
             from_detail.total_time_taken = delta.total_seconds() / 3600.0
         
         # Calculate completion delay

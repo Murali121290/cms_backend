@@ -358,3 +358,195 @@ async def webdav_unlock(file_id: int, mode: str, token: str, filename: str, requ
             db.commit()
 
     return Response(status_code=204)
+
+
+post_prod_locks = {}  # key: chapter_id, value: lock_token (str)
+
+@router.options("/post-prod/chapters/{chapter_id}/")
+@router.options("/post-prod/chapters/{chapter_id}")
+async def webdav_post_prod_options_dir(chapter_id: int):
+    headers = {
+        "DAV": "1,2",
+        "MS-Author-Via": "DAV",
+        "Allow": "OPTIONS, GET, HEAD, PROPFIND, PUT, LOCK, UNLOCK",
+    }
+    return Response(status_code=200, headers=headers)
+
+@router.options("/post-prod/chapters/{chapter_id}/{token}/")
+@router.options("/post-prod/chapters/{chapter_id}/{token}")
+async def webdav_post_prod_options_token_dir(chapter_id: int, token: str):
+    headers = {
+        "DAV": "1,2",
+        "MS-Author-Via": "DAV",
+        "Allow": "OPTIONS, GET, HEAD, PROPFIND, PUT, LOCK, UNLOCK",
+    }
+    return Response(status_code=200, headers=headers)
+
+@router.options("/post-prod/chapters/{chapter_id}/{token}/{filename}")
+async def webdav_post_prod_options(chapter_id: int, token: str, filename: str):
+    headers = {
+        "DAV": "1,2",
+        "MS-Author-Via": "DAV",
+        "Allow": "OPTIONS, GET, HEAD, PROPFIND, PUT, LOCK, UNLOCK",
+    }
+    return Response(status_code=200, headers=headers)
+
+# HEAD
+@router.head("/post-prod/chapters/{chapter_id}/{token}/{filename}")
+async def webdav_post_prod_head(chapter_id: int, token: str, filename: str, db: Session = Depends(database.get_db)):
+    from app.domains.post_prod.models import PostProdChapter
+    chapter = db.query(PostProdChapter).filter(PostProdChapter.id == chapter_id).first()
+    if not chapter or not chapter.converted_file_path or not os.path.exists(chapter.converted_file_path):
+        raise HTTPException(status_code=404, detail="Chapter file not found")
+    stat = os.stat(chapter.converted_file_path)
+    headers = {
+        "Content-Length": str(stat.st_size),
+        "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "Last-Modified": formatdate(stat.st_mtime, usegmt=True),
+    }
+    return Response(status_code=200, headers=headers)
+
+# GET
+@router.get("/post-prod/chapters/{chapter_id}/{token}/{filename}")
+async def webdav_post_prod_get(chapter_id: int, token: str, filename: str, db: Session = Depends(database.get_db)):
+    from app.domains.post_prod.models import PostProdChapter
+    chapter = db.query(PostProdChapter).filter(PostProdChapter.id == chapter_id).first()
+    if not chapter or not chapter.converted_file_path or not os.path.exists(chapter.converted_file_path):
+        raise HTTPException(status_code=404, detail="Chapter file not found")
+    
+    return FileResponse(
+        path=chapter.converted_file_path,
+        filename=filename,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+
+# PROPFIND (explicit)
+@router.post("/post-prod/chapters/{chapter_id}/{token}/{filename}")
+async def webdav_post_prod_propfind(chapter_id: int, token: str, filename: str, db: Session = Depends(database.get_db)):
+    return await _handle_post_prod_propfind(chapter_id, token, filename, db)
+
+@router.api_route("/post-prod/chapters/{chapter_id}/{token}/{filename}", methods=["PROPFIND"])
+async def webdav_post_prod_propfind_explicit(chapter_id: int, token: str, filename: str, db: Session = Depends(database.get_db)):
+    return await _handle_post_prod_propfind(chapter_id, token, filename, db)
+
+async def _handle_post_prod_propfind(chapter_id: int, token: str, filename: str, db: Session):
+    from app.domains.post_prod.models import PostProdChapter
+    chapter = db.query(PostProdChapter).filter(PostProdChapter.id == chapter_id).first()
+    if not chapter or not chapter.converted_file_path or not os.path.exists(chapter.converted_file_path):
+        raise HTTPException(status_code=404, detail="Chapter file not found")
+    stat = os.stat(chapter.converted_file_path)
+    rfc1123 = formatdate(stat.st_mtime, usegmt=True)
+    xml = f"""<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/webdav/post-prod/chapters/{chapter_id}/{token}/{filename}</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:displayname>{filename}</D:displayname>
+        <D:getcontentlength>{stat.st_size}</D:getcontentlength>
+        <D:getcontenttype>application/vnd.openxmlformats-officedocument.wordprocessingml.document</D:getcontenttype>
+        <D:getlastmodified>{rfc1123}</D:getlastmodified>
+        <D:resourcetype/>
+        <D:supportedlock>
+          <D:lockentry>
+            <D:lockscope><D:exclusive/></D:lockscope>
+            <D:locktype><D:write/></D:locktype>
+          </D:lockentry>
+        </D:supportedlock>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>
+"""
+    return Response(content=xml, media_type="application/xml", status_code=207)
+
+# Directory-level PROPFIND
+@router.api_route("/post-prod/chapters/{chapter_id}/{token}/", methods=["PROPFIND"])
+@router.api_route("/post-prod/chapters/{chapter_id}/{token}", methods=["PROPFIND"])
+async def webdav_post_prod_propfind_token_dir(chapter_id: int, token: str):
+    return _collection_propfind(f"/webdav/post-prod/chapters/{chapter_id}/{token}")
+
+@router.api_route("/post-prod/chapters/{chapter_id}/", methods=["PROPFIND"])
+@router.api_route("/post-prod/chapters/{chapter_id}", methods=["PROPFIND"])
+async def webdav_post_prod_propfind_dir(chapter_id: int):
+    return _collection_propfind(f"/webdav/post-prod/chapters/{chapter_id}")
+
+# PROPPATCH
+@router.api_route("/post-prod/chapters/{chapter_id}/{token}/{filename}", methods=["PROPPATCH"])
+async def webdav_post_prod_proppatch(chapter_id: int, token: str, filename: str):
+    xml = f"""<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/webdav/post-prod/chapters/{chapter_id}/{token}/{filename}</D:href>
+    <D:propstat>
+      <D:prop/>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>
+"""
+    return Response(content=xml, media_type="application/xml", status_code=207)
+
+# PUT (Save from Word)
+@router.put("/post-prod/chapters/{chapter_id}/{token}/{filename}")
+async def webdav_post_prod_put(chapter_id: int, token: str, filename: str, request: Request, db: Session = Depends(database.get_db)):
+    token_payload = _decode_token(token)
+    if not token_payload:
+        raise HTTPException(status_code=401, detail="Unauthorized WebDAV PUT")
+    
+    from app.domains.post_prod.models import PostProdChapter
+    chapter = db.query(PostProdChapter).filter(PostProdChapter.id == chapter_id).first()
+    if not chapter or not chapter.converted_file_path:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+        
+    body = await request.body()
+    with open(chapter.converted_file_path, "wb") as f:
+        f.write(body)
+        
+    return Response(status_code=204)
+
+# LOCK
+@router.api_route("/post-prod/chapters/{chapter_id}/{token}/{filename}", methods=["LOCK"])
+async def webdav_post_prod_lock(chapter_id: int, token: str, filename: str, request: Request):
+    existing_token = _extract_lock_token_from_headers(request)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=WEBDAV_TOKEN_EXPIRE_MINUTES)
+    
+    if existing_token:
+        if chapter_id in post_prod_locks and post_prod_locks[chapter_id]["token"] == existing_token:
+            post_prod_locks[chapter_id]["expires_at"] = expires_at
+            token_to_return = existing_token
+        else:
+            token_to_return = f"urn:uuid:{uuid4()}"
+            post_prod_locks[chapter_id] = {"token": token_to_return, "expires_at": expires_at}
+    else:
+        token_to_return = f"urn:uuid:{uuid4()}"
+        post_prod_locks[chapter_id] = {"token": token_to_return, "expires_at": expires_at}
+        
+    xml = f"""<?xml version="1.0" encoding="utf-8"?>
+<D:prop xmlns:D="DAV:">
+  <D:lockdiscovery>
+    <D:activelock>
+      <D:locktype><D:write/></D:locktype>
+      <D:lockscope><D:exclusive/></D:lockscope>
+      <D:depth>0</D:depth>
+      <D:timeout>Second-{WEBDAV_TOKEN_EXPIRE_MINUTES * 60}</D:timeout>
+      <D:locktoken><D:href>{token_to_return}</D:href></D:locktoken>
+    </D:activelock>
+  </D:lockdiscovery>
+</D:prop>
+"""
+    return Response(
+        content=xml,
+        media_type="application/xml",
+        status_code=200,
+        headers={"Lock-Token": f"<{token_to_return}>"},
+    )
+
+# UNLOCK
+@router.api_route("/post-prod/chapters/{chapter_id}/{token}/{filename}", methods=["UNLOCK"])
+async def webdav_post_prod_unlock(chapter_id: int, token: str, filename: str, request: Request):
+    if chapter_id in post_prod_locks:
+        del post_prod_locks[chapter_id]
+    return Response(status_code=204)
+

@@ -62,7 +62,7 @@ export function Settings() {
         <p className="text-sm text-muted mt-1">Manage your system configuration and preferences</p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-4">
         {settingsCards.map(({ to, icon: Icon, title, description, color, iconColor }) => (
           <button
             key={to}

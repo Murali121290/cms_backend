@@ -59,6 +59,7 @@ import {
 import { diffWords, diffArrays } from "diff";
 import { useState, useEffect, useImperativeHandle, forwardRef, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/Button";
+import { useSidebarStore } from "@/store/useSidebarStore";
 import Paragraph from "@tiptap/extension-paragraph";
 import Heading from "@tiptap/extension-heading";
 import { TrackChanges } from "./TrackChanges";
@@ -527,6 +528,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
     }: WysiwygEditorProps,
     ref
   ) {
+    const sidebarCollapsed = useSidebarStore((s) => s.collapsed);
     const [tcEnabled, setTcEnabled] = useState(trackChangesEnabled);
     const [activeGutter, setActiveGutter] = useState<{
       pos: number;
@@ -2033,7 +2035,11 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         </div>
 
         {/* â”€â”€ Save Bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-        <div className="fixed bottom-0 left-0 right-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur-sm px-6 py-3 flex items-center gap-3 shadow-[0_-2px_12px_rgba(15,23,42,0.08)]">
+        <div
+          className={`fixed bottom-0 right-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur-sm px-6 py-3 flex items-center gap-3 shadow-[0_-2px_12px_rgba(15,23,42,0.08)] ${
+            sidebarCollapsed ? "left-16" : "left-60"
+          }`}
+        >
           <Button
             variant="primary"
             onClick={handleSave}

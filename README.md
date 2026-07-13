@@ -1,6 +1,6 @@
-# CMS Backend
+# S4C Ninja Inkflow CMS
 
-A Content Management System for the publishing industry. Manages the full manuscript lifecycle — from raw DOCX upload through structuring, styling, XML tagging, review, and publication.
+A Content Management System for the publishing industry. Manages the full manuscript lifecycle — from raw DOCX upload through structuring, styling, XML tagging, review, and publication. Integrated with **S4C People Hub** for directory syncing, custom browser-based **WYSIWYG editors** with math/image editing, **WebDAV-driven Word synchronization**, and pre-press **PPH services**.
 
 ---
 
@@ -41,22 +41,23 @@ A Content Management System for the publishing industry. Manages the full manusc
 - **Build output:** `frontend/dist/` served by Nginx
 
 ### Document Editing
-- **Collabora Online:** LibreOffice-in-browser via WOPI protocol
-- **OnlyOffice:** Alternative document server integration
+- **Custom WYSIWYG Editor:** In-browser editor featuring an Equation Editor, Image Editor, Reference View, and JATS XML Technical Edit View
+- **WebDAV Integration:** 'Open in Word' support to edit documents locally with server synchronization
+- **OnlyOffice:** Secondary document server formatting option
 
 ---
 
 ## Key Features
 
 - **Hierarchical structure:** Projects → Chapters → Files
-- **Role-Based Access Control:** Admin, Project Manager, Editor, Copyeditor, Typesetter, Viewer
+- **Role-Based Access Control:** Admin, Project Manager, Editor, Copyeditor, Typesetter, Viewer synced with **S4C People Hub**
 - **File versioning:** Checkout/checkin to prevent concurrent edits
-- **Processing pipeline:** 11-step DOCX pipeline (cleanup, style validation, conversion, etc.)
-- **Math support:** LaTeX ↔ MathML ↔ OMML conversions
-- **XML generation:** NLM XML tagging for academic publishing
-- **In-browser editing:** Collabora and OnlyOffice integrations
-- **AI structuring:** Optional external AI service for manuscript analysis
-- **PPH integration:** Pre-press server connectivity
+- **Processing pipeline:** Automated PPH & conversion pipeline (Ingestion, Technical Editing, Bias Scans, Reference Validation, and Backlist extraction)
+- **Math support:** Browser-based Equation Editor (LaTeX ↔ MathML ↔ OMML conversions)
+- **XML generation:** JATS XML / NLM XML tagging for academic database indexing
+- **In-browser editing:** Custom WYSIWYG Editor and OnlyOffice integrations
+- **WebDAV Synchronization:** Seamless 'Open in Word' support for offline and desktop editing
+- **PPH Services:** Automated reference checks, bias tone scans, and contributor credit extraction
 
 ---
 
@@ -145,14 +146,6 @@ npm install
 npm run dev     # http://localhost:5173
 ```
 
-**4. Collabora (required for in-browser editing):**
-```bash
-docker run -t -d -p 9980:9980 \
-  -e "aliasgroup1=http://host.docker.internal:8000,http://127.0.0.1:8000,http://localhost:8000" \
-  -e "extra_params=--o:ssl.enable=false --o:net.post_allow.host[0]=.*" \
-  --name collabora \
-  collabora/code
-```
 
 ### Production (Docker Compose)
 
@@ -168,7 +161,7 @@ docker compose up -d
 docker compose exec backend alembic upgrade head
 ```
 
-This starts: PostgreSQL, Redis, FastAPI backend, Celery worker, Collabora, OnlyOffice, Nginx.
+This starts: PostgreSQL, Redis, FastAPI backend, Celery worker, OnlyOffice, Nginx.
 
 ---
 
@@ -181,8 +174,8 @@ This starts: PostgreSQL, Redis, FastAPI backend, Celery worker, Collabora, OnlyO
 | `SECRET_KEY` | Session signing key | — |
 | `HOST_DOMAIN` | Public domain name | `localhost` |
 | `HOST_PORT` | Public port | `8000` |
-| `COLLABORA_URL` | Collabora container URL | `http://127.0.0.1:9980` |
-| `WOPI_BASE_URL` | URL Collabora uses to reach the backend | `http://host.docker.internal:8000` |
+| `PEOPLE_HUB_URL` | S4C People Hub API base URL | — |
+| `WEBDAV_BASE_URL` | Base URL for WebDAV client connections | — |
 | `ONLYOFFICE_PUBLIC_URL` | OnlyOffice public endpoint | — |
 | `ONLYOFFICE_INTERNAL_URL` | OnlyOffice internal endpoint | — |
 | `ONLYOFFICE_JWT_SECRET` | OnlyOffice JWT secret | — |
@@ -260,30 +253,19 @@ alembic downgrade -1
 
 ## Processing Pipeline
 
-The DOCX pipeline runs through 11 steps managed by Celery workers:
+The conversion and PPH pipeline runs through automated stages managed by Celery workers:
 
-1. Pre-processing cleanup
-2. Style validation
-3. Structuring analysis
-4. Technical content extraction (math, formulas)
-5. Reference parsing
-6. DOCX → XHTML conversion
-7. XML tagging (NLM)
-8. Asset processing (figures, tables)
-9. Review package generation
-10. XHTML → DOCX round-trip
-11. Output packaging
+1. **File Ingestion & Word XML Parsing:** Strips corrupt styles and normalizes layouts.
+2. **Technical Edit & WYSIWYG View:** Mounts equation editors, image editors, and JATS tags.
+3. **Bias Scanning & Credit Extraction:** Audits text diversity and extracts contributor credit taxonomy.
+4. **Reference Validation & Citation Audit:** Cross-checks bibliography items with PubMed/CrossRef.
+5. **Backlist & Output Generation:** Process legacy volume archives and builds final ePub/XML packages.
 
 Customize structuring rules in `app/processing/structuring_lib/rules.yaml`.
 
 ---
 
 ## Troubleshooting
-
-**Collabora "Refused to connect"**
-- Verify the container is running: `docker ps`
-- Check `COLLABORA_URL` matches the container port
-- Ensure `--o:ssl.enable=false` is set for HTTP-only local dev
 
 **File upload errors**
 - Check write permissions on `data/uploads/`

@@ -1,0 +1,52 @@
+{
+  "access_settings": [
+    "Admin"
+  ],
+  "view_all_projects": [
+    "Admin",
+    "Index Manager",
+    "Non-XML Manager",
+    "XML Manager",
+    "Graphics Manager",
+    "Template Team Manager",
+    "Production Manager",
+    "Editorial Manager",
+    "Project Manager",
+    "Senior Project Manager",
+    "Asst General Manager"
+  ],
+  "view_all_chapters": [
+    "Admin",
+    "Index Manager",
+    "Non-XML Manager",
+    "XML Manager",
+    "Graphics Manager",
+    "Template Team Manager",
+    "Production Manager",
+    "Editorial Manager",
+    "Project Manager",
+    "Senior Project Manager",
+    "Asst General Manager"
+  ],
+  "edit_assignee": [
+    "Admin",
+    "Team Lead - Editorial",
+    "Team Lead - Production",
+    "Team lead - prediting",
+    "Team lead - language editing",
+    "Index Manager",
+    "Non-XML Manager",
+    "XML Manager",
+    "Graphics Manager",
+    "Template Team Manager",
+    "Production Manager",
+    "Editorial Manager",
+    "Project Manager",
+    "Senior Project Manager",
+    "Asst General Manager"
+  ],
+  "access_post_production": [
+    "Admin",
+    "Accessibility Team"
+  ]
+}

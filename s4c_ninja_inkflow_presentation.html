@@ -1,0 +1,1170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>S4C Ninja Inkflow - Executive Presentation Portal</title>
+  
+  <!-- Fonts Matching the CMS Brand -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@300;400;500;600;700;800&family=Spectral:ital,wght@0,400;0,600;0,700;1,400;1,700&family=Spline+Sans+Mono:wght@400;600&display=swap" rel="stylesheet">
+
+  <style>
+    /* Design Variables matching S4C Design Guidelines */
+    :root {
+      --accent-orange: #F48B29;
+      --accent-blue: #1B4F9C;
+      --accent-deep: #0F366E;
+      --accent-wash: #EEF5FC;
+      
+      --bg-dark: #131922;
+      --bg-dark-card: #1B2330;
+      --bg-dark-deep: #0D1218;
+      --border-dark: #2C3B50;
+      
+      --bg-light: #EBF1F7;
+      --bg-light-card: #FFFFFF;
+      --border-light: #CFDCEB;
+      
+      --text-dark: #121822;
+      --text-light: #FFFFFF;
+      --text-muted: #68809D;
+      
+      --transition-speed: 0.4s;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Hanken Grotesk', system-ui, sans-serif;
+      background-color: var(--bg-dark-deep);
+      color: var(--text-light);
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Main Grid Layout */
+    .presentation-container {
+      display: flex;
+      flex: 1;
+      height: 100%;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Slides Area */
+    .slides-viewport {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+      background-color: var(--bg-light);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      transition: all var(--transition-speed) cubic-bezier(0.25, 0.8, 0.25, 1);
+    }
+
+    .slide {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      padding: 60px 80px;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      opacity: 0;
+      transform: translateX(100%);
+      transition: transform var(--transition-speed) ease-in-out, opacity var(--transition-speed) ease-in-out;
+      background-color: var(--bg-light);
+      color: var(--text-dark);
+      z-index: 1;
+    }
+
+    .slide.active {
+      opacity: 1;
+      transform: translateX(0);
+      z-index: 2;
+    }
+
+    .slide.previous {
+      transform: translateX(-100%);
+    }
+
+    /* Dark Mode Slides (Title & Conclusion) */
+    .slide.dark-slide {
+      background-color: var(--bg-dark);
+      color: var(--text-light);
+    }
+
+    /* Typography & Headers */
+    .slide-header {
+      margin-bottom: 35px;
+      position: relative;
+      flex-shrink: 0;
+    }
+
+    .slide-header h2 {
+      font-family: 'Spectral', serif;
+      font-size: 38px;
+      font-weight: 700;
+      color: var(--accent-blue);
+      line-height: 1.2;
+    }
+
+    .slide.dark-slide .slide-header h2 {
+      color: var(--text-light);
+    }
+
+    .slide-header::after {
+      content: '';
+      display: block;
+      width: 80px;
+      height: 4px;
+      background-color: var(--accent-orange);
+      margin-top: 15px;
+      border-radius: 2px;
+    }
+
+    .slide.dark-slide .slide-header::after {
+      background-color: var(--accent-blue);
+    }
+
+    /* Slide Content Layout Templates */
+    .slide-body {
+      flex: 1;
+      display: flex;
+      gap: 40px;
+      align-items: stretch;
+      overflow-y: auto;
+    }
+
+    .col-6 {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .full-width {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Interactive lists */
+    .feature-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
+
+    .feature-item {
+      padding: 12px 20px;
+      background: var(--bg-light-card);
+      border-left: 5px solid var(--accent-blue);
+      border-radius: 0 8px 8px 0;
+      box-shadow: 0 4px 15px rgba(27, 79, 156, 0.05);
+      transition: all 0.3s ease;
+    }
+
+    .feature-item:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(27, 79, 156, 0.1);
+    }
+
+    .feature-title {
+      font-weight: 700;
+      font-size: 17px;
+      color: var(--accent-blue);
+      margin-bottom: 4px;
+    }
+
+    .feature-desc {
+      font-size: 14px;
+      color: var(--text-dark);
+      line-height: 1.45;
+    }
+
+    /* Highlight box / Card */
+    .highlight-card {
+      background-color: var(--accent-blue);
+      color: var(--text-light);
+      padding: 30px;
+      border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(27, 79, 156, 0.15);
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .highlight-card h3 {
+      font-family: 'Spectral', serif;
+      color: var(--accent-orange);
+      font-size: 22px;
+      margin-bottom: 20px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .highlight-card ul {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .highlight-card li {
+      font-size: 15px;
+      line-height: 1.45;
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+    }
+
+    /* Title Slide Specifics */
+    .title-slide-content {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: flex-start;
+      height: 100%;
+      max-width: 800px;
+    }
+
+    .title-slide-content h1 {
+      font-family: 'Spectral', serif;
+      font-size: 72px;
+      font-weight: 700;
+      color: var(--accent-orange);
+      margin-bottom: 10px;
+      line-height: 1.1;
+    }
+
+    .title-slide-content h1 span {
+      color: var(--text-light);
+    }
+
+    .title-slide-content h3 {
+      font-size: 28px;
+      color: var(--text-light);
+      font-weight: 400;
+      margin-bottom: 30px;
+    }
+
+    .title-slide-content p {
+      font-size: 16px;
+      color: var(--text-muted);
+      border-left: 3px solid var(--accent-blue);
+      padding-left: 15px;
+    }
+
+    /* Three Pillars Grid */
+    .pillars-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 25px;
+      width: 100%;
+      height: 100%;
+      align-items: stretch;
+    }
+
+    .pillar-card {
+      color: var(--text-light);
+      padding: 30px 25px;
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      transition: transform 0.3s ease;
+      box-shadow: 0 10px 30px rgba(19, 25, 34, 0.08);
+    }
+
+    .pillar-card:hover {
+      transform: translateY(-5px);
+    }
+
+    .pillar-card.p1 { background-color: var(--accent-blue); }
+    .pillar-card.p2 { background-color: var(--accent-deep); }
+    .pillar-card.p3 { background-color: var(--bg-dark); }
+
+    .pillar-num {
+      font-family: 'Spectral', serif;
+      font-size: 32px;
+      font-weight: 700;
+      color: var(--accent-orange);
+      margin-bottom: 20px;
+    }
+
+    .pillar-title {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 15px;
+      line-height: 1.3;
+    }
+
+    .pillar-desc {
+      font-size: 14px;
+      line-height: 1.55;
+      color: var(--accent-wash);
+    }
+
+    /* Pipeline Flow Layout */
+    .pipeline-container {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      width: 100%;
+    }
+
+    .pipeline-step {
+      display: flex;
+      align-items: center;
+      background-color: var(--bg-light-card);
+      border-radius: 8px;
+      padding: 15px 25px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.02);
+      border: 1px solid var(--border-light);
+    }
+
+    .step-num {
+      background-color: var(--accent-orange);
+      color: var(--text-light);
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-weight: 700;
+      margin-right: 20px;
+      flex-shrink: 0;
+    }
+
+    .step-text {
+      flex: 1;
+    }
+
+    .step-title {
+      font-weight: 700;
+      font-size: 16px;
+      color: var(--accent-blue);
+      margin-bottom: 2px;
+    }
+
+    .step-desc {
+      font-size: 13.5px;
+      color: var(--text-dark);
+    }
+
+    /* Comparison columns */
+    .comparison-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 30px;
+      width: 100%;
+    }
+
+    .comp-col {
+      background: var(--bg-light-card);
+      border-radius: 12px;
+      padding: 30px;
+      border: 1px solid var(--border-light);
+      box-shadow: 0 5px 20px rgba(0,0,0,0.02);
+    }
+
+    .comp-col.inkflow-col {
+      background: var(--accent-blue);
+      color: var(--text-light);
+      border: none;
+      box-shadow: 0 8px 25px rgba(27, 79, 156, 0.15);
+    }
+
+    .comp-title {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 20px;
+      padding-bottom: 10px;
+      border-bottom: 2px dashed var(--border-light);
+    }
+
+    .comp-col.inkflow-col .comp-title {
+      color: var(--accent-orange);
+      border-bottom-color: rgba(255,255,255,0.15);
+    }
+
+    .comp-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
+
+    .comp-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: 15px;
+      line-height: 1.4;
+    }
+
+    /* Conclusion Cards */
+    .conclusion-list {
+      display: flex;
+      flex-direction: column;
+      gap: 25px;
+      justify-content: center;
+      height: 100%;
+    }
+
+    .conclusion-item {
+      display: flex;
+      gap: 25px;
+      align-items: flex-start;
+    }
+
+    .conclusion-index {
+      font-family: 'Spectral', serif;
+      font-size: 36px;
+      font-weight: 700;
+      color: var(--accent-orange);
+      line-height: 1;
+    }
+
+    .conclusion-content h4 {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--accent-orange);
+      margin-bottom: 6px;
+    }
+
+    .conclusion-content p {
+      font-size: 15px;
+      color: var(--text-light);
+      line-height: 1.5;
+    }
+
+    /* Speaker Notes / Presentation Guide Sidebar */
+    .speaker-notes-panel {
+      width: 400px;
+      background-color: var(--bg-dark);
+      border-left: 1px solid var(--border-dark);
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      z-index: 10;
+      transition: margin-right var(--transition-speed) ease-in-out;
+      flex-shrink: 0;
+    }
+
+    .speaker-notes-panel.collapsed {
+      margin-right: -400px;
+    }
+
+    .notes-header {
+      padding: 20px 25px;
+      border-bottom: 1px solid var(--border-dark);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background-color: var(--bg-dark-deep);
+    }
+
+    .notes-header h3 {
+      font-family: 'Spectral', serif;
+      font-size: 20px;
+      color: var(--accent-orange);
+      font-weight: 700;
+    }
+
+    .close-notes-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 16px;
+    }
+
+    .close-notes-btn:hover {
+      color: var(--text-light);
+    }
+
+    .notes-content {
+      flex: 1;
+      padding: 25px;
+      overflow-y: auto;
+    }
+
+    .notes-section {
+      margin-bottom: 25px;
+      display: none;
+    }
+
+    .notes-section.active-note {
+      display: block;
+      animation: fadeIn 0.3s ease-out;
+    }
+
+    .notes-section h4 {
+      font-size: 14px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--accent-blue);
+      margin-bottom: 10px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid var(--border-dark);
+    }
+
+    .notes-section p, .notes-section li {
+      font-size: 14.5px;
+      line-height: 1.6;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    .notes-section ul {
+      padding-left: 20px;
+      margin-bottom: 12px;
+    }
+
+    /* Bottom Control Bar */
+    .controls-bar {
+      height: 60px;
+      background-color: var(--bg-dark-deep);
+      border-top: 1px solid var(--border-dark);
+      padding: 0 40px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 11;
+      flex-shrink: 0;
+    }
+
+    .controls-left {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+    }
+
+    .btn {
+      background-color: var(--bg-dark-card);
+      border: 1px solid var(--border-dark);
+      color: var(--text-light);
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13.5px;
+      font-weight: 600;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn:hover {
+      background-color: var(--accent-blue);
+      border-color: var(--accent-blue);
+    }
+
+    .btn:active {
+      transform: scale(0.97);
+    }
+
+    .btn-primary {
+      background-color: var(--accent-orange);
+      border-color: var(--accent-orange);
+    }
+
+    .btn-primary:hover {
+      background-color: #e07b1d;
+      border-color: #e07b1d;
+    }
+
+    .slide-progress-container {
+      width: 250px;
+      height: 6px;
+      background-color: var(--border-dark);
+      border-radius: 3px;
+      overflow: hidden;
+      margin: 0 20px;
+    }
+
+    .slide-progress-bar {
+      height: 100%;
+      width: 10%;
+      background-color: var(--accent-orange);
+      border-radius: 3px;
+      transition: width var(--transition-speed) ease;
+    }
+
+    .slide-counter {
+      font-size: 14px;
+      color: var(--text-muted);
+      font-family: 'Spline Sans Mono', monospace;
+    }
+
+    .controls-right {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    /* Key Animation */
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(5px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Corporate Logo Stretch & Aspect Ratio Fixes */
+    .slide > img {
+      width: auto !important;
+      align-self: flex-start;
+      object-fit: contain;
+    }
+    
+    .slide-header img {
+      width: auto !important;
+      object-fit: contain;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="presentation-container">
+    
+    <!-- Slides Viewport -->
+    <div class="slides-viewport" id="viewport">
+      
+      <!-- Slide 1: Title Slide (Dark) -->
+      <div class="slide dark-slide active" data-slide="1">
+        <div class="title-slide-content">
+          <!-- Corporate Logo -->
+          <img src="file:///d:/Main/cms_backend/frontend/public/portal-assets/s4c-logo.png" alt="S4C Logo" style="height: 65px; margin-bottom: 30px; display: block;" onerror="this.style.display='none';">
+          <h1>S4C Ninja <span>Inkflow</span></h1>
+          <h3>Automating the Manuscript & Publishing Lifecycle</h3>
+          <p>Prepared for Senior Management  |  Technical & Business Roadmap</p>
+        </div>
+      </div>
+
+      <!-- Slide 2: The Publishing Bottleneck -->
+      <div class="slide" data-slide="2">
+        <div class="slide-header">
+          <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+            <h2>The Publishing Bottleneck</h2>
+            <img src="file:///d:/Main/cms_backend/frontend/public/portal-assets/s4c-logo.png" alt="S4C Logo" style="height: 38px; display: block;" onerror="this.style.display='none';">
+          </div>
+        </div>
+        <div class="slide-body">
+          <div class="col-6">
+            <ul class="feature-list">
+              <li class="feature-item">
+                <div class="feature-title">Manual Editing & Layout Workflows</div>
+                <div class="feature-desc">Swapping between separate applications to edit text structure, equations, citations, and XML tags.</div>
+              </li>
+              <li class="feature-item">
+                <div class="feature-title">Pre-Press Processing Delays</div>
+                <div class="feature-desc">Slow, manual processes for reference validation, bias scans, credit extraction, and backlist digital conversions.</div>
+              </li>
+              <li class="feature-item">
+                <div class="feature-title">Revision & Tracking Conflicts</div>
+                <div class="feature-desc">Reviewing files via email updates causes version confusion, duplicate work, and tracking loss.</div>
+              </li>
+            </ul>
+          </div>
+          <div class="col-6">
+            <div class="highlight-card">
+              <h3>The Impact on Operations</h3>
+              <ul>
+                <li>❌ <strong>High Overhead Costs:</strong> Heavy hours spent manually formatting references, citations, and math styles.</li>
+                <li>❌ <strong>Slower Time-to-Market:</strong> Manuscripts remain stuck in editing phases waiting for compliance checks.</li>
+                <li>❌ <strong>Siloed User Management:</strong> Lack of integration with company HR directory systems for roles.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Slide 3: The Solutions -->
+      <div class="slide" data-slide="3">
+        <div class="slide-header">
+          <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+            <h2>S4C Ninja Inkflow (The Solution)</h2>
+            <img src="file:///d:/Main/cms_backend/frontend/public/portal-assets/s4c-logo.png" alt="S4C Logo" style="height: 38px; display: block;" onerror="this.style.display='none';">
+          </div>
+        </div>
+        <div class="slide-body">
+          <div class="pillars-grid">
+            <div class="pillar-card p1">
+              <div class="pillar-num">01</div>
+              <div class="pillar-title">Unified WYSIWYG Editor</div>
+              <div class="pillar-desc">Custom web editor featuring a built-in Equation Editor, Image Editor, Reference View, and Technical Edit View. Eliminates desktop application switching.</div>
+            </div>
+            <div class="pillar-card p2">
+              <div class="pillar-num">02</div>
+              <div class="pillar-title">WebDAV & Word Integration</div>
+              <div class="pillar-desc">Seamless 'Open in Word' support. Edit files locally in Microsoft Word while automatic version logs and lock states sync back to the server via WebDAV.</div>
+            </div>
+            <div class="pillar-card p3">
+              <div class="pillar-num">03</div>
+              <div class="pillar-title">Automated PPH Services</div>
+              <div class="pillar-desc">Pre-press steps run in minutes: automated Reference Validation, Bias Scan, Word XML generation, Credit Extraction, and legacy Backlist ingest tools.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Slide 4: System Integrations -->
+      <div class="slide" data-slide="4">
+        <div class="slide-header">
+          <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+            <h2>Ecosystem & Core Integrations</h2>
+            <img src="file:///d:/Main/cms_backend/frontend/public/portal-assets/s4c-logo.png" alt="S4C Logo" style="height: 38px; display: block;" onerror="this.style.display='none';">
+          </div>
+        </div>
+        <div class="slide-body">
+          <div class="col-6">
+            <ul class="feature-list">
+              <li class="feature-item" style="border-left-color: var(--accent-orange)">
+                <div class="feature-title">S4C People Hub Integration</div>
+                <div class="feature-desc">Directly connects with S4C People Hub for unified user profiles, department mappings, permissions, and roles.</div>
+              </li>
+              <li class="feature-item" style="border-left-color: var(--accent-orange)">
+                <div class="feature-title">WebDAV 'Open in Word'</div>
+                <div class="feature-desc">Open documents in native Microsoft Word. Automatically locks files on server and uploads updates when saved.</div>
+              </li>
+              <li class="feature-item" style="border-left-color: var(--accent-orange)">
+                <div class="feature-title">Custom WYSIWYG Toolset</div>
+                <div class="feature-desc">HTML5 editor with a formula editor, reference visualizer, technical tags view, and image cropping tools.</div>
+              </li>
+            </ul>
+          </div>
+          <div class="col-6">
+            <div class="highlight-card" style="background-color: var(--bg-light-card); color: var(--text-dark); border: 1px solid var(--border-light);">
+              <h3 style="color: var(--accent-blue)">Integration Suite</h3>
+              <ul style="color: var(--text-dark)">
+                <li style="border-bottom: 1px solid var(--bg-light); padding-bottom: 10px;">
+                  <div>
+                    <strong style="color: var(--accent-orange)">PPH Services API:</strong>
+                    <span style="font-size: 13.5px; display: block; color: var(--text-muted)">Automates reference validation, bias scan checks, credit extraction, and Word XML files.</span>
+                  </div>
+                </li>
+                <li style="border-bottom: 1px solid var(--bg-light); padding-bottom: 10px;">
+                  <div>
+                    <strong style="color: var(--accent-orange)">WYSIWYG Technical View:</strong>
+                    <span style="font-size: 13.5px; display: block; color: var(--text-muted)">Displays JATS XML structural tags in real time as editors compile text.</span>
+                  </div>
+                </li>
+                <li>
+                  <div>
+                    <strong style="color: var(--accent-orange)">Backlist Ingestor:</strong>
+                    <span style="font-size: 13.5px; display: block; color: var(--text-muted)">Converts legacy archive volumes into clean, modern publishing templates.</span>
+                  </div>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Slide 5: The PPH Pipeline -->
+      <div class="slide" data-slide="5">
+        <div class="slide-header">
+          <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+            <h2>Automated PPH & Conversion Pipeline</h2>
+            <img src="file:///d:/Main/cms_backend/frontend/public/portal-assets/s4c-logo.png" alt="S4C Logo" style="height: 38px; display: block;" onerror="this.style.display='none';">
+          </div>
+        </div>
+        <div class="slide-body">
+          <div class="full-width">
+            <div class="pipeline-container">
+              <div class="pipeline-step">
+                <div class="step-num">1-2</div>
+                <div class="step-text">
+                  <div class="step-title">Ingestion & Technical Edit View</div>
+                  <div class="step-desc">Strips corrupt templates, parses Word XML layouts, and spins up the WYSIWYG technical edit editor with equation and image fields.</div>
+                </div>
+              </div>
+              <div class="pipeline-step">
+                <div class="step-num">3-4</div>
+                <div class="step-text">
+                  <div class="step-title">Bias Scanning & Reference Validation</div>
+                  <div class="step-desc">Performs language bias analysis (diversity check) and validates manuscript bibliographies against external registries (PubMed/CrossRef).</div>
+                </div>
+              </div>
+              <div class="pipeline-step">
+                <div class="step-num">5</div>
+                <div class="step-text">
+                  <div class="step-title">Credit Extraction, Backlist, & JATS Output</div>
+                  <div class="step-desc">Extracts author contributions, handles legacy backlist ingestion, and outputs standard JATS XML publications.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Slide 6: Roadmap Phase 1 -->
+      <div class="slide" data-slide="6">
+        <div class="slide-header">
+          <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+            <h2>Roadmap Phase 1: People Hub & WebDAV Sync</h2>
+            <img src="file:///d:/Main/cms_backend/frontend/public/portal-assets/s4c-logo.png" alt="S4C Logo" style="height: 38px; display: block;" onerror="this.style.display='none';">
+          </div>
+        </div>
+        <div class="slide-body">
+          <div class="col-6">
+            <ul class="feature-list">
+              <li class="feature-item" style="border-left-color: var(--accent-orange)">
+                <div class="feature-title">S4C People Hub Sync</div>
+                <div class="feature-desc">Connects platform access, workflows, and editor assignments directly to S4C's central HR directories.</div>
+              </li>
+              <li class="feature-item" style="border-left-color: var(--accent-orange)">
+                <div class="feature-title">WebDAV 'Open in Word' Extension</div>
+                <div class="feature-desc">Allows editors to click edit, modify documents in local Microsoft Word, and auto-sync updates back safely.</div>
+              </li>
+              <li class="feature-item" style="border-left-color: var(--accent-orange)">
+                <div class="feature-title">Backlist Conversion Module</div>
+                <div class="feature-desc">Imports legacy print-ready PDFs and Word files, translating them into search-indexed JATS XML.</div>
+              </li>
+            </ul>
+          </div>
+          <div class="col-6">
+            <div class="highlight-card">
+              <h3>Timeline: 6-12 Months</h3>
+              <p style="font-size: 16px; margin-bottom: 20px; color: var(--accent-wash)"><strong>Goal:</strong> Sync corporate identity systems and enable offline desktop Word editing protocols.</p>
+              <p style="font-size: 15px; color: var(--text-muted)"><strong>Business Value:</strong> Single login directory compliance, zero duplicate logins, and complete file checkout locking control.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Slide 7: Roadmap Phase 2 -->
+      <div class="slide" data-slide="7">
+        <div class="slide-header">
+          <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+            <h2>Roadmap Phase 2: Upcoming Operational Modules</h2>
+            <img src="file:///d:/Main/cms_backend/frontend/public/portal-assets/s4c-logo.png" alt="S4C Logo" style="height: 38px; display: block;" onerror="this.style.display='none';">
+          </div>
+        </div>
+        <div class="slide-body">
+          <div class="col-6">
+            <ul class="feature-list">
+              <li class="feature-item">
+                <div class="feature-title">Timesheet & Chapter Tracking</div>
+                <div class="feature-desc">Tracks billable editorial time per chapter stage and maps completion Gantt charts automatically.</div>
+              </li>
+              <li class="feature-item">
+                <div class="feature-title">Billing & Invoice Module</div>
+                <div class="feature-desc">Calculates author publishing costs and creates automated invoices for freelance copyeditors.</div>
+              </li>
+              <li class="feature-item">
+                <div class="feature-title">Journal Production Module</div>
+                <div class="feature-desc">Full framework to coordinate recurring journal volumes, issue structures, and article collections.</div>
+              </li>
+            </ul>
+          </div>
+          <div class="col-6">
+            <div class="highlight-card" style="background-color: var(--bg-dark)">
+              <h3>Timeline: 12+ Months</h3>
+              <p style="font-size: 16px; margin-bottom: 20px; color: var(--accent-wash)"><strong>Goal:</strong> Deploy full operational and commercial trackers to manage freelance workloads and journals.</p>
+              <p style="font-size: 15px; color: var(--text-muted)"><strong>Business Value:</strong> Drastically cuts down administrative timesheets, vendor invoices, and project manager planning delays.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Slide 8: Expected ROI & Impact -->
+      <div class="slide" data-slide="8">
+        <div class="slide-header">
+          <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+            <h2>Expected ROI & Strategic Business Impact</h2>
+            <img src="file:///d:/Main/cms_backend/frontend/public/portal-assets/s4c-logo.png" alt="S4C Logo" style="height: 38px; display: block;" onerror="this.style.display='none';">
+          </div>
+        </div>
+        <div class="slide-body">
+          <div class="comparison-grid">
+            <div class="comp-col">
+              <div class="comp-title">TRADITIONAL WORKFLOW</div>
+              <ul class="comp-list">
+                <li class="comp-item">❌ Expensive server office licensing costs</li>
+                <li class="comp-item">❌ Manual, slow pre-press validations</li>
+                <li class="comp-item">❌ Siloed department user login directory</li>
+                <li class="comp-item">❌ Revision edit overlaps via email</li>
+                <li class="comp-item">❌ Manual timesheets & billing calculations</li>
+              </ul>
+            </div>
+            <div class="comp-col inkflow-col">
+              <div class="comp-title">S4C NINJA INKFLOW PORTAL</div>
+              <ul class="comp-list">
+                <li class="comp-item">✔ Zero-licence WYSIWYG & WebDAV Word Sync</li>
+                <li class="comp-item">✔ Auto PPH (bias check, references, credits)</li>
+                <li class="comp-item">✔ Directly linked with S4C People Hub</li>
+                <li class="comp-item">✔ Version locks prevent overlay conflicts</li>
+                <li class="comp-item">✔ Integrated billing, invoice, & chapter trackers</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Slide 9: Conclusion & Next Steps (Dark) -->
+      <div class="slide dark-slide" data-slide="9">
+        <!-- Logo for conclusion slide -->
+        <img src="file:///d:/Main/cms_backend/frontend/public/portal-assets/s4c-logo.png" alt="S4C Logo" style="height: 65px; margin-bottom: 30px; display: block;" onerror="this.style.display='none';">
+        <div class="slide-header">
+          <h2>Conclusion & Next Steps</h2>
+        </div>
+        <div class="slide-body">
+          <div class="full-width">
+            <div class="conclusion-list">
+              <div class="conclusion-item">
+                <div class="conclusion-index">01</div>
+                <div class="conclusion-content">
+                  <h4>Launch S4C People Hub Pilot</h4>
+                  <p>Deploy the platform synced with S4C People Hub in Q3 to verify role permissions and testing WebDAV Word locking with 5 users.</p>
+                </div>
+              </div>
+              <div class="conclusion-item">
+                <div class="conclusion-index">02</div>
+                <div class="conclusion-content">
+                  <h4>Test Automated PPH Scanning</h4>
+                  <p>Validate reference validation, bias language checks, credit taxonomy extraction, and backlist imports in the WYSIWYG editor.</p>
+                </div>
+              </div>
+              <div class="conclusion-item">
+                <div class="conclusion-index">03</div>
+                <div class="conclusion-content">
+                  <h4>Approve Operational Modules Roadmap</h4>
+                  <p>Approve development budget for Phase 3 (Timesheets, Billing/Invoicing, Chapter tracking, and Journal volumes).</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Speaker Notes Sidebar -->
+    <div class="speaker-notes-panel" id="notesPanel">
+      <div class="notes-header">
+        <h3>Presenter Notes</h3>
+        <button class="close-notes-btn" onclick="toggleNotes()">✕</button>
+      </div>
+      <div class="notes-content">
+        
+        <!-- Note 1 -->
+        <div class="notes-section active-note" data-note="1">
+          <h4>How to Start</h4>
+          <p><strong>The Hook:</strong> Focus on publishing bottlenecks and operational automation.</p>
+          <p><em>"Every year, we manage thousands of chapters. Getting a manuscript from an author's raw Word document to styled publications involves manual handoffs, slow pre-press validations, and expensive office licensing. Today, we present S4C Ninja Inkflow: our unified portal integrated with S4C People Hub and custom WYSIWYG editors."</em></p>
+          <h4>Executive Focus</h4>
+          <ul>
+            <li><strong>Reduced Licensing:</strong> No expensive third-party office server licensing.</li>
+            <li><strong>Automated PPH:</strong> Built-in pre-press validation (bias checks, reference, and XML).</li>
+          </ul>
+        </div>
+
+        <!-- Note 2 -->
+        <div class="notes-section" data-note="2">
+          <h4>The Problem</h4>
+          <p><strong>Executive Focus:</strong> Highlight inefficiencies in editing, pre-press checks, user sync, and tracking.</p>
+          <ul>
+            <li><strong>Manual Work:</strong> Editors switch constantly between tools for citations, equations, and XML.</li>
+            <li><strong>Manual PPH checks:</strong> Confirming citations and scans for biased text manually slows timelines.</li>
+            <li><strong>Siloed Users:</strong> Admin spends hours setting up roles that already exist in S4C People Hub.</li>
+            <li><strong>Operational Blindspots:</strong> Tracking project and chapter progress, timesheets, and invoices is completely manual.</li>
+          </ul>
+        </div>
+
+        <!-- Note 3 -->
+        <div class="notes-section" data-note="3">
+          <h4>The Solution</h4>
+          <p><strong>Executive Focus:</strong> Explain the key pillars of S4C Ninja Inkflow.</p>
+          <ul>
+            <li><strong>Custom WYSIWYG:</strong> Features equation editors, image cropping, reference lists, and structural XML views.</li>
+            <li><strong>WebDAV 'Open in Word':</strong> Editors click edit, it launches local MS Word. Local edits save straight to server and lock file to prevent conflicts.</li>
+            <li><strong>Automated PPH:</strong> Built-in tools for reference validations, diversity bias checks, Word XML tags, CRediT contributions, and backlist imports.</li>
+          </ul>
+        </div>
+
+        <!-- Note 4 -->
+        <div class="notes-section" data-note="4">
+          <h4>Ecosystem Integrations</h4>
+          <p><strong>Executive Focus:</strong> Highlight the integrated corporate directory and custom editor.</p>
+          <ul>
+            <li><strong>S4C People Hub:</strong> Instantly sync profiles, project managers, and copyeditor departments for access sync.</li>
+            <li><strong>WebDAV Word Integration:</strong> Saves formatting and revision details directly into backend storage.</li>
+            <li><strong>PPH Services:</strong> Eliminates separate vendor steps by validating citations and credits on the fly.</li>
+          </ul>
+        </div>
+
+        <!-- Note 5 -->
+        <div class="notes-section" data-note="5">
+          <h4>PPH & Conversion Pipeline</h4>
+          <p><strong>Executive Focus:</strong> Explain how documents flow through automated checking layers.</p>
+          <ul>
+            <li><strong>Word XML & Ingestion:</strong> Automatically cleans up Word file tags.</li>
+            <li><strong>Bias Scans & Credits:</strong> System runs diversity grading scans and extracts contributor credit categories.</li>
+            <li><strong>Reference Verification:</strong> Automatically checks citations with databases, highlighting broken indices.</li>
+            <li><strong>Backlist process:</strong> Handles imports of legacy archives.</li>
+          </ul>
+        </div>
+
+        <!-- Note 6 -->
+        <div class="notes-section" data-note="6">
+          <h4>Roadmap: People Hub & WebDAV</h4>
+          <p><strong>Executive Focus:</strong> Emphasize enterprise directory and file locking.</p>
+          <ul>
+            <li><strong>People Hub Sync:</strong> Integrates authentication, roles, and assignments.</li>
+            <li><strong>WebDAV locks:</strong> Enforces file checkin/checkout behaviors natively inside MS Word.</li>
+            <li><strong>Backlist Modules:</strong> Scaling ingest speed of archive collections.</li>
+          </ul>
+        </div>
+
+        <!-- Note 7 -->
+        <div class="notes-section" data-note="7">
+          <h4>Roadmap: Upcoming Modules</h4>
+          <p><strong>Executive Focus:</strong> Outline operational tools for chapter and financial tracking.</p>
+          <ul>
+            <li><strong>Timesheets:</strong> Automated logs to audit editor hours per chapter.</li>
+            <li><strong>Project/Chapter Tracking:</strong> Real-time Gantt timelines.</li>
+            <li><strong>Billing/Invoicing:</strong> Auto-calculates fees and vendor templates.</li>
+            <li><strong>Journal Production:</strong> Structured coordination for journal issues and volume collections.</li>
+          </ul>
+        </div>
+
+        <!-- Note 8 -->
+        <div class="notes-section" data-note="8">
+          <h4>ROI & Business Case</h4>
+          <p><strong>Executive Focus:</strong> Clear metrics on cost savings and workflows.</p>
+          <ul>
+            <li><strong>No Licensing Fees:</strong> Direct WYSIWYG and WebDAV Word synchronization replaces expensive server licenses.</li>
+            <li><strong>Automated PPH:</strong> Reference checks and bias scans take minutes instead of days.</li>
+            <li><strong>Connected Portal:</strong> Unified directory sync with People Hub and automatic timesheet billing trackers.</li>
+          </ul>
+        </div>
+
+        <!-- Note 9 -->
+        <div class="notes-section" data-note="9">
+          <h4>Conclusion & Call to Action</h4>
+          <p><strong>The Ask:</strong> Define immediately actionable next steps.</p>
+          <ul>
+            <li><strong>Pilot Approval:</strong> Launch testing group synced with S4C People Hub to verify role sync in Q3.</li>
+            <li><strong>Testing Approval:</strong> Validation trials of automated PPH scans.</li>
+            <li><strong>Roadmap Funding:</strong> Budget approval for timesheet, billing, and tracking modules.</li>
+          </ul>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Controls Bar -->
+  <div class="controls-bar">
+    <div class="controls-left">
+      <button class="btn" onclick="prevSlide()">◀ Prev</button>
+      <button class="btn btn-primary" onclick="nextSlide()">Next ▶</button>
+      
+      <div class="slide-progress-container">
+        <div class="slide-progress-bar" id="progressBar"></div>
+      </div>
+      <div class="slide-counter" id="slideCounter">Slide 1 of 10</div>
+    </div>
+    
+    <div class="controls-right">
+      <button class="btn" id="notesToggleBtn" onclick="toggleNotes()">Toggle Speaker Notes (N)</button>
+    </div>
+  </div>
+
+  <script>
+    let currentSlideIndex = 1;
+    const totalSlides = 9;
+    const notesPanel = document.getElementById('notesPanel');
+    const progressBar = document.getElementById('progressBar');
+    const slideCounter = document.getElementById('slideCounter');
+
+    function updateSlide() {
+      // Hide all slides
+      const slides = document.querySelectorAll('.slide');
+      slides.forEach(slide => {
+        slide.classList.remove('active', 'previous');
+        const slideNum = parseInt(slide.getAttribute('data-slide'));
+        if (slideNum < currentSlideIndex) {
+          slide.classList.add('previous');
+        }
+      });
+
+      // Show active slide
+      const activeSlide = document.querySelector(`.slide[data-slide="${currentSlideIndex}"]`);
+      if (activeSlide) {
+        activeSlide.classList.add('active');
+      }
+
+      // Update speaker notes
+      const notes = document.querySelectorAll('.notes-section');
+      notes.forEach(note => note.classList.remove('active-note'));
+      const activeNote = document.querySelector(`.notes-section[data-note="${currentSlideIndex}"]`);
+      if (activeNote) {
+        activeNote.classList.add('active-note');
+      }
+
+      // Update Progress
+      const percent = (currentSlideIndex / totalSlides) * 100;
+      progressBar.style.width = `${percent}%`;
+      slideCounter.innerText = `Slide ${currentSlideIndex} of ${totalSlides}`;
+    }
+
+    function nextSlide() {
+      if (currentSlideIndex < totalSlides) {
+        currentSlideIndex++;
+        updateSlide();
+      }
+    }
+
+    function prevSlide() {
+      if (currentSlideIndex > 1) {
+        currentSlideIndex--;
+        updateSlide();
+      }
+    }
+
+    function toggleNotes() {
+      notesPanel.classList.toggle('collapsed');
+      const toggleBtn = document.getElementById('notesToggleBtn');
+      if (notesPanel.classList.contains('collapsed')) {
+        toggleBtn.innerText = "Show Speaker Notes (N)";
+      } else {
+        toggleBtn.innerText = "Hide Speaker Notes (N)";
+      }
+    }
+
+    // Keyboard Navigation
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'Enter') {
+        e.preventDefault();
+        nextSlide();
+      } else if (e.key === 'ArrowLeft' || e.key === 'Backspace') {
+        e.preventDefault();
+        prevSlide();
+      } else if (e.key === 'n' || e.key === 'N') {
+        toggleNotes();
+      }
+    });
+
+    // Initialize progress bar
+    updateSlide();
+  </script>
+</body>
+</html>

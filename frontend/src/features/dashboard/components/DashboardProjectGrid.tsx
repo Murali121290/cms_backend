@@ -1,4 +1,4 @@
-import { BookOpen, File } from "lucide-react";
+import { BookOpen } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { StatusBadge } from "@/components/ui/StatusBadge";
@@ -35,9 +35,6 @@ function ProjectCard({ project }: { project: ProjectSummary }) {
       <div className="flex items-center gap-3 mt-auto pt-2 border-t border-border">
         <span className="flex items-center gap-1 text-xs text-muted">
           <BookOpen size={11} /> {project.chapter_count} ch
-        </span>
-        <span className="flex items-center gap-1 text-xs text-muted">
-          <File size={11} /> {project.file_count} files
         </span>
         {project.workflow_name && (
           <span className="ml-auto text-[10px] font-medium text-muted truncate max-w-[80px]">

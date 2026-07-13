@@ -19,7 +19,7 @@ frontend/dist/
 
 # Logs
 *.log
-
+*.bak
 # Local env files
 .env
 .env.local

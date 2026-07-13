@@ -124,7 +124,7 @@ def get_jsx_script_path():
         
     # Auto-detect if user has the script in Documents or Downloads
     for auto_script in [
-        r"C:\Users\muraliba\Documents\TextExtraction.jsxbin",
+        r"C:\Users\muraliba\Documents\TextExtraction.jsx",
         r"C:\Users\Muraliba\Downloads\TextExtraction.jsxbin",
         r"C:\Users\muraliba\Downloads\TextExtraction.jsxbin",
     ]:
@@ -214,27 +214,17 @@ def convert_indd_to_docx(file: UploadFile = File(...)):
         logger.info(f"[{session_id}] Dispatching InDesign.Application...")
         indesign_app = win32com.client.Dispatch("InDesign.Application")
         
-        # Disable dialog popups to prevent headless server hangs
+        # Disable dialog popups via ExtendScript snippet to ensure it succeeds regardless of COM version
         try:
-            try:
-                from win32com.client import constants
-                indesign_app.ScriptPreferences.UserInteractionLevel = constants.idNeverInteract
-            except Exception:
-                indesign_app.ScriptPreferences.UserInteractionLevel = 1698829123 # idNeverInteract
+            indesign_app.DoScript("app.scriptPreferences.userInteractionLevel = UserInteractionLevels.NEVER_INTERACT;", 1246973031)
+            logger.info(f"[{session_id}] Successfully disabled user interaction in InDesign application.")
         except Exception as ui_ex:
             logger.warning(f"[{session_id}] Could not set UserInteractionLevel: {str(ui_ex)}")
         
         # Pass file parameters via ScriptArgs (both app.ScriptArgs and arguments array)
+        # Pass file parameters via ScriptArgs (both app.ScriptArgs and arguments array)
         indesign_app.ScriptArgs.SetValue("InputFile", os.path.abspath(input_path))
         indesign_app.ScriptArgs.SetValue("OutputFile", os.path.abspath(output_rtf_path))
-        
-        # Open document first to support scripts (like TextExtraction.jsxbin) that expect an open document
-        opened_doc = None
-        try:
-            logger.info(f"[{session_id}] Pre-opening InDesign document...")
-            opened_doc = indesign_app.Open(os.path.abspath(input_path), False)
-        except Exception as open_ex:
-            logger.warning(f"[{session_id}] Could not pre-open document in InDesign COM: {str(open_ex)}")
             
         jsx_script = get_jsx_script_path()
         logger.info(f"[{session_id}] Executing ExtendScript: {jsx_script}")
@@ -254,6 +244,21 @@ def convert_indd_to_docx(file: UploadFile = File(...)):
             if os.path.abspath(jsx_script) == fallback_jsx:
                 raise e
             logger.warning(f"[{session_id}] Custom script execution failed: {str(e)}. Falling back to default_export.jsx...")
+            
+            # Re-initialize InDesign application in case the previous one crashed or disconnected
+            try:
+                indesign_app.ScriptPreferences.UserInteractionLevel
+            except Exception:
+                logger.info(f"[{session_id}] InDesign application disconnected or crashed. Re-dispatching...")
+                import subprocess
+                subprocess.run(["taskkill", "/F", "/IM", "InDesign.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                time.sleep(2)
+                indesign_app = win32com.client.Dispatch("InDesign.Application")
+                try:
+                    indesign_app.DoScript("app.scriptPreferences.userInteractionLevel = UserInteractionLevels.NEVER_INTERACT;", 1246973031)
+                except Exception:
+                    pass
+            
             # Make sure default_export.jsx is generated with robust story merging export
             with open(fallback_jsx, "w", encoding="utf-8") as f:
                 f.write(JSX_CONTENT)
@@ -277,11 +282,13 @@ def convert_indd_to_docx(file: UploadFile = File(...)):
         word_app = win32com.client.Dispatch("Word.Application")
         word_app.Visible = False
         
-        doc = word_app.Documents.Open(os.path.abspath(output_rtf_path))
-        # 16 is wdFormatXMLDocument (.docx format)
-        doc.SaveAs2(os.path.abspath(output_docx_path), FileFormat=16)
-        doc.Close()
-        word_app.Quit()
+        try:
+            doc = word_app.Documents.Open(os.path.abspath(output_rtf_path))
+            # 16 is wdFormatXMLDocument (.docx format)
+            doc.SaveAs(os.path.abspath(output_docx_path), FileFormat=16)
+            doc.Close()
+        finally:
+            word_app.Quit()
         
         if not os.path.exists(output_docx_path):
             raise Exception("Word conversion finished, but output DOCX was not found.")

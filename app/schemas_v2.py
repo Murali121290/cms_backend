@@ -18,6 +18,7 @@ class Viewer(BaseModel):
     email: str
     roles: list[str]
     is_active: bool
+    team: str | None = None
 
 
 class SessionAuth(BaseModel):
@@ -153,6 +154,10 @@ class FileRecord(BaseModel):
     version: int
     lock: LockState
     available_actions: list[str] = Field(default_factory=list)
+    size_bytes: int | None = None
+    file_size: str | None = None
+    uploaded_by: str | None = None
+    page_count: int | None = None
 
 
 class DashboardResponse(BaseModel):
@@ -587,11 +592,12 @@ class ProcessingStartResponse(BaseModel):
 
 
 class ProcessingStatusResponse(BaseModel):
-    status: Literal["processing", "completed"]
+    status: Literal["processing", "completed", "failed"]
     source_file_id: int
     process_type: str
     derived_file_id: int | None = None
     derived_filename: str | None = None
+    error: str | None = None
     compatibility_status: str
     legacy_status_endpoint: str
 

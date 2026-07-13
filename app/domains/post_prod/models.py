@@ -7,19 +7,27 @@ class PostProdProject(Base):
     __tablename__ = "post_prod_projects"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    customer_name = Column(String(255), nullable=False)
+    client = Column(String(255), nullable=False)
+    client_code = Column(String(100), nullable=True)
     project_name = Column(String(255), nullable=False)
     status = Column(String(50), default="Active")  # e.g., "Active", "Completed"
     assignee = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    chapters = relationship("PostProdChapter", back_populates="project", cascade="all, delete-orphan")
+    chapters = relationship(
+        "PostProdChapter",
+        primaryjoin="and_(PostProdProject.project_name == PostProdChapter.project_name, PostProdProject.client_code == PostProdChapter.client_code)",
+        foreign_keys="[PostProdChapter.project_name, PostProdChapter.client_code]",
+        back_populates="project",
+        cascade="all, delete-orphan"
+    )
 
 class PostProdChapter(Base):
     __tablename__ = "post_prod_chapters"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    project_id = Column(Integer, ForeignKey("post_prod_projects.id", ondelete="CASCADE"), nullable=False)
+    client_code = Column(String(100), nullable=True)
+    project_name = Column(String(255), nullable=True)
     chapter_no = Column(String(50), nullable=False)
     status = Column(String(50), default="YTS")  # "YTS", "Pending", "Converting", "Completed", "Failed"
     source_filename = Column(String, nullable=True)
@@ -30,4 +38,10 @@ class PostProdChapter(Base):
     completed_at = Column(DateTime, nullable=True)
     attempts = Column(Integer, default=0)
 
-    project = relationship("PostProdProject", back_populates="chapters")
+    project = relationship(
+        "PostProdProject",
+        primaryjoin="and_(PostProdProject.project_name == PostProdChapter.project_name, PostProdProject.client_code == PostProdChapter.client_code)",
+        foreign_keys="[PostProdChapter.project_name, PostProdChapter.client_code]",
+        back_populates="chapters"
+    )
+

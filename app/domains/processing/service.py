@@ -13,6 +13,26 @@ import shutil
 import traceback
 
 
+def docx_has_changes(path1: str, path2: str) -> bool:
+    try:
+        import zipfile
+        def get_xml_content(zip_path, member):
+            with zipfile.ZipFile(zip_path) as z:
+                if member in z.namelist():
+                    return z.read(member)
+            return b""
+
+        # Compare main document text and styles
+        if get_xml_content(path1, "word/document.xml") != get_xml_content(path2, "word/document.xml"):
+            return True
+        if get_xml_content(path1, "word/styles.xml") != get_xml_content(path2, "word/styles.xml"):
+            return True
+        return False
+    except Exception:
+        # Fallback to assuming changed if error occurs
+        return True
+
+
 def _run_via_pph(file_path: str, endpoint: str, extra_data: dict = None, file_field: str = "files") -> list:
     """Submit a single file to a PPH endpoint and return extracted output file paths."""
     from app.integrations.pph.client import PPHClient
@@ -47,7 +67,7 @@ PROCESS_PERMISSIONS = {
     "structuring": ["Editor", "CopyEditor", "Admin"],
     "bias_scan": ["Editor", "CopyEditor", "Admin", "ProjectManager"],
     "credit_extractor_ai": ["PermissionsManager", "ProjectManager", "Admin"],
-    "word_to_xml": ["PPD", "ProjectManager", "Admin"],
+    "word_to_xml": ["PPD", "ProjectManager", "Admin", "XML Manager", "Xml manager"],
 }
 
 
@@ -297,8 +317,31 @@ def background_processing_task(
                                     logger.warning(f"Failed to delete intermediate file {processed_path}: {rm_err}")
                             continue
 
-                    # For structuring and technical: move staging file to original path (in-place update)
-                    if process_type in ("structuring", "technical") and os.path.exists(processed_path):
+                    # Determine if this file should update the original document in-place
+                    is_in_place_docx = False
+                    if processed_filename.endswith(".docx"):
+                        if process_type in ("structuring", "technical"):
+                            is_in_place_docx = True
+                        elif process_type in (
+                            "macro_processing",
+                            "reference_validation",
+                            "reference_number_validation",
+                            "reference_apa_chicago_validation",
+                            "reference_structuring",
+                        ):
+                            # For references, only update if the document actually changed
+                            if docx_has_changes(file_path, processed_path):
+                                is_in_place_docx = True
+                            else:
+                                logger.info(f"No changes detected in reference job output: {processed_filename}. Skipping file update.")
+                                # Delete the unused staging file
+                                try:
+                                    os.remove(processed_path)
+                                except Exception as rm_err:
+                                    logger.warning(f"Failed to delete unchanged references file {processed_path}: {rm_err}")
+                                continue
+
+                    if is_in_place_docx and os.path.exists(processed_path):
                         if processed_filename.endswith(".docx"):
                             try:
                                 inject_publisher_styles_func(processed_path)
@@ -306,11 +349,47 @@ def background_processing_task(
                             except Exception as style_err:
                                 logger.warning(f"Style injection failed for {processed_filename}: {style_err}")
 
+                        # If this is a reference job, we deferred the backup/version bump to here:
+                        if process_type in (
+                            "macro_processing",
+                            "reference_validation",
+                            "reference_number_validation",
+                            "reference_apa_chicago_validation",
+                            "reference_structuring",
+                        ):
+                            try:
+                                from app.domains.files.version_service import archive_existing_file
+                                from app.domains.projects.models import Project
+                                from app.services.file_service import UPLOAD_DIR
+                                project = db.query(Project).filter(Project.id == file_record.project_id).first()
+                                chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == file_record.chapter_id).first()
+                                
+                                if project and chapter:
+                                    backup_dir = os.path.abspath(
+                                        f"{UPLOAD_DIR}/{project.code}/{chapter.number}/{file_record.category}"
+                                    )
+                                else:
+                                    backup_dir = os.path.dirname(file_path)
+
+                                # Create archive record
+                                archive_existing_file(
+                                    db,
+                                    existing_file=file_record,
+                                    base_path=backup_dir,
+                                    uploaded_by_id=user_id,
+                                )
+                                # Increment version of original record
+                                file_record.version = (file_record.version or 1) + 1
+                                logger.info(f"Deferred auto-backup created and version bumped to {file_record.version}")
+                            except Exception as backup_err:
+                                logger.error(f"Deferred backup/version bump failed: {backup_err}")
+
+                        file_record.uploaded_by_id = user_id
                         shutil.move(processed_path, file_path)
                         file_record.uploaded_at = now_ist_naive()
                         logger.info(f"In-place overwrite: {file_record.filename} (v{file_record.version})")
                     else:
-                        # All other types (references, bias, xml, etc.) create new records
+                        # All other types (references logs/reports, bias, xml, etc.) create new records
                         mime = "application/octet-stream"
                         if processed_filename.endswith(".html"):
                             mime = "text/html"
@@ -356,6 +435,7 @@ def background_processing_task(
             file_record.is_checked_out = False
             file_record.checked_out_by_id = None
             file_record.checked_out_at = None
+            file_record.processing_error = None
 
             db.commit()
             logger.info(f"Processing success: {success_msg}")
@@ -365,6 +445,7 @@ def background_processing_task(
             logger.error(traceback.format_exc())
             file_record.is_checked_out = False
             file_record.checked_out_by_id = None
+            file_record.processing_error = str(exc)
             db.commit()
 
     finally:
@@ -411,42 +492,55 @@ def start_process(
         file_record.is_checked_out = True
         file_record.checked_out_by_id = user.id
         file_record.checked_out_at = now_ist_naive()
+        file_record.processing_error = None
         db.commit()
 
-    try:
-        from app.domains.projects.models import Project
-        version_num = (file_record.version or 1) + 1
-        project = db.query(Project).filter(Project.id == file_record.project_id).first()
-        chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == file_record.chapter_id).first()
+    # For reference validation jobs, we defer version bumping and backup to the background task
+    # so we only bump the version if there are actual changes made to the document.
+    is_reference_job = process_type in (
+        "macro_processing",
+        "reference_validation",
+        "reference_number_validation",
+        "reference_apa_chicago_validation",
+        "reference_structuring",
+        "reference_report_only",
+    )
 
-        if project and chapter:
-            backup_dir = os.path.abspath(
-                f"{upload_dir}/{project.code}/{chapter.number}/{file_record.category}/Archive"
+    if not is_reference_job:
+        try:
+            from app.domains.projects.models import Project
+            version_num = (file_record.version or 1) + 1
+            project = db.query(Project).filter(Project.id == file_record.project_id).first()
+            chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == file_record.chapter_id).first()
+
+            if project and chapter:
+                backup_dir = os.path.abspath(
+                    f"{upload_dir}/{project.code}/{chapter.number}/{file_record.category}/Archive"
+                )
+            else:
+                backup_dir = os.path.join(os.path.dirname(file_path), "Archive")
+
+            os.makedirs(backup_dir, exist_ok=True)
+
+            name_only = file_record.filename.rsplit(".", 1)[0]
+            ext = file_record.filename.rsplit(".", 1)[1] if "." in file_record.filename else ""
+            backup_filename = f"{name_only}_v{(file_record.version or 1)}.{ext}"
+            backup_path = os.path.join(backup_dir, backup_filename)
+
+            shutil.copy2(file_path, backup_path)
+
+            new_version = models.FileVersion(
+                file_id=file_record.id,
+                version_num=(file_record.version or 1),
+                path=backup_path,
+                uploaded_by_id=user.id,
             )
-        else:
-            backup_dir = os.path.join(os.path.dirname(file_path), "Archive")
-
-        os.makedirs(backup_dir, exist_ok=True)
-
-        name_only = file_record.filename.rsplit(".", 1)[0]
-        ext = file_record.filename.rsplit(".", 1)[1] if "." in file_record.filename else ""
-        backup_filename = f"{name_only}_v{(file_record.version or 1)}.{ext}"
-        backup_path = os.path.join(backup_dir, backup_filename)
-
-        shutil.copy2(file_path, backup_path)
-
-        new_version = models.FileVersion(
-            file_id=file_record.id,
-            version_num=(file_record.version or 1),
-            path=backup_path,
-            uploaded_by_id=user.id,
-        )
-        db.add(new_version)
-        file_record.version = version_num
-        db.commit()
-        logger.info(f"Auto-backup created: {backup_filename}")
-    except Exception as exc:
-        logger.error(f"Backup failed: {exc}")
+            db.add(new_version)
+            file_record.version = version_num
+            db.commit()
+            logger.info(f"Auto-backup created: {backup_filename}")
+        except Exception as exc:
+            logger.error(f"Backup failed: {exc}")
 
     background_tasks.add_task(
         background_task_callable,
@@ -477,10 +571,14 @@ def get_structuring_status(db: Session, *, file_id: int, user):
     if not file_record:
         raise HTTPException(status_code=404, detail="File not found")
 
-    # If the file is unlocked, background structuring has completed!
-    if not file_record.is_checked_out:
-        return {"status": "completed", "new_file_id": file_record.id}
-    return {"status": "processing"}
+    if file_record.is_checked_out:
+        return {"status": "processing"}
+
+    if file_record.processing_error:
+        return {"status": "failed", "error": file_record.processing_error, "new_file_id": file_record.id}
+
+    # File is unlocked with no recorded error: background structuring completed!
+    return {"status": "completed", "new_file_id": file_record.id}
 
 
 def get_reference_validation_status(db: Session, *, file_id: int, user):
@@ -495,20 +593,10 @@ def get_reference_validation_status(db: Session, *, file_id: int, user):
     if file_record.is_checked_out:
         return {"status": "processing"}
 
-    # Completed! Let's find the derived Processed file or fall back to Structured or original
-    derived_file = db.query(models.File).filter(
-        models.File.project_id == file_record.project_id,
-        models.File.chapter_id == file_record.chapter_id,
-        models.File.filename.like("%_Processed.docx")
-    ).order_by(models.File.id.desc()).first()
+    if file_record.processing_error:
+        return {"status": "failed", "error": file_record.processing_error, "new_file_id": file_record.id}
 
-    if not derived_file:
-        derived_file = db.query(models.File).filter(
-            models.File.project_id == file_record.project_id,
-            models.File.chapter_id == file_record.chapter_id,
-            models.File.filename.like("%_Structured.docx")
-        ).order_by(models.File.id.desc()).first()
-
-    new_file_id = derived_file.id if derived_file else file_record.id
-    return {"status": "completed", "new_file_id": new_file_id}
+    # Completed! Since references processing now updates the file in-place,
+    # we return the original file's ID.
+    return {"status": "completed", "new_file_id": file_record.id}
 

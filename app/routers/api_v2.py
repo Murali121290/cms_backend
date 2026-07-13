@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app import database, models, schemas_v2
 from app.domains.projects.models import Project, ProjectStylesheet
 from app.domains.auth.security import get_current_user_from_cookie
+from app.domains.files import image_preview_service
 from app.core.config import get_settings
 from app.services import (
     activity_service,
@@ -169,7 +170,37 @@ def _serialize_viewer(user: models.User):
         email=user.email,
         roles=[role.name for role in user.roles],
         is_active=user.is_active,
+        team=user.team,
     )
+
+
+def _get_user_assigned_project_codes(db: Session, user: models.User) -> list[str]:
+    from app.domains.workflow.models import ChapterInfo
+    from app.domains.auth.rbac_config import has_permission
+
+    if has_permission(user, "view_all_projects"):
+        return []
+
+    project_codes = set()
+
+    chapter_projects = db.query(ChapterInfo.project).filter(ChapterInfo.current_assignee_name == user.username).all()
+    for (code,) in chapter_projects:
+        if code:
+            project_codes.add(code)
+
+    return list(project_codes)
+
+
+def _get_filtered_projects_query(db: Session, user: models.User):
+    from app.domains.projects.models import Project
+    from app.domains.auth.rbac_config import has_permission
+
+    query = db.query(Project)
+    if has_permission(user, "view_all_projects"):
+        return query
+
+    assigned_codes = _get_user_assigned_project_codes(db, user)
+    return query.filter(Project.project_code.in_(assigned_codes))
 
 
 def _serialize_project_summary(project: Project):
@@ -299,6 +330,41 @@ def _serialize_file_record(file_record: models.File, *, viewer: models.User, db:
         actions.append("checkout")
     if file_record.category == "Manuscript":
         actions.append("structuring_review")
+
+    size_bytes = None
+    file_size = None
+    if file_record.path and os.path.exists(file_record.path):
+        try:
+            size_bytes = os.path.getsize(file_record.path)
+            if size_bytes < 1024:
+                file_size = f"{size_bytes} B"
+            elif size_bytes < 1024 * 1024:
+                file_size = f"{size_bytes / 1024:.1f} KB"
+            else:
+                file_size = f"{size_bytes / (1024 * 1024):.1f} MB"
+        except Exception:
+            pass
+
+    page_count = None
+    if file_record.filename.endswith(".docx") and file_record.path and os.path.exists(file_record.path):
+        try:
+            import zipfile
+            from lxml import etree as ET
+            NS = "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"
+            with zipfile.ZipFile(file_record.path) as z:
+                if "docProps/app.xml" in z.namelist():
+                    with z.open("docProps/app.xml") as f:
+                        tree = ET.parse(f)
+                        pages_el = tree.find(f"{{{NS}}}Pages")
+                        if pages_el is not None and pages_el.text:
+                            page_count = int(pages_el.text)
+        except Exception:
+            pass
+
+    uploaded_by = None
+    if file_record.uploaded_by:
+        uploaded_by = file_record.uploaded_by.username
+
     return schemas_v2.FileRecord(
         id=file_record.id,
         project_id=file_record.project_id,
@@ -310,6 +376,10 @@ def _serialize_file_record(file_record: models.File, *, viewer: models.User, db:
         version=file_record.version,
         lock=_serialize_lock(file_record, db=db),
         available_actions=actions,
+        size_bytes=size_bytes,
+        file_size=file_size,
+        uploaded_by=uploaded_by,
+        page_count=page_count,
     )
 
 
@@ -549,12 +619,189 @@ def api_v2_dashboard(
             message="Authentication required.",
         )
 
-    page_data = dashboard_service.get_dashboard_page_data(db, skip=0, limit=100)
-    projects = [_serialize_project_summary(project) for project in page_data["projects"]] if include_projects else []
+    query = _get_filtered_projects_query(db, viewer)
+    projects_list = query.all()
+    
+    total_projects = len(projects_list)
+    
+    # Gather all chapters
+    all_chapters = []
+    for p in projects_list:
+        all_chapters.extend(p.chapters)
+        
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    
+    # 1. Delayed Count
+    delayed_count = 0
+    for p in projects_list:
+        is_delayed = False
+        for ch in p.chapters:
+            if ch.status != "complete" and ch.due_date:
+                due_dt = ch.due_date
+                if due_dt.tzinfo is not None:
+                    now = _dt.now(due_dt.tzinfo)
+                else:
+                    now = _dt.now()
+                if due_dt < now:
+                    is_delayed = True
+                    break
+        if is_delayed:
+            delayed_count += 1
+
+    # 2. On Time Rate
+    chapters_with_due = [c for c in all_chapters if c.due_date is not None]
+    total_chapters_with_due = len(chapters_with_due)
+    
+    on_time_chapters_count = 0
+    for ch in chapters_with_due:
+        due_dt = ch.due_date
+        if due_dt.tzinfo is not None:
+            now_dt = _dt.now(due_dt.tzinfo)
+        else:
+            now_dt = _dt.now()
+            
+        if ch.status == "complete":
+            comp_dt = ch.updated_at
+            if comp_dt.tzinfo is None and due_dt.tzinfo is not None:
+                comp_dt = comp_dt.replace(tzinfo=_tz.utc)
+            elif comp_dt.tzinfo is not None and due_dt.tzinfo is None:
+                comp_dt = comp_dt.replace(tzinfo=None)
+            if comp_dt <= due_dt:
+                on_time_chapters_count += 1
+        else:
+            if due_dt >= now_dt:
+                on_time_chapters_count += 1
+                
+    if total_chapters_with_due > 0:
+        on_time_rate = int(round((on_time_chapters_count / total_chapters_with_due) * 100))
+    else:
+        on_time_rate = 100
+
+    # 3. Trends & Averages (using 30-day window)
+    now_utc = _dt.now(_tz.utc)
+    threshold_date = now_utc - _td(days=30)
+    
+    recent_chapters = []
+    prior_chapters = []
+    for ch in chapters_with_due:
+        target_dt = ch.updated_at if ch.status == "complete" else ch.due_date
+        if target_dt.tzinfo is None:
+            target_dt = target_dt.replace(tzinfo=_tz.utc)
+        if target_dt >= threshold_date:
+            recent_chapters.append(ch)
+        else:
+            prior_chapters.append(ch)
+            
+    def _calc_on_time_rate(ch_list):
+        if not ch_list:
+            return 100.0
+        ot_count = 0
+        for ch in ch_list:
+            due_dt = ch.due_date
+            if due_dt.tzinfo is not None:
+                now_dt = _dt.now(due_dt.tzinfo)
+            else:
+                now_dt = _dt.now()
+            if ch.status == "complete":
+                comp_dt = ch.updated_at
+                if comp_dt.tzinfo is None and due_dt.tzinfo is not None:
+                    comp_dt = comp_dt.replace(tzinfo=_tz.utc)
+                elif comp_dt.tzinfo is not None and due_dt.tzinfo is None:
+                    comp_dt = comp_dt.replace(tzinfo=None)
+                if comp_dt <= due_dt:
+                    ot_count += 1
+            else:
+                if due_dt >= now_dt:
+                    ot_count += 1
+        return (ot_count / len(ch_list)) * 100.0
+        
+    recent_rate = _calc_on_time_rate(recent_chapters)
+    prior_rate = _calc_on_time_rate(prior_chapters)
+    rate_diff = int(round(recent_rate - prior_rate))
+    if rate_diff >= 0:
+        on_time_trend = f"+{rate_diff}%"
+    else:
+        on_time_trend = f"{rate_diff}%"
+
+    completed_chapters = [c for c in all_chapters if c.status == "complete"]
+    def _calc_avg_days(ch_list):
+        if not ch_list:
+            return 0.0
+        durations = []
+        for ch in ch_list:
+            dt_start = ch.created_at
+            dt_end = ch.updated_at
+            if dt_start.tzinfo is None and dt_end.tzinfo is not None:
+                dt_start = dt_start.replace(tzinfo=_tz.utc)
+            elif dt_start.tzinfo is not None and dt_end.tzinfo is None:
+                dt_end = dt_end.replace(tzinfo=_tz.utc)
+            diff = (dt_end - dt_start).total_seconds() / 86400.0
+            durations.append(max(0.1, diff))
+        return sum(durations) / len(durations)
+        
+    if completed_chapters:
+        avg_days = round(_calc_avg_days(completed_chapters), 1)
+    else:
+        avg_days = 0.0
+        
+    recent_completed = [c for c in completed_chapters if (c.updated_at.replace(tzinfo=_tz.utc) if c.updated_at.tzinfo is None else c.updated_at) >= threshold_date]
+    prior_completed = [c for c in completed_chapters if (c.updated_at.replace(tzinfo=_tz.utc) if c.updated_at.tzinfo is None else c.updated_at) < threshold_date]
+    
+    if recent_completed and prior_completed:
+        avg_recent = _calc_avg_days(recent_completed)
+        avg_prior = _calc_avg_days(prior_completed)
+        days_diff = round(avg_recent - avg_prior, 1)
+        if days_diff >= 0:
+            avg_days_trend = f"+{days_diff} days"
+        else:
+            avg_days_trend = f"{days_diff} days"
+    else:
+        avg_days_trend = "Stable"
+
+    recent_delayed = 0
+    prior_delayed = 0
+    for p in projects_list:
+        p_recent_delayed = False
+        p_prior_delayed = False
+        for ch in p.chapters:
+            if ch.status != "complete" and ch.due_date:
+                due_dt = ch.due_date
+                if due_dt.tzinfo is None:
+                    due_dt = due_dt.replace(tzinfo=_tz.utc)
+                if due_dt.tzinfo is not None:
+                    now_dt = _dt.now(due_dt.tzinfo)
+                else:
+                    now_dt = _dt.now()
+                if due_dt < now_dt:
+                    if due_dt >= threshold_date:
+                        p_recent_delayed = True
+                    else:
+                        p_prior_delayed = True
+        if p_recent_delayed:
+            recent_delayed += 1
+        if p_prior_delayed:
+            prior_delayed += 1
+            
+    delayed_diff = recent_delayed - prior_delayed
+    if delayed_diff >= 0:
+        delayed_trend = f"+{delayed_diff}"
+    else:
+        delayed_trend = f"{delayed_diff}"
+
+    serialized_projects = [_serialize_project_summary(p) for p in projects_list[:100]] if include_projects else []
+    
     return schemas_v2.DashboardResponse(
         viewer=_serialize_viewer(viewer),
-        stats=schemas_v2.DashboardStats(**page_data["dashboard_stats"]),
-        projects=projects,
+        stats=schemas_v2.DashboardStats(
+            total_projects=total_projects,
+            on_time_rate=on_time_rate,
+            on_time_trend=on_time_trend,
+            avg_days=avg_days,
+            avg_days_trend=avg_days_trend,
+            delayed_count=delayed_count,
+            delayed_trend=delayed_trend,
+        ),
+        projects=serialized_projects,
     )
 
 
@@ -573,10 +820,11 @@ def api_v2_projects(
             message="Authentication required.",
         )
 
-    page_data = project_read_service.get_projects_page_data(db, skip=offset, limit=limit)
-    total = db.query(Project).count()
+    query = _get_filtered_projects_query(db, viewer)
+    total = query.count()
+    projects = query.offset(offset).limit(limit).all()
     return schemas_v2.ProjectsListResponse(
-        projects=[_serialize_project_summary(project) for project in page_data["projects"]],
+        projects=[_serialize_project_summary(project) for project in projects],
         pagination=schemas_v2.ProjectsPagination(offset=offset, limit=limit, total=total),
     )
 
@@ -597,20 +845,21 @@ def api_v2_projects_by_client(
 
     from sqlalchemy import or_
     from app.domains.clients.models import Client as _Client
-
     # Resolve client name for fallback match (projects created before client_id FK was stored)
     client_obj = db.query(_Client).filter(_Client.id == client_id).first()
     client_name = client_obj.company if client_obj else None
 
+    query = _get_filtered_projects_query(db, viewer)
+
     if client_name:
-        projects = db.query(Project).filter(
+        projects = query.filter(
             or_(
                 Project.client_id == client_id,
                 Project.client_name == client_name,
             )
         ).all()
     else:
-        projects = db.query(Project).filter(Project.client_id == client_id).all()
+        projects = query.filter(Project.client_id == client_id).all()
 
     # Back-fill client_id on projects that matched by name only
     for p in projects:
@@ -1058,7 +1307,7 @@ def api_v2_project_bootstrap(
     for _ch in chapters:
         if _ch.number and _ch.number not in _existing_ci:
             db.add(_ChapterInfo(
-                client=project.client_name or "",
+                client=project.division_code or "",
                 project=project.code,
                 chapters=_ch.number,
                 chapter_title=_ch.title or f"Chapter {_ch.number}",
@@ -1116,9 +1365,14 @@ def api_v2_update_project(
         if c:
             project.client_name = c.company
 
+    if payload.project_manager is not None:
+        from app.domains.auth.rbac_config import has_permission
+        if not has_permission(viewer, "edit_assignee"):
+            raise HTTPException(status_code=403, detail="Permission denied to edit assignee.")
+
     for _f in ("project_manager", "priority", "composition", "category", "edition",
-               "color", "trim_size", "copyright_year", "actual_pages", "division_code",
-               "customer_contact", "sales_person", "isbn_no", "billing_location"):
+               "color", "trim_size", "copyright_year", "actual_pages", "manuscript_pages",
+               "division_code", "customer_contact", "sales_person", "isbn_no", "billing_location"):
         _v = getattr(payload, _f, None)
         if _v is not None:
             setattr(project, _f, _v)
@@ -2057,6 +2311,7 @@ async def api_v2_edit_save_file(
     if target_path == file_record.path:
         file_record.version = (file_record.version or 0) + 1
         file_record.uploaded_at = now_ist_naive()
+        file_record.uploaded_by_id = viewer.id
         db.commit()
         db.refresh(file_record)
         result = file_record
@@ -2600,6 +2855,7 @@ def api_v2_upload_zip(
 
         zip_archive_dir = os.path.join(file_service.UPLOAD_DIR, project.code)
         os.makedirs(zip_archive_dir, exist_ok=True)
+        project_service.create_predefined_project_folders(zip_archive_dir)
         zip_archive_path = os.path.join(zip_archive_dir, f"{project.code}_manuscript.zip")
         shutil.copy2(zip_path, zip_archive_path)
 
@@ -2681,13 +2937,31 @@ def api_v2_upload_zip(
                 rel_path = os.path.relpath(full_path, temp_dir)
                 category, ext = determine_category_and_type(fname)
 
-                chapter_no_str = extract_chapter_number(fname)
-                if not chapter_no_str:
-                    path_parts = rel_path.replace("\\", "/").split("/")
-                    for part in path_parts[:-1]:
-                        chapter_no_str = extract_chapter_number(part)
-                        if chapter_no_str:
-                            break
+                path_parts = rel_path.replace("\\", "/").split("/")
+                is_design_path = any(part.lower() == "design" for part in path_parts[:-1])
+                is_ce_path = any(part.lower() == "ce support" for part in path_parts[:-1])
+
+                if is_design_path:
+                    chapter_no_str = "Design"
+                    design_idx = [i for i, part in enumerate(path_parts) if part.lower() == "design"][0]
+                    if len(path_parts) > design_idx + 2:
+                        category = path_parts[design_idx + 1]
+                    else:
+                        category = "Indesign"
+                elif is_ce_path:
+                    chapter_no_str = "CE support"
+                    ce_idx = [i for i, part in enumerate(path_parts) if part.lower() == "ce support"][0]
+                    if len(path_parts) > ce_idx + 2:
+                        category = path_parts[ce_idx + 1]
+                    else:
+                        category = "Style sheet template"
+                else:
+                    chapter_no_str = extract_chapter_number(fname)
+                    if not chapter_no_str:
+                        for part in path_parts[:-1]:
+                            chapter_no_str = extract_chapter_number(part)
+                            if chapter_no_str:
+                                break
 
                 chapter = None
                 if chapter_no_str:
@@ -2708,10 +2982,10 @@ def api_v2_upload_zip(
                                 first_stage = first_stage_row.stage_name
 
                         chapter = models.Chapter(
-                            client=project.client_name or "",
+                            client=project.division_code or "",
                             project=project.project_code,
                             chapters=chapter_no_str,
-                            chapter_title=f"Chapter {chapter_no_str}",
+                            chapter_title=chapter_no_str if chapter_no_str in ["Design", "CE support"] else f"Chapter {chapter_no_str}",
                             workflow=project.workflow_name or "",
                             status="Received",
                             complexity_level=getattr(project, "composition", None) or "Medium",
@@ -2761,6 +3035,7 @@ def api_v2_upload_zip(
                         path=dest_path,
                         version=1,
                         uploaded_at=now_ist_naive(),
+                        uploaded_by_id=viewer.id,
                     )
                     db.add(db_file)
 
@@ -2807,7 +3082,7 @@ def api_v2_upload_zip(
         for _ch in all_cms_chapters:
             if _ch.chapters and _ch.chapters not in existing_ci_nums:
                 db.add(_ChapterInfo(
-                    client=project.client_name or "",
+                    client=project.division_code or "",
                     project=project.code,
                     chapters=_ch.chapters,
                     chapter_title=_ch.chapter_title or f"Chapter {_ch.chapters}",
@@ -3294,11 +3569,20 @@ def api_v2_processing_status(
             message="Not authenticated",
         )
 
-    if process_type not in ("structuring", "reference_validation", "reference_structuring"):
+    supported_types = (
+        "structuring",
+        "reference_validation",
+        "reference_structuring",
+        "ppd",
+        "bias_scan",
+        "credit_extractor_ai",
+        "word_to_xml",
+    )
+    if process_type not in supported_types:
         return _error_response(
             status_code=status.HTTP_400_BAD_REQUEST,
             code="STATUS_UNSUPPORTED",
-            message="Only structuring, reference_validation and reference_structuring statuses are currently supported.",
+            message=f"Status polling is only supported for: {', '.join(supported_types)}.",
         )
 
     try:
@@ -3332,6 +3616,7 @@ def api_v2_processing_status(
         process_type=process_type,
         derived_file_id=derived_file_id,
         derived_filename=derived_filename,
+        error=status_payload.get("error"),
         compatibility_status=status_payload["status"],
         legacy_status_endpoint=f"/api/v1/processing/files/{file_id}/structuring_status",
     )
@@ -5006,15 +5291,14 @@ def api_v2_admin_users(
             code="AUTH_REQUIRED",
             message="Authentication required.",
         )
-    if not _has_admin_or_pm_role(viewer):
-        return _error_response(
-            status_code=status.HTTP_403_FORBIDDEN,
-            code="ADMIN_REQUIRED",
-            message="Admin or Project Manager access required.",
-        )
 
     page_data = admin_user_service.get_admin_users_page_data(db)
     all_users = page_data["users"]
+
+    # Filter to only active users if the viewer is not admin/PM
+    if not _has_admin_or_pm_role(viewer):
+        all_users = [u for u in all_users if u.is_active]
+
     window = all_users[offset : offset + limit]
     return schemas_v2.AdminUsersResponse(
         users=[_serialize_admin_user(target_user) for target_user in window],
@@ -5303,40 +5587,92 @@ class BulkUpdateStatusPayload(BaseModel):
 
 @router.get("/chapters/", response_model=List[ChapterInfoResponse])
 def api_v2_list_chapters(db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
-    _require_cookie_user(user)
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+    from app.domains.auth.rbac_config import has_permission
     from sqlalchemy import select
-    return list(db.execute(select(ChapterInfo)).scalars().all())
+    if has_permission(viewer, "view_all_chapters"):
+        return list(db.execute(select(ChapterInfo)).scalars().all())
+    return list(db.execute(select(ChapterInfo).where(ChapterInfo.current_assignee_name == viewer.username)).scalars().all())
 
 @router.get("/chapters/{chapter_id}", response_model=ChapterInfoResponse)
 def api_v2_get_chapter_by_id(chapter_id: int, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
-    _require_cookie_user(user)
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+    from app.domains.auth.rbac_config import has_permission
     from sqlalchemy import select
     chapter = db.execute(select(ChapterInfo).where(ChapterInfo.id == chapter_id)).scalars().first()
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
+    if not has_permission(viewer, "view_all_chapters") and chapter.current_assignee_name != viewer.username:
+        raise HTTPException(status_code=403, detail="Access denied to this chapter")
     return chapter
 
 @router.get("/chapters/project/{project}", response_model=List[ChapterInfoResponse])
 def api_v2_get_chapters_by_project(project: str, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
-    _require_cookie_user(user)
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+    from app.domains.auth.rbac_config import has_permission
     from sqlalchemy import select
-    return list(db.execute(select(ChapterInfo).where(ChapterInfo.project == project)).scalars().all())
+    if has_permission(viewer, "view_all_chapters"):
+        return list(db.execute(select(ChapterInfo).where(ChapterInfo.project == project)).scalars().all())
+    return list(db.execute(select(ChapterInfo).where(ChapterInfo.project == project).where(ChapterInfo.current_assignee_name == viewer.username)).scalars().all())
 
 @router.get("/chapters/client/{client}", response_model=List[ChapterInfoResponse])
 def api_v2_get_chapters_by_client(client: str, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
-    _require_cookie_user(user)
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+    from app.domains.auth.rbac_config import has_permission
     from sqlalchemy import select
-    return list(db.execute(select(ChapterInfo).where(ChapterInfo.client == client)).scalars().all())
+    if has_permission(viewer, "view_all_chapters"):
+        return list(db.execute(select(ChapterInfo).where(ChapterInfo.client == client)).scalars().all())
+    return list(db.execute(select(ChapterInfo).where(ChapterInfo.client == client).where(ChapterInfo.current_assignee_name == viewer.username)).scalars().all())
 
 @router.put("/chapters/{chapter_id}", response_model=ChapterInfoResponse)
 def api_v2_update_chapter(chapter_id: int, payload: ChapterInfoUpdate, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
-    _require_cookie_user(user)
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+    
     from sqlalchemy import select
     chapter = db.execute(select(ChapterInfo).where(ChapterInfo.id == chapter_id)).scalars().first()
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
     
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    update_data = payload.model_dump(exclude_unset=True)
+    if "current_assignee_name" in update_data:
+        new_assignee = update_data["current_assignee_name"]
+        if chapter.current_assignee_name != new_assignee:
+            from app.domains.auth.rbac_config import has_permission
+            is_viewer_clearing_themselves = (new_assignee is None and chapter.current_assignee_name == viewer.username)
+            if not (has_permission(viewer, "edit_assignee") or is_viewer_clearing_themselves):
+                raise HTTPException(status_code=403, detail="Permission denied to edit assignee.")
+    
+    for field, value in update_data.items():
         setattr(chapter, field, value)
     db.commit()
     db.refresh(chapter)
@@ -5367,6 +5703,125 @@ def api_v2_bulk_update_status(project: str, payload: BulkUpdateStatusPayload, db
     return {"updated": result.rowcount}
 
 
+@router.post("/projects/{project_id}/chapters/create-with-manuscript", response_model=ChapterInfoResponse)
+def api_v2_create_chapter_with_manuscript(
+    project_id: int,
+    number: str = Form(...),
+    file: UploadFile = FastAPIFile(...),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(status_code=status.HTTP_401_UNAUTHORIZED, code="AUTH_REQUIRED", message="Authentication required.")
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="PROJECT_NOT_FOUND", message="Project not found.")
+
+    raw_number = number.strip()
+    if not raw_number.isdigit():
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="CHAPTER_NUMBER_INVALID",
+            message="Chapter number must be numeric, e.g. 01.",
+        )
+
+    if not file.filename or not file.filename.lower().endswith(".docx"):
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="INVALID_FILE_TYPE",
+            message="Only .docx files are supported.",
+        )
+
+    existing_numbers = sorted(
+        int(ci.chapters) for ci in
+        db.query(ChapterInfo).filter(ChapterInfo.project == project.project_code).all()
+        if ci.chapters and ci.chapters.isdigit()
+    )
+    new_number = int(raw_number)
+    if new_number in existing_numbers:
+        return _error_response(
+            status_code=status.HTTP_409_CONFLICT,
+            code="CHAPTER_NUMBER_DUPLICATE",
+            message=f"Chapter {raw_number.zfill(2)} already exists.",
+        )
+
+    expected_next = (existing_numbers[-1] + 1) if existing_numbers else 1
+    if new_number != expected_next:
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="CHAPTER_NUMBER_NOT_SEQUENTIAL",
+            message=f"Chapter numbers must be sequential. Expected {expected_next:02d}, got {raw_number.zfill(2)}.",
+        )
+
+    number_padded = f"{new_number:02d}"
+
+    result = chapter_service.create_chapter(
+        db,
+        project_id=project_id,
+        number=number_padded,
+        title=f"Chapter {number_padded}",
+        upload_dir=file_service.UPLOAD_DIR,
+        # "Received" — matches the pending-planning status used elsewhere (e.g. sync-chapters)
+        # until this chapter is planned and approved on the Planning page.
+        status="Received",
+    )
+    new_chapter = result["chapter"]
+    if not new_chapter:
+        return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="PROJECT_NOT_FOUND", message="Project not found.")
+
+    upload_result = file_service.upload_chapter_files(
+        db,
+        project_id=project_id,
+        chapter_id=new_chapter.id,
+        category="Manuscript",
+        files=[file],
+        actor_user_id=viewer.id,
+        upload_dir=file_service.UPLOAD_DIR,
+    )
+
+    # Best-effort manuscript page/word count extraction — a failure here must never
+    # block chapter creation, it just leaves manuscript_pages/word_count unset.
+    uploaded_path = (
+        upload_result["uploaded"][0]["file"].path if upload_result["uploaded"] else None
+    )
+    if uploaded_path and os.path.exists(uploaded_path):
+        word_count = None
+        page_count = None
+        try:
+            import docx
+            doc = docx.Document(uploaded_path)
+            word_count = sum(len(p.text.split()) for p in doc.paragraphs)
+        except Exception:
+            pass
+        try:
+            from lxml import etree as ET
+            NS = "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"
+            with zipfile.ZipFile(uploaded_path) as z:
+                if "docProps/app.xml" in z.namelist():
+                    with z.open("docProps/app.xml") as f:
+                        tree = ET.parse(f)
+                        pages_el = tree.find(f"{{{NS}}}Pages")
+                        if pages_el is not None and pages_el.text:
+                            page_count = int(pages_el.text)
+        except Exception:
+            pass
+
+        if word_count:
+            new_chapter.word_count = word_count
+        if page_count:
+            new_chapter.manuscript_pages = page_count
+            project.manuscript_pages = sum(
+                ci.manuscript_pages or 0
+                for ci in db.query(ChapterInfo).filter(ChapterInfo.project == project.project_code).all()
+            )
+
+    db.commit()
+    db.refresh(new_chapter)
+    return new_chapter
+
+
 @router.post("/projects/{project_id}/sync-chapters")
 def api_v2_sync_chapters(project_id: int, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
     """Sync CMS chapters → WMS chapter_details for projects created before auto-sync was added."""
@@ -5394,7 +5849,7 @@ def api_v2_sync_chapters(project_id: int, db: Session = Depends(database.get_db)
     for ch in cms_chapters:
         if ch.chapters and ch.chapters not in existing_nums:
             db.add(ChapterInfo(
-                client=project.client_name or "",
+                client=project.division_code or "",
                 project=project.code,
                 chapters=ch.chapters,
                 chapter_title=ch.chapter_title or f"Chapter {ch.chapters}",
@@ -5484,5 +5939,222 @@ def api_v2_set_client_status(client_id: int, body: ClientStatusUpdate, db: Sessi
     if not updated:
         raise HTTPException(status_code=404, detail="Client not found")
     return updated
+
+class TransitionConfigResponse(BaseModel):
+    has_config: bool
+    custom_message: Optional[str] = None
+    to: List[str] = []
+    cc: List[str] = []
+    subject: Optional[str] = None
+    body: Optional[str] = None
+    from_email: Optional[str] = None
+
+class TransitionEmailRequest(BaseModel):
+    from_stage: str
+    to_stage: str
+    dt: Optional[str] = None
+    to_emails: List[str]
+    cc_emails: List[str]
+    subject: str
+    body: str
+
+def _get_stage_notification_config(client_name: str, stage_name: str) -> Optional[dict]:
+    import json
+    import os
+    config_dir = os.path.join(os.path.dirname(__file__), "..", "config", "stage_transition")
+    
+    # 1. Try client config file
+    if client_name:
+        client_file = f"{client_name.strip()}.json"
+        client_config_path = os.path.join(config_dir, client_file)
+        if os.path.exists(client_config_path):
+            try:
+                with open(client_config_path, "r") as f:
+                    data = json.load(f)
+                stage_cfg = data.get(stage_name)
+                if stage_cfg:
+                    return stage_cfg
+            except Exception as e:
+                print(f"Error loading stage notification config for client {client_name}: {e}")
+                
+    # 2. Try default config file
+    default_config_path = os.path.join(config_dir, "default.json")
+    if os.path.exists(default_config_path):
+        try:
+            with open(default_config_path, "r") as f:
+                data = json.load(f)
+            return data.get(stage_name)
+        except Exception as e:
+            print(f"Error loading default stage notification config: {e}")
+            
+    return None
+
+def _resolve_placeholders(text: str, chapter, project, client, current_stage: str, next_stage: str) -> str:
+    placeholders = {
+        "{chapter_name}": chapter.chapters,
+        "{chapter_title}": chapter.chapter_title or "",
+        "{current_stage}": current_stage,
+        "{next_stage}": next_stage,
+        "{project_code}": chapter.project or "",
+        "{author_email}": getattr(project, "customer_contact", None) or getattr(client, "email", None) or "author@example.com",
+        "{client_email}": getattr(client, "email", None) or "client@example.com",
+        "{languageediting_team_email}": "languageediting_team@example.com",
+        "{pre_editing_team_email}": "pre_editing_team@example.com",
+        "{next_stage_team_email}": f"{next_stage.lower().replace(' ', '_').replace('-', '_').replace('+', '')}_team@example.com",
+    }
+    resolved = text
+    for key, value in placeholders.items():
+        resolved = resolved.replace(key, str(value))
+    return resolved
+
+@router.get("/chapters/{chapter_id}/transition-config", response_model=TransitionConfigResponse)
+def api_v2_get_chapter_transition_config(
+    chapter_id: int,
+    next_stage: str = Query(...),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie)
+):
+    _require_cookie_user(user)
+    from sqlalchemy import select
+    from app.domains.workflow.models import ChapterInfo
+    from app.domains.projects.models import Project
+    from app.domains.clients.models import Client
+    
+    chapter = db.execute(select(ChapterInfo).where(ChapterInfo.id == chapter_id)).scalars().first()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+        
+    project = db.execute(select(Project).where(Project.project_code == chapter.project)).scalars().first()
+    client = None
+    if project and project.client_id:
+        client = db.execute(select(Client).where(Client.id == project.client_id)).scalars().first()
+        
+    client_name = project.client_name if project else chapter.client
+    client_identifier = client.division if (client and client.division) else client_name
+    current_stage = chapter.stage_name or ""
+    
+    cfg = _get_stage_notification_config(client_identifier, current_stage)
+    if not cfg:
+        return TransitionConfigResponse(has_config=False)
+        
+    custom_msg = _resolve_placeholders(cfg.get("custom_message", ""), chapter, project, client, current_stage, next_stage)
+    to_resolved = [_resolve_placeholders(e, chapter, project, client, current_stage, next_stage) for e in cfg.get("to", [])]
+    cc_resolved = [_resolve_placeholders(e, chapter, project, client, current_stage, next_stage) for e in cfg.get("cc", [])]
+    subj_resolved = _resolve_placeholders(cfg.get("subject", ""), chapter, project, client, current_stage, next_stage)
+    body_resolved = _resolve_placeholders(cfg.get("body", ""), chapter, project, client, current_stage, next_stage)
+    
+    return TransitionConfigResponse(
+        has_config=True,
+        custom_message=custom_msg,
+        to=to_resolved,
+        cc=cc_resolved,
+        subject=subj_resolved,
+        body=body_resolved,
+        from_email=settings.SMTP_FROM
+    )
+
+@router.post("/chapters/{chapter_id}/transition-email")
+def api_v2_chapter_transition_email(
+    chapter_id: int,
+    payload: TransitionEmailRequest,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie)
+):
+    _require_cookie_user(user)
+    from sqlalchemy import select
+    from app.domains.workflow.models import ChapterInfo, WorkflowMaster
+    from app.domains.projects.models import Project
+    from app.domains.workflow.api_v1 import stage_transition as internal_stage_transition, TransitionPayload
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+    
+    chapter = db.execute(select(ChapterInfo).where(ChapterInfo.id == chapter_id)).scalars().first()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+        
+    project = db.execute(select(Project).where(Project.project_code == chapter.project)).scalars().first()
+    project_code = project.code if project else chapter.project
+    if not project_code:
+        raise HTTPException(status_code=400, detail="Project code not found")
+        
+    # Execute stage transition
+    transition_payload = TransitionPayload(
+        from_stage=payload.from_stage,
+        to_stage=payload.to_stage,
+        dt=payload.dt
+    )
+    # Transition stage details table
+    internal_stage_transition(project_code, chapter.chapters, transition_payload, db=db)
+    
+    # Update ChapterInfo table
+    chapter.stage_name = payload.to_stage
+    chapter.current_assignee_name = None
+    
+    # Check if last stage
+    stages = []
+    if project and project.workflow_name:
+        try:
+            stages = db.execute(
+                select(WorkflowMaster)
+                .where(WorkflowMaster.workflow_name == project.workflow_name)
+            ).scalars().all()
+        except Exception:
+            pass
+            
+    is_last_stage = False
+    if stages:
+        last_stage_obj = next((s for s in stages if not s.next_stage), None)
+        if last_stage_obj and last_stage_obj.stage_name == payload.to_stage:
+            is_last_stage = True
+            
+    if is_last_stage:
+        chapter.status = "complete"
+        
+    db.commit()
+    db.refresh(chapter)
+    
+    # Send transition email via SMTP (log failure but proceed)
+    if payload.to_emails:
+        msg = MIMEMultipart()
+        msg['From'] = settings.SMTP_FROM
+        msg['To'] = ", ".join(payload.to_emails)
+        if payload.cc_emails:
+            msg['Cc'] = ", ".join(payload.cc_emails)
+        msg['Subject'] = payload.subject
+        msg.attach(MIMEText(payload.body, 'plain'))
+        
+        print("================== SENDING TRANSITION EMAIL ==================")
+        print(f"TO: {payload.to_emails}")
+        print(f"CC: {payload.cc_emails}")
+        print(f"SUBJECT: {payload.subject}")
+        print(f"BODY:\n{payload.body}")
+        print("==============================================================")
+        
+        try:
+            if settings.SMTP_USE_SSL:
+                server = smtplib.SMTP_SSL(settings.SMTP_HOST, settings.SMTP_PORT)
+            else:
+                server = smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT)
+                
+            server.ehlo()
+            if not settings.SMTP_USE_SSL and settings.SMTP_USE_TLS:
+                server.starttls()
+                server.ehlo()
+                
+            if settings.SMTP_USERNAME and settings.SMTP_PASSWORD:
+                server.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
+                
+            recipients = payload.to_emails + (payload.cc_emails if payload.cc_emails else [])
+            server.sendmail(msg['From'], recipients, msg.as_string())
+            server.quit()
+        except Exception as e:
+            print(f"SMTP send failed: {e}")
+            
+    return {"message": "Transition completed and email processed", "chapter": {
+        "id": chapter.id,
+        "stage_name": chapter.stage_name,
+        "status": chapter.status
+    }}
 
 
