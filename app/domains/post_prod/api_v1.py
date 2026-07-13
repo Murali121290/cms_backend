@@ -260,6 +260,7 @@ def get_project(
                 "source_filename": c.source_filename,
                 "error_message": c.error_message,
                 "attempts": c.attempts,
+                "created_at": c.created_at,
                 "completed_at": c.completed_at
             } for c in p.chapters
         ]
@@ -320,6 +321,7 @@ def list_projects(db: Session = Depends(database.get_db), user = Depends(get_cur
                     "source_filename": c.source_filename,
                     "error_message": c.error_message,
                     "attempts": c.attempts,
+                    "created_at": c.created_at,
                     "completed_at": c.completed_at
                 } for c in p.chapters
             ]

@@ -178,10 +178,15 @@ export function ChapterDetailPage() {
   // Derive chapter folder data from project.file_details, merging in backup files
   const chapterFolderData: ChapterFolder | null = (() => {
     if (!chapter || !project?.file_details) return null
-    const chNo = chapter.chapters.match(/\d+/)?.[0]
-    if (!chNo) return null
+    const chName = chapter.chapters
+    const isVirtual = chName.toLowerCase() === 'design' || chName.toLowerCase() === 'ce support'
+    const matchName = isVirtual ? chName.toLowerCase() : `chapter-${chName.match(/\d+/)?.[0] || chName}`
+
     const cf = (project.file_details as { chapter_folders?: { chapters?: ChapterFolder[] } }).chapter_folders
-    const base = cf?.chapters?.find(c => c.chapter_name === `chapter-${chNo}`) ?? null
+    const base = cf?.chapters?.find(c => {
+      const cName = c.chapter_name.toLowerCase()
+      return cName === matchName || cName === `chapter-${matchName}`
+    }) ?? null
     if (!base) return null
     return {
       ...base,
