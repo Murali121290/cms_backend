@@ -211,6 +211,18 @@ export function ImageReviewPage() {
     setSelectedId(images[0].id);
   }, [images, selectedId, initialFileId]);
 
+  // When the currently-selected image disappears from the list (deleted
+  // elsewhere, or removed by an admin action) the canvas would otherwise
+  // keep displaying the last-loaded preview blob. Clear the selection so
+  // the auto-select-first effect above picks a valid image, or the canvas
+  // renders its "no selection" fallback if none remain.
+  useEffect(() => {
+    if (selectedId == null || query.isLoading) return;
+    if (!images.some((img) => img.id === selectedId)) {
+      setSelectedId(images[0]?.id ?? null);
+    }
+  }, [images, selectedId, query.isLoading]);
+
   const selected: ProjectImage | undefined = useMemo(
     () => images.find((img) => img.id === selectedId),
     [images, selectedId],
