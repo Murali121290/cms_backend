@@ -1953,15 +1953,13 @@ async def api_v2_edit_save_file(
             message=f"Edited image is too large ({img.width}×{img.height}); limit is 100 MP.",
         )
 
-    # Preserve the ORIGINAL file's format: TIFF stays TIFF, WebP stays WebP,
-    # etc. Pillow has no EPS encoder (only a Ghostscript-backed reader), so
-    # EPS falls back to a `-edited.png` sibling to preserve the vector master.
+    # Preserve the ORIGINAL file's format: TIFF stays TIFF, EPS stays EPS, etc.
+    # Ghostscript is required at runtime to read the EPS source; Pillow's
+    # Level-2 EPS encoder handles the write side.
     import os
     from app.domains.files import version_service
     from app.utils.timezone import now_ist_naive
 
-    # ext → PIL format name. Everything here is encodable by Pillow's default
-    # build. EPS is intentionally absent (read-only in Pillow).
     FORMAT_MAP = {
         "png":  "PNG",
         "jpg":  "JPEG",
@@ -1971,6 +1969,7 @@ async def api_v2_edit_save_file(
         "bmp":  "BMP",
         "tif":  "TIFF",
         "tiff": "TIFF",
+        "eps":  "EPS",
     }
 
     orig_name = file_record.filename
@@ -1993,9 +1992,9 @@ async def api_v2_edit_save_file(
     if dpi is not None and dpi > 0:
         save_kwargs["dpi"] = (int(dpi), int(dpi))
 
-    # Per-format mode conversion & encoder options. JPEG/BMP need RGB (no
+    # Per-format mode conversion & encoder options. JPEG/BMP/EPS need RGB (no
     # alpha); GIF needs a palette; PNG/WEBP/TIFF accept RGBA natively.
-    if pil_format in ("JPEG", "BMP"):
+    if pil_format in ("JPEG", "BMP", "EPS"):
         if img.mode in ("RGBA", "LA"):
             bg = Image.new("RGB", img.size, (255, 255, 255))
             bg.paste(img, mask=img.split()[-1])

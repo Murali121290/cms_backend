@@ -178,30 +178,55 @@ def _write_copy(
 ) -> models.File:
     """Write a new file record next to the original with the target extension.
 
-    If a file with the target filename already exists in the same folder we
-    disambiguate with a numeric suffix so nothing is silently overwritten.
+    Convert is idempotent: repeat clicks to the same target format overwrite
+    the prior derived output rather than piling up `-1`, `-2`, ... siblings.
+    A collision only disambiguates when the existing sibling is user-owned —
+    an original upload (is_original=True) or an edited derived file
+    (version > 1) — so nothing meaningful is silently overwritten.
     """
     base_path = os.path.dirname(file_record.path)
     target_name = _swap_ext(file_record.filename, new_ext)
     target_path = os.path.join(base_path, target_name)
 
-    # Disambiguate against on-disk collisions.
     if os.path.exists(target_path):
-        stem = target_name.rsplit(".", 1)[0]
-        n = 1
-        while True:
-            candidate = f"{stem}-{n}.{new_ext}"
-            candidate_path = os.path.join(base_path, candidate)
-            if not os.path.exists(candidate_path):
-                target_name = candidate
-                target_path = candidate_path
-                break
-            n += 1
+        existing = (
+            db.query(models.File)
+            .filter(models.File.project_id == file_record.project_id)
+            .filter(models.File.path == target_path)
+            .first()
+        )
+        # Reuse the slot only when it's a plain derived file — freshly
+        # converted, never touched. Anything else (original upload, or a
+        # derived file the user has edited) is protected by disambiguation.
+        can_replace = existing is not None and not existing.is_original and (existing.version or 1) <= 1
+        if not can_replace:
+            stem = target_name.rsplit(".", 1)[0]
+            n = 1
+            while True:
+                candidate = f"{stem}-{n}.{new_ext}"
+                candidate_path = os.path.join(base_path, candidate)
+                if not os.path.exists(candidate_path):
+                    target_name = candidate
+                    target_path = candidate_path
+                    existing = None
+                    break
+                n += 1
+    else:
+        existing = None
 
     tmp_path = target_path + ".tmp"
     with open(tmp_path, "wb") as f:
         f.write(encoded)
     os.replace(tmp_path, target_path)
+
+    if existing is not None:
+        existing.filename = target_name
+        existing.file_type = new_ext
+        existing.category = file_record.category
+        existing.uploaded_at = now_ist_naive()
+        db.commit()
+        db.refresh(existing)
+        return existing
 
     new_record = models.File(
         project_id=file_record.project_id,
