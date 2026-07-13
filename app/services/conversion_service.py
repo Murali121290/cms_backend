@@ -151,6 +151,7 @@ class BatchConversionService:
                 upload_file.file.seek(0)
                 response = requests.post(
                     url,
+                    params={"client": client_name},
                     files={"file": (upload_file.filename, upload_file.file.read(), "application/octet-stream")},
                     timeout=(3.05, 600)
                 )
@@ -165,6 +166,7 @@ class BatchConversionService:
                     upload_file.file.seek(0)
                     response_root = requests.post(
                         root_url,
+                        params={"client": client_name},
                         files={"file": (upload_file.filename, upload_file.file.read(), "application/octet-stream")},
                         timeout=(3.05, 600)
                     )
@@ -391,6 +393,7 @@ class BatchConversionService:
             with open(zip_path, "rb") as f:
                 response = requests.post(
                     url,
+                    params={"client": project.client_name},
                     files={"file": (zip_name, f.read(), "application/octet-stream")},
                     timeout=(30.0, 900)
                 )
@@ -405,6 +408,7 @@ class BatchConversionService:
                 with open(zip_path, "rb") as f:
                     response_root = requests.post(
                         root_url,
+                        params={"client": project.client_name},
                         files={"file": (zip_name, f.read(), "application/octet-stream")},
                         timeout=(30.0, 900)
                     )
@@ -490,8 +494,35 @@ class BatchConversionService:
         # Copy the PDF file to the session folder
         shutil.copyfile(source_file_path, pdf_path)
 
+        from app.core.config import get_settings
+        settings = get_settings()
+        if settings.INDESIGN_SERVER_URL:
+            engine = "remote_pdf_to_docx_exe"
+
         # Run the conversion
-        if engine == "pdf2docx":
+        if engine == "remote_pdf_to_docx_exe":
+            import requests
+            url = f"{settings.INDESIGN_SERVER_URL.rstrip('/')}/convert-pdf"
+            logger.info(f"Sending remote PDF conversion request to: {url}")
+            try:
+                with open(pdf_path, "rb") as f:
+                    response = requests.post(
+                        url,
+                        files={"file": (file_record.filename, f.read(), "application/octet-stream")},
+                        timeout=(30.0, 900)
+                    )
+                if response.status_code == 200:
+                    with open(output_docx_path, "wb") as out_f:
+                        out_f.write(response.content)
+                else:
+                    raise Exception(f"Remote PDF server returned {response.status_code}: {response.text}")
+            except Exception as remote_ex:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Connection to remote InDesign server failed for PDF: {str(remote_ex)}"
+                )
+
+        elif engine == "pdf2docx":
             try:
                 from pdf2docx import Converter
                 cv = Converter(pdf_path)
@@ -658,6 +689,7 @@ class BatchConversionService:
             with open(zip_path, "rb") as f:
                 response = requests.post(
                     url,
+                    params={"client": project.client_name},
                     files={"file": (zip_name, f.read(), "application/octet-stream")},
                     timeout=(30.0, 900)
                 )
@@ -672,6 +704,7 @@ class BatchConversionService:
                 with open(zip_path, "rb") as f:
                     response_root = requests.post(
                         root_url,
+                        params={"client": project.client_name},
                         files={"file": (zip_name, f.read(), "application/octet-stream")},
                         timeout=(30.0, 900)
                     )
@@ -757,8 +790,35 @@ class BatchConversionService:
         # Copy the PDF file to the session folder
         shutil.copyfile(source_file_path, pdf_path)
 
+        from app.core.config import get_settings
+        settings = get_settings()
+        if settings.INDESIGN_SERVER_URL:
+            engine = "remote_pdf_to_docx_exe"
+
         # Run the conversion
-        if engine == "pdf2docx":
+        if engine == "remote_pdf_to_docx_exe":
+            import requests
+            url = f"{settings.INDESIGN_SERVER_URL.rstrip('/')}/convert-pdf"
+            logger.info(f"Sending remote PDF conversion request to: {url}")
+            try:
+                with open(pdf_path, "rb") as f:
+                    response = requests.post(
+                        url,
+                        files={"file": (file_record.filename, f.read(), "application/octet-stream")},
+                        timeout=(30.0, 900)
+                    )
+                if response.status_code == 200:
+                    with open(output_docx_path, "wb") as out_f:
+                        out_f.write(response.content)
+                else:
+                    raise Exception(f"Remote PDF server returned {response.status_code}: {response.text}")
+            except Exception as remote_ex:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Connection to remote InDesign server failed for PDF: {str(remote_ex)}"
+                )
+
+        elif engine == "pdf2docx":
             try:
                 from pdf2docx import Converter
                 cv = Converter(pdf_path)
