@@ -82,6 +82,11 @@ export function useChapterFileActions({
       queryClient.invalidateQueries({
         queryKey: ["project-chapters", projectId],
       }),
+      // Image Editor rail reads this key; without it, deletes made from the
+      // chapter/file page leave stale thumbs in the sidebar.
+      queryClient.invalidateQueries({
+        queryKey: ["project-images", projectId],
+      }),
       queryClient.invalidateQueries({
         queryKey: ["projects"],
       }),

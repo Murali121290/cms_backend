@@ -10,6 +10,7 @@ export interface ProjectImage {
   file_type: string;
   category: string;
   version: number;
+  is_original: boolean;
   uploaded_at: string | null;
   download_url: string;
   preview_url: string;
@@ -28,7 +29,7 @@ export async function getProjectImages(projectId: number): Promise<ProjectImages
 
 export interface ConvertImageArgs {
   fileId: number;
-  target_format: "png" | "jpg" | "tif";
+  target_format: "png" | "jpg" | "tif" | "eps";
   mode?: "copy" | "in_place";
 }
 

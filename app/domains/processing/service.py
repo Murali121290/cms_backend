@@ -485,7 +485,9 @@ def background_processing_task(
                             chapter_id=file_record.chapter_id,
                             version=1,
                             category=file_record.category,
-                            uploaded_by_id=user_id,
+                            # Pipeline output is a derived artifact, not an
+                            # uploaded source.
+                            is_original=False,
                         )
                         db.add(new_record)
                         logger.info(

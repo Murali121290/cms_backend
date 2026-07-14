@@ -1075,6 +1075,7 @@ def api_v2_project_images(
                 "file_type": f.file_type,
                 "category": f.category,
                 "version": f.version,
+                "is_original": bool(f.is_original),
                 "uploaded_at": f.uploaded_at.isoformat() if f.uploaded_at else None,
                 "download_url": f"/api/v2/files/{f.id}/download",
                 "preview_url": f"/api/v2/files/{f.id}/preview?fmt=png&v={f.version or 1}",
@@ -2126,11 +2127,11 @@ def api_v2_file_convert(
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
-    """Convert an image to a different format (EPS/TIFF ↔ PNG/JPG).
+    """Convert an image to a different format (EPS/TIFF ↔ PNG/JPG/EPS).
 
     Body:
       {
-        "target_format": "png" | "jpg" | "tif",
+        "target_format": "png" | "jpg" | "tif" | "eps",
         "mode":          "copy" | "in_place"    (default "copy")
       }
     """
@@ -2266,15 +2267,13 @@ async def api_v2_edit_save_file(
             message=f"Edited image is too large ({img.width}×{img.height}); limit is 100 MP.",
         )
 
-    # Preserve the ORIGINAL file's format: TIFF stays TIFF, WebP stays WebP,
-    # etc. Pillow has no EPS encoder (only a Ghostscript-backed reader), so
-    # EPS falls back to a `-edited.png` sibling to preserve the vector master.
+    # Preserve the ORIGINAL file's format: TIFF stays TIFF, EPS stays EPS, etc.
+    # Ghostscript is required at runtime to read the EPS source; Pillow's
+    # Level-2 EPS encoder handles the write side.
     import os
     from app.domains.files import version_service
     from app.utils.timezone import now_ist_naive
 
-    # ext → PIL format name. Everything here is encodable by Pillow's default
-    # build. EPS is intentionally absent (read-only in Pillow).
     FORMAT_MAP = {
         "png":  "PNG",
         "jpg":  "JPEG",
@@ -2284,6 +2283,7 @@ async def api_v2_edit_save_file(
         "bmp":  "BMP",
         "tif":  "TIFF",
         "tiff": "TIFF",
+        "eps":  "EPS",
     }
 
     orig_name = file_record.filename
@@ -2306,9 +2306,9 @@ async def api_v2_edit_save_file(
     if dpi is not None and dpi > 0:
         save_kwargs["dpi"] = (int(dpi), int(dpi))
 
-    # Per-format mode conversion & encoder options. JPEG/BMP need RGB (no
+    # Per-format mode conversion & encoder options. JPEG/BMP/EPS need RGB (no
     # alpha); GIF needs a palette; PNG/WEBP/TIFF accept RGBA natively.
-    if pil_format in ("JPEG", "BMP"):
+    if pil_format in ("JPEG", "BMP", "EPS"):
         if img.mode in ("RGBA", "LA"):
             bg = Image.new("RGB", img.size, (255, 255, 255))
             bg.paste(img, mask=img.split()[-1])
@@ -2385,7 +2385,9 @@ async def api_v2_edit_save_file(
             category=file_record.category,
             version=1,
             uploaded_at=now_ist_naive(),
-            uploaded_by_id=viewer.id,
+            # Fallback path for formats Pillow can't encode (e.g. EPS): we
+            # write a `-edited.png` sibling. It's derived, not an upload.
+            is_original=False,
         )
         db.add(result)
         db.commit()

@@ -131,18 +131,25 @@ function useEditHistory(initial: EditState) {
   };
 }
 
-// ─── Visual-only status stub ────────────────────────────────────────────────
-type ReviewStatus = "original" | "pending" | "approved";
+// ─── Review status ──────────────────────────────────────────────────────────
+// Derived from the file's origin + version:
+//   uploaded, unedited            → Original
+//   uploaded, edited (v > 1)      → Original (edits happen in-place on the
+//                                   original slot; treat the record as still
+//                                   representing the uploaded master)
+//   converted / pipeline-derived  → Converted
+//   converted + edited (v > 1)    → Pending Review
+// Approved is reserved for a future explicit approval action.
+type ReviewStatus = "original" | "converted" | "pending" | "approved";
 
-function stubStatusFor(image: ProjectImage): ReviewStatus {
-  const bucket = image.id % 5;
-  if (bucket === 0) return "pending";
-  if (bucket === 1) return "approved";
-  return "original";
+function statusFor(image: ProjectImage): ReviewStatus {
+  if (image.is_original) return "original";
+  return (image.version ?? 1) > 1 ? "pending" : "converted";
 }
 
 const STATUS_STYLES: Record<ReviewStatus, { label: string; className: string }> = {
   original: { label: "Original", className: "bg-slate-800 text-white" },
+  converted: { label: "Converted", className: "bg-sky-600 text-white" },
   pending: { label: "Pending Review", className: "bg-amber-500 text-white" },
   approved: { label: "Approved", className: "bg-emerald-500 text-white" },
 };
@@ -185,6 +192,10 @@ export function ImageReviewPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
   const [search, setSearch] = useState("");
+  // Derived files (convert outputs) clutter the rail: every JPG→EPS or
+  // JPG→TIF produces a new card even though the "real" asset is the
+  // original upload. Hide them by default; expose a small toggle to reveal.
+  const [showDerived, setShowDerived] = useState(false);
   const [saveMsg, setSaveMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [replaceDialogFor, setReplaceDialogFor] = useState<ProjectImage | null>(null);
 
@@ -199,6 +210,18 @@ export function ImageReviewPage() {
     }
     setSelectedId(images[0].id);
   }, [images, selectedId, initialFileId]);
+
+  // When the currently-selected image disappears from the list (deleted
+  // elsewhere, or removed by an admin action) the canvas would otherwise
+  // keep displaying the last-loaded preview blob. Clear the selection so
+  // the auto-select-first effect above picks a valid image, or the canvas
+  // renders its "no selection" fallback if none remain.
+  useEffect(() => {
+    if (selectedId == null || query.isLoading) return;
+    if (!images.some((img) => img.id === selectedId)) {
+      setSelectedId(images[0]?.id ?? null);
+    }
+  }, [images, selectedId, query.isLoading]);
 
   const selected: ProjectImage | undefined = useMemo(
     () => images.find((img) => img.id === selectedId),
@@ -231,8 +254,26 @@ export function ImageReviewPage() {
   const saveMut = useSaveEditedImage(projectId);
   const convertMut = useMutation({
     mutationFn: convertImage,
-    onSuccess: async () => {
+    onSuccess: async (res) => {
       await queryClient.invalidateQueries({ queryKey: ["project-images", projectId] });
+      // Auto-select the newly created file so the user is looking at the
+      // converted output, not the still-selected source. Without this the
+      // rail refreshes with both records and users mistake a nearby thumb
+      // for the conversion result.
+      setSelectedId(res.file.id);
+      // Reveal the derived list so the freshly-converted file is visible in
+      // the rail (rail hides derived by default to keep the sidebar clean).
+      setShowDerived(true);
+      setSaveMsg({
+        kind: "ok",
+        text: `Converted to ${res.file.file_type.toUpperCase()} as ${res.file.filename}`,
+      });
+    },
+    onError: (err: unknown) => {
+      setSaveMsg({
+        kind: "err",
+        text: err instanceof Error ? err.message : "Convert failed.",
+      });
     },
   });
 
@@ -553,17 +594,25 @@ export function ImageReviewPage() {
   // ── Search + filtered list ───────────────────────────────────────────────
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return images;
-    return images.filter(
-      (img) =>
-        img.filename.toLowerCase().includes(q) ||
-        (img.chapter_number && img.chapter_number.toLowerCase().includes(q)),
-    );
-  }, [images, search]);
+    let list = showDerived ? images : images.filter((img) => img.is_original);
+    if (q) {
+      list = list.filter(
+        (img) =>
+          img.filename.toLowerCase().includes(q) ||
+          (img.chapter_number && img.chapter_number.toLowerCase().includes(q)),
+      );
+    }
+    return list;
+  }, [images, search, showDerived]);
+
+  const derivedCount = useMemo(
+    () => images.filter((img) => !img.is_original).length,
+    [images],
+  );
 
   const previewFilter = "none";
   const previewTransform =
-    `translate(-50%, -50%) scale(${viewZoom}) rotate(${edit.rotation}deg)`;
+    `scale(${viewZoom}) rotate(${edit.rotation}deg)`;
   const previewClipPath =
     edit.cropRect && !cropMode
       ? `inset(${edit.cropRect.y}% ${100 - (edit.cropRect.x + edit.cropRect.w)}% ${100 - (edit.cropRect.y + edit.cropRect.h)}% ${edit.cropRect.x}%)`
@@ -745,7 +794,7 @@ export function ImageReviewPage() {
             {selected && (
               <div className="flex items-center gap-1.5">
                 <span className="text-slate-500">Convert →</span>
-                {(["png", "jpg", "tif"] as const).map((fmt) => {
+                {(["png", "jpg", "tif", "eps"] as const).map((fmt) => {
                   const disabled = convertMut.isPending || selected.file_type.toLowerCase().startsWith(fmt);
                   return (
                     <button
@@ -795,8 +844,8 @@ export function ImageReviewPage() {
               </div>
             )}
             {selected && preview.kind === "ready" && (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="relative">
+              <div className="absolute inset-0 flex items-center justify-center p-4 overflow-hidden">
+                <div className="relative flex items-center justify-center max-w-full max-h-full">
                   <img
                     key={selected.id}
                     ref={imgRef}
@@ -819,11 +868,9 @@ export function ImageReviewPage() {
                     }}
                     draggable={false}
                     style={{
-                      position: "absolute",
-                      top: "50%",
-                      left: "50%",
-                      maxWidth: "82vw",
-                      maxHeight: "70vh",
+                      display: "block",
+                      maxWidth: "100%",
+                      maxHeight: "100%",
                       transform: previewTransform,
                       transformOrigin: "center center",
                       filter: previewFilter,
@@ -855,10 +902,23 @@ export function ImageReviewPage() {
           <div className="px-3 py-3 border-b border-slate-200">
             <div className="flex items-center justify-between mb-2">
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                All Images ({images.length})
+                {showDerived ? `All Images (${images.length})` : `Originals (${images.length - derivedCount})`}
               </span>
               {query.isFetching && <Loader2 className="w-3 h-3 animate-spin text-slate-400" />}
             </div>
+            {derivedCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowDerived((v) => !v)}
+                className={`mb-2 w-full text-[10px] font-semibold uppercase tracking-wider px-2 py-1 rounded-md border transition-colors ${
+                  showDerived
+                    ? "border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100"
+                    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                {showDerived ? `Hide ${derivedCount} derived` : `Show ${derivedCount} derived`}
+              </button>
+            )}
             <div className="relative mb-2">
               <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
@@ -1257,7 +1317,7 @@ function ImageCard({
 }) {
   const [thumbError, setThumbError] = useState(false);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
-  const status = stubStatusFor(image);
+  const status = statusFor(image);
   const badge = STATUS_STYLES[status];
 
   return (

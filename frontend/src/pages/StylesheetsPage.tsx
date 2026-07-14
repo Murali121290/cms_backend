@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQueries } from "@tanstack/react-query";
 import { BookOpen, Edit2, Trash2, Check, ChevronDown, ChevronUp, GripVertical, Loader, FileSpreadsheet, Table2, Globe, Download } from "lucide-react";
@@ -29,6 +29,9 @@ export function StylesheetsPage() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [editingStylesheet, setEditingStylesheet] = useState<StylesheetSummary | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
+  // Id of the stylesheet the user just created — StylesheetCard uses it to
+  // scroll into view and paint a temporary highlight. Cleared after ~3s.
+  const [justCreatedId, setJustCreatedId] = useState<number | null>(null);
 
   // Workflow state
   const [workflowStep, setWorkflowStep] = useState<WorkflowStep>("select-files");
@@ -46,6 +49,14 @@ export function StylesheetsPage() {
   const { addToast } = useToast();
 
   useDocumentTitle("Stylesheets — S4 Carlisle CMS");
+
+  // Fade the "just created" highlight after a few seconds so the row settles
+  // back into the rest of the list.
+  useEffect(() => {
+    if (justCreatedId == null) return;
+    const t = setTimeout(() => setJustCreatedId(null), 3000);
+    return () => clearTimeout(t);
+  }, [justCreatedId]);
 
   if (normalizedProjectId === null) {
     return (
@@ -168,7 +179,7 @@ export function StylesheetsPage() {
         analyzed_file_ids: analyzeResult!.analyzed_files.map((f: any) => f.id),
       },
       {
-        onSuccess: () => {
+        onSuccess: (res) => {
           // Reset workflow
           setWorkflowStep("select-files");
           setSelectedFileIds(new Set());
@@ -177,6 +188,7 @@ export function StylesheetsPage() {
           setWorkflowName("");
           setWorkflowDescription("");
           setActiveTab("manage");
+          setJustCreatedId(res.stylesheet.id);
           addToast({
             title: "Stylesheet created successfully.",
             variant: "success",
@@ -267,6 +279,7 @@ export function StylesheetsPage() {
                   onActivate={() => handleActivateStylesheet(stylesheet.id)}
                   isActivating={mutations.activate.isPending}
                   isDeleting={mutations.remove.isPending}
+                  isJustCreated={stylesheet.id === justCreatedId}
                 />
               ))}
             </div>
@@ -381,6 +394,7 @@ interface StylesheetCardProps {
   onActivate: () => void;
   isActivating: boolean;
   isDeleting: boolean;
+  isJustCreated?: boolean;
 }
 
 function StylesheetCard({
@@ -390,6 +404,7 @@ function StylesheetCard({
   onActivate,
   isActivating,
   isDeleting,
+  isJustCreated = false,
 }: StylesheetCardProps) {
   const isActive = stylesheet.is_active;
   const [showAllRules, setShowAllRules] = useState(false);
@@ -402,10 +417,20 @@ function StylesheetCard({
   const sourceFiles = stylesheet.source_files ?? [];
   const sourceFileCount = sourceFiles.length || stylesheet.analyzed_file_ids?.length || 0;
 
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (isJustCreated && cardRef.current) {
+      cardRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [isJustCreated]);
+
   return (
     <div
+      ref={cardRef}
       className={`bg-white rounded-lg shadow-card border-l-4 p-5 transition-all ${
         isActive ? "border-gold-500" : "border-navy-100"
+      } ${
+        isJustCreated ? "ring-2 ring-gold-400 ring-offset-2 bg-gold-50/40" : ""
       }`}
     >
       <div className="flex items-start justify-between gap-4">
