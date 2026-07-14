@@ -18,9 +18,21 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.drop_column("stages_details", "stage_activity")
-    op.drop_column("stages_details", "stage_activity_status")
-    op.drop_column("chapter_details", "current_stage_activity")
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    tables = inspector.get_table_names()
+
+    if "stages_details" in tables:
+        cols = {c["name"] for c in inspector.get_columns("stages_details")}
+        if "stage_activity" in cols:
+            op.drop_column("stages_details", "stage_activity")
+        if "stage_activity_status" in cols:
+            op.drop_column("stages_details", "stage_activity_status")
+
+    if "chapter_details" in tables:
+        cols = {c["name"] for c in inspector.get_columns("chapter_details")}
+        if "current_stage_activity" in cols:
+            op.drop_column("chapter_details", "current_stage_activity")
 
 
 def downgrade() -> None:
