@@ -116,7 +116,14 @@ try {
 }
 """
 
-def get_jsx_script_path():
+def get_jsx_script_path(client_name: str = None):
+    # If client is Wolters Kluwer Health, use TextExtraction_WKH.jsx
+    if client_name and client_name.strip() == "Wolters Kluwer Health":
+        wkh_script = r"C:\Users\muraliba\Documents\TextExtraction_WKH.jsx"
+        if os.path.exists(wkh_script):
+            logger.info(f"Using Wolters Kluwer Health specific script: {wkh_script}")
+            return os.path.abspath(wkh_script)
+
     # If the user has a custom script environment variable configured, use it!
     custom_script = os.environ.get("INDESIGN_SCRIPT_PATH", "").strip()
     if custom_script and os.path.exists(custom_script):
@@ -138,7 +145,7 @@ def get_jsx_script_path():
     return jsx_path
 
 @app.post("/convert")
-def convert_indd_to_docx(file: UploadFile = File(...)):
+def convert_indd_to_docx(file: UploadFile = File(...), client: str = None):
     start_time = time.time()
     session_id = str(uuid.uuid4())
     
@@ -226,7 +233,7 @@ def convert_indd_to_docx(file: UploadFile = File(...)):
         indesign_app.ScriptArgs.SetValue("InputFile", os.path.abspath(input_path))
         indesign_app.ScriptArgs.SetValue("OutputFile", os.path.abspath(output_rtf_path))
             
-        jsx_script = get_jsx_script_path()
+        jsx_script = get_jsx_script_path(client)
         logger.info(f"[{session_id}] Executing ExtendScript: {jsx_script}")
         
         # Execute InDesign script (idJavaScript ID: 1246973031)
@@ -277,30 +284,53 @@ def convert_indd_to_docx(file: UploadFile = File(...)):
             
         logger.info(f"[{session_id}] InDesign exported RTF successfully at {output_rtf_path}")
         
-        # 3. Open Word via COM Automation to convert RTF to DOCX
-        logger.info(f"[{session_id}] Dispatching Word.Application...")
-        word_app = win32com.client.Dispatch("Word.Application")
-        word_app.Visible = False
-        
-        try:
-            doc = word_app.Documents.Open(os.path.abspath(output_rtf_path))
-            # 16 is wdFormatXMLDocument (.docx format)
-            doc.SaveAs(os.path.abspath(output_docx_path), FileFormat=16)
-            doc.Close()
-        finally:
-            word_app.Quit()
-        
+        # 3. The JSX script itself runs RTFtoDocx.exe via a batch file and produces
+        #    the .docx directly in the same folder as the RTF. We just need to wait
+        #    for that file to appear (RTFtoDocx.exe runs asynchronously via objFile.execute()).
+        logger.info(f"[{session_id}] Waiting for DOCX produced by RTFtoDocx.exe (via JSX batch)...")
+        wait_seconds = 120  # max wait time
+        poll_interval = 1.0
+        elapsed = 0.0
+        while not os.path.exists(output_docx_path) and elapsed < wait_seconds:
+            time.sleep(poll_interval)
+            elapsed += poll_interval
+
         if not os.path.exists(output_docx_path):
-            raise Exception("Word conversion finished, but output DOCX was not found.")
+            raise Exception(
+                f"RTFtoDocx.exe did not produce a DOCX within {wait_seconds}s. "
+                f"Expected: {output_docx_path}"
+            )
             
         processing_time = time.time() - start_time
         logger.info(f"[{session_id}] Conversion completed successfully in {processing_time:.2f} seconds. Output: {output_docx_path}")
         
-        # Return converted DOCX
-        return FileResponse(
-            path=output_docx_path,
-            filename=f"{os.path.splitext(file.filename)[0]}.docx",
-            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        # Read the DOCX bytes into memory. RTFtoDocx.exe may still hold a write lock
+        # briefly after the file appears — retry until the lock is released.
+        docx_bytes = None
+        read_timeout = 30
+        read_elapsed = 0.0
+        last_read_err = None
+        while read_elapsed < read_timeout:
+            try:
+                with open(output_docx_path, "rb") as fh:
+                    docx_bytes = fh.read()
+                break  # success
+            except PermissionError as pe:
+                last_read_err = pe
+                time.sleep(0.5)
+                read_elapsed += 0.5
+
+        if docx_bytes is None:
+            raise Exception(
+                f"DOCX file exists but could not be read (still locked after {read_timeout}s): {last_read_err}"
+            )
+
+        from starlette.responses import Response
+        docx_filename = f"{os.path.splitext(file.filename)[0]}.docx"
+        return Response(
+            content=docx_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f'attachment; filename="{docx_filename}"'}
         )
         
     except Exception as err:
@@ -316,6 +346,65 @@ def convert_indd_to_docx(file: UploadFile = File(...)):
                 os.remove(input_path)
             if os.path.exists(output_rtf_path):
                 os.remove(output_rtf_path)
+        except Exception:
+            pass
+
+@app.post("/convert-pdf")
+def convert_pdf_to_docx(file: UploadFile = File(...)):
+    start_time = time.time()
+    session_id = str(uuid.uuid4())
+    
+    # Terminate any zombie PdfToDocx.exe processes
+    import subprocess
+    logger.info(f"[{session_id}] Cleaning up zombie PdfToDocx.exe processes...")
+    try:
+        subprocess.run(["taskkill", "/F", "/IM", "PdfToDocx.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+    session_dir = os.path.abspath(f"temp_conversions/{session_id}")
+    os.makedirs(session_dir, exist_ok=True)
+    
+    input_path = os.path.join(session_dir, file.filename)
+    output_docx_name = f"{os.path.splitext(file.filename)[0]}.docx"
+    output_docx_path = os.path.join(session_dir, output_docx_name)
+    
+    try:
+        # Save uploaded PDF locally
+        with open(input_path, "wb") as f:
+            f.write(file.file.read())
+            
+        exe_path = r"C:\Users\muraliba\Documents\PdfToDocx.exe"
+        if not os.path.exists(exe_path):
+            raise Exception(f"PdfToDocx.exe not found at {exe_path} on the Windows server.")
+            
+        logger.info(f"[{session_id}] Executing: {exe_path} \"{input_path}\" \"{output_docx_path}\"")
+        cmd = [exe_path, os.path.abspath(input_path), os.path.abspath(output_docx_path)]
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=300)
+        
+        if result.returncode != 0:
+            raise Exception(f"PdfToDocx.exe failed with code {result.returncode}. Stderr: {result.stderr}")
+            
+        if not os.path.exists(output_docx_path):
+            raise Exception("PdfToDocx.exe conversion finished, but output DOCX was not found.")
+            
+        processing_time = time.time() - start_time
+        logger.info(f"[{session_id}] PDF conversion completed successfully in {processing_time:.2f} seconds.")
+        
+        return FileResponse(
+            path=output_docx_path,
+            filename=output_docx_name,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+        
+    except Exception as err:
+        logger.error(f"[{session_id}] PDF conversion failed: {str(err)}")
+        raise HTTPException(status_code=500, detail=str(err))
+    finally:
+        # Clean up input PDF file to free space
+        try:
+            if os.path.exists(input_path):
+                os.remove(input_path)
         except Exception:
             pass
 

@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Upload, X, FileArchive, CheckCircle2, ExternalLink, Layers, BookOpen, ChevronRight, ArrowLeft } from 'lucide-react'
+import { Upload, X, FileArchive, FileText, CheckCircle2, AlertTriangle, ExternalLink, Layers, BookOpen, ChevronRight, ChevronDown, ArrowLeft } from 'lucide-react'
 import { clientsApi, type Client } from '@/api/clients'
-import { projectsApi, type ProjectCreate } from '@/api/projects'
+import { projectsApi, type ProjectCreate, type POExtractionResponse } from '@/api/projects'
 import { uploadsApi } from '@/api/uploads'
 import { usersApi, type User } from '@/api/users'
 import { workflowsApi } from '@/api/workflows'
@@ -26,6 +26,38 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024)        return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+// Mirrors app/domains/projects/po_intake/detect.py TEMPLATE_LABELS
+const PO_TEMPLATE_LABELS: Record<string, string> = {
+  wk_lww: 'WK / LWW launch form',
+  kendall_hunt: 'Kendall Hunt RFQ',
+  artech_house: 'Artech House transmittal',
+}
+
+const PO_VENDOR_HINTS: Record<string, string> = {
+  wk_lww: 'Wolters Kluwer',
+  kendall_hunt: 'Kendall Hunt',
+  artech_house: 'Artech House',
+}
+
+function humanizeKey(key: string): string {
+  return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
+function formatExtraValue(value: unknown): string | null {
+  if (value === null || value === undefined) return null
+  if (Array.isArray(value)) {
+    if (!value.length) return null
+    return value.map(v => (typeof v === 'object' ? JSON.stringify(v) : String(v))).join(', ')
+  }
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>).filter(([, v]) => formatExtraValue(v) !== null)
+    if (!entries.length) return null
+    return entries.map(([k, v]) => `${humanizeKey(k)}: ${formatExtraValue(v)}`).join(' · ')
+  }
+  const text = String(value).trim()
+  return text ? text : null
 }
 
 // ── Validation ────────────────────────────────────────────────────────────────
@@ -57,6 +89,148 @@ function Section({ title, icon: Icon, required }: { title: string; icon?: React.
         {required && <span className="text-danger ml-0.5 font-bold">*</span>}
       </h3>
       <div className="flex-1 h-px bg-border" />
+    </div>
+  )
+}
+
+// ── PO Import ─────────────────────────────────────────────────────────────────
+
+type PoState = 'idle' | 'extracting' | 'done'
+
+interface PoUploadProps {
+  onExtracted: (file: File, result: POExtractionResponse | null) => void
+  onRemove: () => void
+}
+
+function PoUpload({ onExtracted, onRemove }: PoUploadProps) {
+  const [poFile, setPoFile]     = useState<File | null>(null)
+  const [isDragging, setIsDragging] = useState(false)
+  const [poState, setPoState]   = useState<PoState>('idle')
+  const [result, setResult]     = useState<POExtractionResponse | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  async function processFile(file: File) {
+    const isSupported = /\.(pdf|xlsx)$/i.test(file.name)
+    if (!isSupported) {
+      toast.error('Only .pdf or .xlsx files are allowed')
+      return
+    }
+    setPoFile(file)
+    setPoState('extracting')
+    setResult(null)
+    try {
+      const extracted = await projectsApi.extractPO(file)
+      setResult(extracted)
+      setPoState('done')
+      onExtracted(file, extracted)
+    } catch (err) {
+      setPoState('done')
+      onExtracted(file, null)
+      toast.error('Could not read that PO file — fill in the form manually.')
+    }
+  }
+
+  function removeFile() {
+    setPoFile(null)
+    setResult(null)
+    setPoState('idle')
+    onRemove()
+    if (inputRef.current) inputRef.current.value = ''
+  }
+
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(false)
+    const file = e.dataTransfer.files[0]
+    if (file) processFile(file)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  if (poFile) {
+    const filledCount = result ? Object.values(result.fields).filter(v => v !== null && v !== undefined && v !== '').length : 0
+    const extraCount = result ? Object.keys(result.extras).filter(k => formatExtraValue(result.extras[k]) !== null).length : 0
+    const recognized = result && result.template_detected !== 'unknown'
+
+    return (
+      <div className="col-span-2 rounded-xl border border-border bg-surface p-4 flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-accent rounded-lg">
+              <FileText size={18} className="text-primary" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-text">{poFile.name}</p>
+              <p className="text-xs text-muted">{formatBytes(poFile.size)}</p>
+            </div>
+          </div>
+          <button onClick={removeFile} className="p-1.5 rounded-lg hover:bg-border text-muted hover:text-text transition-colors">
+            <X size={14} />
+          </button>
+        </div>
+
+        {poState === 'extracting' && (
+          <div className="flex items-center gap-2 text-xs text-muted">
+            <Spinner size="sm" /> Detecting template &amp; extracting fields…
+          </div>
+        )}
+
+        {poState === 'done' && result && recognized && (
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center gap-2 text-xs text-success font-medium">
+              <CheckCircle2 size={13} />
+              <span>Fields extracted</span>
+              <span className="inline-flex items-center text-[10px] font-bold bg-accent text-primary rounded-full px-2 py-0.5">
+                {PO_TEMPLATE_LABELS[result.template_detected] ?? result.template_detected}
+              </span>
+            </div>
+            <p className="text-xs text-muted">
+              <strong className="text-text">{filledCount}</strong> field(s) auto-filled
+              {extraCount > 0 && <> · <strong className="text-text">{extraCount}</strong> extra detail(s) captured below</>}
+            </p>
+          </div>
+        )}
+
+        {poState === 'done' && result && !recognized && (
+          <div className="flex items-center gap-2 text-xs text-warning font-medium">
+            <AlertTriangle size={13} />
+            <span>Template not recognized — please fill in the form manually.</span>
+          </div>
+        )}
+
+        {poState === 'done' && result && result.warnings.length > 0 && (
+          <ul className="text-xs text-warning flex flex-col gap-0.5 pl-4 list-disc">
+            {result.warnings.map((w, i) => <li key={i}>{w}</li>)}
+          </ul>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className={`col-span-2 rounded-xl border-2 border-dashed transition-colors cursor-pointer ${
+        isDragging ? 'border-primary bg-accent/40' : 'border-border hover:border-primary/50 bg-surface'
+      }`}
+      onDragOver={e => { e.preventDefault(); setIsDragging(true) }}
+      onDragLeave={() => setIsDragging(false)}
+      onDrop={onDrop}
+      onClick={() => inputRef.current?.click()}
+    >
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".pdf,.xlsx"
+        className="hidden"
+        onChange={e => { const f = e.target.files?.[0]; if (f) processFile(f) }}
+      />
+      <div className="flex flex-col items-center gap-2 py-6 px-4 text-center select-none">
+        <div className={`p-3 rounded-full transition-colors ${isDragging ? 'bg-primary/20' : 'bg-surface'}`}>
+          <Upload size={20} className={isDragging ? 'text-primary' : 'text-muted'} />
+        </div>
+        <p className="text-sm font-medium text-text">Drag &amp; drop a customer PO here</p>
+        <p className="text-xs text-muted">or click to browse — <strong>.pdf or .xlsx</strong></p>
+        <p className="text-[11px] text-muted mt-1">We'll try to pre-fill the form below from it</p>
+      </div>
     </div>
   )
 }
@@ -212,6 +386,16 @@ export function CreateProjectPage() {
   const [saving,  setSaving]  = useState(false)
   const [zipFile, setZipFile] = useState<File | null>(null)
 
+  // PO import — poFilledValues tracks exactly which values we auto-filled, so removing
+  // the PO reverts only those (a manual edit made afterwards is never clobbered).
+  const [poResult, setPoResult] = useState<POExtractionResponse | null>(null)
+  const [poFilledValues, setPoFilledValues] = useState<Record<string, unknown>>({})
+  const [poFile, setPoFile] = useState<File | null>(null)
+
+  // Author has no column on the Project model — kept as a standalone field and saved into
+  // file_details (via extracted_po_data) alongside the rest of the PO extras.
+  const [authorName, setAuthorName] = useState('')
+
   // Reference data
   const [clients,           setClients]          = useState<Client[]>([])
   const [users,             setUsers]             = useState<User[]>([])
@@ -269,6 +453,74 @@ export function CreateProjectPage() {
       set('division_code',    c.division ?? '',)
       set('customer_contact', c.email ?? c.phone_main ?? '')
     }
+  }
+
+  // PO import — only fills fields that are currently blank, and remembers exactly what it
+  // set (poFilledValues) so removing the PO later never reverts a manual edit made after import.
+  function handlePoExtracted(file: File, result: POExtractionResponse | null) {
+    setPoFile(file)
+    setPoResult(result)
+    if (!result) return
+
+    const filled: Record<string, unknown> = {}
+    setForm(f => {
+      const next: Record<string, unknown> = { ...f }
+      for (const [key, value] of Object.entries(result.fields)) {
+        if (value === null || value === undefined || value === '') continue
+        const current = next[key]
+        if (current === undefined || current === null || current === '') {
+          next[key] = value
+          filled[key] = value
+        }
+      }
+      return next as Partial<ProjectCreate>
+    })
+    const authorsRaw = result.extras['author_names']
+    if (Array.isArray(authorsRaw) && authorsRaw.length > 0) {
+      const joined = authorsRaw.map(String).join('; ')
+      setAuthorName(current => {
+        if (current.trim()) return current
+        filled.__author_name = joined
+        return joined
+      })
+    }
+    setPoFilledValues(filled)
+
+    result.warnings.forEach(w => toast.error(w))
+
+    const vendorHint = PO_VENDOR_HINTS[result.template_detected]
+    if (vendorHint) {
+      setForm(f => {
+        if (f.client_id) return f
+        const match = clients.filter(c => c.active_status && clientLabel(c).toLowerCase().includes(vendorHint.toLowerCase()))
+        if (match.length !== 1) return f
+        const c = match[0]
+        return {
+          ...f,
+          client_id: c.id,
+          client_name: c.name_company ?? c.company ?? [c.first_name, c.surname].filter(Boolean).join(' ') ?? '',
+          division_code: c.division ?? '',
+          customer_contact: c.email ?? c.phone_main ?? '',
+        }
+      })
+    }
+  }
+
+  function handlePoRemove() {
+    setPoFile(null)
+    setPoResult(null)
+    const { __author_name, ...formValues } = poFilledValues
+    setForm(f => {
+      const next: Record<string, unknown> = { ...f }
+      for (const [key, value] of Object.entries(formValues)) {
+        if (next[key] === value) delete next[key]
+      }
+      return next as Partial<ProjectCreate>
+    })
+    if (__author_name !== undefined) {
+      setAuthorName(current => (current === __author_name ? '' : current))
+    }
+    setPoFilledValues({})
   }
 
   const pmUsers    = useMemo(() => users.filter(u => u.active_status && u.role.toLowerCase().replace(" ","").includes('projectmanager')), [users])
@@ -370,6 +622,11 @@ export function CreateProjectPage() {
       if (form.isbn_no)            formData.append('isbn_no',          form.isbn_no)
       if (form.billing_location)   formData.append('billing_location', form.billing_location)
       if (form.due_date)           formData.append('due_date',         form.due_date)
+      if (poResult || authorName.trim()) {
+        const fileDetails = { ...(poResult?.extras ?? {}), author_name: authorName.trim() || undefined }
+        formData.append('extracted_po_data', JSON.stringify(fileDetails))
+      }
+      if (poFile) formData.append('po_file', poFile)
 
       const response = await projectsApi.create(formData)
 
@@ -442,6 +699,34 @@ export function CreateProjectPage() {
       ) : (
         <div className="bg-card rounded-2xl border border-border p-6 shadow-sm flex flex-col gap-6">
           <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+            {/* ── PO Import ───────────────────────────── */}
+            <Section title="Import from Purchase Order" icon={FileText} />
+            <p className="col-span-2 -mt-2 text-xs text-muted">
+              Optional — upload the customer's PO/RFQ to pre-fill the fields below. Nothing here is required; you can fill everything in by hand instead.
+            </p>
+            <PoUpload onExtracted={handlePoExtracted} onRemove={handlePoRemove} />
+
+            {poResult && Object.keys(poResult.extras).some(k => formatExtraValue(poResult.extras[k]) !== null) && (
+              <details className="col-span-2 rounded-xl border border-border overflow-hidden" open>
+                <summary className="list-none cursor-pointer px-4 py-3 bg-surface flex items-center justify-between text-sm font-semibold text-text">
+                  <span>Extracted PO Details</span>
+                  <ChevronDown size={14} className="text-muted" />
+                </summary>
+                <div className="px-4 py-3 flex flex-col gap-2">
+                  {Object.entries(poResult.extras).map(([key, value]) => {
+                    const formatted = formatExtraValue(value)
+                    if (formatted === null) return null
+                    return (
+                      <div key={key} className="flex gap-3 text-xs py-1.5 border-b border-border last:border-b-0">
+                        <span className="w-44 flex-shrink-0 font-medium text-muted">{humanizeKey(key)}</span>
+                        <span className="text-text">{formatted}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </details>
+            )}
+
             {/* ── Project Information ─────────────────── */}
             <Section title="Project Information" icon={BookOpen} />
 
@@ -547,6 +832,17 @@ export function CreateProjectPage() {
               />
             </div>
 
+            {/* Author — no column on Project; saved into file_details, not the core project fields */}
+            <div className="col-span-2">
+              <Input
+                label="Author"
+                value={authorName}
+                onChange={e => setAuthorName(e.target.value)}
+                placeholder="e.g. Sharon Jensen, DNP, MD, RN"
+                hint="Not a core project field — saved alongside the other extracted PO details"
+              />
+            </div>
+
             {/* ── Publication Details ─────────────────── */}
             <Section title="Publication Details" icon={Layers} />
 
@@ -612,6 +908,12 @@ export function CreateProjectPage() {
               value={form.billing_location ?? ''}
               onChange={e => set('billing_location', e.target.value)}
               placeholder="e.g. New York, US"
+            />
+            <Input
+              label="Due Date"
+              type="date"
+              value={form.due_date ?? ''}
+              onChange={e => set('due_date', e.target.value || null)}
             />
 
             {/* ── Workflow ────────────────────────────── */}

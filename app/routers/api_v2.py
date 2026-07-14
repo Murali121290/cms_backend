@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import tempfile
@@ -14,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app import database, models, schemas_v2
 from app.domains.projects.models import Project, ProjectStylesheet
+from app.domains.projects.po_intake import service as po_intake_service
 from app.domains.auth.security import get_current_user_from_cookie
 from app.domains.files import image_preview_service
 from app.core.config import get_settings
@@ -473,6 +475,7 @@ def _api_v2_background_processing_task(
     user_username: str,
     mode: str = "style",
     options: dict[str, Any] | None = None,
+    job_id: int | None = None,
 ):
     return processing_service.background_processing_task(
         file_id=file_id,
@@ -481,6 +484,7 @@ def _api_v2_background_processing_task(
         user_username=user_username,
         mode=mode,
         options=options,
+        job_id=job_id,
         logger=logger,
         inject_publisher_styles_func=inject_publisher_styles,
         permissions_engine_cls=PermissionsEngine,
@@ -1157,6 +1161,36 @@ def api_v2_activities(
     )
 
 
+@router.post("/projects/extract-po", response_model=schemas_v2.POExtractionResponse)
+def api_v2_extract_po(
+    file: UploadFile = FastAPIFile(...),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    suffix = Path(file.filename or "").suffix
+    tmp_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            shutil.copyfileobj(file.file, tmp)
+            tmp_path = tmp.name
+        result = po_intake_service.extract_po(tmp_path, file.filename or "")
+    finally:
+        if tmp_path:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+    return schemas_v2.POExtractionResponse(**result)
+
+
 @router.post("/projects/bootstrap", response_model=schemas_v2.ProjectBootstrapResponse)
 def api_v2_project_bootstrap(
     code: str = Form(...),
@@ -1183,6 +1217,8 @@ def api_v2_project_bootstrap(
     isbn_no: str | None = Form(None),
     billing_location: str | None = Form(None),
     due_date: str | None = Form(None),
+    extracted_po_data: str | None = Form(None),
+    po_file: UploadFile | None = FastAPIFile(None),
     files: list[UploadFile] | None = FastAPIFile(None),
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
@@ -1275,6 +1311,30 @@ def api_v2_project_bootstrap(
             project.due_date = _date.fromisoformat(due_date)
         except ValueError:
             pass
+
+    parsed_po_data = None
+    if extracted_po_data:
+        try:
+            parsed_po_data = json.loads(extracted_po_data)
+            project.file_details = parsed_po_data
+        except (TypeError, ValueError):
+            logging.error("Failed to parse extracted_po_data JSON for project %s", code)
+
+    if po_file is not None and po_file.filename:
+        try:
+            ce_support_dir = os.path.join(file_service.UPLOAD_DIR, code, "CE support")
+            os.makedirs(ce_support_dir, exist_ok=True)
+
+            po_dest_path = os.path.join(ce_support_dir, po_file.filename)
+            with open(po_dest_path, "wb") as po_dest:
+                shutil.copyfileobj(po_file.file, po_dest)
+
+            json_stem = Path(po_file.filename).stem
+            json_dest_path = os.path.join(ce_support_dir, f"{json_stem}_extracted.json")
+            with open(json_dest_path, "w", encoding="utf-8") as json_dest:
+                json.dump(parsed_po_data or {}, json_dest, indent=2, ensure_ascii=False)
+        except OSError as exc:
+            logging.error("Failed to save PO file/JSON to CE support for project %s: %s", code, exc)
 
     db.commit()
     db.refresh(project)
@@ -3522,7 +3582,7 @@ def api_v2_start_processing(
             message=str(exc.detail),
         )
 
-    _ = response  # side effects already performed by the service
+    job_id = response.get("job_id")
     file_record = db.query(models.File).filter(models.File.id == file_id).first()
     return schemas_v2.ProcessingStartResponse(
         message=(
@@ -3534,11 +3594,9 @@ def api_v2_start_processing(
         mode=payload.mode,
         source_version=file_record.version,
         lock=_serialize_lock(file_record),
-        status_endpoint=(
-            f"/api/v2/files/{file_id}/processing-status?process_type=structuring"
-            if payload.process_type == "structuring"
-            else None
-        ),
+        status_endpoint=f"/api/v2/files/{file_id}/processing-status?process_type={payload.process_type}",
+        job_id=job_id,
+        job_status_endpoint=f"/api/v2/processing-jobs/{job_id}" if job_id else None,
     )
 
 
@@ -3617,7 +3675,35 @@ def api_v2_processing_status(
         error=status_payload.get("error"),
         compatibility_status=status_payload["status"],
         legacy_status_endpoint=f"/api/v1/processing/files/{file_id}/structuring_status",
+        current_step=status_payload.get("current_step"),
+        progress_pct=status_payload.get("progress_pct"),
     )
+
+
+@router.get("/processing-jobs/{job_id}", response_model=schemas_v2.ProcessingJobResponse)
+def api_v2_get_processing_job(
+    job_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+
+    from app.models import ProcessingJob
+    job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
+    if not job:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="JOB_NOT_FOUND",
+            message="Processing job not found.",
+        )
+
+    return job
 
 
 @router.get("/files/{file_id}/technical-review", response_model=schemas_v2.TechnicalScanResponse)

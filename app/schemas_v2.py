@@ -131,6 +131,13 @@ class ProjectSummary(BaseModel):
     is_delayed: bool = False
 
 
+class POExtractionResponse(BaseModel):
+    fields: dict[str, Any] = Field(default_factory=dict)
+    extras: dict[str, Any] = Field(default_factory=dict)
+    template_detected: str
+    warnings: list[str] = Field(default_factory=list)
+
+
 class ChapterSummary(BaseModel):
     id: int
     project_id: int
@@ -589,6 +596,8 @@ class ProcessingStartResponse(BaseModel):
     source_version: int
     lock: LockState
     status_endpoint: str | None = None
+    job_id: int | None = None
+    job_status_endpoint: str | None = None
 
 
 class ProcessingStatusResponse(BaseModel):
@@ -600,6 +609,25 @@ class ProcessingStatusResponse(BaseModel):
     error: str | None = None
     compatibility_status: str
     legacy_status_endpoint: str
+    current_step: str | None = None
+    progress_pct: int | None = None
+
+
+class ProcessingJobResponse(BaseModel):
+    id: int
+    file_id: int
+    process_type: str
+    status: str
+    current_step: str | None = None
+    progress_pct: int
+    error_message: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None = None
+
+    class Config:
+        orm_mode = True
+
 
 
 class TechnicalIssue(BaseModel):

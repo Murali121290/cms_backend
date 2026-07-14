@@ -118,5 +118,24 @@ from app.domains.workflow.models import (  # noqa: F401
 Chapter = ChapterInfo
 
 
+class ProcessingJob(Base):
+    __tablename__ = "processing_jobs"
+    id = Column(Integer, primary_key=True, index=True)
+    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), index=True)
+    process_type = Column(String, index=True)
+    status = Column(String, default="pending")  # pending, processing, completed, failed
+    current_step = Column(String, nullable=True)
+    progress_pct = Column(Integer, default=0)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    file = relationship("File")
+    user = relationship("User")
+
+
+
 
 

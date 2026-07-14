@@ -372,7 +372,15 @@ function ProcessingHistoryColumn({ file }: { file: FileRecord }) {
     refValidationQuery.isLoading ||
     refStructuringQuery.isLoading;
 
-  const activeJobs: { name: string; status: string; derived_filename?: string | null; compatibility_status?: string }[] = [];
+  const activeJobs: {
+    name: string;
+    status: "processing" | "completed" | "failed";
+    derived_filename?: string | null;
+    compatibility_status?: string;
+    current_step?: string | null;
+    progress_pct?: number;
+    error?: string | null;
+  }[] = [];
 
   if (structuringQuery.data) {
     activeJobs.push({
@@ -380,30 +388,39 @@ function ProcessingHistoryColumn({ file }: { file: FileRecord }) {
       status: structuringQuery.data.status,
       compatibility_status: structuringQuery.data.compatibility_status,
       derived_filename: structuringQuery.data.derived_filename,
+      current_step: structuringQuery.data.current_step,
+      progress_pct: structuringQuery.data.progress_pct,
+      error: structuringQuery.data.error,
     });
   }
 
   if (
     refValidationQuery.data &&
-    (refValidationQuery.data.status === "processing" || refValidationQuery.data.derived_filename)
+    (refValidationQuery.data.status === "processing" || refValidationQuery.data.derived_filename || refValidationQuery.data.status === "failed")
   ) {
     activeJobs.push({
       name: "Reference Validation",
       status: refValidationQuery.data.status,
       compatibility_status: refValidationQuery.data.compatibility_status,
       derived_filename: refValidationQuery.data.derived_filename,
+      current_step: refValidationQuery.data.current_step,
+      progress_pct: refValidationQuery.data.progress_pct,
+      error: refValidationQuery.data.error,
     });
   }
 
   if (
     refStructuringQuery.data &&
-    (refStructuringQuery.data.status === "processing" || refStructuringQuery.data.derived_filename)
+    (refStructuringQuery.data.status === "processing" || refStructuringQuery.data.derived_filename || refStructuringQuery.data.status === "failed")
   ) {
     activeJobs.push({
       name: "Reference Structuring",
       status: refStructuringQuery.data.status,
       compatibility_status: refStructuringQuery.data.compatibility_status,
       derived_filename: refStructuringQuery.data.derived_filename,
+      current_step: refStructuringQuery.data.current_step,
+      progress_pct: refStructuringQuery.data.progress_pct,
+      error: refStructuringQuery.data.error,
     });
   }
 
@@ -422,47 +439,95 @@ function ProcessingHistoryColumn({ file }: { file: FileRecord }) {
         </p>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          {activeJobs.map((job, idx) => (
-            <div key={idx} style={{ display: "flex", gap: "10px" }}>
-              {/* Status dot */}
-              <div style={{ flexShrink: 0, marginTop: "4px" }}>
-                <div style={{
-                  width: "8px",
-                  height: "8px",
-                  borderRadius: "50%",
-                  backgroundColor: job.status === "completed" ? "#166534" : "#1D4ED8",
-                }} />
-              </div>
-              <div>
-                <p style={{ fontSize: "13px", fontWeight: 500, color: "#1A1714", margin: "0 0 4px" }}>
-                  {job.name}
-                </p>
-                <span style={{
-                  display: "inline-block",
-                  fontSize: "10px",
-                  fontWeight: 500,
-                  padding: "1px 6px",
-                  borderRadius: "3px",
-                  marginBottom: "6px",
-                  ...(job.status === "completed"
-                    ? { backgroundColor: "#DCFCE7", color: "#166534" }
-                    : { backgroundColor: "#DBEAFE", color: "#1D4ED8" }),
-                }}>
-                  {job.status === "completed" ? "Completed" : "Processing"}
-                </span>
-                {job.compatibility_status && (
-                  <p style={{ fontSize: "11px", color: "#6B6560", margin: "0 0 2px" }}>
-                    Compatibility: {job.compatibility_status}
+          {activeJobs.map((job, idx) => {
+            let dotColor = "#1D4ED8";
+            let badgeStyle = { backgroundColor: "#DBEAFE", color: "#1D4ED8" };
+            let badgeText = "Processing";
+
+            if (job.status === "completed") {
+              dotColor = "#166534";
+              badgeStyle = { backgroundColor: "#DCFCE7", color: "#166534" };
+              badgeText = "Completed";
+            } else if (job.status === "failed") {
+              dotColor = "#DC2626";
+              badgeStyle = { backgroundColor: "#FEE2E2", color: "#991B1B" };
+              badgeText = "Failed";
+            } else if (job.progress_pct !== undefined && job.progress_pct > 0) {
+              badgeText = `Processing (${job.progress_pct}%)`;
+            }
+
+            return (
+              <div key={idx} style={{ display: "flex", gap: "10px" }}>
+                {/* Status dot */}
+                <div style={{ flexShrink: 0, marginTop: "4px" }}>
+                  <div style={{
+                    width: "8px",
+                    height: "8px",
+                    borderRadius: "50%",
+                    backgroundColor: dotColor,
+                  }} />
+                </div>
+                <div style={{ flexGrow: 1 }}>
+                  <p style={{ fontSize: "13px", fontWeight: 500, color: "#1A1714", margin: "0 0 4px" }}>
+                    {job.name}
                   </p>
-                )}
-                {job.derived_filename && (
-                  <p style={{ fontSize: "11px", color: "#6B6560", margin: 0 }}>
-                    Output: <span style={{ fontFamily: "ui-monospace, monospace" }}>{job.derived_filename}</span>
-                  </p>
-                )}
+                  <span style={{
+                    display: "inline-block",
+                    fontSize: "10px",
+                    fontWeight: 500,
+                    padding: "1px 6px",
+                    borderRadius: "3px",
+                    marginBottom: "6px",
+                    ...badgeStyle,
+                  }}>
+                    {badgeText}
+                  </span>
+                  
+                  {job.status === "processing" && job.current_step && (
+                    <p style={{ fontSize: "11px", fontStyle: "italic", color: "#6B6560", margin: "0 0 4px" }}>
+                      {job.current_step}
+                    </p>
+                  )}
+
+                  {job.status === "processing" && job.progress_pct !== undefined && (
+                    <div style={{
+                      width: "100%",
+                      backgroundColor: "#E4E2E0",
+                      height: "4px",
+                      borderRadius: "2px",
+                      marginTop: "4px",
+                      marginBottom: "8px",
+                      overflow: "hidden"
+                    }}>
+                      <div style={{
+                        width: `${job.progress_pct}%`,
+                        backgroundColor: "#1D4ED8",
+                        height: "100%",
+                        transition: "width 0.4s ease"
+                      }} />
+                    </div>
+                  )}
+
+                  {job.status === "failed" && job.error && (
+                    <p style={{ fontSize: "11px", color: "#DC2626", margin: "0 0 4px", fontWeight: 500 }}>
+                      Error: {job.error}
+                    </p>
+                  )}
+
+                  {job.compatibility_status && (
+                    <p style={{ fontSize: "11px", color: "#6B6560", margin: "0 0 2px" }}>
+                      Compatibility: {job.compatibility_status}
+                    </p>
+                  )}
+                  {job.derived_filename && (
+                    <p style={{ fontSize: "11px", color: "#6B6560", margin: 0 }}>
+                      Output: <span style={{ fontFamily: "ui-monospace, monospace" }}>{job.derived_filename}</span>
+                    </p>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
 
           <p style={{
             fontSize: "11px",

@@ -89,7 +89,7 @@ def test_background_processing_success_registers_outputs_and_unlocks_file(
     output_path = Path(file_record.path).with_name(f"{Path(file_record.filename).stem}_Processed.docx")
     output_path.write_bytes(b"processed-docx-bytes")
 
-    def _fake_structuring_process(self, file_path, mode="style"):
+    def _fake_structuring_process(self, file_path, mode="style", tag_set=None):
         assert Path(file_path) == Path(file_record.path).resolve()
         assert mode == "style"
         return [str(output_path)]
@@ -248,7 +248,7 @@ def test_background_processing_manual_structuring_success_uses_correct_library(
 
     called_manual_process = []
 
-    def _fake_manual_process_docx(input_path, output_path, mode):
+    def _fake_manual_process_docx(input_path, output_path, mode, tag_set=None, on_progress=None):
         assert Path(input_path) == Path(file_record.path).resolve()
         assert mode == "style"
         called_manual_process.append(True)

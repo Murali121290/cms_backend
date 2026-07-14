@@ -76,7 +76,7 @@ async def run_file_process(
     if item:
         options = item.get("options") if "options" in item else item
 
-    return processing_service.start_process(
+    result = processing_service.start_process(
         db,
         file_id=file_id,
         process_type=process_type,
@@ -88,6 +88,7 @@ async def run_file_process(
         background_task_callable=background_processing_task,
         options=options,
     )
+    return JSONResponse(content=result)
 
 @router.get("/files/{file_id}/structuring_status")
 def check_structuring_status(

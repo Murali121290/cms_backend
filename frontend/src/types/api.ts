@@ -282,6 +282,8 @@ export interface ProcessingStartResponse {
   source_version: number;
   lock: LockState;
   status_endpoint: string | null;
+  job_id: number | null;
+  job_status_endpoint: string | null;
 }
 
 export interface ProcessingStatusResponse {
@@ -293,6 +295,21 @@ export interface ProcessingStatusResponse {
   error: string | null;
   compatibility_status: string;
   legacy_status_endpoint: string;
+  current_step?: string | null;
+  progress_pct?: number;
+}
+
+export interface ProcessingJobResponse {
+  id: number;
+  file_id: number;
+  process_type: string;
+  status: string;
+  current_step: string | null;
+  progress_pct: number;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
 }
 
 export interface TechnicalIssue {

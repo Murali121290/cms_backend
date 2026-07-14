@@ -16,6 +16,11 @@ import { stageDetailsApi } from '@/api/stageDetails'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
+// "Design" and "CE support" are organizational folders created alongside every project
+// (see create_project_with_initial_files), not real manuscript chapters — they shouldn't
+// take up rows in the per-chapter planning/scheduling grid.
+const VIRTUAL_CHAPTER_NAMES = new Set(['Design', 'CE support'])
+
 function orderStages(stages: WorkflowStage[]): WorkflowStage[] {
   const byName = new Map(stages.map(s => [s.stage_name, s]))
   const first  = stages.find(s => !s.previous_stage)
@@ -81,7 +86,9 @@ function buildBaseSchedule(
     const due     = new Date(start)
     if (slaDays) due.setDate(due.getDate() + slaDays)
     result.push({ stageName: ws.stage_name, start, due, slaDays })
+    // Next stage starts the day after this one is due, not on the same day.
     cursor.setTime(due.getTime())
+    cursor.setDate(cursor.getDate() + 1)
   }
   return result
 }
@@ -104,7 +111,9 @@ function buildChapterSchedule(
     const due   = new Date(start)
     if (slaDays) due.setDate(due.getDate() + slaDays)
     result.push({ stageName: ws.stage_name, start, due, slaDays })
+    // Next stage starts the day after this one is due, not on the same day.
     cursor.setTime(due.getTime())
+    cursor.setDate(cursor.getDate() + 1)
   }
   return result
 }
@@ -179,7 +188,9 @@ export function ProjectPlanningPage() {
       await import('@/api/client').then(m => m.default.post(`/projects/${id}/sync-chapters`)).catch(() => undefined)
 
       const [chs, wf, masters, stageDetails] = await Promise.all([
-        chaptersApi.getByProject(projectCode).catch(() => [] as Chapter[]),
+        chaptersApi.getByProject(projectCode)
+          .then(list => list.filter(c => !VIRTUAL_CHAPTER_NAMES.has(c.chapters)))
+          .catch(() => [] as Chapter[]),
         workflowName
           ? workflowsApi.getWorkflow(workflowName).catch(() => [] as WorkflowStage[])
           : Promise.resolve([] as WorkflowStage[]),

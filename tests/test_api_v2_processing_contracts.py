@@ -83,6 +83,9 @@ def test_api_v2_processing_status_maps_current_structuring_contract(
         "derived_filename": None,
         "compatibility_status": "processing",
         "legacy_status_endpoint": f"/api/v1/processing/files/{file_record.id}/structuring_status",
+        "error": None,
+        "current_step": None,
+        "progress_pct": None,
     }
 
     file_record.is_checked_out = False
@@ -101,6 +104,9 @@ def test_api_v2_processing_status_maps_current_structuring_contract(
         "derived_filename": file_record.filename,
         "compatibility_status": "completed",
         "legacy_status_endpoint": f"/api/v1/processing/files/{file_record.id}/structuring_status",
+        "error": None,
+        "current_step": None,
+        "progress_pct": None,
     }
 
 
@@ -252,4 +258,36 @@ def test_api_v2_get_file_xhtml_endpoint(
     body = response.json()
     assert "Mocked WYSIWYG Content" in body["content"]
     assert body["filename"] == file_record.filename
+
+
+def test_api_v2_get_processing_job_endpoint(
+    auth_cookie_client,
+    admin_user,
+    file_record,
+    db_session,
+):
+    from app.models import ProcessingJob
+    job = ProcessingJob(
+        file_id=file_record.id,
+        process_type="structuring",
+        status="processing",
+        current_step="Annotating document with style",
+        progress_pct=40,
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    client = auth_cookie_client(admin_user)
+    response = client.get(f"/api/v2/processing-jobs/{job.id}")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == job.id
+    assert body["file_id"] == file_record.id
+    assert body["status"] == "processing"
+    assert body["current_step"] == "Annotating document with style"
+    assert body["progress_pct"] == 40
+
+    # 404 test
+    response_404 = client.get("/api/v2/processing-jobs/999999")
+    assert response_404.status_code == 404
 

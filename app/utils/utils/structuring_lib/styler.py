@@ -5,7 +5,7 @@ Handles applying styles and tags to DOCX documents.
 
 import logging
 import re
-from typing import Literal, Dict, Any, Optional
+from typing import Literal, Dict, Any, Optional, Callable
 from docx import Document
 from docx.oxml.ns import qn
 from .annotator import annotate_document, detect_list_kind, is_list_paragraph, parse_leading_style_hint
@@ -443,6 +443,7 @@ def process_docx(
     output_path: str,
     mode: Literal["style", "tag"] = "style",
     tag_set: Optional[str] = None,
+    on_progress: Optional[Callable[[str, int], None]] = None,
 ) -> Dict[str, Any]:
     """
     Process a DOCX document by annotating and styling paragraphs and tables.
@@ -451,14 +452,8 @@ def process_docx(
         input_path: Path to input DOCX file
         output_path: Path to save output DOCX file
         mode: "style" to apply Word styles, "tag" to prefix text with [TAG]
-        tag_set: optional client tag-set key (see tag_sets/*.yaml). The
-            structuring/classification engine always runs on canonical
-            tags regardless of this value; when set, the document is
-            normalized to canonical tags on the way in (in case it's a
-            reprocessing of an already client-styled document) and
-            translated to the client's tag names on the way out. None
-            (default) uses canonical tags throughout, unchanged from
-            existing behavior.
+        tag_set: optional client tag-set key (see tag_sets/*.yaml).
+        on_progress: optional progress tracking callback: (step_name, percentage) -> None
 
     Returns:
         Dictionary with processing results:
@@ -466,10 +461,6 @@ def process_docx(
         - paragraphs_processed: int
         - tables_processed: int
         - errors: list of error messages
-    
-    Raises:
-        FileNotFoundError: If input file doesn't exist
-        ValueError: If mode is invalid
     """
     if mode not in ("style", "tag"):
         raise ValueError(f"Invalid mode: {mode}. Must be 'style' or 'tag'")
@@ -483,18 +474,26 @@ def process_docx(
     }
 
     try:
+        if on_progress:
+            on_progress("Opening document", 10)
         logger.info(f"Opening document: {input_path}")
         doc = Document(input_path)
 
         if tag_set:
+            if on_progress:
+                on_progress("Normalizing client tags to canonical", 20)
             logger.info(f"Normalizing client tag set '{tag_set}' back to canonical before annotation")
             _normalize_client_tags_to_canonical(doc, get_reverse_tag_map(tag_set))
 
+        if on_progress:
+            on_progress("Annotating document styles and structure", 30)
         logger.info(f"Annotating document with mode: {mode}")
         annotations = annotate_document(doc, recognize_springer_box_markers=bool(tag_set))
         annotations = apply_box_tag_prefixes(annotations)
 
         try:
+            if on_progress:
+                on_progress("Classifying heading levels via formatting", 45)
             logger.info("Classifying heading levels via formatting engine")
             annotations = classify_headings_by_formatting(doc, annotations)
         except Exception as e:
@@ -504,6 +503,8 @@ def process_docx(
             )
 
         if mode == "style":
+            if on_progress:
+                on_progress("Enforcing heading hierarchy and list validation", 60)
             logger.info("Enforcing heading hierarchy and validation")
             annotations = enforce_hierarchy(annotations)
             annotations = demote_long_headings(annotations)
@@ -514,6 +515,8 @@ def process_docx(
         tag_map = get_tag_map(tag_set)
         prefixes = get_rules_loader().get_structural_tags().get("prefixes", []) if tag_map else []
 
+        if on_progress:
+            on_progress("Applying styles and tags to paragraphs", 75)
         # Process annotations
         for idx, item in enumerate(annotations):
             try:
@@ -561,6 +564,8 @@ def process_docx(
         
         # Process tables
         try:
+            if on_progress:
+                on_progress("Processing tables", 85)
             logger.info(f"Processing tables (mode: {mode})")
             tag_tables(doc, mode, tag_map=tag_map)
             result["tables_processed"] = len(doc.tables)
@@ -571,6 +576,8 @@ def process_docx(
         # Process cross-references
         if mode == "style":
             try:
+                if on_progress:
+                    on_progress("Processing cross-references", 90)
                 logger.info("Processing cross-references")
                 process_cross_references(doc)
             except Exception as e:
@@ -578,6 +585,8 @@ def process_docx(
                 result["errors"].append(f"Xref error: {str(e)}")
         
         # Save document
+        if on_progress:
+            on_progress("Saving document", 95)
         logger.info(f"Saving document to: {output_path}")
         doc.save(output_path)
         

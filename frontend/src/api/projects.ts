@@ -71,6 +71,13 @@ export interface ProjectCreate {
   xml_standard?: string | null
 }
 
+export interface POExtractionResponse {
+  fields: Partial<ProjectCreate>
+  extras: Record<string, unknown>
+  template_detected: string
+  warnings: string[]
+}
+
 export interface ProjectUpdate {
   project_manager?: string | null
   priority?: string | null
@@ -118,6 +125,14 @@ export const projectsApi = {
     api.post<ProjectBootstrapResponse>('/projects/bootstrap', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then(r => r.data),
+
+  extractPO: (file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post<POExtractionResponse>('/projects/extract-po', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
 
   update: (id: number, data: ProjectUpdate) =>
     api.put<Project>(`/projects/${id}`, data).then(r => r.data),

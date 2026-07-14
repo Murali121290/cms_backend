@@ -195,7 +195,7 @@ def viewer_user(user_factory):
 
 @pytest.fixture()
 def editor_user(user_factory):
-    return user_factory("editor", role_names=("Editor",))
+    return user_factory("editor", role_names=("Technical Editor", "Editor"))
 
 
 @pytest.fixture()

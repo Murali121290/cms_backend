@@ -58,23 +58,28 @@ def _run_via_pph(file_path: str, endpoint: str, extra_data: dict = None, file_fi
 
 
 PROCESS_PERMISSIONS = {
-    "language": ["Editor", "CopyEditor", "Admin"],
-    "technical": ["Editor", "CopyEditor", "Admin"],
-    "macro_processing": ["Editor", "CopyEditor", "Admin"],
-    "ppd": ["PPD", "ProjectManager", "Admin"],
+    "language": ["Team Lead - Editorial", "Technical Editor", "Admin","Language Editor", "Team Lead - Language Editing"],
+    "technical": ["Team Lead - Editorial", "Technical Editor", "Admin","Language Editor", "Team Lead - Language Editing"],
+    "macro_processing": ["Pre Editor", "Team Lead - Prediting", "Admin","Non-XML Manager", "Non-XML Operator"],
+    "ppd": ["Manuscript Analysis Operator", "ProjectManager", "Admin"],
     "permissions": ["PermissionsManager", "ProjectManager", "Admin"],
-    "reference_validation": ["Editor", "CopyEditor", "Admin"],
-    "structuring": ["Editor", "CopyEditor", "Admin"],
-    "bias_scan": ["Editor", "CopyEditor", "Admin", "ProjectManager"],
+    "reference_validation": ["Pre Editor", "Team Lead - Prediting", "Admin","Non-XML Manager", "Non-XML Operator"],
+    "structuring": ["ProjectManager","Pre Editor", "Team Lead - Prediting", "Admin","Non-XML Manager", "Non-XML Operator"],
+    "bias_scan": ["Team Lead - Editorial", "Technical Editor", "Admin","Language Editor", "Team Lead - Language Editing"],
     "credit_extractor_ai": ["PermissionsManager", "ProjectManager", "Admin"],
-    "word_to_xml": ["PPD", "ProjectManager", "Admin", "XML Manager", "Xml manager"],
+    "word_to_xml": ["Admin", "XML Manager", "XML manager"],
 }
 
 
 def check_permission(user, process_type: str, *, logger):
     allowed = PROCESS_PERMISSIONS.get(process_type, ["Admin"])
     user_role_names = [role.name for role in user.roles]
-    if not any(role in user_role_names for role in allowed):
+    
+    # Normalize to lowercase and strip whitespace for robust case-insensitive matching
+    user_role_names_lower = {role_name.strip().lower() for role_name in user_role_names}
+    is_allowed = any(allowed_role.strip().lower() in user_role_names_lower for allowed_role in allowed)
+    
+    if not is_allowed:
         logger.warning(
             f"Permission denied for user {user.username} on {process_type}. Roles: {user_role_names}"
         )
@@ -87,6 +92,35 @@ def check_permission(user, process_type: str, *, logger):
         )
 
 
+def update_job_status(
+    db: Session,
+    job_id: Optional[int],
+    status: str,
+    current_step: Optional[str] = None,
+    progress_pct: Optional[int] = None,
+    error: Optional[str] = None,
+):
+    if not job_id:
+        return
+    try:
+        from app.models import ProcessingJob
+        from datetime import datetime
+        job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
+        if job:
+            job.status = status
+            if current_step is not None:
+                job.current_step = current_step
+            if progress_pct is not None:
+                job.progress_pct = progress_pct
+            if error is not None:
+                job.error_message = error
+            if status in ("completed", "failed"):
+                job.completed_at = datetime.utcnow()
+            db.commit()
+    except Exception:
+        pass
+
+
 def background_processing_task(
     file_id: int,
     process_type: str,
@@ -94,6 +128,7 @@ def background_processing_task(
     user_username: str,
     mode: str = "style",
     options: Optional[dict[str, Any]] = None,
+    job_id: Optional[int] = None,
     *,
     logger,
     inject_publisher_styles_func,
@@ -111,10 +146,30 @@ def background_processing_task(
         logger.info(
             f"Background task started: File {file_id}, Type {process_type}, User {user_username}"
         )
+        if not job_id:
+            try:
+                from app.models import ProcessingJob
+                job = (
+                    db.query(ProcessingJob)
+                    .filter(
+                        ProcessingJob.file_id == file_id,
+                        ProcessingJob.process_type == process_type,
+                        ProcessingJob.status.in_(["pending", "processing"]),
+                    )
+                    .order_by(ProcessingJob.id.desc())
+                    .first()
+                )
+                if job:
+                    job_id = job.id
+            except Exception:
+                pass
+
+        update_job_status(db, job_id, "processing", f"Starting {process_type} job...", 10)
 
         file_record = db.query(models.File).filter(models.File.id == file_id).first()
         if not file_record:
             logger.error(f"File {file_id} not found in background task.")
+            update_job_status(db, job_id, "failed", "File not found", 100, "File not found in database.")
             return
 
         file_path = os.path.abspath(file_record.path)
@@ -123,10 +178,12 @@ def background_processing_task(
 
         try:
             if process_type == "permissions":
+                update_job_status(db, job_id, "processing", "Scanning permissions...", 30)
                 generated_files = permissions_engine_cls().process_document(file_path)
                 success_msg = "Permissions Log generated successfully"
 
             elif process_type == "ppd":
+                update_job_status(db, job_id, "processing", "Running PPD analysis...", 30)
                 if os.environ.get("PPH_ENABLED", "false").lower() in ("true", "1", "yes"):
                     book_title = os.path.splitext(os.path.basename(file_path))[0]
                     generated_files = _run_via_pph(
@@ -140,6 +197,7 @@ def background_processing_task(
                     success_msg = "PPD processing completed"
 
             elif process_type == "technical":
+                update_job_status(db, job_id, "processing", "Scanning technical style errors...", 30)
                 generated_files = technical_engine_cls().process_document(file_path)
                 success_msg = "Technical Editing completed successfully"
 
@@ -208,6 +266,7 @@ def background_processing_task(
                     f"run_struct={run_struct} run_conversion={run_conversion} "
                     f"run_num={run_num} run_apa={run_apa} report_only={report_only}"
                 )
+                update_job_status(db, job_id, "processing", "Processing document references...", 40)
                 generated_files = references_engine_cls().process_document(
                     file_path,
                     run_structuring=run_struct,
@@ -227,6 +286,9 @@ def background_processing_task(
                     structuring_method = options.get("structuring_method", "ai")
                     tag_set = options.get("tag_set")
 
+                def on_progress_callback(step_name: str, pct: int):
+                    update_job_status(db, job_id, "processing", step_name, pct)
+
                 if structuring_method == "manual":
                     logger.info(f"Starting manual structuring (mode={mode}, tag_set={tag_set}) using app.utils.utils.structuring_lib for: {os.path.basename(file_path)}")
                     from app.utils.utils.structuring_lib.styler import process_docx as manual_process_docx
@@ -240,7 +302,8 @@ def background_processing_task(
                         input_path=file_path,
                         output_path=output_path,
                         mode=mode,
-                        tag_set=tag_set
+                        tag_set=tag_set,
+                        on_progress=on_progress_callback,
                     )
                     if not result.get("success", False):
                         error_msg = "; ".join(result.get("errors", ["Unknown structuring error"]))
@@ -249,6 +312,7 @@ def background_processing_task(
                     generated_files = [output_path]
                     success_msg = f"Manual structuring completed (mode: {mode})"
                 else:
+                    update_job_status(db, job_id, "processing", "Offloading document to AI Structuring...", 30)
                     generated_files = structuring_engine_cls().process_document(file_path, mode=mode, tag_set=tag_set)
                     success_msg = f"Structuring completed (mode: {mode})"
 
@@ -437,6 +501,7 @@ def background_processing_task(
 
             db.commit()
             logger.info(f"Processing success: {success_msg}")
+            update_job_status(db, job_id, "completed", "Job completed successfully", 100)
 
         except Exception as exc:
             logger.error(f"Processing FAILED for file {file_id}: {str(exc)}")
@@ -445,6 +510,7 @@ def background_processing_task(
             file_record.checked_out_by_id = None
             file_record.processing_error = str(exc)
             db.commit()
+            update_job_status(db, job_id, "failed", "Error occurred during execution", 100, error=str(exc))
 
     finally:
         db.close()
@@ -540,6 +606,21 @@ def start_process(
         except Exception as exc:
             logger.error(f"Backup failed: {exc}")
 
+    # Create the ProcessingJob record
+    from app.models import ProcessingJob
+    
+    job = ProcessingJob(
+        file_id=file_id,
+        process_type=process_type,
+        status="pending",
+        current_step="Pending queue execution",
+        progress_pct=0,
+        user_id=user.id if user else None,
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
     background_tasks.add_task(
         background_task_callable,
         file_id=file_id,
@@ -548,17 +629,17 @@ def start_process(
         user_username=user.username,
         mode=mode,
         options=options,
+        job_id=job.id,
     )
 
-    return JSONResponse(
-        content={
-            "message": (
-                f"{process_type.capitalize()} started in background. "
-                "The file is locked and will be updated shortly."
-            ),
-            "status": "processing",
-        }
-    )
+    return {
+        "job_id": job.id,
+        "message": (
+            f"{process_type.capitalize()} started in background. "
+            "The file is locked and will be updated shortly."
+        ),
+        "status": "processing",
+    }
 
 
 def get_structuring_status(db: Session, *, file_id: int, user):
@@ -568,6 +649,21 @@ def get_structuring_status(db: Session, *, file_id: int, user):
     file_record = db.query(models.File).filter(models.File.id == file_id).first()
     if not file_record:
         raise HTTPException(status_code=404, detail="File not found")
+
+    from app.models import ProcessingJob
+    job = db.query(ProcessingJob).filter(
+        ProcessingJob.file_id == file_id,
+        ProcessingJob.process_type == "structuring"
+    ).order_by(ProcessingJob.created_at.desc()).first()
+
+    if job:
+        return {
+            "status": job.status,
+            "current_step": job.current_step,
+            "progress_pct": job.progress_pct,
+            "error": job.error_message,
+            "new_file_id": file_record.id,
+        }
 
     if file_record.is_checked_out:
         return {"status": "processing"}
@@ -586,6 +682,28 @@ def get_reference_validation_status(db: Session, *, file_id: int, user):
     file_record = db.query(models.File).filter(models.File.id == file_id).first()
     if not file_record:
         raise HTTPException(status_code=404, detail="File not found")
+
+    from app.models import ProcessingJob
+    job = db.query(ProcessingJob).filter(
+        ProcessingJob.file_id == file_id,
+        ProcessingJob.process_type.in_((
+            "macro_processing",
+            "reference_validation",
+            "reference_number_validation",
+            "reference_apa_chicago_validation",
+            "reference_structuring",
+            "reference_report_only",
+        ))
+    ).order_by(ProcessingJob.created_at.desc()).first()
+
+    if job:
+        return {
+            "status": job.status,
+            "current_step": job.current_step,
+            "progress_pct": job.progress_pct,
+            "error": job.error_message,
+            "new_file_id": file_record.id,
+        }
 
     # If the parent file is still checked out, the job is still running
     if file_record.is_checked_out:
