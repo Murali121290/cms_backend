@@ -622,7 +622,13 @@ export function ProjectWorkflow() {
       <div className="px-6 py-4 border-b border-border bg-background flex items-start justify-between gap-4">
         <div className="flex items-start gap-3">
           <button
-            onClick={() => navigate(-1)}
+            onClick={() => {
+              if (clientId) {
+                navigate(`/clients/${clientId}/projects`)
+              } else {
+                navigate('/clients')
+              }
+            }}
             className="p-1.5 rounded-lg hover:bg-surface text-muted hover:text-text transition-colors mt-0.5 flex-shrink-0"
           >
             <ArrowLeft size={18} />

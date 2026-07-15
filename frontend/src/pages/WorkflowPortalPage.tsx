@@ -201,10 +201,12 @@ function ChooseScreen({ onBook, onJournal, onGeneral, onPeople }: { onBook: () =
         <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(1000px 400px at 80% 10%, rgba(27, 79, 156, 0.05), transparent)' }} />
         <img src="/portal-assets/workflow-hero.png" alt="" style={{ position: 'absolute', top: 0, right: 0, bottom: 0, height: '100%', width: '64%', objectFit: 'cover', objectPosition: 'right center', opacity: 0.9, WebkitMaskImage: 'linear-gradient(90deg, transparent 0%, #000 34%)', maskImage: 'linear-gradient(90deg, transparent 0%, #000 34%)' }} />
         <div style={{ position: 'relative', zIndex: 2, maxWidth: 1320, margin: '0 auto', width: '100%' }}>
-          <div style={{ fontSize: 11, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--accent-2)', fontWeight: 800, marginBottom: 8 }}>S4C Ninja Inkflow</div>
-          <h1 style={{ fontFamily: 'Spectral, serif', fontSize: 34, fontWeight: 700, color: '#262626', lineHeight: 1.18, letterSpacing: '-0.02em', marginBottom: 6 }}>
-            Choose your <em style={{ color: 'var(--accent-2)', fontStyle: 'italic' }}>production line</em>
+          {/* <div style={{ fontSize: 18, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--accent-2)', fontWeight: 800, marginBottom: 8 }}>S4C Ninja Inkflow</div> */}
+          <h1 style={{ fontFamily: 'Spectral, serif', fontSize: 20, fontWeight: 700, color: '#262626', lineHeight: 1.18, letterSpacing: '-0.02em', marginBottom: 6 }}>
+            <em style={{ color: 'var(--accent-2)', fontStyle: 'italic' }}>Manuscript-to-Market</em>
+            {/* Choose your <em style={{ color: 'var(--accent-2)', fontStyle: 'italic' }}>production line</em> */}
           </h1>
+          <h2 style={{ fontFamily: 'Spectral, serif', fontSize: 20, fontWeight: 700, color: '#262626', lineHeight: 1.18, letterSpacing: '-0.02em', marginBottom: 6 }}>An End-to-End Digital Publishing Ecosystem</h2>
           <p style={{ fontSize: 14.5, color: '#505050', maxWidth: 580 }}>Select a publishing stream to enter its dedicated workflow hubs. Designed with professional corporate layouts.</p>
         </div>
       </div>
