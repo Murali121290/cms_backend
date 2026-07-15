@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, RefreshCw, ChevronRight, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen } from 'lucide-react'
+import { Plus, RefreshCw, ChevronRight, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen, Trash2 } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { usersApi } from '@/api/users'
 import { Button } from '@/components/ui/Button'
+import { Modal } from '@/components/ui/Modal'
+import { toast } from '@/store/useToastStore'
 
 interface Chapter {
   id: number
@@ -42,6 +44,7 @@ export function PostProdWordConversion() {
   
   // Form states
   const [showAddProjectModal, setShowAddProjectModal] = useState(false)
+  const [projectToDelete, setProjectToDelete] = useState<number | null>(null)
   const [customerName, setCustomerName] = useState('')
   const [clientCode, setClientCode] = useState('')
   const [projectName, setProjectName] = useState('')
@@ -129,6 +132,27 @@ export function PostProdWordConversion() {
       setErrorMsg(err.message || 'An error occurred during project creation.')
     } finally {
       setUploading(false)
+    }
+  }
+
+  const handleDeleteProject = async () => {
+    if (!projectToDelete) return
+    try {
+      const res = await fetch(`/api/v2/post-prod/projects/${projectToDelete}`, {
+        method: 'DELETE'
+      })
+      if (res.ok) {
+        toast.success("Project deleted successfully")
+        fetchProjects()
+      } else {
+        const data = await res.json()
+        toast.error(data.detail || 'Failed to delete project')
+      }
+    } catch (err) {
+      console.error('Failed to delete project', err)
+      toast.error('An error occurred while deleting project')
+    } finally {
+      setProjectToDelete(null)
     }
   }
 
@@ -314,7 +338,19 @@ export function PostProdWordConversion() {
                       <h3 className="font-semibold text-sm text-text truncate m-0" title={proj.project_name}>{proj.project_name}</h3>
                       <p className="text-[11px] text-muted mt-0.5">{proj.client} {proj.client_code && `(${proj.client_code})`}</p>
                     </div>
-                    <ChevronRight size={16} className="shrink-0 mt-0.5 transition-colors text-muted" />
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setProjectToDelete(proj.id)
+                        }}
+                        className="text-muted hover:text-red-500 transition-colors p-1 rounded hover:bg-red-50 dark:hover:bg-red-950/30"
+                        title="Delete Project"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                      <ChevronRight size={16} className="shrink-0 mt-0.5 transition-colors text-muted" />
+                    </div>
                   </div>
 
                   <div className="mt-3 flex items-center justify-between text-[11px]">
@@ -509,6 +545,15 @@ export function PostProdWordConversion() {
           </div>
         </div>
       )}
+
+      <Modal
+        isOpen={projectToDelete !== null}
+        onClose={() => setProjectToDelete(null)}
+        onConfirm={handleDeleteProject}
+        title="Delete Project"
+        description="Are you sure you want to delete this project? This will remove it from the dashboard."
+        confirmLabel="Delete"
+      />
     </div>
   )
 }

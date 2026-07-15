@@ -303,7 +303,7 @@ def update_project(
 
 @router.get("/projects")
 def list_projects(db: Session = Depends(database.get_db), user = Depends(get_current_user_from_cookie)):
-    projects = db.query(PostProdProject).order_by(PostProdProject.created_at.desc()).all()
+    projects = db.query(PostProdProject).filter(PostProdProject.is_deleted != True).order_by(PostProdProject.created_at.desc()).all()
     return [
         {
             "id": p.id,
@@ -327,6 +327,15 @@ def list_projects(db: Session = Depends(database.get_db), user = Depends(get_cur
             ]
         } for p in projects
     ]
+
+@router.delete("/projects/{project_id}")
+def delete_project(project_id: int, db: Session = Depends(database.get_db), user = Depends(get_current_user_from_cookie)):
+    project = db.query(PostProdProject).filter(PostProdProject.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project.is_deleted = True
+    db.commit()
+    return {"message": "Project soft deleted successfully"}
 
 @router.post("/projects")
 async def create_project(
