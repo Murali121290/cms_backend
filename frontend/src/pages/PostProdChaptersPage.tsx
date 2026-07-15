@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, RefreshCw, Download, Layers, XCircle, ChevronDown, ChevronUp,
   ExternalLink, FileText, Image, FolderOpen, Info, CheckCircle2, AlertTriangle,
-  File, X, Loader2, Upload, User
+  File, X, Loader2, Upload, User, Check
 } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { toast } from '@/store/useToastStore'
@@ -16,6 +16,10 @@ interface Chapter {
   error_message?: string
   attempts: number
   size_bytes?: number
+  conversion_status: string
+  conversion_completed_at?: string
+  qc_status: string
+  qc_completed_at?: string
   created_at?: string
   completed_at?: string
 }
@@ -240,6 +244,19 @@ export function PostProdChaptersPage() {
     } catch (err) {
       console.error(err)
       toast.error('Failed to open the file in Word.')
+    }
+    fetchProjectDetails() // Refresh to fetch updated qc_status
+  }
+
+  const handleQCComplete = async (chapter: Chapter) => {
+    try {
+      const res = await fetch(`/api/v2/post-prod/chapters/${chapter.id}/qc-complete`, { method: 'POST' })
+      if (!res.ok) throw new Error('QC complete failed')
+      toast.success('QC marked as completed')
+      fetchProjectDetails()
+    } catch (err) {
+      console.error(err)
+      toast.error('Failed to update QC status')
     }
   }
 
@@ -483,6 +500,8 @@ export function PostProdChaptersPage() {
                       <th className="p-3.5 bg-card">Chapter</th>
                       {!selectedChapter && <th className="p-3.5 bg-card">Filename</th>}
                       {!selectedChapter && <th className="p-3.5 bg-card">Size</th>}
+                      <th className="p-3.5 bg-card">Conversion Status</th>
+                      <th className="p-3.5 bg-card">QC Status</th>
                       <th className="p-3.5 bg-card">Status</th>
                       <th className="p-3.5 bg-card">Created</th>
                       <th className="p-3.5 bg-card">Completed</th>
@@ -496,18 +515,17 @@ export function PostProdChaptersPage() {
                       const isFailed = chap.status === 'Failed'
                       const isExpanded = expandedChapterIds.includes(chap.id)
 
-                      let statusCls = 'bg-accent border-border text-muted'
-                      if (chap.status === 'Completed') {
-                        statusCls = 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
-                      } else if (chap.status === 'Converting') {
-                        statusCls = 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400'
-                      } else if (chap.status === 'Failed') {
-                        statusCls = 'bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400'
-                      } else if (chap.status === 'YTS') {
-                        statusCls = 'bg-slate-500/10 border-slate-500/20 text-slate-600 dark:text-slate-400 font-semibold'
-                      } else if (chap.status === 'Pending') {
-                        statusCls = 'bg-blue-500/10 border-blue-500/20 text-blue-600 dark:text-blue-400 font-semibold'
+                      const getStatusCls = (s: string) => {
+                        if (s === 'Completed') return 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                        if (s === 'Converting' || s === 'In-Progress') return 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400'
+                        if (s === 'Failed') return 'bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400'
+                        if (s === 'Pending') return 'bg-blue-500/10 border-blue-500/20 text-blue-600 dark:text-blue-400 font-semibold'
+                        return 'bg-slate-500/10 border-slate-500/20 text-slate-600 dark:text-slate-400 font-semibold'
                       }
+
+                      const conversionStatusCls = getStatusCls(chap.conversion_status)
+                      const qcStatusCls = getStatusCls(chap.qc_status)
+                      const statusCls = getStatusCls(chap.status)
 
                       return (
                         <React.Fragment key={chap.id}>
@@ -537,6 +555,20 @@ export function PostProdChaptersPage() {
                                 {formatBytes(chap.size_bytes)}
                               </td>
                             )}
+                            <td className="p-3.5">
+                              <span
+                                className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border ${conversionStatusCls}`}
+                              >
+                                {chap.conversion_status}
+                              </span>
+                            </td>
+                            <td className="p-3.5">
+                              <span
+                                className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border ${qcStatusCls}`}
+                              >
+                                {chap.qc_status}
+                              </span>
+                            </td>
                             <td className="p-3.5">
                               <span
                                 onClick={(e) => {
@@ -586,7 +618,7 @@ export function PostProdChaptersPage() {
                                   </button>
                                 )}
 
-                                {chap.status === 'Completed' && (
+                                {chap.conversion_status === 'Completed' && (
                                   <>
                                     <button
                                       onClick={() => handleOpenInWord(chap)}
@@ -595,6 +627,15 @@ export function PostProdChaptersPage() {
                                     >
                                       <FileText size={13} />
                                     </button>
+                                    {chap.qc_status !== 'Completed' && (
+                                      <button
+                                        onClick={() => handleQCComplete(chap)}
+                                        className="p-1.5 border border-purple-200/80 bg-purple-500/5 hover:bg-purple-500/15 text-purple-600 hover:text-purple-700 rounded-lg transition-all shadow-sm flex items-center justify-center"
+                                        title="QC Completed"
+                                      >
+                                        <Check size={13} strokeWidth={3} />
+                                      </button>
+                                    )}
                                     <button
                                       onClick={() => handleDownloadChapter(chap)}
                                       className="p-1.5 border border-blue-200/80 bg-blue-500/5 hover:bg-blue-500/15 text-blue-600 hover:text-blue-700 rounded-lg transition-all shadow-sm"
