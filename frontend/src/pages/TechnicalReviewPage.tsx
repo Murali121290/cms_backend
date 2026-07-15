@@ -553,7 +553,7 @@ export function TechnicalReviewPage() {
   }
 
   const file = technicalReviewQuery.data.file;
-  const onlyoffice_available = technicalReviewQuery.data.onlyoffice_available;
+  const onlyoffice_available = false; // technicalReviewQuery.data.onlyoffice_available;
   const collabora_url = technicalReviewQuery.data.collabora_url;
   const inconsistencies = technicalReviewQuery.data.inconsistencies;
   const ia_report = technicalReviewQuery.data.ia_report;

@@ -280,7 +280,7 @@ export function StructuringReviewPage() {
   const editorMode = review.editor.mode;
   const saveMode = review.editor.save_mode;
   const wopiMode = review.editor.wopi_mode;
-  const onlyoffice_available = Boolean(review.editor.onlyoffice_available);
+  const onlyoffice_available = false; // Boolean(review.editor.onlyoffice_available);
   const hasCollabora = Boolean(review.editor.collabora_url);
 
   // ── Render ────────────────────────────────────────────────────────────────
