@@ -60,6 +60,11 @@ export function PostProdChaptersPage() {
   const [loadingFiles, setLoadingFiles] = useState(false)
   const [activeTab, setActiveTab] = useState<'indesign' | 'docx' | 'images' | 'misc'>('indesign')
   const [expandedChapterIds, setExpandedChapterIds] = useState<number[]>([])
+  const [expandedDateIds, setExpandedDateIds] = useState<number[]>([])
+  const toggleDateExpand = (id: number, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setExpandedDateIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  }
   const [selectedChapterIds, setSelectedChapterIds] = useState<number[]>([])
   const [isBulkConverting, setIsBulkConverting] = useState(false)
   const [isBulkDownloading, setIsBulkDownloading] = useState(false)
@@ -345,11 +350,24 @@ export function PostProdChaptersPage() {
     input.click()
   }
 
-  const formatDate = (value?: string) => {
-    if (!value) return '—'
+  const FormatDate = ({ value, inline }: { value?: string, inline?: boolean }) => {
+    if (!value) return <span>—</span>
     const date = new Date(value.endsWith('Z') ? value : value + 'Z')
-    if (isNaN(date.getTime())) return '—'
-    return date.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' })
+    if (isNaN(date.getTime())) return <span>—</span>
+    
+    const dateStr = date.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' })
+    const timeStr = date.toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase()
+    
+    if (inline) {
+      return <span>{dateStr} {timeStr}</span>
+    }
+    
+    return (
+      <div className="flex flex-col">
+        <span>{dateStr}</span>
+        <span className="text-[10px] opacity-75 leading-tight mt-0.5">{timeStr}</span>
+      </div>
+    )
   }
 
   const formatDuration = (start?: string, end?: string) => {
@@ -500,12 +518,11 @@ export function PostProdChaptersPage() {
                       <th className="p-3.5 bg-card">Chapter</th>
                       {!selectedChapter && <th className="p-3.5 bg-card">Filename</th>}
                       {!selectedChapter && <th className="p-3.5 bg-card">Size</th>}
+                      <th className="p-3.5 bg-card">Created</th>
                       <th className="p-3.5 bg-card">Conversion Status</th>
                       <th className="p-3.5 bg-card">QC Status</th>
                       <th className="p-3.5 bg-card">Status</th>
-                      <th className="p-3.5 bg-card">Created</th>
                       <th className="p-3.5 bg-card">Completed</th>
-                      <th className="p-3.5 bg-card">Duration</th>
                       <th className="p-3.5 bg-card text-center">Actions</th>
                     </tr>
                   </thead>
@@ -555,52 +572,108 @@ export function PostProdChaptersPage() {
                                 {formatBytes(chap.size_bytes)}
                               </td>
                             )}
-                            <td className="p-3.5">
-                              <span
-                                className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border ${conversionStatusCls}`}
-                              >
-                                {chap.conversion_status}
-                              </span>
+                            <td className="p-3.5 text-muted whitespace-nowrap">
+                              <FormatDate value={chap.created_at} />
                             </td>
                             <td className="p-3.5">
-                              <span
-                                className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border ${qcStatusCls}`}
-                              >
-                                {chap.qc_status}
-                              </span>
+                              <div className="flex flex-col items-start gap-1.5">
+                                <span
+                                  className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border ${conversionStatusCls}`}
+                                >
+                                  {chap.conversion_status}
+                                </span>
+                                {chap.conversion_completed_at && (
+                                  <div className="relative flex flex-col gap-1 cursor-pointer" onClick={(e) => toggleDateExpand(chap.id + 1000000, e)}>
+                                    <span className="text-[10px] text-muted whitespace-nowrap hover:text-text transition-colors" title="Click to see details">
+                                      ⏱ {formatDuration(chap.created_at, chap.conversion_completed_at)}
+                                    </span>
+                                    {expandedDateIds.includes(chap.id + 1000000) && (
+                                      <div 
+                                        className="absolute top-full left-0 mt-1 z-[100] shadow-xl text-[10px] text-text bg-card p-2.5 rounded-lg border border-border min-w-[150px]"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        <div className="flex flex-col gap-2">
+                                          <div>
+                                            <div className="text-[9px] text-muted uppercase tracking-wider mb-0.5">Start Time</div>
+                                            <div className="font-medium"><FormatDate value={chap.created_at} inline /></div>
+                                          </div>
+                                          <div>
+                                            <div className="text-[9px] text-muted uppercase tracking-wider mb-0.5">End Time</div>
+                                            <div className="font-medium"><FormatDate value={chap.conversion_completed_at} inline /></div>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
                             </td>
                             <td className="p-3.5">
-                              <span
-                                onClick={(e) => {
-                                  if (isFailed) {
-                                    e.stopPropagation();
-                                    toggleExpand(chap.id);
-                                  }
-                                }}
-                                className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border ${statusCls} ${isFailed ? 'cursor-pointer hover:opacity-85 select-none' : ''
-                                  }`}
-                                title={isFailed ? (isExpanded ? "Hide conversion logs" : "Click to view conversion logs") : undefined}
-                              >
-                                {chap.status}
-                                {isFailed && (
-                                  <span className="ml-1 inline-block text-[8px] align-middle opacity-80">
-                                    {isExpanded ? '▲' : '▼'}
+                              <div className="flex flex-col items-start gap-1.5">
+                                <span
+                                  className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border ${qcStatusCls}`}
+                                >
+                                  {chap.qc_status}
+                                </span>
+                                {chap.qc_completed_at && (
+                                  <div className="relative flex flex-col gap-1 cursor-pointer" onClick={(e) => toggleDateExpand(chap.id + 2000000, e)}>
+                                    <span className="text-[10px] text-muted whitespace-nowrap hover:text-text transition-colors" title="Click to see details">
+                                      ⏱ {formatDuration(chap.conversion_completed_at, chap.qc_completed_at)}
+                                    </span>
+                                    {expandedDateIds.includes(chap.id + 2000000) && (
+                                      <div 
+                                        className="absolute top-full left-0 mt-1 z-[100] shadow-xl text-[10px] text-text bg-card p-2.5 rounded-lg border border-border min-w-[150px]"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        <div className="flex flex-col gap-2">
+                                          <div>
+                                            <div className="text-[9px] text-muted uppercase tracking-wider mb-0.5">Start Time</div>
+                                            <div className="font-medium"><FormatDate value={chap.conversion_completed_at} inline /></div>
+                                          </div>
+                                          <div>
+                                            <div className="text-[9px] text-muted uppercase tracking-wider mb-0.5">End Time</div>
+                                            <div className="font-medium"><FormatDate value={chap.qc_completed_at} inline /></div>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                            <td className="p-3.5">
+                              <div className="flex flex-col items-start gap-1.5">
+                                <span
+                                  onClick={(e) => {
+                                    if (isFailed) {
+                                      e.stopPropagation();
+                                      toggleExpand(chap.id);
+                                    }
+                                  }}
+                                  className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border ${statusCls} ${isFailed ? 'cursor-pointer hover:opacity-85 select-none' : ''
+                                    }`}
+                                  title={isFailed ? (isExpanded ? "Hide conversion logs" : "Click to view conversion logs") : undefined}
+                                >
+                                  {chap.status}
+                                  {isFailed && (
+                                    <span className="ml-1 inline-block text-[8px] align-middle opacity-80">
+                                      {isExpanded ? '▲' : '▼'}
+                                    </span>
+                                  )}
+                                </span>
+                                {chap.completed_at && (
+                                  <span className="text-[10px] text-muted whitespace-nowrap" title="Total Duration">
+                                    ⏱ {formatDuration(chap.created_at, chap.completed_at)}
                                   </span>
                                 )}
-                              </span>
+                              </div>
                             </td>
                             <td className="p-3.5 text-muted whitespace-nowrap">
-                              {formatDate(chap.created_at)}
-                            </td>
-                            <td className="p-3.5 text-muted whitespace-nowrap">
-                              {formatDate(chap.completed_at)}
-                            </td>
-                            <td className="p-3.5 text-muted whitespace-nowrap">
-                              {formatDuration(chap.created_at, chap.completed_at)}
+                              <FormatDate value={chap.completed_at} />
                             </td>
                             <td className="p-3.5 text-center" onClick={(e) => e.stopPropagation()}>
                               <div className="flex justify-center gap-1.5">
-                                {chap.status === 'Converting' ? (
+                                {chap.conversion_status === 'Converting' ? (
                                   <button
                                     disabled
                                     className="p-1.5 border border-amber-200/40 bg-amber-500/5 text-amber-500/60 rounded-lg cursor-not-allowed"
@@ -650,7 +723,7 @@ export function PostProdChaptersPage() {
                           </tr>
                           {isFailed && isExpanded && (
                             <tr className="bg-red-500/[0.01]">
-                              <td colSpan={selectedChapter ? 7 : 8} className="p-3 pt-0 pb-3.5">
+                              <td colSpan={selectedChapter ? 6 : 7} className="p-3 pt-0 pb-3.5">
                                 <div className="text-xs text-red-500 bg-red-500/5 border border-red-500/10 rounded-xl p-3 font-mono overflow-x-auto max-h-[120px] overflow-y-auto">
                                   <strong className="block text-[10px] uppercase font-sans tracking-wide mb-1 text-red-600 dark:text-red-400">
                                     Conversion Failure Logs:

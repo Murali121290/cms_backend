@@ -63,8 +63,8 @@ def run_conversion_background(chapter_id: int, session_factory):
         if not chapter:
             return
         
-        chapter.status = "Converting"
-        chapter.conversion_status = "In-Progress"
+        chapter.status = "In-Progress"
+        chapter.conversion_status = "Converting"
         chapter.attempts += 1
         db.commit()
 
