@@ -15,6 +15,7 @@ interface Chapter {
   source_filename: string
   error_message?: string
   attempts: number
+  size_bytes?: number
   created_at?: string
   completed_at?: string
 }
@@ -121,7 +122,7 @@ export function PostProdChaptersPage() {
       a.click()
       a.remove()
       window.URL.revokeObjectURL(url)
-      
+
       setSelectedChapterIds([])
     } catch (err: any) {
       console.error(err)
@@ -329,15 +330,15 @@ export function PostProdChaptersPage() {
 
   const formatDate = (value?: string) => {
     if (!value) return '—'
-    const date = new Date(value)
+    const date = new Date(value.endsWith('Z') ? value : value + 'Z')
     if (isNaN(date.getTime())) return '—'
     return date.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' })
   }
 
   const formatDuration = (start?: string, end?: string) => {
     if (!start || !end) return '—'
-    const startMs = new Date(start).getTime()
-    const endMs = new Date(end).getTime()
+    const startMs = new Date(start.endsWith('Z') ? start : start + 'Z').getTime()
+    const endMs = new Date(end.endsWith('Z') ? end : end + 'Z').getTime()
     if (isNaN(startMs) || isNaN(endMs) || endMs < startMs) return '—'
     const totalSeconds = Math.floor((endMs - startMs) / 1000)
     const hours = Math.floor(totalSeconds / 3600)
@@ -348,13 +349,11 @@ export function PostProdChaptersPage() {
     return `${seconds}s`
   }
 
-  const formatBytes = (bytes: number, decimals = 2) => {
-    if (bytes === 0) return '0 Bytes'
-    const k = 1024
+  const formatBytes = (bytes?: number, decimals = 2) => {
+    if (bytes === undefined || bytes === null) return '—'
+    if (bytes === 0) return '0.00 MB'
     const dm = decimals < 0 ? 0 : decimals
-    const sizes = ['Bytes', 'KB', 'MB', 'GB']
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i]
+    return (bytes / (1024 * 1024)).toFixed(dm) + ' MB'
   }
 
   if (loading) {
@@ -483,6 +482,7 @@ export function PostProdChaptersPage() {
                       </th>
                       <th className="p-3.5 bg-card">Chapter</th>
                       {!selectedChapter && <th className="p-3.5 bg-card">Filename</th>}
+                      {!selectedChapter && <th className="p-3.5 bg-card">Size</th>}
                       <th className="p-3.5 bg-card">Status</th>
                       <th className="p-3.5 bg-card">Created</th>
                       <th className="p-3.5 bg-card">Completed</th>
@@ -530,6 +530,11 @@ export function PostProdChaptersPage() {
                             {!selectedChapter && (
                               <td className="p-3.5 text-text font-normal truncate max-w-[200px]" title={chap.source_filename}>
                                 {chap.source_filename}
+                              </td>
+                            )}
+                            {!selectedChapter && (
+                              <td className="p-3.5 text-text whitespace-nowrap text-[13px]">
+                                {formatBytes(chap.size_bytes)}
                               </td>
                             )}
                             <td className="p-3.5">
@@ -649,7 +654,7 @@ export function PostProdChaptersPage() {
                 <div className="flex overflow-x-auto whitespace-nowrap scrollbar-none -mb-px">
                   {(['indesign', 'docx', 'images', 'misc'] as const).map((tab) => {
                     let label = 'Files'
-                    if (tab === 'indesign') label = 'InDesign'
+                    if (tab === 'indesign') label = 'Chapter'
                     else if (tab === 'docx') label = 'Word'
                     else if (tab === 'images') label = 'Images'
                     else if (tab === 'misc') label = 'Misc'

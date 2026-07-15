@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Boolean
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database import Base
@@ -13,6 +13,7 @@ class PostProdProject(Base):
     status = Column(String(50), default="Active")  # e.g., "Active", "Completed"
     assignee = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    is_deleted = Column(Boolean, default=False, nullable=False)
 
     chapters = relationship(
         "PostProdChapter",
@@ -34,6 +35,7 @@ class PostProdChapter(Base):
     source_file_path = Column(String, nullable=True)
     converted_file_path = Column(String, nullable=True)
     error_message = Column(String, nullable=True)
+    size_bytes = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
     attempts = Column(Integer, default=0)
