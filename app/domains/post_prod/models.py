@@ -35,6 +35,7 @@ class PostProdChapter(Base):
     source_file_path = Column(String, nullable=True)
     converted_file_path = Column(String, nullable=True)
     error_message = Column(String, nullable=True)
+    size_bytes = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
     attempts = Column(Integer, default=0)

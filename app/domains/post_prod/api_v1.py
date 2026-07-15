@@ -260,6 +260,7 @@ def get_project(
                 "source_filename": c.source_filename,
                 "error_message": c.error_message,
                 "attempts": c.attempts,
+                "size_bytes": c.size_bytes,
                 "created_at": c.created_at,
                 "completed_at": c.completed_at
             } for c in p.chapters
@@ -321,6 +322,7 @@ def list_projects(db: Session = Depends(database.get_db), user = Depends(get_cur
                     "source_filename": c.source_filename,
                     "error_message": c.error_message,
                     "attempts": c.attempts,
+                    "size_bytes": c.size_bytes,
                     "created_at": c.created_at,
                     "completed_at": c.completed_at
                 } for c in p.chapters
@@ -395,6 +397,7 @@ async def create_project(
                     status="YTS",
                     source_filename=f_name,
                     source_file_path=source_path,
+                    size_bytes=os.path.getsize(source_path),
                     attempts=0
                 )
                 db.add(chapter)
@@ -530,7 +533,7 @@ def get_chapter_source_files(chapter_id: int, db: Session = Depends(database.get
             
             if file_chap is None:
                 misc_files.append(file_info)
-            elif lowered.endswith((".indd", ".idml")):
+            elif lowered.endswith((".indd", ".idml",".pdf")):
                 indesign_files.append(file_info)
             elif lowered.endswith(".docx"):
                 docx_files.append(file_info)
