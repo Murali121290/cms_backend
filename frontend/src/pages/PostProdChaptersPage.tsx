@@ -578,7 +578,7 @@ export function PostProdChaptersPage() {
                             <td className="p-3.5">
                               <div className="flex flex-col items-start gap-1.5">
                                 <span
-                                  className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border ${conversionStatusCls}`}
+                                  className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border whitespace-nowrap ${conversionStatusCls}`}
                                 >
                                   {chap.conversion_status}
                                 </span>
@@ -611,7 +611,7 @@ export function PostProdChaptersPage() {
                             <td className="p-3.5">
                               <div className="flex flex-col items-start gap-1.5">
                                 <span
-                                  className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border ${qcStatusCls}`}
+                                  className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border whitespace-nowrap ${qcStatusCls}`}
                                 >
                                   {chap.qc_status}
                                 </span>
@@ -650,7 +650,7 @@ export function PostProdChaptersPage() {
                                       toggleExpand(chap.id);
                                     }
                                   }}
-                                  className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border ${statusCls} ${isFailed ? 'cursor-pointer hover:opacity-85 select-none' : ''
+                                  className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border whitespace-nowrap ${statusCls} ${isFailed ? 'cursor-pointer hover:opacity-85 select-none' : ''
                                     }`}
                                   title={isFailed ? (isExpanded ? "Hide conversion logs" : "Click to view conversion logs") : undefined}
                                 >
