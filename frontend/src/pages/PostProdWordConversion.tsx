@@ -406,7 +406,7 @@ export function PostProdWordConversion() {
                 </div>
 
                 <div className="mt-4 pt-2.5 border-t border-border/60 flex items-center justify-between text-[10px] text-muted font-medium">
-                  <span>Created: {new Date(proj.created_at).toLocaleDateString()}</span>
+                  <span>Created: {new Date(proj.created_at.endsWith('Z') ? proj.created_at : proj.created_at + 'Z').toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' })}</span>
                   <span>{percent}% Done</span>
                 </div>
               </div>

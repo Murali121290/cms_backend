@@ -330,15 +330,15 @@ export function PostProdChaptersPage() {
 
   const formatDate = (value?: string) => {
     if (!value) return '—'
-    const date = new Date(value)
+    const date = new Date(value.endsWith('Z') ? value : value + 'Z')
     if (isNaN(date.getTime())) return '—'
     return date.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' })
   }
 
   const formatDuration = (start?: string, end?: string) => {
     if (!start || !end) return '—'
-    const startMs = new Date(start).getTime()
-    const endMs = new Date(end).getTime()
+    const startMs = new Date(start.endsWith('Z') ? start : start + 'Z').getTime()
+    const endMs = new Date(end.endsWith('Z') ? end : end + 'Z').getTime()
     if (isNaN(startMs) || isNaN(endMs) || endMs < startMs) return '—'
     const totalSeconds = Math.floor((endMs - startMs) / 1000)
     const hours = Math.floor(totalSeconds / 3600)
