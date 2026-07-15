@@ -994,8 +994,16 @@ export function ChapterFilePage({
 
       {/* ══ HEADER ═══════════════════════════════════════════════════════════ */}
       <header className="flex items-center gap-3 px-4 py-3 bg-card border-b border-border flex-shrink-0 shadow-sm">
-        <button onClick={() => navigate(-1)}
-          className="p-1.5 rounded-lg hover:bg-surface text-muted hover:text-text transition-colors">
+        <button
+          onClick={() => {
+            if (cliId) {
+              navigate(`/clients/${cliId}/projects/${pid}`)
+            } else {
+              navigate(`/projects/${pid}`)
+            }
+          }}
+          className="p-1.5 rounded-lg hover:bg-surface text-muted hover:text-text transition-colors"
+        >
           <ArrowLeft size={16} />
         </button>
 
