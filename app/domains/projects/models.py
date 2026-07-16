@@ -35,6 +35,8 @@ class Project(Base):
     file_details     = Column(JSON,        nullable=True)
     created_at       = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at       = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    is_deleted       = Column(Boolean, default=False, nullable=False)
+
 
     # ORM Relationships (references by string string to prevent circular imports)
     files = relationship("File", back_populates="project")
