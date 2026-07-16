@@ -65,6 +65,7 @@ def run_conversion_background(chapter_id: int, session_factory):
         
         chapter.status = "In-Progress"
         chapter.conversion_status = "Converting"
+        chapter.conversion_started_at = datetime.utcnow()
         chapter.attempts += 1
         db.commit()
 
@@ -269,6 +270,7 @@ def get_project(
                 "attempts": c.attempts,
                 "size_bytes": c.size_bytes,
                 "conversion_status": c.conversion_status,
+                "conversion_started_at": c.conversion_started_at,
                 "conversion_completed_at": c.conversion_completed_at,
                 "qc_status": c.qc_status,
                 "qc_completed_at": c.qc_completed_at,
@@ -337,6 +339,7 @@ def list_projects(db: Session = Depends(database.get_db), user = Depends(get_cur
                     "attempts": c.attempts,
                     "size_bytes": c.size_bytes,
                     "conversion_status": c.conversion_status,
+                    "conversion_started_at": c.conversion_started_at,
                     "conversion_completed_at": c.conversion_completed_at,
                     "qc_status": c.qc_status,
                     "qc_completed_at": c.qc_completed_at,

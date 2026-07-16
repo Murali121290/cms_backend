@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, RefreshCw, Download, Layers, XCircle, ChevronDown, ChevronUp,
   ExternalLink, FileText, Image, FolderOpen, Info, CheckCircle2, AlertTriangle,
-  File, X, Loader2, Upload, User, Check, FlaskConical, Play, Pause
+  File, X, Loader2, Upload, User, Check, Play, Pause
 } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
@@ -18,6 +18,7 @@ interface Chapter {
   attempts: number
   size_bytes?: number
   conversion_status: string
+  conversion_started_at?: string
   conversion_completed_at?: string
   qc_status: string
   qc_completed_at?: string
@@ -444,9 +445,12 @@ export function PostProdChaptersPage() {
 
   const getOverallDuration = (chap: Chapter) => {
     let conversionSecs = 0
-    if (chap.created_at && chap.conversion_completed_at) {
-      const startMs = new Date(chap.created_at.endsWith('Z') ? chap.created_at : chap.created_at + 'Z').getTime()
-      const endMs = new Date(chap.conversion_completed_at.endsWith('Z') ? chap.conversion_completed_at : chap.conversion_completed_at + 'Z').getTime()
+    if (chap.conversion_started_at) {
+      const startMs = new Date(chap.conversion_started_at.endsWith('Z') ? chap.conversion_started_at : chap.conversion_started_at + 'Z').getTime()
+      let endMs = now
+      if (chap.conversion_completed_at) {
+        endMs = new Date(chap.conversion_completed_at.endsWith('Z') ? chap.conversion_completed_at : chap.conversion_completed_at + 'Z').getTime()
+      }
       conversionSecs = Math.max(0, Math.floor((endMs - startMs) / 1000))
     }
     
@@ -662,7 +666,7 @@ export function PostProdChaptersPage() {
                                 {chap.conversion_completed_at && (
                                   <div className="relative flex flex-col gap-1 cursor-pointer" onClick={(e) => toggleDateExpand(chap.id + 1000000, e)}>
                                     <span className="text-[10px] text-muted whitespace-nowrap hover:text-text transition-colors" title="Click to see details">
-                                      ⏱ {formatDuration(chap.created_at, chap.conversion_completed_at)}
+                                      ⏱ {chap.conversion_started_at ? formatDuration(chap.conversion_started_at, chap.conversion_completed_at || new Date(now).toISOString()) : '—'}
                                     </span>
                                     {expandedDateIds.includes(chap.id + 1000000) && (
                                       <div 
