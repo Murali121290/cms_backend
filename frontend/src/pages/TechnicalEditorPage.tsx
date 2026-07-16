@@ -18,6 +18,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { getApiErrorMessage } from "@/api/client";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { Select } from "@/components/ui/Select";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SkeletonCard } from "@/components/ui/SkeletonLoader";
@@ -30,7 +31,7 @@ import { useParagraphStyles } from "@/features/editor/useParagraphStyles";
 import { CollaboraSidePanel } from "@/features/editor/CollaboraSidePanel";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { uiPaths } from "@/utils/appPaths";
-import { useStylesheetsQuery } from "@/features/stylesheets/useStylesheetsQuery";
+import { useStylesheetsQuery, useStylesheetMutations } from "@/features/stylesheets/useStylesheetsQuery";
 import type { Occurrence } from "@/features/editor/OccurrenceHighlight";
 import type { StylesheetSummary } from "@/types/api";
 
@@ -50,6 +51,9 @@ export function TechnicalEditorPage() {
   const editorRef = useRef<WysiwygEditorHandle>(null);
   const stylesheetsQuery = useStylesheetsQuery(normalizedProjectId);
   const activeStylesheet = stylesheetsQuery.data?.active_stylesheet;
+  const projectStylesheets = stylesheetsQuery.data?.stylesheets || [];
+  const { activate: activateStylesheet } = useStylesheetMutations(normalizedProjectId || 0);
+
   const reviewQuery = useTechnicalReviewQuery(normalizedFileId, activeStylesheet?.id);
   const xhtmlQuery = useFileXhtmlQuery(normalizedFileId);
   const editorSave = useEditorSave(normalizedFileId);
@@ -277,6 +281,34 @@ export function TechnicalEditorPage() {
               </dl>
             </div>
 
+            {/* Stylesheet Selection card */}
+            <div className="bg-white rounded-lg shadow-card p-6 border border-border">
+              <h3 className="text-sm font-semibold text-text mb-4 flex items-center gap-2">
+                <BookMarked className="w-4 h-4 text-muted" />
+                Editorial Stylesheet
+              </h3>
+              <div className="max-w-md">
+                <Select
+                  label="Active Stylesheet"
+                  placeholder="Select a stylesheet to apply..."
+                  options={projectStylesheets.map((s) => ({
+                    value: s.id.toString(),
+                    label: s.name,
+                  }))}
+                  value={activeStylesheet?.id?.toString() || ""}
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      activateStylesheet.mutate(Number(e.target.value));
+                    }
+                  }}
+                  disabled={activateStylesheet.isPending || stylesheetsQuery.isPending}
+                />
+                <p className="text-xs text-muted mt-2">
+                  The selected stylesheet will be used to analyze occurrences and enforce formatting rules while editing.
+                </p>
+              </div>
+            </div>
+
             {/* Quick action */}
             <div className="bg-white rounded-lg shadow-card p-6 border border-border">
               <h3 className="text-sm font-semibold text-text mb-4 flex items-center gap-2">
@@ -332,6 +364,9 @@ export function TechnicalEditorPage() {
                   {/* Stylesheet occurrences panel */}
                   <StylesheetOccurrencesPanel
                     activeStylesheet={activeStylesheet}
+                    projectStylesheets={projectStylesheets}
+                    onActivateStylesheet={(id) => activateStylesheet.mutate(id)}
+                    isActivating={activateStylesheet.isPending}
                     findings={findings}
                     selectedIndex={selectedFindingIndex}
                     onSelect={(i) => {
@@ -434,6 +469,9 @@ export function TechnicalEditorPage() {
 
 interface StylesheetOccurrencesPanelProps {
   activeStylesheet: StylesheetSummary | null | undefined;
+  projectStylesheets: StylesheetSummary[];
+  onActivateStylesheet: (id: number) => void;
+  isActivating: boolean;
   findings: any[];
   selectedIndex: number;
   onSelect: (i: number) => void;
@@ -443,13 +481,16 @@ interface StylesheetOccurrencesPanelProps {
 
 function StylesheetOccurrencesPanel({
   activeStylesheet,
+  projectStylesheets,
+  onActivateStylesheet,
+  isActivating,
   findings,
   selectedIndex,
   onSelect,
   onReplace,
   onReplaceAll,
 }: StylesheetOccurrencesPanelProps) {
-  if (!activeStylesheet) {
+  if (!activeStylesheet && projectStylesheets.length === 0) {
     return (
       <div className="px-3 py-4 text-center">
         <BookMarked className="w-5 h-5 text-muted mx-auto mb-1.5 opacity-40" />
@@ -461,14 +502,32 @@ function StylesheetOccurrencesPanel({
   return (
     <div className="flex flex-col max-h-64 min-h-0">
       {/* Header */}
-      <div className="px-3 py-2 bg-gold-50 border-b border-gold-200 flex items-center gap-2 flex-shrink-0">
-        <BookMarked className="w-3.5 h-3.5 text-gold-700 flex-shrink-0" />
-        <div className="min-w-0 flex-1">
-          <p className="text-xs font-semibold text-gold-800 truncate">{activeStylesheet.name}</p>
-          <p className="text-[10px] text-gold-600">
+      <div className="px-3 py-2 bg-gold-50 border-b border-gold-200 flex flex-col gap-2 flex-shrink-0">
+        <div className="flex items-center gap-2">
+          <BookMarked className="w-3.5 h-3.5 text-gold-700 flex-shrink-0" />
+          <div className="min-w-0 flex-1">
+            <select
+              className="text-xs font-semibold text-gold-800 bg-transparent border-b border-gold-300 focus:outline-none focus:border-gold-600 w-full truncate"
+              value={activeStylesheet?.id?.toString() || ""}
+              onChange={(e) => {
+                if (e.target.value) {
+                  onActivateStylesheet(Number(e.target.value));
+                }
+              }}
+              disabled={isActivating}
+            >
+              <option value="" disabled>Select a Stylesheet...</option>
+              {projectStylesheets.map((s) => (
+                <option key={s.id} value={s.id.toString()}>{s.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        {activeStylesheet && (
+          <p className="text-[10px] text-gold-600 pl-5">
             {findings.length === 0 ? "No occurrences" : `${findings.length} occurrence${findings.length !== 1 ? "s" : ""}`}
           </p>
-        </div>
+        )}
       </div>
 
       {findings.length === 0 ? (
