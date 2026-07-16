@@ -689,7 +689,7 @@ export function ClientProjects() {
         onClose={() => setProjectToDelete(null)}
         onConfirm={handleDeleteProject}
         title="Delete Project"
-        description="Are you sure you want to delete this project? This will soft delete it and hide it from all views."
+        description="Are you sure you want to delete this project?"
         confirmLabel="Delete"
       />
     </div>
