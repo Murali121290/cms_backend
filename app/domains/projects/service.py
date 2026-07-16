@@ -280,13 +280,13 @@ def update_project_status(db: Session, project_id: int, status: str):
     return project
 
 def get_projects(db: Session, skip: int = 0, limit: int = 100):
-    return db.query(Project).offset(skip).limit(limit).all()
+    return db.query(Project).filter(Project.is_deleted != True).offset(skip).limit(limit).all()
 
 def delete_project(db, project_id: int):
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         return None
-    db.delete(project)
+    project.is_deleted = True
     db.commit()
     return True
 
@@ -295,7 +295,7 @@ def delete_project_v2(db, project_id: int):
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         return None
-    db.delete(project)
+    project.is_deleted = True
     db.commit()
     return True
 
@@ -303,12 +303,14 @@ def delete_project_v2(db, project_id: int):
 def delete_project_with_filesystem(db: Session, *, project_id: int, upload_dir: str):
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
-        return None
+        raise ValueError(f"Project with ID {project_id} not found")
+
+    # Soft delete
+    project.is_deleted = True
+    db.commit()
 
     project_path = f"{upload_dir}/{project.code}"
     if os.path.exists(project_path):
         shutil.rmtree(project_path, ignore_errors=True)
 
-    db.delete(project)
-    db.commit()
     return project

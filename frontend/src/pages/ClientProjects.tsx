@@ -2,8 +2,9 @@ import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft, Search, FolderOpen, BookOpen,
-  Layers, Zap, CheckCircle2, Clock, Plus, Info, Edit2, CalendarDays, ChevronRight, AlertCircle
+  Layers, Zap, CheckCircle2, Clock, Plus, Info, Edit2, CalendarDays, ChevronRight, AlertCircle, Trash2
 } from 'lucide-react'
+import { Modal } from '@/components/ui/Modal'
 import { ViewSwitcher } from '@/components/ui/ViewSwitcher'
 import { useViewMode } from '@/hooks/useViewMode'
 import { clientsApi, type Client } from '@/api/clients'
@@ -105,9 +106,10 @@ interface ProjectCardProps {
   onEditInfo: () => void
   onOpenWorkflow: () => void
   onOpenPlanning: () => void
+  onDelete: (id: number) => void
 }
 
-function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo, onOpenWorkflow, onOpenPlanning }: ProjectCardProps) {
+function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo, onOpenWorkflow, onOpenPlanning, onDelete }: ProjectCardProps) {
   const { canAccess } = useRBAC()
   const canEdit = canAccess(['admin', 'manager'])
   const isFastTrack = project.priority === 'Fast Track'
@@ -205,6 +207,15 @@ function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo
               >
                 <CalendarDays size={12} />
               </button>
+              {canAccess(['admin']) && (
+                <button
+                  onClick={e => { e.stopPropagation(); onDelete(project.id) }}
+                  title="Delete project"
+                  className="text-red-500 hover:text-red-600 transition-colors flex-shrink-0 ml-1"
+                >
+                  <Trash2 size={12} />
+                </button>
+              )}
             </div>
           </div>
           {project.status && (
@@ -336,6 +347,7 @@ function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo
 export function ClientProjects() {
   const { clientId } = useParams<{ clientId: string }>()
   const navigate = useNavigate()
+  const { canAccess } = useRBAC()
   const id = Number(clientId)
 
   const [client, setClient] = useState<Client | null>(null)
@@ -352,6 +364,20 @@ export function ClientProjects() {
   const [filterWorkflow, setFilterWorkflow] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
   const [filterPriority, setFilterPriority] = useState('')
+  const [projectToDelete, setProjectToDelete] = useState<number | null>(null)
+
+  const handleDeleteProject = async () => {
+    if (!projectToDelete) return
+    try {
+      await projectsApi.deleteProject(projectToDelete)
+      toast.success("Project deleted successfully")
+      setProjects(projects.filter(p => p.id !== projectToDelete))
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Failed to delete project')
+    } finally {
+      setProjectToDelete(null)
+    }
+  }
 
   useEffect(() => {
     if (!id) return
@@ -540,7 +566,9 @@ export function ClientProjects() {
                     if (project.status === 'Planning') { toast.error('Planning not approved yet.'); return }
                     navigate(`/clients/${clientId}/projects/${project.id}`)
                   }}
-                  onOpenPlanning={() => navigate(`/projects/${project.id}/planning`)} />
+                  onOpenPlanning={() => navigate(`/projects/${project.id}/planning`)}
+                  onDelete={(id) => setProjectToDelete(id)}
+                />
               ))}
             </div>
           )}
@@ -613,6 +641,7 @@ export function ClientProjects() {
                     {['Code', 'Title', 'Status', 'Workflow', 'PM', 'Due Date', 'Chapters', 'Pages'].map(h => (
                       <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider whitespace-nowrap">{h}</th>
                     ))}
+                    {canAccess(['admin']) && <th className="px-4 py-3"></th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -635,6 +664,17 @@ export function ClientProjects() {
                           {project.estimated_pages != null ? `Est. ${project.estimated_pages}` : '—'}
                           {(project.actual_pages ?? 0) > 0 ? ` / ${project.actual_pages} act.` : ''}
                         </td>
+                        {canAccess(['admin']) && (
+                          <td className="px-4 py-3 text-right">
+                            <button
+                              onClick={e => { e.stopPropagation(); setProjectToDelete(project.id) }}
+                              title="Delete project"
+                              className="text-red-500 hover:text-red-600 transition-colors"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     )
                   })}
@@ -644,6 +684,14 @@ export function ClientProjects() {
           )}
         </>
       )}
+      <Modal
+        isOpen={projectToDelete !== null}
+        onClose={() => setProjectToDelete(null)}
+        onConfirm={handleDeleteProject}
+        title="Delete Project"
+        description="Are you sure you want to delete this project? This will soft delete it and hide it from all views."
+        confirmLabel="Delete"
+      />
     </div>
   )
 }
