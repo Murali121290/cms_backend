@@ -272,6 +272,8 @@ def get_project(
                 "conversion_completed_at": c.conversion_completed_at,
                 "qc_status": c.qc_status,
                 "qc_completed_at": c.qc_completed_at,
+                "qc_active_seconds": c.qc_active_seconds,
+                "qc_last_started_at": c.qc_last_started_at,
                 "created_at": c.created_at,
                 "completed_at": c.completed_at
             } for c in p.chapters
@@ -338,6 +340,8 @@ def list_projects(db: Session = Depends(database.get_db), user = Depends(get_cur
                     "conversion_completed_at": c.conversion_completed_at,
                     "qc_status": c.qc_status,
                     "qc_completed_at": c.qc_completed_at,
+                    "qc_active_seconds": c.qc_active_seconds,
+                    "qc_last_started_at": c.qc_last_started_at,
                     "created_at": c.created_at,
                     "completed_at": c.completed_at
                 } for c in p.chapters
@@ -682,6 +686,7 @@ def api_post_prod_open_in_word(
         
     if chapter.qc_status == "YTS":
         chapter.qc_status = "In-Progress"
+        chapter.qc_last_started_at = datetime.utcnow()
         db.commit()
         
     from datetime import timedelta
@@ -701,6 +706,37 @@ def api_post_prod_open_in_word(
     
     return {"ms_word_uri": ms_word_uri, "webdav_url": webdav_url}
 
+from pydantic import BaseModel
+class QCStatusUpdate(BaseModel):
+    status: str
+
+@router.post("/chapters/{chapter_id}/qc-status")
+def update_chapter_qc_status(
+    chapter_id: int,
+    payload: QCStatusUpdate,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie)
+):
+    chapter = db.query(PostProdChapter).filter(PostProdChapter.id == chapter_id).first()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+        
+    if payload.status not in ["In-Progress", "Paused"]:
+        raise HTTPException(status_code=400, detail="Invalid status")
+        
+    if payload.status == "In-Progress" and chapter.qc_status != "In-Progress":
+        chapter.qc_last_started_at = datetime.utcnow()
+    elif payload.status == "Paused" and chapter.qc_status == "In-Progress":
+        if chapter.qc_last_started_at:
+            delta = datetime.utcnow() - chapter.qc_last_started_at
+            chapter.qc_active_seconds = (chapter.qc_active_seconds or 0) + int(delta.total_seconds())
+        chapter.qc_last_started_at = None
+        
+    chapter.qc_status = payload.status
+    db.commit()
+    
+    return {"message": f"QC status updated to {payload.status}"}
+
 @router.post("/chapters/{chapter_id}/qc-complete")
 def complete_chapter_qc(
     chapter_id: int,
@@ -711,7 +747,13 @@ def complete_chapter_qc(
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
         
+    if chapter.qc_status == "In-Progress":
+        if chapter.qc_last_started_at:
+            delta = datetime.utcnow() - chapter.qc_last_started_at
+            chapter.qc_active_seconds = (chapter.qc_active_seconds or 0) + int(delta.total_seconds())
+            
     chapter.qc_status = "Completed"
+    chapter.qc_last_started_at = None
     chapter.qc_completed_at = datetime.utcnow()
     
     if chapter.conversion_status == "Completed":
