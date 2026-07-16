@@ -345,13 +345,14 @@ export function ProjectWorkflow() {
 
   const [project, setProject] = useState<Project | null>(null)
   const [chapters, setChapters] = useState<Chapter[]>([])
-  const [workflowStages, setWorkflowStages] = useState<WorkflowStage[]>([])
+  const [wfStagesMap, setWfStagesMap] = useState<Record<string, WorkflowStage[]>>({})
   const [stageRolesMap, setStageRolesMap] = useState<Map<string, string[]>>(new Map())
   const [users, setUsers] = useState<AppUser[]>([])
   const [plannedDueDates, setPlannedDueDates] = useState<Map<string, StageInfo>>(new Map())
   // Maps WMS chapter number (e.g. "01") → CMS chapter DB id for correct navigation
   const [cmsChapterIdMap, setCmsChapterIdMap] = useState<Map<string, number>>(new Map())
   const [loading, setLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState<'manuscript' | 'art' | 'design'>('manuscript')
 
   const [isInfoOpen, setIsInfoOpen] = useState(false)
   const [isEditOpen, setIsEditOpen] = useState(false)
@@ -391,23 +392,40 @@ export function ProjectWorkflow() {
         const p = response.project as unknown as Project
         setProject(p)
         const projectCode = p.code || p.project_code || ''
-        const workflowName = p.workflow_name || ''
-        const [chs, stages, details, cmsChapters, allStages] = await Promise.all([
+        
+        const [chs, details, cmsChapters, allStages] = await Promise.all([
           chaptersApi.getByProject(projectCode).catch(() => [] as Chapter[]),
-          workflowName
-            ? workflowsApi.getWorkflow(workflowName).catch(() => [] as WorkflowStage[])
-            : Promise.resolve([] as WorkflowStage[]),
           projectCode
             ? stageDetailsApi.listByProject(projectCode).catch(() => [])
             : Promise.resolve([]),
           projectsApi.getProjectChapters(id).catch(() => ({ project: null, chapters: [] })),
           stagesApi.list().catch(() => [] as Stage[]),
         ])
+        
         setChapters(chs)
-        setWorkflowStages(stages)
         setStageRolesMap(new Map(allStages.map(s => [s.stage_name, s.roles])))
+
+        // Find unique workflows across all chapters, including default project workflow
+        const uniqueWfs = Array.from(new Set(chs.map(c => c.workflow).filter(Boolean))) as string[]
+        if (p.workflow_name && !uniqueWfs.includes(p.workflow_name)) {
+          uniqueWfs.push(p.workflow_name)
+        }
+
+        // Fetch all workflows stages
+        const wfPromises = uniqueWfs.map(wf =>
+          workflowsApi.getWorkflow(wf)
+            .then(stages => ({ workflowName: wf, stages }))
+            .catch(() => ({ workflowName: wf, stages: [] as WorkflowStage[] }))
+        )
+        const wfsList = await Promise.all(wfPromises)
+        
+        const wfMapObj: Record<string, WorkflowStage[]> = {}
+        wfsList.forEach(({ workflowName, stages }) => {
+          wfMapObj[workflowName] = orderStages(stages)
+        })
+        setWfStagesMap(wfMapObj)
+
         // Build number → CMS chapter id map with multiple normalizations for robust matching
-        // WMS uses "01", CMS might use "1" or "01" — store all variants
         const idMap = new Map<string, number>()
         for (const c of cmsChapters.chapters ?? []) {
           if (!c.number) continue
@@ -416,18 +434,15 @@ export function ProjectWorkflow() {
           idMap.set(c.number.padStart(2, '0'), c.id)
         }
         setCmsChapterIdMap(idMap)
-        // Build lookup: "chapterLabel||stageName" → planned_end_date from stage_details
-        // Use planned_end_date as the authoritative due date for each stage.
-        // Take the first row that has a planned_end_date (oldest creation wins so planning
-        // approval rows are preferred over transition rows that may have null planned_end).
+
         const sorted = [...details].sort(
           (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
         )
         const dueDateMap = new Map<string, StageInfo>()
         for (const d of sorted) {
-          if (!d.planned_end_date) continue           // skip rows without a planned date
+          if (!d.planned_end_date) continue
           const key = `${d.chapters}||${d.stage_name}`
-          if (dueDateMap.has(key)) continue           // keep the earliest (planning) row
+          if (dueDateMap.has(key)) continue
           const due = d.planned_end_date.split('T')[0]
           dueDateMap.set(key, { due, sla: d.sla })
         }
@@ -437,10 +452,31 @@ export function ProjectWorkflow() {
       .finally(() => setLoading(false))
   }, [id])
 
-  const orderedStages = useMemo(() => orderStages(workflowStages), [workflowStages])
+  // Partition chapters into Design, Manuscripts, and Art tracks
+  const designChapters = useMemo(() => chapters.filter(c => c.chapters === 'Design'), [chapters])
+  const manuscriptChapters = useMemo(() => chapters.filter(c => /^\d+$/.test(c.chapters)), [chapters])
+  const artChapters = useMemo(() => chapters.filter(c => c.chapters.toLowerCase().includes('art')), [chapters])
+
+  // Select active track chapters
+  const activeChapters = useMemo(() => {
+    if (activeTab === 'design') return designChapters
+    if (activeTab === 'art') return artChapters
+    return manuscriptChapters
+  }, [activeTab, designChapters, artChapters, manuscriptChapters])
+
+  // Get active workflow and stages based on the selected tab
+  const activeWorkflowName = useMemo(() => {
+    if (activeTab === 'design') return designChapters[0]?.workflow || project?.workflow_name || ''
+    if (activeTab === 'art') return artChapters[0]?.workflow || project?.workflow_name || ''
+    return manuscriptChapters[0]?.workflow || project?.workflow_name || ''
+  }, [activeTab, designChapters, artChapters, manuscriptChapters, project])
+
+  const orderedStages = useMemo(() => {
+    return wfStagesMap[activeWorkflowName] ?? []
+  }, [activeWorkflowName, wfStagesMap])
 
   const summary = useMemo(() => {
-    const actual = chapters.filter(c => c.chapters.toLowerCase() !== 'design' && c.chapters.toLowerCase() !== 'ce support')
+    const actual = activeChapters.filter(c => c.chapters !== 'CE support')
     const total = actual.length
     const complete = actual.filter(c => c.status === 'complete').length
     const inProg = actual.filter(c => c.status === 'In-progress').length
@@ -449,15 +485,15 @@ export function ProjectWorkflow() {
     const yts = actual.filter(c => c.status === 'Received').length
     const delayed = actual.filter(c => isDelayed(c, plannedDueDates)).length
     return { total, complete, inProg, hold, inQuery, yts, delayed }
-  }, [chapters, plannedDueDates])
+  }, [activeChapters, plannedDueDates])
 
   const assigneeOptions = useMemo(() => {
-    const actual = chapters.filter(c => c.chapters.toLowerCase() !== 'design' && c.chapters.toLowerCase() !== 'ce support')
+    const actual = activeChapters.filter(c => c.chapters !== 'CE support')
     const set = new Set(actual.map(c => c.current_assignee_name).filter(Boolean) as string[])
     return Array.from(set).sort()
-  }, [chapters])
+  }, [activeChapters])
 
-  const filtered = useMemo(() => chapters
+  const filtered = useMemo(() => activeChapters
     .filter(ch => {
       if (filterAssignee && ch.current_assignee_name !== filterAssignee) return false
       if (filterStage && ch.stage_name !== filterStage) return false
@@ -466,16 +502,16 @@ export function ProjectWorkflow() {
       return true
     })
     .sort((a, b) => a.chapters.localeCompare(b.chapters, undefined, { numeric: true }))
-    , [chapters, filterAssignee, filterStage, filterStatus, plannedDueDates])
+    , [activeChapters, filterAssignee, filterStage, filterStatus, plannedDueDates])
 
   // Chapters currently sitting in the stage picked for bulk assignment, ascending by chapter number
   const bulkTargets = useMemo(
     () => bulkStage
-      ? chapters
+      ? activeChapters
         .filter(c => c.stage_name === bulkStage)
         .sort((a, b) => a.chapters.localeCompare(b.chapters, undefined, { numeric: true }))
       : [],
-    [chapters, bulkStage]
+    [activeChapters, bulkStage]
   )
 
   // Ids of chapters in the picked stage that have no assignee yet
@@ -720,10 +756,56 @@ export function ProjectWorkflow() {
         </div>
       </div>
 
+      {/* Track Selection Tabs */}
+      <div className="flex border-b border-border bg-card px-6 py-2 gap-4 flex-shrink-0">
+        <button
+          onClick={() => {
+            setActiveTab('manuscript')
+            setFilterStage('')
+            setFilterStatus('')
+          }}
+          className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
+            activeTab === 'manuscript'
+              ? 'text-primary bg-accent border-primary/20 shadow-sm font-bold'
+              : 'text-muted border-transparent hover:bg-accent/40'
+          }`}
+        >
+          📚 Manuscripts ({manuscriptChapters.length})
+        </button>
+        <button
+          onClick={() => {
+            setActiveTab('art')
+            setFilterStage('')
+            setFilterStatus('')
+          }}
+          className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
+            activeTab === 'art'
+              ? 'text-primary bg-accent border-primary/20 shadow-sm font-bold'
+              : 'text-muted border-transparent hover:bg-accent/40'
+          }`}
+        >
+          📐 Art Tracks ({artChapters.length})
+        </button>
+        <button
+          onClick={() => {
+            setActiveTab('design')
+            setFilterStage('')
+            setFilterStatus('')
+          }}
+          className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
+            activeTab === 'design'
+              ? 'text-primary bg-accent border-primary/20 shadow-sm font-bold'
+              : 'text-muted border-transparent hover:bg-accent/40'
+          }`}
+        >
+          🎨 Design ({designChapters.length})
+        </button>
+      </div>
+
       {/* ── Sticky Workflow Rail ── */}
       <WorkflowRail
         stages={orderedStages}
-        chapters={chapters}
+        chapters={activeChapters}
         filterStage={filterStage}
         onStageClick={s => setFilterStage(prev => prev === s ? '' : s)}
         stageRolesMap={stageRolesMap}

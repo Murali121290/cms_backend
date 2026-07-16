@@ -18,12 +18,12 @@ export interface Project extends ProjectSummary {
   // WMS compatibility fields
   client_id: number | null
   project_code?: string | null
-  client_name?: string | null
+  client_name: string | null
   division_code?: string | null
   customer_contact?: string | null
   category?: string | null
   composition?: string | null
-  workflow_name?: string | null
+  workflow_name: string | null
   project_manager?: string | null
   sales_person?: string | null
   priority?: string | null

@@ -180,12 +180,32 @@ export function ChapterDetailPage() {
     if (!chapter || !project?.file_details) return null
     const chName = chapter.chapters
     const isVirtual = chName.toLowerCase() === 'design' || chName.toLowerCase() === 'ce support'
-    const matchName = isVirtual ? chName.toLowerCase() : `chapter-${chName.match(/\d+/)?.[0] || chName}`
 
     const cf = (project.file_details as { chapter_folders?: { chapters?: ChapterFolder[] } }).chapter_folders
     const base = cf?.chapters?.find(c => {
       const cName = c.chapter_name.toLowerCase()
-      return cName === matchName || cName === `chapter-${matchName}`
+      const chNameLower = chName.toLowerCase()
+      
+      if (isVirtual) {
+        return cName === chNameLower || cName === `chapter-${chNameLower}`
+      }
+
+      // Direct exact match
+      if (cName === chNameLower || cName === `chapter-${chNameLower}`) return true
+      // Suffix match
+      if (cName.includes(chNameLower)) return true
+      
+      // Match by digits and track type (Manuscript vs Art)
+      const digitsMatch = chName.match(/\d+/)?.[0]
+      if (digitsMatch) {
+        const cDigits = cName.match(/\d+/)?.[0]
+        if (cDigits === digitsMatch) {
+          const chIsArt = chNameLower.includes('art')
+          const folderIsArt = cName.includes('art')
+          return chIsArt === folderIsArt
+        }
+      }
+      return false
     }) ?? null
     if (!base) return null
     return {

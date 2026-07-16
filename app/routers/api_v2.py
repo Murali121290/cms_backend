@@ -1287,6 +1287,13 @@ def api_v2_project_bootstrap(
     isbn_no: str | None = Form(None),
     billing_location: str | None = Form(None),
     due_date: str | None = Form(None),
+    design_workflow_name: str | None = Form(None),
+    design_due_date: str | None = Form(None),
+    manuscript_workflow_name: str | None = Form(None),
+    manuscript_due_date: str | None = Form(None),
+    art_workflow_name: str | None = Form(None),
+    art_due_date: str | None = Form(None),
+    art_chapter_count: int | None = Form(None),
     extracted_po_data: str | None = Form(None),
     po_file: UploadFile | None = FastAPIFile(None),
     files: list[UploadFile] | None = FastAPIFile(None),
@@ -1413,43 +1420,124 @@ def api_v2_project_bootstrap(
     from app.domains.workflow.models import ChapterInfo as _ChapterInfo
     from app.domains.workflow.models import WorkflowMaster as _WorkflowMaster
     from sqlalchemy import or_ as _or
+    from datetime import datetime
     
-    first_stage = None
-    if project.workflow_name:
-        first_stage_row = db.query(_WorkflowMaster).filter(
-            _WorkflowMaster.workflow_name == project.workflow_name,
+    def get_first_stage(wf_name: str | None) -> str | None:
+        if not wf_name:
+            return None
+        row = db.query(_WorkflowMaster).filter(
+            _WorkflowMaster.workflow_name == wf_name,
             _or(_WorkflowMaster.previous_stage.is_(None), _WorkflowMaster.previous_stage == "")
         ).first()
-        if first_stage_row:
-            first_stage = first_stage_row.stage_name
+        return row.stage_name if row else None
 
+    def parse_dt(dt_str: str | None) -> datetime | None:
+        if not dt_str:
+            return None
+        try:
+            # Handle ISO string with potential offset or suffix
+            cleaned = dt_str.replace("Z", "+00:00")
+            return datetime.fromisoformat(cleaned)
+        except ValueError:
+            try:
+                # Handle simple date string
+                from datetime import date as _date
+                d = _date.fromisoformat(dt_str)
+                return datetime.combine(d, datetime.min.time())
+            except ValueError:
+                return None
+
+    # Resolve track parameters or fallback to default
+    final_design_wf = design_workflow_name or project.workflow_name
+    final_design_due = parse_dt(design_due_date) or (datetime.combine(project.due_date, datetime.min.time()) if project.due_date else None)
+
+    final_ms_wf = manuscript_workflow_name or project.workflow_name
+    final_ms_due = parse_dt(manuscript_due_date) or (datetime.combine(project.due_date, datetime.min.time()) if project.due_date else None)
+
+    final_art_wf = art_workflow_name
+    final_art_due = parse_dt(art_due_date) or (datetime.combine(project.due_date, datetime.min.time()) if project.due_date else None)
+
+    # 1. Update/Setup Design virtual chapter
+    design_ci = db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code, _ChapterInfo.chapters == "Design").first()
+    if design_ci:
+        design_ci.workflow = final_design_wf or ""
+        design_ci.stage_name = get_first_stage(final_design_wf)
+        design_ci.due_date = final_design_due
+    else:
+        db.add(_ChapterInfo(
+            client=project.division_code or "",
+            project=project.code,
+            chapters="Design",
+            chapter_title="Design",
+            workflow=final_design_wf or "",
+            stage_name=get_first_stage(final_design_wf),
+            due_date=final_design_due,
+            status="In-progress",
+            stage_level=1
+        ))
+
+    # 2. Update/Setup Manuscript chapters
     _existing_ci = {
         ci.chapters for ci in db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code).all()
     }
-    # Update workflow and stage_name for any existing ChapterInfo records that were created during project service instantiation
-    if project.workflow_name:
-        db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code).update({
-            _ChapterInfo.workflow: project.workflow_name,
-            _ChapterInfo.stage_name: first_stage
-        }, synchronize_session=False)
-
+    
+    # Update existing manuscript chapters (numeric ones)
     for _ch in chapters:
-        if _ch.number and _ch.number not in _existing_ci:
-            db.add(_ChapterInfo(
-                client=project.division_code or "",
-                project=project.code,
-                chapters=_ch.number,
-                chapter_title=_ch.title or f"Chapter {_ch.number}",
-                workflow=project.workflow_name or "",
-                status="Received",
-                complexity_level=getattr(project, "composition", None) or "Medium",
-                stage_level=1,
-                stage_name=first_stage,
-                published_status="Draft",
-                priority=getattr(project, "priority", None) or "Normal",
-                project_manager_name=getattr(project, "project_manager", None) or None,
-            ))
-            _existing_ci.add(_ch.number)
+        if _ch.number:
+            is_new = _ch.number not in _existing_ci
+            if is_new:
+                db.add(_ChapterInfo(
+                    client=project.division_code or "",
+                    project=project.code,
+                    chapters=_ch.number,
+                    chapter_title=_ch.title or f"Chapter {_ch.number}",
+                    workflow=final_ms_wf or "",
+                    status="Received",
+                    complexity_level=getattr(project, "composition", None) or "Medium",
+                    stage_level=1,
+                    stage_name=get_first_stage(final_ms_wf),
+                    due_date=final_ms_due,
+                    published_status="Draft",
+                    priority=getattr(project, "priority", None) or "Normal",
+                    project_manager_name=getattr(project, "project_manager", None) or None,
+                ))
+                _existing_ci.add(_ch.number)
+            else:
+                db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code, _ChapterInfo.chapters == _ch.number).update({
+                    _ChapterInfo.workflow: final_ms_wf or "",
+                    _ChapterInfo.stage_name: get_first_stage(final_ms_wf),
+                    _ChapterInfo.due_date: final_ms_due
+                }, synchronize_session=False)
+
+    # 3. Update/Setup Art chapters
+    if final_art_wf:
+        num_art_chapters = art_chapter_count if art_chapter_count is not None else (project.chapter_count or 5)
+        for i in range(1, num_art_chapters + 1):
+            art_ch_num = f"Ch {i:02d} - Art"
+            if art_ch_num not in _existing_ci:
+                db.add(_ChapterInfo(
+                    client=project.division_code or "",
+                    project=project.code,
+                    chapters=art_ch_num,
+                    chapter_title=f"Chapter {i:02d} Art Pack",
+                    workflow=final_art_wf,
+                    status="Received",
+                    complexity_level=getattr(project, "composition", None) or "Medium",
+                    stage_level=1,
+                    stage_name=get_first_stage(final_art_wf),
+                    due_date=final_art_due,
+                    published_status="Draft",
+                    priority=getattr(project, "priority", None) or "Normal",
+                    project_manager_name=getattr(project, "project_manager", None) or None,
+                ))
+                _existing_ci.add(art_ch_num)
+            else:
+                db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code, _ChapterInfo.chapters == art_ch_num).update({
+                    _ChapterInfo.workflow: final_art_wf,
+                    _ChapterInfo.stage_name: get_first_stage(final_art_wf),
+                    _ChapterInfo.due_date: final_art_due
+                }, synchronize_session=False)
+
     db.commit()
 
     return schemas_v2.ProjectBootstrapResponse(
@@ -1548,6 +1636,192 @@ def api_v2_update_project(
         db.commit()
 
     return _serialize_project_summary(project)
+
+
+@router.post("/projects/{project_id}/intake")
+def api_v2_project_intake(
+    project_id: int,
+    category: str = Form(...),  # "Manuscript" | "Art" | "Design"
+    workflow_name: str = Form(...),
+    due_date: str = Form(...),
+    batch_name: str = Form(...),
+    chapter_count: int = Form(...),
+    files: list[UploadFile] | None = FastAPIFile(None),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+
+    from app.domains.workflow.models import ChapterInfo as _ChapterInfo, WorkflowMaster as _WorkflowMaster
+    from sqlalchemy import or_ as _or
+    from datetime import datetime
+
+    def get_first_stage(wf: str) -> str | None:
+        row = db.query(_WorkflowMaster).filter(
+            _WorkflowMaster.workflow_name == wf,
+            _or(_WorkflowMaster.previous_stage.is_(None), _WorkflowMaster.previous_stage == "")
+        ).first()
+        return row.stage_name if row else None
+
+    # Parse due date
+    try:
+        cleaned = due_date.replace("Z", "+00:00")
+        parsed_due = datetime.fromisoformat(cleaned)
+    except ValueError:
+        try:
+            from datetime import date as _date
+            d = _date.fromisoformat(due_date)
+            parsed_due = datetime.combine(d, datetime.min.time())
+        except ValueError:
+            return _error_response(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="INVALID_DUE_DATE",
+                message="Due date must be in YYYY-MM-DD or ISO format.",
+            )
+
+    first_stage = get_first_stage(workflow_name)
+    if not first_stage:
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="INVALID_WORKFLOW",
+            message=f"Workflow '{workflow_name}' not found or has no start stage.",
+        )
+
+    # Determine starting index for new batch
+    existing_chapters = db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code).all()
+    
+    new_chapters = []
+    
+    if category == "Manuscript":
+        nums = []
+        for ec in existing_chapters:
+            try:
+                nums.append(int(ec.chapters))
+            except ValueError:
+                pass
+        start_idx = max(nums) + 1 if nums else 1
+        
+        for i in range(chapter_count):
+            ch_num = f"{start_idx + i:02d}"
+            db_ch = _ChapterInfo(
+                client=project.division_code or "",
+                project=project.code,
+                chapters=ch_num,
+                chapter_title=f"Chapter {ch_num} Manuscript ({batch_name})",
+                workflow=workflow_name,
+                status="Received",
+                complexity_level=project.composition or "Medium",
+                stage_level=1,
+                stage_name=first_stage,
+                due_date=parsed_due,
+                published_status="Draft",
+                priority=project.priority or "Normal",
+                project_manager_name=project.project_manager,
+            )
+            db.add(db_ch)
+            new_chapters.append(db_ch)
+            
+    elif category == "Art":
+        art_nums = []
+        import re
+        for ec in existing_chapters:
+            m = re.match(r'^Ch\s+(\d+)\s+-\s+Art', ec.chapters)
+            if m:
+                art_nums.append(int(m.group(1)))
+        start_idx = max(art_nums) + 1 if art_nums else 1
+        
+        for i in range(chapter_count):
+            art_ch_num = f"Ch {start_idx + i:02d} - Art"
+            db_ch = _ChapterInfo(
+                client=project.division_code or "",
+                project=project.code,
+                chapters=art_ch_num,
+                chapter_title=f"Chapter {start_idx + i:02d} Art Pack ({batch_name})",
+                workflow=workflow_name,
+                status="Received",
+                complexity_level=project.composition or "Medium",
+                stage_level=1,
+                stage_name=first_stage,
+                due_date=parsed_due,
+                published_status="Draft",
+                priority=project.priority or "Normal",
+                project_manager_name=project.project_manager,
+            )
+            db.add(db_ch)
+            new_chapters.append(db_ch)
+            
+    elif category == "Design":
+        design_ch = db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code, _ChapterInfo.chapters == "Design").first()
+        if design_ch:
+            design_ch.workflow = workflow_name
+            design_ch.stage_name = first_stage
+            design_ch.due_date = parsed_due
+            new_chapters.append(design_ch)
+        else:
+            db_ch = _ChapterInfo(
+                client=project.division_code or "",
+                project=project.code,
+                chapters="Design",
+                chapter_title="Design",
+                workflow=workflow_name,
+                status="In-progress",
+                stage_level=1,
+                stage_name=first_stage,
+                due_date=parsed_due,
+            )
+            db.add(db_ch)
+            new_chapters.append(db_ch)
+
+    db.commit()
+    
+    if files:
+        for idx, upload in enumerate(files):
+            if not upload.filename:
+                continue
+            target_ch = new_chapters[idx % len(new_chapters)]
+            
+            dest_dir = os.path.join(file_service.UPLOAD_DIR, project.code, target_ch.chapters, category)
+            os.makedirs(dest_dir, exist_ok=True)
+            
+            dest_path = os.path.join(dest_dir, upload.filename)
+            with open(dest_path, "wb") as buffer:
+                shutil.copyfileobj(upload.file, buffer)
+                
+            db_file = models.File(
+                project_id=project.id,
+                chapter_id=target_ch.id,
+                filename=upload.filename,
+                file_type=upload.filename.split(".")[-1].lower() if "." in upload.filename else "",
+                category=category,
+                path=dest_path,
+                version=1,
+            )
+            db.add(db_file)
+            
+        db.commit()
+
+    for c in new_chapters:
+        db.refresh(c)
+        
+    return {
+        "status": "success",
+        "message": f"Successfully ingested {len(new_chapters)} track items for {category}.",
+        "chapters": [_serialize_chapter_summary(c) for c in new_chapters]
+    }
 
 
 @router.delete("/projects/{project_id}", response_model=schemas_v2.ProjectDeleteResponse)
@@ -3282,7 +3556,8 @@ def api_v2_upload_zip(
         except Exception as e:
             pass
 
-        final_chapters_count = db.query(models.Chapter).filter(models.Chapter.project == project.project_code).count()
+        chapters_rows = db.query(models.Chapter).filter(models.Chapter.project == project.project_code).all()
+        final_chapters_count = sum(1 for c in chapters_rows if c.chapters.isdigit())
         project.chapter_count = final_chapters_count
         db.commit()
         db.refresh(project)

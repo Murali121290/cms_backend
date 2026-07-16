@@ -131,6 +131,7 @@ class BulkPlannedItem(BaseModel):
     planned_start_date: datetime
     planned_end_date: datetime
     sla: Optional[int] = None
+    workflow: Optional[str] = None
 
 
 class BulkPlannedCreate(BaseModel):
