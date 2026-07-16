@@ -32,6 +32,7 @@ class PostProdChapter(Base):
     chapter_no = Column(String(50), nullable=False)
     status = Column(String(50), default="YTS")  # "YTS", "Completed"
     conversion_status = Column(String(50), default="YTS")  # "YTS", "In-Progress", "Completed", "Failed"
+    conversion_started_at = Column(DateTime, nullable=True)
     conversion_completed_at = Column(DateTime, nullable=True)
     qc_status = Column(String(50), default="YTS")  # "YTS", "In-Progress", "Completed"
     qc_completed_at = Column(DateTime, nullable=True)
