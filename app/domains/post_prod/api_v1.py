@@ -63,7 +63,8 @@ def run_conversion_background(chapter_id: int, session_factory):
         if not chapter:
             return
         
-        chapter.status = "Converting"
+        chapter.status = "In-Progress"
+        chapter.conversion_status = "Converting"
         chapter.attempts += 1
         db.commit()
 
@@ -209,11 +210,16 @@ def run_conversion_background(chapter_id: int, session_factory):
             except Exception as post_err:
                 logger.warning(f"DOCX post-processor failed for {dest_path}: {post_err}")
                 
-            chapter.status = "Completed"
+            chapter.conversion_status = "Completed"
+            chapter.conversion_completed_at = datetime.utcnow()
             chapter.converted_file_path = dest_path
-            chapter.completed_at = datetime.utcnow()
+            
+            if chapter.qc_status == "Completed":
+                chapter.status = "Completed"
+                chapter.completed_at = datetime.utcnow()
         else:
             chapter.status = "Failed"
+            chapter.conversion_status = "Failed"
             chapter.error_message = error_msg or "Unknown error"
         
         db.commit()
@@ -228,6 +234,7 @@ def run_conversion_background(chapter_id: int, session_factory):
             chapter = db.query(PostProdChapter).filter(PostProdChapter.id == chapter_id).first()
             if chapter:
                 chapter.status = "Failed"
+                chapter.conversion_status = "Failed"
                 chapter.error_message = str(e)
                 db.commit()
         except:
@@ -261,6 +268,12 @@ def get_project(
                 "error_message": c.error_message,
                 "attempts": c.attempts,
                 "size_bytes": c.size_bytes,
+                "conversion_status": c.conversion_status,
+                "conversion_completed_at": c.conversion_completed_at,
+                "qc_status": c.qc_status,
+                "qc_completed_at": c.qc_completed_at,
+                "qc_active_seconds": c.qc_active_seconds,
+                "qc_last_started_at": c.qc_last_started_at,
                 "created_at": c.created_at,
                 "completed_at": c.completed_at
             } for c in p.chapters
@@ -323,6 +336,12 @@ def list_projects(db: Session = Depends(database.get_db), user = Depends(get_cur
                     "error_message": c.error_message,
                     "attempts": c.attempts,
                     "size_bytes": c.size_bytes,
+                    "conversion_status": c.conversion_status,
+                    "conversion_completed_at": c.conversion_completed_at,
+                    "qc_status": c.qc_status,
+                    "qc_completed_at": c.qc_completed_at,
+                    "qc_active_seconds": c.qc_active_seconds,
+                    "qc_last_started_at": c.qc_last_started_at,
                     "created_at": c.created_at,
                     "completed_at": c.completed_at
                 } for c in p.chapters
@@ -640,6 +659,7 @@ def convert_chapter(
         raise HTTPException(status_code=404, detail="Chapter not found")
         
     chapter.status = "Pending"
+    chapter.conversion_status = "Pending"
     chapter.error_message = None
     db.commit()
     
@@ -661,8 +681,13 @@ def api_post_prod_open_in_word(
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
         
-    if chapter.status != "Completed" or not chapter.converted_file_path or not os.path.exists(chapter.converted_file_path):
+    if chapter.conversion_status != "Completed" or not chapter.converted_file_path or not os.path.exists(chapter.converted_file_path):
         raise HTTPException(status_code=400, detail="Converted file not available for editing.")
+        
+    if chapter.qc_status == "YTS":
+        chapter.qc_status = "In-Progress"
+        chapter.qc_last_started_at = datetime.utcnow()
+        db.commit()
         
     from datetime import timedelta
     from app.domains.auth.security import create_access_token
@@ -681,4 +706,65 @@ def api_post_prod_open_in_word(
     
     return {"ms_word_uri": ms_word_uri, "webdav_url": webdav_url}
 
+from pydantic import BaseModel
+class QCStatusUpdate(BaseModel):
+    status: str
 
+@router.post("/chapters/{chapter_id}/qc-status")
+def update_chapter_qc_status(
+    chapter_id: int,
+    payload: QCStatusUpdate,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie)
+):
+    chapter = db.query(PostProdChapter).filter(PostProdChapter.id == chapter_id).first()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+        
+    if payload.status not in ["In-Progress", "Paused"]:
+        raise HTTPException(status_code=400, detail="Invalid status")
+        
+    if payload.status == "In-Progress" and chapter.qc_status != "In-Progress":
+        chapter.qc_last_started_at = datetime.utcnow()
+    elif payload.status == "Paused" and chapter.qc_status == "In-Progress":
+        if chapter.qc_last_started_at:
+            delta = datetime.utcnow() - chapter.qc_last_started_at
+            chapter.qc_active_seconds = (chapter.qc_active_seconds or 0) + int(delta.total_seconds())
+        chapter.qc_last_started_at = None
+        
+    chapter.qc_status = payload.status
+    db.commit()
+    
+    return {"message": f"QC status updated to {payload.status}"}
+
+@router.post("/chapters/{chapter_id}/qc-complete")
+def complete_chapter_qc(
+    chapter_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie)
+):
+    chapter = db.query(PostProdChapter).filter(PostProdChapter.id == chapter_id).first()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+        
+    if chapter.qc_status == "In-Progress":
+        if chapter.qc_last_started_at:
+            delta = datetime.utcnow() - chapter.qc_last_started_at
+            chapter.qc_active_seconds = (chapter.qc_active_seconds or 0) + int(delta.total_seconds())
+            
+    chapter.qc_status = "Completed"
+    chapter.qc_last_started_at = None
+    chapter.qc_completed_at = datetime.utcnow()
+    
+    if chapter.conversion_status == "Completed":
+        chapter.status = "Completed"
+        chapter.completed_at = datetime.utcnow()
+        
+    db.commit()
+    
+    try:
+        check_and_update_project_status(db, chapter.project_name, chapter.client_code)
+    except Exception as e:
+        logger.warning(f"Failed to update project status: {e}")
+        
+    return {"message": "QC marked as completed"}

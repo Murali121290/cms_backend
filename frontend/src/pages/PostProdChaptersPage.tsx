@@ -3,8 +3,9 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, RefreshCw, Download, Layers, XCircle, ChevronDown, ChevronUp,
   ExternalLink, FileText, Image, FolderOpen, Info, CheckCircle2, AlertTriangle,
-  File, X, Loader2, Upload, User
+  File, X, Loader2, Upload, User, Check, FlaskConical, Play, Pause
 } from 'lucide-react'
+import { Modal } from '@/components/ui/Modal'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { toast } from '@/store/useToastStore'
 
@@ -16,6 +17,12 @@ interface Chapter {
   error_message?: string
   attempts: number
   size_bytes?: number
+  conversion_status: string
+  conversion_completed_at?: string
+  qc_status: string
+  qc_completed_at?: string
+  qc_active_seconds?: number
+  qc_last_started_at?: string
   created_at?: string
   completed_at?: string
 }
@@ -56,9 +63,22 @@ export function PostProdChaptersPage() {
   const [loadingFiles, setLoadingFiles] = useState(false)
   const [activeTab, setActiveTab] = useState<'indesign' | 'docx' | 'images' | 'misc'>('indesign')
   const [expandedChapterIds, setExpandedChapterIds] = useState<number[]>([])
+  const [expandedDateIds, setExpandedDateIds] = useState<number[]>([])
+  const toggleDateExpand = (id: number, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setExpandedDateIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  }
   const [selectedChapterIds, setSelectedChapterIds] = useState<number[]>([])
   const [isBulkConverting, setIsBulkConverting] = useState(false)
   const [isBulkDownloading, setIsBulkDownloading] = useState(false)
+
+  const [now, setNow] = useState(Date.now())
+  const [pendingQCChapter, setPendingQCChapter] = useState<Chapter | null>(null)
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [])
 
   const toggleExpand = (id: number) => {
     setExpandedChapterIds(prev =>
@@ -241,6 +261,53 @@ export function PostProdChaptersPage() {
       console.error(err)
       toast.error('Failed to open the file in Word.')
     }
+    fetchProjectDetails() // Refresh to fetch updated qc_status
+  }
+
+  const handleQCComplete = (chapter: Chapter) => {
+    let totalSeconds = chapter.qc_active_seconds || 0
+    if (chapter.qc_status === 'In-Progress' && chapter.qc_last_started_at) {
+      const startMs = new Date(chapter.qc_last_started_at.endsWith('Z') ? chapter.qc_last_started_at : chapter.qc_last_started_at + 'Z').getTime()
+      totalSeconds += Math.max(0, Math.floor((now - startMs) / 1000))
+    }
+
+    if (totalSeconds === 0) {
+      toast.error('Error: QC not started')
+      return
+    }
+
+    setPendingQCChapter(chapter)
+  }
+
+  const confirmQCComplete = async () => {
+    if (!pendingQCChapter) return
+    try {
+      const res = await fetch(`/api/v2/post-prod/chapters/${pendingQCChapter.id}/qc-complete`, { method: 'POST' })
+      if (!res.ok) throw new Error('QC complete failed')
+      toast.success('QC marked as completed')
+      fetchProjectDetails()
+    } catch (err) {
+      console.error(err)
+      toast.error('Failed to update QC status')
+    } finally {
+      setPendingQCChapter(null)
+    }
+  }
+
+  const handleQCStatusChange = async (chapter: Chapter, newStatus: 'In-Progress' | 'Paused') => {
+    try {
+      const res = await fetch(`/api/v2/post-prod/chapters/${chapter.id}/qc-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      })
+      if (!res.ok) throw new Error('QC status update failed')
+      toast.success(`QC ${newStatus === 'Paused' ? 'paused' : 'started'}`)
+      fetchProjectDetails()
+    } catch (err) {
+      console.error(err)
+      toast.error('Failed to update QC status')
+    }
   }
 
   const handleConvertChapter = async (chapter: Chapter) => {
@@ -328,11 +395,24 @@ export function PostProdChaptersPage() {
     input.click()
   }
 
-  const formatDate = (value?: string) => {
-    if (!value) return '—'
+  const FormatDate = ({ value, inline }: { value?: string, inline?: boolean }) => {
+    if (!value) return <span>—</span>
     const date = new Date(value.endsWith('Z') ? value : value + 'Z')
-    if (isNaN(date.getTime())) return '—'
-    return date.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' })
+    if (isNaN(date.getTime())) return <span>—</span>
+    
+    const dateStr = date.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' })
+    const timeStr = date.toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase()
+    
+    if (inline) {
+      return <span>{dateStr} {timeStr}</span>
+    }
+    
+    return (
+      <div className="flex flex-col">
+        <span>{dateStr}</span>
+        <span className="text-[10px] opacity-75 leading-tight mt-0.5">{timeStr}</span>
+      </div>
+    )
   }
 
   const formatDuration = (start?: string, end?: string) => {
@@ -340,13 +420,44 @@ export function PostProdChaptersPage() {
     const startMs = new Date(start.endsWith('Z') ? start : start + 'Z').getTime()
     const endMs = new Date(end.endsWith('Z') ? end : end + 'Z').getTime()
     if (isNaN(startMs) || isNaN(endMs) || endMs < startMs) return '—'
-    const totalSeconds = Math.floor((endMs - startMs) / 1000)
+    return formatSeconds(Math.floor((endMs - startMs) / 1000))
+  }
+
+  const formatSeconds = (totalSeconds?: number) => {
+    if (totalSeconds === undefined || totalSeconds === null || isNaN(totalSeconds)) return '—'
     const hours = Math.floor(totalSeconds / 3600)
     const minutes = Math.floor((totalSeconds % 3600) / 60)
     const seconds = totalSeconds % 60
     if (hours > 0) return `${hours}h ${minutes}m`
     if (minutes > 0) return `${minutes}m ${seconds}s`
     return `${seconds}s`
+  }
+
+  const getQCDuration = (chap: Chapter) => {
+    let totalSeconds = chap.qc_active_seconds || 0
+    if (chap.qc_status === 'In-Progress' && chap.qc_last_started_at) {
+      const startMs = new Date(chap.qc_last_started_at.endsWith('Z') ? chap.qc_last_started_at : chap.qc_last_started_at + 'Z').getTime()
+      totalSeconds += Math.max(0, Math.floor((now - startMs) / 1000))
+    }
+    return formatSeconds(totalSeconds)
+  }
+
+  const getOverallDuration = (chap: Chapter) => {
+    let conversionSecs = 0
+    if (chap.created_at && chap.conversion_completed_at) {
+      const startMs = new Date(chap.created_at.endsWith('Z') ? chap.created_at : chap.created_at + 'Z').getTime()
+      const endMs = new Date(chap.conversion_completed_at.endsWith('Z') ? chap.conversion_completed_at : chap.conversion_completed_at + 'Z').getTime()
+      conversionSecs = Math.max(0, Math.floor((endMs - startMs) / 1000))
+    }
+    
+    let qcSecs = chap.qc_active_seconds || 0
+    if (chap.qc_status === 'In-Progress' && chap.qc_last_started_at) {
+      const startMs = new Date(chap.qc_last_started_at.endsWith('Z') ? chap.qc_last_started_at : chap.qc_last_started_at + 'Z').getTime()
+      qcSecs += Math.max(0, Math.floor((now - startMs) / 1000))
+    }
+    
+    if (conversionSecs === 0 && qcSecs === 0) return '—'
+    return formatSeconds(conversionSecs + qcSecs)
   }
 
   const formatBytes = (bytes?: number, decimals = 2) => {
@@ -483,10 +594,11 @@ export function PostProdChaptersPage() {
                       <th className="p-3.5 bg-card">Chapter</th>
                       {!selectedChapter && <th className="p-3.5 bg-card">Filename</th>}
                       {!selectedChapter && <th className="p-3.5 bg-card">Size</th>}
-                      <th className="p-3.5 bg-card">Status</th>
                       <th className="p-3.5 bg-card">Created</th>
+                      <th className="p-3.5 bg-card">Conversion Status</th>
+                      <th className="p-3.5 bg-card">QC Status</th>
+                      <th className="p-3.5 bg-card">Status</th>
                       <th className="p-3.5 bg-card">Completed</th>
-                      <th className="p-3.5 bg-card">Duration</th>
                       <th className="p-3.5 bg-card text-center">Actions</th>
                     </tr>
                   </thead>
@@ -496,18 +608,18 @@ export function PostProdChaptersPage() {
                       const isFailed = chap.status === 'Failed'
                       const isExpanded = expandedChapterIds.includes(chap.id)
 
-                      let statusCls = 'bg-accent border-border text-muted'
-                      if (chap.status === 'Completed') {
-                        statusCls = 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
-                      } else if (chap.status === 'Converting') {
-                        statusCls = 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400'
-                      } else if (chap.status === 'Failed') {
-                        statusCls = 'bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400'
-                      } else if (chap.status === 'YTS') {
-                        statusCls = 'bg-slate-500/10 border-slate-500/20 text-slate-600 dark:text-slate-400 font-semibold'
-                      } else if (chap.status === 'Pending') {
-                        statusCls = 'bg-blue-500/10 border-blue-500/20 text-blue-600 dark:text-blue-400 font-semibold'
+                      const getStatusCls = (s: string) => {
+                        if (s === 'Completed') return 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                        if (s === 'Converting' || s === 'In-Progress') return 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400'
+                        if (s === 'Paused') return 'bg-orange-500/10 border-orange-500/20 text-orange-600 dark:text-orange-400'
+                        if (s === 'Failed') return 'bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400'
+                        if (s === 'Pending') return 'bg-blue-500/10 border-blue-500/20 text-blue-600 dark:text-blue-400 font-semibold'
+                        return 'bg-slate-500/10 border-slate-500/20 text-slate-600 dark:text-slate-400 font-semibold'
                       }
+
+                      const conversionStatusCls = getStatusCls(chap.conversion_status)
+                      const qcStatusCls = getStatusCls(chap.qc_status)
+                      const statusCls = getStatusCls(chap.status)
 
                       return (
                         <React.Fragment key={chap.id}>
@@ -537,38 +649,110 @@ export function PostProdChaptersPage() {
                                 {formatBytes(chap.size_bytes)}
                               </td>
                             )}
+                            <td className="p-3.5 text-muted whitespace-nowrap">
+                              <FormatDate value={chap.created_at} />
+                            </td>
                             <td className="p-3.5">
-                              <span
-                                onClick={(e) => {
-                                  if (isFailed) {
-                                    e.stopPropagation();
-                                    toggleExpand(chap.id);
-                                  }
-                                }}
-                                className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border ${statusCls} ${isFailed ? 'cursor-pointer hover:opacity-85 select-none' : ''
-                                  }`}
-                                title={isFailed ? (isExpanded ? "Hide conversion logs" : "Click to view conversion logs") : undefined}
-                              >
-                                {chap.status}
-                                {isFailed && (
-                                  <span className="ml-1 inline-block text-[8px] align-middle opacity-80">
-                                    {isExpanded ? '▲' : '▼'}
+                              <div className="flex flex-col items-start gap-1.5">
+                                <span
+                                  className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border whitespace-nowrap ${conversionStatusCls}`}
+                                >
+                                  {chap.conversion_status}
+                                </span>
+                                {chap.conversion_completed_at && (
+                                  <div className="relative flex flex-col gap-1 cursor-pointer" onClick={(e) => toggleDateExpand(chap.id + 1000000, e)}>
+                                    <span className="text-[10px] text-muted whitespace-nowrap hover:text-text transition-colors" title="Click to see details">
+                                      ⏱ {formatDuration(chap.created_at, chap.conversion_completed_at)}
+                                    </span>
+                                    {expandedDateIds.includes(chap.id + 1000000) && (
+                                      <div 
+                                        className="absolute top-full left-0 mt-1 z-[100] shadow-xl text-[10px] text-text bg-card p-2.5 rounded-lg border border-border min-w-[150px]"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        <div className="flex flex-col gap-2">
+                                          <div>
+                                            <div className="text-[9px] text-muted uppercase tracking-wider mb-0.5">Start Time</div>
+                                            <div className="font-medium"><FormatDate value={chap.created_at} inline /></div>
+                                          </div>
+                                          <div>
+                                            <div className="text-[9px] text-muted uppercase tracking-wider mb-0.5">End Time</div>
+                                            <div className="font-medium"><FormatDate value={chap.conversion_completed_at} inline /></div>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                            <td className="p-3.5">
+                              <div className="flex flex-col items-start gap-1.5">
+                                <span
+                                  className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border whitespace-nowrap ${qcStatusCls}`}
+                                >
+                                  {chap.qc_status}
+                                </span>
+                                {chap.qc_status !== 'YTS' && (
+                                  <div className="relative flex flex-col gap-1 cursor-pointer" onClick={(e) => toggleDateExpand(chap.id + 2000000, e)}>
+                                    <span className="text-[10px] text-muted whitespace-nowrap hover:text-text transition-colors" title="Click to see details">
+                                      ⏱ {getQCDuration(chap)}
+                                    </span>
+                                    {expandedDateIds.includes(chap.id + 2000000) && (
+                                      <div 
+                                        className="absolute top-full left-0 mt-1 z-[100] shadow-xl text-[10px] text-text bg-card p-2.5 rounded-lg border border-border min-w-[150px]"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        <div className="flex flex-col gap-2">
+                                          <div>
+                                            <div className="text-[9px] text-muted uppercase tracking-wider mb-0.5">QC Start</div>
+                                            <div className="font-medium"><FormatDate value={chap.conversion_completed_at} inline /></div>
+                                          </div>
+                                          {chap.qc_completed_at && (
+                                            <div>
+                                              <div className="text-[9px] text-muted uppercase tracking-wider mb-0.5">QC End</div>
+                                              <div className="font-medium"><FormatDate value={chap.qc_completed_at} inline /></div>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                            <td className="p-3.5">
+                              <div className="flex flex-col items-start gap-1.5">
+                                <span
+                                  onClick={(e) => {
+                                    if (isFailed) {
+                                      e.stopPropagation();
+                                      toggleExpand(chap.id);
+                                    }
+                                  }}
+                                  className={`text-[10px] font-semibold px-2.5 py-1 rounded-full border whitespace-nowrap ${statusCls} ${isFailed ? 'cursor-pointer hover:opacity-85 select-none' : ''
+                                    }`}
+                                  title={isFailed ? (isExpanded ? "Hide conversion logs" : "Click to view conversion logs") : undefined}
+                                >
+                                  {chap.status}
+                                  {isFailed && (
+                                    <span className="ml-1 inline-block text-[8px] align-middle opacity-80">
+                                      {isExpanded ? '▲' : '▼'}
+                                    </span>
+                                  )}
+                                </span>
+                                {chap.conversion_status !== 'YTS' && (
+                                  <span className="text-[10px] text-muted whitespace-nowrap" title="Total Duration (Conversion + QC)">
+                                    ⏱ {getOverallDuration(chap)}
                                   </span>
                                 )}
-                              </span>
+                              </div>
                             </td>
                             <td className="p-3.5 text-muted whitespace-nowrap">
-                              {formatDate(chap.created_at)}
-                            </td>
-                            <td className="p-3.5 text-muted whitespace-nowrap">
-                              {formatDate(chap.completed_at)}
-                            </td>
-                            <td className="p-3.5 text-muted whitespace-nowrap">
-                              {formatDuration(chap.created_at, chap.completed_at)}
+                              <FormatDate value={chap.completed_at} />
                             </td>
                             <td className="p-3.5 text-center" onClick={(e) => e.stopPropagation()}>
                               <div className="flex justify-center gap-1.5">
-                                {chap.status === 'Converting' ? (
+                                {chap.conversion_status === 'Converting' ? (
                                   <button
                                     disabled
                                     className="p-1.5 border border-amber-200/40 bg-amber-500/5 text-amber-500/60 rounded-lg cursor-not-allowed"
@@ -577,16 +761,18 @@ export function PostProdChaptersPage() {
                                     <Loader2 size={13} className="animate-spin" />
                                   </button>
                                 ) : (
-                                  <button
-                                    onClick={() => handleConvertChapter(chap)}
-                                    className="p-1.5 border border-amber-200/80 bg-amber-500/5 hover:bg-amber-500/15 text-amber-600 hover:text-amber-700 rounded-lg transition-all shadow-sm"
-                                    title={chap.status === 'Completed' ? 'Reconvert' : 'Convert'}
-                                  >
-                                    <RefreshCw size={13} />
-                                  </button>
+                                  <>
+                                    <button
+                                      onClick={() => handleConvertChapter(chap)}
+                                      className="p-1.5 border border-amber-200/80 bg-amber-500/5 hover:bg-amber-500/15 text-amber-600 hover:text-amber-700 rounded-lg transition-all shadow-sm"
+                                      title={chap.status === 'Completed' ? 'Reconvert' : 'Convert'}
+                                    >
+                                      <RefreshCw size={13} />
+                                    </button>
+                                  </>
                                 )}
 
-                                {chap.status === 'Completed' && (
+                                {chap.conversion_status === 'Completed' && (
                                   <>
                                     <button
                                       onClick={() => handleOpenInWord(chap)}
@@ -595,6 +781,35 @@ export function PostProdChaptersPage() {
                                     >
                                       <FileText size={13} />
                                     </button>
+                                    {chap.qc_status !== 'Completed' && (
+                                      <>
+                                        {(chap.qc_status === 'YTS' || chap.qc_status === 'Paused') && (
+                                          <button
+                                            onClick={() => handleQCStatusChange(chap, 'In-Progress')}
+                                            className="p-1.5 border border-indigo-200/80 bg-indigo-500/5 hover:bg-indigo-500/15 text-indigo-600 hover:text-indigo-700 rounded-lg transition-all shadow-sm flex items-center justify-center"
+                                            title={chap.qc_status === 'Paused' ? "Resume QC" : "Start QC"}
+                                          >
+                                            <Play size={13} fill="currentColor" />
+                                          </button>
+                                        )}
+                                        {chap.qc_status === 'In-Progress' && (
+                                          <button
+                                            onClick={() => handleQCStatusChange(chap, 'Paused')}
+                                            className="p-1.5 border border-orange-200/80 bg-orange-500/5 hover:bg-orange-500/15 text-orange-600 hover:text-orange-700 rounded-lg transition-all shadow-sm flex items-center justify-center"
+                                            title="Pause QC"
+                                          >
+                                            <Pause size={13} fill="currentColor" />
+                                          </button>
+                                        )}
+                                        <button
+                                          onClick={() => handleQCComplete(chap)}
+                                          className="p-1.5 border border-purple-200/80 bg-purple-500/5 hover:bg-purple-500/15 text-purple-600 hover:text-purple-700 rounded-lg transition-all shadow-sm flex items-center justify-center"
+                                          title="QC Completed"
+                                        >
+                                          <Check size={13} strokeWidth={3} />
+                                        </button>
+                                      </>
+                                    )}
                                     <button
                                       onClick={() => handleDownloadChapter(chap)}
                                       className="p-1.5 border border-blue-200/80 bg-blue-500/5 hover:bg-blue-500/15 text-blue-600 hover:text-blue-700 rounded-lg transition-all shadow-sm"
@@ -609,7 +824,7 @@ export function PostProdChaptersPage() {
                           </tr>
                           {isFailed && isExpanded && (
                             <tr className="bg-red-500/[0.01]">
-                              <td colSpan={selectedChapter ? 7 : 8} className="p-3 pt-0 pb-3.5">
+                              <td colSpan={selectedChapter ? 6 : 7} className="p-3 pt-0 pb-3.5">
                                 <div className="text-xs text-red-500 bg-red-500/5 border border-red-500/10 rounded-xl p-3 font-mono overflow-x-auto max-h-[120px] overflow-y-auto">
                                   <strong className="block text-[10px] uppercase font-sans tracking-wide mb-1 text-red-600 dark:text-red-400">
                                     Conversion Failure Logs:
@@ -756,10 +971,17 @@ export function PostProdChaptersPage() {
                 )}
               </div>
             </div>
-
           </div>
         )}
       </div>
+      <Modal
+        isOpen={pendingQCChapter !== null}
+        onClose={() => setPendingQCChapter(null)}
+        onConfirm={confirmQCComplete}
+        title="Confirm QC Completion"
+        description={`Are you sure you want to complete QC for Chapter ${pendingQCChapter?.chapter_no}?`}
+        confirmLabel="Confirm"
+      />
     </div>
   )
 }

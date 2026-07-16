@@ -30,7 +30,13 @@ class PostProdChapter(Base):
     client_code = Column(String(100), nullable=True)
     project_name = Column(String(255), nullable=True)
     chapter_no = Column(String(50), nullable=False)
-    status = Column(String(50), default="YTS")  # "YTS", "Pending", "Converting", "Completed", "Failed"
+    status = Column(String(50), default="YTS")  # "YTS", "Completed"
+    conversion_status = Column(String(50), default="YTS")  # "YTS", "In-Progress", "Completed", "Failed"
+    conversion_completed_at = Column(DateTime, nullable=True)
+    qc_status = Column(String(50), default="YTS")  # "YTS", "In-Progress", "Completed"
+    qc_completed_at = Column(DateTime, nullable=True)
+    qc_active_seconds = Column(Integer, default=0)
+    qc_last_started_at = Column(DateTime, nullable=True)
     source_filename = Column(String, nullable=True)
     source_file_path = Column(String, nullable=True)
     converted_file_path = Column(String, nullable=True)
