@@ -5,6 +5,7 @@ import { Topbar } from '@/components/Topbar'
 import { useSidebarStore } from '@/store/useSidebarStore'
 import { useAutoLogout } from '@/hooks/useAutoLogout'
 import { useRBAC } from '@/hooks/useRBAC'
+import { Modal } from '@/components/ui/Modal'
 
 const VIEW_RE = /^\/clients\/\d+\/projects\/\d+\/chapters\/\d+\/view(\/.*)?$/
 
@@ -12,7 +13,7 @@ export function AppLayout() {
   const { pathname } = useLocation()
   const { setCollapsed } = useSidebarStore()
   const { viewer } = useRBAC()
-  useAutoLogout()
+  const { showWarning, extendSession, forceLogout } = useAutoLogout()
 
   if (viewer?.team === 'Accessibility Team' && (pathname === '/' || pathname === '/dashboard')) {
     return <Navigate to="/post-production" replace />
@@ -45,6 +46,18 @@ export function AppLayout() {
           <Outlet />
         </main>
       </div>
+
+      <Modal
+        isOpen={showWarning}
+        onClose={() => forceLogout('You have been logged out due to inactivity.')}
+        onConfirm={extendSession}
+        title="Session Expiring"
+        confirmLabel="Stay Logged In"
+      >
+        <p className="text-sm text-muted-foreground leading-relaxed">
+          Your session will expire in 5 minutes due to inactivity. Would you like to extend your session and stay logged in?
+        </p>
+      </Modal>
     </div>
   )
 }

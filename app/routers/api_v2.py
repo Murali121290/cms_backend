@@ -609,6 +609,75 @@ def api_v2_delete_session():
     return response
 
 
+@router.post("/session/refresh", response_model=schemas_v2.SessionLoginResponse)
+def api_v2_session_refresh(
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    if not user:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    access_token = create_access_token(data={"sub": user.username})
+
+    response_payload = schemas_v2.SessionLoginResponse(
+        session=schemas_v2.SessionState(
+            authenticated=True,
+            auth_mode="cookie",
+            expires_at=_exp_to_datetime(
+                _decode_token_payload(access_token).get("exp")
+                if _decode_token_payload(access_token)
+                else None
+            ),
+        ),
+        viewer=_serialize_viewer(user),
+        redirect_to="",
+    )
+    response = JSONResponse(status_code=status.HTTP_200_OK, content=response_payload.model_dump(mode="json"))
+    session_service.set_access_token_cookie(response, access_token)
+    return response
+
+
+@router.get("/session/active-locks", response_model=dict)
+def api_v2_session_active_locks(
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    if not user:
+        return {"has_active_locks": False}
+
+    from datetime import timezone
+    now = datetime.now(timezone.utc)
+    lock = db.query(models.WebDAVLock).filter(
+        models.WebDAVLock.owner_user_id == user.id,
+        (models.WebDAVLock.expires_at.is_(None)) | (models.WebDAVLock.expires_at > now)
+    ).first()
+
+    has_active_locks = False
+    if lock:
+        has_active_locks = True
+    else:
+        from app.integrations.webdav.router import post_prod_locks
+        for chapter_id, lock_data in list(post_prod_locks.items()):
+            expires_at = lock_data.get("expires_at")
+            owner_user_id = lock_data.get("owner_user_id")
+            if owner_user_id == user.id:
+                if not expires_at or expires_at > datetime.now(timezone.utc):
+                    has_active_locks = True
+                    break
+
+    response_payload = {"has_active_locks": has_active_locks}
+    response = JSONResponse(status_code=status.HTTP_200_OK, content=response_payload)
+    if has_active_locks:
+        access_token = create_access_token(data={"sub": user.username})
+        session_service.set_access_token_cookie(response, access_token)
+
+    return response
+
+
 @router.get("/dashboard", response_model=schemas_v2.DashboardResponse)
 def api_v2_dashboard(
     include_projects: bool = True,

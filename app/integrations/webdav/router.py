@@ -36,7 +36,9 @@ def _decode_token(token: str | None):
     if not token:
         return None
     try:
-        return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        # Word URLs are static and can be open for a long time. Allow expired signatures
+        # as long as the cryptographic signature is valid.
+        return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM], options={"verify_exp": False})
     except JWTError:
         return None
 
@@ -508,20 +510,38 @@ async def webdav_post_prod_put(chapter_id: int, token: str, filename: str, reque
 
 # LOCK
 @router.api_route("/post-prod/chapters/{chapter_id}/{token}/{filename}", methods=["LOCK"])
-async def webdav_post_prod_lock(chapter_id: int, token: str, filename: str, request: Request):
+async def webdav_post_prod_lock(chapter_id: int, token: str, filename: str, request: Request, db: Session = Depends(database.get_db)):
     existing_token = _extract_lock_token_from_headers(request)
+    payload = _decode_token(token)
+    owner_id = None
+    if payload:
+        sub = payload.get("sub")
+        if sub:
+            user = db.query(models.User).filter(models.User.username == sub).first()
+            if user:
+                owner_id = user.id
+
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=WEBDAV_TOKEN_EXPIRE_MINUTES)
     
     if existing_token:
         if chapter_id in post_prod_locks and post_prod_locks[chapter_id]["token"] == existing_token:
             post_prod_locks[chapter_id]["expires_at"] = expires_at
+            post_prod_locks[chapter_id]["owner_user_id"] = owner_id
             token_to_return = existing_token
         else:
             token_to_return = f"urn:uuid:{uuid4()}"
-            post_prod_locks[chapter_id] = {"token": token_to_return, "expires_at": expires_at}
+            post_prod_locks[chapter_id] = {
+                "token": token_to_return,
+                "expires_at": expires_at,
+                "owner_user_id": owner_id,
+            }
     else:
         token_to_return = f"urn:uuid:{uuid4()}"
-        post_prod_locks[chapter_id] = {"token": token_to_return, "expires_at": expires_at}
+        post_prod_locks[chapter_id] = {
+            "token": token_to_return,
+            "expires_at": expires_at,
+            "owner_user_id": owner_id,
+        }
         
     xml = f"""<?xml version="1.0" encoding="utf-8"?>
 <D:prop xmlns:D="DAV:">

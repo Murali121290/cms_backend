@@ -1128,6 +1128,35 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
       }
     };
 
+    const lastEditTimeRef = useRef<number>(0);
+
+    // Track document updates to record last edit time
+    useEffect(() => {
+      if (!editor) return;
+      const onUpdateHandler = () => {
+        lastEditTimeRef.current = Date.now();
+      };
+      editor.on("update", onUpdateHandler);
+      return () => {
+        editor.off("update", onUpdateHandler);
+      };
+    }, [editor]);
+
+    // Autosave check: runs every 10s if the editor is dirty.
+    // If 30 seconds pass without any keystrokes/updates, trigger handleSave.
+    useEffect(() => {
+      if (!isDirty || isSaving) return;
+
+      const interval = setInterval(() => {
+        const timeSinceLastEdit = Date.now() - lastEditTimeRef.current;
+        if (timeSinceLastEdit >= 30000) {
+          handleSave();
+        }
+      }, 10000);
+
+      return () => clearInterval(interval);
+    }, [isDirty, isSaving, handleSave]);
+
     const applyStyle = (styleName: string, pos: number) => {
       if (!editor) return;
 

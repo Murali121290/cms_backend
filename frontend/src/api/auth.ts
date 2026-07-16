@@ -25,4 +25,10 @@ export const authApi = {
 
   logout: () =>
     api.delete('/session').catch(() => null),
+
+  refresh: () =>
+    api.post<LoginResponse>('/session/refresh').then(r => r.data),
+
+  checkActiveLocks: () =>
+    api.get<{ has_active_locks: boolean }>('/session/active-locks').then(r => r.data),
 }

@@ -206,8 +206,8 @@ function ChooseScreen({ onBook, onJournal, onGeneral, onPeople }: { onBook: () =
             <em style={{ color: 'var(--accent-2)', fontStyle: 'italic' }}>Manuscript-to-Market</em>
             {/* Choose your <em style={{ color: 'var(--accent-2)', fontStyle: 'italic' }}>production line</em> */}
           </h1>
-          <h2 style={{ fontFamily: 'Spectral, serif', fontSize: 20, fontWeight: 700, color: '#262626', lineHeight: 1.18, letterSpacing: '-0.02em', marginBottom: 6 }}>An End-to-End Digital Publishing Ecosystem</h2>
-          <p style={{ fontSize: 14.5, color: '#505050', maxWidth: 580 }}>Select a publishing stream to enter its dedicated workflow hubs. Designed with professional corporate layouts.</p>
+          <h2 style={{ fontFamily: 'Spectral, serif', fontSize: 25, fontWeight: 700, color: '#262626', lineHeight: 1.18, letterSpacing: '-0.02em', marginBottom: 6 }}>An End-to-End Digital Publishing Ecosystem</h2>
+          <p style={{ fontSize: 14.5, color: '#505050', maxWidth: 580 }}>Select a publishing stream to enter its dedicated workflow hubs.</p>
         </div>
       </div>
 
