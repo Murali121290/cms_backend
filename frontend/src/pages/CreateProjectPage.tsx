@@ -396,6 +396,18 @@ export function CreateProjectPage() {
   // file_details (via extracted_po_data) alongside the rest of the PO extras.
   const [authorName, setAuthorName] = useState('')
 
+  // Tracks configuration
+  const [designWfEnabled, setDesignWfEnabled] = useState(false)
+  const [designWfName, setDesignWfName] = useState('')
+  const [designDueDate, setDesignDueDate] = useState('')
+  const [msWfEnabled, setMsWfEnabled] = useState(true)
+  const [msWfName, setMsWfName] = useState('')
+  const [msDueDate, setMsDueDate] = useState('')
+  const [artWfEnabled, setArtWfEnabled] = useState(false)
+  const [artWfName, setArtWfName] = useState('')
+  const [artDueDate, setArtDueDate] = useState('')
+  const [artChapterCount, setArtChapterCount] = useState(5)
+
   // Reference data
   const [clients,           setClients]          = useState<Client[]>([])
   const [users,             setUsers]             = useState<User[]>([])
@@ -578,7 +590,9 @@ export function CreateProjectPage() {
   }
 
   async function handleSubmit() {
-    const errs = validate(form)
+    const primaryWf = msWfName || designWfName || artWfName || ''
+    const formWithWf = { ...form, workflow_name: primaryWf }
+    const errs = validate(formWithWf)
     if (!zipFile) {
       errs.zip_file = 'ZIP file is required'
     }
@@ -603,7 +617,22 @@ export function CreateProjectPage() {
       formData.append('xml_standard',  form.xml_standard ?? 'NLM')
       if (form.client_id)          formData.append('client_id',        String(form.client_id))
       if (form.client_name)        formData.append('client_name',      form.client_name)
-      if (form.workflow_name)      formData.append('workflow_name',    form.workflow_name)
+      
+      // Set default workflow_name
+      formData.append('workflow_name', primaryWf)
+      
+      // Track configurations
+      if (designWfEnabled && designWfName) {
+        formData.append('design_workflow_name', designWfName)
+      }
+      if (msWfEnabled && msWfName) {
+        formData.append('manuscript_workflow_name', msWfName)
+      }
+      if (artWfEnabled && artWfName) {
+        formData.append('art_workflow_name', artWfName)
+        formData.append('art_chapter_count', String(artChapterCount))
+      }
+
       if (form.division_code)      formData.append('division_code',    form.division_code)
       if (form.customer_contact)   formData.append('customer_contact', form.customer_contact)
       if (form.category)           formData.append('category',         form.category)
@@ -641,8 +670,10 @@ export function CreateProjectPage() {
       }
 
       toast.success(`Project "${response.project.title ?? response.project.code}" created`)
-      
-      if (form.client_id) {
+
+      if (response.redirect_to) {
+        navigate(response.redirect_to)
+      } else if (form.client_id) {
         navigate(`/clients/${form.client_id}/projects`)
       } else {
         navigate('/clients')
@@ -916,57 +947,112 @@ export function CreateProjectPage() {
               onChange={e => set('due_date', e.target.value || null)}
             />
 
-            {/* ── Workflow ────────────────────────────── */}
-            <Section title="Workflow" icon={Layers} />
+            {/* ── Workflow Track Configurator ─────────── */}
+            <Section title="Workflow Track Configurator" icon={Layers} />
 
-            <div className="col-span-2 flex flex-col gap-2">
-              <Select
-                id="workflow_name"
-                label="Workflow"
-                required
-                value={form.workflow_name ?? ''}
-                onChange={e => set('workflow_name', e.target.value || null)}
-                options={workflowNames.map(n => ({ value: n, label: n }))}
-                placeholder={workflowNames.length ? 'Select a workflow' : 'No workflows configured'}
-                error={errors.workflow_name}
-              />
+            <div className="col-span-2 space-y-4">
+              <p className="text-xs text-muted">
+                Configure separate workflows and due dates for each file track (Design, Manuscript, Art). Toggle tracks as needed.
+              </p>
 
-              {/* Flow preview */}
-              {form.workflow_name && selectedFlow.length > 0 && (
-                <div className="rounded-xl border border-border bg-surface p-4">
-                  <p className="text-xs font-semibold text-muted uppercase tracking-wider mb-3">
-                    Flow — {form.workflow_name}
-                  </p>
-                  <div className="flex flex-wrap items-center gap-1">
-                    {selectedFlow.map((s, i) => (
-                      <span key={s.id} className="inline-flex items-center gap-1">
-                        <span className="inline-flex items-center gap-1.5 text-xs bg-card border border-border rounded-lg px-2.5 py-1">
-                          <span className="w-4 h-4 rounded-full bg-primary/10 text-primary text-[10px] font-bold flex items-center justify-center flex-shrink-0">
-                            {i + 1}
-                          </span>
-                          <span className="font-medium text-text">{s.stage_name}</span>
-                        </span>
-                        {i < selectedFlow.length - 1 && (
-                          <ChevronRight size={12} className="text-muted flex-shrink-0" />
-                        )}
-                      </span>
-                    ))}
+              {/* Design Track */}
+              <div className={`p-4 rounded-xl border transition-all ${designWfEnabled ? 'bg-accent/10 border-primary/20' : 'bg-surface border-border opacity-70'}`}>
+                <div className="flex items-center justify-between mb-3">
+                  <label className="flex items-center gap-2 font-semibold text-sm text-text cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={designWfEnabled}
+                      onChange={() => setDesignWfEnabled(!designWfEnabled)}
+                      className="rounded border-border bg-surface text-primary focus:ring-primary/20"
+                    />
+                    🎨 Design Track Workflow
+                  </label>
+                  {designWfEnabled && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-bold uppercase">Design</span>
+                  )}
+                </div>
+
+                {designWfEnabled && (
+                  <div className="space-y-3">
+                    <Select
+                      label="Design Workflow"
+                      value={designWfName}
+                      onChange={e => setDesignWfName(e.target.value)}
+                      options={workflowNames.map(n => ({ value: n, label: n }))}
+                      placeholder="Select Design Workflow"
+                    />
                   </div>
-                </div>
-              )}
+                )}
+              </div>
 
-              {!form.workflow_name && workflowNames.length === 0 && (
-                <div className="flex items-center justify-between rounded-lg border border-dashed border-border bg-surface px-4 py-3">
-                  <p className="text-xs text-muted">No workflows configured yet.</p>
-                  <button
-                    type="button"
-                    onClick={() => navigate('/settings/workflow')}
-                    className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-                  >
-                    <ExternalLink size={11} /> Create Workflow
-                  </button>
+              {/* Manuscript Track */}
+              <div className={`p-4 rounded-xl border transition-all ${msWfEnabled ? 'bg-accent/10 border-primary/20' : 'bg-surface border-border opacity-70'}`}>
+                <div className="flex items-center justify-between mb-3">
+                  <label className="flex items-center gap-2 font-semibold text-sm text-text cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={msWfEnabled}
+                      onChange={() => setMsWfEnabled(!msWfEnabled)}
+                      className="rounded border-border bg-surface text-primary focus:ring-primary/20"
+                    />
+                    📚 Manuscript Track Workflow
+                  </label>
+                  {msWfEnabled && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-bold uppercase">Manuscript</span>
+                  )}
                 </div>
-              )}
+
+                {msWfEnabled && (
+                  <div className="space-y-3">
+                    <Select
+                      label="Manuscript Workflow"
+                      value={msWfName}
+                      onChange={e => setMsWfName(e.target.value)}
+                      options={workflowNames.map(n => ({ value: n, label: n }))}
+                      placeholder="Select Manuscript Workflow"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Art Track */}
+              <div className={`p-4 rounded-xl border transition-all ${artWfEnabled ? 'bg-accent/10 border-primary/20' : 'bg-surface border-border opacity-70'}`}>
+                <div className="flex items-center justify-between mb-3">
+                  <label className="flex items-center gap-2 font-semibold text-sm text-text cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={artWfEnabled}
+                      onChange={() => setArtWfEnabled(!artWfEnabled)}
+                      className="rounded border-border bg-surface text-primary focus:ring-primary/20"
+                    />
+                    📐 Art Track Workflow
+                  </label>
+                  {artWfEnabled && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-bold uppercase">Art</span>
+                  )}
+                </div>
+
+                {artWfEnabled && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <Select
+                      label="Art Workflow"
+                      value={artWfName}
+                      onChange={e => setArtWfName(e.target.value)}
+                      options={workflowNames.map(n => ({ value: n, label: n }))}
+                      placeholder="Select Art Workflow"
+                    />
+                    <Input
+                      label="Number of Art Chapters"
+                      type="number"
+                      min={1}
+                      value={String(artChapterCount)}
+                      onChange={e => setArtChapterCount(Number(e.target.value) || 1)}
+                    />
+                  </div>
+                )}
+              </div>
+
+              {errors.workflow_name && <p className="text-xs text-danger">{errors.workflow_name}</p>}
             </div>
 
             {/* ── ZIP Upload ──────────────────────────── */}

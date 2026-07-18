@@ -3,6 +3,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from app.domains.workflow.schemas import ChapterInfoResponse
+
 
 class ErrorResponse(BaseModel):
     status: Literal["error"] = "error"
@@ -924,5 +926,15 @@ class UploadZipResponse(BaseModel):
     xml: list[UploadZipFileEntry]
     docs: list[UploadZipFileEntry]
     chapters_inserted: int
+
+
+class ChapterZipSkippedItem(BaseModel):
+    filename: str
+    reason: str
+
+
+class ChapterZipUploadResponse(BaseModel):
+    created: list[ChapterInfoResponse]
+    skipped: list[ChapterZipSkippedItem]
 
 

@@ -83,8 +83,11 @@ export function ChapterDetailPage() {
         setChapter(ch)
         const proj = projResponse.project
         setProject(proj)
-        if (proj.workflow_name) {
-          const stages = await workflowsApi.getWorkflow(proj.workflow_name).catch(() => [])
+        // Use the chapter's own workflow (Art/Design track) if set,
+        // falling back to the project's main (Manuscript) workflow.
+        const chapterWorkflow = ch.workflow || proj.workflow_name
+        if (chapterWorkflow) {
+          const stages = await workflowsApi.getWorkflow(chapterWorkflow).catch(() => [])
           setOrderedStages(orderStages(stages))
         }
         // Fetch backup files for this chapter
@@ -180,12 +183,32 @@ export function ChapterDetailPage() {
     if (!chapter || !project?.file_details) return null
     const chName = chapter.chapters
     const isVirtual = chName.toLowerCase() === 'design' || chName.toLowerCase() === 'ce support'
-    const matchName = isVirtual ? chName.toLowerCase() : `chapter-${chName.match(/\d+/)?.[0] || chName}`
 
     const cf = (project.file_details as { chapter_folders?: { chapters?: ChapterFolder[] } }).chapter_folders
     const base = cf?.chapters?.find(c => {
       const cName = c.chapter_name.toLowerCase()
-      return cName === matchName || cName === `chapter-${matchName}`
+      const chNameLower = chName.toLowerCase()
+      
+      if (isVirtual) {
+        return cName === chNameLower || cName === `chapter-${chNameLower}`
+      }
+
+      // Direct exact match
+      if (cName === chNameLower || cName === `chapter-${chNameLower}`) return true
+      // Suffix match
+      if (cName.includes(chNameLower)) return true
+      
+      // Match by digits and track type (Manuscript vs Art)
+      const digitsMatch = chName.match(/\d+/)?.[0]
+      if (digitsMatch) {
+        const cDigits = cName.match(/\d+/)?.[0]
+        if (cDigits === digitsMatch) {
+          const chIsArt = chNameLower.includes('art')
+          const folderIsArt = cName.includes('art')
+          return chIsArt === folderIsArt
+        }
+      }
+      return false
     }) ?? null
     if (!base) return null
     return {

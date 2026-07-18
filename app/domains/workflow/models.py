@@ -188,3 +188,7 @@ class ChapterInfo(Base):
     def title(self, val: Optional[str]):
         self.chapter_title = val
 
+    @property
+    def art_count(self) -> int:
+        return sum(1 for f in self.files if f.category == "Art")
+

@@ -120,7 +120,64 @@ function buildChapterSchedule(
 
 // ── Planning Table Header ────────────────────────────────────────────────────────
 
-function PlanningTableHeader({ stages }: { stages: StageSchedule[] }) {
+function PlanningTableHeader({ stages, activeTab = 'manuscript' }: { stages: StageSchedule[], activeTab?: 'manuscript' | 'art' | 'design' }) {
+  if (activeTab === 'art') {
+    return (
+      <thead>
+        <tr className="bg-background border-b-2 border-border">
+          <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-0 z-20 bg-background whitespace-nowrap w-[144px] min-w-[144px] max-w-[144px] shadow-[inset_-1px_0_0_var(--color-border)]">
+            Chapter
+          </th>
+          <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-[144px] z-20 bg-background whitespace-nowrap w-[176px] min-w-[176px] max-w-[176px] shadow-[inset_-1px_0_0_var(--color-border)]">
+            File Name
+          </th>
+          <th className="px-4 py-3 text-center text-xs font-semibold text-muted uppercase tracking-wider sticky left-[320px] z-20 bg-background whitespace-nowrap w-[112px] min-w-[112px] max-w-[112px] shadow-[inset_-2px_0_0_var(--color-border)]">
+            Art Count
+          </th>
+          {stages.map(s => (
+            <th key={s.stageName} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider whitespace-nowrap min-w-56 border-r border-border last:border-r-0">
+              <div className="flex flex-col gap-0.5">
+                <span>{s.stageName}</span>
+                {s.slaDays != null && (
+                  <span className="text-[10px] font-normal normal-case tracking-normal text-muted/70">
+                    Default: {s.slaDays}d
+                  </span>
+                )}
+              </div>
+            </th>
+          ))}
+        </tr>
+      </thead>
+    )
+  }
+
+  if (activeTab === 'design') {
+    return (
+      <thead>
+        <tr className="bg-background border-b-2 border-border">
+          <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-0 z-20 bg-background whitespace-nowrap w-[144px] min-w-[144px] max-w-[144px] shadow-[inset_-1px_0_0_var(--color-border)]">
+            Chapter
+          </th>
+          <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-[144px] z-20 bg-background whitespace-nowrap w-[176px] min-w-[176px] max-w-[176px] shadow-[inset_-2px_0_0_var(--color-border)]">
+            File Name
+          </th>
+          {stages.map(s => (
+            <th key={s.stageName} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider whitespace-nowrap min-w-56 border-r border-border last:border-r-0">
+              <div className="flex flex-col gap-0.5">
+                <span>{s.stageName}</span>
+                {s.slaDays != null && (
+                  <span className="text-[10px] font-normal normal-case tracking-normal text-muted/70">
+                    Default: {s.slaDays}d
+                  </span>
+                )}
+              </div>
+            </th>
+          ))}
+        </tr>
+      </thead>
+    )
+  }
+
   return (
     <thead>
       <tr className="bg-background border-b-2 border-border">
@@ -162,7 +219,7 @@ export function ProjectPlanningPage() {
 
   const [project,      setProject]      = useState<Project | null>(null)
   const [chapters,     setChapters]     = useState<Chapter[]>([])
-  const [wfStages,     setWfStages]     = useState<WorkflowStage[]>([])
+  const [wfStagesMap,  setWfStagesMap]  = useState<Record<string, WorkflowStage[]>>({})
   const [stageMasters, setStageMasters] = useState<Stage[]>([])
   const [loading,      setLoading]      = useState(true)
   const [approving,    setApproving]    = useState(false)
@@ -172,6 +229,7 @@ export function ProjectPlanningPage() {
   const [delayMap,  setDelayMap]  = useState<Map<string, number>>(new Map())
   const [actualFinalDue, setActualFinalDue] = useState<Date | null>(null)
   const [dbDates, setDbDates] = useState<Record<string, { start: Date; due: Date }>>({})
+  const [activeTab, setActiveTab] = useState<'manuscript' | 'art' | 'design'>('manuscript')
 
   const loadPlanningData = useCallback(async (opts?: { silent?: boolean }) => {
     if (!id) return
@@ -182,34 +240,48 @@ export function ProjectPlanningPage() {
       setProject(proj)
       setPreviewComposition(proj.composition ?? 'Medium')
       const projectCode = proj.code || proj.project_code || ''
-      const workflowName = proj.workflow_name || ''
 
       // Ensure WMS chapter_details are in sync with CMS chapters
       await import('@/api/client').then(m => m.default.post(`/projects/${id}/sync-chapters`)).catch(() => undefined)
 
-      const [chs, wf, masters, stageDetails] = await Promise.all([
+      const [chsRaw, masters, stageDetails] = await Promise.all([
         chaptersApi.getByProject(projectCode)
-          .then(list => list.filter(c => !VIRTUAL_CHAPTER_NAMES.has(c.chapters)))
+          .then(list => list.filter(c => c.chapters !== 'CE support'))
           .catch(() => [] as Chapter[]),
-        workflowName
-          ? workflowsApi.getWorkflow(workflowName).catch(() => [] as WorkflowStage[])
-          : Promise.resolve([] as WorkflowStage[]),
         stagesApi.list().catch(() => [] as Stage[]),
         projectCode
           ? stageDetailsApi.listByProject(projectCode).catch(() => [])
           : Promise.resolve([]),
       ])
-      setChapters(chs)
-      setWfStages(wf)
+      setChapters(chsRaw)
       setStageMasters(masters)
 
-      // Reset before rebuilding so chapters that lost their planning rows don't keep stale data
+      // Find unique workflows across all chapters, including default project workflow
+      const uniqueWfs = Array.from(new Set(chsRaw.map(c => c.workflow).filter(Boolean))) as string[]
+      if (proj.workflow_name && !uniqueWfs.includes(proj.workflow_name)) {
+        uniqueWfs.push(proj.workflow_name)
+      }
+
+      // Fetch all unique workflows stages
+      const wfPromises = uniqueWfs.map(wf =>
+        workflowsApi.getWorkflow(wf)
+          .then(stages => ({ workflowName: wf, stages }))
+          .catch(() => ({ workflowName: wf, stages: [] as WorkflowStage[] }))
+      )
+      const wfsList = await Promise.all(wfPromises)
+      
+      const wfMapObj: Record<string, WorkflowStage[]> = {}
+      wfsList.forEach(({ workflowName, stages }) => {
+        wfMapObj[workflowName] = orderStages(stages)
+      })
+      setWfStagesMap(wfMapObj)
+
       let loaded: Record<number, Record<string, number | null>> = {}
       let dMap = new Map<string, number>()
       let datesMap: Record<string, { start: Date; due: Date }> = {}
       let maxDue: Date | null = null
 
-      if (stageDetails.length > 0 && chs.length > 0) {
+      if (stageDetails.length > 0 && chsRaw.length > 0) {
         const sorted = [...stageDetails].sort(
           (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
         )
@@ -219,7 +291,7 @@ export function ProjectPlanningPage() {
           const key = `${d.chapters}||${d.stage_name}`
           if (!slaSeen.has(key) && d.sla != null) {
             slaSeen.add(key)
-            const ch = chs.find(c => c.chapters === d.chapters)
+            const ch = chsRaw.find(c => c.chapters === d.chapters)
             if (ch) {
               if (!loaded[ch.id]) loaded[ch.id] = {}
               loaded[ch.id][d.stage_name] = d.sla
@@ -258,18 +330,39 @@ export function ProjectPlanningPage() {
 
   useEffect(() => { setCellSlas({}) }, [previewComposition])
 
-  const orderedStages = useMemo(() => orderStages(wfStages), [wfStages])
-
   const masterMap = useMemo(() => {
     const m = new Map<string, Stage>()
     stageMasters.forEach(s => m.set(s.stage_name, s))
     return m
   }, [stageMasters])
 
+  // Partition chapters into Design, Manuscripts, and Art tracks
+  const designChapters = useMemo(() => chapters.filter(c => c.chapters === 'Design'), [chapters])
+  const manuscriptChapters = useMemo(() => chapters.filter(c => /^\d+$/.test(c.chapters)), [chapters])
+  const artChapters = useMemo(() => chapters.filter(c => c.chapters.toLowerCase().includes('art')), [chapters])
+
+  // Select active track chapters
+  const activeChapters = useMemo(() => {
+    if (activeTab === 'design') return designChapters
+    if (activeTab === 'art') return artChapters
+    return manuscriptChapters
+  }, [activeTab, designChapters, artChapters, manuscriptChapters])
+
+  // Get active workflow and stages based on the selected tab
+  const activeWorkflowName = useMemo(() => {
+    if (activeTab === 'design') return designChapters[0]?.workflow || project?.workflow_name || ''
+    if (activeTab === 'art') return artChapters[0]?.workflow || project?.workflow_name || ''
+    return manuscriptChapters[0]?.workflow || project?.workflow_name || ''
+  }, [activeTab, designChapters, artChapters, manuscriptChapters, project])
+
+  const currentOrderedStages = useMemo(() => {
+    return wfStagesMap[activeWorkflowName] ?? []
+  }, [activeWorkflowName, wfStagesMap])
+
   const baseSchedule = useMemo((): StageSchedule[] => {
-    if (!project || orderedStages.length === 0) return []
-    return buildBaseSchedule(orderedStages, masterMap, previewComposition, project.created_at || '')
-  }, [project, orderedStages, masterMap, previewComposition])
+    if (!project || currentOrderedStages.length === 0) return []
+    return buildBaseSchedule(currentOrderedStages, masterMap, previewComposition, project.created_at || '')
+  }, [project, currentOrderedStages, masterMap, previewComposition])
 
   const baseSlaMap = useMemo(() => {
     const m = new Map<string, number | null>()
@@ -289,18 +382,16 @@ export function ProjectPlanningPage() {
   }, [dbDates])
 
   const chapterSchedules = useMemo(() => {
-    if (!project || chapters.length === 0 || orderedStages.length === 0) return new Map<number, StageSchedule[]>()
+    if (!project || chapters.length === 0 || currentOrderedStages.length === 0) return new Map<number, StageSchedule[]>()
     const result = new Map<number, StageSchedule[]>()
-    for (const ch of chapters) {
-      // A chapter added after the project was already approved has no history tied to
-      // project.created_at — anchor its schedule to its own upload time instead, otherwise
-      // it would start (and appear "delayed") back on the original project approval date.
+    const activeChapters = activeTab === 'design' ? designChapters : activeTab === 'art' ? artChapters : manuscriptChapters
+    for (const ch of activeChapters) {
       const isUnplanned = alreadyApproved && !plannedChapterNumbers.has(ch.chapters)
       const anchor = isUnplanned ? (ch.created_at || project.created_at || '') : (project.created_at || '')
-      result.set(ch.id, buildChapterSchedule(ch.id, orderedStages, baseSlaMap, cellSlas, anchor))
+      result.set(ch.id, buildChapterSchedule(ch.id, currentOrderedStages, baseSlaMap, cellSlas, anchor))
     }
     return result
-  }, [project, chapters, orderedStages, baseSlaMap, cellSlas, alreadyApproved, plannedChapterNumbers])
+  }, [project, chapters, currentOrderedStages, baseSlaMap, cellSlas, activeTab, designChapters, artChapters, manuscriptChapters, alreadyApproved, plannedChapterNumbers])
 
   function handleCellSlaChange(chId: number, stageName: string, raw: string) {
     if (raw === '') {
@@ -327,18 +418,77 @@ export function ProjectPlanningPage() {
     [alreadyApproved, chapters, plannedChapterNumbers]
   )
 
-  const finalDue = useMemo(() => {
-    if (baseSchedule.length === 0) return null
-    let max = baseSchedule[baseSchedule.length - 1].due
-    for (const ch of chapters) {
-      const chSched = chapterSchedules.get(ch.id)
-      if (chSched) {
-        const last = chSched[chSched.length - 1]
-        if (last && last.due > max) max = last.due
-      }
+  const getScheduleForChapter = useCallback((ch: Chapter) => {
+    let trackWf = project?.workflow_name || ''
+    let ordered: WorkflowStage[] = []
+    if (ch.chapters === 'Design') {
+      trackWf = designChapters[0]?.workflow || project?.workflow_name || ''
+      ordered = wfStagesMap[trackWf] ?? []
+    } else if (ch.chapters.toLowerCase().includes('art')) {
+      trackWf = artChapters[0]?.workflow || project?.workflow_name || ''
+      ordered = wfStagesMap[trackWf] ?? []
+    } else {
+      trackWf = manuscriptChapters[0]?.workflow || project?.workflow_name || ''
+      ordered = wfStagesMap[trackWf] ?? []
+    }
+
+    const baseSched = buildBaseSchedule(ordered, masterMap, previewComposition, project?.created_at || '')
+    const baseSlas = new Map<string, number | null>()
+    baseSched.forEach(s => baseSlas.set(s.stageName, s.slaDays))
+
+    const isUnplanned = alreadyApproved && !plannedChapterNumbers.has(ch.chapters)
+    const anchor = isUnplanned ? (ch.created_at || project?.created_at || '') : (project?.created_at || '')
+    
+    return buildChapterSchedule(ch.id, ordered, baseSlas, cellSlas, anchor)
+  }, [project, designChapters, artChapters, manuscriptChapters, wfStagesMap, masterMap, previewComposition, cellSlas, alreadyApproved, plannedChapterNumbers])
+
+  // Helper: compute the latest stage-end date across a set of chapters and their workflow
+  const getTrackFinalDue = useCallback((
+    trackChapters: Chapter[],
+    ordered: WorkflowStage[],
+  ): Date | null => {
+    if (trackChapters.length === 0 || ordered.length === 0) return null
+    const baseSchedule = buildBaseSchedule(ordered, masterMap, previewComposition, project?.created_at || '')
+    const baseSlas = new Map<string, number | null>()
+    baseSchedule.forEach(s => baseSlas.set(s.stageName, s.slaDays))
+    let max: Date | null = null
+    for (const ch of trackChapters) {
+      const isUnplanned = alreadyApproved && !plannedChapterNumbers.has(ch.chapters)
+      const anchor = isUnplanned ? (ch.created_at || project?.created_at || '') : (project?.created_at || '')
+      const sched = buildChapterSchedule(ch.id, ordered, baseSlas, cellSlas, anchor)
+      const last = sched.length > 0 ? sched[sched.length - 1].due : null
+      if (last && (!max || last > max)) max = last
     }
     return max
-  }, [baseSchedule, chapters, chapterSchedules])
+  }, [project, masterMap, previewComposition, cellSlas, alreadyApproved, plannedChapterNumbers])
+
+  const manuscriptFinalDue = useMemo(() => {
+    const stages = wfStagesMap[manuscriptChapters[0]?.workflow || project?.workflow_name || ''] ?? []
+    return getTrackFinalDue(manuscriptChapters, stages)
+  }, [manuscriptChapters, wfStagesMap, project, getTrackFinalDue])
+
+  const artFinalDue = useMemo(() => {
+    const stages = wfStagesMap[artChapters[0]?.workflow || ''] ?? []
+    return getTrackFinalDue(artChapters, stages)
+  }, [artChapters, wfStagesMap, getTrackFinalDue])
+
+  const designFinalDue = useMemo(() => {
+    const stages = wfStagesMap[designChapters[0]?.workflow || ''] ?? []
+    return getTrackFinalDue(designChapters, stages)
+  }, [designChapters, wfStagesMap, getTrackFinalDue])
+
+  // Combined final due used for Approve (latest across all tracks)
+  const finalDue = useMemo(() => {
+    const candidates = [manuscriptFinalDue, artFinalDue, designFinalDue].filter(Boolean) as Date[]
+    return candidates.length > 0 ? candidates.reduce((a, b) => (b > a ? b : a)) : null
+  }, [manuscriptFinalDue, artFinalDue, designFinalDue])
+
+  // Final due for the currently visible tab
+  const activeTabFinalDue = useMemo(() => {
+    if (activeTab === 'art') return artFinalDue
+    if (activeTab === 'design') return designFinalDue
+    return manuscriptFinalDue
+  }, [activeTab, manuscriptFinalDue, artFinalDue, designFinalDue])
 
   function toLocalDateStr(d: Date): string {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -373,13 +523,14 @@ export function ProjectPlanningPage() {
         }
 
         const items = chapters.flatMap(ch => {
-          const chSched = chapterSchedules.get(ch.id) ?? baseSchedule
+          const chSched = getScheduleForChapter(ch)
           return chSched.map(s => ({
             chapters:           ch.chapters,
             stage_name:         s.stageName,
             planned_start_date: toLocalISOString(s.start),
             planned_end_date:   toLocalISOString(s.due),
             sla:                s.slaDays,
+            workflow:           ch.workflow || wfName || '',
           }))
         })
         try {
@@ -398,7 +549,7 @@ export function ProjectPlanningPage() {
         }
 
         Promise.all(chapters.map(ch => {
-          const chSched = chapterSchedules.get(ch.id) ?? baseSchedule
+          const chSched = getScheduleForChapter(ch)
           const stageSched = ch.stage_name
             ? (chSched.find(s => s.stageName === ch.stage_name) ?? chSched[0])
             : chSched[0]
@@ -413,9 +564,6 @@ export function ProjectPlanningPage() {
     setApproving(false)
   }
 
-  // Scoped approval for chapters added after the project's planning was already approved.
-  // Only ever submits `unplannedChapters` — never re-submits chapters that already have
-  // StageDetail rows, since createPlanningRows has no upsert/dedupe and would duplicate them.
   async function handleApproveNewChapters() {
     if (!project || unplannedChapters.length === 0) return
     setApprovingNew(true)
@@ -430,13 +578,14 @@ export function ProjectPlanningPage() {
         }
 
         const items = unplannedChapters.flatMap(ch => {
-          const chSched = chapterSchedules.get(ch.id) ?? baseSchedule
+          const chSched = getScheduleForChapter(ch)
           return chSched.map(s => ({
             chapters:           ch.chapters,
             stage_name:         s.stageName,
             planned_start_date: toLocalISOString(s.start),
             planned_end_date:   toLocalISOString(s.due),
             sla:                s.slaDays,
+            workflow:           ch.workflow || wfName || '',
           }))
         })
         await stageDetailsApi.createPlanningRows({
@@ -449,7 +598,7 @@ export function ProjectPlanningPage() {
         })
 
         await Promise.all(unplannedChapters.map(ch => {
-          const chSched = chapterSchedules.get(ch.id) ?? baseSchedule
+          const chSched = getScheduleForChapter(ch)
           const stageSched = ch.stage_name
             ? (chSched.find(s => s.stageName === ch.stage_name) ?? chSched[0])
             : chSched[0]
@@ -479,15 +628,26 @@ export function ProjectPlanningPage() {
         <td className="px-4 py-3 font-semibold text-text sticky left-0 z-10 whitespace-nowrap w-[144px] min-w-[144px] max-w-[144px] shadow-[inset_-1px_0_0_var(--color-border)] bg-card group-hover:bg-accent transition-colors">
           {ch.chapters}
         </td>
-        <td className="px-4 py-3 text-xs text-muted sticky left-[144px] z-10 whitespace-nowrap w-[176px] min-w-[176px] max-w-[176px] shadow-[inset_-1px_0_0_var(--color-border)] max-w-[176px] truncate bg-card group-hover:bg-accent transition-colors">
+        <td className={`px-4 py-3 text-xs text-muted sticky left-[144px] z-10 whitespace-nowrap w-[176px] min-w-[176px] max-w-[176px] truncate bg-card group-hover:bg-accent transition-colors ${
+          activeTab === 'design' ? 'shadow-[inset_-2px_0_0_var(--color-border)]' : 'shadow-[inset_-1px_0_0_var(--color-border)]'
+        }`}>
           {ch.chapter_title || '—'}
         </td>
-        <td className="px-4 py-3 text-xs text-center sticky left-[320px] z-10 whitespace-nowrap w-[112px] min-w-[112px] max-w-[112px] shadow-[inset_-1px_0_0_var(--color-border)] font-medium text-text bg-card group-hover:bg-accent transition-colors">
-          {ch.manuscript_pages != null ? ch.manuscript_pages : '—'}
-        </td>
-        <td className="px-4 py-3 text-xs text-center sticky left-[432px] z-10 whitespace-nowrap w-[96px] min-w-[96px] max-w-[96px] shadow-[inset_-2px_0_0_var(--color-border)] font-medium text-text bg-card group-hover:bg-accent transition-colors">
-          {ch.word_count != null ? Math.floor(ch.word_count / 250) : '—'}
-        </td>
+        {activeTab === 'manuscript' && (
+          <>
+            <td className="px-4 py-3 text-xs text-center sticky left-[320px] z-10 whitespace-nowrap w-[112px] min-w-[112px] max-w-[112px] shadow-[inset_-1px_0_0_var(--color-border)] font-medium text-text bg-card group-hover:bg-accent transition-colors">
+              {ch.manuscript_pages != null ? ch.manuscript_pages : '—'}
+            </td>
+            <td className="px-4 py-3 text-xs text-center sticky left-[432px] z-10 whitespace-nowrap w-[96px] min-w-[96px] max-w-[96px] shadow-[inset_-2px_0_0_var(--color-border)] font-medium text-text bg-card group-hover:bg-accent transition-colors">
+              {ch.word_count != null ? Math.floor(ch.word_count / 250) : '—'}
+            </td>
+          </>
+        )}
+        {activeTab === 'art' && (
+          <td className="px-4 py-3 text-xs text-center sticky left-[320px] z-10 whitespace-nowrap w-[112px] min-w-[112px] max-w-[112px] shadow-[inset_-2px_0_0_var(--color-border)] font-medium text-text bg-card group-hover:bg-accent transition-colors">
+            {ch.art_count != null && ch.art_count > 0 ? ch.art_count : 'no arts'}
+          </td>
+        )}
         {chSched.map(s => {
           const isCellEdited = s.slaDays !== (baseSlaMap.get(s.stageName) ?? null)
           const delayDays    = delayMap.get(`${ch.chapters}||${s.stageName}`)
@@ -607,7 +767,7 @@ export function ProjectPlanningPage() {
             )}
           </div>
 
-          {finalDue && (
+          {activeTabFinalDue && (
             <div className="flex flex-col items-end gap-0.5">
               <div className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border ${
                 alreadyApproved
@@ -615,9 +775,9 @@ export function ProjectPlanningPage() {
                   : 'text-primary bg-accent border-primary/20'
               }`}>
                 <Flag size={12} />
-                Final Deliverable: {fmt(finalDue)}
+                {activeTab === 'art' ? 'Art' : activeTab === 'design' ? 'Design' : 'Manuscript'} Final Deliverable: {fmt(activeTabFinalDue)}
               </div>
-              {alreadyApproved && actualFinalDue && actualFinalDue > finalDue && (
+              {alreadyApproved && actualFinalDue && finalDue && actualFinalDue > finalDue && (
                 <div className="inline-flex items-center gap-1 text-[10px] font-semibold text-red-600 bg-red-50 border border-red-200 px-2 py-0.5 rounded-md">
                   <Flag size={9} /> Updated: {fmt(actualFinalDue)} due to delays
                 </div>
@@ -642,12 +802,58 @@ export function ProjectPlanningPage() {
         </div>
       </div>
 
+      {/* Track Selection Tabs */}
+      <div className="flex border-b border-border bg-card px-6 py-2 gap-4 flex-shrink-0">
+        <button
+          onClick={() => setActiveTab('manuscript')}
+          className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
+            activeTab === 'manuscript'
+              ? 'text-primary bg-accent border-primary/20 shadow-sm font-bold'
+              : 'text-muted border-transparent hover:bg-accent/40'
+          }`}
+        >
+          📚 Manuscripts ({manuscriptChapters.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('art')}
+          className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
+            activeTab === 'art'
+              ? 'text-primary bg-accent border-primary/20 shadow-sm font-bold'
+              : 'text-muted border-transparent hover:bg-accent/40'
+          }`}
+        >
+          📐 Art Tracks ({artChapters.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('design')}
+          className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
+            activeTab === 'design'
+              ? 'text-primary bg-accent border-primary/20 shadow-sm font-bold'
+              : 'text-muted border-transparent hover:bg-accent/40'
+          }`}
+        >
+          🎨 Design ({designChapters.length})
+        </button>
+      </div>
+
+      {!(activeTab === 'design' && designChapters.length === 0) && (
+        <div className="px-6 py-2 bg-surface border-b border-border text-xs text-muted flex items-center justify-between flex-shrink-0">
+          <span>Active Workflow: <strong>{activeWorkflowName || 'None'}</strong></span>
+          <span>Chapters count: <strong>{activeChapters.length}</strong></span>
+        </div>
+      )}
+
       {/* Planning Table */}
       <div className="flex-1 overflow-auto">
-        {baseSchedule.length === 0 ? (
+        {activeTab === 'design' && designChapters.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-24 text-muted">
+            <Layers size={40} className="mb-3 opacity-30" />
+            <p className="text-sm">Design track is not enabled for this project.</p>
+          </div>
+        ) : baseSchedule.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-muted">
             <Calendar size={40} className="mb-3 opacity-30" />
-            <p className="text-sm">No workflow stages found. Assign a workflow to this project first.</p>
+            <p className="text-sm">No workflow stages found for active workflow '{activeWorkflowName}'.</p>
           </div>
         ) : (
           <>
@@ -655,7 +861,7 @@ export function ProjectPlanningPage() {
             <div className="sticky left-0 z-30 w-fit min-w-full px-4 pt-4 pb-2 flex items-center justify-between gap-3 bg-amber-50 border-b border-amber-200">
               <p className="text-xs text-amber-800 flex items-center gap-1.5">
                 <Calendar size={13} />
-                {unplannedChapters.length} new chapter{unplannedChapters.length !== 1 ? 's' : ''} added after approval — plan and approve below to give {unplannedChapters.length !== 1 ? 'them' : 'it'} due dates.
+                {unplannedChapters.length} new chapter{unplannedChapters.length !== 1 ? 's' : ''} added after approval — plan and approve below to give them due dates.
               </p>
               <Button
                 onClick={handleApproveNewChapters}
@@ -668,31 +874,33 @@ export function ProjectPlanningPage() {
             </div>
           )}
           <table className="w-full border-collapse text-sm min-w-max">
-            <PlanningTableHeader stages={baseSchedule} />
+            <PlanningTableHeader stages={baseSchedule} activeTab={activeTab} />
             <tbody>
-              {plannedChapters.length === 0 ? (
+              {activeChapters.filter(ch => !alreadyApproved || plannedChapterNumbers.has(ch.chapters)).length === 0 ? (
                 <tr>
-                  <td colSpan={4 + baseSchedule.length} className="px-4 py-16 text-center text-sm text-muted">
-                    No chapters found. Upload a zip file to add chapters first.
+                  <td colSpan={(activeTab === 'manuscript' ? 4 : activeTab === 'art' ? 3 : 2) + baseSchedule.length} className="px-4 py-16 text-center text-sm text-muted">
+                    No active chapters found for this track.
                   </td>
                 </tr>
               ) : (
-                [...plannedChapters]
+                [...activeChapters]
+                  .filter(ch => !alreadyApproved || plannedChapterNumbers.has(ch.chapters))
                   .sort((a, b) => a.chapters.localeCompare(b.chapters, undefined, { numeric: true }))
                   .map(ch => renderChapterRow(ch, !alreadyApproved))
               )}
             </tbody>
           </table>
 
-          {alreadyApproved && unplannedChapters.length > 0 && (
+          {alreadyApproved && activeChapters.filter(ch => !plannedChapterNumbers.has(ch.chapters)).length > 0 && (
             <>
               <div className="sticky left-0 z-30 w-fit min-w-full mt-6 px-4 py-2 text-left text-xs font-semibold text-amber-800 bg-amber-50 border-y border-amber-200">
-                New Chapters — Pending Planning
+                New Chapters in {activeTab === 'manuscript' ? 'Manuscript' : activeTab === 'art' ? 'Art' : 'Design'} Track — Pending Planning
               </div>
               <table className="w-full border-collapse text-sm min-w-max">
-                <PlanningTableHeader stages={baseSchedule} />
+                <PlanningTableHeader stages={baseSchedule} activeTab={activeTab} />
                 <tbody>
-                  {[...unplannedChapters]
+                  {[...activeChapters]
+                    .filter(ch => !plannedChapterNumbers.has(ch.chapters))
                     .sort((a, b) => a.chapters.localeCompare(b.chapters, undefined, { numeric: true }))
                     .map(ch => renderChapterRow(ch, true))}
                 </tbody>

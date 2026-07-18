@@ -92,11 +92,27 @@ export const CE_SUPPORT_FOLDER_CONFIG: Record<string, FolderConfig> = {
   stylesheet_template: { label:'Style sheet template', icon:'FileCode', allowUpload:true, allowDownload:true, columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
 }
 
+export const ART_FOLDER_CONFIG: Record<string, FolderConfig> = {
+  art:        FOLDER_CONFIG.art,
+  misc:       FOLDER_CONFIG.misc,
+  backup:     FOLDER_CONFIG.backup,
+}
+
+export const MANUSCRIPT_FOLDER_CONFIG: Record<string, FolderConfig> = {
+  manuscript: FOLDER_CONFIG.manuscript,
+  indesign:   FOLDER_CONFIG.indesign,
+  proof:      FOLDER_CONFIG.proof,
+  xml:        FOLDER_CONFIG.xml,
+  misc:       FOLDER_CONFIG.misc,
+  backup:     FOLDER_CONFIG.backup,
+}
+
 export function getFolderConfigForChapter(chapterName: string): Record<string, FolderConfig> {
   const name = chapterName.toLowerCase()
   if (name === 'design') return DESIGN_FOLDER_CONFIG
   if (name === 'ce support') return CE_SUPPORT_FOLDER_CONFIG
-  return FOLDER_CONFIG
+  if (name.includes('art')) return ART_FOLDER_CONFIG
+  return MANUSCRIPT_FOLDER_CONFIG
 }
 
 export const PROCESSING_ACTIONS: Record<string, string[]> = {
