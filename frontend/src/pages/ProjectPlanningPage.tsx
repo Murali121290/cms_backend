@@ -120,7 +120,64 @@ function buildChapterSchedule(
 
 // ── Planning Table Header ────────────────────────────────────────────────────────
 
-function PlanningTableHeader({ stages }: { stages: StageSchedule[] }) {
+function PlanningTableHeader({ stages, activeTab = 'manuscript' }: { stages: StageSchedule[], activeTab?: 'manuscript' | 'art' | 'design' }) {
+  if (activeTab === 'art') {
+    return (
+      <thead>
+        <tr className="bg-background border-b-2 border-border">
+          <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-0 z-20 bg-background whitespace-nowrap w-[144px] min-w-[144px] max-w-[144px] shadow-[inset_-1px_0_0_var(--color-border)]">
+            Chapter
+          </th>
+          <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-[144px] z-20 bg-background whitespace-nowrap w-[176px] min-w-[176px] max-w-[176px] shadow-[inset_-1px_0_0_var(--color-border)]">
+            File Name
+          </th>
+          <th className="px-4 py-3 text-center text-xs font-semibold text-muted uppercase tracking-wider sticky left-[320px] z-20 bg-background whitespace-nowrap w-[112px] min-w-[112px] max-w-[112px] shadow-[inset_-2px_0_0_var(--color-border)]">
+            Art Count
+          </th>
+          {stages.map(s => (
+            <th key={s.stageName} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider whitespace-nowrap min-w-56 border-r border-border last:border-r-0">
+              <div className="flex flex-col gap-0.5">
+                <span>{s.stageName}</span>
+                {s.slaDays != null && (
+                  <span className="text-[10px] font-normal normal-case tracking-normal text-muted/70">
+                    Default: {s.slaDays}d
+                  </span>
+                )}
+              </div>
+            </th>
+          ))}
+        </tr>
+      </thead>
+    )
+  }
+
+  if (activeTab === 'design') {
+    return (
+      <thead>
+        <tr className="bg-background border-b-2 border-border">
+          <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-0 z-20 bg-background whitespace-nowrap w-[144px] min-w-[144px] max-w-[144px] shadow-[inset_-1px_0_0_var(--color-border)]">
+            Chapter
+          </th>
+          <th className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider sticky left-[144px] z-20 bg-background whitespace-nowrap w-[176px] min-w-[176px] max-w-[176px] shadow-[inset_-2px_0_0_var(--color-border)]">
+            File Name
+          </th>
+          {stages.map(s => (
+            <th key={s.stageName} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider whitespace-nowrap min-w-56 border-r border-border last:border-r-0">
+              <div className="flex flex-col gap-0.5">
+                <span>{s.stageName}</span>
+                {s.slaDays != null && (
+                  <span className="text-[10px] font-normal normal-case tracking-normal text-muted/70">
+                    Default: {s.slaDays}d
+                  </span>
+                )}
+              </div>
+            </th>
+          ))}
+        </tr>
+      </thead>
+    )
+  }
+
   return (
     <thead>
       <tr className="bg-background border-b-2 border-border">
@@ -385,49 +442,53 @@ export function ProjectPlanningPage() {
     return buildChapterSchedule(ch.id, ordered, baseSlas, cellSlas, anchor)
   }, [project, designChapters, artChapters, manuscriptChapters, wfStagesMap, masterMap, previewComposition, cellSlas, alreadyApproved, plannedChapterNumbers])
 
-  const finalDue = useMemo(() => {
+  // Helper: compute the latest stage-end date across a set of chapters and their workflow
+  const getTrackFinalDue = useCallback((
+    trackChapters: Chapter[],
+    ordered: WorkflowStage[],
+  ): Date | null => {
+    if (trackChapters.length === 0 || ordered.length === 0) return null
+    const baseSchedule = buildBaseSchedule(ordered, masterMap, previewComposition, project?.created_at || '')
+    const baseSlas = new Map<string, number | null>()
+    baseSchedule.forEach(s => baseSlas.set(s.stageName, s.slaDays))
     let max: Date | null = null
-    
-    // Helper to calculate due date for a single chapter
-    const getChLastDue = (ch: Chapter, ordered: WorkflowStage[], baseSlas: Map<string, number | null>) => {
+    for (const ch of trackChapters) {
       const isUnplanned = alreadyApproved && !plannedChapterNumbers.has(ch.chapters)
       const anchor = isUnplanned ? (ch.created_at || project?.created_at || '') : (project?.created_at || '')
       const sched = buildChapterSchedule(ch.id, ordered, baseSlas, cellSlas, anchor)
-      return sched.length > 0 ? sched[sched.length - 1].due : null
+      const last = sched.length > 0 ? sched[sched.length - 1].due : null
+      if (last && (!max || last > max)) max = last
     }
-
-    // Design chapters
-    const designStages = wfStagesMap[designChapters[0]?.workflow || ''] ?? []
-    const designBaseSchedule = buildBaseSchedule(designStages, masterMap, previewComposition, project?.created_at || '')
-    const designBaseSlas = new Map<string, number | null>()
-    designBaseSchedule.forEach(s => designBaseSlas.set(s.stageName, s.slaDays))
-    for (const ch of designChapters) {
-      const d = getChLastDue(ch, designStages, designBaseSlas)
-      if (d && (!max || d > max)) max = d
-    }
-
-    // Manuscript chapters
-    const msStages = wfStagesMap[manuscriptChapters[0]?.workflow || ''] ?? []
-    const msBaseSchedule = buildBaseSchedule(msStages, masterMap, previewComposition, project?.created_at || '')
-    const msBaseSlas = new Map<string, number | null>()
-    msBaseSchedule.forEach(s => msBaseSlas.set(s.stageName, s.slaDays))
-    for (const ch of manuscriptChapters) {
-      const d = getChLastDue(ch, msStages, msBaseSlas)
-      if (d && (!max || d > max)) max = d
-    }
-
-    // Art chapters
-    const artStages = wfStagesMap[artChapters[0]?.workflow || ''] ?? []
-    const artBaseSchedule = buildBaseSchedule(artStages, masterMap, previewComposition, project?.created_at || '')
-    const artBaseSlas = new Map<string, number | null>()
-    artBaseSchedule.forEach(s => artBaseSlas.set(s.stageName, s.slaDays))
-    for (const ch of artChapters) {
-      const d = getChLastDue(ch, artStages, artBaseSlas)
-      if (d && (!max || d > max)) max = d
-    }
-
     return max
-  }, [project, chapters, wfStagesMap, cellSlas, alreadyApproved, plannedChapterNumbers, masterMap, previewComposition, designChapters, manuscriptChapters, artChapters])
+  }, [project, masterMap, previewComposition, cellSlas, alreadyApproved, plannedChapterNumbers])
+
+  const manuscriptFinalDue = useMemo(() => {
+    const stages = wfStagesMap[manuscriptChapters[0]?.workflow || project?.workflow_name || ''] ?? []
+    return getTrackFinalDue(manuscriptChapters, stages)
+  }, [manuscriptChapters, wfStagesMap, project, getTrackFinalDue])
+
+  const artFinalDue = useMemo(() => {
+    const stages = wfStagesMap[artChapters[0]?.workflow || ''] ?? []
+    return getTrackFinalDue(artChapters, stages)
+  }, [artChapters, wfStagesMap, getTrackFinalDue])
+
+  const designFinalDue = useMemo(() => {
+    const stages = wfStagesMap[designChapters[0]?.workflow || ''] ?? []
+    return getTrackFinalDue(designChapters, stages)
+  }, [designChapters, wfStagesMap, getTrackFinalDue])
+
+  // Combined final due used for Approve (latest across all tracks)
+  const finalDue = useMemo(() => {
+    const candidates = [manuscriptFinalDue, artFinalDue, designFinalDue].filter(Boolean) as Date[]
+    return candidates.length > 0 ? candidates.reduce((a, b) => (b > a ? b : a)) : null
+  }, [manuscriptFinalDue, artFinalDue, designFinalDue])
+
+  // Final due for the currently visible tab
+  const activeTabFinalDue = useMemo(() => {
+    if (activeTab === 'art') return artFinalDue
+    if (activeTab === 'design') return designFinalDue
+    return manuscriptFinalDue
+  }, [activeTab, manuscriptFinalDue, artFinalDue, designFinalDue])
 
   function toLocalDateStr(d: Date): string {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -567,15 +628,26 @@ export function ProjectPlanningPage() {
         <td className="px-4 py-3 font-semibold text-text sticky left-0 z-10 whitespace-nowrap w-[144px] min-w-[144px] max-w-[144px] shadow-[inset_-1px_0_0_var(--color-border)] bg-card group-hover:bg-accent transition-colors">
           {ch.chapters}
         </td>
-        <td className="px-4 py-3 text-xs text-muted sticky left-[144px] z-10 whitespace-nowrap w-[176px] min-w-[176px] max-w-[176px] shadow-[inset_-1px_0_0_var(--color-border)] max-w-[176px] truncate bg-card group-hover:bg-accent transition-colors">
+        <td className={`px-4 py-3 text-xs text-muted sticky left-[144px] z-10 whitespace-nowrap w-[176px] min-w-[176px] max-w-[176px] truncate bg-card group-hover:bg-accent transition-colors ${
+          activeTab === 'design' ? 'shadow-[inset_-2px_0_0_var(--color-border)]' : 'shadow-[inset_-1px_0_0_var(--color-border)]'
+        }`}>
           {ch.chapter_title || '—'}
         </td>
-        <td className="px-4 py-3 text-xs text-center sticky left-[320px] z-10 whitespace-nowrap w-[112px] min-w-[112px] max-w-[112px] shadow-[inset_-1px_0_0_var(--color-border)] font-medium text-text bg-card group-hover:bg-accent transition-colors">
-          {ch.manuscript_pages != null ? ch.manuscript_pages : '—'}
-        </td>
-        <td className="px-4 py-3 text-xs text-center sticky left-[432px] z-10 whitespace-nowrap w-[96px] min-w-[96px] max-w-[96px] shadow-[inset_-2px_0_0_var(--color-border)] font-medium text-text bg-card group-hover:bg-accent transition-colors">
-          {ch.word_count != null ? Math.floor(ch.word_count / 250) : '—'}
-        </td>
+        {activeTab === 'manuscript' && (
+          <>
+            <td className="px-4 py-3 text-xs text-center sticky left-[320px] z-10 whitespace-nowrap w-[112px] min-w-[112px] max-w-[112px] shadow-[inset_-1px_0_0_var(--color-border)] font-medium text-text bg-card group-hover:bg-accent transition-colors">
+              {ch.manuscript_pages != null ? ch.manuscript_pages : '—'}
+            </td>
+            <td className="px-4 py-3 text-xs text-center sticky left-[432px] z-10 whitespace-nowrap w-[96px] min-w-[96px] max-w-[96px] shadow-[inset_-2px_0_0_var(--color-border)] font-medium text-text bg-card group-hover:bg-accent transition-colors">
+              {ch.word_count != null ? Math.floor(ch.word_count / 250) : '—'}
+            </td>
+          </>
+        )}
+        {activeTab === 'art' && (
+          <td className="px-4 py-3 text-xs text-center sticky left-[320px] z-10 whitespace-nowrap w-[112px] min-w-[112px] max-w-[112px] shadow-[inset_-2px_0_0_var(--color-border)] font-medium text-text bg-card group-hover:bg-accent transition-colors">
+            {ch.art_count != null && ch.art_count > 0 ? ch.art_count : 'no arts'}
+          </td>
+        )}
         {chSched.map(s => {
           const isCellEdited = s.slaDays !== (baseSlaMap.get(s.stageName) ?? null)
           const delayDays    = delayMap.get(`${ch.chapters}||${s.stageName}`)
@@ -695,7 +767,7 @@ export function ProjectPlanningPage() {
             )}
           </div>
 
-          {finalDue && (
+          {activeTabFinalDue && (
             <div className="flex flex-col items-end gap-0.5">
               <div className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border ${
                 alreadyApproved
@@ -703,9 +775,9 @@ export function ProjectPlanningPage() {
                   : 'text-primary bg-accent border-primary/20'
               }`}>
                 <Flag size={12} />
-                Final Deliverable: {fmt(finalDue)}
+                {activeTab === 'art' ? 'Art' : activeTab === 'design' ? 'Design' : 'Manuscript'} Final Deliverable: {fmt(activeTabFinalDue)}
               </div>
-              {alreadyApproved && actualFinalDue && actualFinalDue > finalDue && (
+              {alreadyApproved && actualFinalDue && finalDue && actualFinalDue > finalDue && (
                 <div className="inline-flex items-center gap-1 text-[10px] font-semibold text-red-600 bg-red-50 border border-red-200 px-2 py-0.5 rounded-md">
                   <Flag size={9} /> Updated: {fmt(actualFinalDue)} due to delays
                 </div>
@@ -764,14 +836,21 @@ export function ProjectPlanningPage() {
         </button>
       </div>
 
-      <div className="px-6 py-2 bg-surface border-b border-border text-xs text-muted flex items-center justify-between flex-shrink-0">
-        <span>Active Workflow: <strong>{activeWorkflowName || 'None'}</strong></span>
-        <span>Chapters count: <strong>{activeChapters.length}</strong></span>
-      </div>
+      {!(activeTab === 'design' && designChapters.length === 0) && (
+        <div className="px-6 py-2 bg-surface border-b border-border text-xs text-muted flex items-center justify-between flex-shrink-0">
+          <span>Active Workflow: <strong>{activeWorkflowName || 'None'}</strong></span>
+          <span>Chapters count: <strong>{activeChapters.length}</strong></span>
+        </div>
+      )}
 
       {/* Planning Table */}
       <div className="flex-1 overflow-auto">
-        {baseSchedule.length === 0 ? (
+        {activeTab === 'design' && designChapters.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-24 text-muted">
+            <Layers size={40} className="mb-3 opacity-30" />
+            <p className="text-sm">Design track is not enabled for this project.</p>
+          </div>
+        ) : baseSchedule.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-muted">
             <Calendar size={40} className="mb-3 opacity-30" />
             <p className="text-sm">No workflow stages found for active workflow '{activeWorkflowName}'.</p>
@@ -795,11 +874,11 @@ export function ProjectPlanningPage() {
             </div>
           )}
           <table className="w-full border-collapse text-sm min-w-max">
-            <PlanningTableHeader stages={baseSchedule} />
+            <PlanningTableHeader stages={baseSchedule} activeTab={activeTab} />
             <tbody>
               {activeChapters.filter(ch => !alreadyApproved || plannedChapterNumbers.has(ch.chapters)).length === 0 ? (
                 <tr>
-                  <td colSpan={4 + baseSchedule.length} className="px-4 py-16 text-center text-sm text-muted">
+                  <td colSpan={(activeTab === 'manuscript' ? 4 : activeTab === 'art' ? 3 : 2) + baseSchedule.length} className="px-4 py-16 text-center text-sm text-muted">
                     No active chapters found for this track.
                   </td>
                 </tr>
@@ -818,7 +897,7 @@ export function ProjectPlanningPage() {
                 New Chapters in {activeTab === 'manuscript' ? 'Manuscript' : activeTab === 'art' ? 'Art' : 'Design'} Track — Pending Planning
               </div>
               <table className="w-full border-collapse text-sm min-w-max">
-                <PlanningTableHeader stages={baseSchedule} />
+                <PlanningTableHeader stages={baseSchedule} activeTab={activeTab} />
                 <tbody>
                   {[...activeChapters]
                     .filter(ch => !plannedChapterNumbers.has(ch.chapters))

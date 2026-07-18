@@ -26,6 +26,7 @@ import { ProjectInfoModal } from './ProjectInfoModal'
 import { Modal } from '@/components/ui/Modal'
 import { UploadZone } from '@/components/ui/UploadZone'
 import { getApiErrorMessage } from '@/api/client'
+import { uploadChapterFiles } from '@/api/files'
 import { useRBAC } from '@/hooks/useRBAC'
 import { ROLE_PERMISSIONS } from '@/config/rbacConfig'
 
@@ -379,6 +380,18 @@ export function ProjectWorkflow() {
   const [newChapterFile, setNewChapterFile] = useState<File | null>(null)
   const [addingChapter, setAddingChapter] = useState(false)
   const [addChapterError, setAddChapterError] = useState<string | null>(null)
+  const [uploadMode, setUploadMode] = useState<'single' | 'zip'>('single')
+  const [newChapterCategory, setNewChapterCategory] = useState('indesign')
+
+  const DESIGN_UPLOAD_CATEGORIES = [
+    { key: 'indesign', label: 'Indesign' },
+    { key: 'common_art', label: 'Common Art' },
+    { key: 'pdf', label: 'Pdf' },
+    { key: 'font', label: 'Font' },
+    { key: 'library', label: 'Library' },
+    { key: 'template', label: 'template' },
+    { key: 'print_preset', label: 'Print Preset' },
+  ]
 
   useEffect(() => {
     if (!id) return
@@ -537,6 +550,18 @@ export function ProjectWorkflow() {
     return String(next).padStart(2, '0')
   }, [chapters])
 
+  const nextArtChapterNumber = useMemo(() => {
+    const regex = /^Ch\s+(\d+)\s+-\s+Art$/
+    const nums = chapters
+      .map(c => {
+        const match = c.chapters.match(regex)
+        return match ? parseInt(match[1], 10) : NaN
+      })
+      .filter(n => !isNaN(n))
+    const next = nums.length > 0 ? Math.max(...nums) + 1 : 1
+    return String(next).padStart(2, '0')
+  }, [chapters])
+
   function handleChapterUpdate(id: number, patch: Partial<Chapter>) {
     setChapters(prev => {
       const updated = prev.map(c => c.id === id ? { ...c, ...patch } : c)
@@ -604,9 +629,11 @@ export function ProjectWorkflow() {
   }
 
   function openAddChapter() {
-    setNewChapterNumber(nextChapterNumber)
+    setNewChapterNumber(activeTab === 'art' ? nextArtChapterNumber : nextChapterNumber)
     setNewChapterFile(null)
     setAddChapterError(null)
+    setUploadMode('single')
+    setNewChapterCategory('indesign')
     setIsAddChapterOpen(true)
   }
 
@@ -615,11 +642,69 @@ export function ProjectWorkflow() {
     setAddingChapter(true)
     setAddChapterError(null)
     try {
+      if (activeTab === 'design') {
+        const designChapter = designChapters[0]
+        if (!designChapter) {
+          setAddChapterError('Design track is not enabled for this project.')
+          return
+        }
+        await uploadChapterFiles({
+          projectId: id,
+          chapterId: designChapter.id,
+          category: newChapterCategory,
+          files: [newChapterFile],
+        })
+        const refreshed = await chaptersApi.getByProject(project?.code || project?.project_code || '')
+        setChapters(refreshed)
+        setIsAddChapterOpen(false)
+        toast.success(`File uploaded to Design / ${newChapterCategory}`)
+        if (project?.status === 'Active' || project?.status === 'Completed') {
+          navigate(`/projects/${id}/planning`)
+        }
+        return
+      }
+
+      if (activeTab === 'art') {
+        if (uploadMode === 'zip') {
+          const result = await chaptersApi.createArtChaptersFromZip(id, newChapterFile)
+          setChapters(prev => [...prev, ...result.created])
+          setIsAddChapterOpen(false)
+          const skippedNote = result.skipped.length > 0 ? `, ${result.skipped.length} skipped` : ''
+          toast.success(`${result.created.length} Art chapter(s) created${skippedNote}`)
+          if (result.created.length > 0 && (project?.status === 'Active' || project?.status === 'Completed')) {
+            navigate(`/projects/${id}/planning`)
+          }
+          return
+        }
+
+        const created = await chaptersApi.createArtChapter(id, newChapterNumber, newChapterFile)
+        setChapters(prev => [...prev, created])
+        setIsAddChapterOpen(false)
+        toast.success(`${created.chapters} added — visit Planning to approve its schedule`)
+        if (project?.status === 'Active' || project?.status === 'Completed') {
+          navigate(`/projects/${id}/planning`)
+        }
+        return
+      }
+
+      if (uploadMode === 'zip') {
+        const result = await chaptersApi.createManuscriptChaptersFromZip(id, newChapterFile)
+        setChapters(prev => [...prev, ...result.created])
+        setIsAddChapterOpen(false)
+        const skippedNote = result.skipped.length > 0 ? `, ${result.skipped.length} skipped` : ''
+        toast.success(`${result.created.length} chapter(s) created${skippedNote}`)
+        if (result.created.length > 0 && (project?.status === 'Active' || project?.status === 'Completed')) {
+          navigate(`/projects/${id}/planning`)
+        }
+        return
+      }
+
       const created = await chaptersApi.createWithManuscript(id, newChapterNumber, newChapterFile)
       setChapters(prev => [...prev, created])
       setIsAddChapterOpen(false)
       if (project?.status === 'Active' || project?.status === 'Completed') {
         toast.success(`Chapter ${created.chapters} added — visit Planning to approve its schedule`)
+        navigate(`/projects/${id}/planning`)
       } else {
         toast.success(`Chapter ${created.chapters} added`)
       }
@@ -1139,8 +1224,14 @@ export function ProjectWorkflow() {
       <Modal
         isOpen={isAddChapterOpen}
         onClose={() => { if (!addingChapter) setIsAddChapterOpen(false) }}
-        title="New Chapter"
-        description="Add the next chapter and its manuscript file. Chapters must be numbered in order with no gaps."
+        title={activeTab === 'art' ? 'New Art Chapter' : activeTab === 'design' ? 'New Design File' : 'New Chapter'}
+        description={
+          activeTab === 'art'
+            ? (uploadMode === 'zip' ? 'Add multiple Art chapters from a zip file.' : 'Add the next Art chapter and its file.')
+            : activeTab === 'design'
+              ? 'Upload a file into the Design track.'
+              : (uploadMode === 'zip' ? 'Add multiple chapters at once from a zip file.' : 'Add the next chapter and its manuscript file.')
+        }
         footer={
           <div className="flex gap-3 justify-end">
             <button
@@ -1152,35 +1243,106 @@ export function ProjectWorkflow() {
             </button>
             <button
               onClick={handleCreateChapter}
-              disabled={addingChapter || !newChapterFile || !newChapterNumber}
+              disabled={addingChapter || !newChapterFile || (activeTab !== 'design' && uploadMode === 'single' && !newChapterNumber) || (activeTab === 'design' && !designChapters[0])}
               className="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
             >
               {addingChapter && <Spinner size="sm" />}
-              {addingChapter ? 'Creating…' : 'Create Chapter'}
+              {addingChapter ? 'Creating…' : activeTab === 'design' ? 'Upload File' : 'Create Chapter'}
             </button>
           </div>
         }
       >
         <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-medium text-muted mb-1">Chapter No.</label>
-            <input
-              type="text"
-              value={newChapterNumber}
-              onChange={e => setNewChapterNumber(e.target.value.replace(/\D/g, ''))}
-              disabled={addingChapter}
-              className="w-full text-sm bg-background border border-border rounded-lg px-3 py-2 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-60"
-              placeholder={nextChapterNumber}
-            />
-            <p className="text-[11px] text-muted mt-1">
-              Next expected number is <span className="font-semibold">{nextChapterNumber}</span> — chapters must stay sequential with no gaps.
-            </p>
-          </div>
+          {(activeTab === 'manuscript' || activeTab === 'art') && (
+            <div className="flex gap-2 p-1 bg-background border border-border rounded-lg w-fit">
+              <button
+                type="button"
+                onClick={() => { setUploadMode('single'); setNewChapterFile(null) }}
+                disabled={addingChapter}
+                className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${uploadMode === 'single' ? 'bg-primary text-white' : 'text-muted hover:text-text'}`}
+              >
+                Single Chapter
+              </button>
+              <button
+                type="button"
+                onClick={() => { setUploadMode('zip'); setNewChapterFile(null) }}
+                disabled={addingChapter}
+                className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${uploadMode === 'zip' ? 'bg-primary text-white' : 'text-muted hover:text-text'}`}
+              >
+                Multiple Chapters (ZIP)
+              </button>
+            </div>
+          )}
+
+          {activeTab === 'manuscript' && uploadMode === 'single' && (
+            <div>
+              <label className="block text-xs font-medium text-muted mb-1">Chapter No.</label>
+              <input
+                type="text"
+                value={newChapterNumber}
+                onChange={e => setNewChapterNumber(e.target.value.replace(/\D/g, ''))}
+                disabled={addingChapter}
+                className="w-full text-sm bg-background border border-border rounded-lg px-3 py-2 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-60"
+                placeholder={nextChapterNumber}
+              />
+              <p className="text-[11px] text-muted mt-1">
+                Next expected number is <span className="font-semibold">{nextChapterNumber}</span> — chapters must stay sequential with no gaps.
+              </p>
+            </div>
+          )}
+
+          {activeTab === 'art' && uploadMode === 'single' && (
+            <div>
+              <label className="block text-xs font-medium text-muted mb-1">Chapter No.</label>
+              <input
+                type="text"
+                value={newChapterNumber}
+                onChange={e => setNewChapterNumber(e.target.value.replace(/\D/g, ''))}
+                disabled={addingChapter}
+                className="w-full text-sm bg-background border border-border rounded-lg px-3 py-2 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-60"
+                placeholder={nextArtChapterNumber}
+              />
+              <p className="text-[11px] text-muted mt-1">
+                Next expected number is <span className="font-semibold">Ch {nextArtChapterNumber} - Art</span> — chapters must stay sequential with no gaps.
+              </p>
+            </div>
+          )}
+
+          {activeTab === 'design' && (
+            <div>
+              <label className="block text-xs font-medium text-muted mb-1">Category</label>
+              <select
+                value={newChapterCategory}
+                onChange={e => setNewChapterCategory(e.target.value)}
+                disabled={addingChapter}
+                className="w-full text-sm bg-background border border-border rounded-lg px-3 py-2 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-60"
+              >
+                {DESIGN_UPLOAD_CATEGORIES.map(cat => (
+                  <option key={cat.key} value={cat.key}>{cat.label}</option>
+                ))}
+              </select>
+              {!designChapters[0] && (
+                <p className="text-[11px] text-danger mt-1">
+                  Design track is not enabled for this project.
+                </p>
+              )}
+            </div>
+          )}
 
           <div>
-            <label className="block text-xs font-medium text-muted mb-1">Manuscript file</label>
+            <label className="block text-xs font-medium text-muted mb-1">
+              {activeTab === 'art' ? (uploadMode === 'zip' ? 'Art files (.zip)' : 'Art file (single or .zip)') : activeTab === 'design' ? 'Design file (single or .zip)' : uploadMode === 'zip' ? 'Chapters (.zip)' : 'Manuscript file'}
+            </label>
             <UploadZone
-              accept=".docx"
+              accept={
+                ((activeTab === 'art' && uploadMode === 'zip') || (activeTab === 'manuscript' && uploadMode === 'zip'))
+                  ? '.zip'
+                  : activeTab === 'art'
+                    ? '.zip,.png,.jpg,.jpeg,.gif,.tiff,.webp,.bmp,.pdf'
+                    : activeTab === 'design'
+                      ? '.zip,.png,.jpg,.jpeg,.gif,.tiff,.webp,.bmp,.pdf,.docx,.doc,.xlsx,.xls,.txt,.indb,.indd'
+                      : '.docx'
+              }
               onFiles={files => setNewChapterFile(files[0] ?? null)}
               isUploading={addingChapter}
               label={newChapterFile ? newChapterFile.name : undefined}

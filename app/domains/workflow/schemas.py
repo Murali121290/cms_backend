@@ -258,5 +258,6 @@ class ChapterInfoResponse(ChapterInfoBase):
     id: int
     created_at: datetime
     updated_at: datetime
+    art_count: Optional[int] = None
 
     model_config = {"from_attributes": True}

@@ -1458,23 +1458,31 @@ def api_v2_project_bootstrap(
     final_art_due = parse_dt(art_due_date) or (datetime.combine(project.due_date, datetime.min.time()) if project.due_date else None)
 
     # 1. Update/Setup Design virtual chapter
-    design_ci = db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code, _ChapterInfo.chapters == "Design").first()
-    if design_ci:
-        design_ci.workflow = final_design_wf or ""
-        design_ci.stage_name = get_first_stage(final_design_wf)
-        design_ci.due_date = final_design_due
+    if design_workflow_name:
+        design_ci = db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code, _ChapterInfo.chapters == "Design").first()
+        if design_ci:
+            design_ci.workflow = final_design_wf or ""
+            design_ci.stage_name = get_first_stage(final_design_wf)
+            design_ci.due_date = final_design_due
+        else:
+            db.add(_ChapterInfo(
+                client=project.division_code or "",
+                project=project.code,
+                chapters="Design",
+                chapter_title="Design",
+                workflow=final_design_wf or "",
+                stage_name=get_first_stage(final_design_wf),
+                due_date=final_design_due,
+                status="In-progress",
+                stage_level=1
+            ))
     else:
-        db.add(_ChapterInfo(
-            client=project.division_code or "",
-            project=project.code,
-            chapters="Design",
-            chapter_title="Design",
-            workflow=final_design_wf or "",
-            stage_name=get_first_stage(final_design_wf),
-            due_date=final_design_due,
-            status="In-progress",
-            stage_level=1
-        ))
+        # Delete if they exist
+        for row in db.query(_ChapterInfo).filter(
+            _ChapterInfo.project == project.code,
+            _ChapterInfo.chapters.in_(["Design", "CE support"])
+        ).all():
+            db.delete(row)
 
     # 2. Update/Setup Manuscript chapters
     _existing_ci = {
@@ -1510,7 +1518,7 @@ def api_v2_project_bootstrap(
                 }, synchronize_session=False)
 
     # 3. Update/Setup Art chapters
-    if final_art_wf:
+    if art_workflow_name:
         num_art_chapters = art_chapter_count if art_chapter_count is not None else (project.chapter_count or 5)
         for i in range(1, num_art_chapters + 1):
             art_ch_num = f"Ch {i:02d} - Art"
@@ -1520,11 +1528,11 @@ def api_v2_project_bootstrap(
                     project=project.code,
                     chapters=art_ch_num,
                     chapter_title=f"Chapter {i:02d} Art Pack",
-                    workflow=final_art_wf,
+                    workflow=art_workflow_name,
                     status="Received",
                     complexity_level=getattr(project, "composition", None) or "Medium",
                     stage_level=1,
-                    stage_name=get_first_stage(final_art_wf),
+                    stage_name=get_first_stage(art_workflow_name),
                     due_date=final_art_due,
                     published_status="Draft",
                     priority=getattr(project, "priority", None) or "Normal",
@@ -1533,18 +1541,32 @@ def api_v2_project_bootstrap(
                 _existing_ci.add(art_ch_num)
             else:
                 db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code, _ChapterInfo.chapters == art_ch_num).update({
-                    _ChapterInfo.workflow: final_art_wf,
-                    _ChapterInfo.stage_name: get_first_stage(final_art_wf),
+                    _ChapterInfo.workflow: art_workflow_name,
+                    _ChapterInfo.stage_name: get_first_stage(art_workflow_name),
                     _ChapterInfo.due_date: final_art_due
                 }, synchronize_session=False)
+    else:
+        # Delete if any exist
+        for row in db.query(_ChapterInfo).filter(
+            _ChapterInfo.project == project.code,
+            _ChapterInfo.chapters.like("Ch % - Art")
+        ).all():
+            db.delete(row)
 
     db.commit()
+
+    chapters = (
+        db.query(models.Chapter)
+        .filter(models.Chapter.project == project.project_code)
+        .order_by(models.Chapter.chapters.asc())
+        .all()
+    )
 
     return schemas_v2.ProjectBootstrapResponse(
         project=_serialize_project_summary(project),
         chapters=[_serialize_chapter_summary(chapter) for chapter in chapters],
         ingested_files=[_serialize_file_record(file_record, viewer=viewer) for file_record in ingested_files],
-        redirect_to="/dashboard",
+        redirect_to=f"/projects/{project.id}/planning",
     )
 
 
@@ -3265,23 +3287,7 @@ def api_v2_upload_zip(
         with zipfile.ZipFile(zip_path, "r") as z:
             z.extractall(temp_dir)
 
-        import re
-        def extract_chapter_number(name: str) -> str | None:
-            name_lower = name.lower()
-            m = re.search(r'(?:chapter|chap|ch)[_\s-]*(\d+)', name_lower)
-            if m:
-                return f"{int(m.group(1)):02d}"
-            base = os.path.splitext(os.path.basename(name))[0]
-            m = re.match(r'^(\d+)', base)
-            if m:
-                return f"{int(m.group(1)):02d}"
-            m = re.search(r'(\d+)$', base)
-            if m:
-                return f"{int(m.group(1)):02d}"
-            m = re.search(r'(\d+)', base)
-            if m:
-                return f"{int(m.group(1)):02d}"
-            return None
+        extract_chapter_number = file_service.extract_chapter_number_from_filename
 
         def determine_category_and_type(name: str) -> tuple[str, str]:
             ext = name.split(".")[-1].lower() if "." in name else ""
@@ -3359,12 +3365,21 @@ def api_v2_upload_zip(
                     else:
                         category = "Style sheet template"
                 else:
-                    chapter_no_str = extract_chapter_number(fname)
+                    # Prioritize extracting chapter number from parent directories (reversed to match deepest first)
+                    chapter_no_str = None
+                    for part in reversed(path_parts[:-1]):
+                        chapter_no_str = extract_chapter_number(part)
+                        if chapter_no_str:
+                            break
+                    # Fallback to checking the filename stem/suffix
                     if not chapter_no_str:
-                        for part in path_parts[:-1]:
-                            chapter_no_str = extract_chapter_number(part)
-                            if chapter_no_str:
-                                break
+                        chapter_no_str = extract_chapter_number(fname)
+
+                    # Route to Art track if file category is Art or sits inside an "art" folder, and chapter_no_str is a digit
+                    if chapter_no_str and chapter_no_str.isdigit():
+                        is_art_track = (category == "Art") or any("art" in part.lower() for part in path_parts)
+                        if is_art_track:
+                            chapter_no_str = f"Ch {chapter_no_str} - Art"
 
                 chapter = None
                 if chapter_no_str:
@@ -3384,11 +3399,20 @@ def api_v2_upload_zip(
                             if first_stage_row:
                                 first_stage = first_stage_row.stage_name
 
+                        # Setup pretty title for Art pack track chapters
+                        if "Art" in chapter_no_str:
+                            digits_clean = chapter_no_str.replace("Ch ", "").replace(" - Art", "")
+                            chapter_title = f"Chapter {digits_clean} Art Pack"
+                        elif chapter_no_str in ["Design", "CE support"]:
+                            chapter_title = chapter_no_str
+                        else:
+                            chapter_title = f"Chapter {chapter_no_str}"
+
                         chapter = models.Chapter(
                             client=project.division_code or "",
                             project=project.project_code,
                             chapters=chapter_no_str,
-                            chapter_title=chapter_no_str if chapter_no_str in ["Design", "CE support"] else f"Chapter {chapter_no_str}",
+                            chapter_title=chapter_title,
                             workflow=project.workflow_name or "",
                             status="Received",
                             complexity_level=getattr(project, "composition", None) or "Medium",
@@ -3453,7 +3477,11 @@ def api_v2_upload_zip(
                     docs_list.append(schemas_v2.UploadZipFileEntry(**file_entry))
 
                 if chapter_no_str:
-                    chapter_no_int = int(chapter_no_str)
+                    try:
+                        digits_only = "".join(c for c in chapter_no_str if c.isdigit())
+                        chapter_no_int = int(digits_only) if digits_only else 0
+                    except ValueError:
+                        chapter_no_int = 0
                     chapters_list.append(
                         schemas_v2.UploadZipChapterEntry(
                             chapter_no=chapter_no_int,
@@ -6252,6 +6280,373 @@ def api_v2_create_chapter_with_manuscript(
     return new_chapter
 
 
+@router.post("/projects/{project_id}/chapters/create-with-art", response_model=ChapterInfoResponse)
+def api_v2_create_chapter_with_art(
+    project_id: int,
+    number: str = Form(...),
+    file: UploadFile = FastAPIFile(...),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(status_code=status.HTTP_401_UNAUTHORIZED, code="AUTH_REQUIRED", message="Authentication required.")
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="PROJECT_NOT_FOUND", message="Project not found.")
+
+    raw_number = number.strip()
+    if not raw_number.isdigit():
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="CHAPTER_NUMBER_INVALID",
+            message="Chapter number must be numeric, e.g. 01.",
+        )
+
+    if not file.filename:
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="INVALID_FILE",
+            message="No filename provided.",
+        )
+
+    import re as _re
+    existing_art_chapters = [
+        ci for ci in db.query(ChapterInfo).filter(ChapterInfo.project == project.project_code).all()
+        if ci.chapters and _re.match(r'^Ch\s+(\d+)\s+-\s+Art$', ci.chapters)
+    ]
+    existing_art_numbers = sorted(
+        int(_re.match(r'^Ch\s+(\d+)\s+-\s+Art$', ci.chapters).group(1)) for ci in existing_art_chapters
+    )
+
+    new_number = int(raw_number)
+    art_chapter_name = f"Ch {new_number:02d} - Art"
+    if new_number in existing_art_numbers:
+        return _error_response(
+            status_code=status.HTTP_409_CONFLICT,
+            code="CHAPTER_NUMBER_DUPLICATE",
+            message=f"{art_chapter_name} already exists.",
+        )
+
+    expected_next = (existing_art_numbers[-1] + 1) if existing_art_numbers else 1
+    if new_number != expected_next:
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="CHAPTER_NUMBER_NOT_SEQUENTIAL",
+            message=f"Art chapter numbers must be sequential. Expected {expected_next:02d}, got {new_number:02d}.",
+        )
+
+    number_padded = f"{new_number:02d}"
+    result = chapter_service.create_chapter(
+        db,
+        project_id=project_id,
+        number=art_chapter_name,
+        title=f"Chapter {number_padded} Art Pack",
+        upload_dir=file_service.UPLOAD_DIR,
+        # "Received" — matches the pending-planning status used elsewhere (e.g. sync-chapters)
+        # until this chapter is planned and approved on the Planning page.
+        status="Received",
+    )
+    new_chapter = result["chapter"]
+    if not new_chapter:
+        return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="PROJECT_NOT_FOUND", message="Project not found.")
+
+    # Inherit the Art track's workflow from an existing Art chapter, same derivation the
+    # frontend already uses for activeWorkflowName (artChapters[0]?.workflow).
+    existing_art_workflow = next((ci.workflow for ci in existing_art_chapters if ci.workflow), None)
+    if existing_art_workflow:
+        new_chapter.workflow = existing_art_workflow
+        db.commit()
+        db.refresh(new_chapter)
+
+    dest_dir = os.path.join(file_service.UPLOAD_DIR, project.code, art_chapter_name, "Art")
+    os.makedirs(dest_dir, exist_ok=True)
+
+    if file.filename.lower().endswith(".zip"):
+        temp_dir = tempfile.mkdtemp()
+        try:
+            zip_path = os.path.join(temp_dir, file.filename)
+            with open(zip_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+
+            with zipfile.ZipFile(zip_path, "r") as z:
+                for member in z.namelist():
+                    fname = os.path.basename(member)
+                    if not fname or member.endswith("/") or "__MACOSX" in member or fname.startswith("."):
+                        continue
+                    with z.open(member) as src, open(os.path.join(dest_dir, fname), "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+
+                    ext = fname.split(".")[-1].lower() if "." in fname else ""
+                    db.add(models.File(
+                        project_id=project.id,
+                        chapter_id=new_chapter.id,
+                        filename=fname,
+                        file_type=ext,
+                        category="Art",
+                        path=os.path.join(dest_dir, fname),
+                        version=1,
+                        uploaded_at=now_ist_naive(),
+                        uploaded_by_id=viewer.id,
+                    ))
+            db.commit()
+            db.refresh(new_chapter)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+    else:
+        fname = file.filename
+        dest_path = os.path.join(dest_dir, fname)
+        with open(dest_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        ext = fname.split(".")[-1].lower() if "." in fname else ""
+        db.add(models.File(
+            project_id=project.id,
+            chapter_id=new_chapter.id,
+            filename=fname,
+            file_type=ext,
+            category="Art",
+            path=dest_path,
+            version=1,
+            uploaded_at=now_ist_naive(),
+            uploaded_by_id=viewer.id,
+        ))
+        db.commit()
+        db.refresh(new_chapter)
+
+    return new_chapter
+
+
+@router.post("/projects/{project_id}/chapters/create-with-manuscript-zip", response_model=schemas_v2.ChapterZipUploadResponse)
+def api_v2_create_chapters_with_manuscript_zip(
+    project_id: int,
+    file: UploadFile = FastAPIFile(...),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(status_code=status.HTTP_401_UNAUTHORIZED, code="AUTH_REQUIRED", message="Authentication required.")
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="PROJECT_NOT_FOUND", message="Project not found.")
+
+    if not file.filename or not file.filename.lower().endswith(".zip"):
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="INVALID_FILE_TYPE",
+            message="Only .zip files are supported.",
+        )
+
+    existing_numbers = {
+        ci.chapters for ci in db.query(ChapterInfo).filter(ChapterInfo.project == project.project_code).all()
+        if ci.chapters and ci.chapters.isdigit()
+    }
+
+    created: list = []
+    skipped: list = []
+
+    temp_dir = tempfile.mkdtemp()
+    try:
+        zip_path = os.path.join(temp_dir, file.filename)
+        with open(zip_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        with zipfile.ZipFile(zip_path, "r") as z:
+            z.extractall(temp_dir)
+
+        for root, _dirs, filenames in os.walk(temp_dir):
+            for fname in filenames:
+                if fname == file.filename or "__MACOSX" in root or fname.startswith("."):
+                    continue
+
+                full_path = os.path.join(root, fname)
+                number_padded = file_service.extract_chapter_number_from_filename(fname)
+                if not number_padded:
+                    rel_path = os.path.relpath(full_path, temp_dir)
+                    for part in reversed(rel_path.replace("\\", "/").split("/")[:-1]):
+                        number_padded = file_service.extract_chapter_number_from_filename(part)
+                        if number_padded:
+                            break
+
+                if not number_padded:
+                    skipped.append({"filename": fname, "reason": "Could not determine a chapter number from the file name."})
+                    continue
+                if number_padded in existing_numbers:
+                    skipped.append({"filename": fname, "reason": f"Chapter {number_padded} already exists."})
+                    continue
+
+                result = chapter_service.create_chapter(
+                    db,
+                    project_id=project_id,
+                    number=number_padded,
+                    title=f"Chapter {number_padded}",
+                    upload_dir=file_service.UPLOAD_DIR,
+                    status="Received",
+                )
+                new_chapter = result["chapter"]
+                if not new_chapter:
+                    skipped.append({"filename": fname, "reason": "Project not found."})
+                    continue
+
+                with open(full_path, "rb") as fh:
+                    upload_stub = UploadFile(filename=fname, file=fh)
+                    file_service.upload_chapter_files(
+                        db,
+                        project_id=project_id,
+                        chapter_id=new_chapter.id,
+                        category="Manuscript",
+                        files=[upload_stub],
+                        actor_user_id=viewer.id,
+                        upload_dir=file_service.UPLOAD_DIR,
+                    )
+
+                existing_numbers.add(number_padded)
+                db.refresh(new_chapter)
+                created.append(new_chapter)
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    return schemas_v2.ChapterZipUploadResponse(
+        created=created,
+        skipped=[schemas_v2.ChapterZipSkippedItem(**item) for item in skipped],
+    )
+
+
+@router.post("/projects/{project_id}/chapters/create-with-art-zip", response_model=schemas_v2.ChapterZipUploadResponse)
+def api_v2_create_chapters_with_art_zip(
+    project_id: int,
+    file: UploadFile = FastAPIFile(...),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(status_code=status.HTTP_401_UNAUTHORIZED, code="AUTH_REQUIRED", message="Authentication required.")
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="PROJECT_NOT_FOUND", message="Project not found.")
+
+    if not file.filename or not file.filename.lower().endswith(".zip"):
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="INVALID_FILE_TYPE",
+            message="Only .zip files are supported.",
+        )
+
+    import re as _re
+    existing_art_chapters = [
+        ci for ci in db.query(ChapterInfo).filter(ChapterInfo.project == project.project_code).all()
+        if ci.chapters and _re.match(r'^Ch\s+(\d+)\s+-\s+Art$', ci.chapters)
+    ]
+    existing_art_numbers = {
+        int(_re.match(r'^Ch\s+(\d+)\s+-\s+Art$', ci.chapters).group(1)) for ci in existing_art_chapters
+    }
+    existing_art_workflow = next((ci.workflow for ci in existing_art_chapters if ci.workflow), None)
+
+    created: list = []
+    skipped: list = []
+
+    temp_dir = tempfile.mkdtemp()
+    try:
+        zip_path = os.path.join(temp_dir, file.filename)
+        with open(zip_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        with zipfile.ZipFile(zip_path, "r") as z:
+            z.extractall(temp_dir)
+
+        # Map to hold temporary files grouped by chapter number
+        ch_files: dict[int, list[tuple[str, str]]] = {}
+
+        for root, _dirs, filenames in os.walk(temp_dir):
+            for fname in filenames:
+                if fname == file.filename or "__MACOSX" in root or fname.startswith("."):
+                    continue
+
+                full_path = os.path.join(root, fname)
+                rel_path = os.path.relpath(full_path, temp_dir)
+                
+                # Determine chapter number
+                number_padded = None
+                path_parts = rel_path.replace("\\", "/").split("/")
+                for part in reversed(path_parts[:-1]):
+                    number_padded = file_service.extract_chapter_number_from_filename(part)
+                    if number_padded:
+                        break
+                if not number_padded:
+                    number_padded = file_service.extract_chapter_number_from_filename(fname)
+
+                if not number_padded:
+                    skipped.append({"filename": fname, "reason": "Could not determine a chapter number from the file name or path."})
+                    continue
+
+                new_num = int(number_padded)
+                if new_num not in ch_files:
+                    ch_files[new_num] = []
+                ch_files[new_num].append((fname, full_path))
+
+        for new_num, files_list in sorted(ch_files.items()):
+            art_chapter_name = f"Ch {new_num:02d} - Art"
+            if new_num in existing_art_numbers:
+                for fname, _ in files_list:
+                    skipped.append({"filename": fname, "reason": f"Art chapter {art_chapter_name} already exists."})
+                continue
+
+            result = chapter_service.create_chapter(
+                db,
+                project_id=project_id,
+                number=art_chapter_name,
+                title=f"Chapter {new_num:02d} Art Pack",
+                upload_dir=file_service.UPLOAD_DIR,
+                status="Received",
+            )
+            new_chapter = result["chapter"]
+            if not new_chapter:
+                for fname, _ in files_list:
+                    skipped.append({"filename": fname, "reason": "Failed to create chapter."})
+                continue
+
+            if existing_art_workflow:
+                new_chapter.workflow = existing_art_workflow
+                db.commit()
+
+            dest_dir = os.path.join(file_service.UPLOAD_DIR, project.code, art_chapter_name, "Art")
+            os.makedirs(dest_dir, exist_ok=True)
+
+            for fname, full_path in files_list:
+                dest_path = os.path.join(dest_dir, fname)
+                shutil.copy2(full_path, dest_path)
+
+                ext = fname.split(".")[-1].lower() if "." in fname else ""
+                db.add(models.File(
+                    project_id=project.id,
+                    chapter_id=new_chapter.id,
+                    filename=fname,
+                    file_type=ext,
+                    category="Art",
+                    path=dest_path,
+                    version=1,
+                    uploaded_at=now_ist_naive(),
+                    uploaded_by_id=viewer.id,
+                ))
+
+            existing_art_numbers.add(new_num)
+            db.commit()
+            db.refresh(new_chapter)
+            created.append(new_chapter)
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    return schemas_v2.ChapterZipUploadResponse(
+        created=created,
+        skipped=[schemas_v2.ChapterZipSkippedItem(**item) for item in skipped],
+    )
+
+
 @router.post("/projects/{project_id}/sync-chapters")
 def api_v2_sync_chapters(project_id: int, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
     """Sync CMS chapters → WMS chapter_details for projects created before auto-sync was added."""
@@ -6521,13 +6916,15 @@ def api_v2_chapter_transition_email(
     chapter.stage_name = payload.to_stage
     chapter.current_assignee_name = None
     
-    # Check if last stage
+    # Check if last stage — use the chapter's own workflow (Art/Design track)
+    # first; fall back to the project's main workflow only if unset.
     stages = []
-    if project and project.workflow_name:
+    chapter_workflow = (chapter.workflow or "").strip() or (project.workflow_name if project else "")
+    if chapter_workflow:
         try:
             stages = db.execute(
                 select(WorkflowMaster)
-                .where(WorkflowMaster.workflow_name == project.workflow_name)
+                .where(WorkflowMaster.workflow_name == chapter_workflow)
             ).scalars().all()
         except Exception:
             pass

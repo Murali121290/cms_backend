@@ -47,7 +47,7 @@ def test_api_v2_project_bootstrap_creates_project_chapters_files_and_redirect(
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
-    assert body["redirect_to"] == "/dashboard"
+    assert body["redirect_to"] == f"/projects/{body['project']['id']}/planning"
     assert body["project"]["code"] == "V2BOOK100"
     num_chapters = [c for c in body["chapters"] if c["number"].isdigit()]
     assert [chapter["number"] for chapter in num_chapters] == ["01", "02"]
@@ -542,6 +542,152 @@ def test_api_v2_project_bootstrap_zip_upload_no_identifiable_chapters_fails(
     body = upload_response.json()
     assert body["code"] == "NO_CHAPTERS_FOUND"
     assert body["message"] == "Unable to identify any chapters in the uploaded ZIP file."
+
+
+def test_api_v2_project_bootstrap_zip_upload_multi_track(
+    auth_cookie_client,
+    admin_user,
+    db_session,
+    temp_upload_root,
+):
+    client = auth_cookie_client(admin_user)
+
+    # 1. Bootstrap project
+    response = client.post(
+        "/api/v2/projects/bootstrap",
+        data={
+            "code": "MULTITRACKZIP",
+            "title": "Multi-track Zip Book",
+            "client_name": "Client A",
+            "xml_standard": "NLM",
+            "workflow_name": "WF-01",
+        },
+    )
+    assert response.status_code == 200
+
+    project = db_session.query(Project).filter(Project.code == "MULTITRACKZIP").first()
+    assert project is not None
+
+    # 2. Prepare ZIP file with one Manuscript chapter and one Art chapter folder structure
+    zip_buffer = BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        zip_file.writestr("docx -Manuscript/chapter-1.docx", b"chapter 1 manuscript docx")
+        zip_file.writestr("CH02/fig1.png", b"fake image content for art track")
+    zip_buffer.seek(0)
+
+    # 3. Upload ZIP
+    upload_response = client.post(
+        "/api/v2/uploads/ClientA/MULTITRACKZIP",
+        data={"project_id": project.id},
+        files={"file": ("MULTITRACKZIP.zip", zip_buffer, "application/zip")},
+    )
+    assert upload_response.status_code == 200
+
+    db_session.refresh(project)
+
+    # 4. Verify that two distinct chapters are registered: "01" and "Ch 02 - Art"
+    chapters = (
+        db_session.query(models.Chapter)
+        .filter(models.Chapter.project == project.project_code)
+        .order_by(models.Chapter.chapters.asc())
+        .all()
+    )
+    # Filter out Design and CE support virtual chapters to assert on the ZIP-derived ones
+    zip_derived_chapters = [c for c in chapters if c.chapters not in ["Design", "CE support"]]
+    assert len(zip_derived_chapters) == 2
+    assert zip_derived_chapters[0].chapters == "01"
+    assert zip_derived_chapters[0].chapter_title == "Chapter 01"
+    assert zip_derived_chapters[1].chapters == "Ch 02 - Art"
+    assert zip_derived_chapters[1].chapter_title == "Chapter 02 Art Pack"
+
+    # 5. Verify the files are correctly associated and stored
+    stored_files = (
+        db_session.query(models.File)
+        .filter(models.File.project_id == project.id)
+        .order_by(models.File.filename.asc())
+        .all()
+    )
+    assert len(stored_files) == 2
+    assert stored_files[0].filename == "chapter-1.docx"
+    assert stored_files[0].chapter.chapters == "01"
+    assert stored_files[1].filename == "fig1.png"
+    assert stored_files[1].chapter.chapters == "Ch 02 - Art"
+
+
+def test_api_v2_create_chapters_with_art_zip(
+    auth_cookie_client,
+    admin_user,
+    project_record,
+    db_session,
+    temp_upload_root,
+):
+    import io
+    import zipfile
+    from app.domains.workflow.models import ChapterInfo
+
+    # Create a project
+    project = project_record
+    project.project_code = "ARTZIPBOOK"
+    project.code = "ARTZIPBOOK"
+    db_session.commit()
+
+    # Pre-add an existing chapter
+    existing_ci = ChapterInfo(
+        client=project.division_code or "",
+        project=project.project_code,
+        chapters="Ch 01 - Art",
+        chapter_title="Chapter 01 Art Pack",
+    )
+    db_session.add(existing_ci)
+    db_session.commit()
+
+    # Create dummy in-memory zip file
+    # Inside ZIP, we have:
+    # CH01/fig_ignored.png (will be skipped since Ch 01 - Art exists)
+    # CH02/fig2.png (will create Ch 02 - Art)
+    # CH03_fig3.jpg (will create Ch 03 - Art)
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("CH01/fig_ignored.png", b"image1")
+        zf.writestr("CH02/fig2.png", b"image2")
+        zf.writestr("CH03_fig3.jpg", b"image3")
+    zip_buffer.seek(0)
+
+    client = auth_cookie_client(admin_user)
+
+    response = client.post(
+        f"/api/v2/projects/{project.id}/chapters/create-with-art-zip",
+        files={"file": ("art_package.zip", zip_buffer, "application/zip")},
+    )
+
+    assert response.status_code == 200
+    res_data = response.json()
+    assert len(res_data["created"]) == 2
+    assert len(res_data["skipped"]) == 1
+
+    assert res_data["created"][0]["chapters"] == "Ch 02 - Art"
+    assert res_data["created"][0]["chapter_title"] == "Chapter 02 Art Pack"
+    assert res_data["created"][1]["chapters"] == "Ch 03 - Art"
+    assert res_data["created"][1]["chapter_title"] == "Chapter 03 Art Pack"
+
+    assert res_data["skipped"][0]["filename"] == "fig_ignored.png"
+    assert "already exists" in res_data["skipped"][0]["reason"]
+
+    # Verify db state
+    stored_files = (
+        db_session.query(models.File)
+        .filter(models.File.project_id == project.id)
+        .order_by(models.File.filename.asc())
+        .all()
+    )
+    assert len(stored_files) == 2
+    assert stored_files[0].filename == "CH03_fig3.jpg"
+    assert stored_files[0].chapter.chapters == "Ch 03 - Art"
+    assert stored_files[0].category == "Art"
+    assert stored_files[1].filename == "fig2.png"
+    assert stored_files[1].chapter.chapters == "Ch 02 - Art"
+    assert stored_files[1].category == "Art"
+
 
 
 

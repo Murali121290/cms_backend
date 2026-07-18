@@ -624,15 +624,12 @@ export function CreateProjectPage() {
       // Track configurations
       if (designWfEnabled && designWfName) {
         formData.append('design_workflow_name', designWfName)
-        if (designDueDate) formData.append('design_due_date', designDueDate)
       }
       if (msWfEnabled && msWfName) {
         formData.append('manuscript_workflow_name', msWfName)
-        if (msDueDate) formData.append('manuscript_due_date', msDueDate)
       }
       if (artWfEnabled && artWfName) {
         formData.append('art_workflow_name', artWfName)
-        if (artDueDate) formData.append('art_due_date', artDueDate)
         formData.append('art_chapter_count', String(artChapterCount))
       }
 
@@ -673,8 +670,10 @@ export function CreateProjectPage() {
       }
 
       toast.success(`Project "${response.project.title ?? response.project.code}" created`)
-      
-      if (form.client_id) {
+
+      if (response.redirect_to) {
+        navigate(response.redirect_to)
+      } else if (form.client_id) {
         navigate(`/clients/${form.client_id}/projects`)
       } else {
         navigate('/clients')
@@ -974,19 +973,13 @@ export function CreateProjectPage() {
                 </div>
 
                 {designWfEnabled && (
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-3">
                     <Select
                       label="Design Workflow"
                       value={designWfName}
                       onChange={e => setDesignWfName(e.target.value)}
                       options={workflowNames.map(n => ({ value: n, label: n }))}
                       placeholder="Select Design Workflow"
-                    />
-                    <Input
-                      label="Design Due Date"
-                      type="date"
-                      value={designDueDate}
-                      onChange={e => setDesignDueDate(e.target.value)}
                     />
                   </div>
                 )}
@@ -1010,19 +1003,13 @@ export function CreateProjectPage() {
                 </div>
 
                 {msWfEnabled && (
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-3">
                     <Select
                       label="Manuscript Workflow"
                       value={msWfName}
                       onChange={e => setMsWfName(e.target.value)}
                       options={workflowNames.map(n => ({ value: n, label: n }))}
                       placeholder="Select Manuscript Workflow"
-                    />
-                    <Input
-                      label="Manuscript Due Date"
-                      type="date"
-                      value={msDueDate}
-                      onChange={e => setMsDueDate(e.target.value)}
                     />
                   </div>
                 )}
@@ -1046,31 +1033,21 @@ export function CreateProjectPage() {
                 </div>
 
                 {artWfEnabled && (
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="col-span-2">
-                      <Select
-                        label="Art Workflow"
-                        value={artWfName}
-                        onChange={e => setArtWfName(e.target.value)}
-                        options={workflowNames.map(n => ({ value: n, label: n }))}
-                        placeholder="Select Art Workflow"
-                      />
-                    </div>
-                    <Input
-                      label="Art Due Date"
-                      type="date"
-                      value={artDueDate}
-                      onChange={e => setArtDueDate(e.target.value)}
+                  <div className="grid grid-cols-2 gap-4">
+                    <Select
+                      label="Art Workflow"
+                      value={artWfName}
+                      onChange={e => setArtWfName(e.target.value)}
+                      options={workflowNames.map(n => ({ value: n, label: n }))}
+                      placeholder="Select Art Workflow"
                     />
-                    <div className="col-span-3">
-                      <Input
-                        label="Number of Art Chapters"
-                        type="number"
-                        min={1}
-                        value={String(artChapterCount)}
-                        onChange={e => setArtChapterCount(Number(e.target.value) || 1)}
-                      />
-                    </div>
+                    <Input
+                      label="Number of Art Chapters"
+                      type="number"
+                      min={1}
+                      value={String(artChapterCount)}
+                      onChange={e => setArtChapterCount(Number(e.target.value) || 1)}
+                    />
                   </div>
                 )}
               </div>

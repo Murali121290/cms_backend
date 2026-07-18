@@ -18,6 +18,7 @@ export interface Chapter {
   remarks: string | null
   manuscript_pages: number | null
   word_count: number | null
+  art_count?: number | null
   priority: string
   delayed_stages: Record<string, number> | null
   created_at: string
@@ -35,6 +36,16 @@ export interface ChapterUpdate {
   published_status?:       string | null
   complexity_level?:       string | null
   delayed_stages?:         Record<string, number> | null
+}
+
+export interface ChapterZipSkippedItem {
+  filename: string
+  reason: string
+}
+
+export interface ChapterZipUploadResponse {
+  created: Chapter[]
+  skipped: ChapterZipSkippedItem[]
 }
 
 export const chaptersApi = {
@@ -64,6 +75,31 @@ export const chaptersApi = {
     formData.append('number', number)
     formData.append('file', file)
     return api.post<Chapter>(`/projects/${projectId}/chapters/create-with-manuscript`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
+
+  createManuscriptChaptersFromZip: (projectId: number, file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post<ChapterZipUploadResponse>(`/projects/${projectId}/chapters/create-with-manuscript-zip`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
+
+  createArtChapter: (projectId: number, number: string, file: File) => {
+    const formData = new FormData()
+    formData.append('number', number)
+    formData.append('file', file)
+    return api.post<Chapter>(`/projects/${projectId}/chapters/create-with-art`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
+
+  createArtChaptersFromZip: (projectId: number, file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post<ChapterZipUploadResponse>(`/projects/${projectId}/chapters/create-with-art-zip`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then(r => r.data)
   },

@@ -83,8 +83,11 @@ export function ChapterDetailPage() {
         setChapter(ch)
         const proj = projResponse.project
         setProject(proj)
-        if (proj.workflow_name) {
-          const stages = await workflowsApi.getWorkflow(proj.workflow_name).catch(() => [])
+        // Use the chapter's own workflow (Art/Design track) if set,
+        // falling back to the project's main (Manuscript) workflow.
+        const chapterWorkflow = ch.workflow || proj.workflow_name
+        if (chapterWorkflow) {
+          const stages = await workflowsApi.getWorkflow(chapterWorkflow).catch(() => [])
           setOrderedStages(orderStages(stages))
         }
         // Fetch backup files for this chapter

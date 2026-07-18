@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from fastapi import UploadFile
 from app import models
 from app.domains.projects.models import Project
+import re
 import shutil
 import os
 from datetime import datetime
@@ -12,6 +13,30 @@ from app.services import checkout_service, version_service
 
 UPLOAD_DIR = str(UPLOADS_DIR)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+def extract_chapter_number_from_filename(name: str) -> str | None:
+    """Parse a zero-padded chapter number out of a filename or folder name.
+
+    Matches "chapter"/"chap"/"ch" followed by digits (e.g. "Chapter_05.docx"),
+    else falls back to a leading or trailing run of digits in the stem
+    (e.g. "05_intro.docx" or "intro_05.docx").
+    """
+    name_lower = name.lower()
+    m = re.search(r'(?:chapter|chap|ch)[_\s-]*(\d+)', name_lower)
+    if m:
+        return f"{int(m.group(1)):02d}"
+    base = os.path.splitext(os.path.basename(name))[0]
+    m = re.match(r'^(\d+)', base)
+    if m:
+        return f"{int(m.group(1)):02d}"
+    m = re.search(r'(\d+)$', base)
+    if m:
+        return f"{int(m.group(1)):02d}"
+    m = re.search(r'(\d+)', base)
+    if m:
+        return f"{int(m.group(1)):02d}"
+    return None
 
 def save_upload_file(upload_file: UploadFile, destination: str):
     try:
@@ -72,69 +97,153 @@ def upload_chapter_files(
         if not upload.filename:
             continue
 
-        existing_file = db.query(models.File).filter(
-            models.File.chapter_id == chapter_id,
-            models.File.category == category,
-            models.File.filename == upload.filename,
-        ).first()
+        if upload.filename.lower().endswith(".zip") and category in ["Design", "Art"]:
+            import zipfile
+            import io
+            try:
+                zip_data = upload.file.read()
+                upload.file.seek(0)
+                with zipfile.ZipFile(io.BytesIO(zip_data)) as z:
+                    for member in z.namelist():
+                        fname = os.path.basename(member)
+                        if not fname or member.endswith("/") or "__MACOSX" in member or fname.startswith("."):
+                            continue
 
-        if existing_file:
-            if checkout_service.is_locked_by_other(existing_file, actor_user_id):
+                        existing_file = db.query(models.File).filter(
+                            models.File.chapter_id == chapter_id,
+                            models.File.category == category,
+                            models.File.filename == fname,
+                        ).first()
+
+                        if existing_file:
+                            if checkout_service.is_locked_by_other(existing_file, actor_user_id):
+                                skipped_results.append(
+                                    {
+                                        "filename": f"{upload.filename} -> {fname}",
+                                        "code": "LOCKED_BY_OTHER",
+                                        "message": "File is locked by another user.",
+                                    }
+                                )
+                                continue
+
+                            version_entry = version_service.archive_existing_file(
+                                db,
+                                existing_file=existing_file,
+                                base_path=base_path,
+                                uploaded_by_id=actor_user_id,
+                            )
+
+                            file_path = existing_file.path
+                            with z.open(member) as src, open(file_path, "wb") as dst:
+                                shutil.copyfileobj(src, dst)
+
+                            existing_file.version += 1
+                            existing_file.uploaded_at = now_ist_naive()
+                            existing_file.uploaded_by_id = actor_user_id
+                            checkout_service.reset_checkout_after_overwrite(existing_file)
+                            uploaded_results.append(
+                                {
+                                    "file": existing_file,
+                                    "operation": "replaced",
+                                    "archive_entry": version_entry,
+                                }
+                            )
+                        else:
+                            file_path = f"{base_path}/{fname}"
+                            with z.open(member) as src, open(file_path, "wb") as dst:
+                                shutil.copyfileobj(src, dst)
+
+                            ext = fname.split(".")[-1].lower() if "." in fname else ""
+                            db_file = models.File(
+                                project_id=project_id,
+                                chapter_id=chapter_id,
+                                filename=fname,
+                                file_type=ext,
+                                category=category,
+                                path=file_path,
+                                version=1,
+                                uploaded_by_id=actor_user_id,
+                            )
+                            db.add(db_file)
+                            uploaded_results.append(
+                                {
+                                    "file": db_file,
+                                    "operation": "created",
+                                    "archive_entry": None,
+                                }
+                            )
+            except Exception as zip_err:
                 skipped_results.append(
                     {
                         "filename": upload.filename,
-                        "code": "LOCKED_BY_OTHER",
-                        "message": "File is locked by another user.",
+                        "code": "INVALID_ZIP",
+                        "message": f"Failed to extract ZIP: {str(zip_err)}",
                     }
                 )
-                continue
-
-            version_entry = version_service.archive_existing_file(
-                db,
-                existing_file=existing_file,
-                base_path=base_path,
-                uploaded_by_id=actor_user_id,
-            )
-
-            file_path = existing_file.path
-            with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(upload.file, buffer)
-
-            existing_file.version += 1
-            existing_file.uploaded_at = now_ist_naive()
-            existing_file.uploaded_by_id = actor_user_id
-            checkout_service.reset_checkout_after_overwrite(existing_file)
-            uploaded_results.append(
-                {
-                    "file": existing_file,
-                    "operation": "replaced",
-                    "archive_entry": version_entry,
-                }
-            )
         else:
-            file_path = f"{base_path}/{upload.filename}"
-            with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(upload.file, buffer)
+            existing_file = db.query(models.File).filter(
+                models.File.chapter_id == chapter_id,
+                models.File.category == category,
+                models.File.filename == upload.filename,
+            ).first()
 
-            ext = upload.filename.split(".")[-1].lower() if "." in upload.filename else ""
-            db_file = models.File(
-                project_id=project_id,
-                chapter_id=chapter_id,
-                filename=upload.filename,
-                file_type=ext,
-                category=category,
-                path=file_path,
-                version=1,
-                uploaded_by_id=actor_user_id,
-            )
-            db.add(db_file)
-            uploaded_results.append(
-                {
-                    "file": db_file,
-                    "operation": "created",
-                    "archive_entry": None,
-                }
-            )
+            if existing_file:
+                if checkout_service.is_locked_by_other(existing_file, actor_user_id):
+                    skipped_results.append(
+                        {
+                            "filename": upload.filename,
+                            "code": "LOCKED_BY_OTHER",
+                            "message": "File is locked by another user.",
+                        }
+                    )
+                    continue
+
+                version_entry = version_service.archive_existing_file(
+                    db,
+                    existing_file=existing_file,
+                    base_path=base_path,
+                    uploaded_by_id=actor_user_id,
+                )
+
+                file_path = existing_file.path
+                with open(file_path, "wb") as buffer:
+                    shutil.copyfileobj(upload.file, buffer)
+
+                existing_file.version += 1
+                existing_file.uploaded_at = now_ist_naive()
+                existing_file.uploaded_by_id = actor_user_id
+                checkout_service.reset_checkout_after_overwrite(existing_file)
+                uploaded_results.append(
+                    {
+                        "file": existing_file,
+                        "operation": "replaced",
+                        "archive_entry": version_entry,
+                    }
+                )
+            else:
+                file_path = f"{base_path}/{upload.filename}"
+                with open(file_path, "wb") as buffer:
+                    shutil.copyfileobj(upload.file, buffer)
+
+                ext = upload.filename.split(".")[-1].lower() if "." in upload.filename else ""
+                db_file = models.File(
+                    project_id=project_id,
+                    chapter_id=chapter_id,
+                    filename=upload.filename,
+                    file_type=ext,
+                    category=category,
+                    path=file_path,
+                    version=1,
+                    uploaded_by_id=actor_user_id,
+                )
+                db.add(db_file)
+                uploaded_results.append(
+                    {
+                        "file": db_file,
+                        "operation": "created",
+                        "archive_entry": None,
+                    }
+                )
 
     db.commit()
     return {

@@ -706,7 +706,8 @@ def test_duplicate_chapter_delete_routes_remain_registered(app_env):
         and "POST" in getattr(route, "methods", set())
     ]
 
-    assert len(delete_routes) == 2
+    # Only one delete route is registered — the legacy duplicate was removed.
+    assert len(delete_routes) == 1
 
 
 def test_activities_page_redirects_anonymous_users_to_login(client):
