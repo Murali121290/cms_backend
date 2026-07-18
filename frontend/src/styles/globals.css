@@ -43,6 +43,63 @@
   --color-warning:        var(--color-warning);
   --color-danger:         var(--color-danger);
   --color-info:           var(--color-info);
+
+  /* ── Neutral (navy) scale — used for text, borders, surfaces ─────────── */
+  --color-navy-50:  #f6f7fb;
+  --color-navy-100: #e6e9f0;
+  --color-navy-200: #cfd4e0;
+  --color-navy-300: #a8b0c2;
+  --color-navy-400: #7c8598;
+  --color-navy-500: #58627a;
+  --color-navy-600: #414a60;
+  --color-navy-700: #2e3547;
+  --color-navy-800: #1c2233;
+  --color-navy-900: #0f1424;
+
+  /* ── Warm surface scale — subtle backgrounds on cream base ──────────── */
+  --color-surface-50:  #FBF8F1;
+  --color-surface-100: #F2ECDF;
+  --color-surface-200: #E7DFCC;
+
+  /* ── Success (emerald) scale ────────────────────────────────────────── */
+  --color-success-50:  #ecfdf5;
+  --color-success-100: #d1fae5;
+  --color-success-200: #a7f3d0;
+  --color-success-300: #6ee7b7;
+  --color-success-400: #34d399;
+  --color-success-500: #10b981;
+  --color-success-600: #059669;
+  --color-success-700: #047857;
+  --color-success-800: #065f46;
+  --color-success-900: #064e3b;
+
+  /* ── Warning (amber) scale ──────────────────────────────────────────── */
+  --color-warning-50:  #fffbeb;
+  --color-warning-100: #fef3c7;
+  --color-warning-200: #fde68a;
+  --color-warning-300: #fcd34d;
+  --color-warning-400: #fbbf24;
+  --color-warning-500: #f59e0b;
+  --color-warning-600: #d97706;
+  --color-warning-700: #b45309;
+  --color-warning-800: #92400e;
+  --color-warning-900: #78350f;
+
+  /* ── Error (red) scale ──────────────────────────────────────────────── */
+  --color-error-50:  #fef2f2;
+  --color-error-100: #fee2e2;
+  --color-error-200: #fecaca;
+  --color-error-300: #fca5a5;
+  --color-error-400: #f87171;
+  --color-error-500: #ef4444;
+  --color-error-600: #dc2626;
+  --color-error-700: #b91c1c;
+  --color-error-800: #991b1b;
+  --color-error-900: #7f1d1d;
+
+  /* ── Elevation shadows ──────────────────────────────────────────────── */
+  --shadow-card:  0 1px 2px 0 rgb(15 20 36 / 0.04), 0 1px 3px 0 rgb(15 20 36 / 0.06);
+  --shadow-hover: 0 4px 12px -2px rgb(15 20 36 / 0.08), 0 2px 4px -1px rgb(15 20 36 / 0.06);
 }
 
 /* ── Base ───────────────────────────────────────────────────────────────────── */
