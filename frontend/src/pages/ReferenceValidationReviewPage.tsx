@@ -2024,20 +2024,20 @@ export function ReferenceValidationReviewPage() {
   });
 
   return (
-    <main ref={pageRootRef} className={`page-enter min-h-screen bg-surface-100 flex flex-col ${isFullscreen ? "p-2" : "px-6 pt-3 pb-6"}`}>
+    <main ref={pageRootRef} className={`page-enter min-h-screen bg-surface-100 flex flex-col ${isFullscreen ? "p-2" : "px-4 pt-3 pb-4"}`}>
       {isFullscreen && (
-        <div style={{ position: "fixed", top: "16px", right: "16px", zIndex: 1000 }}>
+        <div className="fixed top-4 right-4 z-50">
           <Button
             variant="secondary"
             leftIcon={<Minimize2 className="w-4 h-4" />}
             onClick={() => setIsFullscreen(false)}
-            style={{ boxShadow: "0 4px 12px rgba(0,0,0,0.15)", backgroundColor: "#FFFFFF" }}
+            className="shadow-lg bg-white"
           >
             Exit Fullscreen
           </Button>
         </div>
       )}
-      <div className={`w-full flex-1 flex flex-col ${isFullscreen ? "max-w-none px-0" : "max-w-[1650px] mx-auto px-2 space-y-6"}`}>
+      <div className={`w-full flex-1 flex flex-col ${isFullscreen ? "max-w-none px-0" : "mx-auto space-y-3"}`}>
 
         {/* Style Overlay injection filter */}
         <style>{`
@@ -2099,55 +2099,53 @@ export function ReferenceValidationReviewPage() {
 
         {/* Page Header */}
         {!isFullscreen && (
-          <PageHeader
-            breadcrumb={
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => navigate(uiPaths.chapterDetail(normalizedProjectId, normalizedChapterId))}
-                  className="p-2 rounded-lg hover:bg-surface text-muted hover:text-text transition-colors -ml-2"
-                >
-                  <ArrowLeft size={18} />
-                </button>
-                <span className="text-sm font-medium text-navy-700 whitespace-nowrap">Back to Chapter</span>
-                <span className="text-navy-300">·</span>
-                <span className="text-sm font-semibold text-text truncate">{review.file.filename}</span>
-              </div>
-            }
-            title=""
-            secondaryActions={[
-              <Button
-                key="fullscreen"
-                variant="secondary"
-                leftIcon={<Maximize2 className="w-4 h-4" />}
-                onClick={() => setIsFullscreen(true)}
+          <div className="flex items-center justify-between gap-4 py-1">
+            <div className="flex items-center gap-2 min-w-0">
+              <button
+                onClick={() => navigate(uiPaths.chapterDetail(normalizedProjectId, normalizedChapterId))}
+                className="p-1.5 rounded-md hover:bg-surface-100 text-navy-500 hover:text-navy-800 transition-colors"
+                title="Back to chapter"
               >
-                Fullscreen
-              </Button>,
-            ]}
-          />
+                <ArrowLeft size={18} />
+              </button>
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-sm font-semibold text-navy-900 truncate">Reference Review</span>
+                <span className="text-navy-300">/</span>
+                <span className="text-sm text-navy-600 truncate" title={review.file.filename}>{review.file.filename}</span>
+              </div>
+            </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              leftIcon={<Maximize2 className="w-4 h-4" />}
+              onClick={() => setIsFullscreen(true)}
+            >
+              Fullscreen
+            </Button>
+          </div>
         )}
 
         {/* Status / feedback banners */}
         {saveMutation.statusMessage && (
-          <div className="px-4 py-3 rounded-lg text-sm font-semibold border bg-success-50 border-success-200 text-success-700 flex items-center gap-2 shadow-sm animate-pulse">
-            <CheckCircle2 className="w-4 h-4 text-success-600" />
-            {saveMutation.statusMessage}
+          <div className="px-3 py-2 rounded-md text-sm font-medium border bg-success-50 border-success-200 text-success-700 flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-success-600 shrink-0" />
+            <span>{saveMutation.statusMessage}</span>
           </div>
         )}
         {saveMutation.errorMessage && (
-          <div className="px-4 py-3 rounded-lg text-sm font-semibold border bg-error-50 border-error-200 text-error-700 flex items-center gap-2 shadow-sm">
-            <AlertCircle className="w-4 h-4 text-error-600" />
-            {saveMutation.errorMessage}
+          <div className="px-3 py-2 rounded-md text-sm font-medium border bg-error-50 border-error-200 text-error-700 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-error-600 shrink-0" />
+            <span>{saveMutation.errorMessage}</span>
           </div>
         )}
 
         {/* Two-Column split workspace */}
         <div
-          className="flex gap-6 overflow-hidden min-h-0"
-          style={{ height: isFullscreen ? "calc(100vh - 20px)" : "calc(100vh - 260px)" }}
+          className="flex gap-3 overflow-hidden min-h-0"
+          style={{ height: isFullscreen ? "calc(100vh - 20px)" : "calc(100vh - 130px)" }}
         >
 
-          <div className="flex-[2] flex flex-col bg-white rounded-xl shadow-card border border-navy-100 overflow-hidden min-h-0 min-w-0">
+          <div className="flex-1 flex flex-col bg-white rounded-xl shadow-card border border-navy-100 overflow-hidden min-h-0 min-w-0">
             {/* WYSIWYG Editor wrapper */}
             <div className="flex-1 min-h-0 bg-white">
               <WysiwygEditor
@@ -2173,88 +2171,76 @@ export function ReferenceValidationReviewPage() {
             </div>
           </div>
 
-          {/* Right Panel: Three-Tab Sidebar */}
-          <div className="w-[380px] shrink-0 flex flex-col bg-white rounded-xl shadow-card border border-navy-100 overflow-hidden min-h-0">
+          {/* Right Panel: Validation sidebar */}
+          <div className="w-[360px] shrink-0 flex flex-col bg-white rounded-xl shadow-card border border-navy-100 overflow-hidden min-h-0">
 
-            {/* Sidebar Header - 3 rows */}
-            <div className="px-4 pt-3 pb-2 bg-surface-50 border-b border-navy-100">
-              {/* Row 1: File info + style badge */}
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2 min-w-0">
-                  <FileText className="w-3.5 h-3.5 text-navy-500 shrink-0" />
-                  <span className="text-[11px] font-semibold text-navy-800 truncate max-w-[180px]" title={review.file.filename}>
-                    {review.file.filename}
-                  </span>
-                  <span className="text-[9px] text-navy-400 bg-surface-200 px-1.5 py-0.5 rounded font-mono shrink-0">
-                    v{review.file.version}
-                  </span>
-                </div>
-                <div className="flex gap-1.5 items-center flex-wrap">
+            {/* Sidebar Header */}
+            <div className="px-3 py-3 bg-surface-50 border-b border-navy-100 space-y-3">
+              {/* Row 1: Style selectors */}
+              <div className="flex items-center gap-2">
+                <label className="flex-1 flex items-center gap-1.5 min-w-0">
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-navy-500 shrink-0">Style</span>
                   <select
                     value={styleOverride}
                     onChange={(e) => setStyleOverride(e.target.value as any)}
-                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 border focus:outline-none focus:ring-1 focus:ring-navy-400 cursor-pointer ${
-                      detectedStyle === "AMA"
-                        ? "bg-purple-50 text-purple-700 border-purple-200"
-                        : "bg-teal-50 text-teal-700 border-teal-200"
-                    }`}
+                    className="flex-1 min-w-0 px-2 py-1 rounded-md text-xs font-medium border border-navy-200 bg-white text-navy-800 focus:outline-none focus:ring-2 focus:ring-navy-300 focus:border-navy-400 cursor-pointer"
                     title="Override validation style"
                   >
-                    <option value="AUTO">Auto ({reviewQuery.data?.validation_logs?.detected_style ?? "AMA"})</option>
+                    <option value="AUTO">Auto · {reviewQuery.data?.validation_logs?.detected_style ?? "AMA"}</option>
                     <option value="AMA">AMA (Numbered)</option>
                     <option value="APA">APA (Name-Year)</option>
                   </select>
-                  {detectedStyle === "AMA" && (
+                </label>
+                {detectedStyle === "AMA" && (
+                  <label className="flex-1 flex items-center gap-1.5 min-w-0">
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-navy-500 shrink-0">Format</span>
                     <select
                       value={citationFormat}
                       onChange={(e) => setCitationFormat(e.target.value as any)}
-                      className="px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 border focus:outline-none focus:ring-1 focus:ring-navy-400 cursor-pointer bg-sky-50 text-sky-700 border-sky-200"
+                      className="flex-1 min-w-0 px-2 py-1 rounded-md text-xs font-medium border border-navy-200 bg-white text-navy-800 focus:outline-none focus:ring-2 focus:ring-navy-300 focus:border-navy-400 cursor-pointer"
                       title="Citation format override"
                     >
                       <option value="auto">Auto-detect</option>
-                      <option value="superscript">Superscript (¹)</option>
+                      <option value="superscript">Superscript ¹</option>
                       <option value="bracket">Bracket [1]</option>
-                      <option value="paren">Parenthesis (1)</option>
+                      <option value="paren">Paren (1)</option>
                       <option value="plain">Plain 1</option>
                     </select>
-                  )}
+                  </label>
+                )}
+              </div>
+
+              {/* Row 2: Status chips + Validate action */}
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-3 min-w-0 flex-wrap">
+                  <span className="flex items-center gap-1 text-xs font-semibold text-error-600" title="Issues found">
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    <span className="tabular-nums">{issueCount}</span>
+                  </span>
+                  <span className="flex items-center gap-1 text-xs font-semibold text-success-600" title="Matched citations">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span className="tabular-nums">{matchedCount}</span>
+                  </span>
+                  <span className="text-[10px] text-navy-400 flex items-center gap-1" title="Last validated">
+                    <Calendar className="w-3 h-3" />
+                    {lastValidatedAt ? lastValidatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}
+                  </span>
                 </div>
-              </div>
-
-              {/* Row 2: Issue count chips */}
-              <div className="flex items-center gap-3 flex-wrap mb-2">
-                <span className="flex items-center gap-1 text-[10px] font-bold text-error-600">
-                  <AlertCircle className="w-3 h-3" />
-                  {issueCount} issues
-                </span>
-                <span className="flex items-center gap-1 text-[10px] font-bold text-success-600">
-                  <CheckCircle2 className="w-3 h-3" />
-                  {matchedCount} matched
-                </span>
-              </div>
-
-              {/* Row 3: Timestamp + Validate button */}
-              <div className="flex items-center justify-between">
-                <span className="text-[9px] text-navy-400 flex items-center gap-1">
-                  <Calendar className="w-3 h-3" />
-                  {lastValidatedAt ? lastValidatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "Not yet validated"}
-                </span>
-                <div className="flex gap-1.5">
+                <div className="flex gap-1.5 shrink-0">
                   {pendingMerges.length > 0 && (
                     <Button
                       variant="secondary"
                       size="sm"
-                      className="text-[11px] px-2 py-1 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                      leftIcon={<Check className="w-3.5 h-3.5" />}
                       onClick={applyPendingMerges}
                       title={`Apply ${pendingMerges.length} queued merge(s) to editor`}
                     >
-                      ✅ Apply ({pendingMerges.length})
+                      Apply ({pendingMerges.length})
                     </Button>
                   )}
                   <Button
                     variant="primary"
                     size="sm"
-                    className="text-[11px] px-3 py-1 bg-[#C9821A] border-[#C9821A] hover:bg-[#B3711A] text-white"
                     onClick={async () => {
                       if (editorRef.current?.editor) {
                         // If there are pending merges, apply them first
@@ -2294,7 +2280,7 @@ export function ReferenceValidationReviewPage() {
               </div>
             </div>
 
-            {/* Sidebar Tabs — stacked icon + micro-label, flex-1 so all fit without scrolling */}
+            {/* Sidebar Tabs — icon + label + inline count badge */}
             {(() => {
               const amaIssueCount =
                 (logs.duplicates?.length ?? 0) +
@@ -2312,58 +2298,57 @@ export function ReferenceValidationReviewPage() {
               const structBadge = logs.reference_entries?.filter((e: any) => !e.is_cited).length || 0;
 
               const tabCls = (id: string) =>
-                `flex-1 py-2 flex flex-col items-center gap-0.5 border-b-2 transition-all cursor-pointer ${
+                `flex-1 min-w-0 px-2 py-2.5 flex items-center justify-center gap-1.5 border-b-2 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                   activeTab === id
-                    ? "border-navy-800 text-navy-800 bg-white shadow-sm"
-                    : "border-transparent text-navy-400 hover:text-navy-700 hover:bg-white/60"
+                    ? "border-navy-800 text-navy-900 bg-white"
+                    : "border-transparent text-navy-500 hover:text-navy-800 hover:bg-white/60"
                 }`;
 
-              const Badge = ({ count, color = "error" }: { count: number; color?: string }) =>
+              const CountBadge = ({ count, tone = "error" }: { count: number; tone?: "error" | "warning" | "neutral" }) =>
                 count > 0 ? (
-                  <span className={`absolute -top-1.5 -right-2 min-w-[14px] h-[14px] flex items-center justify-center rounded-full text-[7.5px] font-extrabold px-0.5 leading-none ${
-                    color === "error" ? "bg-red-500 text-white" :
-                    color === "warning" ? "bg-amber-500 text-white" :
-                    "bg-navy-500 text-white"
+                  <span className={`inline-flex items-center justify-center min-w-[18px] h-[16px] rounded-full text-[10px] font-bold px-1 leading-none tabular-nums ${
+                    tone === "error" ? "bg-error-100 text-error-700" :
+                    tone === "warning" ? "bg-warning-100 text-warning-700" :
+                    "bg-navy-100 text-navy-700"
                   }`}>{count > 99 ? "99+" : count}</span>
                 ) : null;
-
-              const Label = ({ children }: { children: string }) => (
-                <span className="text-[8px] font-bold uppercase tracking-wide leading-none">{children}</span>
-              );
 
               return (
                 <div className="flex border-b border-navy-200 bg-surface-100 shrink-0">
                   <button title="Citations & References" onClick={() => setActiveTab("citations")} className={tabCls("citations")}>
-                    <div className="relative"><Layers className="w-4 h-4" /><Badge count={citeBadge} color="error" /></div>
-                    <Label>Cites</Label>
+                    <Layers className="w-3.5 h-3.5 shrink-0" />
+                    <span>Citations</span>
+                    <CountBadge count={citeBadge} tone="error" />
                   </button>
 
                   <button title="Structuring Review" onClick={() => setActiveTab("structuring")} className={tabCls("structuring")}>
-                    <div className="relative"><Hash className="w-4 h-4" /><Badge count={structBadge} color="warning" /></div>
-                    <Label>Struct</Label>
+                    <Hash className="w-3.5 h-3.5 shrink-0" />
+                    <span>Refs</span>
+                    <CountBadge count={structBadge} tone="warning" />
                   </button>
 
                   <button title="Tracked Changes" onClick={() => setActiveTab("trackedChanges")} className={tabCls("trackedChanges")}>
-                    <div className="relative"><ArrowLeftRight className="w-4 h-4" /></div>
-                    <Label>Track</Label>
+                    <ArrowLeftRight className="w-3.5 h-3.5 shrink-0" />
+                    <span>Changes</span>
                   </button>
 
                   {issueCount > 0 && (
                     <button title="Issues" onClick={() => setActiveTab("issues")} className={tabCls("issues")}>
-                      <div className="relative"><AlertTriangle className="w-4 h-4" /><Badge count={issueCount} color="warning" /></div>
-                      <Label>Issues</Label>
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                      <span>Issues</span>
+                      <CountBadge count={issueCount} tone="warning" />
                     </button>
                   )}
 
                   <button title="Missing & Unused References" onClick={() => setActiveTab("missing")} className={tabCls("missing")}>
-                    <div className="relative"><AlertCircle className="w-4 h-4" /></div>
-                    <Label>Missing</Label>
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>Missing</span>
                   </button>
 
                   {logs.raw_log && (
                     <button title="Raw Logs" onClick={() => setActiveTab("logs")} className={tabCls("logs")}>
-                      <div className="relative"><Terminal className="w-4 h-4" /></div>
-                      <Label>Logs</Label>
+                      <Terminal className="w-3.5 h-3.5 shrink-0" />
+                      <span>Logs</span>
                     </button>
                   )}
                 </div>
@@ -2375,19 +2360,19 @@ export function ReferenceValidationReviewPage() {
 
               {/* ─── TAB 1: CITATIONS & REFERENCES ─── */}
               {activeTab === "citations" && (
-                <div className="space-y-4 page-enter">
+                <div className="space-y-3 page-enter">
 
-                  {/* Summary Stats Bar — compact 4-column */}
-                  <div className="grid grid-cols-4 divide-x divide-slate-200 border border-slate-200 rounded-md overflow-hidden">
+                  {/* Summary Stats Bar */}
+                  <div className="grid grid-cols-4 divide-x divide-navy-100 border border-navy-100 rounded-lg overflow-hidden bg-white">
                     {([
-                      { label: "Refs",    value: logs.total_refs ?? 0,  cls: "text-navy-800" },
-                      { label: "Cites",   value: logs.total_cites ?? 0, cls: "text-navy-800" },
-                      { label: "Matched", value: matchedCount,           cls: "text-emerald-600" },
-                      { label: "Issues",  value: issueCount,             cls: issueCount > 0 ? "text-red-600" : "text-navy-800" },
+                      { label: "Refs",    value: logs.total_refs ?? 0,  cls: "text-navy-900" },
+                      { label: "Cites",   value: logs.total_cites ?? 0, cls: "text-navy-900" },
+                      { label: "Matched", value: matchedCount,           cls: "text-success-600" },
+                      { label: "Issues",  value: issueCount,             cls: issueCount > 0 ? "text-error-600" : "text-navy-900" },
                     ] as const).map(({ label, value, cls }) => (
-                      <div key={label} className="flex flex-col items-start px-2 py-1.5 bg-slate-50">
-                        <span className={`text-[17px] font-extrabold leading-none tabular-nums ${cls}`}>{value}</span>
-                        <span className="text-[8.5px] font-bold uppercase tracking-wide text-slate-400 mt-0.5">{label}</span>
+                      <div key={label} className="flex flex-col items-center px-2 py-2">
+                        <span className={`text-lg font-bold leading-none tabular-nums ${cls}`}>{value}</span>
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-navy-400 mt-1">{label}</span>
                       </div>
                     ))}
                   </div>
@@ -2397,12 +2382,11 @@ export function ReferenceValidationReviewPage() {
                       <Button
                         variant="secondary"
                         size="sm"
-                        leftIcon={<RefreshCw className="w-3 h-3" />}
-                        className="text-[10px] px-2 py-1 h-auto"
+                        leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
                         onClick={sortBibliographyAlphabetically}
                         title="Sorts references alphabetically and preserves track changes"
                       >
-                        A-Z Sort
+                        A–Z Sort
                       </Button>
                     </div>
                   )}
@@ -2501,30 +2485,31 @@ export function ReferenceValidationReviewPage() {
                   </div>
 
                   {/* Filter Pills */}
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-1.5">
                     {[
-                      { id: "all", label: "All" },
-                      { id: "ok", label: "✅ Matched" },
-                      { id: "missing", label: "🔴 Missing" },
-                      { id: "unused", label: "🟡 Unused" }
+                      { id: "all",     label: "All",     dot: null },
+                      { id: "ok",      label: "Matched", dot: "bg-success-500" },
+                      { id: "missing", label: "Missing", dot: "bg-error-500" },
+                      { id: "unused",  label: "Unused",  dot: "bg-warning-500" },
                     ].map(f => (
                       <button
                         key={f.id}
                         onClick={() => setCitationFilter(f.id as any)}
-                        className={`px-3 py-1 text-[11px] font-bold rounded-full border transition-colors ${citationFilter === f.id
-                            ? "bg-navy-800 text-white border-navy-800 shadow-sm"
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-full border transition-colors ${citationFilter === f.id
+                            ? "bg-navy-800 text-white border-navy-800"
                             : "bg-white text-navy-600 border-navy-200 hover:bg-navy-50"
                           }`}
                       >
+                        {f.dot && <span className={`w-1.5 h-1.5 rounded-full ${f.dot}`} />}
                         {f.label}
                       </button>
                     ))}
                   </div>
 
                   {/* Cards List */}
-                  <div className="space-y-3">
+                  <div className="space-y-2">
                     {filteredCitationPairs.length === 0 ? (
-                      <div className="text-center py-10 bg-white rounded-lg border border-navy-100 p-6 text-navy-400 text-xs font-semibold">
+                      <div className="text-center py-8 bg-white rounded-lg border border-navy-100 p-6 text-navy-400 text-sm font-medium">
                         No citations match the current filter.
                       </div>
                     ) : (
@@ -2547,9 +2532,9 @@ export function ReferenceValidationReviewPage() {
                             id={`citation-card-${idx}`}
                             onMouseEnter={() => pair.citation ? highlightInEditor(pair.citation, true) : highlightRefInEditor(pair.para_idx, true)}
                             onMouseLeave={() => pair.citation ? highlightInEditor(pair.citation, false) : highlightRefInEditor(pair.para_idx, false)}
-                            className={`rounded-lg border bg-white overflow-hidden border-l-[3.5px] transition-all hover:shadow-hover ${isMissing ? "border-l-error-500 bg-error-50/30 border-error-100" :
-                                isUnused ? "border-l-warning-500 bg-warning-50/30 border-warning-100" :
-                                  "border-l-success-500 bg-white border-navy-100"
+                            className={`rounded-lg border bg-white overflow-hidden border-l-[3px] transition-all hover:shadow-hover ${isMissing ? "border-l-error-500 border-error-100" :
+                                isUnused ? "border-l-warning-500 border-warning-100" :
+                                  "border-l-success-500 border-navy-100"
                               } ${activeCitationIdx === idx ? "ring-2 ring-navy-400 ring-offset-1" : ""}`}
                           >
                             {/* Card Header (Collapsed view) */}
@@ -2564,40 +2549,40 @@ export function ReferenceValidationReviewPage() {
                                   }
                                 }
                               }}
-                              className="w-full p-3 flex flex-col gap-2 hover:bg-surface-50/50 text-left transition-colors"
+                              className="w-full px-3 py-2.5 flex flex-col gap-1.5 hover:bg-surface-50/60 text-left transition-colors"
                             >
-                              <div className="flex items-start justify-between gap-3 w-full">
+                              <div className="flex items-start justify-between gap-2 w-full">
                                 <div className="flex items-start gap-2 flex-1 min-w-0">
-                                  {isMissing ? <AlertCircle className="w-3.5 h-3.5 text-error-500 shrink-0 mt-0.5" /> :
-                                    isUnused ? <AlertTriangle className="w-3.5 h-3.5 text-warning-500 shrink-0 mt-0.5" /> :
-                                      <CheckCircle2 className="w-3.5 h-3.5 text-success-500 shrink-0 mt-0.5" />}
+                                  {isMissing ? <AlertCircle className="w-4 h-4 text-error-500 shrink-0 mt-0.5" /> :
+                                    isUnused ? <AlertTriangle className="w-4 h-4 text-warning-500 shrink-0 mt-0.5" /> :
+                                      <CheckCircle2 className="w-4 h-4 text-success-500 shrink-0 mt-0.5" />}
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-1.5 flex-wrap">
-                                      <p className="text-[11px] font-extrabold text-navy-900 break-words leading-tight">
+                                      <p className="text-sm font-semibold text-navy-900 break-words leading-tight">
                                         {pair.citation ? (
                                           detectedStyle === "AMA" && !pair.citation.includes("[") ? `[${pair.citation}]` : pair.citation
                                         ) : (
-                                          <span className="text-navy-400 italic">No in-text citation</span>
+                                          <span className="text-navy-400 italic font-normal">No in-text citation</span>
                                         )}
                                       </p>
                                       {detectedStyle === "APA" && isOk && pair.match_score !== undefined && (() => {
                                         const pct = Math.min(100, Math.round((pair.match_score / 3.5) * 100));
                                         const cls = pct >= 85
-                                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                          ? "bg-success-50 text-success-700 border-success-200"
                                           : pct >= 65
-                                          ? "bg-amber-50 text-amber-700 border-amber-200"
-                                          : "bg-red-50 text-red-700 border-red-200";
+                                          ? "bg-warning-50 text-warning-700 border-warning-200"
+                                          : "bg-error-50 text-error-700 border-error-200";
                                         return (
-                                          <span className={`text-[9.5px] font-bold px-1.5 py-0.5 rounded border ${cls} shrink-0`} title="Match confidence">
+                                          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${cls} shrink-0`} title="Match confidence">
                                             {pct}%
                                           </span>
                                         );
                                       })()}
                                     </div>
-                                    <p className="text-[10px] text-navy-500 mt-1 truncate">
+                                    <p className="text-xs text-navy-500 mt-0.5 truncate">
                                       {isMissing ? "Missing reference entry" :
                                         isUnused ? "Unused reference entry" :
-                                          pair.ref_text.slice(0, 60) + (pair.ref_text.length > 60 ? "..." : "")}
+                                          pair.ref_text.slice(0, 70) + (pair.ref_text.length > 70 ? "…" : "")}
                                     </p>
                                   </div>
                                 </div>
@@ -2621,7 +2606,7 @@ export function ReferenceValidationReviewPage() {
                                       navigateToDocPara(pair.para_idx, pair.ref_text);
                                     }
                                   }}
-                                  className="flex items-center gap-1 text-[10px] font-bold text-navy-400 hover:text-navy-600 bg-surface-50 px-2 py-1 rounded shrink-0 cursor-pointer"
+                                  className="flex items-center gap-1 text-[11px] font-medium text-navy-500 hover:text-navy-800 hover:bg-surface-100 bg-surface-50 px-2 py-1 rounded shrink-0 cursor-pointer transition-colors"
                                 >
                                   Locate <CornerDownRight className="w-3 h-3" />
                                 </div>
@@ -2630,12 +2615,15 @@ export function ReferenceValidationReviewPage() {
 
                             {/* Card Body (Expanded view) */}
                             {isExpanded && (
-                              <div className="p-3 bg-surface-50/30 border-t border-navy-100/60 space-y-3">
+                              <div className="px-3 py-2.5 bg-surface-50/40 border-t border-navy-100/60 space-y-2.5">
                                 {cardIssues.length > 0 && (
                                   <div className="space-y-1.5">
                                     {cardIssues.map((issue: any, issueIdx: number) => (
-                                      <div key={issueIdx} className="text-[10px] font-medium p-2 bg-red-50 text-red-800 rounded border border-red-100 flex flex-col gap-1.5">
-                                        <span>⚠️ {issue.message}</span>
+                                      <div key={issueIdx} className="text-xs p-2 bg-error-50 text-error-800 rounded-md border border-error-100 flex flex-col gap-1.5">
+                                        <div className="flex items-start gap-1.5">
+                                          <AlertCircle className="w-3.5 h-3.5 text-error-600 shrink-0 mt-0.5" />
+                                          <span className="font-medium">{issue.message}</span>
+                                        </div>
                                         <IssueFix issue={issue} />
                                       </div>
                                     ))}
@@ -2643,32 +2631,36 @@ export function ReferenceValidationReviewPage() {
                                 )}
 
                                 {isMissing ? (
-                                  <div className="text-[11px] text-navy-800 font-semibold p-2 bg-red-50 rounded border border-red-100">
-                                    ⚠️ Citation found in text but no matching bibliography entry.
+                                  <div className="text-xs p-2.5 bg-error-50 rounded-md border border-error-100">
+                                    <div className="flex items-start gap-1.5 text-navy-800 font-medium">
+                                      <AlertCircle className="w-3.5 h-3.5 text-error-600 shrink-0 mt-0.5" />
+                                      <span>Citation found in text but no matching bibliography entry.</span>
+                                    </div>
                                     {pair.citation && (
                                       <button
                                         onClick={() => addBibliographyPlaceholder(detectedStyle === "AMA" && !pair.citation.includes("[") ? `[${pair.citation}]` : pair.citation)}
-                                        className="mt-2 text-[10px] font-bold text-emerald-600 hover:text-emerald-800 flex items-center gap-1 hover:underline bg-transparent border-none cursor-pointer"
+                                        className="mt-2 ml-5 text-xs font-semibold text-success-700 hover:text-success-800 flex items-center gap-1 hover:underline bg-transparent border-none cursor-pointer"
                                       >
-                                        <PlusIcon className="w-3 h-3" />
+                                        <PlusIcon className="w-3.5 h-3.5" />
                                         Add Placeholder Reference
                                       </button>
                                     )}
                                   </div>
                                 ) : isUnused ? (
                                   <div className="space-y-2">
-                                    <div className="text-[11px] text-navy-800 font-semibold p-2 bg-amber-50 rounded border border-amber-100">
-                                      ⚠️ This reference is in the bibliography, but it is never cited in the text.
+                                    <div className="flex items-start gap-1.5 text-xs text-navy-800 font-medium p-2.5 bg-warning-50 rounded-md border border-warning-100">
+                                      <AlertTriangle className="w-3.5 h-3.5 text-warning-600 shrink-0 mt-0.5" />
+                                      <span>This reference is in the bibliography but never cited in the text.</span>
                                     </div>
-                                    <div className="p-2.5 bg-white rounded border border-navy-100 text-[11px] leading-relaxed text-navy-800">
+                                    <div className="p-2.5 bg-white rounded-md border border-navy-100 text-xs leading-relaxed text-navy-800">
                                       {pair.ref_text}
                                     </div>
                                   </div>
                                 ) : (
-                                  <div className="space-y-2.5">
+                                  <div className="space-y-2">
                                     <div className="flex items-center justify-between">
-                                      <span className="text-[9px] uppercase font-bold text-navy-400 tracking-wider">Reference Text</span>
-                                      <div className="flex items-center gap-2">
+                                      <span className="text-[10px] uppercase font-semibold text-navy-400 tracking-wider">Reference Text</span>
+                                      <div className="flex items-center gap-1">
                                         <button
                                           onClick={() => {
                                             const refHtml = getReferenceHTML(pair.para_idx);
@@ -2685,51 +2677,53 @@ export function ReferenceValidationReviewPage() {
                                             setSearchSource(null);
                                             setIsEditModalOpen(true);
                                           }}
-                                          className="text-[9px] font-bold text-navy-500 hover:text-navy-800 bg-transparent border-none cursor-pointer"
+                                          className="text-[11px] font-medium text-navy-500 hover:text-navy-800 hover:bg-surface-100 px-1.5 py-0.5 rounded bg-transparent border-none cursor-pointer transition-colors"
                                         >
-                                          Edit Text
+                                          Edit
                                         </button>
-                                        <span className="text-navy-200">|</span>
                                         <button
                                           onClick={() => {
                                             navigator.clipboard.writeText(pair.ref_text);
                                             setCopiedIdx(idx);
                                             setTimeout(() => setCopiedIdx(null), 1500);
                                           }}
-                                          className="text-[9px] font-bold text-navy-500 hover:text-navy-800 bg-transparent border-none cursor-pointer"
+                                          className="text-[11px] font-medium text-navy-500 hover:text-navy-800 hover:bg-surface-100 px-1.5 py-0.5 rounded bg-transparent border-none cursor-pointer transition-colors"
                                         >
-                                          {copiedIdx === idx ? "Copied!" : "Copy"}
+                                          {copiedIdx === idx ? "Copied" : "Copy"}
                                         </button>
                                       </div>
                                     </div>
-                                    <div className="p-2.5 bg-white rounded border border-navy-100 text-[11px] leading-relaxed text-navy-800 selection:bg-blue-100">
+                                    <div className="p-2.5 bg-white rounded-md border border-navy-100 text-xs leading-relaxed text-navy-800 selection:bg-blue-100">
                                       {pair.ref_text}
                                     </div>
 
                                     {parsed && (
-                                      <div className="bg-white rounded border border-navy-100 p-2 space-y-1 text-[10px] text-navy-700">
+                                      <div className="bg-white rounded-md border border-navy-100 p-2 space-y-1 text-[11px] text-navy-700">
                                         {parsed.title && (
-                                          <p className="line-clamp-2"><strong>Title:</strong> {parsed.title}</p>
+                                          <p className="line-clamp-2"><span className="font-semibold text-navy-500">Title: </span>{parsed.title}</p>
                                         )}
                                         {parsed.journal && (
-                                          <p><strong>Journal:</strong> {parsed.journal}</p>
+                                          <p><span className="font-semibold text-navy-500">Journal: </span>{parsed.journal}</p>
                                         )}
-                                        <div className="flex gap-4">
-                                          {parsed.year && <p><strong>Year:</strong> {parsed.year}</p>}
-                                          {parsed.doi && <p><strong>DOI:</strong> {parsed.doi}</p>}
-                                        </div>
+                                        {(parsed.year || parsed.doi) && (
+                                          <div className="flex gap-4 flex-wrap">
+                                            {parsed.year && <p><span className="font-semibold text-navy-500">Year: </span>{parsed.year}</p>}
+                                            {parsed.doi && <p><span className="font-semibold text-navy-500">DOI: </span>{parsed.doi}</p>}
+                                          </div>
+                                        )}
                                       </div>
                                     )}
 
                                     {parsed?.doi && (
-                                      <div className="flex items-center gap-3 pt-1">
+                                      <div className="pt-0.5">
                                         <a
                                           href={`https://doi.org/${parsed.doi}`}
                                           target="_blank"
                                           rel="noreferrer"
-                                          className="text-[10px] text-purple-600 font-bold hover:underline"
+                                          className="inline-flex items-center gap-1 text-[11px] text-accent font-semibold hover:underline"
                                         >
-                                          DOI Link ↗
+                                          Open DOI link
+                                          <CornerDownRight className="w-3 h-3 -rotate-90" />
                                         </a>
                                       </div>
                                     )}
@@ -2747,16 +2741,22 @@ export function ReferenceValidationReviewPage() {
 
               {/* ─── TAB 2: STRUCTURING REVIEW ─── */}
               {activeTab === "structuring" && (
-                <div className="space-y-4 page-enter">
+                <div className="space-y-3 page-enter">
                   {/* Header Stat Bar & Search */}
-                  <div className="bg-white p-3 border border-navy-100 rounded-lg shadow-sm space-y-3">
+                  <div className="bg-white p-3 border border-navy-100 rounded-lg space-y-3">
                     <div className="flex items-center justify-between flex-wrap gap-2">
-                      <div className="flex gap-4 text-[11px] font-bold text-navy-800 flex-wrap">
-                        <span>{referenceEntries.length} references</span>
-                        <span className="text-navy-300">|</span>
-                        <span className="text-emerald-600">✅ {referenceEntries.filter((e: any) => e.is_cited).length} cited</span>
-                        <span className="text-navy-300">|</span>
-                        <span className="text-amber-600">🟡 {referenceEntries.filter((e: any) => !e.is_cited).length} uncited</span>
+                      <div className="flex items-center gap-3 text-xs font-medium text-navy-700 flex-wrap">
+                        <span className="tabular-nums"><span className="font-semibold text-navy-900">{referenceEntries.length}</span> refs</span>
+                        <span className="text-navy-200">·</span>
+                        <span className="inline-flex items-center gap-1 text-success-600">
+                          <span className="w-1.5 h-1.5 rounded-full bg-success-500" />
+                          <span className="tabular-nums font-semibold">{referenceEntries.filter((e: any) => e.is_cited).length}</span> cited
+                        </span>
+                        <span className="text-navy-200">·</span>
+                        <span className="inline-flex items-center gap-1 text-warning-700">
+                          <span className="w-1.5 h-1.5 rounded-full bg-warning-500" />
+                          <span className="tabular-nums font-semibold">{referenceEntries.filter((e: any) => !e.is_cited).length}</span> uncited
+                        </span>
                       </div>
                       {/* List / Changes toggle */}
                       <div className="flex gap-0.5 p-0.5 bg-surface-100 rounded-md border border-navy-100">
@@ -2764,7 +2764,7 @@ export function ReferenceValidationReviewPage() {
                           <button
                             key={mode}
                             onClick={() => setStructuringViewMode(mode)}
-                            className={`px-2.5 py-1 text-[10px] font-bold rounded capitalize transition-colors cursor-pointer ${
+                            className={`px-2 py-0.5 text-[11px] font-semibold rounded transition-colors cursor-pointer ${
                               structuringViewMode === mode
                                 ? "bg-white text-navy-900 shadow-sm"
                                 : "text-navy-500 hover:text-navy-700"
@@ -2784,20 +2784,20 @@ export function ReferenceValidationReviewPage() {
                           <Search className="w-3.5 h-3.5 text-navy-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                           <input
                             type="text"
-                            placeholder="Search references..."
+                            placeholder="Search references…"
                             value={refFilter}
                             onChange={(e) => setRefFilter(e.target.value)}
-                            className="w-full pl-8 pr-3 py-1.5 bg-surface-50 text-[11px] rounded border border-navy-200 focus:outline-none focus:border-navy-500"
+                            className="w-full pl-8 pr-3 py-1.5 bg-surface-50 text-xs rounded-md border border-navy-200 focus:outline-none focus:ring-2 focus:ring-navy-300 focus:border-navy-400"
                           />
                         </div>
                         <button
                           onClick={() => setShowUncitedOnly(!showUncitedOnly)}
-                          className={`px-3 text-[10px] font-bold rounded border whitespace-nowrap transition-colors ${showUncitedOnly
-                              ? "bg-amber-100 text-amber-800 border-amber-300"
+                          className={`px-3 text-[11px] font-semibold rounded-md border whitespace-nowrap transition-colors ${showUncitedOnly
+                              ? "bg-warning-100 text-warning-800 border-warning-300"
                               : "bg-surface-50 text-navy-600 border-navy-200 hover:bg-navy-50"
                             }`}
                         >
-                          Uncited Only
+                          Uncited only
                         </button>
                       </div>
                     )}
@@ -2982,31 +2982,34 @@ export function ReferenceValidationReviewPage() {
 
               {/* ─── TAB 3: ISSUES ─── */}
               {activeTab === "issues" && (
-                <div className="space-y-4 page-enter">
+                <div className="space-y-3 page-enter">
                   {/* Pending Merge Queue Banner */}
                   {pendingMerges.length > 0 && (
-                    <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-[11px] font-bold text-emerald-800 mb-1">
-                          ✅ {pendingMerges.length} merge{pendingMerges.length > 1 ? "s" : ""} queued
+                    <div className="bg-success-50 border border-success-200 rounded-lg p-3 flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-success-800 mb-1 inline-flex items-center gap-1.5">
+                          <Check className="w-3.5 h-3.5" />
+                          {pendingMerges.length} merge{pendingMerges.length > 1 ? "s" : ""} queued
                         </p>
                         <ul className="space-y-0.5">
                           {pendingMerges.map((m, i) => (
-                            <li key={i} className="text-[10px] text-emerald-700">
+                            <li key={i} className="text-[11px] text-success-700 tabular-nums">
                               Ref #{m.duplicate} → Ref #{m.canonical}
                             </li>
                           ))}
                         </ul>
-                        <p className="text-[10px] text-emerald-600 mt-1.5">
+                        <p className="text-[11px] text-success-600 mt-1.5">
                           Click <strong>Apply</strong> to update editor, then <strong>Validate</strong> to renumber.
                         </p>
                       </div>
-                      <button
+                      <Button
+                        variant="primary"
+                        size="sm"
                         onClick={applyPendingMerges}
-                        className="shrink-0 px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold rounded-md transition-colors cursor-pointer"
+                        className="shrink-0"
                       >
                         Apply Merges
-                      </button>
+                      </Button>
                     </div>
                   )}
 
@@ -3014,7 +3017,7 @@ export function ReferenceValidationReviewPage() {
                   {/* Duplicates Section */}
                   {(logs.duplicates?.length || 0) > 0 && (
                     <div className="space-y-2">
-                      <h4 className="text-[10px] uppercase font-extrabold text-navy-500 tracking-wider px-1">
+                      <h4 className="text-[11px] uppercase font-semibold text-navy-500 tracking-wider px-1">
                         Duplicate References ({logs.duplicates.length})
                       </h4>
                       {logs.duplicates.map((dup: any, idx: number) => {
@@ -3022,42 +3025,42 @@ export function ReferenceValidationReviewPage() {
                         const isQueued = resolvedDups.has(dupKey);
                         const simPct = Math.round((dup.similarity || 0) * 100);
                         return (
-                          <div key={idx} className="bg-white rounded-lg border border-warning-200 border-l-[3px] border-l-warning-500 p-3 space-y-2.5 shadow-sm">
+                          <div key={idx} className="bg-white rounded-lg border border-warning-200 border-l-[3px] border-l-warning-500 p-3 space-y-2">
                             <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-1.5 text-[10px] font-bold text-warning-700">
-                                <AlertTriangle className="w-3 h-3" />
-                                Possible Duplicate
+                              <div className="flex items-center gap-1.5 text-xs font-semibold text-warning-700">
+                                <AlertTriangle className="w-3.5 h-3.5" />
+                                Possible duplicate
                               </div>
-                              <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded-full border ${simPct >= 95 ? "bg-red-50 text-red-700 border-red-200" : "bg-amber-50 text-amber-700 border-amber-200"}`}>
+                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${simPct >= 95 ? "bg-error-50 text-error-700 border-error-200" : "bg-warning-50 text-warning-700 border-warning-200"}`}>
                                 {simPct}% similar
                               </span>
                             </div>
                             <div className="space-y-1.5">
-                              <div className="bg-surface-50 rounded p-2 border border-navy-100">
-                                <div className="text-[9px] font-extrabold text-navy-500 uppercase tracking-wide mb-1">
-                                  Reference #{dup.num1 ?? "?"} (Keep)
+                              <div className="bg-surface-50 rounded-md p-2 border border-navy-100">
+                                <div className="text-[10px] font-semibold text-success-700 uppercase tracking-wide mb-1">
+                                  Reference #{dup.num1 ?? "?"} · Keep
                                 </div>
-                                <p className="text-[10px] text-navy-800 leading-relaxed line-clamp-3">{dup.text1}</p>
+                                <p className="text-[11px] text-navy-800 leading-relaxed line-clamp-3">{dup.text1}</p>
                               </div>
-                              <div className="bg-surface-50 rounded p-2 border border-navy-100">
-                                <div className="text-[9px] font-extrabold text-navy-500 uppercase tracking-wide mb-1">
-                                  Reference #{dup.num2 ?? "?"} (Remove)
+                              <div className="bg-surface-50 rounded-md p-2 border border-navy-100">
+                                <div className="text-[10px] font-semibold text-error-700 uppercase tracking-wide mb-1">
+                                  Reference #{dup.num2 ?? "?"} · Remove
                                 </div>
-                                <p className="text-[10px] text-navy-800 leading-relaxed line-clamp-3">{dup.text2}</p>
+                                <p className="text-[11px] text-navy-800 leading-relaxed line-clamp-3">{dup.text2}</p>
                               </div>
                             </div>
                             {isQueued ? (
-                              <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-1.5">
-                                <Check className="w-3 h-3" />
+                              <div className="flex items-center gap-1.5 text-xs font-medium text-success-700 bg-success-50 border border-success-200 rounded-md px-2 py-1.5">
+                                <Check className="w-3.5 h-3.5" />
                                 Queued — will apply on next Save + Validate
                               </div>
                             ) : (
                               <button
                                 onClick={() => queueMerge(dup)}
-                                className="w-full text-[10px] font-bold text-navy-700 hover:text-navy-900 bg-surface-100 hover:bg-navy-100 px-2.5 py-1.5 rounded border border-navy-200 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                                className="w-full text-xs font-semibold text-navy-700 hover:text-navy-900 bg-surface-100 hover:bg-navy-100 px-2.5 py-1.5 rounded-md border border-navy-200 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                               >
-                                <Layers className="w-3 h-3" />
-                                Queue Merge: #{dup.num2} → #{dup.num1}
+                                <Layers className="w-3.5 h-3.5" />
+                                Queue merge #{dup.num2} → #{dup.num1}
                               </button>
                             )}
                           </div>
@@ -3069,7 +3072,7 @@ export function ReferenceValidationReviewPage() {
                   {/* Sequence Issues Section */}
                   {(logs.sequence_issues?.length || 0) > 0 && (
                     <div className="space-y-2">
-                      <h4 className="text-[10px] uppercase font-extrabold text-navy-500 tracking-wider px-1">
+                      <h4 className="text-[11px] uppercase font-semibold text-navy-500 tracking-wider px-1">
                         Sequence Issues ({logs.sequence_issues.length})
                       </h4>
                       {logs.sequence_issues.map((issue: any, idx: number) => (
@@ -3090,7 +3093,7 @@ export function ReferenceValidationReviewPage() {
                   {/* ── AMA: Broken Ranges ── */}
                   {detectedStyle === "AMA" && (logs.broken_ranges?.length || 0) > 0 && (
                     <div className="space-y-2">
-                      <h4 className="text-[10px] uppercase font-extrabold text-red-600 tracking-wider px-1">
+                      <h4 className="text-[11px] uppercase font-semibold text-red-600 tracking-wider px-1">
                         Broken Ranges ({logs.broken_ranges!.length})
                       </h4>
                       {logs.broken_ranges!.map((item: any, idx: number) => (
@@ -3109,7 +3112,7 @@ export function ReferenceValidationReviewPage() {
                   {/* ── AMA: Invalid Numbers ── */}
                   {detectedStyle === "AMA" && (logs.invalid_numbers?.length || 0) > 0 && (
                     <div className="space-y-2">
-                      <h4 className="text-[10px] uppercase font-extrabold text-red-600 tracking-wider px-1">
+                      <h4 className="text-[11px] uppercase font-semibold text-red-600 tracking-wider px-1">
                         Invalid Numbers ({logs.invalid_numbers!.length})
                       </h4>
                       {logs.invalid_numbers!.map((item: any, idx: number) => (
@@ -3128,7 +3131,7 @@ export function ReferenceValidationReviewPage() {
                   {/* ── AMA: Format Warnings ── */}
                   {detectedStyle === "AMA" && (logs.mixed_citation_style || (logs.inline_text_citations?.length || 0) > 0) && (
                     <div className="space-y-2">
-                      <h4 className="text-[10px] uppercase font-extrabold text-amber-600 tracking-wider px-1">
+                      <h4 className="text-[11px] uppercase font-semibold text-amber-600 tracking-wider px-1">
                         Format Warnings
                       </h4>
                       {logs.mixed_citation_style && (
@@ -3156,7 +3159,7 @@ export function ReferenceValidationReviewPage() {
                   {/* ── APA: et al. Issues ── */}
                   {detectedStyle === "APA" && (logs.et_al_issues?.length || 0) > 0 && (
                     <div className="space-y-2">
-                      <h4 className="text-[10px] uppercase font-extrabold text-blue-600 tracking-wider px-1">
+                      <h4 className="text-[11px] uppercase font-semibold text-blue-600 tracking-wider px-1">
                         et al. Issues ({logs.et_al_issues!.length})
                       </h4>
                       {logs.et_al_issues!.map((issue: any, idx: number) => (
@@ -3176,7 +3179,7 @@ export function ReferenceValidationReviewPage() {
                   {/* ── APA: Spelling Mismatches ── */}
                   {detectedStyle === "APA" && (logs.name_spelling_warnings?.length || 0) > 0 && (
                     <div className="space-y-2">
-                      <h4 className="text-[10px] uppercase font-extrabold text-amber-600 tracking-wider px-1">
+                      <h4 className="text-[11px] uppercase font-semibold text-amber-600 tracking-wider px-1">
                         Spelling Mismatches ({logs.name_spelling_warnings!.length})
                       </h4>
                       {logs.name_spelling_warnings!.map((issue: any, idx: number) => (
@@ -3195,7 +3198,7 @@ export function ReferenceValidationReviewPage() {
                   {/* ── APA: Ordering Issues ── */}
                   {detectedStyle === "APA" && (logs.ordering_issues?.length || 0) > 0 && (
                     <div className="space-y-2">
-                      <h4 className="text-[10px] uppercase font-extrabold text-purple-600 tracking-wider px-1">
+                      <h4 className="text-[11px] uppercase font-semibold text-purple-600 tracking-wider px-1">
                         Ordering Issues ({logs.ordering_issues!.length})
                       </h4>
                       {logs.ordering_issues!.map((issue: any, idx: number) => (
@@ -3213,7 +3216,7 @@ export function ReferenceValidationReviewPage() {
                   {/* ── APA: Suffix Issues ── */}
                   {detectedStyle === "APA" && (logs.suffix_issues?.length || 0) > 0 && (
                     <div className="space-y-2">
-                      <h4 className="text-[10px] uppercase font-extrabold text-orange-600 tracking-wider px-1">
+                      <h4 className="text-[11px] uppercase font-semibold text-orange-600 tracking-wider px-1">
                         Suffix Issues ({logs.suffix_issues!.length})
                       </h4>
                       {logs.suffix_issues!.map((issue: any, idx: number) => (
@@ -3232,7 +3235,7 @@ export function ReferenceValidationReviewPage() {
                   {/* ── APA: Disambiguation ── */}
                   {detectedStyle === "APA" && (logs.disambiguation_issues?.length || 0) > 0 && (
                     <div className="space-y-2">
-                      <h4 className="text-[10px] uppercase font-extrabold text-teal-600 tracking-wider px-1">
+                      <h4 className="text-[11px] uppercase font-semibold text-teal-600 tracking-wider px-1">
                         Disambiguation ({logs.disambiguation_issues!.length})
                       </h4>
                       {logs.disambiguation_issues!.map((issue: any, idx: number) => (
@@ -3546,7 +3549,7 @@ export function ReferenceValidationReviewPage() {
                                   const catItems = parsed.items.filter(item => item.category === cat);
                                   return (
                                     <div key={cat} className="space-y-1.5">
-                                      <h4 className="text-[10px] uppercase font-extrabold text-navy-500 tracking-wider px-1">
+                                      <h4 className="text-[11px] uppercase font-semibold text-navy-500 tracking-wider px-1">
                                         {cat} ({catItems.length})
                                       </h4>
                                       <div className="space-y-2">

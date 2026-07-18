@@ -53,6 +53,8 @@ runtime/
 ref_cache.json
 celerybeat-schedule
 app/processing/legacy/ref_cache.json
+app/processing/results/
+frontend/.npm_cache/
 *.save
 docker-compose.yml.bak
 
