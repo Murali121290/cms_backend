@@ -6,9 +6,6 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  # Converts repository name to lowercase for Docker image naming compatibility
-  IMAGE_NAME_BACKEND: ghcr.io/s4cindia/s4carlisle-inkflow/backend
-  IMAGE_NAME_AI: ghcr.io/s4cindia/s4carlisle-inkflow/ai-structuring
 
 jobs:
   build-and-push:
@@ -21,6 +18,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set lowercased image names
+        run: |
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE_NAME_BACKEND=ghcr.io/${REPO_LOWER}/backend" >> $GITHUB_ENV
+          echo "IMAGE_NAME_CELERY_WORKER=ghcr.io/${REPO_LOWER}/celery_worker" >> $GITHUB_ENV
+          echo "IMAGE_NAME_AI_STRUCTURING=ghcr.io/${REPO_LOWER}/ai_structuring" >> $GITHUB_ENV
+          echo "IMAGE_NAME_AI_STRUCTURING_WORKER=ghcr.io/${REPO_LOWER}/ai_structuring_worker" >> $GITHUB_ENV
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -31,7 +36,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Build & Push FastAPI Backend & Celery Worker Image
+      # 1. Build & Push FastAPI Backend Image
       - name: Build and Push Backend Image
         uses: docker/build-push-action@v5
         with:
@@ -44,7 +49,20 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Build & Push AI Structuring Service & Worker Image
+      # 2. Build & Push Celery Worker Image
+      - name: Build and Push Celery Worker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME_CELERY_WORKER }}:latest
+            ${{ env.IMAGE_NAME_CELERY_WORKER }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # 3. Build & Push AI Structuring Service Image
       - name: Build and Push AI Structuring Image
         uses: docker/build-push-action@v5
         with:
@@ -52,8 +70,21 @@ jobs:
           file: ./ai_structuring_backend/Dockerfile
           push: true
           tags: |
-            ${{ env.IMAGE_NAME_AI }}:latest
-            ${{ env.IMAGE_NAME_AI }}:${{ github.sha }}
+            ${{ env.IMAGE_NAME_AI_STRUCTURING }}:latest
+            ${{ env.IMAGE_NAME_AI_STRUCTURING }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # 4. Build & Push AI Structuring Worker Image
+      - name: Build and Push AI Structuring Worker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./ai_structuring_backend
+          file: ./ai_structuring_backend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME_AI_STRUCTURING_WORKER }}:latest
+            ${{ env.IMAGE_NAME_AI_STRUCTURING_WORKER }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -75,8 +106,12 @@ jobs:
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             
             # Pull new images
-            export BACKEND_IMAGE=${{ env.IMAGE_NAME_BACKEND }}:latest
-            export AI_IMAGE=${{ env.IMAGE_NAME_AI }}:latest
+            REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+            export BACKEND_IMAGE=ghcr.io/${REPO_LOWER}/backend:latest
+            export CELERY_WORKER_IMAGE=ghcr.io/${REPO_LOWER}/celery_worker:latest
+            export AI_STRUCTURING_IMAGE=ghcr.io/${REPO_LOWER}/ai_structuring:latest
+            export AI_STRUCTURING_WORKER_IMAGE=ghcr.io/${REPO_LOWER}/ai_structuring_worker:latest
+            
             docker compose pull backend celery_worker ai_structuring ai_structuring_worker
             
             # Recreate containers with zero downtime
