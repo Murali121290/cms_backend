@@ -7,8 +7,8 @@ on:
 env:
   REGISTRY: ghcr.io
   # Converts repository name to lowercase for Docker image naming compatibility
-  IMAGE_NAME_BACKEND: ghcr.io/${{ github.repository }}/backend
-  IMAGE_NAME_AI: ghcr.io/${{ github.repository }}/ai-structuring
+  IMAGE_NAME_BACKEND: ghcr.io/s4cindia/s4carlisle-inkflow/backend
+  IMAGE_NAME_AI: ghcr.io/s4cindia/s4carlisle-inkflow/ai-structuring
 
 jobs:
   build-and-push:
