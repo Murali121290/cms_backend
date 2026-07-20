@@ -1,0 +1,86 @@
+name: Build and Deploy to Local Server
+
+on:
+  push:
+    branches: [ main ]
+
+env:
+  REGISTRY: ghcr.io
+  # Converts repository name to lowercase for Docker image naming compatibility
+  IMAGE_NAME_BACKEND: ghcr.io/${{ github.repository }}/backend
+  IMAGE_NAME_AI: ghcr.io/${{ github.repository }}/ai-structuring
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Build & Push FastAPI Backend & Celery Worker Image
+      - name: Build and Push Backend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME_BACKEND }}:latest
+            ${{ env.IMAGE_NAME_BACKEND }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Build & Push AI Structuring Service & Worker Image
+      - name: Build and Push AI Structuring Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./ai_structuring_backend
+          file: ./ai_structuring_backend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME_AI }}:latest
+            ${{ env.IMAGE_NAME_AI }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Local Server via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.LOCAL_SERVER_HOST }}
+          username: ${{ secrets.LOCAL_SERVER_USER }}
+          key: ${{ secrets.LOCAL_SERVER_SSH_KEY }}
+          port: ${{ secrets.LOCAL_SERVER_PORT }}
+          script: |
+            cd /path/to/cms_backend
+            
+            # Log in to GHCR on your local server
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            
+            # Pull new images
+            export BACKEND_IMAGE=${{ env.IMAGE_NAME_BACKEND }}:latest
+            export AI_IMAGE=${{ env.IMAGE_NAME_AI }}:latest
+            docker compose pull backend celery_worker ai_structuring ai_structuring_worker
+            
+            # Recreate containers with zero downtime
+            docker compose up -d --no-deps backend celery_worker ai_structuring ai_structuring_worker
+            
+            # Clean up old dangling images
+            docker image prune -f
