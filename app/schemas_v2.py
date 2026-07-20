@@ -938,3 +938,72 @@ class ChapterZipUploadResponse(BaseModel):
     skipped: list[ChapterZipSkippedItem]
 
 
+class WorkspaceItem(BaseModel):
+    id: int
+    client: str
+    project: str
+    chapters: str
+    stage_name: str
+    planned_start_date: datetime | None = None
+    planned_end_date: datetime | None = None
+    actual_start_date: datetime | None = None
+    actual_end_date: datetime | None = None
+    stage_status: str
+    delayed: bool
+    delay_days: int | None = None
+    remarks: str | None = None
+    manuscript_pages: int | None = 0
+    ce_pages: int | None = 0
+    project_manager_name: str | None = "-"
+
+
+class WorkspaceStats(BaseModel):
+    today_assigned: int
+    yesterday_assigned: int
+    delayed_count: int
+    completed_count: int
+    kra_meet_rate: float
+
+
+class UserWorkspaceData(BaseModel):
+    stats: WorkspaceStats
+    assignments: list[WorkspaceItem]
+
+
+class TeamMemberWorkspaceData(BaseModel):
+    username: str
+    role: str
+    email: str | None = None
+    stats: WorkspaceStats
+    assignments: list[WorkspaceItem]
+
+
+class TeamLeadWorkspaceData(BaseModel):
+    stats: WorkspaceStats
+    members: list[TeamMemberWorkspaceData]
+
+
+class StageMetric(BaseModel):
+    stage_name: str
+    active_count: int
+    delayed_count: int
+    today_assigned: int
+    yesterday_assigned: int
+    kra_meet_rate: float
+
+
+class ManagerWorkspaceData(BaseModel):
+    stats: WorkspaceStats
+    stages: list[StageMetric]
+    members: list[TeamMemberWorkspaceData]
+
+
+class WorkspaceDashboardResponse(BaseModel):
+    role: str
+    viewer: Viewer
+    user_workspace: UserWorkspaceData | None = None
+    teamlead_workspace: TeamLeadWorkspaceData | None = None
+    manager_workspace: ManagerWorkspaceData | None = None
+
+
+

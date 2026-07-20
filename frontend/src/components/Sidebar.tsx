@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Users, BarChart3,
-  Settings, ChevronLeft, ChevronRight, Layers,
+  Settings, ChevronLeft, ChevronRight, Layers, Briefcase,
 } from 'lucide-react'
 import { useSidebarStore } from '@/store/useSidebarStore'
 import { useRBAC } from '@/hooks/useRBAC'
@@ -19,6 +19,9 @@ export function Sidebar() {
   const navItems = [
     ...(viewer?.team !== 'Accessibility Team'
       ? [{ to: '/', icon: LayoutDashboard, label: 'Dashboard' }]
+      : []),
+    ...(viewer?.team !== 'Accessibility Team'
+      ? [{ to: '/workspace', icon: Briefcase, label: 'My Workspace' }]
       : []),
     ...(viewer?.team !== 'Accessibility Team'
       ? [{ to: '/clients', icon: Users, label: 'Clients' }]
