@@ -59,7 +59,6 @@ services:
 
   # ── FastAPI Backend ───────────────────────────────────────────────────────
   backend:
-    image: ${BACKEND_IMAGE:-cms_backend-backend}
     build:
       context: .
       dockerfile: Dockerfile
@@ -94,7 +93,6 @@ services:
 
   # ── Celery Worker ─────────────────────────────────────────────────────────
   celery_worker:
-    image: ${CELERY_WORKER_IMAGE:-cms_backend-celery_worker}
     build:
       context: .
       dockerfile: Dockerfile
@@ -165,7 +163,6 @@ services:
 
   # ── AI Structuring Service ────────────────────────────────────────────────
   ai_structuring:
-    image: ${AI_STRUCTURING_IMAGE:-cms_backend-ai_structuring}
     build:
       context: ./ai_structuring_backend
       dockerfile: Dockerfile
@@ -192,7 +189,6 @@ services:
 
   # ── AI Structuring Celery Worker ──────────────────────────────────────────
   ai_structuring_worker:
-    image: ${AI_STRUCTURING_WORKER_IMAGE:-cms_backend-ai_structuring_worker}
     build:
       context: ./ai_structuring_backend
       dockerfile: Dockerfile
