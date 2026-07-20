@@ -2212,16 +2212,29 @@ export function ReferenceValidationReviewPage() {
 
               {/* Row 2: Status chips + Validate action */}
               <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-3 min-w-0 flex-wrap">
-                  <span className="flex items-center gap-1 text-xs font-semibold text-error-600" title="Issues found">
-                    <AlertCircle className="w-3.5 h-3.5" />
-                    <span className="tabular-nums">{issueCount}</span>
+                <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                  <span
+                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] font-bold tabular-nums border ${
+                      issueCount > 0
+                        ? "bg-error-50 text-error-700 border-error-200"
+                        : "bg-navy-50 text-navy-500 border-navy-100"
+                    }`}
+                    title="Issues found"
+                  >
+                    <AlertCircle className="w-3 h-3" />
+                    {issueCount}
                   </span>
-                  <span className="flex items-center gap-1 text-xs font-semibold text-success-600" title="Matched citations">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span className="tabular-nums">{matchedCount}</span>
+                  <span
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] font-bold tabular-nums border bg-success-50 text-success-700 border-success-200"
+                    title="Matched citations"
+                  >
+                    <CheckCircle2 className="w-3 h-3" />
+                    {matchedCount}
                   </span>
-                  <span className="text-[10px] text-navy-400 flex items-center gap-1" title="Last validated">
+                  <span
+                    className="inline-flex items-center gap-1 text-[10px] font-medium text-navy-500"
+                    title="Last validated"
+                  >
                     <Calendar className="w-3 h-3" />
                     {lastValidatedAt ? lastValidatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}
                   </span>
@@ -2298,57 +2311,106 @@ export function ReferenceValidationReviewPage() {
               const structBadge = logs.reference_entries?.filter((e: any) => !e.is_cited).length || 0;
 
               const tabCls = (id: string) =>
-                `flex-1 min-w-0 px-2 py-2.5 flex items-center justify-center gap-1.5 border-b-2 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                `relative flex-1 min-w-0 h-14 px-1 flex flex-col items-center justify-center gap-1 border-b-2 text-[10px] font-semibold tracking-tight transition-colors cursor-pointer select-none ${
                   activeTab === id
                     ? "border-navy-800 text-navy-900 bg-white"
                     : "border-transparent text-navy-500 hover:text-navy-800 hover:bg-white/60"
                 }`;
 
+              const iconCls = (id: string, activeColor: string, inactiveColor: string) =>
+                `w-[18px] h-[18px] shrink-0 ${activeTab === id ? activeColor : inactiveColor}`;
+
               const CountBadge = ({ count, tone = "error" }: { count: number; tone?: "error" | "warning" | "neutral" }) =>
                 count > 0 ? (
-                  <span className={`inline-flex items-center justify-center min-w-[18px] h-[16px] rounded-full text-[10px] font-bold px-1 leading-none tabular-nums ${
-                    tone === "error" ? "bg-error-100 text-error-700" :
-                    tone === "warning" ? "bg-warning-100 text-warning-700" :
-                    "bg-navy-100 text-navy-700"
-                  }`}>{count > 99 ? "99+" : count}</span>
+                  <span
+                    className={`absolute top-1 right-1 inline-flex items-center justify-center min-w-[16px] h-[16px] rounded-full text-[9px] font-bold px-1 leading-none tabular-nums shadow-sm ring-1 ring-white ${
+                      tone === "error"
+                        ? "bg-error-500 text-white"
+                        : tone === "warning"
+                        ? "bg-warning-500 text-white"
+                        : "bg-navy-500 text-white"
+                    }`}
+                  >
+                    {count > 99 ? "99+" : count}
+                  </span>
                 ) : null;
 
               return (
-                <div className="flex border-b border-navy-200 bg-surface-100 shrink-0">
-                  <button title="Citations & References" onClick={() => setActiveTab("citations")} className={tabCls("citations")}>
-                    <Layers className="w-3.5 h-3.5 shrink-0" />
-                    <span>Citations</span>
+                <div
+                  role="tablist"
+                  aria-label="Reference review sections"
+                  className="flex items-stretch border-b border-navy-200 bg-surface-100 shrink-0"
+                >
+                  <button
+                    role="tab"
+                    aria-selected={activeTab === "citations"}
+                    title="Citations & References"
+                    onClick={() => setActiveTab("citations")}
+                    className={tabCls("citations")}
+                  >
+                    <Layers className={iconCls("citations", "text-blue-600", "text-blue-500/70")} />
+                    <span className="truncate max-w-full leading-none">Citations</span>
                     <CountBadge count={citeBadge} tone="error" />
                   </button>
 
-                  <button title="Structuring Review" onClick={() => setActiveTab("structuring")} className={tabCls("structuring")}>
-                    <Hash className="w-3.5 h-3.5 shrink-0" />
-                    <span>Refs</span>
+                  <button
+                    role="tab"
+                    aria-selected={activeTab === "structuring"}
+                    title="Structuring Review"
+                    onClick={() => setActiveTab("structuring")}
+                    className={tabCls("structuring")}
+                  >
+                    <Hash className={iconCls("structuring", "text-navy-700", "text-navy-500/70")} />
+                    <span className="truncate max-w-full leading-none">Refs</span>
                     <CountBadge count={structBadge} tone="warning" />
                   </button>
 
-                  <button title="Tracked Changes" onClick={() => setActiveTab("trackedChanges")} className={tabCls("trackedChanges")}>
-                    <ArrowLeftRight className="w-3.5 h-3.5 shrink-0" />
-                    <span>Changes</span>
+                  <button
+                    role="tab"
+                    aria-selected={activeTab === "trackedChanges"}
+                    title="Tracked Changes"
+                    onClick={() => setActiveTab("trackedChanges")}
+                    className={tabCls("trackedChanges")}
+                  >
+                    <ArrowLeftRight className={iconCls("trackedChanges", "text-accent", "text-navy-500/70")} />
+                    <span className="truncate max-w-full leading-none">Changes</span>
                   </button>
 
                   {issueCount > 0 && (
-                    <button title="Issues" onClick={() => setActiveTab("issues")} className={tabCls("issues")}>
-                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                      <span>Issues</span>
+                    <button
+                      role="tab"
+                      aria-selected={activeTab === "issues"}
+                      title="Issues"
+                      onClick={() => setActiveTab("issues")}
+                      className={tabCls("issues")}
+                    >
+                      <AlertTriangle className={iconCls("issues", "text-warning-600", "text-warning-500/70")} />
+                      <span className="truncate max-w-full leading-none">Issues</span>
                       <CountBadge count={issueCount} tone="warning" />
                     </button>
                   )}
 
-                  <button title="Missing & Unused References" onClick={() => setActiveTab("missing")} className={tabCls("missing")}>
-                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                    <span>Missing</span>
+                  <button
+                    role="tab"
+                    aria-selected={activeTab === "missing"}
+                    title="Missing & Unused References"
+                    onClick={() => setActiveTab("missing")}
+                    className={tabCls("missing")}
+                  >
+                    <AlertCircle className={iconCls("missing", "text-error-600", "text-error-500/70")} />
+                    <span className="truncate max-w-full leading-none">Missing</span>
                   </button>
 
                   {logs.raw_log && (
-                    <button title="Raw Logs" onClick={() => setActiveTab("logs")} className={tabCls("logs")}>
-                      <Terminal className="w-3.5 h-3.5 shrink-0" />
-                      <span>Logs</span>
+                    <button
+                      role="tab"
+                      aria-selected={activeTab === "logs"}
+                      title="Raw Logs"
+                      onClick={() => setActiveTab("logs")}
+                      className={tabCls("logs")}
+                    >
+                      <Terminal className={iconCls("logs", "text-navy-800", "text-navy-500/70")} />
+                      <span className="truncate max-w-full leading-none">Logs</span>
                     </button>
                   )}
                 </div>
@@ -2362,17 +2424,51 @@ export function ReferenceValidationReviewPage() {
               {activeTab === "citations" && (
                 <div className="space-y-3 page-enter">
 
-                  {/* Summary Stats Bar */}
-                  <div className="grid grid-cols-4 divide-x divide-navy-100 border border-navy-100 rounded-lg overflow-hidden bg-white">
+                  {/* Summary Stats Cards */}
+                  <div className="grid grid-cols-2 gap-2">
                     {([
-                      { label: "Refs",    value: logs.total_refs ?? 0,  cls: "text-navy-900" },
-                      { label: "Cites",   value: logs.total_cites ?? 0, cls: "text-navy-900" },
-                      { label: "Matched", value: matchedCount,           cls: "text-success-600" },
-                      { label: "Issues",  value: issueCount,             cls: issueCount > 0 ? "text-error-600" : "text-navy-900" },
-                    ] as const).map(({ label, value, cls }) => (
-                      <div key={label} className="flex flex-col items-center px-2 py-2">
-                        <span className={`text-lg font-bold leading-none tabular-nums ${cls}`}>{value}</span>
-                        <span className="text-[10px] font-semibold uppercase tracking-wide text-navy-400 mt-1">{label}</span>
+                      {
+                        label: "References", value: logs.total_refs ?? 0,
+                        icon: <Hash className="w-3.5 h-3.5" />,
+                        wrap: "bg-white border-navy-100",
+                        iconWrap: "bg-navy-100 text-navy-700",
+                        valueCls: "text-navy-900",
+                      },
+                      {
+                        label: "Citations", value: logs.total_cites ?? 0,
+                        icon: <Layers className="w-3.5 h-3.5" />,
+                        wrap: "bg-white border-navy-100",
+                        iconWrap: "bg-blue-100 text-blue-700",
+                        valueCls: "text-navy-900",
+                      },
+                      {
+                        label: "Matched", value: matchedCount,
+                        icon: <CheckCircle2 className="w-3.5 h-3.5" />,
+                        wrap: "bg-success-50 border-success-200",
+                        iconWrap: "bg-success-100 text-success-700",
+                        valueCls: "text-success-700",
+                      },
+                      {
+                        label: "Issues", value: issueCount,
+                        icon: <AlertCircle className="w-3.5 h-3.5" />,
+                        wrap: issueCount > 0 ? "bg-error-50 border-error-200" : "bg-white border-navy-100",
+                        iconWrap: issueCount > 0 ? "bg-error-100 text-error-700" : "bg-navy-100 text-navy-500",
+                        valueCls: issueCount > 0 ? "text-error-700" : "text-navy-900",
+                      },
+                    ] as const).map(({ label, value, icon, wrap, iconWrap, valueCls }) => (
+                      <div
+                        key={label}
+                        className={`flex items-center gap-2.5 px-3 py-2.5 rounded-lg border shadow-sm ${wrap}`}
+                      >
+                        <div className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 ${iconWrap}`}>
+                          {icon}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className={`text-xl font-bold leading-none tabular-nums ${valueCls}`}>{value}</div>
+                          <div className="text-[10px] font-semibold uppercase tracking-wide text-navy-500 mt-1 truncate">
+                            {label}
+                          </div>
+                        </div>
                       </div>
                     ))}
                   </div>
