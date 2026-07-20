@@ -878,6 +878,22 @@ def api_v2_dashboard(
     )
 
 
+@router.get("/dashboard/workspaces", response_model=schemas_v2.WorkspaceDashboardResponse)
+def api_v2_dashboard_workspaces(
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+        
+    return dashboard_service.get_workspace_dashboard_data(db, viewer)
+
+
 @router.get("/projects", response_model=schemas_v2.ProjectsListResponse)
 def api_v2_projects(
     offset: int = Query(0, ge=0),

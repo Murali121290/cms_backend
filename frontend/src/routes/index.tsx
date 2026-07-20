@@ -7,6 +7,7 @@ import { WorkflowPortalPage } from '@/pages/WorkflowPortalPage'
 import { RegisterPage } from '@/pages/RegisterPage'
 import { ForgotPasswordPage } from '@/pages/ForgotPasswordPage'
 import { DashboardPage } from '@/pages/DashboardPage'
+import { WorkspacePage } from '@/pages/WorkspacePage'
 import { Settings } from '@/pages/Settings'
 import { UserManagement } from '@/pages/settings/UserManagement'
 import { CustomerManagement } from '@/pages/settings/CustomerManagement'
@@ -68,6 +69,7 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <DashboardPage /> },
       { path: 'dashboard', element: <DashboardPage /> },
+      { path: 'workspace', element: <WorkspacePage /> },
 
       { path: 'clients', element: <Clients /> },
       { path: 'clients/:clientId/projects', element: <ClientProjects /> },

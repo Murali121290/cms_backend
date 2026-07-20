@@ -210,17 +210,81 @@ def assign_stage(project: str, chapters: str, stage_name: str, payload: AssignPa
         db.add(db_detail)
     
     db_detail.assignee_name = payload.assignee_name
-    if payload.dt:
-        try:
-            db_detail.actual_start_date = datetime.fromisoformat(payload.dt.replace("Z", "+00:00"))
-        except ValueError:
+    if not db_detail.actual_start_date and not db_detail.actual_end_date:
+        if payload.dt:
+            try:
+                dt_val = datetime.fromisoformat(payload.dt.replace("Z", "+00:00"))
+                if dt_val.tzinfo is not None:
+                    dt_val = dt_val.replace(tzinfo=None)
+                db_detail.actual_start_date = dt_val
+            except ValueError:
+                db_detail.actual_start_date = datetime.utcnow()
+        else:
             db_detail.actual_start_date = datetime.utcnow()
-    else:
-        db_detail.actual_start_date = datetime.utcnow()
         
     db.commit()
     db.refresh(db_detail)
     return db_detail
+
+
+class AssignmentTarget(BaseModel):
+    project: str
+    chapters: str
+    stage_name: str
+
+
+class BulkAssignPayload(BaseModel):
+    assignee_name: Optional[str]
+    targets: List[AssignmentTarget]
+    dt: Optional[str] = None
+
+
+@router.post("/stage-details/bulk-assign", response_model=List[StageDetailResponse])
+def bulk_assign_stages(payload: BulkAssignPayload, db: Session = Depends(get_db)):
+    from sqlalchemy import select
+    from datetime import datetime
+    
+    updated_details = []
+    
+    assign_time = datetime.utcnow()
+    if payload.dt:
+        try:
+            assign_time = datetime.fromisoformat(payload.dt.replace("Z", "+00:00"))
+            if assign_time.tzinfo is not None:
+                assign_time = assign_time.replace(tzinfo=None)
+        except ValueError:
+            pass
+            
+    for target in payload.targets:
+        db_detail = db.execute(
+            select(StageDetail)
+            .where(
+                StageDetail.project == target.project,
+                StageDetail.chapters == target.chapters,
+                StageDetail.stage_name == target.stage_name
+            )
+        ).scalars().first()
+        
+        if not db_detail:
+            db_detail = StageDetail(
+                client=target.project,
+                project=target.project,
+                chapters=target.chapters,
+                stage_name=target.stage_name,
+                workflow="Workflow1",
+            )
+            db.add(db_detail)
+            
+        db_detail.assignee_name = payload.assignee_name
+        if not db_detail.actual_start_date and not db_detail.actual_end_date:
+            db_detail.actual_start_date = assign_time
+        updated_details.append(db_detail)
+        
+    db.commit()
+    for d in updated_details:
+        db.refresh(d)
+        
+    return updated_details
 
 
 class TransitionPayload(BaseModel):
