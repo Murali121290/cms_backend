@@ -698,7 +698,7 @@ def api_post_prod_open_in_word(
     import urllib.parse
 
     token = create_access_token(
-        {"sub": user.username, "chapter_id": chapter_id},
+        {"sub": user.username},
         expires_delta=timedelta(minutes=WEBDAV_TOKEN_EXPIRE_MINUTES)
     )
     

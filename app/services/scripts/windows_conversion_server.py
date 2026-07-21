@@ -4,6 +4,8 @@ import uuid
 import logging
 import shutil
 import time
+import pythoncom
+import win32com.client
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 import uvicorn
@@ -116,6 +118,93 @@ try {
 }
 """
 
+def apply_ppt_template(input_ppt, template_ppt, output_ppt, session_id):
+
+    powerpoint = None
+    presentation = None
+
+    try:
+        logger.info(
+            f"[{session_id}] Starting PowerPoint template processing"
+        )
+
+        pythoncom.CoInitialize()
+
+        powerpoint = win32com.client.Dispatch(
+            "PowerPoint.Application"
+        )
+
+        powerpoint.Visible = True
+
+        input_ppt = os.path.abspath(input_ppt)
+        template_ppt = os.path.abspath(template_ppt)
+        output_ppt = os.path.abspath(output_ppt)
+
+        logger.info(
+            f"[{session_id}] Opening PPT: {input_ppt}"
+        )
+
+        presentation = powerpoint.Presentations.Open(
+            input_ppt,
+            WithWindow=False
+        )
+
+
+        logger.info(
+            f"[{session_id}] Applying template: {template_ppt}"
+        )
+
+        presentation.ApplyTemplate(
+            template_ppt
+        )
+
+
+        logger.info(
+            f"[{session_id}] Saving output PPT: {output_ppt}"
+        )
+
+        presentation.SaveAs(
+            output_ppt
+        )
+
+
+        presentation.Close()
+        presentation = None
+
+
+        logger.info(
+            f"[{session_id}] PowerPoint template completed"
+        )
+
+        return output_ppt
+
+
+    except Exception as e:
+
+        logger.error(
+            f"[{session_id}] PPT template error: {str(e)}"
+        )
+
+        raise e
+
+
+    finally:
+
+        try:
+            if presentation:
+                presentation.Close()
+        except:
+            pass
+
+
+        try:
+            if powerpoint:
+                powerpoint.Quit()
+        except:
+            pass
+
+
+        pythoncom.CoUninitialize()
 def get_jsx_script_path(client_name: str = None):
     # If client is Wolters Kluwer Health, use TextExtraction_WKH.jsx
     if client_name and client_name.strip() == "Wolters Kluwer Health":
@@ -380,34 +469,194 @@ def convert_pdf_to_docx(file: UploadFile = File(...)):
             
         logger.info(f"[{session_id}] Executing: {exe_path} \"{input_path}\" \"{output_docx_path}\"")
         cmd = [exe_path, os.path.abspath(input_path), os.path.abspath(output_docx_path)]
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=300)
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=1800,
+            cwd=session_dir  # run inside session dir so relative output lands here
+        )
+        
+        # Always log exe output to aid debugging
+        if result.stdout:
+            logger.info(f"[{session_id}] PdfToDocx stdout: {result.stdout.strip()}")
+        if result.stderr:
+            logger.warning(f"[{session_id}] PdfToDocx stderr: {result.stderr.strip()}")
+        logger.info(f"[{session_id}] PdfToDocx.exe return code: {result.returncode}")
         
         if result.returncode != 0:
             raise Exception(f"PdfToDocx.exe failed with code {result.returncode}. Stderr: {result.stderr}")
-            
-        if not os.path.exists(output_docx_path):
-            raise Exception("PdfToDocx.exe conversion finished, but output DOCX was not found.")
+        
+        # PdfToDocx.exe uses Adobe PDF Services API. It may exit with rc=0 even on
+        # failure, printing the error to stdout instead. Detect known failure patterns.
+        stdout_lower = result.stdout.lower()
+        if "exceeds permitted size" in stdout_lower:
+            raise Exception(
+                "PDF file is too large for Adobe PDF Services API (limit ~1 GB). "
+                f"File size: ~{os.path.getsize(input_path) // (1024*1024)} MB. "
+                "Please split the PDF into smaller chapters and retry."
+            )
+        if "conversion failed" in stdout_lower or "adobe api error" in stdout_lower:
+            raise Exception(
+                f"PdfToDocx.exe (Adobe API) reported a conversion failure. "
+                f"Stdout: {result.stdout.strip()}"
+            )
+        
+        # Some versions of PdfToDocx.exe ignore the output path argument and write
+        # the DOCX alongside the input file using the same base name.
+        # Check expected path first, then fallback locations.
+        actual_docx_path = None
+        candidate_paths = [
+            output_docx_path,
+            # Same folder as input, same basename
+            os.path.join(session_dir, output_docx_name),
+            # CWD of the exe (session_dir already, but be explicit)
+            os.path.join(os.path.dirname(exe_path), output_docx_name),
+        ]
+        for candidate in candidate_paths:
+            if os.path.exists(candidate):
+                actual_docx_path = candidate
+                logger.info(f"[{session_id}] Found DOCX at: {actual_docx_path}")
+                break
+
+        if actual_docx_path is None:
+            raise Exception(
+                f"PdfToDocx.exe conversion finished (rc={result.returncode}), "
+                f"but output DOCX was not found. Searched: {candidate_paths}. "
+                f"Stdout: {result.stdout!r}  Stderr: {result.stderr!r}"
+            )
             
         processing_time = time.time() - start_time
         logger.info(f"[{session_id}] PDF conversion completed successfully in {processing_time:.2f} seconds.")
         
-        return FileResponse(
-            path=output_docx_path,
-            filename=output_docx_name,
-            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        # Read bytes into memory to avoid FileResponse async lock issues
+        read_timeout = 30
+        read_elapsed = 0.0
+        docx_bytes = None
+        last_read_err = None
+        while read_elapsed < read_timeout:
+            try:
+                with open(actual_docx_path, "rb") as fh:
+                    docx_bytes = fh.read()
+                break
+            except PermissionError as pe:
+                last_read_err = pe
+                time.sleep(0.5)
+                read_elapsed += 0.5
+
+        if docx_bytes is None:
+            raise Exception(
+                f"DOCX exists but could not be read after {read_timeout}s (still locked): {last_read_err}"
+            )
+
+        from starlette.responses import Response
+        return Response(
+            content=docx_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f'attachment; filename="{output_docx_name}"'}
         )
         
     except Exception as err:
         logger.error(f"[{session_id}] PDF conversion failed: {str(err)}")
         raise HTTPException(status_code=500, detail=str(err))
     finally:
-        # Clean up input PDF file to free space
+        # Clean up temp files
         try:
             if os.path.exists(input_path):
                 os.remove(input_path)
         except Exception:
             pass
 
+@app.post("/apply-ppt-template")
+def apply_ppt_template_api(
+    ppt_file: UploadFile = File(...),
+    template_file: UploadFile = File(...)
+):
+    print("test")
+    session_id = str(uuid.uuid4())
+
+    temp_dir = os.path.abspath(
+        f"temp_ppt/{session_id}"
+    )
+
+    os.makedirs(
+        temp_dir,
+        exist_ok=True
+    )
+
+
+    try:
+
+        logger.info(
+            f"[{session_id}] PPT template request received"
+        )
+
+
+        # Save input PPT
+        input_ppt = os.path.join(
+            temp_dir,
+            ppt_file.filename
+        )
+
+        with open(input_ppt, "wb") as f:
+            shutil.copyfileobj(
+                ppt_file.file,
+                f
+            )
+
+
+        # Save template PPT
+        template_ppt = os.path.join(
+            temp_dir,
+            template_file.filename
+        )
+
+        with open(template_ppt, "wb") as f:
+            shutil.copyfileobj(
+                template_file.file,
+                f
+            )
+
+
+        output_ppt = os.path.join(
+            temp_dir,
+            "styled_" + ppt_file.filename
+        )
+
+
+        result = apply_ppt_template(
+            input_ppt,
+            template_ppt,
+            output_ppt,
+            session_id
+        )
+
+
+        if not os.path.exists(result):
+            raise Exception(
+                "Output PowerPoint was not generated"
+            )
+
+
+        return FileResponse(
+            path=result,
+            filename=os.path.basename(result),
+            media_type=
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        )
+
+
+    except Exception as e:
+
+        logger.error(
+            f"[{session_id}] PPT API failed: {str(e)}"
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
 @app.get("/health")
 def health_check():
     return {"status": "healthy", "service": "indesign-to-word-converter", "log_file": log_file}

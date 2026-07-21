@@ -3854,7 +3854,7 @@ def api_v2_open_in_word(
         )
 
     import urllib.parse
-    token = create_access_token({"sub": viewer.username, "file_id": file_id, "mode": mode}, expires_delta=timedelta(minutes=WEBDAV_TOKEN_EXPIRE_MINUTES))
+    token = create_access_token({"sub": viewer.username}, expires_delta=timedelta(minutes=WEBDAV_TOKEN_EXPIRE_MINUTES))
     quoted_filename = urllib.parse.quote(filename, safe="")
     # Token is a path segment, not a `?token=` query param — Word (including
     # 2019) mis-parses ms-word:ofe|u| URLs that contain a query string.

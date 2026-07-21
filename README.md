@@ -9,7 +9,7 @@ A Content Management System for the publishing industry. Manages the full manusc
 ```
 ┌─────────────┐     ┌──────────────┐     ┌──────────────────────┐
 │  React SPA  │────▶│  Nginx Proxy │────▶│  FastAPI Backend     │
-│  (Vite/TS)  │     │   :80/:443   │     │  :8000               │
+│  (Vite/TS)  │     │   :80/:443   │     │  :8085               │
 └─────────────┘     └──────────────┘     └──────┬───────────────┘
                                                  │
                     ┌──────────────┐     ┌───────▼───────────────┐
@@ -20,12 +20,10 @@ A Content Management System for the publishing industry. Manages the full manusc
                     │    Redis     │◀────│  Celery Workers       │
                     └──────────────┘     └───────────────────────┘
                                                  │
-              ┌──────────────────────────────────┼───────────────┐
-              │                                  │               │
-   ┌──────────▼──────┐   ┌──────────────┐  ┌────▼──────────────┐
-   │ Collabora Online│   │  OnlyOffice  │  │ AI Structuring    │
-   │   :9980         │   │  :8080       │  │ Backend (opt.)    │
-   └─────────────────┘   └──────────────┘  └───────────────────┘
+                                         ┌───────▼───────────────┐
+                                         │ AI Structuring        │
+                                         │ Backend (opt.)        │
+                                         └───────────────────────┘
 ```
 
 ### Backend
@@ -43,7 +41,6 @@ A Content Management System for the publishing industry. Manages the full manusc
 ### Document Editing
 - **Custom WYSIWYG Editor:** In-browser editor featuring an Equation Editor, Image Editor, Reference View, and JATS XML Technical Edit View
 - **WebDAV Integration:** 'Open in Word' support to edit documents locally with server synchronization
-- **OnlyOffice:** Secondary document server formatting option
 
 ---
 
@@ -55,7 +52,7 @@ A Content Management System for the publishing industry. Manages the full manusc
 - **Processing pipeline:** Automated PPH & conversion pipeline (Ingestion, Technical Editing, Bias Scans, Reference Validation, and Backlist extraction)
 - **Math support:** Browser-based Equation Editor (LaTeX ↔ MathML ↔ OMML conversions)
 - **XML generation:** JATS XML / NLM XML tagging for academic database indexing
-- **In-browser editing:** Custom WYSIWYG Editor and OnlyOffice integrations
+- **In-browser editing:** Custom WYSIWYG Editor
 - **WebDAV Synchronization:** Seamless 'Open in Word' support for offline and desktop editing
 - **PPH Services:** Automated reference checks, bias tone scans, and contributor credit extraction
 
@@ -79,7 +76,7 @@ cms_backend/
 │   │   ├── activities/
 │   │   ├── review/
 │   │   └── notifications/
-│   ├── integrations/      # Collabora, OnlyOffice, PPH, AI service, storage
+│   ├── integrations/      # PPH, AI service, storage
 │   ├── models/            # SQLAlchemy models
 │   ├── processing/        # Document processing engines
 │   │   ├── docx_pipeline/ # 11-step processing pipeline
@@ -161,7 +158,7 @@ docker compose up -d
 docker compose exec backend alembic upgrade head
 ```
 
-This starts: PostgreSQL, Redis, FastAPI backend, Celery worker, OnlyOffice, Nginx.
+This starts: PostgreSQL, Redis, FastAPI backend, Celery worker, Nginx.
 
 ---
 
@@ -173,12 +170,9 @@ This starts: PostgreSQL, Redis, FastAPI backend, Celery worker, OnlyOffice, Ngin
 | `REDIS_URL` | Redis broker URL | `redis://localhost:6379` |
 | `SECRET_KEY` | Session signing key | — |
 | `HOST_DOMAIN` | Public domain name | `localhost` |
-| `HOST_PORT` | Public port | `8000` |
+| `HOST_PORT` | Public port | `8085` |
 | `PEOPLE_HUB_URL` | S4C People Hub API base URL | — |
 | `WEBDAV_BASE_URL` | Base URL for WebDAV client connections | — |
-| `ONLYOFFICE_PUBLIC_URL` | OnlyOffice public endpoint | — |
-| `ONLYOFFICE_INTERNAL_URL` | OnlyOffice internal endpoint | — |
-| `ONLYOFFICE_JWT_SECRET` | OnlyOffice JWT secret | — |
 | `PPH_BASE_URL` | Pre-press server base URL | — |
 | `PPH_USERNAME` / `PPH_PASSWORD` | Pre-press server credentials | — |
 | `AI_STRUCTURING_BASE_URL` | AI service URL (optional) | — |
