@@ -16,7 +16,11 @@ import requests
 from app.core.config import get_settings
 from jose import jwt
 import urllib.parse
-from app.services.scripts.docx_post_processor import post_process_docx
+
+from .epub_utils import decode_bytes, load_epub
+from .report import build_report, to_html, to_csv
+from fastapi.responses import JSONResponse
+import json
 
 from app.domains.auth.rbac_config import has_post_prod_access
 
@@ -771,3 +775,60 @@ def complete_chapter_qc(
         logger.warning(f"Failed to update project status: {e}")
         
     return {"message": "QC marked as completed"}
+
+
+MAX_CSS_MATCHER_BYTES = 80 * 1024 * 1024  # 80 MB guard
+
+@router.post("/css-matcher/analyze")
+async def analyze_css(
+    epub: UploadFile = File(...),
+    master_css: UploadFile = File(...),
+    package_files: str = Form(""),          # comma/newline separated filenames in the delivery folder
+    expected_sidecars: str = Form("frontlist.csv"),
+    user=Depends(get_current_user_from_cookie)
+):
+    epub_bytes = await epub.read()
+    css_bytes = await master_css.read()
+
+    if not epub_bytes or not css_bytes:
+        raise HTTPException(status_code=400, detail="Both an EPUB and a master CSS file are required.")
+    if len(epub_bytes) > MAX_CSS_MATCHER_BYTES:
+        raise HTTPException(status_code=413, detail="EPUB exceeds the 80 MB limit.")
+
+    if not epub.filename.lower().endswith(".epub"):
+        raise HTTPException(status_code=400, detail="First file must be a .epub")
+
+    try:
+        epub_info = load_epub(epub_bytes)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not read EPUB as a ZIP archive: {exc}")
+
+    if not epub_info.stylesheets:
+        raise HTTPException(status_code=422, detail="No .css stylesheet found inside the EPUB.")
+
+    master_text, _, _ = decode_bytes(css_bytes)
+
+    pkg = [p.strip() for p in package_files.replace(",", "\n").splitlines() if p.strip()]
+    # the uploaded epub is itself part of the delivery package
+    pkg.append(epub.filename)
+    expected = [s.strip() for s in expected_sidecars.replace(",", "\n").splitlines() if s.strip()]
+
+    report = build_report(
+        epub_info,
+        master_text,
+        package_filenames=pkg,
+        expected_sidecars=expected or None,
+        epub_bytes=epub_bytes,
+    )
+
+    return JSONResponse(
+        {
+            "report": report,
+            "artifacts": {
+                "html": to_html(report),
+                "csv": to_csv(report),
+                "json": json.dumps(report, indent=2, ensure_ascii=False),
+            },
+        }
+    )
+

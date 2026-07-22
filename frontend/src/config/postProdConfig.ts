@@ -29,5 +29,12 @@ export const POST_PROD_SERVICES: PostProdService[] = [
     description: 'Process and enhance Web PDFs with bookmarks, hyperlinks, page setup, cover pages, and publication-ready formatting.',
     icon: 'FileCog',
     enabled: false,
+  },
+  {
+    id: 'epub-css-matcher',
+    title: 'EPUB CSS Matcher',
+    description: 'Verify EPUB embedded stylesheets against master templates and identify CSS differences, encoding issues, and validation errors.',
+    icon: 'BookOpen',
+    enabled: true,
   }
 ];

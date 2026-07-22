@@ -39,6 +39,7 @@ import ProjectSchedule from '@/Reports/ProjectSchedule'
 import { PostProduction } from '@/pages/PostProduction'
 import { PostProdWordConversion } from '@/pages/PostProdWordConversion'
 import { PostProdChaptersPage } from '@/pages/PostProdChaptersPage'
+import { PostProdCssMatcher } from '@/pages/PostProdCssMatcher'
 import { ROLE_PERMISSIONS } from '@/config/rbacConfig'
 import { useRBAC } from '@/hooks/useRBAC'
 
@@ -122,6 +123,7 @@ const router = createBrowserRouter([
       { path: 'post-production', element: <PostProdGuard><PostProduction /></PostProdGuard> },
       { path: 'post-production/word-conversion', element: <PostProdGuard><PostProdWordConversion /></PostProdGuard> },
       { path: 'post-production/word-conversion/:projectId', element: <PostProdGuard><PostProdChaptersPage /></PostProdGuard> },
+      { path: 'post-production/epub-css-matcher', element: <PostProdGuard><PostProdCssMatcher /></PostProdGuard> },
       { path: 'reports', element: <ReportsPage /> },
       { path: 'reports/schedule', element: <ScheduleReport /> },
       { path: 'reports/today-schedule', element: <TodaySchedule /> },
