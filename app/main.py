@@ -62,6 +62,10 @@ app.include_router(conversion.router, prefix=f"{settings.API_V1_STR}", tags=["Co
 from app.domains.post_prod import api_v1 as post_prod
 app.include_router(post_prod.router, prefix="/api/v2", tags=["Post Production"])
 
+# EPUB Validator Router
+from app.domains.post_prod.epub_validator import router as epub_validator
+app.include_router(epub_validator, prefix="/api/v2", tags=["EPUB Validator"])
+
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the Publishing CMS API"}

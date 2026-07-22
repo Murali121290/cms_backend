@@ -29,3 +29,8 @@ debugpy
 latex2mathml
 mathml2omml
 pdf2docx
+PyMuPDF
+beautifulsoup4
+cssutils
+pdfminer.six
+Pillow

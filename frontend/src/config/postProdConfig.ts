@@ -36,5 +36,12 @@ export const POST_PROD_SERVICES: PostProdService[] = [
     description: 'Verify EPUB embedded stylesheets against master templates and identify CSS differences, encoding issues, and validation errors.',
     icon: 'BookOpen',
     enabled: true,
+  },
+  {
+    id: 'epub-validator',
+    title: 'EPUB Validator',
+    description: 'Upload ZIP packages, run comprehensive XHTML checks, edit markup/CSS in the browser, check PDF parity, and export clean EPUBs.',
+    icon: 'FileCheck',
+    enabled: true,
   }
 ];
