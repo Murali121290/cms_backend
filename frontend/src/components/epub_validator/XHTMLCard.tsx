@@ -149,7 +149,7 @@ export function XHTMLCard({
             {isCss ? (
               <Button
                 size="sm"
-                className="flex-1 gap-1.5 text-xs shadow-sm"
+                className="flex-1 gap-1.5 h-8 text-xs font-semibold shadow-sm hover:shadow-md hover:-translate-y-px active:translate-y-0 transition-all"
                 onClick={onOpen}
                 aria-label={`Open source for ${file.file_name}`}
               >
@@ -161,7 +161,7 @@ export function XHTMLCard({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="flex-1 gap-1.5 text-xs shadow-sm"
+                  className="flex-1 gap-1.5 h-8 text-xs font-semibold shadow-sm hover:shadow hover:-translate-y-px hover:border-primary/40 hover:text-primary transition-all"
                   onClick={onPreview}
                   aria-label={`Preview ${file.file_name}`}
                 >
@@ -170,7 +170,7 @@ export function XHTMLCard({
                 </Button>
                 <Button
                   size="sm"
-                  className="flex-1 gap-1.5 text-xs shadow-sm"
+                  className="flex-1 gap-1.5 h-8 text-xs font-semibold shadow-sm hover:shadow-md hover:-translate-y-px active:translate-y-0 transition-all"
                   onClick={onValidate}
                   disabled={isValidating}
                   aria-label={`Validate ${file.file_name}`}
