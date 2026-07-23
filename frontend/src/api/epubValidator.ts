@@ -1,6 +1,6 @@
 import axios from 'axios';
 import api, { getApiErrorMessage } from './client';
-import type { Book, FilesResponse, UploadResponse, ValidationApiResponse } from '../types/epubValidator';
+import type { AceReport, Book, FilesResponse, UploadResponse, ValidationApiResponse } from '../types/epubValidator';
 
 export async function uploadFile(
   file: File,
@@ -148,6 +148,31 @@ export async function exportEpub(
       if (parsed) throw new Error(parsed.detail ?? parsed.message ?? 'Export failed');
     }
     throw new Error(getApiErrorMessage(err, 'Export failed'));
+  }
+}
+
+export async function getCachedAceReport(folderName: string): Promise<AceReport | null> {
+  try {
+    const { data } = await api.get<{ status: boolean; report?: AceReport; message?: string }>(
+      `/post-prod/epub-validator/ace/${encodeURIComponent(folderName)}`,
+    );
+    return data.status ? data.report ?? null : null;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to load accessibility report'));
+  }
+}
+
+export async function runAceReport(folderName: string): Promise<AceReport> {
+  try {
+    const { data } = await api.post<{ status: boolean; report: AceReport; message?: string }>(
+      `/post-prod/epub-validator/ace/${encodeURIComponent(folderName)}`,
+    );
+    if (!data.status) {
+      throw new Error(data.message || 'Accessibility check failed');
+    }
+    return data.report;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Accessibility check failed'));
   }
 }
 
