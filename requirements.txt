@@ -34,3 +34,4 @@ beautifulsoup4
 cssutils
 pdfminer.six
 Pillow
+python-pptx

@@ -42,6 +42,7 @@ import { PostProdChaptersPage } from '@/pages/PostProdChaptersPage'
 import { PostProdCssMatcher } from '@/pages/PostProdCssMatcher'
 import { PostProdEpubValidator } from '@/pages/PostProdEpubValidator'
 import { PostProdEpubValidatorFiles } from '@/pages/PostProdEpubValidatorFiles'
+import { PostProdSlideFormatter } from '@/pages/PostProdSlideFormatter'
 import { ROLE_PERMISSIONS } from '@/config/rbacConfig'
 import { useRBAC } from '@/hooks/useRBAC'
 
@@ -128,6 +129,7 @@ const router = createBrowserRouter([
       { path: 'post-production/epub-css-matcher', element: <PostProdGuard><PostProdCssMatcher /></PostProdGuard> },
       { path: 'post-production/epub-validator', element: <PostProdGuard><PostProdEpubValidator /></PostProdGuard> },
       { path: 'post-production/epub-validator/:folderName', element: <PostProdGuard><PostProdEpubValidatorFiles /></PostProdGuard> },
+      { path: 'post-production/slide-formatter', element: <PostProdGuard><PostProdSlideFormatter /></PostProdGuard> },
       { path: 'reports', element: <ReportsPage /> },
       { path: 'reports/schedule', element: <ScheduleReport /> },
       { path: 'reports/today-schedule', element: <TodaySchedule /> },

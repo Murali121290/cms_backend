@@ -628,7 +628,7 @@ class ProcessingJobResponse(BaseModel):
     completed_at: datetime | None = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 

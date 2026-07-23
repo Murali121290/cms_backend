@@ -66,6 +66,10 @@ app.include_router(post_prod.router, prefix="/api/v2", tags=["Post Production"])
 from app.domains.post_prod.epub_validator import router as epub_validator
 app.include_router(epub_validator, prefix="/api/v2", tags=["EPUB Validator"])
 
+# PPT Builder Router
+from app.domains.post_prod.ppt_builder import router as ppt_builder
+app.include_router(ppt_builder, prefix="/api/v2", tags=["PPT Builder"])
+
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the Publishing CMS API"}

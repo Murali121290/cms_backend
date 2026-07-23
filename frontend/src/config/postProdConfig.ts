@@ -21,7 +21,6 @@ export const POST_PROD_SERVICES: PostProdService[] = [
     description: 'Format, style, and structure slide decks using automated layouts and template compliance checks.',
     icon: 'Layers',
     enabled: true,
-    externalUrl: 'http://10.1.1.18:5050/',
   },
   {
     id: 'web-pdf-processor',

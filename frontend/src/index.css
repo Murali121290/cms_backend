@@ -109,3 +109,30 @@ code {
   padding: 4px 8px;
   background: var(--code-bg);
 }
+
+/* SlideFormatter specific custom theme styles */
+:root {
+  --color-cream: #faf9f6;
+  --color-navy: #1B5C9E;
+  --color-navy-light: #2570bd;
+  --color-amber: #F5822A;
+  --color-amber-light: #f79b54;
+  --color-success: #10B981;
+  --color-muted: #6B7280;
+  --color-border: #E5E7EB;
+  --radius-custom: 0.75rem;
+}
+
+.surface-card {
+  background-color: white;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-custom);
+  box-shadow: 0 4px 12px -2px rgba(27, 92, 158, 0.03), 0 2px 6px -1px rgba(27, 92, 158, 0.02);
+}
+
+.dashed-drop {
+  border: 2px dashed #d1d5db;
+  border-radius: var(--radius-custom);
+  background-color: #fafaf9;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
