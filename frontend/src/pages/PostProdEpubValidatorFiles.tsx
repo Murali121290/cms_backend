@@ -14,17 +14,20 @@ import {
   XCircle,
   Clock,
   Download,
+  ShieldCheck,
+  Eye,
 } from 'lucide-react';
 import { XHTMLCard, xhtmlCardVariants } from '@/components/epub_validator/XHTMLCard';
 import { ValidationDetailModal } from '@/components/epub_validator/ValidationDetailModal';
+import { AccessibilityReportModal } from '@/components/epub_validator/AccessibilityReportModal';
 import type { Tab as ModalTab } from '@/components/epub_validator/ValidationDetailModal';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody } from '@/components/ui/Card';
-import { getFiles, validateFolder, validateFile, exportEpub } from '@/api/epubValidator';
+import { getFiles, validateFolder, validateFile, exportEpub, getCachedAceReport, runAceReport } from '@/api/epubValidator';
 import { useEpubBookStore } from '@/hooks/useEpubBookStore';
 import { cn, formatDate, titleCase } from '@/utils/epubValidatorUtils';
-import type { ValidationApiResponse, XHTMLFile, XHTMLFileStatus } from '@/types/epubValidator';
+import type { AceReport, ValidationApiResponse, XHTMLFile, XHTMLFileStatus } from '@/types/epubValidator';
 
 // ─── Stagger animation ────────────────────────────────────────────────────────
 
@@ -170,6 +173,13 @@ export function PostProdEpubValidatorFiles() {
   const [isValidating, setIsValidating] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
 
+  const [aceReport, setAceReport] = useState<AceReport | null>(null);
+  const [isAceRunning, setIsAceRunning] = useState(false);
+  const [aceError, setAceError] = useState<string | null>(null);
+  const [aceModalOpen, setAceModalOpen] = useState(false);
+  const [aceElapsed, setAceElapsed] = useState(0);
+  const aceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // Elapsed-time counter while validation runs
   const [elapsed, setElapsed] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -183,6 +193,21 @@ export function PostProdEpubValidatorFiles() {
     }
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [isValidating]);
+
+  useEffect(() => {
+    if (!folderName) return;
+    getCachedAceReport(folderName).then((r) => { if (r) setAceReport(r); }).catch(() => undefined);
+  }, [folderName]);
+
+  useEffect(() => {
+    if (isAceRunning) {
+      setAceElapsed(0);
+      aceTimerRef.current = setInterval(() => setAceElapsed((s) => s + 1), 1000);
+    } else if (aceTimerRef.current) {
+      clearInterval(aceTimerRef.current);
+    }
+    return () => { if (aceTimerRef.current) clearInterval(aceTimerRef.current); };
+  }, [isAceRunning]);
 
   const fmtElapsed = (s: number) =>
     s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
@@ -237,6 +262,20 @@ export function PostProdEpubValidatorFiles() {
         next.delete(fileName);
         return next;
       });
+    }
+  };
+
+  const handleRunAce = async () => {
+    setIsAceRunning(true);
+    setAceError(null);
+    try {
+      const report = await runAceReport(folderName);
+      setAceReport(report);
+      setAceModalOpen(true);
+    } catch (err) {
+      setAceError(err instanceof Error ? err.message : 'Accessibility check failed');
+    } finally {
+      setIsAceRunning(false);
     }
   };
 
@@ -355,6 +394,16 @@ export function PostProdEpubValidatorFiles() {
 
   return (
     <>
+    <AnimatePresence>
+      {aceModalOpen && aceReport && (
+        <AccessibilityReportModal
+          report={aceReport}
+          folderName={folderName}
+          onClose={() => setAceModalOpen(false)}
+        />
+      )}
+    </AnimatePresence>
+
     <AnimatePresence>
       {selectedFile && (
         <ValidationDetailModal
@@ -488,6 +537,31 @@ export function PostProdEpubValidatorFiles() {
             variant="outline"
             size="sm"
             className="gap-2 shadow-sm text-xs font-semibold py-1.5 h-9"
+            onClick={handleRunAce}
+            disabled={isAceRunning || isLoading}
+          >
+            {isAceRunning ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <ShieldCheck className="w-3.5 h-3.5" />
+            )}
+            {isAceRunning ? `Checking… ${fmtElapsed(aceElapsed)}` : aceReport ? 'Re-run A11y check' : 'Run accessibility check'}
+          </Button>
+          {aceReport && !isAceRunning && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2 shadow-sm text-xs font-semibold py-1.5 h-9"
+              onClick={() => setAceModalOpen(true)}
+            >
+              <Eye className="w-3.5 h-3.5" />
+              View report
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2 shadow-sm text-xs font-semibold py-1.5 h-9"
             onClick={handleExport}
             disabled={isExporting || isLoading || isValidating}
           >
@@ -519,6 +593,22 @@ export function PostProdEpubValidatorFiles() {
           <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-danger/10 border border-danger/20 text-xs text-danger font-sans">
             <XCircle className="w-4 h-4 flex-shrink-0" />
             {validationError}
+          </div>
+        )}
+
+        {/* Accessibility check error banner */}
+        {aceError && (
+          <div className="flex items-start justify-between gap-3 px-4 py-3 rounded-lg bg-danger/10 border border-danger/20 text-xs text-danger font-sans">
+            <div className="flex items-start gap-2">
+              <XCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <span>{aceError}</span>
+            </div>
+            <button
+              onClick={() => setAceError(null)}
+              className="text-xs font-semibold hover:underline shrink-0"
+            >
+              Dismiss
+            </button>
           </div>
         )}
 

@@ -15,6 +15,7 @@ from .services.upload_service import process_upload, get_extract_files, UPLOAD_D
 from .services.validate_service import validate_epub
 from .services.books_service import get_all_books, delete_book as delete_book_record
 from .services.pdf_service import find_pdf_page, render_pdf_page, get_chapter_pdf
+from .services.ace_service import run_ace, get_cached_report as get_cached_ace_report, html_report_dir as ace_html_report_dir
 
 
 def check_post_prod_access(user = Depends(get_current_user_from_cookie)):
@@ -116,6 +117,33 @@ async def get_chapter_pdf_endpoint(folder_name: str, file: str = Query(...)):
         return FileResponse(path, media_type="application/pdf")
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="PDF not found")
+
+
+@router.get("/ace/{folder_name}")
+def get_ace_report(folder_name: str):
+    report = get_cached_ace_report(folder_name)
+    if report is None:
+        return {"status": False, "message": "No accessibility report yet."}
+    return {"status": True, "report": report}
+
+
+@router.post("/ace/{folder_name}")
+async def run_ace_report(folder_name: str):
+    report = await asyncio.to_thread(run_ace, folder_name)
+    return {"status": True, "report": report}
+
+
+@router.get("/ace/{folder_name}/report/{path:path}")
+def get_ace_html_report(folder_name: str, path: str = "report.html"):
+    if not path:
+        path = "report.html"
+    base = ace_html_report_dir(folder_name).resolve()
+    target = (base / path).resolve()
+    if base not in target.parents and target != base:
+        raise HTTPException(status_code=400, detail="Invalid path.")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Report file not found.")
+    return FileResponse(target)
 
 
 @router.get("/pdf/{folder_name}/render")

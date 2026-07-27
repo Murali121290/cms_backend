@@ -90,7 +90,38 @@ export interface ValidationApiResponse {
   epub_path: string;
   files: ValidationFileEntry[];
 }
+export interface AceViolation {
+  rule_id: string;
+  rule_title: string;
+  impact: 'critical' | 'serious' | 'moderate' | 'minor' | '';
+  wcag: string[];
+  help_url: string | null;
+  message: string;
+  file_path: string | null;
+  snippet: string | null;
+}
 
+export interface AceReport {
+  status: 'pass' | 'fail';
+  ran_at: string;
+  duration_seconds: number;
+  conformance_level: string;
+  totals: {
+    critical: number;
+    serious: number;
+    moderate: number;
+    minor: number;
+  };
+  metadata: {
+    title: string | null;
+    language: string | null;
+    identifier: string | null;
+    accessibility_features: string[];
+    accessibility_summary: string | null;
+    conforms_to: string[];
+  };
+  violations: AceViolation[];
+}
 // ─── Per-file aggregated result (computed on frontend) ────────────────────────
 export type XHTMLFileStatus = 'pending' | 'passed' | 'warning' | 'failed';
 
