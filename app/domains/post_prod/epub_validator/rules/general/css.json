@@ -1,0 +1,18 @@
+{
+  "rules": [
+    {
+      "id": "CSS001",
+      "name": "Validate CSS Files via W3C Validator",
+      "target_path": "OEBPS/xhtml",
+      "enabled": true,
+      "file_name_pattern": "*.xhtml"
+    },
+    {
+      "id": "CSS002",
+      "name": "Validate CSS Files Directly via W3C Validator",
+      "target_path": "OEBPS/css",
+      "enabled": true,
+      "file_name_pattern": "*.css"
+    }
+  ]
+}

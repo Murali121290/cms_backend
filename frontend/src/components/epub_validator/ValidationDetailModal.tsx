@@ -544,16 +544,59 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
                   No validation data yet.
                 </p>
               ) : (
-                entries.map((entry) => (
-                  <RuleRow
-                    key={`${entry.rule_id}-${entry.file_details.file_name}`}
-                    entry={entry}
-                    isSelected={selectedRuleId === entry.rule_id}
-                    selectedSubRuleName={selectedRuleId === entry.rule_id ? ruleNameFilter : null}
-                    onClick={() => { setSelectedRule(entry.rule_id); setRuleNameFilter(null); }}
-                    onSubRuleClick={(name) => { setSelectedRule(entry.rule_id); setRuleNameFilter(name); }}
-                  />
-                ))
+                (() => {
+                  // v2 responses tag each entry with origin. If none of the entries
+                  // carry the tag we're on legacy — render as a flat list.
+                  const hasOrigin = entries.some((e) => e.origin !== undefined);
+                  if (!hasOrigin) {
+                    return entries.map((entry) => (
+                      <RuleRow
+                        key={`${entry.rule_id}-${entry.file_details.file_name}`}
+                        entry={entry}
+                        isSelected={selectedRuleId === entry.rule_id}
+                        selectedSubRuleName={selectedRuleId === entry.rule_id ? ruleNameFilter : null}
+                        onClick={() => { setSelectedRule(entry.rule_id); setRuleNameFilter(null); }}
+                        onSubRuleClick={(name) => { setSelectedRule(entry.rule_id); setRuleNameFilter(name); }}
+                      />
+                    ));
+                  }
+                  const generalEntries = entries.filter((e) => e.origin !== 'customer');
+                  const customerEntries = entries.filter((e) => e.origin === 'customer');
+                  const customerLabel = customerEntries[0]?.customer
+                    ? `${customerEntries[0].customer!.charAt(0).toUpperCase()}${customerEntries[0].customer!.slice(1)} Rules`
+                    : 'Customer Rules';
+                  const renderEntries = (list: ValidationFileEntry[]) =>
+                    list.map((entry) => (
+                      <RuleRow
+                        key={`${entry.rule_id}-${entry.file_details.file_name}`}
+                        entry={entry}
+                        isSelected={selectedRuleId === entry.rule_id}
+                        selectedSubRuleName={selectedRuleId === entry.rule_id ? ruleNameFilter : null}
+                        onClick={() => { setSelectedRule(entry.rule_id); setRuleNameFilter(null); }}
+                        onSubRuleClick={(name) => { setSelectedRule(entry.rule_id); setRuleNameFilter(name); }}
+                      />
+                    ));
+                  return (
+                    <>
+                      {generalEntries.length > 0 && (
+                        <>
+                          <p className="px-2 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/80">
+                            General
+                          </p>
+                          {renderEntries(generalEntries)}
+                        </>
+                      )}
+                      {customerEntries.length > 0 && (
+                        <>
+                          <p className="px-2 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-primary/80">
+                            {customerLabel}
+                          </p>
+                          {renderEntries(customerEntries)}
+                        </>
+                      )}
+                    </>
+                  );
+                })()
               )}
             </div>
           </div>

@@ -12,8 +12,19 @@ from app.domains.auth.security import get_current_user_from_cookie
 from app.domains.auth.rbac_config import has_post_prod_access
 
 from .services.upload_service import process_upload, get_extract_files, UPLOAD_DIR, EXTRACT_DIR
-from .services.validate_service import validate_epub
+from .services.validate_service import validate_epub as _validate_epub_legacy
+from .engine.runner import validate_epub as _validate_epub_v2
 from .services.books_service import get_all_books, delete_book as delete_book_record
+
+
+def _select_validate_epub():
+    """Return v2 (default) or legacy engine based on EPUB_VALIDATOR_ENGINE.
+
+    v2 is the default as of Phase 4. Set EPUB_VALIDATOR_ENGINE=legacy to opt
+    back into the old engine. Read per-request so ops can flip it without
+    restarting uvicorn.
+    """
+    return _validate_epub_legacy if os.getenv("EPUB_VALIDATOR_ENGINE") == "legacy" else _validate_epub_v2
 from .services.pdf_service import find_pdf_page, render_pdf_page, get_chapter_pdf
 from .services.ace_service import run_ace, get_cached_report as get_cached_ace_report, html_report_dir as ace_html_report_dir
 
@@ -156,15 +167,18 @@ async def render_pdf_page_endpoint(folder_name: str, page: int = Query(1)):
 
 
 @router.get("/validate/{filename}")
-async def validate_file(filename: str, file: str = Query(None)):
+async def validate_file(
+    filename: str,
+    file: str = Query(None),
+    customer: str = Query(None, description="Override auto-detected customer (v2 engine only)"),
+):
     # validate_epub does heavy file I/O + network calls — run in thread pool
     epub_folder = os.path.join(UPLOAD_DIR, filename, "extract", "epub")
-    return await asyncio.to_thread(
-        validate_epub,
-        epub_folder=epub_folder,
-        folder_name=filename,
-        target_file=file,
-    )
+    engine = _select_validate_epub()
+    kwargs = {"epub_folder": epub_folder, "folder_name": filename, "target_file": file}
+    if engine is _validate_epub_v2:
+        kwargs["customer"] = customer
+    return await asyncio.to_thread(engine, **kwargs)
 
 
 @router.post("/export/{folder_name}")

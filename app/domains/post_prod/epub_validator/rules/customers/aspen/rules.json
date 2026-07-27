@@ -1,0 +1,103 @@
+{
+  "rules": [
+    {
+      "id": "ASP-COV-001",
+      "name": "Aspen: Cover file named cover.jpg",
+      "scope": "book",
+      "enabled": true
+    },
+    {
+      "id": "ASP-COV-002",
+      "name": "Aspen: Cover height is 1100 pixels",
+      "scope": "book",
+      "enabled": true
+    },
+    {
+      "id": "ASP-COV-003",
+      "name": "Aspen: Cover image is 300 DPI",
+      "scope": "book",
+      "enabled": true
+    },
+
+    {
+      "id": "ASP-NAV-001",
+      "name": "Aspen: Front Matter present in NAV",
+      "target_path": "",
+      "file_name_pattern": "nav.xhtml",
+      "enabled": true
+    },
+    {
+      "id": "ASP-NAV-002",
+      "name": "Aspen: 'Half title' word forbidden in NAV/NCX",
+      "target_path": "",
+      "file_name_pattern": ["nav.xhtml", "toc.ncx"],
+      "enabled": true
+    },
+    {
+      "id": "ASP-NAV-003",
+      "name": "Aspen: Authors separated by ',' not 'and' in OPF/NCX",
+      "scope": "book",
+      "enabled": true
+    },
+
+    {
+      "id": "ASP-COPY-001",
+      "name": "Aspen: Copyright page must not contain 'Printed'",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": ["*Copyright*.xhtml", "*copyright*.xhtml"],
+      "enabled": true
+    },
+    {
+      "id": "ASP-COPY-002",
+      "name": "Aspen: Copyright page must contain the eISBN",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": ["*Copyright*.xhtml", "*copyright*.xhtml"],
+      "enabled": true
+    },
+
+    {
+      "id": "ASP-META-001",
+      "name": "Aspen: OPF dc:publisher = 'Aspen Publishing'",
+      "scope": "book",
+      "enabled": true
+    },
+    {
+      "id": "ASP-META-002",
+      "name": "Aspen: OPF dc:rights matches Aspen copyright pattern",
+      "scope": "book",
+      "enabled": true
+    },
+    {
+      "id": "ASP-META-003",
+      "name": "Aspen: OPF certifier = 'S4Carlisle Publishing Services'",
+      "scope": "book",
+      "enabled": true
+    },
+    {
+      "id": "ASP-META-004",
+      "name": "Aspen: OPF dcterms:conformsTo = EPUB Accessibility 1.1 - WCAG 2.2 Level AA",
+      "scope": "book",
+      "enabled": true
+    },
+
+    {
+      "id": "ASP-IMG-001",
+      "name": "Aspen: All manifest images must be JPEG",
+      "scope": "book",
+      "enabled": true
+    },
+    {
+      "id": "ASP-IMG-002",
+      "name": "Aspen: <img> alt attribute must not be empty",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true
+    },
+    {
+      "id": "ASP-IMG-003",
+      "name": "Aspen: No image over 4,000,000 pixels (W×H)",
+      "scope": "book",
+      "enabled": true
+    }
+  ]
+}

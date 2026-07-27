@@ -1,0 +1,11 @@
+{
+  "rules": [
+    {
+      "id": "PAGE001",
+      "name": "Validate Pagebreak Position",
+      "target_path": "OEBPS/xhtml",
+      "enabled": true,
+      "file_name_pattern": "*.xhtml"
+    }
+  ]
+}

@@ -67,6 +67,8 @@ export interface ValidationIssue {
   [key: string]: unknown;
 }
 
+export type ValidationOrigin = 'general' | 'customer';
+
 export interface ValidationFileEntry {
   rule_id: string;
   rule_name: string;
@@ -78,17 +80,23 @@ export interface ValidationFileEntry {
     full_path: string;
     relative_path: string;
     folder_name: string;
+    epub_root?: string;
   };
   result: {
     issues_count: number;
     issues: ValidationIssue[];
   };
+  // v2 engine only; absent on legacy responses.
+  origin?: ValidationOrigin;
+  customer?: string | null;
 }
 
 export interface ValidationApiResponse {
   folder: string;
   epub_path: string;
   files: ValidationFileEntry[];
+  // v2 engine only; when present the modal + page render the general/customer split.
+  customer?: string | null;
 }
 export interface AceViolation {
   rule_id: string;

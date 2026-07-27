@@ -1,0 +1,21 @@
+# Customer detection + enablement.
+#
+# The engine matches the EPUB's OPF <dc:publisher> against `detection.publisher`
+# and/or the primary <dc:identifier> against `detection.isbn_prefix`. First
+# enabled match wins. When nothing matches, only general rules run.
+#
+# Adding a new customer = add an entry here + drop a folder under
+# validators/customers/<name>/ and rules/customers/<name>/. No engine change.
+
+customers:
+  aspen:
+    display_name: "Aspen Publishing"
+    enabled: true
+    detection:
+      publisher:
+        - "Aspen Publishing"
+      isbn_prefix:
+        - "9798894"
+        - "9781543"
+
+default_customer: null

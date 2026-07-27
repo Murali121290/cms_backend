@@ -140,35 +140,22 @@ export function PostProdEpubValidatorFiles() {
     [filesData],
   );
 
-  // ── Validation state (persisted to localStorage per book) ──────────────────
-  const storageKey = `validation:${folderName}`;
+  // ── Validation state (in-memory only, per session) ─────────────────────────
+  // Not persisted: opening/reloading a book always starts on the Pending state
+  // so the dashboard never shows stale numbers before the user clicks
+  // Validate All. Accessibility (ACE) results are cached server-side and are
+  // still fetched on mount — see the useEffect further down.
+  const [validationData, setValidationData] = useState<ValidationApiResponse | null>(null);
 
-  const [validationData, setValidationData] = useState<ValidationApiResponse | null>(() => {
-    try {
-      const saved = localStorage.getItem(storageKey);
-      return saved ? (JSON.parse(saved) as ValidationApiResponse) : null;
-    } catch {
-      return null;
-    }
-  });
-
+  // One-time cleanup for keys written by an earlier version that persisted
+  // validation results. Safe to remove after users have visited once.
   useEffect(() => {
     try {
-      if (validationData === null) {
-        localStorage.removeItem(storageKey);
-      } else {
-        localStorage.removeItem(storageKey);
-        localStorage.setItem(storageKey, JSON.stringify(validationData));
+      for (const key of Object.keys(localStorage)) {
+        if (key.startsWith('validation:')) localStorage.removeItem(key);
       }
-    } catch {
-      try {
-        for (const key of Object.keys(localStorage)) {
-          if (key.startsWith('validation:') && key !== storageKey) localStorage.removeItem(key);
-        }
-        if (validationData !== null) localStorage.setItem(storageKey, JSON.stringify(validationData));
-      } catch { /* truly out of space */ }
-    }
-  }, [validationData, storageKey]);
+    } catch { /* noop */ }
+  }, []);
 
   const [isValidating, setIsValidating] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -227,6 +214,9 @@ export function PostProdEpubValidatorFiles() {
   const handleValidateAll = async () => {
     setIsValidating(true);
     setValidationError(null);
+    // Reset to Pending so the dashboard reflects "fresh run in progress"
+    // immediately instead of showing the previous run's numbers.
+    setValidationData(null);
     try {
       const result = await validateFolder(folderName);
       setValidationData(result);
@@ -515,6 +505,26 @@ export function PostProdEpubValidatorFiles() {
                 </>
               )}
               {!book && <span className="font-mono text-[11px] font-semibold">{folderName}</span>}
+              {validationData && validationData.customer !== undefined && (
+                <>
+                  <span className="text-border">·</span>
+                  {validationData.customer ? (
+                    <span
+                      className="inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
+                      title={`Detected customer: ${validationData.customer}`}
+                    >
+                      {validationData.customer}
+                    </span>
+                  ) : (
+                    <span
+                      className="inline-flex items-center rounded-full bg-muted text-muted-foreground px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
+                      title="No customer rules matched — running general rules only"
+                    >
+                      General only
+                    </span>
+                  )}
+                </>
+              )}
             </p>
           </div>
         </div>
@@ -531,7 +541,9 @@ export function PostProdEpubValidatorFiles() {
             ) : (
               <Play className="w-3.5 h-3.5" />
             )}
-            {isValidating ? `Validating… ${fmtElapsed(elapsed)}` : 'Validate all'}
+            {isValidating
+              ? `Validating… ${fmtElapsed(elapsed)}`
+              : hasValidated ? 'Re-run validation' : 'Validate all'}
           </Button>
           <Button
             variant="outline"

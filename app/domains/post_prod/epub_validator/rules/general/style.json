@@ -1,0 +1,10 @@
+{
+  "rules": [
+    {
+      "id": "PDF001",
+      "name": "PDF-EPUB Style Parity (italic, alignment, indent, images, colour, page count)",
+      "scope": "book",
+      "enabled": true
+    }
+  ]
+}
