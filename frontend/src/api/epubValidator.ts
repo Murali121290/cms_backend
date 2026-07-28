@@ -36,7 +36,7 @@ export async function getFiles(folderName: string): Promise<FilesResponse> {
 export async function validateFolder(folderName: string): Promise<ValidationApiResponse> {
   try {
     const { data } = await api.get<ValidationApiResponse>(`/post-prod/epub-validator/validate/${folderName}`, {
-      timeout: 10 * 60 * 1000,
+      timeout: 30 * 60 * 1000,
     });
     return data;
   } catch (err) {
@@ -76,7 +76,7 @@ export async function validateFile(
   try {
     const { data } = await api.get<ValidationApiResponse>(`/post-prod/epub-validator/validate/${folderName}`, {
       params: { file: fileName },
-      timeout: 10 * 60 * 1000,
+      timeout: 30 * 60 * 1000,
     });
     return data;
   } catch (err) {

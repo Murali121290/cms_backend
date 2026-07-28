@@ -1,0 +1,11 @@
+{
+  "rules": [
+    {
+      "id": "XHTML001",
+      "name": "XHTML files parse as well-formed XML",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true
+    }
+  ]
+}

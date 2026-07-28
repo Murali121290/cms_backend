@@ -57,8 +57,12 @@ function statusText(
 ): string {
   if (status === 'pending')  return 'Awaiting validation';
   if (status === 'passed')   return 'No issues found';
-  if (status === 'failed')   return `${errors} error${errors !== 1 ? 's' : ''}`;
-  return `${warnings} warning${warnings !== 1 ? 's' : ''}`;
+  const errStr = `${errors} error${errors !== 1 ? 's' : ''}`;
+  const warnStr = `${warnings} warning${warnings !== 1 ? 's' : ''}`;
+  if (status === 'failed') {
+    return warnings > 0 ? `${errStr}, ${warnStr}` : errStr;
+  }
+  return warnStr;
 }
 
 // ─── Card ─────────────────────────────────────────────────────────────────────

@@ -25,6 +25,8 @@ export function AccessibilityReportModal({ report, folderName, onClose }: Props)
   const totalViolations = report.violations.length;
   const passed = report.status === 'pass' && totalViolations === 0;
   const reportUrl = `/api/v2/post-prod/epub-validator/ace/${encodeURIComponent(folderName)}/report/report.html`;
+  const coverage = report.coverage;
+  const wcag = report.wcag_breakdown ?? [];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
@@ -65,6 +67,75 @@ export function AccessibilityReportModal({ report, folderName, onClose }: Props)
               <X className="w-4 h-4" />
             </Button>
           </div>
+        </div>
+
+        {/* Summary panel — shows accurate context so a passing (all-zero) run doesn't look empty */}
+        <div className="px-5 py-4 border-b border-border bg-muted/30">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div>
+              <div className="text-xs uppercase text-muted-foreground tracking-wide">Result</div>
+              <div className={passed ? 'text-emerald-600 font-semibold text-lg' : 'text-amber-600 font-semibold text-lg'}>
+                {passed ? 'Passed' : `${totalViolations} violation${totalViolations !== 1 ? 's' : ''}`}
+              </div>
+              <div className="text-xs text-muted-foreground mt-0.5">
+                Conformance {report.conformance_level}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs uppercase text-muted-foreground tracking-wide">Coverage</div>
+              <div className="text-lg font-semibold text-foreground">
+                {coverage?.files_checked ?? '—'} files
+              </div>
+              <div className="text-xs text-muted-foreground mt-0.5">
+                {coverage?.images_inspected ?? 0} images inspected
+                {coverage && coverage.images_missing_alt > 0 && (
+                  <span className="text-amber-600"> · {coverage.images_missing_alt} without alt</span>
+                )}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs uppercase text-muted-foreground tracking-wide">Violation impact</div>
+              <div className="text-sm font-medium text-foreground">
+                {report.totals.critical} critical · {report.totals.serious} serious
+              </div>
+              <div className="text-xs text-muted-foreground mt-0.5">
+                {report.totals.moderate} moderate · {report.totals.minor} minor
+              </div>
+            </div>
+            <div>
+              <div className="text-xs uppercase text-muted-foreground tracking-wide">A11y metadata</div>
+              <div className="text-sm font-medium text-foreground">
+                {report.metadata.accessibility_features.length} features declared
+              </div>
+              {coverage?.accessibility_metadata_missing && coverage.accessibility_metadata_missing.length > 0 && (
+                <div className="text-xs text-amber-600 mt-0.5">
+                  missing: {coverage.accessibility_metadata_missing.slice(0, 2).join(', ')}
+                  {coverage.accessibility_metadata_missing.length > 2 && ' …'}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {wcag.some((r) => r.total > 0) && (
+            <div className="mt-3 pt-3 border-t border-border">
+              <div className="text-xs uppercase text-muted-foreground tracking-wide mb-1">
+                Violations by ruleset
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs">
+                {wcag.filter((r) => r.total > 0).map((r) => (
+                  <span key={r.ruleset} className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-red-50 text-red-700 border border-red-200">
+                    {r.ruleset}: <strong>{r.total}</strong>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {passed && (
+            <p className="mt-3 text-xs text-emerald-700">
+              DAISY ACE + axe-core ran {coverage?.files_checked ?? 0} content documents and found no WCAG 2.0 / 2.1 / 2.2, EPUB, or Best Practice violations.
+            </p>
+          )}
         </div>
 
         <iframe

@@ -250,3 +250,133 @@ def validate_nav_full(book_details):
     cli_issues = NavValidator(bundle).run_all()
     issues = _drop_pass_issues([_cli_issue_to_web(i) for i in cli_issues])
     return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("NAV004")
+def validate_nav_cover_entry(file_details):
+    """nav.xhtml must contain an entry named 'Cover' (case-insensitive) or an
+    element with epub:type='cover'.
+    """
+    with open(file_details["full_path"], "r", encoding="utf-8") as f:
+        soup = BeautifulSoup(f.read(), "html.parser")
+
+    nav = soup.find("nav", attrs={"epub:type": "toc"}) or soup.find("nav", id="toc")
+    if not nav:
+        return {"issues_count": 0, "issues": []}
+
+    for a in nav.find_all("a"):
+        label = a.get_text(strip=True)
+        if label.strip().lower() == "cover":
+            return {"issues_count": 0, "issues": []}
+
+    landmark_or_type = soup.find(attrs={"epub:type": lambda v: v and "cover" in v})
+    if landmark_or_type is not None:
+        return {"issues_count": 0, "issues": []}
+
+    return {"issues_count": 1, "issues": [{
+        "type": "cover_entry_missing",
+        "message": "nav.xhtml does not contain a 'Cover' entry (link text 'Cover' or epub:type='cover').",
+        "category": "Warning",
+    }]}
+
+
+import glob as _glob
+import re
+
+
+@rule("NAV005")
+def validate_page_list_parity(book_details):
+    """Every page id declared in the OPF spine/xhtml (id="page_*") must appear in
+    the OPF pagelist (if present) and in the NCX pageList and in nav.xhtml page-list nav.
+    """
+    epub = book_details["epub_path"]
+    issues = []
+
+    # 1) Collect page IDs from all xhtml files: id="page_..." or epub:type="pagebreak" id="..."
+    page_ids: set[str] = set()
+    for xhtml in _glob.glob(os.path.join(epub, "**", "*.xhtml"), recursive=True):
+        try:
+            with open(xhtml, "r", encoding="utf-8") as f:
+                soup = BeautifulSoup(f.read(), "html.parser")
+        except Exception:  # noqa: BLE001
+            continue
+        for el in soup.find_all(True):
+            eid = (el.get("id") or "").strip()
+            etype = (el.get("epub:type") or "").strip()
+            # Only treat as a page id when it's page_N / page-N / pageN with N digits/roman.
+            if re.match(r"^page[_-]?[ivxlcdm0-9]+$", eid, re.IGNORECASE):
+                page_ids.add(eid)
+            elif "pagebreak" in etype and eid:
+                page_ids.add(eid)
+
+    if not page_ids:
+        return {"issues_count": 0, "issues": []}
+
+    # 2) Check nav.xhtml page-list nav.
+    nav_ids: set[str] = set()
+    for nav_path in _glob.glob(os.path.join(epub, "**", "nav.xhtml"), recursive=True):
+        try:
+            with open(nav_path, "r", encoding="utf-8") as f:
+                nav_soup = BeautifulSoup(f.read(), "html.parser")
+        except Exception:  # noqa: BLE001
+            continue
+        page_nav = nav_soup.find("nav", attrs={"epub:type": "page-list"})
+        if not page_nav:
+            continue
+        for a in page_nav.find_all("a", href=True):
+            href = a["href"]
+            if "#" in href:
+                nav_ids.add(href.split("#", 1)[1])
+
+    missing_in_nav = sorted(page_ids - nav_ids) if nav_ids else []
+    if nav_ids and missing_in_nav:
+        issues.append({
+            "type": "page_ids_missing_in_nav",
+            "message": f"nav.xhtml page-list is missing {len(missing_in_nav)} page id(s): {missing_in_nav[:10]}"
+                       + ("..." if len(missing_in_nav) > 10 else ""),
+            "category": "Error",
+        })
+    elif not nav_ids:
+        issues.append({
+            "type": "nav_page_list_missing",
+            "message": "nav.xhtml does not contain a <nav epub:type=\"page-list\"> section.",
+            "category": "Warning",
+        })
+
+    # 3) Check NCX pageList.
+    ncx_ids: set[str] = set()
+    ncx_found = False
+    for ncx_path in _glob.glob(os.path.join(epub, "**", "toc.ncx"), recursive=True):
+        ncx_found = True
+        try:
+            with open(ncx_path, "r", encoding="utf-8") as f:
+                ncx_soup = BeautifulSoup(f.read(), "xml")
+        except Exception:  # noqa: BLE001
+            continue
+        page_list = ncx_soup.find("pageList") or ncx_soup.find("pagelist")
+        if not page_list:
+            continue
+        for pt in page_list.find_all(["pageTarget", "pagetarget"]):
+            content = pt.find("content")
+            if content and content.get("src"):
+                src = content.get("src")
+                if "#" in src:
+                    ncx_ids.add(src.split("#", 1)[1])
+
+    if ncx_found and not ncx_ids:
+        issues.append({
+            "type": "ncx_page_list_missing",
+            "message": "toc.ncx does not contain a <pageList> section.",
+            "category": "Warning",
+        })
+    elif ncx_ids:
+        missing_in_ncx = sorted(page_ids - ncx_ids)
+        if missing_in_ncx:
+            issues.append({
+                "type": "page_ids_missing_in_ncx",
+                "message": f"toc.ncx pageList is missing {len(missing_in_ncx)} page id(s): {missing_in_ncx[:10]}"
+                           + ("..." if len(missing_in_ncx) > 10 else ""),
+                "category": "Error",
+            })
+
+    return {"issues_count": len(issues), "issues": issues}

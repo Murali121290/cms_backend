@@ -18,4 +18,48 @@ customers:
         - "9798894"
         - "9781543"
 
+  # Disabled stubs — enable + add validators/customers/<name>/ + rules/customers/<name>/rules.json to activate.
+  pearson:
+    display_name: "Pearson"
+    enabled: false
+    detection:
+      publisher: []
+      isbn_prefix: []
+
+  springer:
+    display_name: "Springer"
+    enabled: false
+    detection:
+      publisher: []
+      isbn_prefix: []
+
+  elsevier:
+    display_name: "Elsevier"
+    enabled: false
+    detection:
+      publisher: []
+      isbn_prefix: []
+
+  jbl:
+    display_name: "Jones & Bartlett Learning"
+    enabled: false
+    detection:
+      publisher: []
+      isbn_prefix: []
+
+  wkh:
+    display_name: "Wolters Kluwer Health"
+    enabled: false
+    detection:
+      publisher: []
+      isbn_prefix: []
+
+  pelagic:
+    display_name: "Pelagic"
+    enabled: true
+    detection:
+      publisher:
+        - "Pelagic"
+      isbn_prefix: []
+
 default_customer: null

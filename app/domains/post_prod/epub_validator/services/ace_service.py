@@ -138,6 +138,19 @@ def run_ace(folder_name: str) -> dict[str, Any]:
     if xvfb and not os.environ.get("DISPLAY"):
         cmd = [xvfb, "-a", "--server-args=-screen 0 1024x768x24", *cmd]
 
+    # Give the Electron subprocess a full user environment. When uvicorn
+    # was started from a stripped shell (or via a hook), the inherited env
+    # can lack HOME/USER/PATH, and Electron's Chromium then rejects page
+    # loads with did-fail-load ERR_ABORTED. Also disable the Chromium
+    # sandbox which requires an entitled binary on macOS and often blocks
+    # loads under `acehttps://` in server-spawned Electron.
+    env = os.environ.copy()
+    env.setdefault("HOME", str(Path.home()))
+    env.setdefault("USER", os.environ.get("USER") or os.environ.get("LOGNAME") or "runner")
+    env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
+    env["ELECTRON_DISABLE_SANDBOX"] = "1"
+    env["NODE_NO_WARNINGS"] = "1"
+
     started = time.monotonic()
     try:
         proc = subprocess.run(
@@ -146,6 +159,7 @@ def run_ace(folder_name: str) -> dict[str, Any]:
             text=True,
             timeout=300,
             check=False,
+            env=env,
         )
     except FileNotFoundError:
         raise HTTPException(status_code=503, detail=ACE_MISSING_MESSAGE)
@@ -209,15 +223,93 @@ def _normalise(raw: dict[str, Any], *, duration_seconds: float) -> dict[str, Any
         if impact in totals:
             totals[impact] += 1
 
+    # WCAG-ruleset breakdown, matching the official DAISY ACE summary table.
+    wcag_breakdown = _wcag_breakdown(violations)
+
+    # Surface useful context ACE always produces, so a passing report is
+    # not just a wall of zeros. Numbers here come straight from ACE and let
+    # the UI show "N files checked, M images inspected, K accessibility
+    # features present" alongside the zero-violation summary.
+    checked_files = len(raw.get("assertions") or [])
+    images = raw.get("data", {}).get("images") or []
+    images_without_alt = sum(1 for i in images if not (i.get("alt") or "").strip())
+    a11y_meta = raw.get("a11y-metadata") or {}
+    outlines = raw.get("outlines") or {}
+    outline_summary = {
+        "toc_entries": len(outlines.get("toc") or []) if isinstance(outlines.get("toc"), list) else None,
+        "headings": len(outlines.get("headings") or []) if isinstance(outlines.get("headings"), list) else None,
+    }
+
     return {
         "status": "pass" if outcome == "pass" else "fail",
         "ran_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "duration_seconds": duration_seconds,
         "conformance_level": conformance,
         "totals": totals,
+        "wcag_breakdown": wcag_breakdown,
         "metadata": metadata,
         "violations": violations,
+        "coverage": {
+            "files_checked": checked_files,
+            "images_inspected": len(images),
+            "images_missing_alt": images_without_alt,
+            "accessibility_metadata_missing": _as_list(a11y_meta.get("missing")),
+            "accessibility_metadata_empty": _as_list(a11y_meta.get("empty")),
+            "outline_summary": outline_summary,
+        },
     }
+
+
+_WCAG_BUCKETS = [
+    "WCAG 2.0 A", "WCAG 2.0 AA", "WCAG 2.0 AAA",
+    "WCAG 2.1 A", "WCAG 2.1 AA", "WCAG 2.1 AAA",
+    "WCAG 2.2 A", "WCAG 2.2 AA", "WCAG 2.2 AAA",
+    "EPUB", "Best Practice", "Other",
+]
+
+
+def _wcag_breakdown(violations: list[dict]) -> list[dict]:
+    """Bucket violations by the same categories ACE's official summary uses.
+
+    Each row: {ruleset, critical, serious, moderate, minor, total}.
+    """
+    rows = {b: {"critical": 0, "serious": 0, "moderate": 0, "minor": 0, "total": 0} for b in _WCAG_BUCKETS}
+    for v in violations:
+        buckets = _classify_wcag(v)
+        impact = (v.get("impact") or "").lower()
+        for b in buckets:
+            rows[b][impact if impact in rows[b] else "minor"] += 0  # keep keys even if impact unknown
+            if impact in ("critical", "serious", "moderate", "minor"):
+                rows[b][impact] += 1
+            rows[b]["total"] += 1
+    return [{"ruleset": b, **rows[b]} for b in _WCAG_BUCKETS]
+
+
+def _classify_wcag(v: dict) -> list[str]:
+    """Return the WCAG buckets a violation belongs to based on its tags.
+
+    axe-core's ruleset tags follow the pattern `wcag2a` / `wcag2aa` / `wcag2aaa`
+    for WCAG 2.0 (no minor-version digit) and `wcag21a` / `wcag22aa` etc. for
+    WCAG 2.1+. We match both forms.
+    """
+    tags = v.get("wcag") or []
+    raw_tags = " ".join(tags).lower()
+    buckets: list[str] = []
+    version_prefixes = {"2.0": "wcag2", "2.1": "wcag21", "2.2": "wcag22"}
+    for version, prefix in version_prefixes.items():
+        for level in ("aaa", "aa", "a"):  # longest first so 'aa' doesn't also match 'a'
+            marker = f"{prefix}{level}"
+            # word boundary via space check — tags are joined with spaces
+            if f" {marker} " in f" {raw_tags} " or raw_tags.endswith(marker) or raw_tags.startswith(marker + " "):
+                buckets.append(f"WCAG {version} {level.upper()}")
+                break  # one level per version — highest match wins
+    if any("epub" in t.lower() and not t.lower().startswith("cat.") is False for t in tags) or "cat.epub" in raw_tags:
+        buckets.append("EPUB")
+    if not buckets and "best-practice" in raw_tags:
+        buckets.append("Best Practice")
+    if not buckets:
+        buckets.append("Other")
+    return buckets
 
 
 def _conformance_level(raw: dict[str, Any]) -> str:
@@ -249,11 +341,13 @@ def _iter_violations(raw: dict[str, Any]):
             pointer = result.get("earl:pointer") or {}
             snippet = pointer.get("cfi") or pointer.get("css") if isinstance(pointer, dict) else None
 
+            # Prefer rulesetTags for WCAG classification when present (ACE 1.4+).
+            ruleset_tags = _as_list(test.get("rulesetTags"))
             yield {
                 "rule_id": test.get("@id") or test.get("dct:title") or "unknown",
                 "rule_title": test.get("dct:title") or test.get("@id") or "Unnamed rule",
                 "impact": (test.get("earl:impact") or "").lower(),
-                "wcag": _as_list(test.get("help", {}).get("dct:title"))
+                "wcag": ruleset_tags or _as_list(test.get("help", {}).get("dct:title"))
                 or _wcag_from_test(test),
                 "help_url": help_url,
                 "message": (

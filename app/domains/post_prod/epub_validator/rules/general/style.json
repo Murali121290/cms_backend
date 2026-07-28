@@ -5,6 +5,24 @@
       "name": "PDF-EPUB Style Parity (italic, alignment, indent, images, colour, page count)",
       "scope": "book",
       "enabled": true
+    },
+    {
+      "id": "STYLE001",
+      "name": "Drop cap styling is consistent across all chapters",
+      "scope": "book",
+      "enabled": true
+    },
+    {
+      "id": "STYLE002",
+      "name": "CSS line-height values are within a reasonable range",
+      "scope": "book",
+      "enabled": true
+    },
+    {
+      "id": "STYLE003",
+      "name": "Every figure/table has at least one cross-reference link",
+      "scope": "book",
+      "enabled": true
     }
   ]
 }

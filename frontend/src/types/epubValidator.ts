@@ -129,6 +129,25 @@ export interface AceReport {
     conforms_to: string[];
   };
   violations: AceViolation[];
+  wcag_breakdown?: Array<{
+    ruleset: string;
+    critical: number;
+    serious: number;
+    moderate: number;
+    minor: number;
+    total: number;
+  }>;
+  coverage?: {
+    files_checked: number;
+    images_inspected: number;
+    images_missing_alt: number;
+    accessibility_metadata_missing: string[];
+    accessibility_metadata_empty: string[];
+    outline_summary: {
+      toc_entries: number | null;
+      headings: number | null;
+    };
+  };
 }
 // ─── Per-file aggregated result (computed on frontend) ────────────────────────
 export type XHTMLFileStatus = 'pending' | 'passed' | 'warning' | 'failed';

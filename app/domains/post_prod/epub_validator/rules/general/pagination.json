@@ -6,6 +6,12 @@
       "target_path": "OEBPS/xhtml",
       "enabled": true,
       "file_name_pattern": "*.xhtml"
+    },
+    {
+      "id": "PAGE002",
+      "name": "Page number sequence has no gaps",
+      "scope": "book",
+      "enabled": true
     }
   ]
 }

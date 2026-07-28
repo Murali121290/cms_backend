@@ -19,6 +19,19 @@
       "name": "PDF-EPUB Nav Validator (heading coverage + hierarchy + EISBN)",
       "scope": "book",
       "enabled": true
+    },
+    {
+      "id": "NAV004",
+      "name": "nav.xhtml contains a 'Cover' entry",
+      "target_path": "",
+      "enabled": true,
+      "file_name_pattern": "nav.xhtml"
+    },
+    {
+      "id": "NAV005",
+      "name": "All chapter page ids are listed in nav.xhtml page-list and toc.ncx pageList",
+      "scope": "book",
+      "enabled": true
     }
   ]
 }
