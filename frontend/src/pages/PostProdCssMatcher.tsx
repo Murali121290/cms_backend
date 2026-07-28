@@ -56,7 +56,7 @@ interface RuleDeclaration {
 interface RuleDiff {
   media: string | null
   selector: string
-  status: 'modified' | 'additional' | 'missing'
+  status: 'modified' | 'additional' | 'missing' | 'matched'
   severity: string
   changes?: DeclChange[]
   after_marker?: boolean
@@ -70,6 +70,7 @@ interface UndefinedClass {
 }
 
 interface ReportSummary {
+  matched: number
   modified: number
   missing: number
   additional_marked: number
@@ -133,12 +134,13 @@ export function PostProdCssMatcher() {
   const [epubFile, setEpubFile] = useState<File | null>(null)
   const [cssFile, setCssFile] = useState<File | null>(null)
   const [packageFiles, setPackageFiles] = useState('')
-  const [expectedSidecars, setExpectedSidecars] = useState('frontlist.csv')
+  const [expectedSidecars, setExpectedSidecars] = useState('')
 
   // UI state
   const [analyzing, setAnalyzing] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [result, setResult] = useState<AnalyzeResponse | null>(null)
+  const [showMatched, setShowMatched] = useState(false)
 
   // Accordion toggle states
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
@@ -249,9 +251,8 @@ export function PostProdCssMatcher() {
   const report = result?.report
   const summary = report?.summary
 
-  const modifiedRules = report?.rule_diffs.filter(r => r.status === 'modified') || []
-  const additionalRules = report?.rule_diffs.filter(r => r.status === 'additional') || []
-  const missingRules = report?.rule_diffs.filter(r => r.status === 'missing') || []
+  const allRules = report?.rule_diffs || []
+  const filteredRules = showMatched ? allRules : allRules.filter(r => r.status !== 'matched')
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto p-6 text-text">
@@ -467,7 +468,11 @@ export function PostProdCssMatcher() {
           </div>
 
           {/* Cards metrics */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-9 gap-4">
+            <div className="bg-card border border-border rounded-xl p-3 text-center">
+              <div className="text-xl font-black text-emerald-600">{summary.matched ?? 0}</div>
+              <div className="text-[10px] text-muted font-bold uppercase tracking-wider mt-0.5">Matched Selectors</div>
+            </div>
             <div className="bg-card border border-border rounded-xl p-3 text-center">
               <div className="text-xl font-black text-amber-600">{summary.modified}</div>
               <div className="text-[10px] text-muted font-bold uppercase tracking-wider mt-0.5">Value Changes</div>
@@ -662,185 +667,114 @@ export function PostProdCssMatcher() {
               )}
             </div>
 
-            {/* SECTION 4: Modified Standard Classes */}
+            {/* Unified CSS Match Table */}
             <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
-              <button
-                type="button"
-                onClick={() => toggleSection('modified')}
-                className="w-full flex items-center justify-between px-5 py-3.5 bg-accent/10 border-b border-border/50 text-left font-semibold text-sm hover:bg-accent/25 transition-all"
-              >
+              <div className="flex items-center justify-between px-5 py-3.5 bg-accent/10 border-b border-border/50">
                 <div className="flex items-center gap-2">
-                  <span className="font-serif text-base text-text">Modified Standard Template Classes (Value Changes)</span>
-                  <span className="text-xs px-2 py-0.5 bg-accent/40 text-muted rounded-full">
-                    {modifiedRules.length}
+                  <span className="font-serif text-base text-text font-semibold">CSS Stylesheet Selector Comparison</span>
+                  <span className="text-xs px-2 py-0.5 bg-accent/40 text-muted rounded-full font-bold">
+                    {filteredRules.length} shown
                   </span>
                 </div>
-                {openSections.modified ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-              </button>
-              {openSections.modified && (
-                <div className="p-5">
-                  {modifiedRules.length === 0 ? (
-                    <p className="text-sm text-muted">No modification of standard template properties detected.</p>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse text-xs">
-                        <thead>
-                          <tr className="border-b border-border text-muted font-bold uppercase tracking-wider">
-                            <th className="py-2.5 px-3">Selector</th>
-                            <th className="py-2.5 px-3">@media Context</th>
-                            <th className="py-2.5 px-3">Property</th>
-                            <th className="py-2.5 px-3">Standard Value</th>
-                            <th className="py-2.5 px-3">EPUB Value</th>
-                            <th className="py-2.5 px-3">Change Type</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border">
-                          {modifiedRules.flatMap((r, rIdx) =>
-                            r.changes?.map((ch, cIdx) => (
-                              <tr key={rIdx + '-' + cIdx} className="hover:bg-accent/10 align-top">
-                                {cIdx === 0 ? (
-                                  <td className="py-3 px-3 font-mono text-text font-bold" rowSpan={r.changes?.length}>
-                                    <code>{r.selector}</code>
-                                  </td>
-                                ) : null}
-                                {cIdx === 0 ? (
-                                  <td className="py-3 px-3 text-muted font-mono text-[10px]" rowSpan={r.changes?.length}>
-                                    {r.media || 'None'}
-                                  </td>
-                                ) : null}
-                                <td className="py-3 px-3 font-mono text-[11px] text-text">{ch.property}</td>
-                                <td className="py-3 px-3 font-mono text-muted">{ch.master ?? '—'}</td>
-                                <td className="py-3 px-3 font-mono text-amber-700 font-bold dark:text-amber-500">{ch.epub ?? '—'}</td>
-                                <td className="py-3 px-3">
-                                  <span className={`text-[9px] uppercase font-extrabold px-2 py-0.5 rounded-full ${
-                                    ch.kind === 'changed' ? 'bg-amber-500/10 text-amber-600 border border-amber-500/20' :
-                                    ch.kind === 'added' ? 'bg-blue-500/10 text-blue-600 border border-blue-500/20' :
-                                    'bg-red-500/10 text-red-600 border border-red-500/20'
-                                  }`}>
-                                    {ch.kind}
+                <div className="flex items-center gap-2">
+                  <label className="flex items-center gap-2 text-xs text-muted cursor-pointer font-medium select-none">
+                    <input
+                      type="checkbox"
+                      checked={showMatched}
+                      onChange={(e) => setShowMatched(e.target.checked)}
+                      className="rounded border-border bg-surface text-primary focus:ring-primary/40 focus:ring-2"
+                    />
+                    Show Matched Selectors ({allRules.filter(r => r.status === 'matched').length})
+                  </label>
+                </div>
+              </div>
+              
+              <div className="p-5">
+                {filteredRules.length === 0 ? (
+                  <p className="text-sm text-muted text-center py-4">No selector changes/warnings found. Toggle "Show Matched Selectors" or upload files.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="border-b border-border text-muted font-bold uppercase tracking-wider">
+                          <th className="py-2.5 px-3">Input Selector (Master)</th>
+                          <th className="py-2.5 px-3">EPUB Selector</th>
+                          <th className="py-2.5 px-3">Status</th>
+                          <th className="py-2.5 px-3">@media Context</th>
+                          <th className="py-2.5 px-3">Detail / Warning Remarks</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {filteredRules.map((rule, idx) => (
+                          <tr key={idx} className="hover:bg-accent/10">
+                            <td className="py-3 px-3 font-mono">
+                              {rule.status === 'additional' ? (
+                                <span className="text-muted/65">—</span>
+                              ) : (
+                                <code>{rule.selector}</code>
+                              )}
+                            </td>
+                            <td className="py-3 px-3 font-mono">
+                              {rule.status === 'missing' ? (
+                                <span className="text-muted/65">—</span>
+                              ) : (
+                                <code>{rule.selector}</code>
+                              )}
+                            </td>
+                            <td className="py-3 px-3">
+                              <span className={`text-[9px] uppercase font-extrabold px-2 py-0.5 rounded-full ${
+                                rule.status === 'matched' ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20' :
+                                rule.status === 'modified' ? 'bg-amber-500/10 text-amber-600 border border-amber-500/20' :
+                                rule.status === 'additional' ? 'bg-blue-500/10 text-blue-600 border border-blue-500/20' :
+                                'bg-red-500/10 text-red-600 border border-red-500/20'
+                              }`}>
+                                {rule.status === 'modified' ? 'warning' : rule.status}
+                              </span>
+                            </td>
+                            <td className="py-3 px-3 font-mono text-[10px] text-muted">
+                              {rule.media || 'None'}
+                            </td>
+                            <td className="py-3 px-3">
+                              {rule.status === 'matched' && (
+                                <span className="text-muted/50">—</span>
+                              )}
+                              {rule.status === 'modified' && rule.changes?.map((ch, cIdx) => {
+                                let remark = '';
+                                if (ch.kind === 'changed') {
+                                  remark = `${ch.property}: ${ch.epub}; /* Warning: changed from ${ch.master} */`;
+                                } else if (ch.kind === 'added') {
+                                  remark = `${ch.property}: ${ch.epub}; /* Warning: property added */`;
+                                } else {
+                                  remark = `/* Warning: property ${ch.property} (master value: ${ch.master}) was removed */`;
+                                }
+                                return <div key={cIdx} className="font-mono text-[11px] text-amber-700 dark:text-amber-400">{remark}</div>;
+                              })}
+                              {rule.status === 'additional' && (
+                                <div className="font-mono text-[11px]">
+                                  <span className={rule.after_marker ? "text-muted font-normal" : "text-amber-600 dark:text-amber-400 font-bold"}>
+                                    {rule.after_marker ? '/* documented custom style */' : '/* UNMARKED custom style */'}{' '}
                                   </span>
-                                </td>
-                              </tr>
-                            ))
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* SECTION 5: Additional Bespoke Styles */}
-            <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
-              <button
-                type="button"
-                onClick={() => toggleSection('additional')}
-                className="w-full flex items-center justify-between px-5 py-3.5 bg-accent/10 border-b border-border/50 text-left font-semibold text-sm hover:bg-accent/25 transition-all"
-              >
-                <div className="flex items-center gap-2">
-                  <span className="font-serif text-base text-text">Bespoke Styles / Selectors (Not in Standard Master)</span>
-                  <span className="text-xs px-2 py-0.5 bg-accent/40 text-muted rounded-full">
-                    {additionalRules.length}
-                  </span>
-                </div>
-                {openSections.additional ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-              </button>
-              {openSections.additional && (
-                <div className="p-5">
-                  {additionalRules.length === 0 ? (
-                    <p className="text-sm text-muted">No custom styles added beyond standard template.</p>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse text-xs">
-                        <thead>
-                          <tr className="border-b border-border text-muted font-bold uppercase tracking-wider">
-                            <th className="py-2.5 px-3">Severity</th>
-                            <th className="py-2.5 px-3">Selector</th>
-                            <th className="py-2.5 px-3">@media Context</th>
-                            <th className="py-2.5 px-3">Declarations</th>
-                            <th className="py-2.5 px-3">Review Remark</th>
+                                  <span className="text-text/75">
+                                    {rule.declarations?.map(d => `${d.property}: ${d.value};`).join(' ')}
+                                  </span>
+                                </div>
+                              )}
+                              {rule.status === 'missing' && (
+                                <div className="font-mono text-[11px] text-red-500/80">
+                                  <span>/* Selector absent from EPUB */ </span>
+                                  <span className="text-muted">
+                                    {rule.declarations?.map(d => `${d.property}: ${d.value};`).join(' ')}
+                                  </span>
+                                </div>
+                              )}
+                            </td>
                           </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border">
-                          {additionalRules.map((rule, idx) => (
-                            <tr key={idx} className="hover:bg-accent/10 align-top">
-                              <td className="py-3 px-3">
-                                <span className={`text-[9px] uppercase font-extrabold px-2 py-0.5 rounded-full ${getSeverityBadgeClass(rule.severity)}`}>
-                                  {rule.severity}
-                                </span>
-                              </td>
-                              <td className="py-3 px-3 font-mono text-text font-bold">
-                                <code>{rule.selector}</code>
-                              </td>
-                              <td className="py-3 px-3 font-mono text-[10px] text-muted">{rule.media || 'None'}</td>
-                              <td className="py-3 px-3 font-mono text-[11px] text-muted space-y-0.5">
-                                {rule.declarations?.map((d, dIdx) => (
-                                  <div key={dIdx}>
-                                    <span className="text-text font-medium">{d.property}</span>: {d.value};
-                                  </div>
-                                ))}
-                              </td>
-                              <td className="py-3 px-3 text-text font-medium leading-relaxed">{rule.note}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* SECTION 6: Missing Standard Selectors */}
-            <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
-              <button
-                type="button"
-                onClick={() => toggleSection('missing')}
-                className="w-full flex items-center justify-between px-5 py-3.5 bg-accent/10 border-b border-border/50 text-left font-semibold text-sm hover:bg-accent/25 transition-all"
-              >
-                <div className="flex items-center gap-2">
-                  <span className="font-serif text-base text-text">Standard Template Selectors Missing in EPUB</span>
-                  <span className="text-xs px-2 py-0.5 bg-accent/40 text-muted rounded-full">
-                    {missingRules.length}
-                  </span>
-                </div>
-                {openSections.missing ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-              </button>
-              {openSections.missing && (
-                <div className="p-5">
-                  {missingRules.length === 0 ? (
-                    <p className="text-sm text-emerald-600 font-medium">All standard selectors from the master template exist inside the EPUB stylesheet.</p>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse text-xs">
-                        <thead>
-                          <tr className="border-b border-border text-muted font-bold uppercase tracking-wider">
-                            <th className="py-2.5 px-3">Severity</th>
-                            <th className="py-2.5 px-3">Selector</th>
-                            <th className="py-2.5 px-3">@media Context</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border">
-                          {missingRules.map((rule, idx) => (
-                            <tr key={idx} className="hover:bg-accent/10">
-                              <td className="py-3 px-3">
-                                <span className={`text-[9px] uppercase font-extrabold px-2 py-0.5 rounded-full ${getSeverityBadgeClass(rule.severity)}`}>
-                                  {rule.severity}
-                                </span>
-                              </td>
-                              <td className="py-3 px-3 font-mono text-text font-bold">
-                                <code>{rule.selector}</code>
-                              </td>
-                              <td className="py-3 px-3 font-mono text-[10px] text-muted">{rule.media || 'None'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              )}
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* SECTION 7: Undefined Class Names Used in XHTML */}

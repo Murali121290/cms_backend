@@ -150,6 +150,21 @@ def build_report(
                 }
                 for dd in d.decl_diffs
             ]
+            entry["declarations"] = [
+                {"property": p, "value": v} for p, v in d.epub_declarations
+            ]
+            entry["master_declarations"] = [
+                {"property": p, "value": v} for p, v in d.master_declarations
+            ]
+        elif d.status == "matched":
+            entry["severity"] = "ok"
+            entry["declarations"] = [
+                {"property": p, "value": v} for p, v in d.epub_declarations
+            ]
+            entry["master_declarations"] = [
+                {"property": p, "value": v} for p, v in d.master_declarations
+            ]
+            entry["note"] = "Matched"
         elif d.status == "additional":
             entry["after_marker"] = d.after_marker
             entry["severity"] = (
@@ -175,7 +190,7 @@ def build_report(
     report["has_additional_marker"] = has_marker
 
     # --- undefined class usage (bonus) -------------------------------------
-    defined = _defined_class_names(master_rules + (parse_css(primary.text) if primary else []))
+    defined = _defined_class_names(master_rules + [r for s in epub.stylesheets for r in parse_css(s.text)])
     for cls in sorted(epub.used_classes):
         if cls and cls not in defined:
             report["undefined_classes"].append(
@@ -191,6 +206,7 @@ def _summarize(report: dict) -> dict:
     rd = report["rule_diffs"]
     vsum = report.get("validation", {}).get("summary", {})
     counts = {
+        "matched": sum(1 for r in rd if r["status"] == "matched"),
         "modified": sum(1 for r in rd if r["status"] == "modified"),
         "missing": sum(1 for r in rd if r["status"] == "missing"),
         "additional_marked": sum(
@@ -251,46 +267,44 @@ def _defined_class_names(rules) -> set:
 def to_csv(report: dict) -> str:
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["category", "severity", "selector/name", "media", "detail"])
+    w.writerow(["Input Selector (Master)", "EPUB Selector", "Status", "Media", "Detail / Warning Remarks"])
 
     for c in report["sidecar_checks"]:
-        w.writerow(["sidecar", c["severity"], c["name"], "", c["note"]])
+        w.writerow(["—", c["name"], c["severity"], "", c["note"]])
     for c in report["encoding_checks"]:
-        w.writerow(["encoding", c["severity"], c["path"], "", c["note"]])
+        w.writerow(["—", c["path"], c["severity"], "", c["note"]])
 
     vc = report["version_check"]
-    w.writerow(["version", vc["severity"], "stylesheet banner", "", vc["note"]])
+    w.writerow(["stylesheet banner", "stylesheet banner", vc["severity"], "", vc["note"]])
 
     for r in report["rule_diffs"]:
         media = r.get("media") or ""
-        if r["status"] == "modified":
+        if r["status"] == "matched":
+            w.writerow([r["selector"], r["selector"], "matched", media, "—"])
+        elif r["status"] == "modified":
+            details = []
             for ch in r["changes"]:
-                detail = f"{ch['property']}: master={ch['master']} | epub={ch['epub']} ({ch['kind']})"
-                w.writerow(["modified", r["severity"], r["selector"], media, detail])
+                if ch["kind"] == "changed":
+                    details.append(f"{ch['property']}: {ch['epub']}; /* Warning: changed from {ch['master']} */")
+                elif ch["kind"] == "added":
+                    details.append(f"{ch['property']}: {ch['epub']}; /* Warning: property added */")
+                elif ch["kind"] == "removed":
+                    details.append(f"/* Warning: property {ch['property']} (master value: {ch['master']}) was removed */")
+            w.writerow([r["selector"], r["selector"], "warning", media, " | ".join(details)])
         elif r["status"] == "additional":
             decls = "; ".join(f"{d['property']}: {d['value']}" for d in r["declarations"])
-            w.writerow(["additional", r["severity"], r["selector"], media,
-                        f"{'[under marker] ' if r.get('after_marker') else '[unmarked] '}{decls}"])
+            tag = "[under marker] " if r.get("after_marker") else "[unmarked] "
+            w.writerow(["—", r["selector"], r["severity"], media, f"{tag}{decls}"])
         elif r["status"] == "missing":
-            w.writerow(["missing", r["severity"], r["selector"], media,
-                        "selector absent from EPUB stylesheet"])
+            decls = "; ".join(f"{d['property']}: {d['value']}" for d in r["declarations"])
+            w.writerow([r["selector"], "—", r["severity"], media, f"/* Selector absent from EPUB stylesheet */ {decls}"])
 
     for u in report["undefined_classes"]:
-        w.writerow(["undefined-class", u["severity"], u["class"], "",
-                    "class used in XHTML but not defined in any stylesheet"])
+        w.writerow(["—", "." + u["class"], u["severity"], "", "/* used in HTML, not defined in CSS */"])
 
     for i in report.get("validation", {}).get("issues", []):
-        w.writerow(["validation:" + i["category"], i["level"], i["code"],
-                    i["location"], i["message"]])
+        w.writerow(["—", i["location"], i["level"], i["code"], i["message"]])
     return buf.getvalue()
-
-
-_SEV_COLOR = {
-    "error": "#b3261e",
-    "warning": "#8a5a00",
-    "info": "#3b5ba5",
-    "ok": "#1b7a43",
-}
 
 
 def to_html(report: dict) -> str:
@@ -299,52 +313,73 @@ def to_html(report: dict) -> str:
     verdict = s["verdict"]
     verdict_color = {"PASS": "#1b7a43", "REVIEW": "#8a5a00", "FAIL": "#b3261e"}[verdict]
 
-    def badge(sev):
-        return (f'<span style="display:inline-block;padding:1px 8px;border-radius:10px;'
-                f'font-size:11px;font-weight:700;color:#fff;background:{_SEV_COLOR.get(sev,"#666")}">'
-                f'{e(sev.upper())}</span>')
+    def badge(sev, label=None):
+        lbl = label or sev
+        color = {
+            "error": "#b3261e",
+            "warning": "#8a5a00",
+            "info": "#3b5ba5",
+            "ok": "#1b7a43",
+            "matched": "#1b7a43",
+            "additional": "#3b5ba5",
+            "missing": "#b3261e",
+        }.get(sev.lower(), "#666")
+        return (f'<span style="display:inline-block;padding:2px 8px;border-radius:10px;'
+                f'font-size:11px;font-weight:700;color:#fff;background:{color}">'
+                f'{e(lbl.upper())}</span>')
 
     rows = []
     for c in report["sidecar_checks"]:
-        rows.append(f"<tr><td>Sidecar</td><td>{badge(c['severity'])}</td>"
-                    f"<td><code>{e(c['name'])}</code></td><td></td><td>{e(c['note'])}</td></tr>")
+        rows.append(f"<tr><td>&mdash;</td><td><code>{e(c['name'])}</code></td>"
+                    f"<td>{badge(c['severity'], 'found' if c['found'] else 'missing')}</td><td></td><td>{e(c['note'])}</td></tr>")
     for c in report["encoding_checks"]:
-        rows.append(f"<tr><td>Encoding</td><td>{badge(c['severity'])}</td>"
-                    f"<td><code>{e(c['path'])}</code></td><td></td><td>{e(c['note'])}</td></tr>")
+        rows.append(f"<tr><td>&mdash;</td><td><code>{e(c['path'])}</code></td>"
+                    f"<td>{badge(c['severity'], 'utf-8' if c['is_utf8'] else 'error')}</td><td></td><td>{e(c['note'])}</td></tr>")
     vc = report["version_check"]
-    rows.append(f"<tr><td>Version</td><td>{badge(vc['severity'])}</td>"
-                f"<td>stylesheet banner</td><td></td><td>{e(vc['note'])}</td></tr>")
+    rows.append(f"<tr><td><code>stylesheet banner</code></td><td><code>stylesheet banner</code></td>"
+                f"<td>{badge(vc['severity'], 'matching' if vc['match'] else 'mismatch')}</td><td></td><td>{e(vc['note'])}</td></tr>")
 
     for r in report["rule_diffs"]:
         media = e(r.get("media") or "")
         sel = f"<code>{e(r['selector'])}</code>"
-        if r["status"] == "modified":
+        if r["status"] == "matched":
+            rows.append(f"<tr><td>{sel}</td><td>{sel}</td>"
+                        f"<td>{badge('matched')}</td><td>{media}</td><td>&mdash;</td></tr>")
+        elif r["status"] == "modified":
+            details = []
             for ch in r["changes"]:
-                detail = (f"<code>{e(ch['property'])}</code>: "
-                          f"master <b>{e(str(ch['master']))}</b> &rarr; "
-                          f"epub <b>{e(str(ch['epub']))}</b> "
-                          f"<i>({e(ch['kind'])})</i>")
-                rows.append(f"<tr><td>Modified</td><td>{badge(r['severity'])}</td>"
-                            f"<td>{sel}</td><td>{media}</td><td>{detail}</td></tr>")
+                if ch["kind"] == "changed":
+                    details.append(f"<code>{e(ch['property'])}: {e(str(ch['epub']))};</code> <span style='color:#777;font-style:italic;'>/* Warning: changed from {e(str(ch['master']))} */</span>")
+                elif ch["kind"] == "added":
+                    details.append(f"<code>{e(ch['property'])}: {e(str(ch['epub']))};</code> <span style='color:#777;font-style:italic;'>/* Warning: property added */</span>")
+                elif ch["kind"] == "removed":
+                    details.append(f"<span style='color:#777;font-style:italic;'>/* Warning: property {e(ch['property'])} (master value: {e(str(ch['master']))}) was removed */</span>")
+            detail_str = "<br>".join(details)
+            rows.append(f"<tr><td>{sel}</td><td>{sel}</td>"
+                        f"<td>{badge('warning')}</td><td>{media}</td><td>{detail_str}</td></tr>")
         elif r["status"] == "additional":
-            decls = "; ".join(f"{e(d['property'])}: {e(d['value'])}" for d in r["declarations"])
-            tag = "[under marker] " if r.get("after_marker") else "[UNMARKED] "
-            rows.append(f"<tr><td>Additional</td><td>{badge(r['severity'])}</td>"
-                        f"<td>{sel}</td><td>{media}</td><td>{e(tag)}{decls}</td></tr>")
+            decls = "; ".join(f"<code>{e(d['property'])}: {e(d['value'])}</code>" for d in r["declarations"])
+            tag = "/* documented custom style */ " if r.get("after_marker") else "/* UNMARKED custom style */ "
+            tag_style = "color:#777;" if r.get("after_marker") else "color:#8a5a00;font-weight:bold;"
+            detail_str = f"<span style='{tag_style}font-style:italic;'>{e(tag)}</span>{decls}"
+            rows.append(f"<tr><td>&mdash;</td><td>{sel}</td>"
+                        f"<td>{badge('additional', 'additional (marked)' if r.get('after_marker') else 'additional (unmarked)')}</td>"
+                        f"<td>{media}</td><td>{detail_str}</td></tr>")
         elif r["status"] == "missing":
-            rows.append(f"<tr><td>Missing</td><td>{badge(r['severity'])}</td>"
-                        f"<td>{sel}</td><td>{media}</td><td>selector absent from EPUB</td></tr>")
+            decls = "; ".join(f"<code>{e(d['property'])}: {e(d['value'])}</code>" for d in r["declarations"])
+            detail_str = f"<span style='color:#b3261e;font-style:italic;'>/* Selector absent from EPUB */</span> {decls}"
+            rows.append(f"<tr><td>{sel}</td><td>&mdash;</td>"
+                        f"<td>{badge('missing')}</td><td>{media}</td><td>{detail_str}</td></tr>")
 
     for u in report["undefined_classes"]:
-        rows.append(f"<tr><td>Undefined class</td><td>{badge(u['severity'])}</td>"
-                    f"<td><code>.{e(u['class'])}</code></td><td></td>"
-                    f"<td>used in XHTML, not defined in CSS</td></tr>")
+        rows.append(f"<tr><td>&mdash;</td><td><code>.{e(u['class'])}</code></td>"
+                    f"<td>{badge(u['severity'], 'undefined class')}</td><td></td>"
+                    f"<td><span style='color:#777;font-style:italic;'>/* used in HTML, not defined in CSS */</span></td></tr>")
 
     for i in report.get("validation", {}).get("issues", []):
-        rows.append(f"<tr><td>Validation &middot; {e(i['category'])}</td>"
-                    f"<td>{badge(i['level'])}</td>"
-                    f"<td><code>{e(i['code'])}</code></td>"
-                    f"<td>{e(i['location'])}</td><td>{e(i['message'])}</td></tr>")
+        rows.append(f"<tr><td>&mdash;</td><td><code>{e(i['location'])}</code></td>"
+                    f"<td>{badge(i['level'], 'validation ' + i['level'])}</td>"
+                    f"<td><code>{e(i['code'])}</code></td><td>{e(i['message'])}</td></tr>")
 
     return f"""<!doctype html><html><head><meta charset="utf-8">
 <title>EPUB CSS Match Report - {e(report['epub']['title'] or '')}</title>
@@ -365,6 +400,7 @@ def to_html(report: dict) -> str:
  &middot; generated {e(report['generated_at'])} &middot; master v{e(str(report['master']['version']))}</div>
 <div class="verdict">{verdict}</div>
 <div class="cards">
+ <div class="card"><b>{s.get('matched',0)}</b><span>matched selectors</span></div>
  <div class="card"><b>{s['modified']}</b><span>value changes</span></div>
  <div class="card"><b>{s['additional_marked']}</b><span>additional (marked)</span></div>
  <div class="card"><b>{s['additional_unmarked']}</b><span>additional (unmarked)</span></div>
@@ -374,6 +410,6 @@ def to_html(report: dict) -> str:
  <div class="card"><b>{s.get('validation_errors',0)}</b><span>validation errors</span></div>
  <div class="card"><b>{s.get('validation_warnings',0)}</b><span>validation warnings</span></div>
 </div>
-<table><thead><tr><th>Category</th><th>Severity</th><th>Selector / Name</th><th>@media</th><th>Detail</th></tr></thead>
+<table><thead><tr><th>Input Selector (Master)</th><th>EPUB Selector</th><th>Status</th><th>@media</th><th>Detail / Warning Remarks</th></tr></thead>
 <tbody>{''.join(rows)}</tbody></table>
 </body></html>"""

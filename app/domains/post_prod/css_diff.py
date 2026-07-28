@@ -172,7 +172,35 @@ def _split_selectors(prelude: str) -> list:
 
 def _parse_declarations(body: str) -> list:
     decls = []
-    for chunk in body.split(";"):
+    # Split by semicolon respecting quotes and parentheses
+    chunks = []
+    current = []
+    in_dquote = False
+    in_squote = False
+    paren_depth = 0
+    for char in body:
+        if char == '"' and not in_squote:
+            in_dquote = not in_dquote
+            current.append(char)
+        elif char == "'" and not in_dquote:
+            in_squote = not in_squote
+            current.append(char)
+        elif char == '(' and not in_dquote and not in_squote:
+            paren_depth += 1
+            current.append(char)
+        elif char == ')' and not in_dquote and not in_squote:
+            if paren_depth > 0:
+                paren_depth -= 1
+            current.append(char)
+        elif char == ';' and not in_dquote and not in_squote and paren_depth == 0:
+            chunks.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+    if current:
+        chunks.append("".join(current))
+
+    for chunk in chunks:
         if ":" not in chunk:
             continue
         prop, _, val = chunk.partition(":")
@@ -210,8 +238,6 @@ def _index(rules: list) -> dict:
     idx: dict = {}
     for r in rules:
         if r.key in idx:
-            merged = dict(idx[r.key].declarations)
-            merged.update(r.declarations)  # note: dict() of tuples => last wins
             # rebuild ordered list preserving master order then extras
             base = idx[r.key]
             seen = {p.lower() for p, _ in base.declarations}
@@ -272,6 +298,16 @@ def compare(master_rules: list, epub_rules: list, epub_text: str) -> list:
                     selector=m_rule.selector,
                     status="modified",
                     decl_diffs=decl_diffs,
+                    epub_declarations=e_rule.declarations,
+                    master_declarations=m_rule.declarations,
+                )
+            )
+        else:
+            diffs.append(
+                RuleDiff(
+                    media=m_rule.media,
+                    selector=m_rule.selector,
+                    status="matched",
                     epub_declarations=e_rule.declarations,
                     master_declarations=m_rule.declarations,
                 )

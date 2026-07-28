@@ -28,6 +28,20 @@ from dataclasses import asdict, dataclass
 from xml.etree import ElementTree as ET
 
 from .epub_utils import decode_bytes
+import html.entities
+
+def resolve_xml_entities(raw_bytes: bytes) -> bytes:
+    """Pre-resolve standard XHTML/HTML entities into numeric entities to prevent xml.etree parse errors."""
+    text, enc, _ = decode_bytes(raw_bytes)
+    
+    def replace_entity(match):
+        name = match.group(1)
+        if name in html.entities.name2codepoint:
+            return f"&#{html.entities.name2codepoint[name]};"
+        return match.group(0)
+        
+    resolved_text = re.sub(r"&([A-Za-z]+);", replace_entity, text)
+    return resolved_text.encode(enc, errors="replace")
 
 OPF_NS = "http://www.idpf.org/2007/opf"
 DC_NS = "http://purl.org/dc/elements/1.1/"
@@ -204,7 +218,8 @@ def validate_epub(data: bytes) -> list:
 
         # well-formedness
         try:
-            tree = ET.fromstring(raw)
+            resolved_raw = resolve_xml_entities(raw)
+            tree = ET.fromstring(resolved_raw)
             well_formed = True
         except ET.ParseError as e:
             add("error", "XHT-001", "XHT", path, f"Content document is not well-formed XML: {e}")
@@ -212,8 +227,8 @@ def validate_epub(data: bytes) -> list:
             tree = None
 
         # anchors
-        anchors = set(re.findall(r'\bid\s*=\s*"([^"]+)"', text))
-        anchors |= set(re.findall(r'\bname\s*=\s*"([^"]+)"', text))
+        anchors = set(re.findall(r'\bid\s*=\s*["\']([^"\']+)["\']', text))
+        anchors |= set(re.findall(r'\bname\s*=\s*["\']([^"\']+)["\']', text))
         doc_anchors[path] = anchors
 
         # A11Y: language
@@ -230,12 +245,12 @@ def validate_epub(data: bytes) -> list:
         for m in re.finditer(r"<img\b[^>]*>", text, re.I):
             tag = m.group(0)
             if not re.search(r'\balt\s*=', tag, re.I):
-                src = re.search(r'src\s*=\s*"([^"]*)"', tag, re.I)
+                src = re.search(r'src\s*=\s*["\']([^"\']*)["\']', tag, re.I)
                 add("error", "A11Y-001", "A11Y", path,
                     f"<img> without alt attribute (src={src.group(1) if src else '?'}).")
 
     # ---- LNK: resolve internal links & resources ---------------------------
-    all_hrefs = re.compile(r'(?:href|src)\s*=\s*"([^"]+)"', re.I)
+    all_hrefs = re.compile(r'(?:href|src)\s*=\s*["\']([^"\']+)["\']', re.I)
     for iid, path in content_docs:
         text, _, _ = decode_bytes(zf.read(path))
         base = posixpath.dirname(path)

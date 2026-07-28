@@ -784,7 +784,7 @@ async def analyze_css(
     epub: UploadFile = File(...),
     master_css: UploadFile = File(...),
     package_files: str = Form(""),          # comma/newline separated filenames in the delivery folder
-    expected_sidecars: str = Form("frontlist.csv"),
+    expected_sidecars: str = Form(""),
     user=Depends(get_current_user_from_cookie)
 ):
     epub_bytes = await epub.read()

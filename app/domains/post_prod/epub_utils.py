@@ -124,7 +124,7 @@ def _first_group(match) -> str:
 # Package-level (sidecar) checks - internal find #1
 # --------------------------------------------------------------------------- #
 
-DEFAULT_SIDECARS = ["frontlist.csv"]
+DEFAULT_SIDECARS = []
 
 
 @dataclass
