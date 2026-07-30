@@ -87,12 +87,22 @@ export function SourceEditor({ value, onChange, className, readOnly = false }: P
         },
         '.cm-activeLineGutter': { backgroundColor: 'transparent' },
         '.cm-searchMatch': {
-          backgroundColor: 'rgba(250, 204, 21, 0.35)',
-          outline: '1px solid rgba(202, 138, 4, 0.5)',
+          backgroundColor: '#fef08a',
+          outline: '1px solid #ca8a04',
+          borderRadius: '2px',
+        },
+        '.cm-searchMatch span': {
+          color: '#0f172a !important',
         },
         '.cm-searchMatch-selected': {
-          backgroundColor: 'rgba(249, 115, 22, 0.55)',
-          outline: '1px solid rgba(194, 65, 12, 0.7)',
+          backgroundColor: '#f97316 !important',
+          outline: '2px solid #9a3412 !important',
+          borderRadius: '2px',
+          boxShadow: '0 0 0 1px #ffffff, 0 0 6px rgba(249, 115, 22, 0.6)',
+        },
+        '.cm-searchMatch-selected, .cm-searchMatch-selected span': {
+          color: '#0f172a !important',
+          fontWeight: '600',
         },
       }),
     ],
