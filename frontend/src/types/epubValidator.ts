@@ -67,6 +67,8 @@ export interface ValidationIssue {
   [key: string]: unknown;
 }
 
+export type ValidationOrigin = 'general' | 'customer';
+
 export interface ValidationFileEntry {
   rule_id: string;
   rule_name: string;
@@ -78,17 +80,23 @@ export interface ValidationFileEntry {
     full_path: string;
     relative_path: string;
     folder_name: string;
+    epub_root?: string;
   };
   result: {
     issues_count: number;
     issues: ValidationIssue[];
   };
+  // v2 engine only; absent on legacy responses.
+  origin?: ValidationOrigin;
+  customer?: string | null;
 }
 
 export interface ValidationApiResponse {
   folder: string;
   epub_path: string;
   files: ValidationFileEntry[];
+  // v2 engine only; when present the modal + page render the general/customer split.
+  customer?: string | null;
 }
 export interface AceViolation {
   rule_id: string;
@@ -121,6 +129,25 @@ export interface AceReport {
     conforms_to: string[];
   };
   violations: AceViolation[];
+  wcag_breakdown?: Array<{
+    ruleset: string;
+    critical: number;
+    serious: number;
+    moderate: number;
+    minor: number;
+    total: number;
+  }>;
+  coverage?: {
+    files_checked: number;
+    images_inspected: number;
+    images_missing_alt: number;
+    accessibility_metadata_missing: string[];
+    accessibility_metadata_empty: string[];
+    outline_summary: {
+      toc_entries: number | null;
+      headings: number | null;
+    };
+  };
 }
 // ─── Per-file aggregated result (computed on frontend) ────────────────────────
 export type XHTMLFileStatus = 'pending' | 'passed' | 'warning' | 'failed';

@@ -1,0 +1,65 @@
+# Customer detection + enablement.
+#
+# The engine matches the EPUB's OPF <dc:publisher> against `detection.publisher`
+# and/or the primary <dc:identifier> against `detection.isbn_prefix`. First
+# enabled match wins. When nothing matches, only general rules run.
+#
+# Adding a new customer = add an entry here + drop a folder under
+# validators/customers/<name>/ and rules/customers/<name>/. No engine change.
+
+customers:
+  aspen:
+    display_name: "Aspen Publishing"
+    enabled: true
+    detection:
+      publisher:
+        - "Aspen Publishing"
+      isbn_prefix:
+        - "9798894"
+        - "9781543"
+
+  # Disabled stubs — enable + add validators/customers/<name>/ + rules/customers/<name>/rules.json to activate.
+  pearson:
+    display_name: "Pearson"
+    enabled: false
+    detection:
+      publisher: []
+      isbn_prefix: []
+
+  springer:
+    display_name: "Springer"
+    enabled: false
+    detection:
+      publisher: []
+      isbn_prefix: []
+
+  elsevier:
+    display_name: "Elsevier"
+    enabled: false
+    detection:
+      publisher: []
+      isbn_prefix: []
+
+  jbl:
+    display_name: "Jones & Bartlett Learning"
+    enabled: false
+    detection:
+      publisher: []
+      isbn_prefix: []
+
+  wkh:
+    display_name: "Wolters Kluwer Health"
+    enabled: false
+    detection:
+      publisher: []
+      isbn_prefix: []
+
+  pelagic:
+    display_name: "Pelagic"
+    enabled: true
+    detection:
+      publisher:
+        - "Pelagic"
+      isbn_prefix: []
+
+default_customer: null

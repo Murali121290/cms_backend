@@ -4,15 +4,18 @@ import os
 import zipfile
 from pathlib import Path
 import shutil
-from datetime import date
-from .books_service import upsert_book
+from typing import Optional
+
+from sqlalchemy.orm import Session
+
+from .books_db import upsert_book_upload
 
 UPLOAD_DIR = os.path.join("uploads", "epub_validator")
 EXTRACT_DIR = "extract"
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-async def process_upload(file: UploadFile):
+async def process_upload(file: UploadFile, db: Optional[Session] = None, user_id: Optional[int] = None):
     # Validate ZIP
     if not file.filename.endswith(".zip"):
         return JSONResponse(
@@ -111,12 +114,14 @@ async def process_upload(file: UploadFile):
 
         total_files = sum(len(files) for _, _, files in os.walk(epub_extract_path))
 
-        upsert_book({
-            "folder_name": filename,
-            "epub_path": epub_extract_path,
-            "uploaded_at": date.today().isoformat(),
-            "total_files": total_files,
-        })
+        if db is not None:
+            upsert_book_upload(
+                db,
+                folder_name=filename,
+                epub_path=epub_extract_path,
+                total_files=total_files,
+                user_id=user_id,
+            )
 
         return {
             "status": True,

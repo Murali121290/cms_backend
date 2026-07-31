@@ -1,0 +1,10 @@
+{
+  "rules": [
+    {
+      "id": "LINK004",
+      "name": "Footnote / endnote references have matching back-links (two-way)",
+      "scope": "book",
+      "enabled": true
+    }
+  ]
+}

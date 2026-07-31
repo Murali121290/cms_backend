@@ -1,0 +1,31 @@
+{
+  "rules": [
+    {
+      "id": "URL001",
+      "name": "Validate Internal XHTML Links",
+      "target_path": "OEBPS/xhtml",
+      "enabled": true,
+      "file_name_pattern": ["*_chapter*.xhtml", "*_ch*.xhtml"]
+    },
+    {
+      "id": "URL002",
+      "name": "Validate External URLs",
+      "target_path": "OEBPS/xhtml",
+      "enabled": true,
+      "file_name_pattern": ["*_chapter*.xhtml", "*_ch*.xhtml"]
+    },
+    {
+      "id": "URL003",
+      "name": "Validate URL Text Match",
+      "target_path": "OEBPS/xhtml",
+      "enabled": true,
+      "file_name_pattern": ["*_chapter*.xhtml", "*_ch*.xhtml"]
+    },
+    {
+      "id": "URL004",
+      "name": "PDF-EPUB Link Checker (broken anchors + missing links)",
+      "scope": "book",
+      "enabled": true
+    }
+  ]
+}

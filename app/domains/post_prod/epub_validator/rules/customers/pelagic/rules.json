@@ -1,0 +1,10 @@
+{
+  "rules": [
+    {
+      "id": "PEL-LINK-001",
+      "name": "Pelagic: TOC entries have back-links from every chapter",
+      "scope": "book",
+      "enabled": true
+    }
+  ]
+}

@@ -12,6 +12,7 @@ import {
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/utils/epubValidatorUtils';
 import { getFileContent, getPdfPage, saveFileContent } from '@/api/epubValidator';
+import { SourceEditor } from './SourceEditor';
 import type { XHTMLFile, ValidationFileEntry, ValidationIssue } from '@/types/epubValidator';
 
 interface Props {
@@ -253,13 +254,10 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
   const [saveSuccess, setSaveSuccess]       = useState(false);
   const [saveError, setSaveError]           = useState<string | null>(null);
   const [showCloseWarning, setShowCloseWarning] = useState(false);
-  const textareaRef  = useRef<HTMLTextAreaElement>(null);
-  const lineNumsRef  = useRef<HTMLDivElement>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isDirty       = editedContent !== null && editedContent !== sourceContent;
   const displayContent = editedContent ?? sourceContent ?? '';
-  const lineCount      = displayContent ? displayContent.split('\n').length : 0;
 
   useEffect(() => () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); }, []);
 
@@ -544,16 +542,59 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
                   No validation data yet.
                 </p>
               ) : (
-                entries.map((entry) => (
-                  <RuleRow
-                    key={`${entry.rule_id}-${entry.file_details.file_name}`}
-                    entry={entry}
-                    isSelected={selectedRuleId === entry.rule_id}
-                    selectedSubRuleName={selectedRuleId === entry.rule_id ? ruleNameFilter : null}
-                    onClick={() => { setSelectedRule(entry.rule_id); setRuleNameFilter(null); }}
-                    onSubRuleClick={(name) => { setSelectedRule(entry.rule_id); setRuleNameFilter(name); }}
-                  />
-                ))
+                (() => {
+                  // v2 responses tag each entry with origin. If none of the entries
+                  // carry the tag we're on legacy — render as a flat list.
+                  const hasOrigin = entries.some((e) => e.origin !== undefined);
+                  if (!hasOrigin) {
+                    return entries.map((entry) => (
+                      <RuleRow
+                        key={`${entry.rule_id}-${entry.file_details.file_name}`}
+                        entry={entry}
+                        isSelected={selectedRuleId === entry.rule_id}
+                        selectedSubRuleName={selectedRuleId === entry.rule_id ? ruleNameFilter : null}
+                        onClick={() => { setSelectedRule(entry.rule_id); setRuleNameFilter(null); }}
+                        onSubRuleClick={(name) => { setSelectedRule(entry.rule_id); setRuleNameFilter(name); }}
+                      />
+                    ));
+                  }
+                  const generalEntries = entries.filter((e) => e.origin !== 'customer');
+                  const customerEntries = entries.filter((e) => e.origin === 'customer');
+                  const customerLabel = customerEntries[0]?.customer
+                    ? `${customerEntries[0].customer!.charAt(0).toUpperCase()}${customerEntries[0].customer!.slice(1)} Rules`
+                    : 'Customer Rules';
+                  const renderEntries = (list: ValidationFileEntry[]) =>
+                    list.map((entry) => (
+                      <RuleRow
+                        key={`${entry.rule_id}-${entry.file_details.file_name}`}
+                        entry={entry}
+                        isSelected={selectedRuleId === entry.rule_id}
+                        selectedSubRuleName={selectedRuleId === entry.rule_id ? ruleNameFilter : null}
+                        onClick={() => { setSelectedRule(entry.rule_id); setRuleNameFilter(null); }}
+                        onSubRuleClick={(name) => { setSelectedRule(entry.rule_id); setRuleNameFilter(name); }}
+                      />
+                    ));
+                  return (
+                    <>
+                      {generalEntries.length > 0 && (
+                        <>
+                          <p className="px-2 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/80">
+                            General
+                          </p>
+                          {renderEntries(generalEntries)}
+                        </>
+                      )}
+                      {customerEntries.length > 0 && (
+                        <>
+                          <p className="px-2 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-primary/80">
+                            {customerLabel}
+                          </p>
+                          {renderEntries(customerEntries)}
+                        </>
+                      )}
+                    </>
+                  );
+                })()
               )}
             </div>
           </div>
@@ -763,30 +804,11 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
                       </div>
                     )}
                     {sourceContent !== null && !sourceLoading && (
-                      <div className="flex h-full font-mono text-xs bg-muted/30">
-                        {/* Line numbers — scrolled in sync with textarea */}
-                        <div
-                          ref={lineNumsRef}
-                          className="select-none text-right text-muted-foreground/40 px-3 py-1 border-r border-border/40 overflow-hidden shrink-0 min-w-[2.75rem]"
-                          aria-hidden
-                        >
-                          {Array.from({ length: lineCount }, (_, i) => (
-                            <div key={i} className="leading-5">{i + 1}</div>
-                          ))}
-                        </div>
-                        {/* Editable content */}
-                        <textarea
-                          ref={textareaRef}
+                      <div className="h-full bg-muted/30">
+                        <SourceEditor
                           value={displayContent}
-                          onChange={(e) => setEditedContent(e.target.value)}
-                          onScroll={(e) => {
-                            if (lineNumsRef.current)
-                              lineNumsRef.current.scrollTop = e.currentTarget.scrollTop;
-                          }}
-                          className="flex-1 resize-none outline-none px-4 py-1 leading-5 bg-transparent text-foreground/90 overflow-auto whitespace-pre"
-                          spellCheck={false}
-                          autoComplete="off"
-                          autoCorrect="off"
+                          onChange={setEditedContent}
+                          className="h-full"
                         />
                       </div>
                     )}
