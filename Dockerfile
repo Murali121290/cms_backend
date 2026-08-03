@@ -3,7 +3,9 @@ FROM python:3.10-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    CMS_RUNTIME_ROOT=/opt/cms_runtime
+    CMS_RUNTIME_ROOT=/opt/cms_runtime \
+    PUPPETEER_SKIP_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 WORKDIR /app
 
@@ -25,7 +27,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ghostscript \
     imagemagick \
     libtiff-dev \
+    nodejs \
+    npm \
+    chromium \
+    xvfb \
+    xauth \
     && rm -rf /var/lib/apt/lists/*
+
+# Install @daisy/ace globally
+RUN npm install -g @daisy/ace
 
 # ImageMagick's default policy blocks PS/EPS/PDF as a security default. We need
 # EPS decoding for the Image Review & Editor's preview + convert pipeline, so
