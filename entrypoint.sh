@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Ensure standard /app/wordtoxml path redirects to the legacy wordtoxml path
+ln -sfn /app/app/processing/legacy/wordtoxml /app/wordtoxml
+
 if [ "${RUN_MIGRATIONS}" != "false" ]; then
     echo "Running database migrations..."
     { alembic upgrade head; } || {

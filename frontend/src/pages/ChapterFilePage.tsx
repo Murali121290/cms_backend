@@ -31,6 +31,7 @@ import { BulkUploadModal } from '@/components/BulkUploadModal'
 import { FileDetailPanel } from '@/features/projects/components/FileDetailPanel'
 import { ReferenceCheckModal } from '@/features/projects/components/ReferenceCheckModal'
 import { TagSetSelectModal } from '@/features/projects/components/TagSetSelectModal'
+import { XmlToIndesignModal } from '@/components/XmlToIndesignModal'
 import {
   startLanguageEdit,
   startPpdGeneration, startPermissionsCheck, startCreditExtraction,
@@ -122,10 +123,11 @@ function categoryToFolderKey(category: string, chapterName: string): FolderKey {
   const chName = chapterName.toLowerCase()
   if (chName === 'design') {
     if (c === 'indesign') return 'indesign'
-    if (c === 'common art') return 'common_art'
     if (c === 'pdf') return 'pdf'
-    if (c === 'font') return 'font'
-    if (c === 'library') return 'library'
+    if (c === 'template/indesign') return 'template_indesign'
+    if (c === 'template/common art') return 'template_common_art'
+    if (c === 'template/font') return 'template_font'
+    if (c === 'template/library') return 'template_library'
     if (c === 'template') return 'template'
     if (c === 'print preset') return 'print_preset'
   }
@@ -237,10 +239,11 @@ function IconTooltipButton({
 }
 
 function ProcessingActionsMenu({
-  row, onOpenReferenceCheck, stageName, isAssigned, projectId, chapterId,
+  row, onOpenReferenceCheck, onOpenXmlToIndesign, stageName, isAssigned, projectId, chapterId,
 }: {
   row: FileRow | null
   onOpenReferenceCheck: (file: FileRecord) => void
+  onOpenXmlToIndesign: (fileId: number, fileName: string) => void
   stageName: string
   isAssigned: boolean
   projectId: number
@@ -445,6 +448,20 @@ function ProcessingActionsMenu({
             <FileCode size={12} /> Word to XML
           </button>
         )}
+
+        {showAction('xmlToIndesign') && fname.endsWith('.xml') && row?.subfolder?.toLowerCase() === 'xml' && (
+          <button
+            disabled={!fid}
+            className={btnCls}
+            onClick={() => {
+              if (fid) {
+                onOpenXmlToIndesign(fid, row?.file_name || '')
+              }
+            }}
+          >
+            <Layers size={12} /> Generate InDesign
+          </button>
+        )}
       </div>
 
       {confirmStep && (
@@ -556,6 +573,19 @@ export function ChapterFilePage({
   const [showBulkUpload, setShowBulkUpload] = useState(false)
   const [deleteConfirmRow, setDeleteConfirmRow] = useState<FileRow | null>(null)
   const [deleteLoading, setDeleteLoading] = useState(false)
+  const queryClient = useQueryClient()
+  const [xmlToIndesignFile, setXmlToIndesignFile] = useState<{ id: number; name: string } | null>(null)
+  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({
+    template: true,
+  })
+
+  const toggleFolder = (key: string) => {
+    setExpandedFolders(prev => ({ ...prev, [key]: !prev[key] }))
+  }
+
+  const invalidateFiles = () => {
+    void queryClient.invalidateQueries({ queryKey: ['chapter-files', pid, cid] })
+  }
 
   useEffect(() => { setRowSelection({}) }, [activeFolder])
 
@@ -1107,23 +1137,63 @@ export function ChapterFilePage({
           <div className="px-4 pt-4 pb-2">
             <p className="text-[10px] font-bold text-muted uppercase tracking-widest">Folders</p>
           </div>
-          {FOLDER_KEYS.map(k => {
-            const cfg = activeFolderConfig[k]
-            const count = fileCounts[k] ?? 0
-            const active = k === activeFolder
-            return (
-              <button key={k} onClick={() => { setActiveFolder(k); setSorting([]); setGlobalFilter('') }}
-                className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-left border-l-2 transition-colors
-                  ${active ? 'bg-accent text-primary border-primary font-semibold' : 'text-muted hover:bg-card border-transparent'}`}>
-                <FolderIcon name={cfg.icon} size={14} color={active ? 'var(--color-primary)' : 'var(--color-muted)'} />
-                <span className="text-xs flex-1">{cfg.label}</span>
-                {count > 0 && (
-                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full leading-none
-                    ${active ? 'bg-primary/10 text-primary' : 'bg-border text-muted'}`}>{count}</span>
-                )}
-              </button>
-            )
-          })}
+          {(() => {
+            const roots = FOLDER_KEYS.filter(k => !activeFolderConfig[k]?.parent)
+            const childrenMap: Record<string, FolderKey[]> = {}
+            FOLDER_KEYS.forEach(k => {
+              const p = activeFolderConfig[k]?.parent
+              if (p) {
+                if (!childrenMap[p]) childrenMap[p] = []
+                childrenMap[p].push(k)
+              }
+            })
+
+            const renderItem = (k: FolderKey, isChild = false) => {
+              const cfg = activeFolderConfig[k]
+              if (!cfg) return null
+              const count = fileCounts[k] ?? 0
+              const active = k === activeFolder
+              const hasChildren = childrenMap[k] && childrenMap[k].length > 0
+              const isExpanded = !!expandedFolders[k]
+
+              return (
+                <div key={k} className="flex flex-col">
+                  <button
+                    onClick={() => {
+                      if (hasChildren) {
+                        toggleFolder(k)
+                      }
+                      setActiveFolder(k)
+                      setSorting([])
+                      setGlobalFilter('')
+                    }}
+                    className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-left border-l-2 transition-colors
+                      ${isChild ? 'pl-8' : ''}
+                      ${active ? 'bg-accent text-primary border-primary font-semibold' : 'text-muted hover:bg-card border-transparent'}`}
+                  >
+                    {hasChildren && (
+                      <span className="mr-0.5 text-[9px] text-muted flex-shrink-0">
+                        {isExpanded ? '▼' : '▶'}
+                      </span>
+                    )}
+                    <FolderIcon name={cfg.icon} size={14} color={active ? 'var(--color-primary)' : 'var(--color-muted)'} />
+                    <span className="text-xs flex-1 truncate">{cfg.label}</span>
+                    {count > 0 && (
+                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full leading-none
+                        ${active ? 'bg-primary/10 text-primary' : 'bg-border text-muted'}`}>{count}</span>
+                    )}
+                  </button>
+                  {hasChildren && isExpanded && (
+                    <div className="flex flex-col bg-surface/50 border-b border-border/10">
+                      {childrenMap[k].map(childKey => renderItem(childKey, true))}
+                    </div>
+                  )}
+                </div>
+              )
+            }
+
+            return roots.map(rootKey => renderItem(rootKey))
+          })()}
         </nav>
 
         {/* ── FILE TABLE ───────────────────────────────────────────────────── */}
@@ -1141,6 +1211,7 @@ export function ChapterFilePage({
                 <ProcessingActionsMenu
                   row={selectedCount === 1 ? selectedRows[0] : null}
                   onOpenReferenceCheck={setRefCheckFile}
+                  onOpenXmlToIndesign={(fileId, fileName) => setXmlToIndesignFile({ id: fileId, name: fileName })}
                   stageName={resolvedStageName}
                   isAssigned={resolvedIsAssigned}
                   projectId={pid}
@@ -1294,6 +1365,18 @@ export function ChapterFilePage({
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── XML to InDesign Conversion Modal ────────────────────────────── */}
+      {xmlToIndesignFile && (
+        <XmlToIndesignModal
+          isOpen={xmlToIndesignFile !== null}
+          onClose={() => setXmlToIndesignFile(null)}
+          fileId={xmlToIndesignFile.id}
+          fileName={xmlToIndesignFile.name}
+          projectId={pid}
+          onComplete={invalidateFiles}
+        />
       )}
     </div>
   )

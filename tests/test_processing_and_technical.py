@@ -277,3 +277,68 @@ def test_background_processing_manual_structuring_success_uses_correct_library(
     assert called_manual_process == [True]
     assert Path(file_record.path).read_bytes() == b"manual-processed-docx-bytes"
 
+
+def test_background_processing_word_to_xml_registers_xml_and_log_as_xml_category(
+    monkeypatch,
+    admin_user,
+    file_record,
+    db_session,
+):
+    from app.routers.processing import background_processing_task
+
+    called_process = []
+
+    xml_path = Path(file_record.path).parent.parent / "XML" / f"{Path(file_record.filename).stem}.xml"
+    log_path = Path(file_record.path).parent.parent / "XML" / f"{Path(file_record.filename).stem}.log"
+
+    def _fake_xml_process(self, file_path):
+        called_process.append(file_path)
+        xml_path.parent.mkdir(parents=True, exist_ok=True)
+        xml_path.write_bytes(b"<xml>test</xml>")
+        log_path.write_bytes(b"log data")
+        return [str(xml_path), str(log_path)]
+
+    from app.processing.xml_engine import XMLEngine
+    monkeypatch.setattr(XMLEngine, "process_document", _fake_xml_process)
+
+    file_record.is_checked_out = True
+    file_record.checked_out_by_id = admin_user.id
+    db_session.commit()
+
+    background_processing_task(
+        file_id=file_record.id,
+        process_type="word_to_xml",
+        user_id=admin_user.id,
+        user_username=admin_user.username,
+    )
+
+    db_session.refresh(file_record)
+    assert file_record.is_checked_out is False
+
+    xml_file_record = (
+        db_session.query(models.File)
+        .filter(
+            models.File.project_id == file_record.project_id,
+            models.File.chapter_id == file_record.chapter_id,
+            models.File.filename == f"{Path(file_record.filename).stem}.xml",
+        )
+        .first()
+    )
+    assert xml_file_record is not None
+    assert xml_file_record.category == "XML"
+    assert xml_file_record.file_type == "application/xml"
+
+    log_file_record = (
+        db_session.query(models.File)
+        .filter(
+            models.File.project_id == file_record.project_id,
+            models.File.chapter_id == file_record.chapter_id,
+            models.File.filename == f"{Path(file_record.filename).stem}.log",
+        )
+        .first()
+    )
+    assert log_file_record is not None
+    assert log_file_record.category == "XML"
+    assert log_file_record.file_type == "text/plain"
+
+
