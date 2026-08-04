@@ -5,7 +5,7 @@ from app.database import Base
 
 
 class PostProdProject(Base):
-    __tablename__ = "post_prod_projects"
+    __tablename__ = "post_prod_wc_projects"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     client = Column(String(255), nullable=False)
@@ -26,7 +26,7 @@ class PostProdProject(Base):
 
 
 class PostProdChapter(Base):
-    __tablename__ = "post_prod_chapters"
+    __tablename__ = "post_prod_wc_chapters"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     client_code = Column(String(100), nullable=True)
