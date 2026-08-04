@@ -109,7 +109,7 @@ export function PostProdChaptersPage() {
     try {
       await Promise.all(
         selectedChapterIds.map(id =>
-          fetch(`/api/v2/post-prod/chapters/${id}/convert`, {
+          fetch(`/api/v2/word-conversion/chapters/${id}/convert`, {
             method: 'POST'
           })
         )
@@ -313,7 +313,7 @@ export function PostProdChaptersPage() {
 
   const handleConvertChapter = async (chapter: Chapter) => {
     try {
-      const res = await fetch(`/api/v2/post-prod/chapters/${chapter.id}/convert`, {
+      const res = await fetch(`/api/v2/word-conversion/chapters/${chapter.id}/convert`, {
         method: 'POST'
       })
       if (!res.ok) {

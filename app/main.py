@@ -66,6 +66,10 @@ app.include_router(post_prod.router, prefix="/api/v2", tags=["Post Production"])
 from app.domains.post_prod.css_matcher import router as css_matcher
 app.include_router(css_matcher, prefix="/api/v2", tags=["CSS Matcher"])
 
+# Word Conversion Router
+from app.domains.post_prod.word_conversion import router as word_conversion
+app.include_router(word_conversion, prefix="/api/v2", tags=["Word Conversion"])
+
 # EPUB Validator Router
 from app.domains.post_prod.epub_validator import router as epub_validator
 app.include_router(epub_validator, prefix="/api/v2", tags=["EPUB Validator"])
