@@ -76,11 +76,11 @@ def _build_project_bootstrap_upload_plan(
 def create_predefined_project_folders(base_path: str):
     predefined_folders = [
         "Design/Indesign",
-        "Design/Common Art",
         "Design/Pdf",
-        "Design/Font",
-        "Design/Library",
-        "Design/template",
+        "Design/template/indesign",
+        "Design/template/Common Art",
+        "Design/template/Font",
+        "Design/template/Library",
         "Design/Print Preset",
         "CE support/Style sheet template",
     ]

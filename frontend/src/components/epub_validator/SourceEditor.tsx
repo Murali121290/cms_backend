@@ -78,6 +78,7 @@ export function SourceEditor({ value, onChange, className, readOnly = false }: P
           fontFamily:
             'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
           lineHeight: '1.5',
+          overflow: 'auto',
         },
         '.cm-content': { padding: '4px 0' },
         '.cm-gutters': {
@@ -113,6 +114,34 @@ export function SourceEditor({ value, onChange, className, readOnly = false }: P
 
   return (
     <div className={cn('relative flex flex-col h-full min-h-0', className)}>
+      {/* Editor Toolbar */}
+      <div className="flex items-center gap-1.5 px-3 py-1 bg-gray-50 border-b border-gray-200 text-[11px] text-gray-500 font-sans flex-shrink-0 select-none">
+        <button
+          type="button"
+          onClick={() => {
+            setReplaceMode(false);
+            setPanelOpen(true);
+          }}
+          className="px-2 py-0.5 rounded hover:bg-gray-200 active:bg-gray-300 transition-colors font-medium flex items-center gap-1 border border-gray-300 shadow-sm bg-white"
+          title="Search text (Ctrl+F)"
+        >
+          🔍 Find
+        </button>
+        {!readOnly && (
+          <button
+            type="button"
+            onClick={() => {
+              setReplaceMode(true);
+              setPanelOpen(true);
+            }}
+            className="px-2 py-0.5 rounded hover:bg-gray-200 active:bg-gray-300 transition-colors font-medium flex items-center gap-1 border border-gray-300 shadow-sm bg-white"
+            title="Find and replace text (Ctrl+H)"
+          >
+            ✏️ Replace
+          </button>
+        )}
+      </div>
+
       {panelOpen && view && (
         <FindReplacePanel
           view={view}
@@ -129,6 +158,7 @@ export function SourceEditor({ value, onChange, className, readOnly = false }: P
           extensions={extensions}
           readOnly={readOnly}
           height="100%"
+          style={{ height: '100%' }}
           basicSetup={{
             lineNumbers: true,
             highlightActiveLine: true,

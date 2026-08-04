@@ -68,6 +68,7 @@ PROCESS_PERMISSIONS = {
     "bias_scan": ["Team Lead - Editorial", "Technical Editor", "Admin","Language Editor", "Team Lead - Language Editing"],
     "credit_extractor_ai": ["PermissionsManager", "ProjectManager", "Admin"],
     "word_to_xml": ["Admin", "XML Manager", "XML manager"],
+    "xml_to_indesign": ["Admin", "XML Manager", "XML manager"],
 }
 
 
@@ -340,6 +341,25 @@ def background_processing_task(
                     generated_files = xml_engine_cls().process_document(file_path)
                     success_msg = "Word to XML conversion completed"
 
+            elif process_type == "xml_to_indesign":
+                update_job_status(db, job_id, "processing", "Processing XML to InDesign conversion...", 30)
+                template_file_id = options.get("template_file_id") if options else None
+                if not template_file_id:
+                    raise ValueError("Missing template_file_id option.")
+                
+                from app.services.file_service import UPLOAD_DIR
+                from app.processing.xml_to_indesign_engine import XMLToInDesignEngine
+                generated_files = XMLToInDesignEngine().process_document(
+                    db=db,
+                    file_path=file_path,
+                    file_record=file_record,
+                    template_file_id=template_file_id,
+                    user_id=user_id,
+                    upload_dir=UPLOAD_DIR,
+                    logger=logger
+                )
+                success_msg = "XML to InDesign conversion completed"
+
             else:
                 raise HTTPException(
                     status_code=501,
@@ -470,7 +490,7 @@ def background_processing_task(
                                 logger.warning(
                                     f"Style injection failed for {processed_filename}: {style_err}"
                                 )
-                        elif processed_filename.endswith(".txt"):
+                        elif processed_filename.endswith(".txt") or processed_filename.endswith(".log"):
                             mime = "text/plain"
                         elif processed_filename.endswith(".zip"):
                             mime = "application/zip"
@@ -484,14 +504,18 @@ def background_processing_task(
                             project_id=file_record.project_id,
                             chapter_id=file_record.chapter_id,
                             version=1,
-                            category=file_record.category,
+                            category=(
+                                "InDesign" if process_type == "xml_to_indesign"
+                                else "XML" if process_type == "word_to_xml"
+                                else file_record.category
+                            ),
                             # Pipeline output is a derived artifact, not an
                             # uploaded source.
                             is_original=False,
                         )
                         db.add(new_record)
                         logger.info(
-                            f"Registered result file: {processed_filename} to category {file_record.category}"
+                            f"Registered result file: {processed_filename} to category {new_record.category}"
                         )
             else:
                 logger.warning(f"No generated files returned from {process_type} processing")

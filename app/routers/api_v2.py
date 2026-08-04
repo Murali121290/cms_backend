@@ -1020,6 +1020,45 @@ def api_v2_project_chapters(
     )
 
 
+@router.get("/projects/{project_id}/indesign-templates")
+def api_v2_project_indesign_templates(
+    project_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+        
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+        
+    design_chapter = db.query(models.ChapterInfo).filter(
+        models.ChapterInfo.project == project.project_code,
+        models.ChapterInfo.chapters.ilike("design")
+    ).first()
+    
+    if not design_chapter:
+        return []
+        
+    template_files = db.query(models.File).filter(
+        models.File.chapter_id == design_chapter.id,
+        models.File.category == "template/indesign",
+        models.File.filename.ilike("%.indt")
+    ).all()
+    
+    return [_serialize_file_record(file_record, viewer=viewer, db=db) for file_record in template_files]
+
+
 @router.get(
     "/projects/{project_id}/chapters/{chapter_id}",
     response_model=schemas_v2.ChapterDetailResponse,

@@ -202,6 +202,20 @@ Write-Host ""
 docker-compose ps
 Write-Host ""
 
+# Parse HOST_DOMAIN and HOST_PORT from .env
+$hostDomain = "localhost"
+$hostPort = "8080"
+if (Test-Path ".env") {
+    Get-Content ".env" | ForEach-Object {
+        if ($_ -match "^HOST_DOMAIN\s*=\s*(.+)$") {
+            $hostDomain = $Matches[1].Trim()
+        }
+        if ($_ -match "^HOST_PORT\s*=\s*(.+)$") {
+            $hostPort = $Matches[1].Trim()
+        }
+    }
+}
+
 # Success Message
 Write-Host "========================================" -ForegroundColor Green
 Write-Host "SUCCESS: CMS BACKEND IS RUNNING" -ForegroundColor Green
@@ -209,13 +223,13 @@ Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
 
 Write-Host "Access the application:" -ForegroundColor Cyan
-Write-Host "  Web Interface: http://localhost:8080" -ForegroundColor White
-Write-Host "  API Docs:      http://localhost:8000/docs" -ForegroundColor White
-Write-Host "  Collabora: http://localhost:9980" -ForegroundColor White
+Write-Host "  Web Interface: http://$hostDomain`:$hostPort" -ForegroundColor White
+Write-Host "  API Docs:      http://$hostDomain`:$hostPort/api/docs" -ForegroundColor White
+Write-Host "  Collabora:     http://$hostDomain`:9980" -ForegroundColor White
 Write-Host ""
 
 Write-Host "Database Connection:" -ForegroundColor Cyan
-Write-Host "  Host: localhost:5432" -ForegroundColor White
+Write-Host "  Host: localhost:5433" -ForegroundColor White
 Write-Host "  User: cms_user" -ForegroundColor White
 Write-Host "  Password: cms_password (see .env)" -ForegroundColor White
 Write-Host ""
@@ -227,9 +241,9 @@ Write-Host "  Stop services: docker-compose stop" -ForegroundColor DarkGray
 Write-Host "  Restart: docker-compose restart" -ForegroundColor DarkGray
 Write-Host ""
 
-$openBrowser = Read-Host "Open http://localhost:8085 in browser? (y/n)"
+$openBrowser = Read-Host "Open http://$hostDomain`:$hostPort in browser? (y/n)"
 if ($openBrowser -eq "y" -or $openBrowser -eq "Y") {
-    Start-Process "http://localhost:8085"
+    Start-Process "http://$hostDomain`:$hostPort"
     Write-Host "Opening browser..." -ForegroundColor Cyan
 }
 

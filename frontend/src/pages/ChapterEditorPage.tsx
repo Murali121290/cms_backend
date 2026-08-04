@@ -9,6 +9,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, FileText, Save, Loader2, Download } from 'lucide-react'
 import { DocxViewer } from '@/components/DocxViewer'
+import { SourceEditor } from '@/components/epub_validator/SourceEditor'
 import 'pdfjs-viewer-element'
 import { projectsApi } from '@/api/projects'
 import { chaptersApi } from '@/api/chapters'
@@ -27,6 +28,12 @@ export function ChapterEditorPage() {
   const [loading,  setLoading]  = useState(true)
   const [chapter,  setChapter]  = useState<{ chapter_title: string | null; chapters: string; current_assignee_name: string | null } | null>(null)
   const [project,  setProject]  = useState<{ file_details: Record<string,unknown> | null } | null>(null)
+
+  const [xmlContent, setXmlContent] = useState<string | null>(null)
+  const [logContent, setLogContent] = useState<string | null>(null)
+  const [xmlLoading, setXmlLoading] = useState(false)
+  const [xmlSaving, setXmlSaving] = useState(false)
+  const [isXmlDirty, setIsXmlDirty] = useState(false)
 
   useEffect(() => {
     if (!chapterId || !projectId) return
@@ -58,6 +65,7 @@ export function ChapterEditorPage() {
   const decodedFilename  = filename  ? decodeURIComponent(filename)  : ''
   const decodedSubfolder = subfolder ? decodeURIComponent(subfolder) : ''
   const ext = decodedFilename.split('.').pop()?.toLowerCase() ?? ''
+  const logFilename = decodedFilename.replace(/\.xml$/i, '.log')
 
   // Build download / view URL from the API
   const fileUrl = chapterId && projectId && decodedSubfolder && decodedFilename
@@ -71,6 +79,24 @@ export function ChapterEditorPage() {
         const cf = (project.file_details as { chapter_folders?: { chapters?: Array<{ chapter_name: string }> } }).chapter_folders
         return cf?.chapters?.find(c => c.chapter_name === `chapter-${chNo}`)?.chapter_name ?? `chapter-${chNo}`
       })()}/${decodedSubfolder}/${encodeURIComponent(decodedFilename)}/download`
+    : null
+
+  const logFileUrl = chapterId && projectId && decodedSubfolder && decodedFilename
+    ? `/api/uploads/${projectId}/chapter/${(() => {
+        const chNo = chapter?.chapters?.match(/\d+/)?.[0]
+        if (!project?.file_details || !chNo) return `chapter-${chNo ?? chapterId}`
+        const cf = (project.file_details as { chapter_folders?: { chapters?: Array<{ chapter_name: string }> } }).chapter_folders
+        return cf?.chapters?.find(c => c.chapter_name === `chapter-${chNo}`)?.chapter_name ?? `chapter-${chNo}`
+      })()}/${decodedSubfolder}/${encodeURIComponent(logFilename)}/download`
+    : null
+
+  const saveUrl = chapterId && projectId && decodedSubfolder && decodedFilename
+    ? `/api/uploads/${projectId}/chapter/${(() => {
+        const chNo = chapter?.chapters?.match(/\d+/)?.[0]
+        if (!project?.file_details || !chNo) return `chapter-${chNo ?? chapterId}`
+        const cf = (project.file_details as { chapter_folders?: { chapters?: Array<{ chapter_name: string }> } }).chapter_folders
+        return cf?.chapters?.find(c => c.chapter_name === `chapter-${chNo}`)?.chapter_name ?? `chapter-${chNo}`
+      })()}/${decodedSubfolder}/${encodeURIComponent(decodedFilename)}/save`
     : null
 
   const isEditable = !!chapter?.current_assignee_name
@@ -93,6 +119,83 @@ export function ChapterEditorPage() {
     return () => { cancelled = true }
   }, [ext, fileUrl])
 
+  // Warning for unsaved changes before leaving browser tab
+  useEffect(() => {
+    if (!isXmlDirty) return
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [isXmlDirty])
+
+  // Fetch XML and Log files if file is XML
+  useEffect(() => {
+    if (ext !== 'xml' || !fileUrl || !logFileUrl) return
+    setXmlLoading(true)
+    
+    fetch(fileUrl)
+      .then(res => {
+        if (!res.ok) throw new Error('XML file not found')
+        return res.text()
+      })
+      .then(text => {
+        setXmlContent(text)
+      })
+      .catch(err => {
+        console.error(err)
+        toast.error('Failed to load XML content')
+      })
+      .finally(() => setXmlLoading(false))
+
+    fetch(logFileUrl)
+      .then(res => {
+        if (!res.ok) return 'No log file found.'
+        return res.text()
+      })
+      .then(text => {
+        setLogContent(text)
+      })
+      .catch(() => {
+        setLogContent('No log file found.')
+      })
+  }, [ext, fileUrl, logFileUrl])
+
+  const handleXmlSave = async () => {
+    if (!saveUrl || xmlContent === null || xmlSaving) return
+    setXmlSaving(true)
+    try {
+      const res = await fetch(saveUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ content: xmlContent }),
+      })
+      if (!res.ok) throw new Error('Save failed')
+      const data = await res.json()
+      setIsXmlDirty(false)
+      if (data.log_content) {
+        setLogContent(data.log_content)
+      }
+      toast.success('XML file saved successfully')
+    } catch (err) {
+      toast.error('Failed to save XML file')
+    } finally {
+      setXmlSaving(false)
+    }
+  }
+
+  const handleBack = () => {
+    if (isXmlDirty) {
+      if (!window.confirm('You have unsaved changes. Do you really want to leave?')) {
+        return
+      }
+    }
+    navigate(-1)
+  }
+
   if (loading) return <FullPageSpinner/>
 
   return (
@@ -101,7 +204,7 @@ export function ChapterEditorPage() {
       {/* ── TOOLBAR ──────────────────────────────────────────────────────── */}
       <header className="flex items-center gap-3 px-4 py-3 bg-white border-b border-gray-200 flex-shrink-0 shadow-sm">
         {/* Back to file manager */}
-        <button onClick={() => navigate(-1)}
+        <button onClick={handleBack}
           className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
           <ArrowLeft size={13}/> Back to Files
         </button>
@@ -128,12 +231,14 @@ export function ChapterEditorPage() {
           </a>
         )}
 
-        {/* Save (placeholder) */}
+        {/* Save */}
         {isEditable && (
           <button
-            onClick={() => toast.success('Auto-saved')}
-            className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors shadow-sm">
-            <Save size={13}/> Save
+            onClick={ext === 'xml' ? handleXmlSave : () => toast.success('Auto-saved')}
+            disabled={ext === 'xml' && xmlSaving}
+            className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors shadow-sm disabled:opacity-50">
+            {xmlSaving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13}/>}
+            {ext === 'xml' && isXmlDirty ? 'Save*' : 'Save'}
           </button>
         )}
       </header>
@@ -169,6 +274,48 @@ export function ChapterEditorPage() {
             <img src={fileUrl} alt={decodedFilename}
               className="max-w-full max-h-full object-contain rounded-lg shadow-md"/>
           </div>
+        ) : ext === 'xml' ? (
+          xmlLoading ? (
+            <div className="h-full flex items-center justify-center">
+              <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+            </div>
+          ) : (
+            <div className="flex h-full w-full">
+              {/* Left Panel: XML Editor */}
+              <div className="w-1/2 h-full border-r border-gray-200 flex flex-col">
+                <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-700 uppercase tracking-wider flex items-center justify-between flex-shrink-0">
+                  <span>XML Source</span>
+                  {isXmlDirty && <span className="text-amber-600 normal-case font-normal font-sans">Unsaved changes</span>}
+                </div>
+                <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                  <SourceEditor
+                    value={xmlContent ?? ''}
+                    onChange={(val) => {
+                      setXmlContent(val)
+                      setIsXmlDirty(true)
+                    }}
+                    readOnly={!isEditable}
+                    className="flex-1 min-h-0"
+                  />
+                </div>
+              </div>
+              
+              {/* Right Panel: Log (Read-only) */}
+              <div className="w-1/2 h-full flex flex-col bg-gray-50">
+                <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-700 uppercase tracking-wider flex-shrink-0">
+                  <span>Conversion Log</span>
+                </div>
+                <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                  <SourceEditor
+                    value={logContent ?? 'Loading log...'}
+                    onChange={() => {}}
+                    readOnly={true}
+                    className="flex-1 min-h-0 bg-gray-50 opacity-80"
+                  />
+                </div>
+              </div>
+            </div>
+          )
         ) : (
           <div className="h-full flex flex-col items-center justify-center gap-4 text-center p-8">
             <FileText size={52} className="text-gray-200"/>
