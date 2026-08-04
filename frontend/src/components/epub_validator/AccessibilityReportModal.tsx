@@ -5,6 +5,7 @@ import {
   ShieldAlert,
   ExternalLink,
   Clock,
+  Download,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import type { AceReport } from '@/types/epubValidator';
@@ -115,6 +116,14 @@ export function AccessibilityReportModal({ report, folderName, onClose }: Props)
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
+              <a
+                href={reportUrl}
+                download={`${folderName}-ace-report.html`}
+                className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-md border border-border hover:bg-muted transition"
+                aria-label="Download report"
+              >
+                <Download className="w-3 h-3" /> Download report
+              </a>
               <a
                 href={reportUrl}
                 target="_blank"
