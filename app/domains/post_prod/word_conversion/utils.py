@@ -2,7 +2,7 @@
 
 import re
 from sqlalchemy.orm import Session
-from app.domains.post_prod.models import PostProdProject, PostProdChapter
+from app.domains.post_prod.word_conversion.models import PostProdProject, PostProdChapter
 
 
 def parse_chapter_number(filename: str) -> str:

@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app import database
 from app.domains.auth.security import get_current_user_from_cookie
-from app.domains.post_prod.models import PostProdChapter
+from app.domains.post_prod.word_conversion.models import PostProdChapter
 from .converter import run_conversion_background
 
 router = APIRouter(prefix="/word-conversion/chapters", tags=["Word Conversion"])

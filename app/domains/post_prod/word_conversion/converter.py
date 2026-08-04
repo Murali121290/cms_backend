@@ -7,7 +7,7 @@ import requests
 from datetime import datetime
 
 from app.core.config import get_settings
-from app.domains.post_prod.models import PostProdChapter
+from app.domains.post_prod.word_conversion.models import PostProdChapter
 from app.services.scripts.docx_post_processor import post_process_docx
 from .utils import check_and_update_project_status
 
