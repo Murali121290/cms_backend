@@ -132,7 +132,7 @@ export function ChapterEditorPage() {
 
   // Fetch XML and Log files if file is XML
   useEffect(() => {
-    if (ext !== 'xml' || !fileUrl || !logFileUrl) return
+    if (ext !== 'xml' || !fileUrl || !logFileUrl || loading || !chapter) return
     setXmlLoading(true)
     
     fetch(fileUrl)
