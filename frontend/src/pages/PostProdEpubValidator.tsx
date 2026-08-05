@@ -20,7 +20,7 @@ import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { toast } from '@/store/useToastStore';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
-import { useAuthStore } from '@/store/useAuthStore';
+import { useSessionStore } from '@/stores/sessionStore';
 import {
   listProjects,
   createProject,
@@ -71,10 +71,12 @@ interface CardProps {
 
 function ProjectCard({ project, users, onDelete, onRefresh }: CardProps) {
   const navigate = useNavigate();
-  const currentUser = useAuthStore((s) => s.user);
+  const viewer = useSessionStore((s) => s.viewer);
 
   const handleCardClick = () => {
-    if (project.assignee && currentUser?.username && project.assignee !== currentUser.username) {
+    const assigned = (project.assignee || '').trim().toLowerCase();
+    const myUsername = (viewer?.username || '').trim().toLowerCase();
+    if (assigned && myUsername && assigned !== myUsername) {
       toast.error(`This project is assigned to ${project.assignee}. You cannot open it.`);
       return;
     }

@@ -25,6 +25,8 @@ import type { Tab as ModalTab } from '@/components/epub_validator/ValidationDeta
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody } from '@/components/ui/Card';
+import { toast } from '@/store/useToastStore';
+import { useSessionStore } from '@/stores/sessionStore';
 import { getFiles, validateFolder, validateFile, exportEpub, getCachedAceReport, runAceReport, listProjects, type EvProject } from '@/api/epubValidator';
 import { useEpubBookStore } from '@/hooks/useEpubBookStore';
 import { cn, formatDate, titleCase } from '@/utils/epubValidatorUtils';
@@ -113,6 +115,16 @@ export function PostProdEpubValidatorFiles() {
   }, [projects, params]);
 
   const folderName = project ? project.folder_name : (params.folderName || params.projectId || '');
+
+  const viewer = useSessionStore((s) => s.viewer);
+  useEffect(() => {
+    const assigned = (project?.assignee || '').trim().toLowerCase();
+    const myUsername = (viewer?.username || '').trim().toLowerCase();
+    if (assigned && myUsername && assigned !== myUsername) {
+      toast.error(`This project is assigned to ${project?.assignee}. You cannot access it.`);
+      navigate('/post-production/epub-validator');
+    }
+  }, [project, viewer, navigate]);
 
   // ── Files from API ──────────────────────────────────────────────────────────
   const { data: filesData, isLoading, isError } = useQuery({
@@ -392,463 +404,462 @@ export function PostProdEpubValidatorFiles() {
 
   return (
     <>
-    <AnimatePresence>
-      {aceModalOpen && aceReport && (
-        <AccessibilityReportModal
-          report={aceReport}
-          folderName={folderName}
-          onClose={() => setAceModalOpen(false)}
-        />
-      )}
-    </AnimatePresence>
+      <AnimatePresence>
+        {aceModalOpen && aceReport && (
+          <AccessibilityReportModal
+            report={aceReport}
+            folderName={folderName}
+            onClose={() => setAceModalOpen(false)}
+          />
+        )}
+      </AnimatePresence>
 
-    <AnimatePresence>
-      {selectedFile && (
-        <ValidationDetailModal
-          key={selectedFile.file_name}
-          file={selectedFile}
-          folderName={folderName}
-          entries={selectedEntries}
-          isRevalidating={validatingFiles.has(selectedFile.file_name)}
-          initialTab={modalInitialTab}
-          allowedTabs={modalAllowedTabs}
-          onClose={() => setSelectedFile(null)}
-          onRevalidate={
-            !modalAllowedTabs || modalAllowedTabs.includes('result')
-              ? () => handleValidateFile(selectedFile.file_name)
-              : undefined
-          }
-        />
-      )}
-    </AnimatePresence>
+      <AnimatePresence>
+        {selectedFile && (
+          <ValidationDetailModal
+            key={selectedFile.file_name}
+            file={selectedFile}
+            folderName={folderName}
+            entries={selectedEntries}
+            isRevalidating={validatingFiles.has(selectedFile.file_name)}
+            initialTab={modalInitialTab}
+            allowedTabs={modalAllowedTabs}
+            onClose={() => setSelectedFile(null)}
+            onRevalidate={
+              !modalAllowedTabs || modalAllowedTabs.includes('result')
+                ? () => handleValidateFile(selectedFile.file_name)
+                : undefined
+            }
+          />
+        )}
+      </AnimatePresence>
 
-    {/* ── Export error modal ────────────────────────────────────────────── */}
-    <AnimatePresence>
-      {exportErrorMsg && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <motion.div
-            className="bg-background rounded-2xl shadow-2xl border border-border w-full max-w-md mx-4 p-6"
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            transition={{ duration: 0.18 }}
-          >
-            <div className="flex items-start gap-3 mb-5">
-              <XCircle className="w-5 h-5 text-danger shrink-0 mt-0.5" />
-              <div>
-                <h2 className="font-semibold text-foreground font-serif">Export Error</h2>
-                <p className="text-sm text-muted-foreground mt-1 font-sans">{exportErrorMsg}</p>
+      {/* ── Export error modal ────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {exportErrorMsg && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+            <motion.div
+              className="bg-background rounded-2xl shadow-2xl border border-border w-full max-w-md mx-4 p-6"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.18 }}
+            >
+              <div className="flex items-start gap-3 mb-5">
+                <XCircle className="w-5 h-5 text-danger shrink-0 mt-0.5" />
+                <div>
+                  <h2 className="font-semibold text-foreground font-serif">Export Error</h2>
+                  <p className="text-sm text-muted-foreground mt-1 font-sans">{exportErrorMsg}</p>
+                </div>
               </div>
-            </div>
-            <div className="flex justify-end font-sans">
-              <Button onClick={() => setExportErrorMsg(null)}>Close</Button>
-            </div>
-          </motion.div>
-        </div>
-      )}
-    </AnimatePresence>
-
-    {/* ── Export confirm modal ──────────────────────────────────────────── */}
-    <AnimatePresence>
-      {exportConfirmMsg && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <motion.div
-            className="bg-background rounded-2xl shadow-2xl border border-border w-full max-w-md mx-4 p-6"
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            transition={{ duration: 0.18 }}
-          >
-            <div className="flex items-start gap-3 mb-5">
-              <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
-              <div>
-                <h2 className="font-semibold text-foreground font-serif">Export with Issues?</h2>
-                <p className="text-sm text-muted-foreground mt-1 font-sans">{exportConfirmMsg}</p>
+              <div className="flex justify-end font-sans">
+                <Button onClick={() => setExportErrorMsg(null)}>Close</Button>
               </div>
-            </div>
-            <div className="flex justify-end gap-2 font-sans">
-              <Button variant="outline" onClick={() => setExportConfirmMsg(null)}>
-                Cancel
-              </Button>
-              <Button onClick={handleExportConfirmed}>Proceed</Button>
-            </div>
-          </motion.div>
-        </div>
-      )}
-    </AnimatePresence>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
-    <motion.div
-      className="space-y-6 max-w-7xl mx-auto p-6 text-text"
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -8 }}
-      transition={{ duration: 0.22 }}
-    >
-      {/* ── Sticky header ──────────────────────────────────────────────────── */}
-      <div className="border-b border-border/60 pb-4 flex items-center justify-between">
-        <div className="flex items-center gap-3 min-w-0">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => navigate('/post-production/epub-validator')}
-            className="shrink-0 h-9 w-9 p-0 rounded-lg"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </Button>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2.5">
-              <h1
-                className="text-2xl font-bold font-serif text-text tracking-tight truncate m-0"
-                title={project?.project_name || folderName}
-              >
-                {project?.project_name || folderName}
-              </h1>
-              {project && (
-                <span
-                  className={`capitalize font-bold px-2 py-0.5 rounded-md text-[9px] border ${
-                    project.validation_status === 'pass' || project.validation_status === 'validated' || project.validation_status === 'Completed'
+      {/* ── Export confirm modal ──────────────────────────────────────────── */}
+      <AnimatePresence>
+        {exportConfirmMsg && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+            <motion.div
+              className="bg-background rounded-2xl shadow-2xl border border-border w-full max-w-md mx-4 p-6"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.18 }}
+            >
+              <div className="flex items-start gap-3 mb-5">
+                <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                <div>
+                  <h2 className="font-semibold text-foreground font-serif">Export with Issues?</h2>
+                  <p className="text-sm text-muted-foreground mt-1 font-sans">{exportConfirmMsg}</p>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 font-sans">
+                <Button variant="outline" onClick={() => setExportConfirmMsg(null)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleExportConfirmed}>Proceed</Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <motion.div
+        className="space-y-6 max-w-7xl mx-auto p-6 text-text"
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -8 }}
+        transition={{ duration: 0.22 }}
+      >
+        {/* ── Sticky header ──────────────────────────────────────────────────── */}
+        <div className="border-b border-border/60 pb-4 flex items-center justify-between">
+          <div className="flex items-center gap-3 min-w-0">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => navigate('/post-production/epub-validator')}
+              className="shrink-0 h-9 w-9 p-0 rounded-lg"
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </Button>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2.5">
+                <h1
+                  className="text-2xl font-bold font-serif text-text tracking-tight truncate m-0"
+                  title={project?.project_name || folderName}
+                >
+                  {project?.project_name || folderName}
+                </h1>
+                {project && (
+                  <span
+                    className={`capitalize font-bold px-2 py-0.5 rounded-md text-[9px] border ${project.validation_status === 'pass' || project.validation_status === 'validated' || project.validation_status === 'Completed'
                       ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
                       : project.validation_status === 'in_progress' || project.validation_status === 'in-progress' || project.validation_status === 'In Progress'
-                      ? 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400'
-                      : 'bg-primary/10 border-primary/20 text-primary'
-                  }`}
-                >
-                  {project.validation_status === 'pass' || project.validation_status === 'validated' || project.validation_status === 'Completed'
-                    ? 'Completed'
-                    : project.validation_status === 'in_progress' || project.validation_status === 'in-progress' || project.validation_status === 'In Progress'
-                    ? 'In Progress'
-                    : 'Active'}
-                </span>
-              )}
-            </div>
-            <p className="text-xs text-muted mt-1 flex items-center gap-2 flex-wrap font-sans">
-              {project ? (
-                <>
-                  <span>
-                    {project.client} {project.client_code && `(${project.client_code})`}
+                        ? 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400'
+                        : 'bg-primary/10 border-primary/20 text-primary'
+                      }`}
+                  >
+                    {project.validation_status === 'pass' || project.validation_status === 'validated' || project.validation_status === 'Completed'
+                      ? 'Completed'
+                      : project.validation_status === 'in_progress' || project.validation_status === 'in-progress' || project.validation_status === 'In Progress'
+                        ? 'In Progress'
+                        : 'Active'}
                   </span>
-                  {project.assignee && (
-                    <>
-                      <span className="text-border">·</span>
-                      <span className="inline-flex items-center gap-1 text-muted">
-                        <User size={12} className="text-muted/70" />
-                        <span>{project.assignee}</span>
+                )}
+              </div>
+              <p className="text-xs text-muted mt-1 flex items-center gap-2 flex-wrap font-sans">
+                {project ? (
+                  <>
+                    <span>
+                      {project.client} {project.client_code && `(${project.client_code})`}
+                    </span>
+                    {project.assignee && (
+                      <>
+                        <span className="text-border">·</span>
+                        <span className="inline-flex items-center gap-1 text-muted">
+                          <User size={12} className="text-muted/70" />
+                          <span>{project.assignee}</span>
+                        </span>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <span className="font-mono text-[11px] font-semibold">{folderName}</span>
+                )}
+                {validationData && validationData.customer !== undefined && (
+                  <>
+                    <span className="text-border">·</span>
+                    {validationData.customer ? (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
+                        title={`Detected customer: ${validationData.customer}`}
+                      >
+                        {validationData.customer}
                       </span>
-                    </>
-                  )}
-                </>
-              ) : (
-                <span className="font-mono text-[11px] font-semibold">{folderName}</span>
-              )}
-              {validationData && validationData.customer !== undefined && (
-                <>
-                  <span className="text-border">·</span>
-                  {validationData.customer ? (
-                    <span
-                      className="inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
-                      title={`Detected customer: ${validationData.customer}`}
-                    >
-                      {validationData.customer}
-                    </span>
-                  ) : (
-                    <span
-                      className="inline-flex items-center rounded-full bg-muted text-muted-foreground px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
-                      title="No customer rules matched — running general rules only"
-                    >
-                      General only
-                    </span>
-                  )}
-                </>
-              )}
-            </p>
+                    ) : (
+                      <span
+                        className="inline-flex items-center rounded-full bg-muted text-muted-foreground px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
+                        title="No customer rules matched — running general rules only"
+                      >
+                        General only
+                      </span>
+                    )}
+                  </>
+                )}
+              </p>
+            </div>
           </div>
-        </div>
 
-        <div className="flex items-center gap-2 shrink-0 font-sans">
-          <Button
-            size="sm"
-            className="gap-2 shadow-sm text-xs font-semibold py-1.5 h-9"
-            onClick={handleValidateAll}
-            disabled={isValidating || isLoading}
-          >
-            {isValidating ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <Play className="w-3.5 h-3.5" />
-            )}
-            {isValidating
-              ? `Validating… ${fmtElapsed(elapsed)}`
-              : hasValidated ? 'Re-run validation' : 'Validate all'}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-2 shadow-sm text-xs font-semibold py-1.5 h-9"
-            onClick={handleRunAce}
-            disabled={isAceRunning || isLoading}
-          >
-            {isAceRunning ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <ShieldCheck className="w-3.5 h-3.5" />
-            )}
-            {isAceRunning ? `Checking… ${fmtElapsed(aceElapsed)}` : aceReport ? 'Re-run A11y check' : 'Run accessibility check'}
-          </Button>
-          {aceReport && !isAceRunning && (
+          <div className="flex items-center gap-2 shrink-0 font-sans">
+            <Button
+              size="sm"
+              className="gap-2 shadow-sm text-xs font-semibold py-1.5 h-9"
+              onClick={handleValidateAll}
+              disabled={isValidating || isLoading}
+            >
+              {isValidating ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Play className="w-3.5 h-3.5" />
+              )}
+              {isValidating
+                ? `Validating… ${fmtElapsed(elapsed)}`
+                : hasValidated ? 'Re-run validation' : 'Validate all'}
+            </Button>
             <Button
               variant="outline"
               size="sm"
               className="gap-2 shadow-sm text-xs font-semibold py-1.5 h-9"
-              onClick={() => setAceModalOpen(true)}
+              onClick={handleRunAce}
+              disabled={isAceRunning || isLoading}
             >
-              <Eye className="w-3.5 h-3.5" />
-              View report
+              {isAceRunning ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <ShieldCheck className="w-3.5 h-3.5" />
+              )}
+              {isAceRunning ? `Checking… ${fmtElapsed(aceElapsed)}` : aceReport ? 'Re-run A11y check' : 'Run accessibility check'}
             </Button>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-2 shadow-sm text-xs font-semibold py-1.5 h-9"
-            onClick={handleExport}
-            disabled={isExporting || isLoading || isValidating}
-          >
-            {isExporting ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <Download className="w-3.5 h-3.5" />
-            )}
-            {isExporting ? 'Exporting…' : 'Export EPUB'}
-          </Button>
-        </div>
-      </div>
-
-      {/* Indeterminate progress stripe while validating */}
-      {isValidating && (
-        <div className="h-0.5 w-full bg-muted overflow-hidden relative">
-          <motion.div
-            className="h-full w-1/3 bg-primary rounded-full absolute"
-            animate={{ x: ['-100%', '400%'] }}
-            transition={{ repeat: Infinity, duration: 1.4, ease: 'easeInOut' }}
-          />
-        </div>
-      )}
-
-      {/* ── Content ────────────────────────────────────────────────────────── */}
-      <div className="space-y-6">
-        {/* Validation error banner */}
-        {validationError && (
-          <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-danger/10 border border-danger/20 text-xs text-danger font-sans">
-            <XCircle className="w-4 h-4 flex-shrink-0" />
-            {validationError}
-          </div>
-        )}
-
-        {/* Accessibility check error banner */}
-        {aceError && (
-          <div className="flex items-start justify-between gap-3 px-4 py-3 rounded-lg bg-danger/10 border border-danger/20 text-xs text-danger font-sans">
-            <div className="flex items-start gap-2">
-              <XCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-              <span>{aceError}</span>
-            </div>
-            <button
-              onClick={() => setAceError(null)}
-              className="text-xs font-semibold hover:underline shrink-0"
-            >
-              Dismiss
-            </button>
-          </div>
-        )}
-
-        {/* Export success banner */}
-        <AnimatePresence>
-          {exportSuccess && (
-            <motion.div
-              className="flex items-center gap-2 px-4 py-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-700 dark:bg-emerald-950/30 dark:border-emerald-900/40 dark:text-emerald-400 font-sans"
-              initial={{ opacity: 0, y: -4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              transition={{ duration: 0.2 }}
-            >
-              <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-              EPUB exported successfully — check your downloads.
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* ── 5-stat summary row ─────────────────────────────────────────── */}
-        {!isLoading && xhtmlFiles.length > 0 && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-            <StatCard
-              label="Total Files"
-              value={stats.total}
-              total={stats.total}
-              icon={BookOpen}
-              barColor="bg-primary"
-              valueColor="text-foreground"
-            />
-            <StatCard
-              label="Pending"
-              value={stats.pending}
-              total={stats.total}
-              icon={Clock}
-              barColor="bg-slate-400"
-              valueColor={stats.pending > 0 ? 'text-slate-500' : 'text-foreground'}
-              isActive={activeFilter === 'pending'}
-              onClick={() => toggleFilter('pending')}
-            />
-            <StatCard
-              label="Passed"
-              value={stats.passed}
-              total={stats.total}
-              icon={CheckCircle2}
-              barColor="bg-emerald-500"
-              valueColor={hasValidated ? 'text-emerald-600' : 'text-foreground'}
-              isActive={activeFilter === 'passed'}
-              onClick={() => toggleFilter('passed')}
-            />
-            <StatCard
-              label="Warnings"
-              value={stats.warnings}
-              total={stats.total}
-              icon={AlertTriangle}
-              barColor="bg-amber-400"
-              valueColor={hasValidated && stats.warnings > 0 ? 'text-amber-600' : 'text-foreground'}
-              isActive={activeFilter === 'warning'}
-              onClick={() => toggleFilter('warning')}
-            />
-            <StatCard
-              label="Failed"
-              value={stats.failed}
-              total={stats.total}
-              icon={XCircle}
-              barColor="bg-red-500"
-              valueColor={hasValidated && stats.failed > 0 ? 'text-red-500' : 'text-foreground'}
-              isActive={activeFilter === 'failed'}
-              onClick={() => toggleFilter('failed')}
-            />
-          </div>
-        )}
-
-        {/* ── XHTML file cards ────────────────────────────────────────────── */}
-        {isLoading ? (
-          <SkeletonGrid />
-        ) : isError || !filesData?.status ? (
-          <EmptyState
-            icon={FileCode2}
-            title="Could not load files"
-            description="Make sure the folder is existing and accessible."
-            action={
-              <Button onClick={() => navigate('/post-production/epub-validator')} className="font-semibold text-xs">
-                Back to Dashboard
-              </Button>
-            }
-          />
-        ) : xhtmlFiles.length === 0 ? (
-          <EmptyState
-            icon={FileCode2}
-            title="No XHTML files found"
-            description="This folder doesn't contain any .xhtml files."
-            action={
-              <Button onClick={() => navigate('/post-production/epub-validator')} className="font-semibold text-xs">
-                Back to Dashboard
-              </Button>
-            }
-          />
-        ) : (
-          <>
-          {activeFilter && (
-            <div className="flex items-center justify-between text-xs text-muted-foreground font-sans">
-              <span>
-                Showing <span className="font-medium text-foreground">{visibleFiles.length}</span> {activeFilter} file{visibleFiles.length !== 1 ? 's' : ''}
-              </span>
-              <button
-                onClick={() => setActiveFilter(null)}
-                className="text-xs text-primary hover:underline font-semibold"
+            {aceReport && !isAceRunning && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2 shadow-sm text-xs font-semibold py-1.5 h-9"
+                onClick={() => setAceModalOpen(true)}
               >
-                Clear filter
+                <Eye className="w-3.5 h-3.5" />
+                View report
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2 shadow-sm text-xs font-semibold py-1.5 h-9"
+              onClick={handleExport}
+              disabled={isExporting || isLoading || isValidating}
+            >
+              {isExporting ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Download className="w-3.5 h-3.5" />
+              )}
+              {isExporting ? 'Exporting…' : 'Export EPUB'}
+            </Button>
+          </div>
+        </div>
+
+        {/* Indeterminate progress stripe while validating */}
+        {isValidating && (
+          <div className="h-0.5 w-full bg-muted overflow-hidden relative">
+            <motion.div
+              className="h-full w-1/3 bg-primary rounded-full absolute"
+              animate={{ x: ['-100%', '400%'] }}
+              transition={{ repeat: Infinity, duration: 1.4, ease: 'easeInOut' }}
+            />
+          </div>
+        )}
+
+        {/* ── Content ────────────────────────────────────────────────────────── */}
+        <div className="space-y-6">
+          {/* Validation error banner */}
+          {validationError && (
+            <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-danger/10 border border-danger/20 text-xs text-danger font-sans">
+              <XCircle className="w-4 h-4 flex-shrink-0" />
+              {validationError}
+            </div>
+          )}
+
+          {/* Accessibility check error banner */}
+          {aceError && (
+            <div className="flex items-start justify-between gap-3 px-4 py-3 rounded-lg bg-danger/10 border border-danger/20 text-xs text-danger font-sans">
+              <div className="flex items-start gap-2">
+                <XCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <span>{aceError}</span>
+              </div>
+              <button
+                onClick={() => setAceError(null)}
+                className="text-xs font-semibold hover:underline shrink-0"
+              >
+                Dismiss
               </button>
             </div>
           )}
-          <motion.div
-            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
-            variants={containerVariants}
-            initial="hidden"
-            animate="show"
-          >
-            {visibleFiles.map((file, i) => {
-              const status = getFileStatus(file.file_name);
-              const agg = fileIssues.get(file.file_name);
-              return (
-                <motion.div key={`${file.file_name}-${i}`} variants={xhtmlCardVariants}>
-                  <XHTMLCard
-                     file={file}
-                     status={status}
-                     errors={agg?.errors ?? 0}
-                     warnings={agg?.warnings ?? 0}
-                     isValidating={validatingFiles.has(file.file_name)}
-                     onValidate={() => handleValidateFile(file.file_name)}
-                     onOpen={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
-                     onPreview={() => { setModalAllowedTabs(undefined); setModalInitialTab('preview'); setSelectedFile(file); }}
-                     index={i}
-                  />
-                </motion.div>
-              );
-            })}
-            {(activeFilter ? ncxFiles.filter((f) => getFileStatus(f.file_name) === activeFilter) : ncxFiles).map((file, i) => {
-              const status = getFileStatus(file.file_name);
-              const agg = fileIssues.get(file.file_name);
-              return (
-                <motion.div key={`ncx-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
-                  <XHTMLCard
-                    file={file}
-                    status={status}
-                    errors={agg?.errors ?? 0}
-                    warnings={agg?.warnings ?? 0}
-                    isValidating={validatingFiles.has(file.file_name)}
-                    onValidate={() => handleValidateFile(file.file_name)}
-                    onPreview={() => { setModalAllowedTabs(['result', 'source']); setModalInitialTab('result'); setSelectedFile(file); }}
-                    onOpen={() => { setModalAllowedTabs(['result', 'source']); setModalInitialTab('result'); setSelectedFile(file); }}
-                    index={i}
-                  />
-                </motion.div>
-              );
-            })}
-          </motion.div>
 
-          {/* ── CSS stylesheets section ────────────────────────────────── */}
-          {cssFiles.length > 0 && (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2 pt-2">
-                <Braces className="w-4 h-4 text-violet-500" />
-                <h2 className="text-xs font-bold text-muted-foreground uppercase tracking-widest">
-                  CSS Stylesheets
-                </h2>
-                <span className="text-xs text-muted-foreground font-mono">({cssFiles.length})</span>
-              </div>
+          {/* Export success banner */}
+          <AnimatePresence>
+            {exportSuccess && (
+              <motion.div
+                className="flex items-center gap-2 px-4 py-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-700 dark:bg-emerald-950/30 dark:border-emerald-900/40 dark:text-emerald-400 font-sans"
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.2 }}
+              >
+                <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                EPUB exported successfully — check your downloads.
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* ── 5-stat summary row ─────────────────────────────────────────── */}
+          {!isLoading && xhtmlFiles.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+              <StatCard
+                label="Total Files"
+                value={stats.total}
+                total={stats.total}
+                icon={BookOpen}
+                barColor="bg-primary"
+                valueColor="text-foreground"
+              />
+              <StatCard
+                label="Pending"
+                value={stats.pending}
+                total={stats.total}
+                icon={Clock}
+                barColor="bg-slate-400"
+                valueColor={stats.pending > 0 ? 'text-slate-500' : 'text-foreground'}
+                isActive={activeFilter === 'pending'}
+                onClick={() => toggleFilter('pending')}
+              />
+              <StatCard
+                label="Passed"
+                value={stats.passed}
+                total={stats.total}
+                icon={CheckCircle2}
+                barColor="bg-emerald-500"
+                valueColor={hasValidated ? 'text-emerald-600' : 'text-foreground'}
+                isActive={activeFilter === 'passed'}
+                onClick={() => toggleFilter('passed')}
+              />
+              <StatCard
+                label="Warnings"
+                value={stats.warnings}
+                total={stats.total}
+                icon={AlertTriangle}
+                barColor="bg-amber-400"
+                valueColor={hasValidated && stats.warnings > 0 ? 'text-amber-600' : 'text-foreground'}
+                isActive={activeFilter === 'warning'}
+                onClick={() => toggleFilter('warning')}
+              />
+              <StatCard
+                label="Failed"
+                value={stats.failed}
+                total={stats.total}
+                icon={XCircle}
+                barColor="bg-red-500"
+                valueColor={hasValidated && stats.failed > 0 ? 'text-red-500' : 'text-foreground'}
+                isActive={activeFilter === 'failed'}
+                onClick={() => toggleFilter('failed')}
+              />
+            </div>
+          )}
+
+          {/* ── XHTML file cards ────────────────────────────────────────────── */}
+          {isLoading ? (
+            <SkeletonGrid />
+          ) : isError || !filesData?.status ? (
+            <EmptyState
+              icon={FileCode2}
+              title="Could not load files"
+              description="Make sure the folder is existing and accessible."
+              action={
+                <Button onClick={() => navigate('/post-production/epub-validator')} className="font-semibold text-xs">
+                  Back to Dashboard
+                </Button>
+              }
+            />
+          ) : xhtmlFiles.length === 0 ? (
+            <EmptyState
+              icon={FileCode2}
+              title="No XHTML files found"
+              description="This folder doesn't contain any .xhtml files."
+              action={
+                <Button onClick={() => navigate('/post-production/epub-validator')} className="font-semibold text-xs">
+                  Back to Dashboard
+                </Button>
+              }
+            />
+          ) : (
+            <>
+              {activeFilter && (
+                <div className="flex items-center justify-between text-xs text-muted-foreground font-sans">
+                  <span>
+                    Showing <span className="font-medium text-foreground">{visibleFiles.length}</span> {activeFilter} file{visibleFiles.length !== 1 ? 's' : ''}
+                  </span>
+                  <button
+                    onClick={() => setActiveFilter(null)}
+                    className="text-xs text-primary hover:underline font-semibold"
+                  >
+                    Clear filter
+                  </button>
+                </div>
+              )}
               <motion.div
                 className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
                 variants={containerVariants}
                 initial="hidden"
                 animate="show"
               >
-                {cssFiles.map((file, i) => (
-                  <motion.div key={`css-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
-                    <XHTMLCard
-                      file={file}
-                      variant="css"
-                      status="pending"
-                      onOpen={() => { setModalAllowedTabs(['result', 'source']); setModalInitialTab('result'); setSelectedFile(file); }}
-                      index={i}
-                    />
-                  </motion.div>
-                ))}
+                {visibleFiles.map((file, i) => {
+                  const status = getFileStatus(file.file_name);
+                  const agg = fileIssues.get(file.file_name);
+                  return (
+                    <motion.div key={`${file.file_name}-${i}`} variants={xhtmlCardVariants}>
+                      <XHTMLCard
+                        file={file}
+                        status={status}
+                        errors={agg?.errors ?? 0}
+                        warnings={agg?.warnings ?? 0}
+                        isValidating={validatingFiles.has(file.file_name)}
+                        onValidate={() => handleValidateFile(file.file_name)}
+                        onOpen={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
+                        onPreview={() => { setModalAllowedTabs(undefined); setModalInitialTab('preview'); setSelectedFile(file); }}
+                        index={i}
+                      />
+                    </motion.div>
+                  );
+                })}
+                {(activeFilter ? ncxFiles.filter((f) => getFileStatus(f.file_name) === activeFilter) : ncxFiles).map((file, i) => {
+                  const status = getFileStatus(file.file_name);
+                  const agg = fileIssues.get(file.file_name);
+                  return (
+                    <motion.div key={`ncx-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
+                      <XHTMLCard
+                        file={file}
+                        status={status}
+                        errors={agg?.errors ?? 0}
+                        warnings={agg?.warnings ?? 0}
+                        isValidating={validatingFiles.has(file.file_name)}
+                        onValidate={() => handleValidateFile(file.file_name)}
+                        onPreview={() => { setModalAllowedTabs(['result', 'source']); setModalInitialTab('result'); setSelectedFile(file); }}
+                        onOpen={() => { setModalAllowedTabs(['result', 'source']); setModalInitialTab('result'); setSelectedFile(file); }}
+                        index={i}
+                      />
+                    </motion.div>
+                  );
+                })}
               </motion.div>
-            </div>
+
+              {/* ── CSS stylesheets section ────────────────────────────────── */}
+              {cssFiles.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 pt-2">
+                    <Braces className="w-4 h-4 text-violet-500" />
+                    <h2 className="text-xs font-bold text-muted-foreground uppercase tracking-widest">
+                      CSS Stylesheets
+                    </h2>
+                    <span className="text-xs text-muted-foreground font-mono">({cssFiles.length})</span>
+                  </div>
+                  <motion.div
+                    className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
+                    variants={containerVariants}
+                    initial="hidden"
+                    animate="show"
+                  >
+                    {cssFiles.map((file, i) => (
+                      <motion.div key={`css-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
+                        <XHTMLCard
+                          file={file}
+                          variant="css"
+                          status="pending"
+                          onOpen={() => { setModalAllowedTabs(['result', 'source']); setModalInitialTab('result'); setSelectedFile(file); }}
+                          index={i}
+                        />
+                      </motion.div>
+                    ))}
+                  </motion.div>
+                </div>
+              )}
+            </>
           )}
-          </>
-        )}
-      </div>
-    </motion.div>
+        </div>
+      </motion.div>
     </>
   );
 }
