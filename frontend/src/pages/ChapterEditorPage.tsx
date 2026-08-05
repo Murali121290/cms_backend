@@ -5,16 +5,132 @@
  *
  * Route: …/chapters/:chapterId/view/:subfolder/:filename
  */
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, FileText, Save, Loader2, Download } from 'lucide-react'
 import { DocxViewer } from '@/components/DocxViewer'
-import { SourceEditor } from '@/components/epub_validator/SourceEditor'
+import { SourceEditor, SourceEditorRef, formatXmlString } from '@/components/epub_validator/SourceEditor'
 import 'pdfjs-viewer-element'
 import { projectsApi } from '@/api/projects'
 import { chaptersApi } from '@/api/chapters'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import { toast } from '@/store/useToastStore'
+
+interface LintError {
+  line: number;
+  message: string;
+}
+
+interface OutlineItem {
+  tagName: string;
+  line: number;
+  children: OutlineItem[];
+}
+
+const parseLogErrors = (log: string | null): LintError[] => {
+  if (!log) return [];
+  const errors: LintError[] = [];
+  const lines = log.split('\n');
+  const regex = /:(\d+):\s*(?:validity error\s*:\s*)?(.+)/i;
+  
+  for (const line of lines) {
+    const match = line.match(regex);
+    if (match) {
+      const lineNo = parseInt(match[1], 10);
+      const message = match[2].trim();
+      if (message && message !== '^' && !message.includes('Validation failed: no DTD found')) {
+        errors.push({ line: lineNo, message });
+      }
+    }
+  }
+  return errors;
+};
+
+const parseXmlOutline = (xml: string | null): OutlineItem[] => {
+  if (!xml) return [];
+  const outline: OutlineItem[] = [];
+  const lines = xml.split('\n');
+  const stack: OutlineItem[] = [];
+  
+  for (let i = 0; i < lines.length; i++) {
+    const lineText = lines[i];
+    const tagRegex = /<(\/)?([a-zA-Z0-9_\-]+)(?:\s+[^>]*)*(\/)?>/g;
+    let match;
+    while ((match = tagRegex.exec(lineText)) !== null) {
+      const isClosing = !!match[1];
+      const tagName = match[2];
+      const isSelfClosing = !!match[3];
+      
+      if (tagName.startsWith('?') || tagName.startsWith('!')) continue;
+      
+      if (['strong', 'em', 'italic', 'bold', 'sub', 'sup', 'xref', 'link', 'mml:math', 'mml:mrow', 'tab'].includes(tagName.toLowerCase())) {
+        continue;
+      }
+      
+      if (isClosing) {
+        stack.pop();
+      } else {
+        const item: OutlineItem = {
+          tagName,
+          line: i + 1,
+          children: []
+        };
+        
+        if (stack.length === 0) {
+          outline.push(item);
+        } else {
+          stack[stack.length - 1].children.push(item);
+        }
+        
+        if (!isSelfClosing) {
+          stack.push(item);
+        }
+      }
+    }
+  }
+  return outline;
+};
+
+function OutlineNode({ node, onSelect }: { node: OutlineItem; onSelect: (line: number) => void }) {
+  const [expanded, setExpanded] = useState(true);
+  const hasChildren = node.children.length > 0;
+  
+  return (
+    <div className="pl-3 font-sans text-xs select-none">
+      <div className="flex items-center py-1 hover:bg-gray-100 rounded cursor-pointer group">
+        {hasChildren ? (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpanded(!expanded);
+            }}
+            className="w-4 h-4 flex items-center justify-center text-gray-400 hover:text-gray-600 mr-1"
+          >
+            {expanded ? '▼' : '▶'}
+          </button>
+        ) : (
+          <span className="w-4 mr-1" />
+        )}
+        <span
+          onClick={() => onSelect(node.line)}
+          className="text-blue-600 hover:underline font-mono"
+        >
+          &lt;{node.tagName}&gt;
+        </span>
+        <span className="text-[10px] text-gray-400 ml-auto pr-2 opacity-0 group-hover:opacity-100 transition-opacity">
+          L{node.line}
+        </span>
+      </div>
+      {hasChildren && expanded && (
+        <div className="border-l border-gray-200 ml-2">
+          {node.children.map((child, idx) => (
+            <OutlineNode key={idx} node={child} onSelect={onSelect} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function ChapterEditorPage() {
   const { projectId, chapterId, subfolder, filename } = useParams<{
@@ -34,6 +150,149 @@ export function ChapterEditorPage() {
   const [xmlLoading, setXmlLoading] = useState(false)
   const [xmlSaving, setXmlSaving] = useState(false)
   const [isXmlDirty, setIsXmlDirty] = useState(false)
+
+  const [showOutline, setShowOutline] = useState(true)
+  const [showLog, setShowLog] = useState(true)
+  const [activeRightTab, setActiveRightTab] = useState<'log' | 'xpath'>('log')
+  const [xpathQuery, setXpathQuery] = useState('//title')
+  const [xpathResults, setXpathResults] = useState<{ line: number; tagName: string; text: string }[]>([])
+  const [xpathError, setXpathError] = useState<string | null>(null)
+  
+  const xmlEditorRef = useRef<SourceEditorRef | null>(null)
+  
+  // XML metrics (Well-formedness check + tags count + words count)
+  const xmlMetrics = useMemo(() => {
+    if (!xmlContent) return { isValid: true, elementsCount: 0, wordsCount: 0 };
+    
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(xmlContent, 'application/xml');
+    const parserError = xmlDoc.getElementsByTagName('parsererror')[0];
+    
+    let isValid = true;
+    let line: number | undefined;
+    let message: string | undefined;
+    
+    if (parserError) {
+      isValid = false;
+      message = parserError.textContent || 'XML syntax error';
+      const lineMatch = message.match(/line\s+(\d+)/i) || message.match(/:(\d+):\s*(\d+)/);
+      line = lineMatch ? parseInt(lineMatch[1], 10) : undefined;
+    }
+    
+    const elementsCount = isValid ? xmlDoc.getElementsByTagName('*').length : 0;
+    
+    const cleanText = xmlContent.replace(/<[^>]*>/g, ' ').trim();
+    const wordsCount = cleanText ? cleanText.split(/\s+/).filter(w => w.length > 0).length : 0;
+    
+    return {
+      isValid,
+      line,
+      message,
+      elementsCount,
+      wordsCount
+    };
+  }, [xmlContent]);
+
+  // Combine server-side DTD errors and client-side well-formedness errors
+  const xmlErrors = useMemo(() => {
+    const errors = parseLogErrors(logContent);
+    if (!xmlMetrics.isValid && xmlMetrics.line) {
+      errors.push({
+        line: xmlMetrics.line,
+        message: `Syntax Error: ${xmlMetrics.message}`
+      });
+    }
+    return errors;
+  }, [logContent, xmlMetrics]);
+
+  const xmlOutline = useMemo(() => parseXmlOutline(xmlContent), [xmlContent])
+  
+  const handleOutlineNodeSelect = (lineNum: number) => {
+    xmlEditorRef.current?.scrollToLine(lineNum)
+  }
+
+  const handleFormatXml = () => {
+    if (!xmlContent) return
+    try {
+      const formatted = formatXmlString(xmlContent)
+      setXmlContent(formatted)
+      setIsXmlDirty(true)
+      toast.success('XML formatted successfully')
+    } catch (e) {
+      toast.error('Failed to format XML')
+    }
+  }
+
+  const handleEvaluateXPath = () => {
+    if (!xmlContent || !xpathQuery.trim()) return;
+    setXpathError(null);
+    setXpathResults([]);
+    
+    try {
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(xmlContent, 'application/xml');
+      const parserError = xmlDoc.getElementsByTagName('parsererror')[0];
+      if (parserError) {
+        throw new Error('XML is not well-formed. Fix syntax errors before running XPath queries.');
+      }
+      
+      const resolver = xmlDoc.createNSResolver(
+        xmlDoc.ownerDocument === null ? xmlDoc.documentElement : xmlDoc.ownerDocument.documentElement
+      );
+      
+      const result = xmlDoc.evaluate(
+        xpathQuery,
+        xmlDoc,
+        resolver,
+        XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
+        null
+      );
+      
+      const matches: { line: number; tagName: string; text: string }[] = [];
+      const lines = xmlContent.split('\n');
+      
+      for (let i = 0; i < result.snapshotLength; i++) {
+        const node = result.snapshotItem(i);
+        let tagName = node.nodeName || 'Match';
+        let textVal = node.textContent?.trim() || '';
+        
+        if (node.nodeType === Node.ATTRIBUTE_NODE) {
+          tagName = `@${(node as Attr).name}`;
+          textVal = (node as Attr).value;
+        } else if (node.nodeType === Node.TEXT_NODE) {
+          tagName = '#text';
+          textVal = node.nodeValue?.trim() || '';
+        }
+        
+        let lineNum = 1;
+        const outerHTML = (node as Element).outerHTML;
+        const searchVal = outerHTML ? outerHTML.split('\n')[0].trim() : textVal;
+        
+        for (let idx = 0; idx < lines.length; idx++) {
+          if (lines[idx].includes(searchVal) || (textVal && lines[idx].includes(textVal))) {
+            lineNum = idx + 1;
+            break;
+          }
+        }
+        
+        matches.push({
+          line: lineNum,
+          tagName,
+          text: textVal
+        });
+      }
+      
+      setXpathResults(matches);
+      if (matches.length === 0) {
+        toast.info('XPath evaluation: 0 matches found');
+      } else {
+        toast.success(`XPath evaluated: ${matches.length} matches found`);
+      }
+    } catch (err: any) {
+      setXpathError(err.message || 'XPath evaluation failed');
+      toast.error('XPath evaluation failed');
+    }
+  };
 
   useEffect(() => {
     if (!chapterId || !projectId) return
@@ -280,40 +539,167 @@ export function ChapterEditorPage() {
               <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
             </div>
           ) : (
-            <div className="flex h-full w-full">
+            <div className="flex h-full w-full overflow-hidden">
+              {/* Collapsible Outline Panel */}
+              {showOutline && (
+                <div className="w-64 h-full border-r border-gray-200 bg-white flex flex-col overflow-hidden flex-shrink-0">
+                  <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-700 uppercase tracking-wider flex-shrink-0">
+                    Document Outline
+                  </div>
+                  <div className="flex-1 overflow-auto p-2">
+                    {xmlOutline.length === 0 ? (
+                      <div className="text-gray-400 text-center py-4 text-xs font-sans">No elements found</div>
+                    ) : (
+                      xmlOutline.map((node, idx) => (
+                        <OutlineNode key={idx} node={node} onSelect={handleOutlineNodeSelect} />
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Left Panel: XML Editor */}
-              <div className="w-1/2 h-full border-r border-gray-200 flex flex-col">
-                <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-700 uppercase tracking-wider flex items-center justify-between flex-shrink-0">
-                  <span>XML Source</span>
-                  {isXmlDirty && <span className="text-amber-600 normal-case font-normal font-sans">Unsaved changes</span>}
+              <div className={`${showLog ? 'w-1/2' : 'flex-1'} h-full border-r border-gray-200 flex flex-col overflow-hidden`}>
+                <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-700 uppercase tracking-wider flex items-center justify-between flex-shrink-0 select-none">
+                  <div className="flex items-center gap-2">
+                    <span>XML Source</span>
+                    {isXmlDirty && <span className="text-amber-600 normal-case font-normal font-sans text-[11px] ml-2">Unsaved changes</span>}
+                  </div>
+                  <div className="flex items-center gap-1.5 normal-case font-medium">
+                    <button
+                      type="button"
+                      onClick={() => setShowOutline(!showOutline)}
+                      className={`px-2 py-0.5 rounded border text-[11px] transition-colors flex items-center gap-1 ${showOutline ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                    >
+                      Outline
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (xmlMetrics.isValid) {
+                          toast.success('✓ XML Document is Well-Formed!');
+                        } else {
+                          if (xmlMetrics.line) {
+                            xmlEditorRef.current?.scrollToLine(xmlMetrics.line);
+                            toast.error(`✗ Syntax Error on Line ${xmlMetrics.line}`);
+                          } else {
+                            toast.error(`✗ Syntax Error: ${xmlMetrics.message}`);
+                          }
+                        }
+                      }}
+                      className={`px-2 py-0.5 rounded border text-[11px] transition-colors ${xmlMetrics.isValid ? 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50' : 'bg-red-50 text-red-700 border-red-200 font-semibold'}`}
+                    >
+                      Check Well-Formedness
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleFormatXml}
+                      disabled={!isEditable}
+                      className="px-2 py-0.5 rounded border text-[11px] bg-white text-gray-600 border-gray-200 hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Format XML
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowLog(!showLog)}
+                      className={`px-2 py-0.5 rounded border text-[11px] transition-colors ${showLog ? 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50' : 'bg-amber-50 text-amber-700 border-amber-200'}`}
+                    >
+                      {showLog ? 'Hide Log' : 'Show Log'}
+                    </button>
+                  </div>
                 </div>
                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
                   <SourceEditor
+                    ref={xmlEditorRef}
                     value={xmlContent ?? ''}
                     onChange={(val) => {
                       setXmlContent(val)
                       setIsXmlDirty(true)
                     }}
                     readOnly={!isEditable}
+                    errors={xmlErrors}
                     className="flex-1 min-h-0"
                   />
                 </div>
               </div>
               
-              {/* Right Panel: Log (Read-only) */}
-              <div className="w-1/2 h-full flex flex-col bg-gray-50">
-                <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-700 uppercase tracking-wider flex-shrink-0">
-                  <span>Conversion Log</span>
+              {/* Right Panel: Log or XPath (Read-only) */}
+              {showLog && (
+                <div className="w-1/2 h-full flex flex-col bg-gray-50 overflow-hidden">
+                  <div className="flex bg-gray-100 border-b border-gray-200 h-9 flex-shrink-0 select-none">
+                    <button
+                      type="button"
+                      onClick={() => setActiveRightTab('log')}
+                      className={`flex-1 text-[11px] font-semibold uppercase tracking-wider transition-colors border-b-2 ${activeRightTab === 'log' ? 'border-blue-600 text-blue-600 bg-white' : 'border-transparent text-gray-500 hover:bg-gray-50 hover:text-gray-700'}`}
+                    >
+                      Conversion Log
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveRightTab('xpath')}
+                      className={`flex-1 text-[11px] font-semibold uppercase tracking-wider transition-colors border-b-2 ${activeRightTab === 'xpath' ? 'border-blue-600 text-blue-600 bg-white' : 'border-transparent text-gray-500 hover:bg-gray-50 hover:text-gray-700'}`}
+                    >
+                      XPath Evaluator
+                    </button>
+                  </div>
+                  <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                    {activeRightTab === 'log' ? (
+                      <SourceEditor
+                        value={logContent ?? 'Loading log...'}
+                        onChange={() => {}}
+                        readOnly={true}
+                        onLogLineClick={handleOutlineNodeSelect}
+                        className="flex-1 min-h-0 bg-gray-50 opacity-80"
+                      />
+                    ) : (
+                      <div className="flex-1 flex flex-col p-4 gap-3 overflow-hidden bg-white">
+                        <div className="flex gap-2 flex-shrink-0">
+                          <input
+                            type="text"
+                            value={xpathQuery}
+                            onChange={(e) => setXpathQuery(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') handleEvaluateXPath(); }}
+                            placeholder="e.g. //title or //xref"
+                            className="flex-1 px-3 py-1.5 border border-gray-300 rounded-lg text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleEvaluateXPath}
+                            className="px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors flex-shrink-0"
+                          >
+                            Evaluate
+                          </button>
+                        </div>
+                        
+                        <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider flex-shrink-0">
+                          Matches
+                        </div>
+                        
+                        <div className="flex-1 border border-gray-200 rounded-lg overflow-y-auto bg-gray-50 font-mono text-[11px]">
+                          {xpathError ? (
+                            <div className="p-3 text-red-600">{xpathError}</div>
+                          ) : xpathResults.length === 0 ? (
+                            <div className="p-3 text-gray-400 text-center text-xs font-sans">
+                              Enter XPath query and click evaluate
+                            </div>
+                          ) : (
+                            xpathResults.map((match, idx) => (
+                              <div
+                                key={idx}
+                                onClick={() => handleOutlineNodeSelect(match.line)}
+                                className="p-2 border-b border-gray-200 hover:bg-gray-100 cursor-pointer transition-colors flex flex-col gap-0.5"
+                              >
+                                <span className="text-blue-700 font-semibold">&lt;{match.tagName}&gt; (Line {match.line})</span>
+                                <span className="text-gray-600 truncate">{match.text || '(empty)'}</span>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                  <SourceEditor
-                    value={logContent ?? 'Loading log...'}
-                    onChange={() => {}}
-                    readOnly={true}
-                    className="flex-1 min-h-0 bg-gray-50 opacity-80"
-                  />
-                </div>
-              </div>
+              )}
             </div>
           )
         ) : (
@@ -328,6 +714,24 @@ export function ChapterEditorPage() {
           </div>
         )}
       </div>
+      {ext === 'xml' && !xmlLoading && (
+        <footer className="h-7 bg-white border-t border-gray-200 px-4 flex items-center justify-between text-[11px] text-gray-500 font-sans select-none flex-shrink-0">
+          <div
+            onClick={() => {
+              if (!xmlMetrics.isValid && xmlMetrics.line) {
+                xmlEditorRef.current?.scrollToLine(xmlMetrics.line);
+              }
+            }}
+            className={`flex items-center gap-1.5 font-medium cursor-pointer ${xmlMetrics.isValid ? 'text-green-600 hover:underline' : 'text-red-600 hover:underline animate-pulse'}`}
+          >
+            {xmlMetrics.isValid ? '✓ Well-formed' : `✗ Syntax Error (Line ${xmlMetrics.line ?? '?'})`}
+          </div>
+          <div className="flex gap-4">
+            <span>Elements: {xmlMetrics.elementsCount}</span>
+            <span>Words: {xmlMetrics.wordsCount}</span>
+          </div>
+        </footer>
+      )}
     </div>
   )
 }

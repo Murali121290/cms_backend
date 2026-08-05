@@ -5,6 +5,7 @@ import redis
 import shutil
 import tempfile
 import logging
+import time
 from sqlalchemy.orm import Session
 from datetime import datetime
 
@@ -23,7 +24,8 @@ class XMLToInDesignEngine:
         template_file_id: int,
         user_id: int,
         upload_dir: str,
-        logger
+        logger,
+        job_id: int | None = None,
     ) -> list[str]:
         """
         Zips up the XML, the template (.indt), related art files (Links),
@@ -121,24 +123,117 @@ class XMLToInDesignEngine:
                                 zf.write(full_file_path, rel_path)
                                 
                 # Add Chapter Art files (Links) packaged under 'artfile/'
-                art_folder = os.path.join(chapter_dir, "Art")
-                if os.path.exists(art_folder):
+                art_folder = None
+                
+                # Candidate 1: chapter_dir/Art
+                c1 = os.path.join(chapter_dir, "Art")
+                if os.path.exists(c1) and os.path.isdir(c1):
+                    art_folder = c1
+                else:
+                    # Candidate 2: lowercase art folder
+                    c2 = os.path.join(chapter_dir, "art")
+                    if os.path.exists(c2) and os.path.isdir(c2):
+                        art_folder = c2
+                        
+                # Candidate 3: Search project level for chapter art folders like "Ch 01 - Art/Art"
+                if not art_folder:
+                    ch_num = chapter.number.strip()
+                    ch_num_clean = ch_num.lstrip('0') if ch_num.lstrip('0') else '0'
+                    ch_num_padded = ch_num.zfill(2)
+                    
+                    possible_names = [
+                        f"Ch {ch_num} - Art",
+                        f"Ch {ch_num_clean} - Art",
+                        f"Ch {ch_num_padded} - Art",
+                        f"Ch_{ch_num}_Art",
+                        f"Ch_{ch_num_clean}_Art",
+                        f"Ch_{ch_num_padded}_Art",
+                        f"Chapter {ch_num} - Art",
+                        f"Chapter {ch_num_clean} - Art",
+                        f"Chapter {ch_num_padded} - Art",
+                        f"Ch {ch_num}",
+                        f"Ch {ch_num_clean}",
+                        f"Ch {ch_num_padded}",
+                        f"Chapter {ch_num}",
+                        f"Chapter {ch_num_clean}",
+                        f"Chapter {ch_num_padded}",
+                    ]
+                    
+                    if os.path.exists(project_dir):
+                        for entry in os.listdir(project_dir):
+                            entry_path = os.path.join(project_dir, entry)
+                            if os.path.isdir(entry_path):
+                                entry_lower = entry.lower()
+                                matched = False
+                                for name in possible_names:
+                                    if entry_lower == name.lower():
+                                        matched = True
+                                        break
+                                if matched:
+                                    for sub in ["Art", "art"]:
+                                        sub_path = os.path.join(entry_path, sub)
+                                        if os.path.exists(sub_path) and os.path.isdir(sub_path):
+                                            art_folder = sub_path
+                                            break
+                                    if art_folder:
+                                        break
+
+                if art_folder and os.path.exists(art_folder):
+                    logger.info(f"Packaging art files from folder: {art_folder}")
                     for root, _, files in os.walk(art_folder):
                         for file in files:
                             full_file_path = os.path.join(root, file)
                             rel_path = os.path.relpath(full_file_path, art_folder)
                             zf.write(full_file_path, os.path.join("artfile", rel_path))
+                else:
+                    logger.warning(f"Could not locate art folder for chapter {chapter.number} (searched project dir {project_dir})")
                             
-            # 5. Call InDesign Server using Redis Lock
+            # 5. Call InDesign Server using Redis Lock (prioritized locker loop)
             if not settings.INDESIGN_SERVER_URL:
                 raise ValueError("Windows InDesign Conversion Server is not configured. Please set INDESIGN_SERVER_URL.")
                 
             url = f"{settings.INDESIGN_SERVER_URL.rstrip('/')}/convert-xml-to-indesign"
             redis_client = redis.from_url(settings.REDIS_URL)
-            lock = redis_client.lock("indesign_conversion_lock", timeout=1200, blocking_timeout=1200)
+            lock = redis_client.lock("indesign_conversion_lock", timeout=1200)
             
-            logger.info("Attempting to acquire InDesign conversion lock (Redis)...")
-            with lock:
+            job = db.query(models.ProcessingJob).filter(models.ProcessingJob.id == job_id).first() if job_id else None
+            
+            logger.info(f"Job {job_id} entering prioritization lock loop...")
+            while True:
+                if job:
+                    db.refresh(job)
+                    if job.status == "cancelled":
+                        logger.info(f"Job {job_id} was cancelled by user. Exiting.")
+                        return []
+                
+                # Check for higher priority jobs waiting
+                higher_job = None
+                if job:
+                    higher_job = db.query(models.ProcessingJob).filter(
+                        models.ProcessingJob.status.in_(["pending", "processing"]),
+                        models.ProcessingJob.id != job.id,
+                        models.ProcessingJob.process_type.in_([
+                            "xml_to_indesign",
+                            "post_prod_conversion",
+                            "ppd",
+                            "reference_validation"
+                        ])
+                    ).filter(
+                        (models.ProcessingJob.priority > job.priority) |
+                        ((models.ProcessingJob.priority == job.priority) & (models.ProcessingJob.id < job.id))
+                    ).first()
+                
+                if higher_job:
+                    time.sleep(2)
+                    continue
+                
+                # Try to acquire lock
+                acquired = lock.acquire(blocking=False)
+                if acquired:
+                    break
+                time.sleep(2)
+
+            try:
                 logger.info(f"Lock acquired. Sending remote InDesign XML conversion request to: {url}")
                 client_name = project.client_name or ""
                 with open(temp_zip_path, "rb") as zf_in:
@@ -150,6 +245,17 @@ class XMLToInDesignEngine:
                     )
                 if response.status_code != 200:
                     raise RuntimeError(f"Remote InDesign server returned status code {response.status_code}. Response: {response.text}")
+            finally:
+                try:
+                    lock.release()
+                except Exception:
+                    pass
+
+            if job:
+                db.refresh(job)
+                if job.status == "cancelled":
+                    logger.info(f"Job {job_id} was cancelled during conversion. Discarding output.")
+                    return []
                     
             # 6. Save response content (INDD file directly)
             indd_filename = f"{xml_base}.indd"
