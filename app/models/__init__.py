@@ -118,7 +118,7 @@ from app.domains.workflow.models import (  # noqa: F401
     WorkflowMaster,
     ChapterInfo,
 )
-from app.domains.post_prod.epub_validator.models import EpubBook, EpubBookEvent  # noqa: F401
+from app.domains.post_prod.epub_validator.models import EvProject, EvHistory  # noqa: F401
 
 Chapter = ChapterInfo
 

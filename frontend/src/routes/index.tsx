@@ -128,7 +128,7 @@ const router = createBrowserRouter([
       { path: 'post-production/word-conversion/:projectId', element: <PostProdGuard><PostProdChaptersPage /></PostProdGuard> },
       { path: 'post-production/epub-css-matcher', element: <PostProdGuard><PostProdCssMatcher /></PostProdGuard> },
       { path: 'post-production/epub-validator', element: <PostProdGuard><PostProdEpubValidator /></PostProdGuard> },
-      { path: 'post-production/epub-validator/:folderName', element: <PostProdGuard><PostProdEpubValidatorFiles /></PostProdGuard> },
+      { path: 'post-production/epub-validator/:projectId', element: <PostProdGuard><PostProdEpubValidatorFiles /></PostProdGuard> },
       { path: 'post-production/slide-formatter', element: <PostProdGuard><PostProdSlideFormatter /></PostProdGuard> },
       { path: 'reports', element: <ReportsPage /> },
       { path: 'reports/schedule', element: <ScheduleReport /> },
