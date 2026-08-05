@@ -47,7 +47,7 @@ def run_post_prod_conversion_task(chapter_id: int):
     import redis
     import logging
     from app.core.config import get_settings
-    from app.domains.post_prod.api_v1 import run_conversion_background
+    from app.domains.post_prod.word_conversion.converter import run_conversion_background
     from app.database import SessionLocal
 
     logger = logging.getLogger("app.worker.post_prod")

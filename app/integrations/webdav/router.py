@@ -396,7 +396,7 @@ async def webdav_post_prod_options(chapter_id: int, token: str, filename: str):
 # HEAD
 @router.head("/post-prod/chapters/{chapter_id}/{token}/{filename}")
 async def webdav_post_prod_head(chapter_id: int, token: str, filename: str, db: Session = Depends(database.get_db)):
-    from app.domains.post_prod.models import PostProdChapter
+    from app.domains.post_prod.word_conversion.models import PostProdChapter
     chapter = db.query(PostProdChapter).filter(PostProdChapter.id == chapter_id).first()
     if not chapter or not chapter.converted_file_path or not os.path.exists(chapter.converted_file_path):
         raise HTTPException(status_code=404, detail="Chapter file not found")
@@ -411,7 +411,7 @@ async def webdav_post_prod_head(chapter_id: int, token: str, filename: str, db: 
 # GET
 @router.get("/post-prod/chapters/{chapter_id}/{token}/{filename}")
 async def webdav_post_prod_get(chapter_id: int, token: str, filename: str, db: Session = Depends(database.get_db)):
-    from app.domains.post_prod.models import PostProdChapter
+    from app.domains.post_prod.word_conversion.models import PostProdChapter
     chapter = db.query(PostProdChapter).filter(PostProdChapter.id == chapter_id).first()
     if not chapter or not chapter.converted_file_path or not os.path.exists(chapter.converted_file_path):
         raise HTTPException(status_code=404, detail="Chapter file not found")
@@ -432,7 +432,7 @@ async def webdav_post_prod_propfind_explicit(chapter_id: int, token: str, filena
     return await _handle_post_prod_propfind(chapter_id, token, filename, db)
 
 async def _handle_post_prod_propfind(chapter_id: int, token: str, filename: str, db: Session):
-    from app.domains.post_prod.models import PostProdChapter
+    from app.domains.post_prod.word_conversion.models import PostProdChapter
     chapter = db.query(PostProdChapter).filter(PostProdChapter.id == chapter_id).first()
     if not chapter or not chapter.converted_file_path or not os.path.exists(chapter.converted_file_path):
         raise HTTPException(status_code=404, detail="Chapter file not found")
@@ -496,8 +496,8 @@ async def webdav_post_prod_put(chapter_id: int, token: str, filename: str, reque
     token_payload = _decode_token(token)
     if not token_payload:
         raise HTTPException(status_code=401, detail="Unauthorized WebDAV PUT")
-    
-    from app.domains.post_prod.models import PostProdChapter
+
+    from app.domains.post_prod.word_conversion.models import PostProdChapter
     chapter = db.query(PostProdChapter).filter(PostProdChapter.id == chapter_id).first()
     if not chapter or not chapter.converted_file_path:
         raise HTTPException(status_code=404, detail="Chapter not found")

@@ -1,16 +1,17 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, Boolean
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database import Base
 
+
 class PostProdProject(Base):
-    __tablename__ = "post_prod_projects"
+    __tablename__ = "post_prod_wc_projects"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     client = Column(String(255), nullable=False)
     client_code = Column(String(100), nullable=True)
     project_name = Column(String(255), nullable=False)
-    status = Column(String(50), default="Active")  # e.g., "Active", "Completed"
+    status = Column(String(50), default="Active")
     assignee = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     is_deleted = Column(Boolean, default=False, nullable=False)
@@ -23,8 +24,9 @@ class PostProdProject(Base):
         cascade="all, delete-orphan"
     )
 
+
 class PostProdChapter(Base):
-    __tablename__ = "post_prod_chapters"
+    __tablename__ = "post_prod_wc_chapters"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     client_code = Column(String(100), nullable=True)
@@ -53,4 +55,3 @@ class PostProdChapter(Base):
         foreign_keys="[PostProdChapter.project_name, PostProdChapter.client_code]",
         back_populates="chapters"
     )
-

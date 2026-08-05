@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Upload, BookOpen, Download, AlertCircle, CheckCircle2,
-  AlertTriangle, Info, ChevronDown, ChevronUp, RefreshCw, FileText, FileCode, Play, X
+  AlertTriangle, ChevronDown, ChevronUp, RefreshCw, FileText, FileCode, Play, X
 } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { Button } from '@/components/ui/Button'
@@ -178,7 +178,7 @@ export function PostProdCssMatcher() {
     formData.append('expected_sidecars', expectedSidecars)
 
     try {
-      const res = await fetch('/api/v2/post-prod/css-matcher/analyze', {
+      const res = await fetch('/api/v2/css-matcher/analyze', {
         method: 'POST',
         body: formData
       })
