@@ -99,20 +99,60 @@ export async function getPdfPage(
   }
 }
 
-export async function getBooks(): Promise<Book[]> {
+// ─── Project-based CRUD (new pattern matching Word Conversion) ───────────────
+
+export interface EvProject {
+  id: number;
+  client: string;
+  client_code: string | null;
+  project_name: string;
+  folder_name: string;
+  epub_path: string;
+  total_files: number;
+  status: string;
+  validation_status: string | null;
+  assignee: string | null;
+  uploaded_by_id: number | null;
+  uploaded_at: string;
+  updated_at: string;
+}
+
+export async function listProjects(): Promise<EvProject[]> {
   try {
-    const { data } = await api.get<Book[]>('/post-prod/epub-validator/books');
+    const { data } = await api.get<EvProject[]>('/post-prod/epub-validator/projects');
     return data;
   } catch (err) {
-    throw new Error(getApiErrorMessage(err, 'Failed to load books'));
+    throw new Error(getApiErrorMessage(err, 'Failed to load projects'));
   }
 }
 
-export async function deleteBook(folderName: string): Promise<void> {
+export async function createProject(formData: FormData): Promise<{ message: string; project: EvProject }> {
   try {
-    await api.delete(`/post-prod/epub-validator/books/${folderName}`);
+    const { data } = await api.post<{ message: string; project: EvProject }>(
+      '/post-prod/epub-validator/projects',
+      formData,
+      { headers: { 'Content-Type': 'multipart/form-data' } },
+    );
+    return data;
   } catch (err) {
-    throw new Error(getApiErrorMessage(err, 'Failed to delete book'));
+    throw new Error(getApiErrorMessage(err, 'Failed to create project'));
+  }
+}
+
+export async function updateProject(projectId: number, payload: { assignee?: string }): Promise<EvProject> {
+  try {
+    const { data } = await api.put<EvProject>(`/post-prod/epub-validator/projects/${projectId}`, payload);
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to update project'));
+  }
+}
+
+export async function deleteProject(projectId: number): Promise<void> {
+  try {
+    await api.delete(`/post-prod/epub-validator/projects/${projectId}`);
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to delete project'));
   }
 }
 

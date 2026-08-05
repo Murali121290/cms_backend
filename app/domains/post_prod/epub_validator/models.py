@@ -1,75 +1,75 @@
 from datetime import datetime
 
-from sqlalchemy import (
-    BigInteger,
-    Boolean,
-    Column,
-    DateTime,
-    ForeignKey,
-    Integer,
-    String,
-    Text,
-)
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
-from sqlalchemy.types import JSON, TypeDecorator
 
 from app.database import Base
 
 
-class _DialectJSONB(TypeDecorator):
-    impl = JSON
-    cache_ok = True
+class EvProject(Base):
+    """One row per uploaded EPUB book in the EPUB Validator tool.
 
-    def load_dialect_impl(self, dialect):
-        if dialect.name == "postgresql":
-            from sqlalchemy.dialects.postgresql import JSONB
-            return dialect.type_descriptor(JSONB)
-        return dialect.type_descriptor(JSON)
+    Replaces the legacy EpubBook / EpubBookEvent models.
+    Disk layout: <UPLOAD_DIR>/<folder_name>/  (flat, unique slug)
+    """
 
-
-class EpubBook(Base):
-    __tablename__ = "epub_validator_books"
+    __tablename__ = "post_prod_ev_projects"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    folder_name = Column(String(255), unique=True, nullable=False, index=True)
-    title = Column(String(500), nullable=True)
-    customer = Column(String(255), nullable=True)
-    epub_path = Column(Text, nullable=False)
+
+    # Client info (from the Clients table at upload time — stored as strings so
+    # the record survives client renames / deletions)
+    client = Column(String(255), nullable=False)          # company display name
+    client_code = Column(String(100), nullable=True)      # division / client code
+
+    # Project identification
+    project_name = Column(String(255), nullable=False)    # user-typed at upload
+    folder_name = Column(String(255), unique=True, nullable=False, index=True)  # disk key / slug
+
+    # EPUB metadata
+    epub_path = Column(Text, nullable=False)              # abs path to extracted epub/
     total_files = Column(Integer, nullable=False, default=0)
-    # uploaded → validating → validated | failed
+
+    # Lifecycle status
+    # "uploaded" → "validated" | "failed"
     status = Column(String(50), nullable=False, default="uploaded")
-    # pass | fail | mixed | null
+    # "pass" | "fail" | null (null means never validated)
     validation_status = Column(String(50), nullable=True)
-    uploaded_by_id = Column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    # Assignee username (free string, mirrors WC pattern)
+    assignee = Column(String(255), nullable=True)
+
+    # Audit
+    uploaded_by_id = Column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     uploaded_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
     is_deleted = Column(Boolean, nullable=False, default=False)
 
     uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
-    events = relationship(
-        "EpubBookEvent",
-        back_populates="book",
-        cascade="all, delete-orphan",
-        order_by="EpubBookEvent.created_at.desc()",
-    )
 
 
-class EpubBookEvent(Base):
-    __tablename__ = "epub_validator_book_events"
+class EvHistory(Base):
+    """Assignee change history for post_prod_ev_projects."""
+
+    __tablename__ = "post_prod_ev_history"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    book_id = Column(
+    project_id = Column(
         Integer,
-        ForeignKey("epub_validator_books.id", ondelete="CASCADE"),
+        ForeignKey("post_prod_ev_projects.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
-    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
-    # upload | validate | edit | delete
-    action = Column(String(50), nullable=False, index=True)
-    # Structured diff: {"field": {"old": ..., "new": ...}, ...} or free-form summary.
-    changes = Column(_DialectJSONB, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    changed_by_id = Column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    changed_by_username = Column(String(255), nullable=True)
+    old_assignee = Column(String(255), nullable=True)
+    new_assignee = Column(String(255), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
-    book = relationship("EpubBook", back_populates="events")
-    user = relationship("User", foreign_keys=[user_id])
+    project = relationship("EvProject", foreign_keys=[project_id])
+    changed_by = relationship("User", foreign_keys=[changed_by_id])
