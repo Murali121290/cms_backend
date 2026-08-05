@@ -1314,7 +1314,9 @@ export function ChapterFilePage({
         projectId={pid}
         chapterId={cid}
         chapterName={chapterFolderData?.chapter_name ?? resolvedChapterLabel}
-        subfolder={activeFolderConfig[activeFolder]?.label || activeFolder}
+        subfolder={activeFolderConfig[activeFolder]?.parent
+          ? `${activeFolderConfig[activeFolder].parent}/${activeFolderConfig[activeFolder].label}`
+          : (activeFolderConfig[activeFolder]?.label || activeFolder)}
         stageName={resolvedStageName}
         existingFileNames={rows.map(r => r.file_name)}
         onComplete={() => { setShowBulkUpload(false); onRefresh?.(); void filesQuery.refetch() }}

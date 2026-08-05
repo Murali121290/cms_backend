@@ -14,7 +14,7 @@ from .utils import check_and_update_project_status
 logger = logging.getLogger("app.post_prod.word_conversion")
 
 
-def run_conversion_background(chapter_id: int, session_factory) -> None:
+def run_conversion_background(chapter_id: int, session_factory, job_id: int | None = None) -> None:
     """
     Convert INDD/PDF chapters to DOCX format.
 
@@ -28,10 +28,19 @@ def run_conversion_background(chapter_id: int, session_factory) -> None:
         session_factory: Database session factory
     """
     db = session_factory()
+    job = None
     try:
         chapter = db.query(PostProdChapter).filter(PostProdChapter.id == chapter_id).first()
         if not chapter:
             return
+
+        from app.models import ProcessingJob
+        job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first() if job_id else None
+        if job:
+            job.status = "processing"
+            job.current_step = "Converting document formats"
+            job.progress_pct = 20
+            db.commit()
 
         chapter.status = "In-Progress"
         chapter.conversion_status = "Converting"
@@ -79,10 +88,21 @@ def run_conversion_background(chapter_id: int, session_factory) -> None:
             if chapter.qc_status == "Completed":
                 chapter.status = "Completed"
                 chapter.completed_at = datetime.utcnow()
+
+            if job:
+                job.status = "completed"
+                job.progress_pct = 100
+                job.completed_at = datetime.utcnow()
         else:
             chapter.status = "Failed"
             chapter.conversion_status = "Failed"
             chapter.error_message = error_msg or "Unknown error"
+
+            if job:
+                job.status = "failed"
+                job.progress_pct = 100
+                job.error_message = error_msg or "Unknown error"
+                job.completed_at = datetime.utcnow()
 
         db.commit()
         try:
@@ -98,6 +118,12 @@ def run_conversion_background(chapter_id: int, session_factory) -> None:
                 chapter.status = "Failed"
                 chapter.conversion_status = "Failed"
                 chapter.error_message = str(e)
+                db.commit()
+            if job:
+                job.status = "failed"
+                job.progress_pct = 100
+                job.error_message = str(e)
+                job.completed_at = datetime.utcnow()
                 db.commit()
         except:
             pass

@@ -103,6 +103,28 @@ def init_data():
         if db.bind.dialect.name == "postgresql":
             db.execute(text("SELECT pg_advisory_xact_lock(424242);"))
             
+        # Dynamically add the priority column if it doesn't exist
+        try:
+            db.execute(text("ALTER TABLE processing_jobs ADD COLUMN priority INTEGER DEFAULT 0 NOT NULL;"))
+            db.commit()
+        except Exception:
+            db.rollback()
+
+        # Dynamically add the options column if it doesn't exist
+        try:
+            db.execute(text("ALTER TABLE processing_jobs ADD COLUMN options TEXT;"))
+            db.commit()
+        except Exception:
+            db.rollback()
+
+        # Dynamically add generic metadata columns if they don't exist
+        for col in ["project_code", "chapter_number", "filename"]:
+            try:
+                db.execute(text(f"ALTER TABLE processing_jobs ADD COLUMN {col} TEXT;"))
+                db.commit()
+            except Exception:
+                db.rollback()
+
         Base.metadata.create_all(bind=engine)
             
         # Define all required roles in RolesMaster

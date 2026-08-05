@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { Users, Building2, Shield, Sliders, Layers, Workflow, ChevronRight } from 'lucide-react'
+import { Users, Building2, Shield, Sliders, Layers, Workflow, ChevronRight, Activity } from 'lucide-react'
 
 const settingsCards = [
   {
@@ -49,6 +49,14 @@ const settingsCards = [
     description: 'Configure system preferences and global options',
     color: 'bg-slate-50',
     iconColor: 'text-slate-600',
+  },
+  {
+    to: '/settings/queues',
+    icon: Activity,
+    title: 'Conversion Queues',
+    description: 'Monitor InDesign conversions and background task queues',
+    color: 'bg-amber-50',
+    iconColor: 'text-amber-600',
   },
 ]
 

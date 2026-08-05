@@ -631,6 +631,31 @@ class ProcessingJobResponse(BaseModel):
         from_attributes = True
 
 
+class ProcessingJobListItem(BaseModel):
+    id: int
+    file_id: int | None = None
+    process_type: str
+    status: str
+    current_step: str | None = None
+    progress_pct: int
+    error_message: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None = None
+    filename: str | None = None
+    project_code: str | None = None
+    chapter_number: str | None = None
+    priority: int
+    options: dict | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class ProcessingJobPriorityUpdate(BaseModel):
+    priority: int
+
+
 
 class TechnicalIssue(BaseModel):
     key: str

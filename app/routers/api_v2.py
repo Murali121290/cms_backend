@@ -4135,6 +4135,159 @@ def api_v2_get_processing_job(
     return job
 
 
+@router.get("/processing-jobs", response_model=list[schemas_v2.ProcessingJobListItem])
+def api_v2_list_processing_jobs(
+    limit: int = Query(50, ge=1, le=200),
+    status_filter: str | None = Query(None, alias="status"),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+
+    from app.models import ProcessingJob, File, ChapterInfo
+    from app.domains.projects.models import Project
+
+    from sqlalchemy import func
+
+    query = db.query(
+        ProcessingJob.id,
+        ProcessingJob.file_id,
+        ProcessingJob.process_type,
+        ProcessingJob.status,
+        ProcessingJob.current_step,
+        ProcessingJob.progress_pct,
+        ProcessingJob.error_message,
+        ProcessingJob.created_at,
+        ProcessingJob.updated_at,
+        ProcessingJob.completed_at,
+        ProcessingJob.priority,
+        ProcessingJob.options,
+        func.coalesce(ProcessingJob.filename, File.filename).label("filename"),
+        func.coalesce(ProcessingJob.project_code, Project.project_code).label("project_code"),
+        func.coalesce(ProcessingJob.chapter_number, ChapterInfo.chapters).label("chapter_number")
+    ).outerjoin(File, ProcessingJob.file_id == File.id)\
+     .outerjoin(Project, File.project_id == Project.id)\
+     .outerjoin(ChapterInfo, File.chapter_id == ChapterInfo.id)
+
+    if status_filter:
+        query = query.filter(ProcessingJob.status == status_filter)
+
+    jobs = query.order_by(
+        ProcessingJob.status.in_(["pending", "processing"]).desc(),
+        ProcessingJob.priority.desc(),
+        ProcessingJob.created_at.desc()
+    ).limit(limit).all()
+    
+    import json
+    result = []
+    for row in jobs:
+        options_dict = None
+        if row.options:
+            if isinstance(row.options, str):
+                try:
+                    options_dict = json.loads(row.options)
+                except Exception:
+                    options_dict = {}
+            elif isinstance(row.options, dict):
+                options_dict = row.options
+
+        result.append(schemas_v2.ProcessingJobListItem(
+            id=row.id,
+            file_id=row.file_id,
+            process_type=row.process_type,
+            status=row.status,
+            current_step=row.current_step,
+            progress_pct=row.progress_pct,
+            error_message=row.error_message,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+            completed_at=row.completed_at,
+            filename=row.filename,
+            project_code=row.project_code,
+            chapter_number=row.chapter_number,
+            priority=row.priority,
+            options=options_dict
+        ))
+    return result
+
+
+@router.post("/processing-jobs/{job_id}/cancel")
+def api_v2_cancel_processing_job(
+    job_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+
+    from app.models import ProcessingJob
+    import redis
+    from app.core.config import get_settings
+
+    job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
+    if not job:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="JOB_NOT_FOUND",
+            message="Processing job not found.",
+        )
+
+    job.status = "cancelled"
+    job.error_message = "Cancelled by user"
+    job.completed_at = datetime.utcnow()
+    db.commit()
+
+    # Force release InDesign Redis lock
+    try:
+        settings = get_settings()
+        redis_client = redis.from_url(settings.REDIS_URL)
+        redis_client.delete("indesign_conversion_lock")
+    except Exception:
+        pass
+
+    return {"status": "cancelled", "job_id": job_id}
+
+
+@router.post("/processing-jobs/{job_id}/priority")
+def api_v2_update_job_priority(
+    job_id: int,
+    payload: schemas_v2.ProcessingJobPriorityUpdate,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+
+    from app.models import ProcessingJob
+    job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
+    if not job:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="JOB_NOT_FOUND",
+            message="Processing job not found.",
+        )
+
+    job.priority = payload.priority
+    db.commit()
+    return {"status": "success", "job_id": job_id, "priority": payload.priority}
+
+
 @router.get("/files/{file_id}/technical-review", response_model=schemas_v2.TechnicalScanResponse)
 def api_v2_technical_scan(
     file_id: int,
