@@ -15,6 +15,7 @@ import { projectsApi } from '@/api/projects'
 import { chaptersApi } from '@/api/chapters'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import { toast } from '@/store/useToastStore'
+import { OnlyOfficeEditor } from '@/features/editor'
 
 interface LintError {
   line: number;
@@ -153,7 +154,12 @@ export function ChapterEditorPage() {
 
   const [showOutline, setShowOutline] = useState(true)
   const [showLog, setShowLog] = useState(true)
-  const [activeRightTab, setActiveRightTab] = useState<'log' | 'xpath'>('log')
+  const [activeRightTab, setActiveRightTab] = useState<'log' | 'xpath' | 'shortcuts' | 'design' | 'manuscript'>('log')
+  const [designPdfUrl, setDesignPdfUrl] = useState<string | null>(null)
+  const [designLoading, setDesignLoading] = useState(false)
+  const [manuscriptHtmlUrl, setManuscriptHtmlUrl] = useState<string | null>(null)
+  const [manuscriptLoading, setManuscriptLoading] = useState(false)
+  const [manuscriptFileId, setManuscriptFileId] = useState<number | null>(null)
   const [xpathQuery, setXpathQuery] = useState('//title')
   const [xpathResults, setXpathResults] = useState<{ line: number; tagName: string; text: string }[]>([])
   const [xpathError, setXpathError] = useState<string | null>(null)
@@ -358,6 +364,28 @@ export function ChapterEditorPage() {
       })()}/${decodedSubfolder}/${encodeURIComponent(decodedFilename)}/save`
     : null
 
+  useEffect(() => {
+    if (!projectId || !chapterId || !decodedFilename) return
+    projectsApi.getChapterFiles(Number(projectId), Number(chapterId))
+      .then(filesData => {
+        const docxFile = filesData.files?.find(f => {
+          if (!f.filename.toLowerCase().endsWith('.docx')) return false
+          let xmlBase = decodedFilename.replace(/\.xml$/i, '')
+          if (xmlBase.toLowerCase().endsWith('_indd')) {
+            xmlBase = xmlBase.slice(0, -5)
+          }
+          let docxBase = f.filename.slice(0, -5)
+          return xmlBase.toLowerCase() === docxBase.toLowerCase()
+        })
+        if (docxFile) {
+          setManuscriptFileId(docxFile.id)
+        }
+      })
+      .catch(err => {
+        console.error("Failed to load chapter files for manuscript:", err)
+      })
+  }, [projectId, chapterId, decodedFilename])
+
   const isEditable = !!chapter?.current_assignee_name
 
   // pdfjs-viewer-element only reacts to a `src` attribute change once its
@@ -389,12 +417,13 @@ export function ChapterEditorPage() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [isXmlDirty])
 
+
   // Fetch XML and Log files if file is XML
   useEffect(() => {
     if (ext !== 'xml' || !fileUrl || !logFileUrl || loading || !chapter) return
     setXmlLoading(true)
     
-    fetch(fileUrl)
+    fetch(fileUrl, { credentials: 'include' })
       .then(res => {
         if (!res.ok) throw new Error('XML file not found')
         return res.text()
@@ -408,7 +437,7 @@ export function ChapterEditorPage() {
       })
       .finally(() => setXmlLoading(false))
 
-    fetch(logFileUrl)
+    fetch(logFileUrl, { credentials: 'include' })
       .then(res => {
         if (!res.ok) return 'No log file found.'
         return res.text()
@@ -427,6 +456,7 @@ export function ChapterEditorPage() {
     try {
       const res = await fetch(saveUrl, {
         method: 'PUT',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
         },
@@ -443,6 +473,72 @@ export function ChapterEditorPage() {
       toast.error('Failed to save XML file')
     } finally {
       setXmlSaving(false)
+    }
+  }
+
+  // Window-level Ctrl+S / Cmd+S save keymap shortcut
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        void handleXmlSave()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [handleXmlSave])
+
+  const loadDesignPdf = async () => {
+    if (designPdfUrl || designLoading) return
+    setDesignLoading(true)
+    try {
+      const chaptersData = await projectsApi.getProjectChapters(Number(projectId))
+      const designChapter = chaptersData.chapters?.find(c => c.number.toLowerCase() === 'design')
+      if (designChapter) {
+        const filesData = await projectsApi.getChapterFiles(Number(projectId), designChapter.id)
+        const pdfFile = filesData.files?.find(f => f.filename.toLowerCase().endsWith('.pdf'))
+        if (pdfFile) {
+          const url = `/api/uploads/${projectId}/chapter/chapter-${designChapter.id}/${pdfFile.category}/${encodeURIComponent(pdfFile.filename)}/download`
+          setDesignPdfUrl(url)
+        } else {
+          toast.error("No Design PDF file found in Design folder")
+        }
+      } else {
+        toast.error("Design chapter not found in this project")
+      }
+    } catch (err) {
+      console.error("Failed to load design pdf:", err)
+      toast.error("Failed to fetch design details")
+    } finally {
+      setDesignLoading(false)
+    }
+  }
+
+  const loadManuscriptHtml = async () => {
+    if (manuscriptHtmlUrl || manuscriptLoading) return
+    setManuscriptLoading(true)
+    try {
+      // Derive manuscript base name from the XML file name currently being edited
+      let baseName = decodedFilename.replace(/\.xml$/i, '')
+      if (baseName.toLowerCase().endsWith('_indd')) {
+        baseName = baseName.slice(0, -5)
+      }
+      const htmlFilename = `${baseName}.html`
+      
+      const chNo = chapter?.chapters?.match(/\d+/)?.[0]
+      let chFolder = `chapter-${chapterId}`
+      if (project?.file_details && chNo) {
+        const cf = (project.file_details as any).chapter_folders
+        chFolder = cf?.chapters?.find((c: any) => c.chapter_name === `chapter-${chNo}`)?.chapter_name ?? `chapter-${chNo}`
+      }
+      
+      const url = `/api/uploads/${projectId}/chapter/${chFolder}/Manuscript/xhtml/${encodeURIComponent(htmlFilename)}/download`
+      setManuscriptHtmlUrl(url)
+    } catch (err) {
+      console.error("Failed to load manuscript:", err)
+      toast.error("Failed to fetch manuscript details")
+    } finally {
+      setManuscriptLoading(false)
     }
   }
 
@@ -601,6 +697,38 @@ export function ChapterEditorPage() {
                     </button>
                     <button
                       type="button"
+                      onClick={() => {
+                        setShowLog(true)
+                        setActiveRightTab('shortcuts')
+                      }}
+                      className={`px-2 py-0.5 rounded border text-[11px] transition-colors ${showLog && activeRightTab === 'shortcuts' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                    >
+                      Shortcuts
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowLog(true)
+                        setActiveRightTab('design')
+                        void loadDesignPdf()
+                      }}
+                      className={`px-2 py-0.5 rounded border text-[11px] transition-colors ${showLog && activeRightTab === 'design' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                    >
+                      {designLoading ? 'Loading Design...' : 'Design'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowLog(true)
+                        setActiveRightTab('manuscript')
+                        void loadManuscriptHtml()
+                      }}
+                      className={`px-2 py-0.5 rounded border text-[11px] transition-colors ${showLog && activeRightTab === 'manuscript' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                    >
+                      {manuscriptLoading ? 'Converting...' : 'Manuscript'}
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => setShowLog(!showLog)}
                       className={`px-2 py-0.5 rounded border text-[11px] transition-colors ${showLog ? 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50' : 'bg-amber-50 text-amber-700 border-amber-200'}`}
                     >
@@ -618,6 +746,7 @@ export function ChapterEditorPage() {
                     }}
                     readOnly={!isEditable}
                     errors={xmlErrors}
+                    onSave={handleXmlSave}
                     className="flex-1 min-h-0"
                   />
                 </div>
@@ -641,9 +770,36 @@ export function ChapterEditorPage() {
                     >
                       XPath Evaluator
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveRightTab('shortcuts')}
+                      className={`flex-1 text-[11px] font-semibold uppercase tracking-wider transition-colors border-b-2 ${activeRightTab === 'shortcuts' ? 'border-blue-600 text-blue-600 bg-white' : 'border-transparent text-gray-500 hover:bg-gray-50 hover:text-gray-700'}`}
+                    >
+                      Shortcuts
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveRightTab('design')
+                        void loadDesignPdf()
+                      }}
+                      className={`flex-1 text-[11px] font-semibold uppercase tracking-wider transition-colors border-b-2 ${activeRightTab === 'design' ? 'border-blue-600 text-blue-600 bg-white' : 'border-transparent text-gray-500 hover:bg-gray-50 hover:text-gray-700'}`}
+                    >
+                      Design PDF
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveRightTab('manuscript')
+                        void loadManuscriptHtml()
+                      }}
+                      className={`flex-1 text-[11px] font-semibold uppercase tracking-wider transition-colors border-b-2 ${activeRightTab === 'manuscript' ? 'border-blue-600 text-blue-600 bg-white' : 'border-transparent text-gray-500 hover:bg-gray-50 hover:text-gray-700'}`}
+                    >
+                      Manuscript
+                    </button>
                   </div>
                   <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                    {activeRightTab === 'log' ? (
+                    {activeRightTab === 'log' && (
                       <SourceEditor
                         value={logContent ?? 'Loading log...'}
                         onChange={() => {}}
@@ -651,7 +807,8 @@ export function ChapterEditorPage() {
                         onLogLineClick={handleOutlineNodeSelect}
                         className="flex-1 min-h-0 bg-gray-50 opacity-80"
                       />
-                    ) : (
+                    )}
+                    {activeRightTab === 'xpath' && (
                       <div className="flex-1 flex flex-col p-4 gap-3 overflow-hidden bg-white">
                         <div className="flex gap-2 flex-shrink-0">
                           <input
@@ -695,6 +852,121 @@ export function ChapterEditorPage() {
                             ))
                           )}
                         </div>
+                      </div>
+                    )}
+                    {activeRightTab === 'shortcuts' && (
+                      <div className="flex-1 p-4 overflow-y-auto bg-white text-xs font-sans text-gray-700">
+                        <h3 className="font-semibold text-sm mb-3 border-b pb-2 text-gray-800">XML Editor Keyboard Shortcuts</h3>
+                        <table className="w-full border-collapse border border-gray-200 text-xs">
+                          <thead>
+                            <tr className="bg-gray-50 text-[10px] uppercase text-gray-500">
+                              <th className="border border-gray-200 p-2 text-left">Action / Operation</th>
+                              <th className="border border-gray-200 p-2 text-left">Windows / Linux</th>
+                              <th className="border border-gray-200 p-2 text-left">macOS</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              <td className="border border-gray-200 p-2 font-medium">💾 Save Document</td>
+                              <td className="border border-gray-200 p-2 font-mono text-blue-600">Ctrl + S</td>
+                              <td className="border border-gray-200 p-2 font-mono text-blue-600">Cmd + S</td>
+                            </tr>
+                            <tr className="bg-gray-50/50">
+                              <td className="border border-gray-200 p-2 font-medium">🔄 Toggle Word Wrap</td>
+                              <td className="border border-gray-200 p-2 font-mono text-blue-600">Alt + Z</td>
+                              <td className="border border-gray-200 p-2 font-mono text-blue-600">Option + Z</td>
+                            </tr>
+                            <tr>
+                              <td className="border border-gray-200 p-2 font-medium">🔍 Open Find Panel</td>
+                              <td className="border border-gray-200 p-2 font-mono text-blue-600">Ctrl + F</td>
+                              <td className="border border-gray-200 p-2 font-mono text-blue-600">Cmd + F</td>
+                            </tr>
+                            <tr className="bg-gray-50/50">
+                              <td className="border border-gray-200 p-2 font-medium">✏️ Open Replace Panel</td>
+                              <td className="border border-gray-200 p-2 font-mono text-blue-600">Ctrl + H</td>
+                              <td className="border border-gray-200 p-2 font-mono text-blue-600">Cmd + H</td>
+                            </tr>
+                            <tr>
+                              <td className="border border-gray-200 p-2 font-medium">⏭️ Find Next Match</td>
+                              <td className="border border-gray-200 p-2 font-mono text-blue-600">F3 / Enter</td>
+                              <td className="border border-gray-200 p-2 font-mono text-blue-600">F3 / Enter</td>
+                            </tr>
+                            <tr className="bg-gray-50/50">
+                              <td className="border border-gray-200 p-2 font-medium">⏮️ Find Previous Match</td>
+                              <td className="border border-gray-200 p-2 font-mono text-blue-600">Shift+F3 / Shift+Enter</td>
+                              <td className="border border-gray-200 p-2 font-mono text-blue-600">Shift+F3 / Shift+Enter</td>
+                            </tr>
+                            <tr>
+                              <td className="border border-gray-200 p-2 font-medium">❌ Close Search Panel</td>
+                              <td className="border border-gray-200 p-2 font-mono text-blue-600">Escape</td>
+                              <td className="border border-gray-200 p-2 font-mono text-blue-600">Escape</td>
+                            </tr>
+                            <tr className="bg-gray-50/50">
+                              <td className="border border-gray-200 p-2 font-medium">↩️ Undo Edit</td>
+                              <td className="border border-gray-200 p-2 font-mono text-blue-600">Ctrl + Z</td>
+                              <td className="border border-gray-200 p-2 font-mono text-blue-600">Cmd + Z</td>
+                            </tr>
+                            <tr>
+                              <td className="border border-gray-200 p-2 font-medium">↪️ Redo Edit</td>
+                              <td className="border border-gray-200 p-2 font-mono text-blue-600">Ctrl+Y / Ctrl+Shift+Z</td>
+                              <td className="border border-gray-200 p-2 font-mono text-blue-600">Cmd+Shift+Z</td>
+                            </tr>
+                            <tr className="bg-gray-50/50">
+                              <td className="border border-gray-200 p-2 font-medium">📐 Fold XML tag</td>
+                              <td className="border border-gray-200 p-2 font-mono text-blue-600">Ctrl + Shift + [</td>
+                              <td className="border border-gray-200 p-2 font-mono text-blue-600">Cmd + Option + [</td>
+                            </tr>
+                            <tr>
+                              <td className="border border-gray-200 p-2 font-medium">📐 Unfold XML tag</td>
+                              <td className="border border-gray-200 p-2 font-mono text-blue-600">Ctrl + Shift + ]</td>
+                              <td className="border border-gray-200 p-2 font-mono text-blue-600">Cmd + Option + ]</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    {activeRightTab === 'design' && (
+                      <div className="flex-1 flex flex-col min-h-0 bg-white">
+                        {designLoading ? (
+                          <div className="flex-1 flex items-center justify-center text-xs text-gray-500 gap-1.5">
+                            <Loader2 size={14} className="animate-spin text-blue-600" /> Loading Design PDF...
+                          </div>
+                        ) : designPdfUrl ? (
+                          <iframe
+                            src={designPdfUrl}
+                            className="w-full h-full border-0"
+                            title="Design PDF Preview"
+                          />
+                        ) : (
+                          <div className="flex-1 flex items-center justify-center text-xs text-gray-400 font-sans p-4 text-center">
+                            No Design PDF found.
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {activeRightTab === 'manuscript' && (
+                      <div className="flex-1 flex flex-col min-h-0 bg-white relative">
+                        {manuscriptFileId ? (
+                          <OnlyOfficeEditor
+                            fileId={manuscriptFileId}
+                            mode="structuring"
+                            height="100%"
+                          />
+                        ) : manuscriptLoading ? (
+                          <div className="flex-1 flex items-center justify-center text-xs text-gray-500 gap-1.5">
+                            <Loader2 size={14} className="animate-spin text-blue-600" /> Loading Manuscript...
+                          </div>
+                        ) : manuscriptHtmlUrl ? (
+                          <iframe
+                            src={manuscriptHtmlUrl}
+                            className="w-full h-full border-0 bg-white"
+                            title="Manuscript Preview"
+                          />
+                        ) : (
+                          <div className="flex-1 flex items-center justify-center text-xs text-gray-400 font-sans p-4 text-center">
+                            No converted Manuscript file found.
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
