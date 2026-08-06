@@ -1288,7 +1288,7 @@ export function PostProdEpubValidatorFiles() {
                                 isValidating={validatingFiles.has(file.file_name)}
                                 onValidate={() => handleValidateFile(file.file_name)}
                                 onOpen={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
-                                onPreview={() => { setModalAllowedTabs(undefined); setModalInitialTab('preview'); setSelectedFile(file); }}
+                                onPreview={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
                                 index={i}
                               />
                             </motion.div>
@@ -1331,7 +1331,7 @@ export function PostProdEpubValidatorFiles() {
                               variant="css"
                               layoutMode={layoutMode}
                               status="pending"
-                              onOpen={() => { setModalAllowedTabs(['result', 'source']); setModalInitialTab('result'); setSelectedFile(file); }}
+                              onOpen={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
                               index={i}
                             />
                           </motion.div>
@@ -1373,8 +1373,8 @@ export function PostProdEpubValidatorFiles() {
                               variant="image"
                               layoutMode={layoutMode}
                               status="pending"
-                              onOpen={() => { setModalAllowedTabs(['result', 'source']); setModalInitialTab('preview'); setSelectedFile(file); }}
-                              onPreview={() => { setModalAllowedTabs(['result', 'source']); setModalInitialTab('preview'); setSelectedFile(file); }}
+                              onOpen={() => { setModalAllowedTabs(['result', 'preview']); setModalInitialTab('preview'); setSelectedFile(file); }}
+                              onPreview={() => { setModalAllowedTabs(['result', 'preview']); setModalInitialTab('preview'); setSelectedFile(file); }}
                               index={i}
                             />
                           </motion.div>
@@ -1424,8 +1424,8 @@ export function PostProdEpubValidatorFiles() {
                                 warnings={agg?.warnings ?? 0}
                                 isValidating={validatingFiles.has(file.file_name)}
                                 onValidate={canValidate ? () => handleValidateFile(file.file_name) : undefined}
-                                onOpen={() => { setModalAllowedTabs(['result', 'source']); setModalInitialTab('result'); setSelectedFile(file); }}
-                                onPreview={() => { setModalAllowedTabs(['result', 'source']); setModalInitialTab('result'); setSelectedFile(file); }}
+                                onOpen={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
+                                onPreview={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
                                 index={i}
                               />
                             </motion.div>
