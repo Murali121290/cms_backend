@@ -52,7 +52,7 @@ class EvProject(Base):
 
 
 class EvHistory(Base):
-    """Assignee change history for post_prod_ev_projects."""
+    """Assignee change & validation execution history for post_prod_ev_projects."""
 
     __tablename__ = "post_prod_ev_history"
 
@@ -69,7 +69,10 @@ class EvHistory(Base):
     changed_by_username = Column(String(255), nullable=True)
     old_assignee = Column(String(255), nullable=True)
     new_assignee = Column(String(255), nullable=True)
+    result_type = Column(String(50), nullable=False, default="assignee_change")  # "assignee_change" | "validation"
+    validation_result = Column(Text, nullable=True)  # JSON payload of ValidationApiResponse
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     project = relationship("EvProject", foreign_keys=[project_id])
     changed_by = relationship("User", foreign_keys=[changed_by_id])
+

@@ -288,6 +288,18 @@ def get_ace_html_report(folder_name: str, path: str = "report.html"):
     return FileResponse(target)
 
 
+@router.get("/validate/{filename}/latest")
+def get_latest_validation(
+    filename: str,
+    db: Session = Depends(get_db),
+):
+    """Retrieve the latest stored validation result payload for a project."""
+    run = ev_projects_db.get_latest_validation_run(db, filename)
+    if not run:
+        return {"status": False, "message": "No validation run history found."}
+    return run
+
+
 @router.get("/validate/{filename}")
 async def validate_file(
     filename: str,
@@ -303,14 +315,18 @@ async def validate_file(
         kwargs["customer"] = customer
     result = await asyncio.to_thread(engine, **kwargs)
 
-    files = result.get("files", []) if isinstance(result, dict) else []
-    total_issues = sum(
-        f.get("result", {}).get("issues_count", 0) for f in files if isinstance(f, dict)
-    )
-    validation_status = "pass" if total_issues == 0 else "fail"
-    ev_projects_db.update_validation_status(
-        db, folder_name=filename, validation_status=validation_status
-    )
+    user_id = getattr(user, "id", None)
+    username = getattr(user, "username", None) or getattr(user, "user_name", None)
+
+    # Save full validation run snapshot to history table
+    if isinstance(result, dict):
+        ev_projects_db.save_validation_run(
+            db,
+            folder_name=filename,
+            validation_result=result,
+            user_id=user_id,
+            username=username,
+        )
     return result
 
 

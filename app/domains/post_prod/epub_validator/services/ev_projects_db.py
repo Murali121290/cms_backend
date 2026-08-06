@@ -108,6 +108,7 @@ def update_project(
                 changed_by_username=username,
                 old_assignee=p.assignee,
                 new_assignee=target_val,
+                result_type="assignee_change",
                 created_at=datetime.utcnow(),
             )
             db.add(history)
@@ -115,6 +116,73 @@ def update_project(
     db.commit()
     db.refresh(p)
     return _serialize(p)
+
+
+def save_validation_run(
+    db: Session,
+    *,
+    folder_name: str,
+    validation_result: dict[str, Any],
+    user_id: Optional[int] = None,
+    username: Optional[str] = None,
+) -> None:
+    """Save a full validation run snapshot into post_prod_ev_history."""
+    import json
+
+    p = get_project_by_folder(db, folder_name)
+    if p is None:
+        return
+
+    # Update project status fields
+    files = validation_result.get("files", []) if isinstance(validation_result, dict) else []
+    total_issues = sum(
+        f.get("result", {}).get("issues_count", 0) for f in files if isinstance(f, dict)
+    )
+    val_status = "pass" if total_issues == 0 else "fail"
+    p.validation_status = val_status
+    p.status = "validated" if val_status == "pass" else "failed"
+
+    history = EvHistory(
+        project_id=p.id,
+        changed_by_id=user_id,
+        changed_by_username=username,
+        old_assignee=p.assignee,
+        new_assignee=p.assignee,
+        result_type="validation",
+        validation_result=json.dumps(validation_result),
+        created_at=datetime.utcnow(),
+    )
+    db.add(history)
+    db.commit()
+
+
+def get_latest_validation_run(
+    db: Session,
+    folder_name: str,
+) -> Optional[dict[str, Any]]:
+    """Retrieve the latest stored validation result payload for a project."""
+    import json
+
+    p = get_project_by_folder(db, folder_name)
+    if p is None:
+        return None
+
+    h = (
+        db.query(EvHistory)
+        .filter(
+            EvHistory.project_id == p.id,
+            EvHistory.result_type == "validation",
+            EvHistory.validation_result.isnot(None),
+        )
+        .order_by(EvHistory.created_at.desc())
+        .first()
+    )
+    if h and h.validation_result:
+        try:
+            return json.loads(h.validation_result)
+        except Exception:
+            return None
+    return None
 
 
 def update_validation_status(

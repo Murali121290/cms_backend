@@ -17,6 +17,8 @@ import {
   ShieldCheck,
   Eye,
   User,
+  LayoutGrid,
+  List,
 } from 'lucide-react';
 import { XHTMLCard, xhtmlCardVariants } from '@/components/epub_validator/XHTMLCard';
 import { ValidationDetailModal } from '@/components/epub_validator/ValidationDetailModal';
@@ -27,7 +29,7 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardBody } from '@/components/ui/Card';
 import { toast } from '@/store/useToastStore';
 import { useSessionStore } from '@/stores/sessionStore';
-import { getFiles, validateFolder, validateFile, exportEpub, getCachedAceReport, runAceReport, listProjects, type EvProject } from '@/api/epubValidator';
+import { getFiles, validateFolder, validateFile, exportEpub, getCachedAceReport, runAceReport, listProjects, getLatestValidation, type EvProject } from '@/api/epubValidator';
 import { useEpubBookStore } from '@/hooks/useEpubBookStore';
 import { cn, formatDate, titleCase } from '@/utils/epubValidatorUtils';
 import type { AceReport, ValidationApiResponse, XHTMLFile, XHTMLFileStatus } from '@/types/epubValidator';
@@ -139,9 +141,14 @@ export function PostProdEpubValidatorFiles() {
   const naturalSort = (a: string, b: string) =>
     a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
 
+  const allBackendFiles = useMemo(
+    () => (filesData?.files ?? []).sort((a, b) => naturalSort(a.file_name, b.file_name)),
+    [filesData],
+  );
+
   const xhtmlFiles = useMemo(
     () => (filesData?.files ?? [])
-      .filter((f) => f.file_name.toLowerCase().endsWith('.xhtml'))
+      .filter((f) => f.file_name.toLowerCase().endsWith('.xhtml') || f.file_name.toLowerCase().endsWith('.html') || f.file_name.toLowerCase().endsWith('.htm'))
       .sort((a, b) => naturalSort(a.file_name, b.file_name)),
     [filesData],
   );
@@ -155,10 +162,24 @@ export function PostProdEpubValidatorFiles() {
 
   const ncxFiles = useMemo(
     () => (filesData?.files ?? [])
-      .filter((f) => f.file_name.toLowerCase().endsWith('.ncx'))
+      .filter((f) => f.file_name.toLowerCase().endsWith('.ncx') || f.file_name.toLowerCase().endsWith('.opf') || f.file_name.toLowerCase().endsWith('.xml'))
       .sort((a, b) => naturalSort(a.file_name, b.file_name)),
     [filesData],
   );
+
+  const otherFiles = useMemo(
+    () => (filesData?.files ?? [])
+      .filter((f) => {
+        const name = f.file_name.toLowerCase();
+        return !name.endsWith('.xhtml') && !name.endsWith('.html') && !name.endsWith('.htm') &&
+          !name.endsWith('.css') && !name.endsWith('.ncx') && !name.endsWith('.opf') && !name.endsWith('.xml');
+      })
+      .sort((a, b) => naturalSort(a.file_name, b.file_name)),
+    [filesData],
+  );
+
+  // ── Layout mode (grid vs list view) ──────────────────────────────────────────
+  const [layoutMode, setLayoutMode] = useState<'grid' | 'list'>('list');
 
   // ── Validation state (in-memory only, per session) ─────────────────────────
   // Not persisted: opening/reloading a book always starts on the Pending state
@@ -204,6 +225,7 @@ export function PostProdEpubValidatorFiles() {
   useEffect(() => {
     if (!folderName) return;
     getCachedAceReport(folderName).then((r) => { if (r) setAceReport(r); }).catch(() => undefined);
+    getLatestValidation(folderName).then((res) => { if (res) setValidationData(res); }).catch(() => undefined);
   }, [folderName]);
 
   useEffect(() => {
@@ -317,7 +339,7 @@ export function PostProdEpubValidatorFiles() {
 
   // ── Summary stats ───────────────────────────────────────────────────────────
   const stats = useMemo(() => {
-    const allFiles = [...xhtmlFiles, ...ncxFiles];
+    const allFiles = allBackendFiles;
     const total = allFiles.length;
     let passed = 0, warnings = 0, failed = 0, pending = 0;
     for (const f of allFiles) {
@@ -328,20 +350,104 @@ export function PostProdEpubValidatorFiles() {
       else warnings++;
     }
     return { total, passed, warnings, failed, pending };
-  }, [xhtmlFiles, ncxFiles, fileIssues]);
+  }, [allBackendFiles, fileIssues]);
 
   const hasValidated = validationData !== null;
 
-  // ── Status filter ───────────────────────────────────────────────────────────
+  // ── Status filter & Rule filter ─────────────────────────────────────────────
   const [activeFilter, setActiveFilter] = useState<XHTMLFileStatus | null>(null);
+  const [selectedRuleFilter, setSelectedRuleFilter] = useState<string | null>(null);
 
-  const toggleFilter = (status: XHTMLFileStatus) =>
+  const toggleFilter = (status: XHTMLFileStatus) => {
+    setSelectedRuleFilter(null);
     setActiveFilter((prev) => (prev === status ? null : status));
+  };
 
-  const visibleFiles = useMemo(
-    () => activeFilter ? xhtmlFiles.filter((f) => getFileStatus(f.file_name) === activeFilter) : xhtmlFiles,
-    [xhtmlFiles, activeFilter, fileIssues], // eslint-disable-line react-hooks/exhaustive-deps
-  );
+  const toggleRuleFilter = (ruleKey: string) => {
+    setActiveFilter(null);
+    setSelectedRuleFilter((prev) => (prev === ruleKey ? null : ruleKey));
+  };
+
+  // Aggregate rules across all validation data entries
+  const ruleSummary = useMemo(() => {
+    if (!validationData || !validationData.files) {
+      return { general: [], customer: [], totalErrors: 0, totalWarnings: 0, customerName: null };
+    }
+
+    const generalMap = new Map<string, { rule_id: string; rule_name: string; errors: number; warnings: number; files: Set<string> }>();
+    const customerMap = new Map<string, { rule_id: string; rule_name: string; errors: number; warnings: number; files: Set<string> }>();
+    let totalErrors = 0;
+    let totalWarnings = 0;
+    let custName: string | null = validationData.customer || null;
+
+    for (const entry of validationData.files) {
+      const isCustomer = entry.origin === 'customer';
+      if (isCustomer && entry.customer && !custName) custName = entry.customer;
+      const targetMap = isCustomer ? customerMap : generalMap;
+      const key = entry.rule_id || entry.rule_name;
+
+      const item = targetMap.get(key) ?? {
+        rule_id: entry.rule_id,
+        rule_name: entry.rule_name,
+        errors: 0,
+        warnings: 0,
+        files: new Set<string>(),
+      };
+
+      let entryHasErrors = false;
+      let entryHasWarnings = false;
+
+      for (const issue of entry.result.issues) {
+        const isErr = (issue.category ?? '').toLowerCase() === 'error';
+        if (isErr) {
+          item.errors++;
+          totalErrors++;
+          entryHasErrors = true;
+        } else {
+          item.warnings++;
+          totalWarnings++;
+          entryHasWarnings = true;
+        }
+      }
+
+      if (entry.result.issues.length > 0 || entryHasErrors || entryHasWarnings) {
+        item.files.add(entry.file_details.file_name);
+      }
+
+      targetMap.set(key, item);
+    }
+
+    return {
+      general: Array.from(generalMap.values()),
+      customer: Array.from(customerMap.values()),
+      totalErrors,
+      totalWarnings,
+      customerName: custName,
+    };
+  }, [validationData]);
+
+  // Set of filenames that contain errors/warnings matching the selected rule
+  const ruleMatchingFiles = useMemo(() => {
+    if (!selectedRuleFilter || !validationData) return null;
+    const matching = new Set<string>();
+    for (const entry of validationData.files) {
+      const key = entry.rule_id || entry.rule_name;
+      if (key === selectedRuleFilter && entry.result.issues.length > 0) {
+        matching.add(entry.file_details.file_name);
+      }
+    }
+    return matching;
+  }, [selectedRuleFilter, validationData]);
+
+  const visibleFiles = useMemo(() => {
+    if (selectedRuleFilter && ruleMatchingFiles) {
+      return xhtmlFiles.filter((f) => ruleMatchingFiles.has(f.file_name));
+    }
+    if (activeFilter) {
+      return xhtmlFiles.filter((f) => getFileStatus(f.file_name) === activeFilter);
+    }
+    return xhtmlFiles;
+  }, [xhtmlFiles, activeFilter, selectedRuleFilter, ruleMatchingFiles, fileIssues]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Export state ────────────────────────────────────────────────────────────
   const [isExporting, setIsExporting] = useState(false);
@@ -576,6 +682,36 @@ export function PostProdEpubValidatorFiles() {
           </div>
 
           <div className="flex items-center gap-2 shrink-0 font-sans">
+            {/* Grid / List View Toggle */}
+            <div className="flex items-center bg-muted/60 p-0.5 rounded-lg border border-border/60 mr-1">
+              <button
+                onClick={() => setLayoutMode('list')}
+                className={cn(
+                  'flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition-all',
+                  layoutMode === 'list'
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground',
+                )}
+                title="List View"
+              >
+                <List className="w-3.5 h-3.5" />
+                List
+              </button>
+              <button
+                onClick={() => setLayoutMode('grid')}
+                className={cn(
+                  'flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition-all',
+                  layoutMode === 'grid'
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground',
+                )}
+                title="Grid View"
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+                Grid
+              </button>
+            </div>
+
             <Button
               size="sm"
               className="gap-2 shadow-sm text-xs font-semibold py-1.5 h-9"
@@ -740,7 +876,7 @@ export function PostProdEpubValidatorFiles() {
             </div>
           )}
 
-          {/* ── XHTML file cards ────────────────────────────────────────────── */}
+          {/* ── XHTML file cards layout (with Rules Sidebar if validated) ─────────── */}
           {isLoading ? (
             <SkeletonGrid />
           ) : isError || !filesData?.status ? (
@@ -766,97 +902,305 @@ export function PostProdEpubValidatorFiles() {
               }
             />
           ) : (
-            <>
-              {activeFilter && (
-                <div className="flex items-center justify-between text-xs text-muted-foreground font-sans">
-                  <span>
-                    Showing <span className="font-medium text-foreground">{visibleFiles.length}</span> {activeFilter} file{visibleFiles.length !== 1 ? 's' : ''}
-                  </span>
-                  <button
-                    onClick={() => setActiveFilter(null)}
-                    className="text-xs text-primary hover:underline font-semibold"
-                  >
-                    Clear filter
-                  </button>
+            <div className="flex flex-col lg:flex-row gap-6 items-start">
+              {/* Left Rules Sidebar */}
+              {hasValidated && (ruleSummary.general.length > 0 || ruleSummary.customer.length > 0) && (
+                <div className="w-full lg:w-72 shrink-0 bg-card rounded-xl border border-border/80 shadow-sm p-4 space-y-4">
+                  <div className="flex items-center justify-between border-b border-border/60 pb-2.5">
+                    <div>
+                      <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground font-serif">
+                        Validation Rules
+                      </h2>
+                      <p className="text-[11px] text-muted-foreground mt-0.5 font-sans">
+                        Filter files by triggered rule
+                      </p>
+                    </div>
+                    {selectedRuleFilter && (
+                      <button
+                        onClick={() => setSelectedRuleFilter(null)}
+                        className="text-[11px] text-primary hover:underline font-semibold"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="space-y-4 max-h-[600px] overflow-y-auto pr-1">
+                    {/* General Rules Group */}
+                    {ruleSummary.general.length > 0 && (
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between px-1">
+                          <span className="text-[11px] font-bold text-foreground/80 uppercase tracking-wide">
+                            General Rules
+                          </span>
+                          <span className="text-[10px] text-muted-foreground font-mono">
+                            ({ruleSummary.general.length})
+                          </span>
+                        </div>
+                        <div className="space-y-1">
+                          {ruleSummary.general.map((r) => {
+                            const isSelected = selectedRuleFilter === (r.rule_id || r.rule_name);
+                            return (
+                              <button
+                                key={r.rule_id || r.rule_name}
+                                onClick={() => toggleRuleFilter(r.rule_id || r.rule_name)}
+                                className={cn(
+                                  'w-full text-left p-2 rounded-lg transition-all border text-xs flex items-start justify-between gap-2',
+                                  isSelected
+                                    ? 'bg-primary/10 border-primary/30 ring-1 ring-primary/20 text-primary'
+                                    : 'bg-background hover:bg-muted border-border/50 text-foreground',
+                                )}
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <p className="font-medium font-serif truncate leading-tight">
+                                    {r.rule_name}
+                                  </p>
+                                  <p className="text-[10px] text-muted-foreground mt-1 font-mono">
+                                    {r.files.size} file{r.files.size !== 1 ? 's' : ''} affected
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0 pt-0.5">
+                                  {r.errors > 0 && (
+                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500/10 text-red-600 dark:text-red-400">
+                                      <XCircle className="w-3 h-3" />
+                                      {r.errors}
+                                    </span>
+                                  )}
+                                  {r.warnings > 0 && (
+                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                                      <AlertTriangle className="w-3 h-3" />
+                                      {r.warnings}
+                                    </span>
+                                  )}
+                                  {r.errors === 0 && r.warnings === 0 && (
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                                  )}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Customer Rules Group */}
+                    {ruleSummary.customer.length > 0 && (
+                      <div className="space-y-1.5 pt-2 border-t border-border/40">
+                        <div className="flex items-center justify-between px-1">
+                          <span className="text-[11px] font-bold text-primary uppercase tracking-wide">
+                            {ruleSummary.customerName
+                              ? `${ruleSummary.customerName.charAt(0).toUpperCase()}${ruleSummary.customerName.slice(1)} Rules`
+                              : 'Customer Rules'}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground font-mono">
+                            ({ruleSummary.customer.length})
+                          </span>
+                        </div>
+                        <div className="space-y-1">
+                          {ruleSummary.customer.map((r) => {
+                            const isSelected = selectedRuleFilter === (r.rule_id || r.rule_name);
+                            return (
+                              <button
+                                key={r.rule_id || r.rule_name}
+                                onClick={() => toggleRuleFilter(r.rule_id || r.rule_name)}
+                                className={cn(
+                                  'w-full text-left p-2 rounded-lg transition-all border text-xs flex items-start justify-between gap-2',
+                                  isSelected
+                                    ? 'bg-primary/10 border-primary/30 ring-1 ring-primary/20 text-primary'
+                                    : 'bg-background hover:bg-muted border-border/50 text-foreground',
+                                )}
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <p className="font-medium font-serif truncate leading-tight">
+                                    {r.rule_name}
+                                  </p>
+                                  <p className="text-[10px] text-muted-foreground mt-1 font-mono">
+                                    {r.files.size} file{r.files.size !== 1 ? 's' : ''} affected
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0 pt-0.5">
+                                  {r.errors > 0 && (
+                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500/10 text-red-600 dark:text-red-400">
+                                      <XCircle className="w-3 h-3" />
+                                      {r.errors}
+                                    </span>
+                                  )}
+                                  {r.warnings > 0 && (
+                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                                      <AlertTriangle className="w-3 h-3" />
+                                      {r.warnings}
+                                    </span>
+                                  )}
+                                  {r.errors === 0 && r.warnings === 0 && (
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                                  )}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
-              <motion.div
-                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
-                variants={containerVariants}
-                initial="hidden"
-                animate="show"
-              >
-                {visibleFiles.map((file, i) => {
-                  const status = getFileStatus(file.file_name);
-                  const agg = fileIssues.get(file.file_name);
-                  return (
-                    <motion.div key={`${file.file_name}-${i}`} variants={xhtmlCardVariants}>
-                      <XHTMLCard
-                        file={file}
-                        status={status}
-                        errors={agg?.errors ?? 0}
-                        warnings={agg?.warnings ?? 0}
-                        isValidating={validatingFiles.has(file.file_name)}
-                        onValidate={() => handleValidateFile(file.file_name)}
-                        onOpen={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
-                        onPreview={() => { setModalAllowedTabs(undefined); setModalInitialTab('preview'); setSelectedFile(file); }}
-                        index={i}
-                      />
-                    </motion.div>
-                  );
-                })}
-                {(activeFilter ? ncxFiles.filter((f) => getFileStatus(f.file_name) === activeFilter) : ncxFiles).map((file, i) => {
-                  const status = getFileStatus(file.file_name);
-                  const agg = fileIssues.get(file.file_name);
-                  return (
-                    <motion.div key={`ncx-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
-                      <XHTMLCard
-                        file={file}
-                        status={status}
-                        errors={agg?.errors ?? 0}
-                        warnings={agg?.warnings ?? 0}
-                        isValidating={validatingFiles.has(file.file_name)}
-                        onValidate={() => handleValidateFile(file.file_name)}
-                        onPreview={() => { setModalAllowedTabs(['result', 'source']); setModalInitialTab('result'); setSelectedFile(file); }}
-                        onOpen={() => { setModalAllowedTabs(['result', 'source']); setModalInitialTab('result'); setSelectedFile(file); }}
-                        index={i}
-                      />
-                    </motion.div>
-                  );
-                })}
-              </motion.div>
 
-              {/* ── CSS stylesheets section ────────────────────────────────── */}
-              {cssFiles.length > 0 && (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2 pt-2">
-                    <Braces className="w-4 h-4 text-violet-500" />
-                    <h2 className="text-xs font-bold text-muted-foreground uppercase tracking-widest">
-                      CSS Stylesheets
-                    </h2>
-                    <span className="text-xs text-muted-foreground font-mono">({cssFiles.length})</span>
+              {/* Main File Cards Area */}
+              <div className="flex-1 min-w-0 space-y-6">
+                {(activeFilter || selectedRuleFilter) && (
+                  <div className="flex items-center justify-between text-xs text-muted-foreground font-sans bg-muted/40 px-3 py-2 rounded-lg border border-border/50">
+                    <span>
+                      Showing <span className="font-semibold text-foreground">{visibleFiles.length}</span> file{visibleFiles.length !== 1 ? 's' : ''}
+                      {activeFilter && <span> matching status <span className="font-semibold text-foreground">{activeFilter}</span></span>}
+                      {selectedRuleFilter && (
+                        <span>
+                          {' '}matching rule{' '}
+                          <span className="font-semibold text-primary">
+                            {[...ruleSummary.general, ...ruleSummary.customer].find((r) => (r.rule_id || r.rule_name) === selectedRuleFilter)?.rule_name || selectedRuleFilter}
+                          </span>
+                        </span>
+                      )}
+                    </span>
+                    <button
+                      onClick={() => { setActiveFilter(null); setSelectedRuleFilter(null); }}
+                      className="text-xs text-primary hover:underline font-semibold"
+                    >
+                      Clear filter
+                    </button>
                   </div>
-                  <motion.div
-                    className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
-                    variants={containerVariants}
-                    initial="hidden"
-                    animate="show"
-                  >
-                    {cssFiles.map((file, i) => (
-                      <motion.div key={`css-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
+                )}
+
+                <motion.div
+                  className={cn(
+                    layoutMode === 'grid'
+                      ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
+                      : 'space-y-2.5',
+                  )}
+                  variants={containerVariants}
+                  initial="hidden"
+                  animate="show"
+                >
+                  {visibleFiles.map((file, i) => {
+                    const status = getFileStatus(file.file_name);
+                    const agg = fileIssues.get(file.file_name);
+                    return (
+                      <motion.div key={`${file.file_name}-${i}`} variants={xhtmlCardVariants}>
                         <XHTMLCard
                           file={file}
-                          variant="css"
-                          status="pending"
+                          layoutMode={layoutMode}
+                          status={status}
+                          errors={agg?.errors ?? 0}
+                          warnings={agg?.warnings ?? 0}
+                          isValidating={validatingFiles.has(file.file_name)}
+                          onValidate={() => handleValidateFile(file.file_name)}
+                          onOpen={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
+                          onPreview={() => { setModalAllowedTabs(undefined); setModalInitialTab('preview'); setSelectedFile(file); }}
+                          index={i}
+                        />
+                      </motion.div>
+                    );
+                  })}
+                  {(activeFilter ? ncxFiles.filter((f) => getFileStatus(f.file_name) === activeFilter) : ncxFiles).map((file, i) => {
+                    const status = getFileStatus(file.file_name);
+                    const agg = fileIssues.get(file.file_name);
+                    return (
+                      <motion.div key={`ncx-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
+                        <XHTMLCard
+                          file={file}
+                          layoutMode={layoutMode}
+                          status={status}
+                          errors={agg?.errors ?? 0}
+                          warnings={agg?.warnings ?? 0}
+                          isValidating={validatingFiles.has(file.file_name)}
+                          onValidate={() => handleValidateFile(file.file_name)}
+                          onPreview={() => { setModalAllowedTabs(['result', 'source']); setModalInitialTab('result'); setSelectedFile(file); }}
                           onOpen={() => { setModalAllowedTabs(['result', 'source']); setModalInitialTab('result'); setSelectedFile(file); }}
                           index={i}
                         />
                       </motion.div>
-                    ))}
-                  </motion.div>
-                </div>
-              )}
-            </>
+                    );
+                  })}
+                </motion.div>
+
+                {/* ── CSS stylesheets section ────────────────────────────────── */}
+                {cssFiles.length > 0 && !selectedRuleFilter && (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 pt-2">
+                      <Braces className="w-4 h-4 text-violet-500" />
+                      <h2 className="text-xs font-bold text-muted-foreground uppercase tracking-widest">
+                        CSS Stylesheets
+                      </h2>
+                      <span className="text-xs text-muted-foreground font-mono">({cssFiles.length})</span>
+                    </div>
+                    <motion.div
+                      className={cn(
+                        layoutMode === 'grid'
+                          ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
+                          : 'space-y-2.5',
+                      )}
+                      variants={containerVariants}
+                      initial="hidden"
+                      animate="show"
+                    >
+                      {cssFiles.map((file, i) => (
+                        <motion.div key={`css-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
+                          <XHTMLCard
+                            file={file}
+                            variant="css"
+                            layoutMode={layoutMode}
+                            status="pending"
+                            onOpen={() => { setModalAllowedTabs(['result', 'source']); setModalInitialTab('result'); setSelectedFile(file); }}
+                            index={i}
+                          />
+                        </motion.div>
+                      ))}
+                    </motion.div>
+                  </div>
+                )}
+
+                {/* ── Other files & assets section ────────────────────────────── */}
+                {otherFiles.length > 0 && !selectedRuleFilter && (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 pt-2">
+                      <FileCode2 className="w-4 h-4 text-slate-500" />
+                      <h2 className="text-xs font-bold text-muted-foreground uppercase tracking-widest">
+                        Other Package Files & Assets
+                      </h2>
+                      <span className="text-xs text-muted-foreground font-mono">({otherFiles.length})</span>
+                    </div>
+                    <motion.div
+                      className={cn(
+                        layoutMode === 'grid'
+                          ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
+                          : 'space-y-2.5',
+                      )}
+                      variants={containerVariants}
+                      initial="hidden"
+                      animate="show"
+                    >
+                      {otherFiles.map((file, i) => {
+                        const status = getFileStatus(file.file_name);
+                        const agg = fileIssues.get(file.file_name);
+                        return (
+                          <motion.div key={`other-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
+                            <XHTMLCard
+                              file={file}
+                              variant="css"
+                              layoutMode={layoutMode}
+                              status={status}
+                              errors={agg?.errors ?? 0}
+                              warnings={agg?.warnings ?? 0}
+                              onOpen={() => { setModalAllowedTabs(['result', 'source']); setModalInitialTab('result'); setSelectedFile(file); }}
+                              index={i}
+                            />
+                          </motion.div>
+                        );
+                      })}
+                    </motion.div>
+                  </div>
+                )}
+              </div>
+            </div>
           )}
         </div>
       </motion.div>

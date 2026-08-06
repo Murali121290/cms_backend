@@ -75,6 +75,7 @@ export const xhtmlCardVariants = {
 interface XHTMLCardProps {
   file: XHTMLFile;
   variant?: 'xhtml' | 'css';
+  layoutMode?: 'grid' | 'list';
   status: XHTMLFileStatus;
   errors?: number;
   warnings?: number;
@@ -88,6 +89,7 @@ interface XHTMLCardProps {
 export function XHTMLCard({
   file,
   variant = 'xhtml',
+  layoutMode = 'grid',
   status,
   errors = 0,
   warnings = 0,
@@ -98,6 +100,121 @@ export function XHTMLCard({
 }: XHTMLCardProps) {
   const filePath = file.path ?? file.relative_path ?? '';
   const isCss = variant === 'css';
+
+  if (layoutMode === 'list') {
+    return (
+      <motion.div variants={xhtmlCardVariants} whileHover={{ x: 2, transition: { duration: 0.12 } }}>
+        <Card className="hover:shadow-md hover:border-primary/30 transition-all duration-150 border border-border/70 bg-card/95 rounded-xl overflow-hidden">
+          <div className="px-4 py-3 flex items-center justify-between gap-4 font-sans flex-wrap sm:flex-nowrap">
+            {/* File Icon & Name & Path */}
+            <div className="flex items-center gap-3.5 min-w-0 flex-1">
+              <div
+                className={cn(
+                  'w-9 h-9 rounded-xl flex items-center justify-center shrink-0 cursor-pointer transition-transform hover:scale-105',
+                  isCss ? 'bg-violet-500/10 text-violet-600' : 'bg-primary/10 text-primary',
+                )}
+                onClick={onOpen}
+              >
+                {isCss ? (
+                  <Braces className="w-4 h-4" />
+                ) : (
+                  <FileCode2 className="w-4 h-4" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
+                  <p
+                    onClick={onOpen}
+                    className="text-xs font-bold text-foreground truncate cursor-pointer hover:text-primary transition-colors font-serif m-0 tracking-tight"
+                    title={file.file_name}
+                  >
+                    {file.file_name}
+                  </p>
+                  {!isCss && <StatusBadge status={status} />}
+                </div>
+                <p className="text-[11px] text-muted-foreground/80 truncate font-mono mt-0.5" title={filePath}>
+                  {filePath}
+                </p>
+              </div>
+            </div>
+
+            {/* Errors / Warnings Summary */}
+            {!isCss && (
+              <div
+                onClick={onOpen}
+                className="flex items-center gap-2 cursor-pointer text-xs shrink-0 font-medium"
+              >
+                {errors > 0 && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 font-bold text-[11px]">
+                    <XCircle className="w-3.5 h-3.5" />
+                    {errors} {errors === 1 ? 'Error' : 'Errors'}
+                  </span>
+                )}
+                {warnings > 0 && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 font-bold text-[11px]">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    {warnings} {warnings === 1 ? 'Warning' : 'Warnings'}
+                  </span>
+                )}
+                {errors === 0 && warnings === 0 && status === 'passed' && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Passed
+                  </span>
+                )}
+                {status === 'pending' && (
+                  <span className="text-slate-400 text-[11px] font-medium flex items-center gap-1 px-2 py-0.5">
+                    <Clock className="w-3.5 h-3.5 text-slate-400" /> Pending
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex items-center gap-2 shrink-0">
+              {isCss ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5 h-8 text-xs font-semibold rounded-lg shadow-sm"
+                  onClick={onOpen}
+                >
+                  <Braces className="w-3.5 h-3.5" />
+                  View Source
+                </Button>
+              ) : (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 h-8 text-xs font-semibold rounded-lg shadow-sm hover:border-primary/40 hover:text-primary transition-all"
+                    onClick={onPreview}
+                    aria-label={`Preview ${file.file_name}`}
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    Preview
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="gap-1.5 h-8 text-xs font-semibold rounded-lg shadow-sm"
+                    onClick={onValidate}
+                    disabled={isValidating}
+                    aria-label={`Validate ${file.file_name}`}
+                  >
+                    {isValidating ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Play className="w-3.5 h-3.5" />
+                    )}
+                    {isValidating ? 'Validating…' : 'Validate'}
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+        </Card>
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div variants={xhtmlCardVariants} whileHover={{ y: -2, transition: { duration: 0.12 } }}>

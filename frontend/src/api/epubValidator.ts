@@ -44,6 +44,18 @@ export async function validateFolder(folderName: string): Promise<ValidationApiR
   }
 }
 
+export async function getLatestValidation(folderName: string): Promise<ValidationApiResponse | null> {
+  try {
+    const { data } = await api.get<ValidationApiResponse | { status: false }>(
+      `/post-prod/epub-validator/validate/${folderName}/latest`,
+    );
+    if ('status' in data && data.status === false) return null;
+    return data as ValidationApiResponse;
+  } catch {
+    return null;
+  }
+}
+
 export async function getFileContent(folderName: string, filePath: string): Promise<string> {
   try {
     const encoded = filePath.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
