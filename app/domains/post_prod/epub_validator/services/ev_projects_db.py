@@ -64,6 +64,12 @@ def create_project(
     user_id: Optional[int],
     assignee: Optional[str] = None,
 ) -> dict[str, Any]:
+    # Purge any old soft-deleted project records matching folder_name or project_name
+    db.query(EvProject).filter(
+        (EvProject.folder_name == folder_name) | (EvProject.project_name == project_name),
+        EvProject.is_deleted.is_(True),
+    ).delete(synchronize_session=False)
+
     now = datetime.utcnow()
     project = EvProject(
         client=client,

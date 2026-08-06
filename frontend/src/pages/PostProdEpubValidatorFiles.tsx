@@ -122,6 +122,13 @@ export function PostProdEpubValidatorFiles() {
   useEffect(() => {
     const assigned = (project?.assignee || '').trim().toLowerCase();
     const myUsername = (viewer?.username || '').trim().toLowerCase();
+    
+    if (!assigned) {
+      toast.error('This project is not assigned to anyone. Assign it to access it.');
+      navigate('/post-production/epub-validator');
+      return;
+    }
+
     if (assigned && myUsername && assigned !== myUsername) {
       toast.error(`This project is assigned to ${project?.assignee}. You cannot access it.`);
       navigate('/post-production/epub-validator');
@@ -644,15 +651,11 @@ export function PostProdEpubValidatorFiles() {
                     <span>
                       {project.client} {project.client_code && `(${project.client_code})`}
                     </span>
-                    {project.assignee && (
-                      <>
-                        <span className="text-border">·</span>
-                        <span className="inline-flex items-center gap-1 text-muted">
-                          <User size={12} className="text-muted/70" />
-                          <span>{project.assignee}</span>
-                        </span>
-                      </>
-                    )}
+                    <span className="text-border">·</span>
+                    <span className="inline-flex items-center gap-1 text-muted">
+                      <User size={12} className="text-muted/70" />
+                      <span>{project.assignee || 'Not Assigned'}</span>
+                    </span>
                   </>
                 ) : (
                   <span className="font-mono text-[11px] font-semibold">{folderName}</span>

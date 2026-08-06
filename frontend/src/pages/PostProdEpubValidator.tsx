@@ -76,10 +76,17 @@ function ProjectCard({ project, users, onDelete, onRefresh }: CardProps) {
   const handleCardClick = () => {
     const assigned = (project.assignee || '').trim().toLowerCase();
     const myUsername = (viewer?.username || '').trim().toLowerCase();
+
+    if (!assigned) {
+      toast.error('This project is not assigned to anyone. Assign it to open it.');
+      return;
+    }
+
     if (assigned && myUsername && assigned !== myUsername) {
       toast.error(`This project is assigned to ${project.assignee}. You cannot open it.`);
       return;
     }
+
     navigate(`/post-production/epub-validator/${project.id}`);
   };
 
@@ -340,14 +347,18 @@ export function PostProdEpubValidator() {
 
   const handleDelete = async () => {
     if (!projectToDelete) return;
+    const targetId = projectToDelete;
+    // Optimistically update list so project disappears immediately
+    setProjects((prev) => prev.filter((p) => p.id !== targetId));
+    setProjectToDelete(null);
+
     try {
-      await deleteProject(projectToDelete);
+      await deleteProject(targetId);
       toast.success('Project deleted successfully');
       fetchProjects();
-    } catch {
-      toast.error('Failed to delete project');
-    } finally {
-      setProjectToDelete(null);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete project');
+      fetchProjects();
     }
   };
 

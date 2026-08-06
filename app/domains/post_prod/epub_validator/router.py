@@ -103,7 +103,14 @@ async def create_project(
     db: Session = Depends(get_db),
     user=Depends(get_current_user_from_cookie),
 ):
-    """Create a new EV project by uploading a ZIP (epub + pdf)."""
+    # Check if an active (non-deleted) project with the same name already exists
+    existing = ev_projects_db.get_project_by_folder(db, project_name.strip())
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{project_name.strip()} already present"
+        )
+
     result = await process_upload(
         file,
         db=db,
