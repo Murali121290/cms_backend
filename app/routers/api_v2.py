@@ -162,6 +162,7 @@ def _serialize_admin_user(user: models.User):
         roles=[schemas_v2.AdminUserRole(id=role.id, name=role.name) for role in user.roles],
         team=user.team,
         customer_access=user.customer_access or [],
+        designation=user.designation,
     )
 
 
@@ -173,6 +174,7 @@ def _serialize_viewer(user: models.User):
         roles=[role.name for role in user.roles],
         is_active=user.is_active,
         team=user.team,
+        designation=user.designation,
     )
 
 
@@ -4152,6 +4154,7 @@ def api_v2_list_processing_jobs(
 
     from app.models import ProcessingJob, File, ChapterInfo
     from app.domains.projects.models import Project
+    from app.domains.auth.models import User
 
     from sqlalchemy import func
 
@@ -4170,10 +4173,13 @@ def api_v2_list_processing_jobs(
         ProcessingJob.options,
         func.coalesce(ProcessingJob.filename, File.filename).label("filename"),
         func.coalesce(ProcessingJob.project_code, Project.project_code).label("project_code"),
-        func.coalesce(ProcessingJob.chapter_number, ChapterInfo.chapters).label("chapter_number")
+        func.coalesce(ProcessingJob.chapter_number, ChapterInfo.chapters).label("chapter_number"),
+        User.username.label("username"),
+        User.role.label("user_role")
     ).outerjoin(File, ProcessingJob.file_id == File.id)\
      .outerjoin(Project, File.project_id == Project.id)\
-     .outerjoin(ChapterInfo, File.chapter_id == ChapterInfo.id)
+     .outerjoin(ChapterInfo, File.chapter_id == ChapterInfo.id)\
+     .outerjoin(User, ProcessingJob.user_id == User.id)
 
     if status_filter:
         query = query.filter(ProcessingJob.status == status_filter)
@@ -4212,7 +4218,9 @@ def api_v2_list_processing_jobs(
             project_code=row.project_code,
             chapter_number=row.chapter_number,
             priority=row.priority,
-            options=options_dict
+            options=options_dict,
+            username=row.username,
+            user_role=row.user_role
         ))
     return result
 
@@ -6057,7 +6065,8 @@ def api_v2_create_user(
         username=payload.username,
         email=payload.email,
         password_hash=hash_password(payload.password),
-        role=role_record.role_name,
+        designation=role_record.role_name,
+        role=role_record.role_name if role_record.role_name.lower() == "admin" else None,
         team=role_record.team,
         customer_access=payload.customer_access,
         active_status=payload.active_status if payload.active_status is not None else True
@@ -6118,10 +6127,16 @@ def api_v2_update_user(
             )
 
         # Admin count check to protect the last admin
-        was_admin = db_user.role and db_user.role.lower() == "admin"
+        from sqlalchemy import func
+        was_admin = (
+            (db_user.role and db_user.role.lower() == "admin") or
+            (db_user.designation and db_user.designation.lower() == "admin")
+        )
         is_new_admin = role_record.role_name.lower() == "admin"
         if was_admin and not is_new_admin:
-            admin_count = db.query(models.User).filter(models.User.role.ilike("admin")).count()
+            admin_count = db.query(models.User).filter(
+                func.coalesce(models.User.role, models.User.designation).ilike("admin")
+            ).count()
             if admin_count <= 1:
                 return _error_response(
                     status_code=status.HTTP_409_CONFLICT,
@@ -6129,10 +6144,13 @@ def api_v2_update_user(
                     message="Cannot remove the last Admin role"
                 )
 
-        db_user.role = role_record.role_name
+        db_user.designation = role_record.role_name
+        db_user.role = role_record.role_name if role_record.role_name.lower() == "admin" else None
         db_user.team = role_record.team
 
     # Other updates
+    if payload.designation is not None:
+        db_user.designation = payload.designation
     if payload.customer_access is not None:
         db_user.customer_access = payload.customer_access
     if payload.password:

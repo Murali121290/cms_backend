@@ -24,6 +24,8 @@ interface ProcessingJob {
   chapter_number: string | null
   priority: number
   options: Record<string, unknown> | null
+  username?: string | null
+  user_role?: string | null
 }
 
 export function QueueManagement() {
@@ -202,14 +204,14 @@ export function QueueManagement() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-background">
-                  {['Job ID', 'Priority', 'Project', 'Chapter', 'File Info', 'Process Type', 'Progress / Status', 'Timestamps', 'Actions'].map(h => (
+                  {['Job ID', 'Priority', 'Project', 'Chapter', 'File Info', 'Process Type', 'User / Role', 'Progress / Status', 'Timestamps', 'Actions'].map(h => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wide whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {filtered.length === 0 ? (
-                  <tr><td colSpan={9} className="px-4 py-12 text-center text-muted text-sm">No conversion jobs found</td></tr>
+                  <tr><td colSpan={10} className="px-4 py-12 text-center text-muted text-sm">No conversion jobs found</td></tr>
                 ) : (
                   filtered.map(job => (
                     <tr key={job.id} className="hover:bg-background/60 transition-colors">
@@ -233,6 +235,16 @@ export function QueueManagement() {
                       <td className="px-4 py-3 text-muted">{job.chapter_number || '—'}</td>
                       <td className="px-4 py-3 max-w-[180px] truncate text-text" title={job.filename || ''}>{job.filename || '—'}</td>
                       <td className="px-4 py-3 text-text font-medium">{fmtType(job.process_type)}</td>
+                      <td className="px-4 py-3">
+                        {job.username ? (
+                          <div className="flex flex-col">
+                            <span className="text-text font-semibold">{job.username}</span>
+                            <span className="text-xs text-muted font-medium">{job.user_role || '—'}</span>
+                          </div>
+                        ) : (
+                          <span className="text-muted text-xs">—</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         <div className="space-y-1.5 min-w-[120px]">
                           <div>{getStatusBadge(job.status)}</div>
