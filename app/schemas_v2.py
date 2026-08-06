@@ -21,6 +21,7 @@ class Viewer(BaseModel):
     roles: list[str]
     is_active: bool
     team: str | None = None
+    designation: str | None = None
 
 
 class SessionAuth(BaseModel):
@@ -325,6 +326,7 @@ class AdminUser(BaseModel):
     roles: list[AdminUserRole]
     team: str | None = None
     customer_access: list[str] = []
+    designation: str | None = None
 
 
 class AdminUsersPagination(BaseModel):
@@ -347,7 +349,8 @@ class UserCreate(BaseModel):
     username: str
     email: str
     password: str
-    role: str
+    role: str | None = None
+    designation: str | None = None
     team: str
     customer_access: list[str] = []
     active_status: bool | None = True
@@ -355,6 +358,7 @@ class UserCreate(BaseModel):
 
 class UserUpdate(BaseModel):
     role: str | None = None
+    designation: str | None = None
     team: str | None = None
     password: str | None = None
     customer_access: list[str] | None = None
@@ -647,6 +651,8 @@ class ProcessingJobListItem(BaseModel):
     chapter_number: str | None = None
     priority: int
     options: dict | None = None
+    username: str | None = None
+    user_role: str | None = None
 
     class Config:
         from_attributes = True

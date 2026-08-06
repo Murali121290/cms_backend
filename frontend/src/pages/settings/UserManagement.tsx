@@ -19,6 +19,13 @@ import { Card } from '@/components/ui/Card'
 const PAGE_SIZE = 8
 
 // ── Validation ────────────────────────────────────────────────────────────────
+const SYSTEM_ROLES = [
+  { value: '', label: 'None (Empty)' },
+  { value: 'Admin', label: 'Admin' },
+  { value: 'ProjectManager', label: 'ProjectManager' },
+  { value: 'Viewer', label: 'Viewer' }
+]
+
 function validateCreate(f: Partial<CreateUserPayload>, users: User[]) {
   const e: Record<string, string> = {}
   if (!f.user_name?.trim())    e.user_name = 'User name is required'
@@ -26,15 +33,15 @@ function validateCreate(f: Partial<CreateUserPayload>, users: User[]) {
   else if (!/\S+@\S+\.\S+/.test(f.email)) e.email = 'Invalid email address'
   else if (users.some(u => u.email === f.email)) e.email = 'Email already exists'
   if (!f.password?.trim())     e.password  = 'Password is required'
-  if (!f.role)                 e.role      = 'Role is required'
+  if (!f.designation)          e.designation = 'Designation is required'
   if (!f.team)                 e.team      = 'Team is required'
   return e
 }
 
 function validateEdit(f: Partial<UpdateUserPayload>) {
   const e: Record<string, string> = {}
-  if (!f.role)  e.role = 'Role is required'
-  if (!f.team)  e.team = 'Team is required'
+  if (!f.designation)  e.designation = 'Designation is required'
+  if (!f.team)         e.team = 'Team is required'
   return e
 }
 
@@ -59,14 +66,14 @@ function CreateUserModal({ isOpen, onClose, onCreated, roles, users, teams, cust
     setErrors(e => { const n = { ...e }; delete n[key]; return n })
   }
 
-  // Unique role names for dropdown
-  const roleOptions = useMemo(() =>
+  // Unique designation names for dropdown
+  const designationOptions = useMemo(() =>
     [...new Set(roles.map(r => r.role_name))].sort().map(n => ({ value: n, label: n }))
     , [roles])
 
-  function handleRoleChange(roleName: string) {
-    set('role', roleName)
-    const matched = roles.filter(r => r.role_name === roleName)
+  function handleDesignationChange(desName: string) {
+    set('designation', desName)
+    const matched = roles.filter(r => r.role_name === desName)
     if (matched.length >= 1) set('team', matched[0].team)
     else set('team', '')
   }
@@ -102,10 +109,12 @@ function CreateUserModal({ isOpen, onClose, onCreated, roles, users, teams, cust
         <Input label="User Name" required value={form.user_name ?? ''} onChange={e => set('user_name', e.target.value)} error={errors.user_name} placeholder="e.g. john_doe" />
         <Input label="Email" type="email" required value={form.email ?? ''} onChange={e => set('email', e.target.value)} error={errors.email} placeholder="john@example.com" />
         <Input label="Password" type="password" required value={form.password ?? ''} onChange={e => set('password', e.target.value)} error={errors.password} placeholder="Min 8 characters" />
-        <Select label="Role" required value={form.role ?? ''} onChange={e => handleRoleChange(e.target.value)} error={errors.role}
-          options={roleOptions} placeholder="Select role" />
+        <Select label="Designation" required value={form.designation ?? ''} onChange={e => handleDesignationChange(e.target.value)} error={errors.designation}
+          options={designationOptions} placeholder="Select designation" />
+        <Select label="Role" value={form.role ?? ''} onChange={e => set('role', e.target.value)} error={errors.role}
+          options={SYSTEM_ROLES} placeholder="Select system role" />
         <Input label="Team" value={form.team ?? ''} disabled className="opacity-70 cursor-not-allowed"
-          placeholder="Auto-filled from role" hint="Set automatically when a role is selected" />
+          placeholder="Auto-filled from designation" hint="Set automatically when a designation is selected" />
         <div className="sm:col-span-2">
           <MultiSelect label="Customer Access" options={customerOptions} value={form.customer_access ?? []}
             onChange={v => set('customer_access', v)} placeholder="Select customers..." />
@@ -132,7 +141,7 @@ function EditUserModal({ isOpen, onClose, onUpdated, user, roles, teams, custome
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (user) setForm({ role: user.role, team: user.team, customer_access: user.customer_access, active_status: user.active_status, password: '' })
+    if (user) setForm({ role: user.role, designation: user.designation, team: user.team, customer_access: user.customer_access, active_status: user.active_status, password: '' })
   }, [user])
 
   function set<K extends keyof UpdateUserPayload>(key: K, value: UpdateUserPayload[K]) {
@@ -140,14 +149,14 @@ function EditUserModal({ isOpen, onClose, onUpdated, user, roles, teams, custome
     setErrors(e => { const n = { ...e }; delete n[key]; return n })
   }
 
-  // Unique role names for dropdown
-  const roleOptions = useMemo(() =>
+  // Unique designation names for dropdown
+  const designationOptions = useMemo(() =>
     [...new Set(roles.map(r => r.role_name))].sort().map(n => ({ value: n, label: n }))
     , [roles])
 
-  function handleRoleChange(roleName: string) {
-    set('role', roleName)
-    const matched = roles.filter(r => r.role_name === roleName)
+  function handleDesignationChange(desName: string) {
+    set('designation', desName)
+    const matched = roles.filter(r => r.role_name === desName)
     if (matched.length >= 1) set('team', matched[0].team)
     else set('team', '')
   }
@@ -186,10 +195,12 @@ function EditUserModal({ isOpen, onClose, onUpdated, user, roles, teams, custome
         <Input label="Email" value={user?.email ?? ''} disabled className="opacity-60" />
         <Input label="New Password" type="password" value={form.password ?? ''} onChange={e => set('password', e.target.value)}
           placeholder="Leave blank to keep current" hint="Leave blank to keep existing password" />
-        <Select label="Role" required value={form.role ?? ''} onChange={e => handleRoleChange(e.target.value)} error={errors.role}
-          options={roleOptions} placeholder="Select role" />
+        <Select label="Designation" required value={form.designation ?? ''} onChange={e => handleDesignationChange(e.target.value)} error={errors.designation}
+          options={designationOptions} placeholder="Select designation" />
+        <Select label="Role" value={form.role ?? ''} onChange={e => set('role', e.target.value)} error={errors.role}
+          options={SYSTEM_ROLES} placeholder="Select system role" />
         <Input label="Team" value={form.team ?? ''} disabled className="opacity-70 cursor-not-allowed"
-          placeholder="Auto-filled from role" hint="Set automatically when a role is selected" />
+          placeholder="Auto-filled from designation" hint="Set automatically when a designation is selected" />
         <div className="sm:col-span-2">
           <MultiSelect label="Customer Access" options={customerOptions} value={form.customer_access ?? []}
             onChange={v => set('customer_access', v)} placeholder="Select customers..." />
@@ -344,7 +355,7 @@ export function UserManagement() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-background">
-                  {['User', 'Email', 'Role', 'Team', 'Customer Access', 'Status', 'Actions'].map(h => (
+                  {['User', 'Email', 'Role', 'Designation', 'Team', 'Customer Access', 'Status', 'Actions'].map(h => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wide whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -352,9 +363,9 @@ export function UserManagement() {
               <tbody className="divide-y divide-border">
                 {pageData.length === 0 ? (
                   <>
-                    <tr><td colSpan={7} className="px-4 py-12 text-center text-muted text-sm">No users found</td></tr>
+                    <tr><td colSpan={8} className="px-4 py-12 text-center text-muted text-sm">No users found</td></tr>
                     {Array.from({ length: PAGE_SIZE - 1 }).map((_, i) => (
-                      <tr key={`pad-${i}`}><td colSpan={7} className="py-[22px]" /></tr>
+                      <tr key={`pad-${i}`}><td colSpan={8} className="py-[22px]" /></tr>
                     ))}
                   </>
                 ) : (
@@ -374,10 +385,16 @@ export function UserManagement() {
                         <td className="px-4 py-3 text-muted">{user.email}</td>
                         {/* Role */}
                         <td className="px-4 py-3">
-                          <Badge variant={statusToBadge('in-progress')} className="bg-purple-100 text-purple-700 border-purple-200">
-                            {user.role}
-                          </Badge>
+                          {user.role ? (
+                            <Badge variant={statusToBadge('in-progress')} className="bg-purple-100 text-purple-700 border-purple-200">
+                              {user.role}
+                            </Badge>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
                         </td>
+                        {/* Designation */}
+                        <td className="px-4 py-3 text-text font-medium">{user.designation || '—'}</td>
                         {/* Team */}
                         <td className="px-4 py-3 text-text">{user.team}</td>
                         {/* Customer Access */}
@@ -416,7 +433,7 @@ export function UserManagement() {
                       </tr>
                     ))}
                     {Array.from({ length: PAGE_SIZE - pageData.length }).map((_, i) => (
-                      <tr key={`pad-${i}`}><td colSpan={7} className="py-[22px]" /></tr>
+                      <tr key={`pad-${i}`}><td colSpan={8} className="py-[22px]" /></tr>
                     ))}
                   </>
                 )}

@@ -392,7 +392,7 @@ export function ClientProjects() {
         setClient(c)
         setProjects(ps)
         setPmUsers((users || []).filter(u =>
-          u.active_status && u.role.toLowerCase().replace(" ", "").includes('projectmanager')
+          u.active_status && (u.role || u.designation).toLowerCase().replace(" ", "").includes('projectmanager')
         ))
       })
       .catch(() => toast.error('Failed to load projects'))

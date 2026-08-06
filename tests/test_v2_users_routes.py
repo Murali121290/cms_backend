@@ -33,7 +33,8 @@ def test_v2_create_user_success(auth_cookie_client, admin_user, roles, db_sessio
     user_in_db = db_session.query(models.User).filter(models.User.username == "v2testuser").first()
     assert user_in_db is not None
     assert verify_password("SecretPassword123!", user_in_db.password_hash)
-    assert user_in_db.role == editor_role.role_name
+    assert user_in_db.role is None
+    assert user_in_db.designation == editor_role.role_name
 
 def test_v2_create_user_duplicate_username(auth_cookie_client, admin_user, roles, db_session):
     client = auth_cookie_client(admin_user)
@@ -44,7 +45,8 @@ def test_v2_create_user_duplicate_username(auth_cookie_client, admin_user, roles
         username="v2testuser",
         email="v2test_other@example.com",
         password_hash="dummy",
-        role=editor_role.role_name,
+        role=None,
+        designation=editor_role.role_name,
         team=editor_role.team
     )
     db_session.add(existing_user)
@@ -75,7 +77,8 @@ def test_v2_update_user_details(auth_cookie_client, admin_user, roles, db_sessio
         username="updateme2",
         email="updateme2@example.com",
         password_hash="dummy",
-        role=editor_role.role_name,
+        role=None,
+        designation=editor_role.role_name,
         team=editor_role.team
     )
     db_session.add(user)
@@ -93,7 +96,8 @@ def test_v2_update_user_details(auth_cookie_client, admin_user, roles, db_sessio
     
     assert response.status_code == 200
     db_session.refresh(user)
-    assert user.role == pm_role.role_name
+    assert user.role is None
+    assert user.designation == pm_role.role_name
     assert user.team == pm_role.team
     assert user.customer_access == ["ClientB"]
     assert verify_password("NewSecretPassword123!", user.password_hash)
