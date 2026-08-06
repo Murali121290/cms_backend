@@ -18,6 +18,7 @@ def _serialize(p: EvProject) -> dict[str, Any]:
         "total_files": p.total_files,
         "status": p.status,
         "validation_status": p.validation_status,
+        "latest_validation_file": p.latest_validation_file,
         "assignee": p.assignee,
         "uploaded_by_id": p.uploaded_by_id,
         "uploaded_at": p.uploaded_at.isoformat() if p.uploaded_at else None,
@@ -132,8 +133,10 @@ def save_validation_run(
     user_id: Optional[int] = None,
     username: Optional[str] = None,
 ) -> None:
-    """Save a full validation run snapshot into post_prod_ev_history."""
+    """Save a full validation run snapshot as JSON to disk and record execution in DB."""
     import json
+    import os
+    from .upload_service import UPLOAD_DIR
 
     p = get_project_by_folder(db, folder_name)
     if p is None:
@@ -148,6 +151,22 @@ def save_validation_run(
     p.validation_status = val_status
     p.status = "validated" if val_status == "pass" else "failed"
 
+    # Determine assignee slug for filename: {assignee_name}_{timestamp}.json
+    raw_assignee = (p.assignee or username or "unassigned").strip().replace(" ", "_")
+    timestamp_str = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    val_filename = f"{raw_assignee}_{timestamp_str}.json"
+
+    # Ensure project validations folder exists on disk
+    val_dir = os.path.join(UPLOAD_DIR, folder_name, "validations")
+    os.makedirs(val_dir, exist_ok=True)
+
+    # Save JSON file on disk
+    val_file_path = os.path.join(val_dir, val_filename)
+    with open(val_file_path, "w", encoding="utf-8") as f:
+        json.dump(validation_result, f, indent=2)
+
+    p.latest_validation_file = val_filename
+
     history = EvHistory(
         project_id=p.id,
         changed_by_id=user_id,
@@ -155,7 +174,6 @@ def save_validation_run(
         old_assignee=p.assignee,
         new_assignee=p.assignee,
         result_type="validation",
-        validation_result=json.dumps(validation_result),
         created_at=datetime.utcnow(),
     )
     db.add(history)
@@ -166,29 +184,40 @@ def get_latest_validation_run(
     db: Session,
     folder_name: str,
 ) -> Optional[dict[str, Any]]:
-    """Retrieve the latest stored validation result payload for a project."""
+    """Retrieve the latest stored validation result payload from disk."""
+    import glob
     import json
+    import os
+    from .upload_service import UPLOAD_DIR
 
     p = get_project_by_folder(db, folder_name)
     if p is None:
         return None
 
-    h = (
-        db.query(EvHistory)
-        .filter(
-            EvHistory.project_id == p.id,
-            EvHistory.result_type == "validation",
-            EvHistory.validation_result.isnot(None),
-        )
-        .order_by(EvHistory.created_at.desc())
-        .first()
-    )
-    if h and h.validation_result:
-        try:
-            return json.loads(h.validation_result)
-        except Exception:
-            return None
-    return None
+    val_dir = os.path.join(UPLOAD_DIR, folder_name, "validations")
+
+    # Fast path: read the file specified in latest_validation_file column
+    if p.latest_validation_file:
+        file_path = os.path.join(val_dir, p.latest_validation_file)
+        if os.path.isfile(file_path):
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+
+    # Fallback: find newest *.json file under validations directory
+    pattern = os.path.join(val_dir, "*.json")
+    files = glob.glob(pattern)
+    if not files:
+        return None
+
+    files.sort(key=os.path.getmtime, reverse=True)
+    try:
+        with open(files[0], "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
 
 
 def update_validation_status(

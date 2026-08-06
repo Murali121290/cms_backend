@@ -35,6 +35,7 @@ class EvProject(Base):
     status = Column(String(50), nullable=False, default="uploaded")
     # "pass" | "fail" | null (null means never validated)
     validation_status = Column(String(50), nullable=True)
+    latest_validation_file = Column(String(255), nullable=True)
     # Assignee username (free string, mirrors WC pattern)
     assignee = Column(String(255), nullable=True)
 
@@ -70,7 +71,6 @@ class EvHistory(Base):
     old_assignee = Column(String(255), nullable=True)
     new_assignee = Column(String(255), nullable=True)
     result_type = Column(String(50), nullable=False, default="assignee_change")  # "assignee_change" | "validation"
-    validation_result = Column(Text, nullable=True)  # JSON payload of ValidationApiResponse
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     project = relationship("EvProject", foreign_keys=[project_id])
