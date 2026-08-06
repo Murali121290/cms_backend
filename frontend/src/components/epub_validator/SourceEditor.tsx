@@ -24,6 +24,7 @@ interface Props {
   readOnly?: boolean;
   errors?: LintError[];
   onLogLineClick?: (lineNum: number) => void;
+  onSave?: () => void;
 }
 
 // XML tag auto-closer
@@ -90,10 +91,11 @@ export function formatXmlString(xmlStr: string): string {
  * the app's design system (see FindReplacePanel).
  */
 export const SourceEditor = forwardRef<SourceEditorRef, Props>(
-  ({ value, onChange, className, readOnly = false, errors, onLogLineClick }, ref) => {
+  ({ value, onChange, className, readOnly = false, errors, onLogLineClick, onSave }, ref) => {
     const cmRef = useRef<ReactCodeMirrorRef | null>(null);
     const [panelOpen, setPanelOpen] = useState(false);
     const [replaceMode, setReplaceMode] = useState(false);
+    const [wordWrap, setWordWrap] = useState(true);
 
     useImperativeHandle(ref, () => ({
       scrollToLine(lineNum) {
@@ -120,6 +122,11 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
       setReplaceMode(replace);
       setPanelOpen(true);
     };
+  });
+
+  const onSaveRef = useRef<(() => void) | undefined>(onSave);
+  useEffect(() => {
+    onSaveRef.current = onSave;
   });
 
   const lintExtension = useMemo(() => {
@@ -171,6 +178,7 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
       xmlAutoClose,
       lintExtension,
       clickExtension,
+      wordWrap ? EditorView.lineWrapping : [],
       Prec.highest(
         keymap.of([
           {
@@ -186,6 +194,22 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
             preventDefault: true,
             run: () => {
               openPanelRef.current(true);
+              return true;
+            },
+          },
+          {
+            key: 'Mod-s',
+            preventDefault: true,
+            run: () => {
+              onSaveRef.current?.();
+              return true;
+            },
+          },
+          {
+            key: 'Alt-z',
+            preventDefault: true,
+            run: () => {
+              setWordWrap((prev) => !prev);
               return true;
             },
           },
@@ -231,7 +255,7 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
         },
       }),
     ],
-    [],
+    [lintExtension, clickExtension, wordWrap],
   );
 
   const view = cmRef.current?.view ?? null;
@@ -264,6 +288,18 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
             ✏️ Replace
           </button>
         )}
+        <label
+          className="flex items-center gap-1.5 ml-auto cursor-pointer hover:text-gray-800 transition-colors font-medium text-[11px] select-none"
+          title="Word Wrap text (Alt+Z)"
+        >
+          <input
+            type="checkbox"
+            checked={wordWrap}
+            onChange={(e) => setWordWrap(e.target.checked)}
+            className="rounded border-gray-300 text-primary focus:ring-primary h-3.5 w-3.5 cursor-pointer"
+          />
+          Word Wrap
+        </label>
       </div>
 
       {panelOpen && view && (
