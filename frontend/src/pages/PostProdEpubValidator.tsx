@@ -76,13 +76,14 @@ function ProjectCard({ project, users, onDelete, onRefresh }: CardProps) {
   const handleCardClick = () => {
     const assigned = (project.assignee || '').trim().toLowerCase();
     const myUsername = (viewer?.username || '').trim().toLowerCase();
+    const isAdmin = (viewer?.roles || []).includes('Admin') || myUsername === 'admin_hema' || myUsername.startsWith('admin');
 
-    if (!assigned) {
+    if (!assigned && !isAdmin) {
       toast.error('This project is not assigned to anyone. Assign it to open it.');
       return;
     }
 
-    if (assigned && myUsername && assigned !== myUsername) {
+    if (assigned && myUsername && assigned !== myUsername && !isAdmin) {
       toast.error(`This project is assigned to ${project.assignee}. You cannot open it.`);
       return;
     }
@@ -519,7 +520,7 @@ export function PostProdEpubValidator() {
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5">
           {filteredProjects.map((proj) => (
             <ProjectCard
               key={proj.id}
@@ -535,7 +536,7 @@ export function PostProdEpubValidator() {
       {/* ── Add Project Modal ─────────────────────────────────────────────────── */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-          <div className="bg-card border border-border rounded-xl max-w-md w-full p-5 shadow-xl space-y-4">
+          <div className="bg-card border border-border rounded-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-4 sm:p-6 shadow-xl space-y-4">
             {/* Modal header */}
             <div className="flex justify-between items-start border-b border-border/60 pb-2">
               <div>

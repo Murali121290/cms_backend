@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   FileCode2,
   Braces,
+  Image as ImageIcon,
   Play,
   Loader2,
   BookOpen,
@@ -60,21 +61,21 @@ function StatCard({ label, value, total, icon: Icon, barColor, valueColor, isAct
     <Card
       onClick={onClick}
       className={cn(
-        'overflow-hidden shadow-sm border border-border/80',
+        'overflow-hidden shadow-xs border border-border/80',
         onClick && 'cursor-pointer transition-all duration-150',
-        onClick && !isActive && 'hover:shadow-md hover:-translate-y-0.5 bg-card',
-        isActive && 'ring-2 ring-primary bg-card shadow-md -translate-y-0.5',
+        onClick && !isActive && 'hover:shadow-sm hover:-translate-y-0.5 bg-card',
+        isActive && 'ring-2 ring-primary bg-card shadow-sm -translate-y-0.5',
       )}
     >
-      <CardBody className="pt-5 pb-4">
-        <div className="flex items-center justify-between mb-3">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+      <CardBody className="p-3">
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
             {label}
           </p>
-          <Icon className={cn('w-4 h-4', valueColor)} />
+          <Icon className={cn('w-3.5 h-3.5', valueColor)} />
         </div>
-        <p className={cn('text-3xl font-bold font-serif tabular-nums', valueColor)}>{value}</p>
-        <div className="mt-4 h-1.5 w-full rounded-full bg-muted overflow-hidden">
+        <p className={cn('text-xl font-bold font-serif tabular-nums leading-tight', valueColor)}>{value}</p>
+        <div className="mt-2 h-1 w-full rounded-full bg-muted overflow-hidden">
           <motion.div
             className={cn('h-full rounded-full', barColor)}
             initial={{ width: 0 }}
@@ -93,7 +94,7 @@ function SkeletonGrid() {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
       {Array.from({ length: 8 }).map((_, i) => (
-        <div key={i} className="animate-pulse bg-muted rounded-xl h-[196px]" />
+        <div key={i} className="animate-pulse bg-muted rounded-xl h-44 sm:h-48 md:h-52" />
       ))}
     </div>
   );
@@ -104,7 +105,7 @@ function SkeletonGrid() {
 export function PostProdEpubValidatorFiles() {
   const params = useParams<{ projectId?: string; folderName?: string }>();
   const navigate = useNavigate();
-  const { data: projects = [] } = useQuery<EvProject[]>({
+  const { data: projects = [], isLoading: isLoadingProjects } = useQuery<EvProject[]>({
     queryKey: ['epub-projects'],
     queryFn: listProjects,
     staleTime: 30_000,
@@ -120,20 +121,26 @@ export function PostProdEpubValidatorFiles() {
 
   const viewer = useSessionStore((s) => s.viewer);
   useEffect(() => {
-    const assigned = (project?.assignee || '').trim().toLowerCase();
+    // Skip access check while projects list is loading or if project object is not found yet
+    if (isLoadingProjects || !projects || projects.length === 0 || !project) {
+      return;
+    }
+
+    const assigned = (project.assignee || '').trim().toLowerCase();
     const myUsername = (viewer?.username || '').trim().toLowerCase();
-    
-    if (!assigned) {
+    const isAdmin = (viewer?.roles || []).includes('Admin') || myUsername === 'admin_hema' || myUsername.startsWith('admin');
+
+    if (!assigned && !isAdmin) {
       toast.error('This project is not assigned to anyone. Assign it to access it.');
       navigate('/post-production/epub-validator');
       return;
     }
 
-    if (assigned && myUsername && assigned !== myUsername) {
-      toast.error(`This project is assigned to ${project?.assignee}. You cannot access it.`);
+    if (assigned && myUsername && assigned !== myUsername && !isAdmin) {
+      toast.error(`This project is assigned to ${project.assignee}. You cannot access it.`);
       navigate('/post-production/epub-validator');
     }
-  }, [project, viewer, navigate]);
+  }, [project, projects, isLoadingProjects, viewer, navigate]);
 
   // ── Files from API ──────────────────────────────────────────────────────────
   const { data: filesData, isLoading, isError } = useQuery({
@@ -153,13 +160,32 @@ export function PostProdEpubValidatorFiles() {
     [filesData],
   );
 
+  const isNavFile = (fileName: string, path?: string) => {
+    const name = fileName.toLowerCase();
+    const p = (path || '').toLowerCase();
+    return name === 'nav.xhtml' || name === 'nav.html' || name === 'nav.htm' || name === 'nav' || p.endsWith('/nav.xhtml');
+  };
+
+  const isImageFile = (fileName: string, path?: string) => {
+    const name = fileName.toLowerCase();
+    const p = (path || '').toLowerCase();
+    const imgExts = ['.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp', '.bmp', '.tiff', '.ico', '.eps', '.tif'];
+    return imgExts.some((ext) => name.endsWith(ext)) || p.includes('/images/') || p.includes('/img/');
+  };
+
+  // 1) Chapters (.xhtml) - exclude nav
   const xhtmlFiles = useMemo(
     () => (filesData?.files ?? [])
-      .filter((f) => f.file_name.toLowerCase().endsWith('.xhtml') || f.file_name.toLowerCase().endsWith('.html') || f.file_name.toLowerCase().endsWith('.htm'))
+      .filter((f) => {
+        const name = f.file_name.toLowerCase();
+        const isXhtml = name.endsWith('.xhtml') || name.endsWith('.html') || name.endsWith('.htm');
+        return isXhtml && !isNavFile(f.file_name, f.path);
+      })
       .sort((a, b) => naturalSort(a.file_name, b.file_name)),
     [filesData],
   );
 
+  // 2) CSS (.css)
   const cssFiles = useMemo(
     () => (filesData?.files ?? [])
       .filter((f) => f.file_name.toLowerCase().endsWith('.css'))
@@ -167,19 +193,23 @@ export function PostProdEpubValidatorFiles() {
     [filesData],
   );
 
-  const ncxFiles = useMemo(
+  // 3) Images
+  const imageFiles = useMemo(
     () => (filesData?.files ?? [])
-      .filter((f) => f.file_name.toLowerCase().endsWith('.ncx') || f.file_name.toLowerCase().endsWith('.opf') || f.file_name.toLowerCase().endsWith('.xml'))
+      .filter((f) => isImageFile(f.file_name, f.path))
       .sort((a, b) => naturalSort(a.file_name, b.file_name)),
     [filesData],
   );
 
+  // 4) Other files (nav, content.opf, toc.ncx, container.xml, mimetype, etc.)
   const otherFiles = useMemo(
     () => (filesData?.files ?? [])
       .filter((f) => {
         const name = f.file_name.toLowerCase();
-        return !name.endsWith('.xhtml') && !name.endsWith('.html') && !name.endsWith('.htm') &&
-          !name.endsWith('.css') && !name.endsWith('.ncx') && !name.endsWith('.opf') && !name.endsWith('.xml');
+        const isXhtmlChapter = (name.endsWith('.xhtml') || name.endsWith('.html') || name.endsWith('.htm')) && !isNavFile(f.file_name, f.path);
+        const isCss = name.endsWith('.css');
+        const isImg = isImageFile(f.file_name, f.path);
+        return !isXhtmlChapter && !isCss && !isImg;
       })
       .sort((a, b) => naturalSort(a.file_name, b.file_name)),
     [filesData],
@@ -361,7 +391,8 @@ export function PostProdEpubValidatorFiles() {
 
   const hasValidated = validationData !== null;
 
-  // ── Status filter & Rule filter ─────────────────────────────────────────────
+  // ── Category Tab & Status & Rule filters ─────────────────────────────────────
+  const [activeCategoryTab, setActiveCategoryTab] = useState<'chapters' | 'css' | 'images' | 'other' | 'all'>('chapters');
   const [activeFilter, setActiveFilter] = useState<XHTMLFileStatus | null>(null);
   const [selectedRuleFilter, setSelectedRuleFilter] = useState<string | null>(null);
 
@@ -446,7 +477,7 @@ export function PostProdEpubValidatorFiles() {
     return matching;
   }, [selectedRuleFilter, validationData]);
 
-  const visibleFiles = useMemo(() => {
+  const visibleXhtmlFiles = useMemo(() => {
     if (selectedRuleFilter && ruleMatchingFiles) {
       return xhtmlFiles.filter((f) => ruleMatchingFiles.has(f.file_name));
     }
@@ -455,6 +486,34 @@ export function PostProdEpubValidatorFiles() {
     }
     return xhtmlFiles;
   }, [xhtmlFiles, activeFilter, selectedRuleFilter, ruleMatchingFiles, fileIssues]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const visibleCssFiles = useMemo(() => {
+    if (selectedRuleFilter) return [];
+    if (activeFilter) {
+      return cssFiles.filter((f) => getFileStatus(f.file_name) === activeFilter);
+    }
+    return cssFiles;
+  }, [cssFiles, activeFilter, selectedRuleFilter]);
+
+  const visibleImageFiles = useMemo(() => {
+    if (selectedRuleFilter) return [];
+    if (activeFilter) {
+      return imageFiles.filter((f) => getFileStatus(f.file_name) === activeFilter);
+    }
+    return imageFiles;
+  }, [imageFiles, activeFilter, selectedRuleFilter]);
+
+  const visibleOtherFiles = useMemo(() => {
+    if (selectedRuleFilter && ruleMatchingFiles) {
+      return otherFiles.filter((f) => ruleMatchingFiles.has(f.file_name));
+    }
+    if (activeFilter) {
+      return otherFiles.filter((f) => getFileStatus(f.file_name) === activeFilter);
+    }
+    return otherFiles;
+  }, [otherFiles, activeFilter, selectedRuleFilter, ruleMatchingFiles, fileIssues]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const totalVisibleCount = visibleXhtmlFiles.length + visibleCssFiles.length + visibleImageFiles.length + visibleOtherFiles.length;
 
   // ── Export state ────────────────────────────────────────────────────────────
   const [isExporting, setIsExporting] = useState(false);
@@ -684,91 +743,91 @@ export function PostProdEpubValidatorFiles() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0 font-sans">
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0 font-sans">
             {/* Grid / List View Toggle */}
-            <div className="flex items-center bg-muted/60 p-0.5 rounded-lg border border-border/60 mr-1">
+            <div className="inline-flex items-center bg-muted/60 p-0.5 rounded-lg border border-border/60 shrink-0">
               <button
                 onClick={() => setLayoutMode('list')}
                 className={cn(
-                  'flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition-all',
+                  'inline-flex flex-row items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all whitespace-nowrap',
                   layoutMode === 'list'
-                    ? 'bg-background text-foreground shadow-sm'
+                    ? 'bg-background text-foreground shadow-xs font-bold'
                     : 'text-muted-foreground hover:text-foreground',
                 )}
                 title="List View"
               >
-                <List className="w-3.5 h-3.5" />
-                List
+                <List className="w-3.5 h-3.5 shrink-0" />
+                <span>List</span>
               </button>
               <button
                 onClick={() => setLayoutMode('grid')}
                 className={cn(
-                  'flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition-all',
+                  'inline-flex flex-row items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all whitespace-nowrap',
                   layoutMode === 'grid'
-                    ? 'bg-background text-foreground shadow-sm'
+                    ? 'bg-background text-foreground shadow-xs font-bold'
                     : 'text-muted-foreground hover:text-foreground',
                 )}
                 title="Grid View"
               >
-                <LayoutGrid className="w-3.5 h-3.5" />
-                Grid
+                <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
+                <span>Grid</span>
               </button>
             </div>
 
-            <Button
-              size="sm"
-              className="gap-2 shadow-sm text-xs font-semibold py-1.5 h-9"
+            <button
               onClick={handleValidateAll}
               disabled={isValidating || isLoading}
+              className="inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg bg-primary text-white hover:bg-primary/90 transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
             >
               {isValidating ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <Loader2 className="w-4 h-4 animate-spin shrink-0 text-white" />
               ) : (
-                <Play className="w-3.5 h-3.5" />
+                <Play className="w-4 h-4 shrink-0 text-white fill-white" />
               )}
-              {isValidating
-                ? `Validating… ${fmtElapsed(elapsed)}`
-                : hasValidated ? 'Re-run validation' : 'Validate all'}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-2 shadow-sm text-xs font-semibold py-1.5 h-9"
+              <span className="whitespace-nowrap text-white">
+                {isValidating
+                  ? `Validating… ${fmtElapsed(elapsed)}`
+                  : hasValidated ? 'Re-run validation' : 'Validate all'}
+              </span>
+            </button>
+
+            <button
               onClick={handleRunAce}
               disabled={isAceRunning || isLoading}
+              className="inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-primary/10 text-foreground hover:border-primary/40 hover:text-primary transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
             >
               {isAceRunning ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <Loader2 className="w-4 h-4 animate-spin shrink-0" />
               ) : (
-                <ShieldCheck className="w-3.5 h-3.5" />
+                <ShieldCheck className="w-4 h-4 shrink-0" />
               )}
-              {isAceRunning ? `Checking… ${fmtElapsed(aceElapsed)}` : aceReport ? 'Re-run A11y check' : 'Run accessibility check'}
-            </Button>
+              <span className="whitespace-nowrap">
+                {isAceRunning ? `Checking… ${fmtElapsed(aceElapsed)}` : aceReport ? 'Re-run accessibility check' : 'Run accessibility check'}
+              </span>
+            </button>
+
             {aceReport && !isAceRunning && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-2 shadow-sm text-xs font-semibold py-1.5 h-9"
+              <button
                 onClick={() => setAceModalOpen(true)}
+                className="inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-primary/10 text-foreground hover:border-primary/40 hover:text-primary transition-all shadow-xs shrink-0 whitespace-nowrap"
               >
-                <Eye className="w-3.5 h-3.5" />
-                View report
-              </Button>
+                <Eye className="w-4 h-4 shrink-0" />
+                <span className="whitespace-nowrap">View report</span>
+              </button>
             )}
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-2 shadow-sm text-xs font-semibold py-1.5 h-9"
+
+            <button
               onClick={handleExport}
               disabled={isExporting || isLoading || isValidating}
+              className="inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-primary/10 text-foreground hover:border-primary/40 hover:text-primary transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
             >
               {isExporting ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <Loader2 className="w-4 h-4 animate-spin shrink-0" />
               ) : (
-                <Download className="w-3.5 h-3.5" />
+                <Download className="w-4 h-4 shrink-0" />
               )}
-              {isExporting ? 'Exporting…' : 'Export EPUB'}
-            </Button>
+              <span className="whitespace-nowrap">{isExporting ? 'Exporting…' : 'Export EPUB'}</span>
+            </button>
           </div>
         </div>
 
@@ -825,61 +884,7 @@ export function PostProdEpubValidatorFiles() {
             )}
           </AnimatePresence>
 
-          {/* ── 5-stat summary row ─────────────────────────────────────────── */}
-          {!isLoading && xhtmlFiles.length > 0 && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-              <StatCard
-                label="Total Files"
-                value={stats.total}
-                total={stats.total}
-                icon={BookOpen}
-                barColor="bg-primary"
-                valueColor="text-foreground"
-              />
-              <StatCard
-                label="Pending"
-                value={stats.pending}
-                total={stats.total}
-                icon={Clock}
-                barColor="bg-slate-400"
-                valueColor={stats.pending > 0 ? 'text-slate-500' : 'text-foreground'}
-                isActive={activeFilter === 'pending'}
-                onClick={() => toggleFilter('pending')}
-              />
-              <StatCard
-                label="Passed"
-                value={stats.passed}
-                total={stats.total}
-                icon={CheckCircle2}
-                barColor="bg-emerald-500"
-                valueColor={hasValidated ? 'text-emerald-600' : 'text-foreground'}
-                isActive={activeFilter === 'passed'}
-                onClick={() => toggleFilter('passed')}
-              />
-              <StatCard
-                label="Warnings"
-                value={stats.warnings}
-                total={stats.total}
-                icon={AlertTriangle}
-                barColor="bg-amber-400"
-                valueColor={hasValidated && stats.warnings > 0 ? 'text-amber-600' : 'text-foreground'}
-                isActive={activeFilter === 'warning'}
-                onClick={() => toggleFilter('warning')}
-              />
-              <StatCard
-                label="Failed"
-                value={stats.failed}
-                total={stats.total}
-                icon={XCircle}
-                barColor="bg-red-500"
-                valueColor={hasValidated && stats.failed > 0 ? 'text-red-500' : 'text-foreground'}
-                isActive={activeFilter === 'failed'}
-                onClick={() => toggleFilter('failed')}
-              />
-            </div>
-          )}
-
-          {/* ── XHTML file cards layout (with Rules Sidebar if validated) ─────────── */}
+          {/* ── Categorized file cards layout (with Rules Sidebar if validated) ─────────── */}
           {isLoading ? (
             <SkeletonGrid />
           ) : isError || !filesData?.status ? (
@@ -893,11 +898,11 @@ export function PostProdEpubValidatorFiles() {
                 </Button>
               }
             />
-          ) : xhtmlFiles.length === 0 ? (
+          ) : allBackendFiles.length === 0 ? (
             <EmptyState
               icon={FileCode2}
-              title="No XHTML files found"
-              description="This folder doesn't contain any .xhtml files."
+              title="No files found"
+              description="This EPUB folder doesn't contain any files."
               action={
                 <Button onClick={() => navigate('/post-production/epub-validator')} className="font-semibold text-xs">
                   Back to Dashboard
@@ -906,9 +911,9 @@ export function PostProdEpubValidatorFiles() {
             />
           ) : (
             <div className="flex flex-col lg:flex-row gap-6 items-start">
-              {/* Left Rules Sidebar */}
+              {/* Left Rules Sidebar (Validation Rules with Scroll Option) */}
               {hasValidated && (ruleSummary.general.length > 0 || ruleSummary.customer.length > 0) && (
-                <div className="w-full lg:w-72 shrink-0 bg-card rounded-xl border border-border/80 shadow-sm p-4 space-y-4">
+                <div className="w-full lg:w-80 xl:w-96 shrink-0 bg-card rounded-xl border border-border/80 shadow-sm p-4 space-y-4 font-sans">
                   <div className="flex items-center justify-between border-b border-border/60 pb-2.5">
                     <div>
                       <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground font-serif">
@@ -928,7 +933,7 @@ export function PostProdEpubValidatorFiles() {
                     )}
                   </div>
 
-                  <div className="space-y-4 max-h-[600px] overflow-y-auto pr-1">
+                  <div className="space-y-4 max-h-[calc(100vh-14rem)] min-h-[250px] overflow-y-auto pr-1.5 scrollbar-thin scrollbar-thumb-border font-sans">
                     {/* General Rules Group */}
                     {ruleSummary.general.length > 0 && (
                       <div className="space-y-1.5">
@@ -948,10 +953,10 @@ export function PostProdEpubValidatorFiles() {
                                 key={r.rule_id || r.rule_name}
                                 onClick={() => toggleRuleFilter(r.rule_id || r.rule_name)}
                                 className={cn(
-                                  'w-full text-left p-2 rounded-lg transition-all border text-xs flex items-start justify-between gap-2',
+                                  'w-full text-left p-2.5 rounded-xl transition-all border text-xs flex items-start justify-between gap-2.5',
                                   isSelected
-                                    ? 'bg-primary/10 border-primary/30 ring-1 ring-primary/20 text-primary'
-                                    : 'bg-background hover:bg-muted border-border/50 text-foreground',
+                                    ? 'bg-primary/10 border-primary/40 ring-1 ring-primary/30 text-primary font-bold shadow-xs'
+                                    : 'bg-card hover:bg-primary/5 hover:border-primary/30 hover:text-primary border-border/60 text-foreground transition-all duration-150',
                                 )}
                               >
                                 <div className="min-w-0 flex-1">
@@ -1007,10 +1012,10 @@ export function PostProdEpubValidatorFiles() {
                                 key={r.rule_id || r.rule_name}
                                 onClick={() => toggleRuleFilter(r.rule_id || r.rule_name)}
                                 className={cn(
-                                  'w-full text-left p-2 rounded-lg transition-all border text-xs flex items-start justify-between gap-2',
+                                  'w-full text-left p-2.5 rounded-xl transition-all border text-xs flex items-start justify-between gap-2.5',
                                   isSelected
-                                    ? 'bg-primary/10 border-primary/30 ring-1 ring-primary/20 text-primary'
-                                    : 'bg-background hover:bg-muted border-border/50 text-foreground',
+                                    ? 'bg-primary/10 border-primary/40 ring-1 ring-primary/30 text-primary font-bold shadow-xs'
+                                    : 'bg-card hover:bg-primary/5 hover:border-primary/30 hover:text-primary border-border/60 text-foreground transition-all duration-150',
                                 )}
                               >
                                 <div className="min-w-0 flex-1">
@@ -1048,12 +1053,180 @@ export function PostProdEpubValidatorFiles() {
                 </div>
               )}
 
-              {/* Main File Cards Area */}
+              {/* Main Right Area: Summary Stats + Top Category Tabs on top, Files below */}
               <div className="flex-1 min-w-0 space-y-6">
+                {/* ── 5-stat summary row ─────────────────────────────────────────── */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 font-sans">
+                  <StatCard
+                    label="Total Files"
+                    value={stats.total}
+                    total={stats.total}
+                    icon={BookOpen}
+                    barColor="bg-primary"
+                    valueColor="text-foreground"
+                  />
+                  <StatCard
+                    label="Pending"
+                    value={stats.pending}
+                    total={stats.total}
+                    icon={Clock}
+                    barColor="bg-slate-400"
+                    valueColor={stats.pending > 0 ? 'text-slate-500' : 'text-foreground'}
+                    isActive={activeFilter === 'pending'}
+                    onClick={() => toggleFilter('pending')}
+                  />
+                  <StatCard
+                    label="Passed"
+                    value={stats.passed}
+                    total={stats.total}
+                    icon={CheckCircle2}
+                    barColor="bg-emerald-500"
+                    valueColor={hasValidated ? 'text-emerald-600' : 'text-foreground'}
+                    isActive={activeFilter === 'passed'}
+                    onClick={() => toggleFilter('passed')}
+                  />
+                  <StatCard
+                    label="Warnings"
+                    value={stats.warnings}
+                    total={stats.total}
+                    icon={AlertTriangle}
+                    barColor="bg-amber-400"
+                    valueColor={hasValidated && stats.warnings > 0 ? 'text-amber-600' : 'text-foreground'}
+                    isActive={activeFilter === 'warning'}
+                    onClick={() => toggleFilter('warning')}
+                  />
+                  <StatCard
+                    label="Failed"
+                    value={stats.failed}
+                    total={stats.total}
+                    icon={XCircle}
+                    barColor="bg-red-500"
+                    valueColor={hasValidated && stats.failed > 0 ? 'text-red-500' : 'text-foreground'}
+                    isActive={activeFilter === 'failed'}
+                    onClick={() => toggleFilter('failed')}
+                  />
+                </div>
+                {/* ── Top Horizontal Category Navigation Tabs ─────────────────────────────────── */}
+                <div className="flex items-center gap-2 border-b border-border/80 pb-px font-sans overflow-x-auto scrollbar-none">
+                  <button
+                    onClick={() => setActiveCategoryTab('chapters')}
+                    className={cn(
+                      'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
+                      activeCategoryTab === 'chapters'
+                        ? 'border-primary text-primary bg-primary/10 shadow-xs'
+                        : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                    )}
+                  >
+                    <BookOpen className="w-4 h-4 text-primary shrink-0" />
+                    <span>Chapters</span>
+                    <span
+                      className={cn(
+                        'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold transition-colors',
+                        activeCategoryTab === 'chapters'
+                          ? 'bg-primary/20 text-primary'
+                          : 'bg-primary/10 text-primary/80',
+                      )}
+                    >
+                      {xhtmlFiles.length}
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() => setActiveCategoryTab('css')}
+                    className={cn(
+                      'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
+                      activeCategoryTab === 'css'
+                        ? 'border-violet-500 text-violet-600 dark:text-violet-400 bg-violet-500/10 shadow-xs'
+                        : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                    )}
+                  >
+                    <Braces className="w-4 h-4 text-violet-500 shrink-0" />
+                    <span>CSS</span>
+                    <span
+                      className={cn(
+                        'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold transition-colors',
+                        activeCategoryTab === 'css'
+                          ? 'bg-violet-500/20 text-violet-600 dark:text-violet-400'
+                          : 'bg-violet-500/10 text-violet-600/80 dark:text-violet-400/80',
+                      )}
+                    >
+                      {cssFiles.length}
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() => setActiveCategoryTab('images')}
+                    className={cn(
+                      'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
+                      activeCategoryTab === 'images'
+                        ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 shadow-xs'
+                        : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                    )}
+                  >
+                    <ImageIcon className="w-4 h-4 text-emerald-500 shrink-0" />
+                    <span>Images</span>
+                    <span
+                      className={cn(
+                        'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold transition-colors',
+                        activeCategoryTab === 'images'
+                          ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                          : 'bg-emerald-500/10 text-emerald-600/80 dark:text-emerald-400/80',
+                      )}
+                    >
+                      {imageFiles.length}
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() => setActiveCategoryTab('other')}
+                    className={cn(
+                      'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
+                      activeCategoryTab === 'other'
+                        ? 'border-sky-500 text-sky-600 dark:text-sky-400 bg-sky-500/10 shadow-xs'
+                        : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                    )}
+                  >
+                    <FileCode2 className="w-4 h-4 text-sky-500 shrink-0" />
+                    <span>Other Files</span>
+                    <span
+                      className={cn(
+                        'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold transition-colors',
+                        activeCategoryTab === 'other'
+                          ? 'bg-sky-500/20 text-sky-600 dark:text-sky-400'
+                          : 'bg-sky-500/10 text-sky-600/80 dark:text-sky-400/80',
+                      )}
+                    >
+                      {otherFiles.length}
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() => setActiveCategoryTab('all')}
+                    className={cn(
+                      'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg sm:ml-auto',
+                      activeCategoryTab === 'all'
+                        ? 'border-foreground text-foreground bg-muted shadow-xs font-bold'
+                        : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                    )}
+                  >
+                    <span>All Files</span>
+                    <span
+                      className={cn(
+                        'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold transition-colors',
+                        activeCategoryTab === 'all'
+                          ? 'bg-primary/20 text-primary'
+                          : 'bg-muted text-muted-foreground',
+                      )}
+                    >
+                      {allBackendFiles.length}
+                    </span>
+                  </button>
+                </div>
+
                 {(activeFilter || selectedRuleFilter) && (
                   <div className="flex items-center justify-between text-xs text-muted-foreground font-sans bg-muted/40 px-3 py-2 rounded-lg border border-border/50">
                     <span>
-                      Showing <span className="font-semibold text-foreground">{visibleFiles.length}</span> file{visibleFiles.length !== 1 ? 's' : ''}
+                      Showing <span className="font-semibold text-foreground">{totalVisibleCount}</span> file{totalVisibleCount !== 1 ? 's' : ''}
                       {activeFilter && <span> matching status <span className="font-semibold text-foreground">{activeFilter}</span></span>}
                       {selectedRuleFilter && (
                         <span>
@@ -1073,135 +1246,196 @@ export function PostProdEpubValidatorFiles() {
                   </div>
                 )}
 
-                <motion.div
-                  className={cn(
-                    layoutMode === 'grid'
-                      ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
-                      : 'space-y-2.5',
-                  )}
-                  variants={containerVariants}
-                  initial="hidden"
-                  animate="show"
-                >
-                  {visibleFiles.map((file, i) => {
-                    const status = getFileStatus(file.file_name);
-                    const agg = fileIssues.get(file.file_name);
-                    return (
-                      <motion.div key={`${file.file_name}-${i}`} variants={xhtmlCardVariants}>
-                        <XHTMLCard
-                          file={file}
-                          layoutMode={layoutMode}
-                          status={status}
-                          errors={agg?.errors ?? 0}
-                          warnings={agg?.warnings ?? 0}
-                          isValidating={validatingFiles.has(file.file_name)}
-                          onValidate={() => handleValidateFile(file.file_name)}
-                          onOpen={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
-                          onPreview={() => { setModalAllowedTabs(undefined); setModalInitialTab('preview'); setSelectedFile(file); }}
-                          index={i}
-                        />
-                      </motion.div>
-                    );
-                  })}
-                  {(activeFilter ? ncxFiles.filter((f) => getFileStatus(f.file_name) === activeFilter) : ncxFiles).map((file, i) => {
-                    const status = getFileStatus(file.file_name);
-                    const agg = fileIssues.get(file.file_name);
-                    return (
-                      <motion.div key={`ncx-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
-                        <XHTMLCard
-                          file={file}
-                          layoutMode={layoutMode}
-                          status={status}
-                          errors={agg?.errors ?? 0}
-                          warnings={agg?.warnings ?? 0}
-                          isValidating={validatingFiles.has(file.file_name)}
-                          onValidate={() => handleValidateFile(file.file_name)}
-                          onPreview={() => { setModalAllowedTabs(['result', 'source']); setModalInitialTab('result'); setSelectedFile(file); }}
-                          onOpen={() => { setModalAllowedTabs(['result', 'source']); setModalInitialTab('result'); setSelectedFile(file); }}
-                          index={i}
-                        />
-                      </motion.div>
-                    );
-                  })}
-                </motion.div>
-
-                {/* ── CSS stylesheets section ────────────────────────────────── */}
-                {cssFiles.length > 0 && !selectedRuleFilter && (
+                {/* ── Scrollable Files List Area ───────────────────────────────── */}
+                <div className="flex-1 overflow-y-auto max-h-[calc(100vh-17rem)] min-h-[350px] pr-2 space-y-6 scrollbar-thin scrollbar-thumb-border font-sans pb-4">
+                  {/* ── 1. Chapters Tab View ────────────────────────────────── */}
+                {(activeCategoryTab === 'chapters' || activeCategoryTab === 'all') && (
                   <div className="space-y-3">
-                    <div className="flex items-center gap-2 pt-2">
-                      <Braces className="w-4 h-4 text-violet-500" />
-                      <h2 className="text-xs font-bold text-muted-foreground uppercase tracking-widest">
-                        CSS Stylesheets
-                      </h2>
-                      <span className="text-xs text-muted-foreground font-mono">({cssFiles.length})</span>
+                    <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                      <div className="flex items-center gap-2">
+                        <BookOpen className="w-4 h-4 text-primary" />
+                        <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
+                          Chapters
+                        </h2>
+                        <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleXhtmlFiles.length})</span>
+                      </div>
                     </div>
-                    <motion.div
-                      className={cn(
-                        layoutMode === 'grid'
-                          ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
-                          : 'space-y-2.5',
-                      )}
-                      variants={containerVariants}
-                      initial="hidden"
-                      animate="show"
-                    >
-                      {cssFiles.map((file, i) => (
-                        <motion.div key={`css-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
-                          <XHTMLCard
-                            file={file}
-                            variant="css"
-                            layoutMode={layoutMode}
-                            status="pending"
-                            onOpen={() => { setModalAllowedTabs(['result', 'source']); setModalInitialTab('result'); setSelectedFile(file); }}
-                            index={i}
-                          />
-                        </motion.div>
-                      ))}
-                    </motion.div>
+                    {visibleXhtmlFiles.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic py-1">No chapter files in this section.</p>
+                    ) : (
+                      <motion.div
+                        className={cn(
+                          layoutMode === 'grid'
+                            ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
+                            : 'space-y-2.5',
+                        )}
+                        variants={containerVariants}
+                        initial="hidden"
+                        animate="show"
+                      >
+                        {visibleXhtmlFiles.map((file, i) => {
+                          const status = getFileStatus(file.file_name);
+                          const agg = fileIssues.get(file.file_name);
+                          return (
+                            <motion.div key={`chapter-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
+                              <XHTMLCard
+                                file={file}
+                                variant="xhtml"
+                                layoutMode={layoutMode}
+                                status={status}
+                                errors={agg?.errors ?? 0}
+                                warnings={agg?.warnings ?? 0}
+                                isValidating={validatingFiles.has(file.file_name)}
+                                onValidate={() => handleValidateFile(file.file_name)}
+                                onOpen={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
+                                onPreview={() => { setModalAllowedTabs(undefined); setModalInitialTab('preview'); setSelectedFile(file); }}
+                                index={i}
+                              />
+                            </motion.div>
+                          );
+                        })}
+                      </motion.div>
+                    )}
                   </div>
                 )}
 
-                {/* ── Other files & assets section ────────────────────────────── */}
-                {otherFiles.length > 0 && !selectedRuleFilter && (
+                {/* ── 2. CSS Tab View ────────────────────────────────────── */}
+                {(activeCategoryTab === 'css' || activeCategoryTab === 'all') && (
                   <div className="space-y-3">
-                    <div className="flex items-center gap-2 pt-2">
-                      <FileCode2 className="w-4 h-4 text-slate-500" />
-                      <h2 className="text-xs font-bold text-muted-foreground uppercase tracking-widest">
-                        Other Package Files & Assets
-                      </h2>
-                      <span className="text-xs text-muted-foreground font-mono">({otherFiles.length})</span>
+                    <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                      <div className="flex items-center gap-2">
+                        <Braces className="w-4 h-4 text-violet-500" />
+                        <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
+                          CSS
+                        </h2>
+                        <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleCssFiles.length})</span>
+                      </div>
                     </div>
-                    <motion.div
-                      className={cn(
-                        layoutMode === 'grid'
-                          ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
-                          : 'space-y-2.5',
-                      )}
-                      variants={containerVariants}
-                      initial="hidden"
-                      animate="show"
-                    >
-                      {otherFiles.map((file, i) => {
-                        const status = getFileStatus(file.file_name);
-                        const agg = fileIssues.get(file.file_name);
-                        return (
-                          <motion.div key={`other-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
+                    {visibleCssFiles.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic py-1">No CSS files in this section.</p>
+                    ) : (
+                      <motion.div
+                        className={cn(
+                          layoutMode === 'grid'
+                            ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
+                            : 'space-y-2.5',
+                        )}
+                        variants={containerVariants}
+                        initial="hidden"
+                        animate="show"
+                      >
+                        {visibleCssFiles.map((file, i) => (
+                          <motion.div key={`css-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
                             <XHTMLCard
                               file={file}
                               variant="css"
                               layoutMode={layoutMode}
-                              status={status}
-                              errors={agg?.errors ?? 0}
-                              warnings={agg?.warnings ?? 0}
+                              status="pending"
                               onOpen={() => { setModalAllowedTabs(['result', 'source']); setModalInitialTab('result'); setSelectedFile(file); }}
                               index={i}
                             />
                           </motion.div>
-                        );
-                      })}
-                    </motion.div>
+                        ))}
+                      </motion.div>
+                    )}
                   </div>
                 )}
+
+                {/* ── 3. Images Tab View ────────────────────────────────────────── */}
+                {(activeCategoryTab === 'images' || activeCategoryTab === 'all') && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                      <div className="flex items-center gap-2">
+                        <ImageIcon className="w-4 h-4 text-emerald-500" />
+                        <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
+                          Images
+                        </h2>
+                        <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleImageFiles.length})</span>
+                      </div>
+                    </div>
+                    {visibleImageFiles.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic py-1">No image files in this section.</p>
+                    ) : (
+                      <motion.div
+                        className={cn(
+                          layoutMode === 'grid'
+                            ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
+                            : 'space-y-2.5',
+                        )}
+                        variants={containerVariants}
+                        initial="hidden"
+                        animate="show"
+                      >
+                        {visibleImageFiles.map((file, i) => (
+                          <motion.div key={`img-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
+                            <XHTMLCard
+                              file={file}
+                              variant="image"
+                              layoutMode={layoutMode}
+                              status="pending"
+                              onOpen={() => { setModalAllowedTabs(['result', 'source']); setModalInitialTab('preview'); setSelectedFile(file); }}
+                              onPreview={() => { setModalAllowedTabs(['result', 'source']); setModalInitialTab('preview'); setSelectedFile(file); }}
+                              index={i}
+                            />
+                          </motion.div>
+                        ))}
+                      </motion.div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── 4. Other files Tab View ────────────────────────────────── */}
+                {(activeCategoryTab === 'other' || activeCategoryTab === 'all') && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <FileCode2 className="w-4 h-4 text-sky-500" />
+                        <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
+                          Other Files
+                        </h2>
+                        <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleOtherFiles.length})</span>
+                      </div>
+                    </div>
+                    {visibleOtherFiles.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic py-1">No other files in this section.</p>
+                    ) : (
+                      <motion.div
+                        className={cn(
+                          layoutMode === 'grid'
+                            ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
+                            : 'space-y-2.5',
+                        )}
+                        variants={containerVariants}
+                        initial="hidden"
+                        animate="show"
+                      >
+                        {visibleOtherFiles.map((file, i) => {
+                          const status = getFileStatus(file.file_name);
+                          const agg = fileIssues.get(file.file_name);
+                          const canValidate = file.file_name.endsWith('.xml') || file.file_name.endsWith('.opf') || file.file_name.endsWith('.ncx') || file.file_name.endsWith('.xhtml') || file.file_name.endsWith('.html');
+                          return (
+                            <motion.div key={`other-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
+                              <XHTMLCard
+                                file={file}
+                                variant="other"
+                                layoutMode={layoutMode}
+                                status={status}
+                                errors={agg?.errors ?? 0}
+                                warnings={agg?.warnings ?? 0}
+                                isValidating={validatingFiles.has(file.file_name)}
+                                onValidate={canValidate ? () => handleValidateFile(file.file_name) : undefined}
+                                onOpen={() => { setModalAllowedTabs(['result', 'source']); setModalInitialTab('result'); setSelectedFile(file); }}
+                                onPreview={() => { setModalAllowedTabs(['result', 'source']); setModalInitialTab('result'); setSelectedFile(file); }}
+                                index={i}
+                              />
+                            </motion.div>
+                          );
+                        })}
+                      </motion.div>
+                    )}
+                  </div>
+                )}
+                </div>
               </div>
             </div>
           )}
