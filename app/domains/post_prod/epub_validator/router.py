@@ -339,14 +339,10 @@ async def validate_file(
 
 @router.post("/export/{folder_name}")
 async def export_epub(folder_name: str, body: ExportRequest):
-    if body.failed > 0:
-        raise HTTPException(
-            status_code=400,
-            detail="There are validation errors. Please fix them before downloading.",
-        )
-
-    if (body.warnings > 0 or body.pending > 0) and not body.force:
+    if (body.failed > 0 or body.warnings > 0 or body.pending > 0) and not body.force:
         parts: list[str] = []
+        if body.failed > 0:
+            parts.append(f"{body.failed} error{'s' if body.failed != 1 else ''}")
         if body.warnings > 0:
             parts.append(f"{body.warnings} warning{'s' if body.warnings != 1 else ''}")
         if body.pending > 0:
@@ -354,7 +350,7 @@ async def export_epub(folder_name: str, body: ExportRequest):
         return {
             "status": "confirm",
             "message": (
-                f"There {'are' if len(parts) > 1 else 'is'} {' and '.join(parts)}."
+                f"There {'are' if len(parts) > 1 or 'error' in parts[0] or 'warning' in parts[0] else 'is'} {' and '.join(parts)}."
                 " Proceed with export anyway?"
             ),
         }

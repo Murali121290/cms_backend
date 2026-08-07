@@ -48,7 +48,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from .upload_service import EXTRACT_DIR, UPLOAD_DIR
+from .upload_service import EXTRACT_DIR, UPLOAD_DIR, find_epub_file_path
 
 
 ACE_MISSING_MESSAGE = (
@@ -75,7 +75,7 @@ def _find_ace_binary() -> str | None:
 
 def _epub_path(folder_name: str) -> Path:
     """Path to the .epub file that was uploaded for this folder."""
-    return Path(UPLOAD_DIR) / folder_name / EXTRACT_DIR / f"{folder_name}.epub"
+    return find_epub_file_path(folder_name)
 
 
 def _cache_dir(folder_name: str) -> Path:

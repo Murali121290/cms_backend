@@ -128,3 +128,53 @@ def get_extract_files(folder_name: str) -> dict:
         "total_files": len(files_data),
         "files": files_data,
     }
+
+
+def find_epub_file_path(folder_name: str) -> Path:
+    """Locate the .epub file for a project dynamically.
+
+    Supports custom project names and inner file names.
+    Resolution strategy:
+    1. Exact path: UPLOAD_DIR / folder_name / EXTRACT_DIR / f"{folder_name}.epub"
+    2. Any .epub file in UPLOAD_DIR / folder_name / EXTRACT_DIR /
+    3. Any .epub file in UPLOAD_DIR / folder_name / (recursive)
+    4. Fallback: package extracted 'epub' directory into a .epub zip if present
+    """
+    upload_root = Path(UPLOAD_DIR)
+    folder_path = upload_root / folder_name
+    extract_path = folder_path / EXTRACT_DIR
+
+    # 1. Exact match
+    exact = extract_path / f"{folder_name}.epub"
+    if exact.is_file():
+        return exact
+
+    # 2. Any .epub file in extract directory
+    if extract_path.is_dir():
+        for p in extract_path.glob("*.epub"):
+            if not p.name.startswith("._"):
+                return p
+
+    # 3. Any .epub file under folder directory recursively
+    if folder_path.is_dir():
+        for p in folder_path.rglob("*.epub"):
+            if not p.name.startswith("._"):
+                return p
+
+    # 4. Fallback: package extracted 'epub' directory if present
+    unzipped_epub_dir = extract_path / "epub"
+    if unzipped_epub_dir.is_dir():
+        out_epub = extract_path / f"{folder_name}.epub"
+        try:
+            shutil.make_archive(str(out_epub.with_suffix("")), "zip", str(unzipped_epub_dir))
+            zipped_file = out_epub.with_suffix(".zip")
+            if zipped_file.is_file():
+                if out_epub.exists():
+                    out_epub.unlink()
+                zipped_file.rename(out_epub)
+                return out_epub
+        except Exception:
+            pass
+
+    return exact
+

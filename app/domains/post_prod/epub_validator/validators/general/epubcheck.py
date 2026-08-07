@@ -23,7 +23,11 @@ import tempfile
 from pathlib import Path
 
 from ...engine.registry import rule
-from ...services.upload_service import EXTRACT_DIR, UPLOAD_DIR
+from app.domains.post_prod.epub_validator.services.upload_service import (
+    EXTRACT_DIR,
+    UPLOAD_DIR,
+    find_epub_file_path,
+)
 
 
 def _find_epubcheck() -> tuple[str, list[str]] | None:
@@ -113,9 +117,10 @@ def validate_via_epubcheck(book_details):
 
     kind, cmd_prefix = finder
     folder = book_details["folder_name"]
-    epub_file = os.path.join(UPLOAD_DIR, folder, EXTRACT_DIR, f"{folder}.epub")
-    if not os.path.isfile(epub_file):
+    epub_file_path = find_epub_file_path(folder)
+    if not epub_file_path.is_file():
         return {"issues_count": 0, "issues": []}
+    epub_file = str(epub_file_path)
 
     messages, err = _run_epubcheck(cmd_prefix, kind, epub_file)
     if err:
