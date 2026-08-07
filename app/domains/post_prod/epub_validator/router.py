@@ -32,6 +32,10 @@ from .services.ace_service import (
     get_cached_report as get_cached_ace_report,
     html_report_dir as ace_html_report_dir,
 )
+from .services.epubcheck_service import (
+    run_epubcheck_report,
+    get_cached_epubcheck_report,
+)
 
 
 def _select_validate_epub():
@@ -293,6 +297,24 @@ def get_ace_html_report(folder_name: str, path: str = "report.html"):
     if not target.is_file():
         raise HTTPException(status_code=404, detail="Report file not found.")
     return FileResponse(target)
+
+
+@router.get("/epubcheck/{folder_name}")
+def get_epubcheck_report_route(folder_name: str):
+    report = get_cached_epubcheck_report(folder_name)
+    if report is None:
+        return {"status": False, "message": "No EPUBCheck report yet."}
+    return {"status": True, "report": report}
+
+
+@router.post("/epubcheck/{folder_name}")
+async def run_epubcheck_report_route(
+    folder_name: str,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    report = await asyncio.to_thread(run_epubcheck_report, folder_name)
+    return {"status": True, "report": report}
 
 
 @router.get("/validate/{filename}/latest")

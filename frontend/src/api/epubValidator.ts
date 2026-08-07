@@ -228,6 +228,54 @@ export async function runAceReport(folderName: string): Promise<AceReport> {
   }
 }
 
+export interface EpubCheckMessage {
+  id: string;
+  message: string;
+  category: 'Error' | 'Warning' | 'Info';
+  severity: string;
+  file_path?: string | null;
+  line_number?: number | null;
+  column_number?: number | null;
+}
+
+export interface EpubCheckReport {
+  status: 'pass' | 'fail';
+  ran_at: string;
+  duration_seconds: number;
+  totals: {
+    error: number;
+    warning: number;
+    info: number;
+    total: number;
+  };
+  messages: EpubCheckMessage[];
+}
+
+export async function getCachedEpubCheckReport(folderName: string): Promise<EpubCheckReport | null> {
+  try {
+    const { data } = await api.get<{ status: boolean; report?: EpubCheckReport; message?: string }>(
+      `/post-prod/epub-validator/epubcheck/${encodeURIComponent(folderName)}`,
+    );
+    return data.status ? data.report ?? null : null;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to load EPUBCheck report'));
+  }
+}
+
+export async function runEpubCheckReport(folderName: string): Promise<EpubCheckReport> {
+  try {
+    const { data } = await api.post<{ status: boolean; report: EpubCheckReport; message?: string }>(
+      `/post-prod/epub-validator/epubcheck/${encodeURIComponent(folderName)}`,
+    );
+    if (!data.status) {
+      throw new Error(data.message || 'EPUBCheck failed');
+    }
+    return data.report;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'EPUBCheck failed'));
+  }
+}
+
 /** Derive folder_name from the upload response, falling back to the filename. */
 export function resolveFolderName(response: UploadResponse, file: File): string {
   if (!response.status) return file.name.replace(/\.[^.]+$/, '');

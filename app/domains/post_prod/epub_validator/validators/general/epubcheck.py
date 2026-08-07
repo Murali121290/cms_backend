@@ -63,7 +63,7 @@ def _run_epubcheck(cmd_prefix: list[str], kind: str, epub: str) -> tuple[list[di
         report_path = tmp.name
 
     if kind == "npm":
-        cmd = [*cmd_prefix, epub, "--output", report_path, "--json"]
+        cmd = [*cmd_prefix, epub, "-O", report_path]
     else:
         cmd = [*cmd_prefix, epub, "--json", report_path]
 

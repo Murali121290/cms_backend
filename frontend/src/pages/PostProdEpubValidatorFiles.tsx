@@ -16,6 +16,7 @@ import {
   Clock,
   Download,
   ShieldCheck,
+  CheckSquare,
   Eye,
   User,
   LayoutGrid,
@@ -24,13 +25,27 @@ import {
 import { XHTMLCard, xhtmlCardVariants } from '@/components/epub_validator/XHTMLCard';
 import { ValidationDetailModal } from '@/components/epub_validator/ValidationDetailModal';
 import { AccessibilityReportModal } from '@/components/epub_validator/AccessibilityReportModal';
+import { EpubCheckReportModal } from '@/components/epub_validator/EpubCheckReportModal';
 import type { Tab as ModalTab } from '@/components/epub_validator/ValidationDetailModal';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody } from '@/components/ui/Card';
 import { toast } from '@/store/useToastStore';
 import { useSessionStore } from '@/stores/sessionStore';
-import { getFiles, validateFolder, validateFile, exportEpub, getCachedAceReport, runAceReport, listProjects, getLatestValidation, type EvProject } from '@/api/epubValidator';
+import {
+  getFiles,
+  validateFolder,
+  validateFile,
+  exportEpub,
+  getCachedAceReport,
+  runAceReport,
+  getCachedEpubCheckReport,
+  runEpubCheckReport,
+  type EpubCheckReport,
+  listProjects,
+  getLatestValidation,
+  type EvProject,
+} from '@/api/epubValidator';
 import { useEpubBookStore } from '@/hooks/useEpubBookStore';
 import { cn, formatDate, titleCase } from '@/utils/epubValidatorUtils';
 import type { AceReport, ValidationApiResponse, XHTMLFile, XHTMLFileStatus } from '@/types/epubValidator';
@@ -245,6 +260,13 @@ export function PostProdEpubValidatorFiles() {
   const [aceElapsed, setAceElapsed] = useState(0);
   const aceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const [epubCheckReport, setEpubCheckReport] = useState<EpubCheckReport | null>(null);
+  const [isEpubCheckRunning, setIsEpubCheckRunning] = useState(false);
+  const [epubCheckError, setEpubCheckError] = useState<string | null>(null);
+  const [epubCheckModalOpen, setEpubCheckModalOpen] = useState(false);
+  const [epubCheckElapsed, setEpubCheckElapsed] = useState(0);
+  const epubCheckTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // Elapsed-time counter while validation runs
   const [elapsed, setElapsed] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -262,6 +284,7 @@ export function PostProdEpubValidatorFiles() {
   useEffect(() => {
     if (!folderName) return;
     getCachedAceReport(folderName).then((r) => { if (r) setAceReport(r); }).catch(() => undefined);
+    getCachedEpubCheckReport(folderName).then((r) => { if (r) setEpubCheckReport(r); }).catch(() => undefined);
     getLatestValidation(folderName).then((res) => { if (res) setValidationData(res); }).catch(() => undefined);
   }, [folderName]);
 
@@ -274,6 +297,16 @@ export function PostProdEpubValidatorFiles() {
     }
     return () => { if (aceTimerRef.current) clearInterval(aceTimerRef.current); };
   }, [isAceRunning]);
+
+  useEffect(() => {
+    if (isEpubCheckRunning) {
+      setEpubCheckElapsed(0);
+      epubCheckTimerRef.current = setInterval(() => setEpubCheckElapsed((s) => s + 1), 1000);
+    } else if (epubCheckTimerRef.current) {
+      clearInterval(epubCheckTimerRef.current);
+    }
+    return () => { if (epubCheckTimerRef.current) clearInterval(epubCheckTimerRef.current); };
+  }, [isEpubCheckRunning]);
 
   const fmtElapsed = (s: number) =>
     s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
@@ -345,6 +378,20 @@ export function PostProdEpubValidatorFiles() {
       setAceError(err instanceof Error ? err.message : 'Accessibility check failed');
     } finally {
       setIsAceRunning(false);
+    }
+  };
+
+  const handleRunEpubCheck = async () => {
+    setIsEpubCheckRunning(true);
+    setEpubCheckError(null);
+    try {
+      const report = await runEpubCheckReport(folderName);
+      setEpubCheckReport(report);
+      setEpubCheckModalOpen(true);
+    } catch (err) {
+      setEpubCheckError(err instanceof Error ? err.message : 'EPUBCheck failed');
+    } finally {
+      setIsEpubCheckRunning(false);
     }
   };
 
@@ -587,6 +634,16 @@ export function PostProdEpubValidatorFiles() {
       </AnimatePresence>
 
       <AnimatePresence>
+        {epubCheckModalOpen && epubCheckReport && (
+          <EpubCheckReportModal
+            report={epubCheckReport}
+            folderName={folderName}
+            onClose={() => setEpubCheckModalOpen(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {selectedFile && (
           <ValidationDetailModal
             key={selectedFile.file_name}
@@ -669,18 +726,18 @@ export function PostProdEpubValidatorFiles() {
         transition={{ duration: 0.22 }}
       >
         {/* ── Sticky header ──────────────────────────────────────────────────── */}
-        <div className="border-b border-border/60 pb-4 flex items-center justify-between">
-          <div className="flex items-center gap-3 min-w-0">
+        <div className="border-b border-border/60 pb-4 flex flex-col md:flex-row md:items-start justify-between gap-4">
+          <div className="flex items-start gap-3 min-w-0 flex-1">
             <Button
               variant="ghost"
               size="sm"
               onClick={() => navigate('/post-production/epub-validator')}
-              className="shrink-0 h-9 w-9 p-0 rounded-lg"
+              className="shrink-0 h-9 w-9 p-0 rounded-lg mt-0.5"
             >
               <ArrowLeft className="w-4 h-4" />
             </Button>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2.5">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2.5 flex-wrap">
                 <h1
                   className="text-2xl font-bold font-serif text-text tracking-tight truncate m-0"
                   title={project?.project_name || folderName}
@@ -689,12 +746,13 @@ export function PostProdEpubValidatorFiles() {
                 </h1>
                 {project && (
                   <span
-                    className={`capitalize font-bold px-2 py-0.5 rounded-md text-[9px] border ${project.validation_status === 'pass' || project.validation_status === 'validated' || project.validation_status === 'Completed'
-                      ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
-                      : project.validation_status === 'in_progress' || project.validation_status === 'in-progress' || project.validation_status === 'In Progress'
-                        ? 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400'
-                        : 'bg-primary/10 border-primary/20 text-primary'
-                      }`}
+                    className={`capitalize font-bold px-2 py-0.5 rounded-md text-[9px] border shrink-0 ${
+                      project.validation_status === 'pass' || project.validation_status === 'validated' || project.validation_status === 'Completed'
+                        ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                        : project.validation_status === 'in_progress' || project.validation_status === 'in-progress' || project.validation_status === 'In Progress'
+                          ? 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400'
+                          : 'bg-primary/10 border-primary/20 text-primary'
+                    }`}
                   >
                     {project.validation_status === 'pass' || project.validation_status === 'validated' || project.validation_status === 'Completed'
                       ? 'Completed'
@@ -743,91 +801,94 @@ export function PostProdEpubValidatorFiles() {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5 shrink-0 font-sans">
-            {/* Grid / List View Toggle */}
-            <div className="inline-flex items-center bg-muted/60 p-0.5 rounded-lg border border-border/60 shrink-0">
+          <div className="flex flex-col items-end gap-2 shrink-0 font-sans">
+            {/* Main top action buttons */}
+            <div className="flex items-center gap-2 flex-wrap">
               <button
-                onClick={() => setLayoutMode('list')}
-                className={cn(
-                  'inline-flex flex-row items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all whitespace-nowrap',
-                  layoutMode === 'list'
-                    ? 'bg-background text-foreground shadow-xs font-bold'
-                    : 'text-muted-foreground hover:text-foreground',
-                )}
-                title="List View"
+                onClick={handleValidateAll}
+                disabled={isValidating || isLoading}
+                className="inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg bg-primary text-white hover:bg-primary/90 transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
               >
-                <List className="w-3.5 h-3.5 shrink-0" />
-                <span>List</span>
+                {isValidating ? (
+                  <Loader2 className="w-4 h-4 animate-spin shrink-0 text-white" />
+                ) : (
+                  <Play className="w-4 h-4 shrink-0 text-white fill-white" />
+                )}
+                <span className="whitespace-nowrap text-white">
+                  {isValidating
+                    ? `Validating… ${fmtElapsed(elapsed)}`
+                    : hasValidated ? 'Re-run validation' : 'Validate all'}
+                </span>
               </button>
+
               <button
-                onClick={() => setLayoutMode('grid')}
-                className={cn(
-                  'inline-flex flex-row items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all whitespace-nowrap',
-                  layoutMode === 'grid'
-                    ? 'bg-background text-foreground shadow-xs font-bold'
-                    : 'text-muted-foreground hover:text-foreground',
-                )}
-                title="Grid View"
+                onClick={handleRunAce}
+                disabled={isAceRunning || isLoading}
+                className="inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-primary/10 text-foreground hover:border-primary/40 hover:text-primary transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
               >
-                <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
-                <span>Grid</span>
+                {isAceRunning ? (
+                  <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                ) : (
+                  <ShieldCheck className="w-4 h-4 shrink-0" />
+                )}
+                <span className="whitespace-nowrap">
+                  {isAceRunning ? `Checking… ${fmtElapsed(aceElapsed)}` : aceReport ? 'Re-run accessibility' : 'Accessibility check'}
+                </span>
+              </button>
+
+              <button
+                onClick={handleRunEpubCheck}
+                disabled={isEpubCheckRunning || isLoading}
+                className="inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-primary/10 text-foreground hover:border-primary/40 hover:text-primary transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
+              >
+                {isEpubCheckRunning ? (
+                  <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                ) : (
+                  <CheckSquare className="w-4 h-4 shrink-0" />
+                )}
+                <span className="whitespace-nowrap">
+                  {isEpubCheckRunning ? `EPUBCheck… ${fmtElapsed(epubCheckElapsed)}` : epubCheckReport ? 'Re-run EPUBCheck' : 'Run EPUBCheck'}
+                </span>
+              </button>
+
+              <button
+                onClick={handleExport}
+                disabled={isExporting || isLoading || isValidating}
+                className="inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-primary/10 text-foreground hover:border-primary/40 hover:text-primary transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
+              >
+                {isExporting ? (
+                  <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                ) : (
+                  <Download className="w-4 h-4 shrink-0" />
+                )}
+                <span className="whitespace-nowrap">{isExporting ? 'Exporting…' : 'Export EPUB'}</span>
               </button>
             </div>
 
-            <button
-              onClick={handleValidateAll}
-              disabled={isValidating || isLoading}
-              className="inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg bg-primary text-white hover:bg-primary/90 transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
-            >
-              {isValidating ? (
-                <Loader2 className="w-4 h-4 animate-spin shrink-0 text-white" />
-              ) : (
-                <Play className="w-4 h-4 shrink-0 text-white fill-white" />
-              )}
-              <span className="whitespace-nowrap text-white">
-                {isValidating
-                  ? `Validating… ${fmtElapsed(elapsed)}`
-                  : hasValidated ? 'Re-run validation' : 'Validate all'}
-              </span>
-            </button>
+            {/* Secondary row below: View report options */}
+            {(aceReport || epubCheckReport) && (
+              <div className="flex items-center gap-2 flex-wrap text-xs pt-0.5">
+                {aceReport && !isAceRunning && (
+                  <button
+                    onClick={() => setAceModalOpen(true)}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-all border border-primary/20"
+                  >
+                    <Eye className="w-3.5 h-3.5 shrink-0" />
+                    <span>View Accessibility Report</span>
+                  </button>
+                )}
 
-            <button
-              onClick={handleRunAce}
-              disabled={isAceRunning || isLoading}
-              className="inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-primary/10 text-foreground hover:border-primary/40 hover:text-primary transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
-            >
-              {isAceRunning ? (
-                <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-              ) : (
-                <ShieldCheck className="w-4 h-4 shrink-0" />
-              )}
-              <span className="whitespace-nowrap">
-                {isAceRunning ? `Checking… ${fmtElapsed(aceElapsed)}` : aceReport ? 'Re-run accessibility check' : 'Run accessibility check'}
-              </span>
-            </button>
-
-            {aceReport && !isAceRunning && (
-              <button
-                onClick={() => setAceModalOpen(true)}
-                className="inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-primary/10 text-foreground hover:border-primary/40 hover:text-primary transition-all shadow-xs shrink-0 whitespace-nowrap"
-              >
-                <Eye className="w-4 h-4 shrink-0" />
-                <span className="whitespace-nowrap">View report</span>
-              </button>
+                {epubCheckReport && !isEpubCheckRunning && (
+                  <button
+                    onClick={() => setEpubCheckModalOpen(true)}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-all border border-primary/20"
+                  >
+                    <Eye className="w-3.5 h-3.5 shrink-0" />
+                    <span>View EPUBCheck Report</span>
+                  </button>
+                )}
+              </div>
             )}
-
-            <button
-              onClick={handleExport}
-              disabled={isExporting || isLoading || isValidating}
-              className="inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-primary/10 text-foreground hover:border-primary/40 hover:text-primary transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
-            >
-              {isExporting ? (
-                <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-              ) : (
-                <Download className="w-4 h-4 shrink-0" />
-              )}
-              <span className="whitespace-nowrap">{isExporting ? 'Exporting…' : 'Export EPUB'}</span>
-            </button>
           </div>
         </div>
 
