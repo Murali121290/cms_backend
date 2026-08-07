@@ -168,6 +168,15 @@ class FileRecord(BaseModel):
     file_size: str | None = None
     uploaded_by: str | None = None
     page_count: int | None = None
+    # Populated for image files (and the first page of PDFs). Powers the
+    # Dimensions / DPI / Color Profile columns in the chapter file list.
+    width: int | None = None
+    height: int | None = None
+    dpi: int | None = None
+    color_profile: str | None = None
+    # Set when this file was generated from another file (e.g. Figure PDF from
+    # its source DOCX). Frontend groups derived artefacts under their source.
+    source_file_id: int | None = None
 
 
 class DashboardResponse(BaseModel):

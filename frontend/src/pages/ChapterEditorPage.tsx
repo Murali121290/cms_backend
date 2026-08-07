@@ -59,18 +59,17 @@ export function ChapterEditorPage() {
   const decodedSubfolder = subfolder ? decodeURIComponent(subfolder) : ''
   const ext = decodedFilename.split('.').pop()?.toLowerCase() ?? ''
 
-  // Build download / view URL from the API
+  // Build download / view URL from the API. Passes chapter_id explicitly so
+  // the backend resolver picks the right ChapterInfo row even when multiple
+  // chapters share the same slugified name ("chapter-01" matches both a plain
+  // "01" and a labelled "Ch 01 - Art").
   const fileUrl = chapterId && projectId && decodedSubfolder && decodedFilename
     ? `/api/uploads/${projectId}/chapter/${(() => {
-        // Derive chapter_name from project file_details — match the chapter
-        // this page is actually viewing (by chapter number), not just the
-        // first entry in the array (see ChapterDetailPage.tsx for the same
-        // pattern already working there).
         const chNo = chapter?.chapters?.match(/\d+/)?.[0]
         if (!project?.file_details || !chNo) return `chapter-${chNo ?? chapterId}`
         const cf = (project.file_details as { chapter_folders?: { chapters?: Array<{ chapter_name: string }> } }).chapter_folders
         return cf?.chapters?.find(c => c.chapter_name === `chapter-${chNo}`)?.chapter_name ?? `chapter-${chNo}`
-      })()}/${decodedSubfolder}/${encodeURIComponent(decodedFilename)}/download`
+      })()}/${decodedSubfolder}/${encodeURIComponent(decodedFilename)}/download?chapter_id=${chapterId}`
     : null
 
   const isEditable = !!chapter?.current_assignee_name

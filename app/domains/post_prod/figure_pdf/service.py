@@ -39,6 +39,10 @@ IMAGE_TOP_PADDING = 12.0
 
 _WML_A = "http://schemas.openxmlformats.org/drawingml/2006/main"
 _WML_R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+_WML_WP = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+
+# EMU per point: 914400 EMU = 1 inch = 72 pt, so 12700 EMU = 1 pt.
+_EMU_PER_PT = 12700
 
 
 def _natural_key(s: str):
@@ -66,7 +70,7 @@ def _fmt_ts(ts: Optional[float]) -> str:
 class _ImageSource:
     """One figure to render — either loaded from disk or embedded in a DOCX."""
 
-    __slots__ = ("filename", "data", "path", "source_label", "source_ts")
+    __slots__ = ("filename", "data", "path", "source_label", "source_ts", "display_size_pt")
 
     def __init__(
         self,
@@ -76,12 +80,16 @@ class _ImageSource:
         path: Optional[str],
         source_label: str,
         source_ts: Optional[Tuple[float, float]],
+        display_size_pt: Optional[Tuple[float, float]] = None,
     ):
         self.filename = filename
         self.data = data
         self.path = path
         self.source_label = source_label
         self.source_ts = source_ts
+        # Author-intended display size in points (from the DOCX drawing extent).
+        # None for standalone image files where no author sizing exists.
+        self.display_size_pt = display_size_pt
 
     def open_pil(self) -> Image.Image:
         if self.data is not None:
@@ -186,12 +194,29 @@ def _extract_docx_images(docx_path: str) -> list[_ImageSource]:
                             data = mf.read()
                     except KeyError:
                         continue
+                    # Walk up to the containing wp:inline/wp:anchor drawing
+                    # element to grab the author-placed extent (EMU → pt).
+                    display_size_pt = None
+                    ancestor = blip.getparent()
+                    while ancestor is not None:
+                        ext = ancestor.find(f"{{{_WML_WP}}}extent")
+                        if ext is not None:
+                            try:
+                                cx = int(ext.get("cx", "0"))
+                                cy = int(ext.get("cy", "0"))
+                                if cx > 0 and cy > 0:
+                                    display_size_pt = (cx / _EMU_PER_PT, cy / _EMU_PER_PT)
+                            except (TypeError, ValueError):
+                                pass
+                            break
+                        ancestor = ancestor.getparent()
                     images.append(_ImageSource(
                         filename=os.path.basename(media_path),
                         data=data,
                         path=None,
                         source_label=docx_name,
                         source_ts=source_ts,
+                        display_size_pt=display_size_pt,
                     ))
                     emitted_media_paths.add(media_path)
 
@@ -221,20 +246,61 @@ def _extract_docx_images(docx_path: str) -> list[_ImageSource]:
     return images
 
 
+_COLOR_MODE_LABELS = {
+    "1": "Bilevel (1-bit B/W)",
+    "L": "Grayscale (8-bit)",
+    "LA": "Grayscale with alpha",
+    "P": "Palette (indexed)",
+    "PA": "Palette with alpha",
+    "RGB": "RGB",
+    "RGBA": "RGB with alpha",
+    "CMYK": "CMYK",
+    "YCbCr": "YCbCr",
+    "LAB": "L*a*b*",
+    "HSV": "HSV",
+    "I": "Grayscale (32-bit int)",
+    "F": "Grayscale (32-bit float)",
+    "I;16": "Grayscale (16-bit)",
+}
+
+
+def _describe_color_space(im) -> Optional[str]:
+    label = _COLOR_MODE_LABELS.get(im.mode, im.mode)
+    profile_name = None
+    icc = im.info.get("icc_profile")
+    if icc:
+        # Parse the "desc" tag out of the ICC profile if PIL didn't already
+        # expose a description. Cheap fallback: just note that a profile exists.
+        try:
+            from PIL import ImageCms
+            prof = ImageCms.ImageCmsProfile(io.BytesIO(icc))
+            profile_name = ImageCms.getProfileDescription(prof).strip() or None
+        except Exception:
+            profile_name = "embedded ICC profile"
+    if profile_name:
+        return f"{label} · {profile_name}"
+    return label
+
+
 def _extract_metadata(src: _ImageSource, figure_number: int) -> list[tuple[str, str]]:
-    width = height = dpi = None
+    width = height = None
+    dpi_x = dpi_y = None
     fmt = color_space = exif_dt = None
     try:
         with src.open_pil() as im:
             width, height = im.size
             fmt = im.format
-            color_space = im.mode
-            dpi_val = im.info.get("dpi")
-            if dpi_val:
+            color_space = _describe_color_space(im)
+            dpi_val = im.info.get("dpi") or im.info.get("jfif_density")
+            if dpi_val and isinstance(dpi_val, (tuple, list)) and len(dpi_val) >= 2:
                 try:
-                    dpi = int(round(sum(dpi_val) / len(dpi_val)))
-                except (TypeError, ZeroDivisionError):
-                    dpi = None
+                    dx, dy = float(dpi_val[0]), float(dpi_val[1])
+                    if dx > 0:
+                        dpi_x = int(round(dx))
+                    if dy > 0:
+                        dpi_y = int(round(dy))
+                except (TypeError, ValueError):
+                    pass
             try:
                 exif = im.getexif()
                 if exif:
@@ -243,27 +309,60 @@ def _extract_metadata(src: _ImageSource, figure_number: int) -> list[tuple[str, 
                         if tag in ("DateTimeOriginal", "DateTime") and isinstance(val, str):
                             exif_dt = val
                             break
+                    if dpi_x is None:
+                        # EXIF stores resolution in tags 282 (XResolution) and
+                        # 283 (YResolution). Unit tag 296: 2=inch, 3=cm.
+                        xres = exif.get(282)
+                        yres = exif.get(283)
+                        unit = exif.get(296, 2)
+                        def _to_dpi(v):
+                            try:
+                                v = float(v)
+                            except (TypeError, ValueError):
+                                return None
+                            if unit == 3:  # per-cm → per-inch
+                                v *= 2.54
+                            return int(round(v)) if v > 0 else None
+                        dpi_x = _to_dpi(xres)
+                        dpi_y = _to_dpi(yres)
             except Exception:
                 pass
     except Exception:
         pass
 
+    if width and height:
+        dimensions = f"{width} × {height} px"
+    else:
+        dimensions = "N/A"
+
+    if dpi_x and dpi_y:
+        dpi_str = f"{dpi_x} DPI" if dpi_x == dpi_y else f"{dpi_x} × {dpi_y} DPI"
+    elif dpi_x or dpi_y:
+        dpi_str = f"{dpi_x or dpi_y} DPI"
+    else:
+        dpi_str = "N/A"
+
+    fmt_str = fmt or Path(src.filename).suffix.lstrip(".").upper() or "N/A"
+
     ctime = mtime = None
     if src.source_ts:
         ctime, mtime = src.source_ts
 
+    def _fmt_ts_or_na(ts):
+        s = _fmt_ts(ts)
+        return s if s != "—" else "N/A"
+
     return [
         ("Figure Number", str(figure_number)),
-        ("File Name", src.filename),
-        ("Source", src.source_label),
-        ("Image Format", fmt or (Path(src.filename).suffix.lstrip(".").upper() or "—")),
-        ("Width", f"{width} px" if width else "—"),
-        ("Height", f"{height} px" if height else "—"),
-        ("Resolution (DPI)", str(dpi) if dpi else "—"),
-        ("Color Space", color_space or "—"),
+        ("File Name", src.filename or "N/A"),
+        ("Source", src.source_label or "N/A"),
+        ("Image Format", fmt_str),
+        ("Dimensions", dimensions),
+        ("Resolution (DPI)", dpi_str),
+        ("Color Space", color_space or "N/A"),
         ("File Size", _fmt_size(src.size_bytes())),
-        ("Creation Date", exif_dt or _fmt_ts(ctime)),
-        ("Last Modified Date", _fmt_ts(mtime)),
+        ("Creation Date", exif_dt or _fmt_ts_or_na(ctime)),
+        ("Last Modified Date", _fmt_ts_or_na(mtime)),
     ]
 
 
@@ -302,19 +401,50 @@ def _insert_image_centered(page: fitz.Page, src: _ImageSource, area: fitz.Rect) 
     except Exception:
         pass
 
-    if w and h and w > 0 and h > 0:
-        # Cap at 1.0: never upscale bitmaps beyond native pixel size, or a small
-        # source (e.g. a 33x27 px icon) gets blown up to fill the page and looks
-        # pixelated. Large figures still fit-to-page as before.
-        scale = min((area.x1 - area.x0) / w, (area.y1 - area.y0) / h, 1.0)
-        tw, th = w * scale, h * scale
+    area_w = area.x1 - area.x0
+    area_h = area.y1 - area.y0
+
+    # Prefer the author's intended display size from the DOCX drawing extent.
+    # This matches what Word shows and avoids stretching a small icon to fill
+    # the page (which either pixelates or blurs it). Fall back to fit-to-page
+    # for standalone image files where no author sizing exists.
+    if src.display_size_pt and src.display_size_pt[0] > 0 and src.display_size_pt[1] > 0:
+        tw_target, th_target = src.display_size_pt
+        # Clamp to the available area (never overflow the page).
+        clamp = min(area_w / tw_target, area_h / th_target, 1.0)
+        tw, th = tw_target * clamp, th_target * clamp
         cx = (area.x0 + area.x1) / 2
         cy = (area.y0 + area.y1) / 2
         target = fitz.Rect(cx - tw / 2, cy - th / 2, cx + tw / 2, cy + th / 2)
+        target_pixel_scale = (tw / w) if (w and w > 0) else 1.0
+    elif w and h and w > 0 and h > 0:
+        fit_scale = min(area_w / w, area_h / h)
+        tw, th = w * fit_scale, h * fit_scale
+        cx = (area.x0 + area.x1) / 2
+        cy = (area.y0 + area.y1) / 2
+        target = fitz.Rect(cx - tw / 2, cy - th / 2, cx + tw / 2, cy + th / 2)
+        target_pixel_scale = fit_scale
     else:
         target = area
+        target_pixel_scale = 1.0
 
     data = src.bytes()
+    # If the target size requires enlarging the source bitmap, pre-upscale via
+    # Pillow LANCZOS so PDF viewers don't render it with nearest-neighbor.
+    if target_pixel_scale > 1.0 and w and h:
+        try:
+            with src.open_pil() as im:
+                if im.mode not in ("RGB", "RGBA", "L"):
+                    im = im.convert("RGBA")
+                new_w = max(1, int(round(w * target_pixel_scale)))
+                new_h = max(1, int(round(h * target_pixel_scale)))
+                im = im.resize((new_w, new_h), Image.LANCZOS)
+                buf = io.BytesIO()
+                im.save(buf, format="PNG")
+                data = buf.getvalue()
+        except Exception:
+            pass
+
     try:
         page.insert_image(target, stream=data)
         return
@@ -486,6 +616,7 @@ def generate_figure_pdf(
         version=1,
         is_original=False,
         uploaded_by_id=actor_user_id,
+        source_file_id=source_file.id if source_file is not None else None,
     )
     db.add(db_file)
     db.commit()

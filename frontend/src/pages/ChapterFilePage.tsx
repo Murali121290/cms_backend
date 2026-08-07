@@ -36,7 +36,7 @@ import {
   startPpdGeneration, startPermissionsCheck, startCreditExtraction,
   startBiasScan, startWordToXml, getProcessingStatus,
 } from '@/api/processing'
-import { deleteFile } from '@/api/files'
+import { deleteFile, generateFigurePdf } from '@/api/files'
 import { useChapterFilesQuery } from '@/features/projects/useChapterFilesQuery'
 import { uiPaths } from '@/utils/appPaths'
 import { openInWordWithFallback } from '@/utils/openInWord'
@@ -50,6 +50,12 @@ import { useRBAC } from '@/hooks/useRBAC'
 export interface FileRow {
   id: string    // unique key: "{subfolder}::{file_name}"
   db_id?: number    // numeric DB file ID — required for all processing/edit actions
+  // Grouping: rows whose source_file_id points at another row's db_id render
+  // nested (indented) under that parent. Populated for derived artefacts like
+  // Figure PDFs generated from a specific source file.
+  source_file_id?: number
+  child_count?: number   // populated on parent rows for the toggle affordance
+  is_child?: boolean     // true when this row is nested under a parent
   subfolder: string
   file_name: string
   file_size: string
@@ -556,6 +562,8 @@ export function ChapterFilePage({
   const [showBulkUpload, setShowBulkUpload] = useState(false)
   const [deleteConfirmRow, setDeleteConfirmRow] = useState<FileRow | null>(null)
   const [deleteLoading, setDeleteLoading] = useState(false)
+  const [generatingFigurePdf, setGeneratingFigurePdf] = useState(false)
+  const [expandedSources, setExpandedSources] = useState<Record<number, boolean>>({})
 
   useEffect(() => { setRowSelection({}) }, [activeFolder])
 
@@ -564,26 +572,60 @@ export function ChapterFilePage({
     const sfLabel = activeFolderConfig[activeFolder]?.label || activeFolder
 
     if (filesQuery.data?.files?.length) {
-      return filesQuery.data.files
+      const inFolder = filesQuery.data.files
         .filter(f => categoryToFolderKey(f.category, resolvedChapterName) === activeFolder)
-        .map(f => ({
-          id: `${sfLabel}::${f.filename}`,
-          db_id: f.id,
-          subfolder: sfLabel,
-          file_name: f.filename,
-          file_size: f.file_size || '—',
-          size_bytes: f.size_bytes || 0,
-          uploaded_by: f.uploaded_by || '—',
-          uploaded_on: f.uploaded_at,
-          path: '',
-          isLocked: f.lock?.is_checked_out ?? false,
-          lockedBy: f.lock?.checked_out_by_username ?? null,
-          lockedAt: f.lock?.checked_out_at ?? null,
-          webdavLocked: f.lock?.webdav_locked ?? false,
-          webdavLockedBy: f.lock?.webdav_locked_by ?? null,
-          webdavLockedAt: f.lock?.webdav_locked_at ?? null,
-          pageCount: f.page_count ?? undefined,
-        }))
+
+      // Nesting: group derived files under their source. A row whose
+      // source_file_id points at another row in the same folder renders as a
+      // child of that parent; expand state controls visibility.
+      const idsInFolder = new Set(inFolder.map(f => f.id))
+      const childrenBySource = new Map<number, typeof inFolder>()
+      const topLevel: typeof inFolder = []
+      for (const f of inFolder) {
+        const sfid = f.source_file_id as number | null | undefined
+        if (sfid != null && idsInFolder.has(sfid)) {
+          if (!childrenBySource.has(sfid)) childrenBySource.set(sfid, [])
+          childrenBySource.get(sfid)!.push(f)
+        } else {
+          topLevel.push(f)
+        }
+      }
+
+      const toRow = (f: (typeof inFolder)[number], is_child: boolean): FileRow => ({
+        id: `${sfLabel}::${f.filename}`,
+        db_id: f.id,
+        source_file_id: f.source_file_id ?? undefined,
+        child_count: childrenBySource.get(f.id)?.length,
+        is_child,
+        subfolder: sfLabel,
+        file_name: f.filename,
+        file_size: f.file_size || '—',
+        size_bytes: f.size_bytes || 0,
+        uploaded_by: f.uploaded_by || '—',
+        uploaded_on: f.uploaded_at,
+        path: '',
+        isLocked: f.lock?.is_checked_out ?? false,
+        lockedBy: f.lock?.checked_out_by_username ?? null,
+        lockedAt: f.lock?.checked_out_at ?? null,
+        webdavLocked: f.lock?.webdav_locked ?? false,
+        webdavLockedBy: f.lock?.webdav_locked_by ?? null,
+        webdavLockedAt: f.lock?.webdav_locked_at ?? null,
+        pageCount: f.page_count ?? undefined,
+        width: f.width ?? undefined,
+        height: f.height ?? undefined,
+        dpi: f.dpi ?? undefined,
+        colorProfile: f.color_profile ?? undefined,
+      })
+
+      const out: FileRow[] = []
+      for (const parent of topLevel) {
+        out.push(toRow(parent, false))
+        const kids = childrenBySource.get(parent.id) || []
+        if (kids.length && expandedSources[parent.id]) {
+          for (const child of kids) out.push(toRow(child, true))
+        }
+      }
+      return out
     }
 
     if (!chapterFolderData) return []
@@ -597,7 +639,7 @@ export function ChapterFilePage({
       uploaded_on: f.uploaded_on,
       path: f.path,
     }))
-  }, [filesQuery.data, chapterFolderData, activeFolder, activeFolderConfig, resolvedChapterName])
+  }, [filesQuery.data, chapterFolderData, activeFolder, activeFolderConfig, resolvedChapterName, expandedSources])
 
   // ── File counts per folder tab ───────────────────────────────────────────
   const fileCounts = useMemo(() => {
@@ -744,6 +786,9 @@ export function ChapterFilePage({
         const ext = name.split('.').pop() ?? ''
         const { icon, color } = fileTypeIcon(ext)
         const fid = row.original.db_id
+        const childCount = row.original.child_count ?? 0
+        const isChild = !!row.original.is_child
+        const isExpanded = fid != null && !!expandedSources[fid]
         const isImageRow = /\.(jpe?g|png|gif|webp|tiff?|bmp|eps)$/i.test(name)
         const isDocxRow = /\.docx?$/i.test(name)
         const openTarget = isImageRow
@@ -752,7 +797,22 @@ export function ChapterFilePage({
             ? `${uiPaths.structuringReview(pid, cid, fid)}?tab=editor`
             : buildFileViewPath(row.original, pid, cid, cliId)
         return (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2" style={isChild ? { paddingLeft: 22 } : undefined}>
+            {childCount > 0 && fid != null ? (
+              <button
+                type="button"
+                onClick={e => {
+                  e.stopPropagation()
+                  setExpandedSources(s => ({ ...s, [fid]: !s[fid] }))
+                }}
+                title={isExpanded ? 'Collapse generated files' : `Expand ${childCount} generated file${childCount === 1 ? '' : 's'}`}
+                className="flex items-center justify-center w-4 h-4 rounded hover:bg-accent text-muted"
+              >
+                <span className={`inline-block transition-transform ${isExpanded ? 'rotate-90' : ''}`}>▶</span>
+              </button>
+            ) : (
+              <span className="w-4" />
+            )}
             <FolderIcon name={icon} size={14} color={color} />
             {fid ? (
               <button
@@ -771,6 +831,11 @@ export function ChapterFilePage({
               </button>
             ) : (
               <span className="font-medium text-text truncate max-w-[2000px]" title={name}>{name}</span>
+            )}
+            {childCount > 0 && (
+              <span className="text-[10px] text-muted px-1.5 py-0.5 rounded-full bg-accent/60" title={`${childCount} generated file${childCount === 1 ? '' : 's'}`}>
+                +{childCount}
+              </span>
             )}
           </div>
         )
@@ -923,6 +988,34 @@ export function ChapterFilePage({
   const selectedRows = table.getSelectedRowModel().rows.map(r => r.original)
   const selectedCount = selectedRows.length
 
+  async function handleGenerateFigurePdf() {
+    if (generatingFigurePdf) return
+    // If a single supported source (DOCX or image) is selected, scope the
+    // generation to that file so the output PDF is named after its source
+    // and nests under it in the file list. Otherwise bundle the whole chapter.
+    const only = selectedRows.length === 1 ? selectedRows[0] : null
+    const canScope = !!only && /\.(docx?|jpe?g|png|gif|webp|tiff?|bmp)$/i.test(only.file_name)
+    const sourceId = canScope ? only?.db_id : undefined
+    setGeneratingFigurePdf(true)
+    try {
+      const res = await generateFigurePdf(pid, cid, sourceId)
+      const label = sourceId ? ` from ${only?.file_name}` : ''
+      toast.success(
+        `Figure PDF generated${label} (${res.figures_included} figure${res.figures_included === 1 ? '' : 's'})`,
+      )
+      if (sourceId) setExpandedSources(s => ({ ...s, [sourceId]: true }))
+      void filesQuery.refetch()
+    } catch (e: any) {
+      const msg = e?.response?.data?.message
+        || e?.response?.data?.error?.message
+        || e?.response?.data?.detail
+        || 'Failed to generate Figure PDF'
+      toast.error(msg)
+    } finally {
+      setGeneratingFigurePdf(false)
+    }
+  }
+
   async function handleBulkDownload() {
     if (selectedCount === 0 || downloadBusy) return
     const chapterLabel = chapterFolderData?.chapter_name ?? resolvedChapterLabel
@@ -936,7 +1029,7 @@ export function ChapterFilePage({
         document.body.appendChild(a); a.click(); document.body.removeChild(a)
       } else if (chapterFolderData) {
         const a = document.createElement('a')
-        a.href = `/api/uploads/${pid}/chapter/${chapterFolderData.chapter_name}/${row.subfolder}/${encodeURIComponent(row.file_name)}/download`
+        a.href = `/api/uploads/${pid}/chapter/${chapterFolderData.chapter_name}/${row.subfolder}/${encodeURIComponent(row.file_name)}/download?chapter_id=${cid}`
         a.download = row.file_name
         document.body.appendChild(a); a.click(); document.body.removeChild(a)
       }
@@ -1062,6 +1155,31 @@ export function ChapterFilePage({
             )}
           </button>
         )}
+
+        {/* Generate Figure PDF — Art track only */}
+        {activeFolder === 'art' && (() => {
+          const only = selectedRows.length === 1 ? selectedRows[0] : null
+          const scopedSource = only && /\.(docx?|jpe?g|png|gif|webp|tiff?|bmp)$/i.test(only.file_name)
+            ? only.file_name
+            : null
+          const tooltip = scopedSource
+            ? `Generate Figure PDF from ${scopedSource}`
+            : 'Bundle every figure in this Art track into a single PDF (select a single DOCX row to generate from just that file)'
+          return (
+            <button
+              onClick={() => void handleGenerateFigurePdf()}
+              disabled={!resolvedIsAssigned || generatingFigurePdf}
+              title={tooltip}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors shadow-sm
+                ${resolvedIsAssigned && !generatingFigurePdf
+                  ? 'border-primary text-primary hover:bg-accent'
+                  : 'border-border text-muted opacity-50 cursor-not-allowed'}`}
+            >
+              {generatingFigurePdf ? <Loader2 size={12} className="animate-spin" /> : <FileOutput size={12} />}
+              {generatingFigurePdf ? 'Generating…' : (scopedSource ? 'Generate Figure PDF (selected)' : 'Generate Figure PDF')}
+            </button>
+          )
+        })()}
 
         {/* Bulk Upload */}
         {activeFolderConfig[activeFolder]?.allowUpload && (

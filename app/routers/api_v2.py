@@ -369,6 +369,45 @@ def _serialize_file_record(file_record: models.File, *, viewer: models.User, db:
     if file_record.uploaded_by:
         uploaded_by = file_record.uploaded_by.username
 
+    # Image / PDF metadata for the chapter file list's Dimensions / DPI /
+    # Color Profile columns. Cheap for images (PIL only reads the header);
+    # for PDFs we grab first-page dimensions in points via PyMuPDF.
+    width = height = dpi = None
+    color_profile: str | None = None
+    if file_record.path and os.path.exists(file_record.path):
+        ext = os.path.splitext(file_record.filename or "")[1].lower()
+        if ext in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".tif", ".tiff", ".bmp"):
+            try:
+                from PIL import Image as _PILImage
+                with _PILImage.open(file_record.path) as _im:
+                    width, height = _im.size
+                    dpi_info = _im.info.get("dpi") or _im.info.get("jfif_density")
+                    if dpi_info and isinstance(dpi_info, (tuple, list)) and dpi_info[0]:
+                        try:
+                            dpi = int(round(float(dpi_info[0])))
+                        except (TypeError, ValueError):
+                            dpi = None
+                    _MODE_LABELS = {
+                        "1": "Bilevel", "L": "Grayscale", "LA": "Grayscale+A",
+                        "P": "Palette", "PA": "Palette+A",
+                        "RGB": "RGB", "RGBA": "RGB+A", "CMYK": "CMYK",
+                        "YCbCr": "YCbCr", "LAB": "L*a*b*", "HSV": "HSV",
+                        "I": "Grayscale-32", "F": "Grayscale-32F", "I;16": "Grayscale-16",
+                    }
+                    color_profile = _MODE_LABELS.get(_im.mode, _im.mode)
+            except Exception:
+                pass
+        elif ext == ".pdf":
+            try:
+                import fitz as _fitz
+                with _fitz.open(file_record.path) as _doc:
+                    if len(_doc) > 0:
+                        r = _doc[0].rect
+                        width = int(round(r.width))
+                        height = int(round(r.height))
+            except Exception:
+                pass
+
     return schemas_v2.FileRecord(
         id=file_record.id,
         project_id=file_record.project_id,
@@ -384,6 +423,11 @@ def _serialize_file_record(file_record: models.File, *, viewer: models.User, db:
         file_size=file_size,
         uploaded_by=uploaded_by,
         page_count=page_count,
+        width=width,
+        height=height,
+        dpi=dpi,
+        color_profile=color_profile,
+        source_file_id=getattr(file_record, "source_file_id", None),
     )
 
 
