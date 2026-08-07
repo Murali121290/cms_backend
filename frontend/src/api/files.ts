@@ -2,9 +2,16 @@ import { apiClient } from "@/api/client";
 import type {
   FileCheckoutResponse,
   FileDeleteResponse,
+  FileRecord,
   FileUploadResponse,
   FileVersionsResponse,
 } from "@/types/api";
+
+export interface GenerateFigurePdfResponse {
+  status: "ok";
+  file: FileRecord;
+  figures_included: number;
+}
 
 
 function getDownloadFilename(contentDisposition: string | undefined, fallbackFilename: string) {
@@ -97,4 +104,13 @@ export async function downloadFileVersion(fileId: number, versionId: number, fal
     blob: response.data,
     filename: getDownloadFilename(response.headers["content-disposition"], fallbackFilename),
   };
+}
+
+export async function generateFigurePdf(projectId: number, chapterId: number, fileId?: number) {
+  const response = await apiClient.post<GenerateFigurePdfResponse>(
+    `/projects/${projectId}/chapters/${chapterId}/generate-figure-pdf`,
+    undefined,
+    fileId != null ? { params: { file_id: fileId } } : undefined,
+  );
+  return response.data;
 }

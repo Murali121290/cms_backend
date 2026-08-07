@@ -21,6 +21,7 @@ class Viewer(BaseModel):
     roles: list[str]
     is_active: bool
     team: str | None = None
+    designation: str | None = None
 
 
 class SessionAuth(BaseModel):
@@ -325,6 +326,7 @@ class AdminUser(BaseModel):
     roles: list[AdminUserRole]
     team: str | None = None
     customer_access: list[str] = []
+    designation: str | None = None
 
 
 class AdminUsersPagination(BaseModel):
@@ -347,7 +349,8 @@ class UserCreate(BaseModel):
     username: str
     email: str
     password: str
-    role: str
+    role: str | None = None
+    designation: str | None = None
     team: str
     customer_access: list[str] = []
     active_status: bool | None = True
@@ -355,6 +358,7 @@ class UserCreate(BaseModel):
 
 class UserUpdate(BaseModel):
     role: str | None = None
+    designation: str | None = None
     team: str | None = None
     password: str | None = None
     customer_access: list[str] | None = None
@@ -553,6 +557,12 @@ class FileUploadResponse(BaseModel):
     redirect_to: str | None = None
 
 
+class GenerateFigurePdfResponse(BaseModel):
+    status: Literal["ok"] = "ok"
+    file: FileRecord
+    figures_included: int
+
+
 class VersionRecord(BaseModel):
     id: int
     file_id: int
@@ -629,6 +639,33 @@ class ProcessingJobResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ProcessingJobListItem(BaseModel):
+    id: int
+    file_id: int | None = None
+    process_type: str
+    status: str
+    current_step: str | None = None
+    progress_pct: int
+    error_message: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None = None
+    filename: str | None = None
+    project_code: str | None = None
+    chapter_number: str | None = None
+    priority: int
+    options: dict | None = None
+    username: str | None = None
+    user_role: str | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class ProcessingJobPriorityUpdate(BaseModel):
+    priority: int
 
 
 

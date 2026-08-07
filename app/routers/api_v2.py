@@ -162,6 +162,7 @@ def _serialize_admin_user(user: models.User):
         roles=[schemas_v2.AdminUserRole(id=role.id, name=role.name) for role in user.roles],
         team=user.team,
         customer_access=user.customer_access or [],
+        designation=user.designation,
     )
 
 
@@ -173,6 +174,7 @@ def _serialize_viewer(user: models.User):
         roles=[role.name for role in user.roles],
         is_active=user.is_active,
         team=user.team,
+        designation=user.designation,
     )
 
 
@@ -1018,6 +1020,45 @@ def api_v2_project_chapters(
         project=_serialize_project_summary(project),
         chapters=[_serialize_chapter_summary(chapter) for chapter in page_data["chapters"]],
     )
+
+
+@router.get("/projects/{project_id}/indesign-templates")
+def api_v2_project_indesign_templates(
+    project_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+        
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+        
+    design_chapter = db.query(models.ChapterInfo).filter(
+        models.ChapterInfo.project == project.project_code,
+        models.ChapterInfo.chapters.ilike("design")
+    ).first()
+    
+    if not design_chapter:
+        return []
+        
+    template_files = db.query(models.File).filter(
+        models.File.chapter_id == design_chapter.id,
+        models.File.category == "template/indesign",
+        models.File.filename.ilike("%.indt")
+    ).all()
+    
+    return [_serialize_file_record(file_record, viewer=viewer, db=db) for file_record in template_files]
 
 
 @router.get(
@@ -3128,6 +3169,65 @@ def api_v2_upload_chapter_files(
     )
 
 
+@router.post(
+    "/projects/{project_id}/chapters/{chapter_id}/generate-figure-pdf",
+    response_model=schemas_v2.GenerateFigurePdfResponse,
+)
+def api_v2_generate_figure_pdf(
+    project_id: int,
+    chapter_id: int,
+    file_id: Optional[int] = None,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    from app.domains.post_prod.figure_pdf.service import generate_figure_pdf
+
+    try:
+        db_file, figures_included, error = generate_figure_pdf(
+            db,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            actor_user_id=viewer.id,
+            upload_dir=file_service.UPLOAD_DIR,
+            source_file_id=file_id,
+        )
+    except Exception as exc:
+        logger.exception("Figure PDF generation failed for chapter %s", chapter_id)
+        return _error_response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            code="FIGURE_PDF_FAILED",
+            message=f"Failed to generate Figure PDF: {exc}",
+        )
+
+    if error or not db_file:
+        return _error_response(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+                if error and ("not found" in error.lower())
+                else status.HTTP_400_BAD_REQUEST
+            ),
+            code=(
+                "FIGURE_PDF_EMPTY"
+                if error and ("no figures" in error.lower() or "no images" in error.lower())
+                else "FIGURE_PDF_FAILED"
+            ),
+            message=error or "Failed to generate Figure PDF.",
+        )
+
+    return schemas_v2.GenerateFigurePdfResponse(
+        file=_serialize_file_record(db_file, viewer=viewer, db=db),
+        figures_included=figures_included,
+    )
+
+
 @router.get("/uploads/{project_id}/chapter/{chapter_name}/backup-list")
 def api_v2_backup_list(
     project_id: int,
@@ -3142,7 +3242,7 @@ def api_v2_backup_list(
             code="AUTH_REQUIRED",
             message="Authentication required.",
         )
-        
+
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         return _error_response(
@@ -4094,6 +4194,165 @@ def api_v2_get_processing_job(
         )
 
     return job
+
+
+@router.get("/processing-jobs", response_model=list[schemas_v2.ProcessingJobListItem])
+def api_v2_list_processing_jobs(
+    limit: int = Query(50, ge=1, le=200),
+    status_filter: str | None = Query(None, alias="status"),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+
+    from app.models import ProcessingJob, File, ChapterInfo
+    from app.domains.projects.models import Project
+    from app.domains.auth.models import User
+
+    from sqlalchemy import func
+
+    query = db.query(
+        ProcessingJob.id,
+        ProcessingJob.file_id,
+        ProcessingJob.process_type,
+        ProcessingJob.status,
+        ProcessingJob.current_step,
+        ProcessingJob.progress_pct,
+        ProcessingJob.error_message,
+        ProcessingJob.created_at,
+        ProcessingJob.updated_at,
+        ProcessingJob.completed_at,
+        ProcessingJob.priority,
+        ProcessingJob.options,
+        func.coalesce(ProcessingJob.filename, File.filename).label("filename"),
+        func.coalesce(ProcessingJob.project_code, Project.project_code).label("project_code"),
+        func.coalesce(ProcessingJob.chapter_number, ChapterInfo.chapters).label("chapter_number"),
+        User.username.label("username"),
+        User.role.label("user_role")
+    ).outerjoin(File, ProcessingJob.file_id == File.id)\
+     .outerjoin(Project, File.project_id == Project.id)\
+     .outerjoin(ChapterInfo, File.chapter_id == ChapterInfo.id)\
+     .outerjoin(User, ProcessingJob.user_id == User.id)
+
+    if status_filter:
+        query = query.filter(ProcessingJob.status == status_filter)
+
+    jobs = query.order_by(
+        ProcessingJob.status.in_(["pending", "processing"]).desc(),
+        ProcessingJob.priority.desc(),
+        ProcessingJob.created_at.desc()
+    ).limit(limit).all()
+    
+    import json
+    result = []
+    for row in jobs:
+        options_dict = None
+        if row.options:
+            if isinstance(row.options, str):
+                try:
+                    options_dict = json.loads(row.options)
+                except Exception:
+                    options_dict = {}
+            elif isinstance(row.options, dict):
+                options_dict = row.options
+
+        result.append(schemas_v2.ProcessingJobListItem(
+            id=row.id,
+            file_id=row.file_id,
+            process_type=row.process_type,
+            status=row.status,
+            current_step=row.current_step,
+            progress_pct=row.progress_pct,
+            error_message=row.error_message,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+            completed_at=row.completed_at,
+            filename=row.filename,
+            project_code=row.project_code,
+            chapter_number=row.chapter_number,
+            priority=row.priority,
+            options=options_dict,
+            username=row.username,
+            user_role=row.user_role
+        ))
+    return result
+
+
+@router.post("/processing-jobs/{job_id}/cancel")
+def api_v2_cancel_processing_job(
+    job_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+
+    from app.models import ProcessingJob
+    import redis
+    from app.core.config import get_settings
+
+    job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
+    if not job:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="JOB_NOT_FOUND",
+            message="Processing job not found.",
+        )
+
+    job.status = "cancelled"
+    job.error_message = "Cancelled by user"
+    job.completed_at = datetime.utcnow()
+    db.commit()
+
+    # Force release InDesign Redis lock
+    try:
+        settings = get_settings()
+        redis_client = redis.from_url(settings.REDIS_URL)
+        redis_client.delete("indesign_conversion_lock")
+    except Exception:
+        pass
+
+    return {"status": "cancelled", "job_id": job_id}
+
+
+@router.post("/processing-jobs/{job_id}/priority")
+def api_v2_update_job_priority(
+    job_id: int,
+    payload: schemas_v2.ProcessingJobPriorityUpdate,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+
+    from app.models import ProcessingJob
+    job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
+    if not job:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="JOB_NOT_FOUND",
+            message="Processing job not found.",
+        )
+
+    job.priority = payload.priority
+    db.commit()
+    return {"status": "success", "job_id": job_id, "priority": payload.priority}
 
 
 @router.get("/files/{file_id}/technical-review", response_model=schemas_v2.TechnicalScanResponse)
@@ -5865,7 +6124,8 @@ def api_v2_create_user(
         username=payload.username,
         email=payload.email,
         password_hash=hash_password(payload.password),
-        role=role_record.role_name,
+        designation=role_record.role_name,
+        role=role_record.role_name if role_record.role_name.lower() == "admin" else None,
         team=role_record.team,
         customer_access=payload.customer_access,
         active_status=payload.active_status if payload.active_status is not None else True
@@ -5926,10 +6186,16 @@ def api_v2_update_user(
             )
 
         # Admin count check to protect the last admin
-        was_admin = db_user.role and db_user.role.lower() == "admin"
+        from sqlalchemy import func
+        was_admin = (
+            (db_user.role and db_user.role.lower() == "admin") or
+            (db_user.designation and db_user.designation.lower() == "admin")
+        )
         is_new_admin = role_record.role_name.lower() == "admin"
         if was_admin and not is_new_admin:
-            admin_count = db.query(models.User).filter(models.User.role.ilike("admin")).count()
+            admin_count = db.query(models.User).filter(
+                func.coalesce(models.User.role, models.User.designation).ilike("admin")
+            ).count()
             if admin_count <= 1:
                 return _error_response(
                     status_code=status.HTTP_409_CONFLICT,
@@ -5937,10 +6203,13 @@ def api_v2_update_user(
                     message="Cannot remove the last Admin role"
                 )
 
-        db_user.role = role_record.role_name
+        db_user.designation = role_record.role_name
+        db_user.role = role_record.role_name if role_record.role_name.lower() == "admin" else None
         db_user.team = role_record.team
 
     # Other updates
+    if payload.designation is not None:
+        db_user.designation = payload.designation
     if payload.customer_access is not None:
         db_user.customer_access = payload.customer_access
     if payload.password:
