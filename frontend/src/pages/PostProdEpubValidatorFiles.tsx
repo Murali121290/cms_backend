@@ -746,13 +746,12 @@ export function PostProdEpubValidatorFiles() {
                 </h1>
                 {project && (
                   <span
-                    className={`capitalize font-bold px-2 py-0.5 rounded-md text-[9px] border shrink-0 ${
-                      project.validation_status === 'pass' || project.validation_status === 'validated' || project.validation_status === 'Completed'
+                    className={`capitalize font-bold px-2 py-0.5 rounded-md text-[9px] border shrink-0 ${project.validation_status === 'pass' || project.validation_status === 'validated' || project.validation_status === 'Completed'
                         ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
                         : project.validation_status === 'in_progress' || project.validation_status === 'in-progress' || project.validation_status === 'In Progress'
                           ? 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400'
                           : 'bg-primary/10 border-primary/20 text-primary'
-                    }`}
+                      }`}
                   >
                     {project.validation_status === 'pass' || project.validation_status === 'validated' || project.validation_status === 'Completed'
                       ? 'Completed'
@@ -822,21 +821,6 @@ export function PostProdEpubValidatorFiles() {
               </button>
 
               <button
-                onClick={handleRunAce}
-                disabled={isAceRunning || isLoading}
-                className="inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-primary/10 text-foreground hover:border-primary/40 hover:text-primary transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
-              >
-                {isAceRunning ? (
-                  <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-                ) : (
-                  <ShieldCheck className="w-4 h-4 shrink-0" />
-                )}
-                <span className="whitespace-nowrap">
-                  {isAceRunning ? `Checking… ${fmtElapsed(aceElapsed)}` : aceReport ? 'Re-run accessibility' : 'Accessibility check'}
-                </span>
-              </button>
-
-              <button
                 onClick={handleRunEpubCheck}
                 disabled={isEpubCheckRunning || isLoading}
                 className="inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-primary/10 text-foreground hover:border-primary/40 hover:text-primary transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
@@ -848,6 +832,21 @@ export function PostProdEpubValidatorFiles() {
                 )}
                 <span className="whitespace-nowrap">
                   {isEpubCheckRunning ? `EPUBCheck… ${fmtElapsed(epubCheckElapsed)}` : epubCheckReport ? 'Re-run EPUBCheck' : 'Run EPUBCheck'}
+                </span>
+              </button>
+
+              <button
+                onClick={handleRunAce}
+                disabled={isAceRunning || isLoading}
+                className="inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-primary/10 text-foreground hover:border-primary/40 hover:text-primary transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
+              >
+                {isAceRunning ? (
+                  <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                ) : (
+                  <ShieldCheck className="w-4 h-4 shrink-0" />
+                )}
+                <span className="whitespace-nowrap">
+                  {isAceRunning ? `Checking… ${fmtElapsed(aceElapsed)}` : aceReport ? 'Re-run accessibility' : 'Accessibility check'}
                 </span>
               </button>
 
@@ -864,6 +863,7 @@ export function PostProdEpubValidatorFiles() {
                 <span className="whitespace-nowrap">{isExporting ? 'Exporting…' : 'Export EPUB'}</span>
               </button>
             </div>
+
 
             {/* Secondary row below: View report options */}
             {(aceReport || epubCheckReport) && (
@@ -1310,192 +1310,192 @@ export function PostProdEpubValidatorFiles() {
                 {/* ── Scrollable Files List Area ───────────────────────────────── */}
                 <div className="flex-1 overflow-y-auto max-h-[calc(100vh-17rem)] min-h-[350px] pr-2 space-y-6 scrollbar-thin scrollbar-thumb-border font-sans pb-4">
                   {/* ── 1. Chapters Tab View ────────────────────────────────── */}
-                {(activeCategoryTab === 'chapters' || activeCategoryTab === 'all') && (
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between border-b border-border/60 pb-2">
-                      <div className="flex items-center gap-2">
-                        <BookOpen className="w-4 h-4 text-primary" />
-                        <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
-                          Chapters
-                        </h2>
-                        <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleXhtmlFiles.length})</span>
+                  {(activeCategoryTab === 'chapters' || activeCategoryTab === 'all') && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                        <div className="flex items-center gap-2">
+                          <BookOpen className="w-4 h-4 text-primary" />
+                          <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
+                            Chapters
+                          </h2>
+                          <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleXhtmlFiles.length})</span>
+                        </div>
                       </div>
+                      {visibleXhtmlFiles.length === 0 ? (
+                        <p className="text-xs text-muted-foreground italic py-1">No chapter files in this section.</p>
+                      ) : (
+                        <motion.div
+                          className={cn(
+                            layoutMode === 'grid'
+                              ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
+                              : 'space-y-2.5',
+                          )}
+                          variants={containerVariants}
+                          initial="hidden"
+                          animate="show"
+                        >
+                          {visibleXhtmlFiles.map((file, i) => {
+                            const status = getFileStatus(file.file_name);
+                            const agg = fileIssues.get(file.file_name);
+                            return (
+                              <motion.div key={`chapter-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
+                                <XHTMLCard
+                                  file={file}
+                                  variant="xhtml"
+                                  layoutMode={layoutMode}
+                                  status={status}
+                                  errors={agg?.errors ?? 0}
+                                  warnings={agg?.warnings ?? 0}
+                                  isValidating={validatingFiles.has(file.file_name)}
+                                  onValidate={() => handleValidateFile(file.file_name)}
+                                  onOpen={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
+                                  onPreview={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
+                                  index={i}
+                                />
+                              </motion.div>
+                            );
+                          })}
+                        </motion.div>
+                      )}
                     </div>
-                    {visibleXhtmlFiles.length === 0 ? (
-                      <p className="text-xs text-muted-foreground italic py-1">No chapter files in this section.</p>
-                    ) : (
-                      <motion.div
-                        className={cn(
-                          layoutMode === 'grid'
-                            ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
-                            : 'space-y-2.5',
-                        )}
-                        variants={containerVariants}
-                        initial="hidden"
-                        animate="show"
-                      >
-                        {visibleXhtmlFiles.map((file, i) => {
-                          const status = getFileStatus(file.file_name);
-                          const agg = fileIssues.get(file.file_name);
-                          return (
-                            <motion.div key={`chapter-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
+                  )}
+
+                  {/* ── 2. CSS Tab View ────────────────────────────────────── */}
+                  {(activeCategoryTab === 'css' || activeCategoryTab === 'all') && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                        <div className="flex items-center gap-2">
+                          <Braces className="w-4 h-4 text-violet-500" />
+                          <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
+                            CSS
+                          </h2>
+                          <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleCssFiles.length})</span>
+                        </div>
+                      </div>
+                      {visibleCssFiles.length === 0 ? (
+                        <p className="text-xs text-muted-foreground italic py-1">No CSS files in this section.</p>
+                      ) : (
+                        <motion.div
+                          className={cn(
+                            layoutMode === 'grid'
+                              ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
+                              : 'space-y-2.5',
+                          )}
+                          variants={containerVariants}
+                          initial="hidden"
+                          animate="show"
+                        >
+                          {visibleCssFiles.map((file, i) => (
+                            <motion.div key={`css-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
                               <XHTMLCard
                                 file={file}
-                                variant="xhtml"
+                                variant="css"
                                 layoutMode={layoutMode}
-                                status={status}
-                                errors={agg?.errors ?? 0}
-                                warnings={agg?.warnings ?? 0}
-                                isValidating={validatingFiles.has(file.file_name)}
-                                onValidate={() => handleValidateFile(file.file_name)}
-                                onOpen={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
-                                onPreview={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
-                                index={i}
-                              />
-                            </motion.div>
-                          );
-                        })}
-                      </motion.div>
-                    )}
-                  </div>
-                )}
-
-                {/* ── 2. CSS Tab View ────────────────────────────────────── */}
-                {(activeCategoryTab === 'css' || activeCategoryTab === 'all') && (
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between border-b border-border/60 pb-2">
-                      <div className="flex items-center gap-2">
-                        <Braces className="w-4 h-4 text-violet-500" />
-                        <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
-                          CSS
-                        </h2>
-                        <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleCssFiles.length})</span>
-                      </div>
-                    </div>
-                    {visibleCssFiles.length === 0 ? (
-                      <p className="text-xs text-muted-foreground italic py-1">No CSS files in this section.</p>
-                    ) : (
-                      <motion.div
-                        className={cn(
-                          layoutMode === 'grid'
-                            ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
-                            : 'space-y-2.5',
-                        )}
-                        variants={containerVariants}
-                        initial="hidden"
-                        animate="show"
-                      >
-                        {visibleCssFiles.map((file, i) => (
-                          <motion.div key={`css-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
-                            <XHTMLCard
-                              file={file}
-                              variant="css"
-                              layoutMode={layoutMode}
-                              status="pending"
-                              onOpen={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
-                              index={i}
-                            />
-                          </motion.div>
-                        ))}
-                      </motion.div>
-                    )}
-                  </div>
-                )}
-
-                {/* ── 3. Images Tab View ────────────────────────────────────────── */}
-                {(activeCategoryTab === 'images' || activeCategoryTab === 'all') && (
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between border-b border-border/60 pb-2">
-                      <div className="flex items-center gap-2">
-                        <ImageIcon className="w-4 h-4 text-emerald-500" />
-                        <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
-                          Images
-                        </h2>
-                        <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleImageFiles.length})</span>
-                      </div>
-                    </div>
-                    {visibleImageFiles.length === 0 ? (
-                      <p className="text-xs text-muted-foreground italic py-1">No image files in this section.</p>
-                    ) : (
-                      <motion.div
-                        className={cn(
-                          layoutMode === 'grid'
-                            ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
-                            : 'space-y-2.5',
-                        )}
-                        variants={containerVariants}
-                        initial="hidden"
-                        animate="show"
-                      >
-                        {visibleImageFiles.map((file, i) => (
-                          <motion.div key={`img-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
-                            <XHTMLCard
-                              file={file}
-                              variant="image"
-                              layoutMode={layoutMode}
-                              status="pending"
-                              onOpen={() => { setModalAllowedTabs(['result', 'preview']); setModalInitialTab('preview'); setSelectedFile(file); }}
-                              onPreview={() => { setModalAllowedTabs(['result', 'preview']); setModalInitialTab('preview'); setSelectedFile(file); }}
-                              index={i}
-                            />
-                          </motion.div>
-                        ))}
-                      </motion.div>
-                    )}
-                  </div>
-                )}
-
-                {/* ── 4. Other files Tab View ────────────────────────────────── */}
-                {(activeCategoryTab === 'other' || activeCategoryTab === 'all') && (
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between border-b border-border/60 pb-2">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <FileCode2 className="w-4 h-4 text-sky-500" />
-                        <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
-                          Other Files
-                        </h2>
-                        <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleOtherFiles.length})</span>
-                      </div>
-                    </div>
-                    {visibleOtherFiles.length === 0 ? (
-                      <p className="text-xs text-muted-foreground italic py-1">No other files in this section.</p>
-                    ) : (
-                      <motion.div
-                        className={cn(
-                          layoutMode === 'grid'
-                            ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
-                            : 'space-y-2.5',
-                        )}
-                        variants={containerVariants}
-                        initial="hidden"
-                        animate="show"
-                      >
-                        {visibleOtherFiles.map((file, i) => {
-                          const status = getFileStatus(file.file_name);
-                          const agg = fileIssues.get(file.file_name);
-                          const canValidate = file.file_name.endsWith('.xml') || file.file_name.endsWith('.opf') || file.file_name.endsWith('.ncx') || file.file_name.endsWith('.xhtml') || file.file_name.endsWith('.html');
-                          return (
-                            <motion.div key={`other-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
-                              <XHTMLCard
-                                file={file}
-                                variant="other"
-                                layoutMode={layoutMode}
-                                status={status}
-                                errors={agg?.errors ?? 0}
-                                warnings={agg?.warnings ?? 0}
-                                isValidating={validatingFiles.has(file.file_name)}
-                                onValidate={canValidate ? () => handleValidateFile(file.file_name) : undefined}
+                                status="pending"
                                 onOpen={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
-                                onPreview={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
                                 index={i}
                               />
                             </motion.div>
-                          );
-                        })}
-                      </motion.div>
-                    )}
-                  </div>
-                )}
+                          ))}
+                        </motion.div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* ── 3. Images Tab View ────────────────────────────────────────── */}
+                  {(activeCategoryTab === 'images' || activeCategoryTab === 'all') && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                        <div className="flex items-center gap-2">
+                          <ImageIcon className="w-4 h-4 text-emerald-500" />
+                          <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
+                            Images
+                          </h2>
+                          <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleImageFiles.length})</span>
+                        </div>
+                      </div>
+                      {visibleImageFiles.length === 0 ? (
+                        <p className="text-xs text-muted-foreground italic py-1">No image files in this section.</p>
+                      ) : (
+                        <motion.div
+                          className={cn(
+                            layoutMode === 'grid'
+                              ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
+                              : 'space-y-2.5',
+                          )}
+                          variants={containerVariants}
+                          initial="hidden"
+                          animate="show"
+                        >
+                          {visibleImageFiles.map((file, i) => (
+                            <motion.div key={`img-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
+                              <XHTMLCard
+                                file={file}
+                                variant="image"
+                                layoutMode={layoutMode}
+                                status="pending"
+                                onOpen={() => { setModalAllowedTabs(['result', 'preview']); setModalInitialTab('preview'); setSelectedFile(file); }}
+                                onPreview={() => { setModalAllowedTabs(['result', 'preview']); setModalInitialTab('preview'); setSelectedFile(file); }}
+                                index={i}
+                              />
+                            </motion.div>
+                          ))}
+                        </motion.div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* ── 4. Other files Tab View ────────────────────────────────── */}
+                  {(activeCategoryTab === 'other' || activeCategoryTab === 'all') && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <FileCode2 className="w-4 h-4 text-sky-500" />
+                          <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
+                            Other Files
+                          </h2>
+                          <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleOtherFiles.length})</span>
+                        </div>
+                      </div>
+                      {visibleOtherFiles.length === 0 ? (
+                        <p className="text-xs text-muted-foreground italic py-1">No other files in this section.</p>
+                      ) : (
+                        <motion.div
+                          className={cn(
+                            layoutMode === 'grid'
+                              ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
+                              : 'space-y-2.5',
+                          )}
+                          variants={containerVariants}
+                          initial="hidden"
+                          animate="show"
+                        >
+                          {visibleOtherFiles.map((file, i) => {
+                            const status = getFileStatus(file.file_name);
+                            const agg = fileIssues.get(file.file_name);
+                            const canValidate = file.file_name.endsWith('.xml') || file.file_name.endsWith('.opf') || file.file_name.endsWith('.ncx') || file.file_name.endsWith('.xhtml') || file.file_name.endsWith('.html');
+                            return (
+                              <motion.div key={`other-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
+                                <XHTMLCard
+                                  file={file}
+                                  variant="other"
+                                  layoutMode={layoutMode}
+                                  status={status}
+                                  errors={agg?.errors ?? 0}
+                                  warnings={agg?.warnings ?? 0}
+                                  isValidating={validatingFiles.has(file.file_name)}
+                                  onValidate={canValidate ? () => handleValidateFile(file.file_name) : undefined}
+                                  onOpen={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
+                                  onPreview={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
+                                  index={i}
+                                />
+                              </motion.div>
+                            );
+                          })}
+                        </motion.div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
