@@ -535,8 +535,8 @@ export function CreateProjectPage() {
     setPoFilledValues({})
   }
 
-  const pmUsers    = useMemo(() => users.filter(u => u.active_status && u.role.toLowerCase().replace(" ","").includes('projectmanager')), [users])
-  const salesUsers = useMemo(() => users.filter(u => u.active_status && u.role.toLowerCase().replace(" ","").includes('sales')), [users])
+  const pmUsers    = useMemo(() => users.filter(u => u.active_status && (u.role || u.designation).toLowerCase().replace(" ","").includes('projectmanager')), [users])
+  const salesUsers = useMemo(() => users.filter(u => u.active_status && (u.role || u.designation).toLowerCase().replace(" ","").includes('sales')), [users])
 
   // Build workflow map + ordered stage lists
   const workflowMap = useMemo(() => {

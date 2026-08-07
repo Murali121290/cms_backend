@@ -3889,6 +3889,11 @@ def api_v2_onlyoffice_config(
                 "help": False,
                 "plugins": False,
                 "goback": {"url": ""},
+                "hideRightMenu": True,
+                "hideRulers": True,
+                "layout": {
+                    "leftMenu": False
+                }
             },
             **({"plugins": {
                 "autostart": ["asc.{4c1b92a4-793d-4251-ba23-1451e06eeafd}"],

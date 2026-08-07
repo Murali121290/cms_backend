@@ -68,10 +68,13 @@ def create_admin_user(db: Session, *, username: str, email: str, password: str, 
 
     target_role = db.query(RolesMaster).filter(RolesMaster.id == role_id).first()
     if target_role:
-        new_user.role = target_role.role_name
+        role_name = target_role.role_name
+        new_user.designation = role_name
+        new_user.role = role_name if role_name.lower() == "admin" else None
         new_user.team = target_role.team
     else:
-        new_user.role = "viewer"
+        new_user.designation = "viewer"
+        new_user.role = None
         new_user.team = team_name or "General"
 
     db.add(new_user)
@@ -81,21 +84,28 @@ def create_admin_user(db: Session, *, username: str, email: str, password: str, 
 
 def replace_user_role(db: Session, *, user_id: int, role_id: int, team_name: str | None = None):
     from app.domains.workflow.models import RolesMaster
+    from sqlalchemy import func
 
     target_user = db.query(models.User).filter(models.User.id == user_id).first()
     new_role = db.query(RolesMaster).filter(RolesMaster.id == role_id).first()
     if not target_user or not new_role:
         return {"status": "invalid"}
 
-    is_target_admin = target_user.role and target_user.role.lower() == "admin"
+    is_target_admin = (
+        (target_user.role and target_user.role.lower() == "admin") or
+        (target_user.designation and target_user.designation.lower() == "admin")
+    )
     is_new_role_admin = new_role.role_name.lower() == "admin"
 
     if is_target_admin and not is_new_role_admin:
-        admin_count = db.query(models.User).filter(models.User.role.ilike("admin")).count()
+        admin_count = db.query(models.User).filter(
+            func.coalesce(models.User.role, models.User.designation).ilike("admin")
+        ).count()
         if admin_count <= 1:
             return {"status": "last_admin_blocked"}
 
-    target_user.role = new_role.role_name
+    target_user.designation = new_role.role_name
+    target_user.role = new_role.role_name if new_role.role_name.lower() == "admin" else None
     target_user.team = new_role.team
     
     db.commit()

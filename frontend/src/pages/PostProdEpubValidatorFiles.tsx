@@ -16,6 +16,7 @@ import {
   Download,
   ShieldCheck,
   Eye,
+  User,
 } from 'lucide-react';
 import { XHTMLCard, xhtmlCardVariants } from '@/components/epub_validator/XHTMLCard';
 import { ValidationDetailModal } from '@/components/epub_validator/ValidationDetailModal';
@@ -24,7 +25,7 @@ import type { Tab as ModalTab } from '@/components/epub_validator/ValidationDeta
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody } from '@/components/ui/Card';
-import { getFiles, validateFolder, validateFile, exportEpub, getCachedAceReport, runAceReport } from '@/api/epubValidator';
+import { getFiles, validateFolder, validateFile, exportEpub, getCachedAceReport, runAceReport, listProjects, type EvProject } from '@/api/epubValidator';
 import { useEpubBookStore } from '@/hooks/useEpubBookStore';
 import { cn, formatDate, titleCase } from '@/utils/epubValidatorUtils';
 import type { AceReport, ValidationApiResponse, XHTMLFile, XHTMLFileStatus } from '@/types/epubValidator';
@@ -97,14 +98,21 @@ function SkeletonGrid() {
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 export function PostProdEpubValidatorFiles() {
-  const { folderName = '' } = useParams<{ folderName: string }>();
+  const params = useParams<{ projectId?: string; folderName?: string }>();
   const navigate = useNavigate();
-  const { books } = useEpubBookStore();
+  const { data: projects = [] } = useQuery<EvProject[]>({
+    queryKey: ['epub-projects'],
+    queryFn: listProjects,
+    staleTime: 30_000,
+  });
 
-  const book = useMemo(
-    () => books.find((b) => b.folder_name === folderName),
-    [books, folderName],
-  );
+  const project = useMemo(() => {
+    const pId = params.projectId || params.folderName;
+    if (!pId) return null;
+    return projects.find((p) => String(p.id) === pId || p.folder_name === pId) || null;
+  }, [projects, params]);
+
+  const folderName = project ? project.folder_name : (params.folderName || params.projectId || '');
 
   // ── Files from API ──────────────────────────────────────────────────────────
   const { data: filesData, isLoading, isError } = useQuery({
@@ -488,23 +496,50 @@ export function PostProdEpubValidatorFiles() {
             <ArrowLeft className="w-4 h-4" />
           </Button>
           <div className="min-w-0">
-            <h1
-              className="text-2xl font-bold font-serif text-text tracking-tight truncate"
-              title={folderName}
-            >
-              {titleCase(folderName)}
-            </h1>
-            <p className="text-xs text-muted mt-1 flex items-center gap-2 flex-wrap font-sans">
-              {book && (
-                <>
-                  <span className="font-mono text-[11px] font-semibold">{folderName}</span>
-                  <span className="text-border">·</span>
-                  <span>{xhtmlFiles.length} chapters</span>
-                  <span className="text-border">·</span>
-                  <span>{formatDate(book.uploaded_at)}</span>
-                </>
+            <div className="flex items-center gap-2.5">
+              <h1
+                className="text-2xl font-bold font-serif text-text tracking-tight truncate m-0"
+                title={project?.project_name || folderName}
+              >
+                {project?.project_name || folderName}
+              </h1>
+              {project && (
+                <span
+                  className={`capitalize font-bold px-2 py-0.5 rounded-md text-[9px] border ${
+                    project.validation_status === 'pass' || project.validation_status === 'validated' || project.validation_status === 'Completed'
+                      ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                      : project.validation_status === 'in_progress' || project.validation_status === 'in-progress' || project.validation_status === 'In Progress'
+                      ? 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400'
+                      : 'bg-primary/10 border-primary/20 text-primary'
+                  }`}
+                >
+                  {project.validation_status === 'pass' || project.validation_status === 'validated' || project.validation_status === 'Completed'
+                    ? 'Completed'
+                    : project.validation_status === 'in_progress' || project.validation_status === 'in-progress' || project.validation_status === 'In Progress'
+                    ? 'In Progress'
+                    : 'Active'}
+                </span>
               )}
-              {!book && <span className="font-mono text-[11px] font-semibold">{folderName}</span>}
+            </div>
+            <p className="text-xs text-muted mt-1 flex items-center gap-2 flex-wrap font-sans">
+              {project ? (
+                <>
+                  <span>
+                    {project.client} {project.client_code && `(${project.client_code})`}
+                  </span>
+                  {project.assignee && (
+                    <>
+                      <span className="text-border">·</span>
+                      <span className="inline-flex items-center gap-1 text-muted">
+                        <User size={12} className="text-muted/70" />
+                        <span>{project.assignee}</span>
+                      </span>
+                    </>
+                  )}
+                </>
+              ) : (
+                <span className="font-mono text-[11px] font-semibold">{folderName}</span>
+              )}
               {validationData && validationData.customer !== undefined && (
                 <>
                   <span className="text-border">·</span>

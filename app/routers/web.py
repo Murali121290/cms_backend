@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from jose import jwt, JWTError
 from datetime import datetime
+from pydantic import BaseModel
 
 from app import database, models
 from app.domains.projects.models import Project
@@ -320,17 +321,21 @@ async def download_backup_or_folder_file(
         else:
             file_path = version_entry.path
     else:
-        file_path = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, subfolder, file_name)
+        file_record = db.query(models.File).filter(
+            models.File.project_id == project_id,
+            models.File.chapter_id == chapter.id,
+            models.File.filename == file_name
+        ).first()
+
+        if file_record:
+            file_path = os.path.join(UPLOAD_DIR, file_record.path)
+            if not os.path.exists(file_path):
+                file_path = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, subfolder, file_name)
+        else:
+            file_path = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, subfolder, file_name)
+
         if not os.path.exists(file_path):
-            # Try querying the File table
-            file_record = db.query(models.File).filter(
-                models.File.chapter_id == chapter.id,
-                models.File.filename == file_name
-            ).first()
-            if file_record and os.path.exists(os.path.join(UPLOAD_DIR, file_record.path)):
-                file_path = os.path.join(UPLOAD_DIR, file_record.path)
-            else:
-                raise HTTPException(status_code=404, detail="File not found")
+            raise HTTPException(status_code=404, detail="File not found")
 
     PREVIEWABLE_EXTS = {'.pdf', '.html', '.htm', '.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp'}
     ext = os.path.splitext(file_name)[1].lower()
@@ -341,6 +346,140 @@ async def download_backup_or_folder_file(
         media_type='text/html; charset=utf-8' if ext in ('.html', '.htm') else None,
         content_disposition_type='inline' if ext in PREVIEWABLE_EXTS else 'attachment',
     )
+
+
+class SaveContentRequest(BaseModel):
+    content: str
+
+
+@router.put("/api/uploads/{project_id}/chapter/{chapter_name}/{subfolder:path}/{file_name}/save")
+async def save_folder_file(
+    project_id: int,
+    chapter_name: str,
+    subfolder: str,
+    file_name: str,
+    body: SaveContentRequest,
+    user=Depends(get_current_user_from_cookie),
+    db: Session = Depends(database.get_db)
+):
+    import os
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+        
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    chapter_no = chapter_name.split("-")[-1]
+    chapter = None
+    if chapter_name.startswith("chapter-") and chapter_no.isdigit():
+        chapter = db.query(models.ChapterInfo).filter(
+            models.ChapterInfo.id == int(chapter_no)
+        ).first()
+    if not chapter:
+        chapter = db.query(models.ChapterInfo).filter(
+            models.ChapterInfo.project == project.code,
+            (models.ChapterInfo.chapters == chapter_no) | (models.ChapterInfo.chapters == str(int(chapter_no)))
+        ).first()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+        
+    if subfolder == "Backup":
+        raise HTTPException(status_code=400, detail="Cannot save to Backup folder")
+        
+    file_record = db.query(models.File).filter(
+        models.File.project_id == project_id,
+        models.File.chapter_id == chapter.id,
+        models.File.filename == file_name
+    ).first()
+
+    if file_record:
+        file_path = os.path.join(UPLOAD_DIR, file_record.path)
+    else:
+        resolved_subfolder = subfolder
+        chapter_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters)
+        if os.path.exists(chapter_dir):
+            for d in os.listdir(chapter_dir):
+                if d.lower() == subfolder.lower():
+                    resolved_subfolder = d
+                    break
+        file_path = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, resolved_subfolder, file_name)
+
+    target_abs = os.path.abspath(file_path)
+    upload_abs = os.path.abspath(UPLOAD_DIR)
+    if not target_abs.startswith(upload_abs):
+        raise HTTPException(status_code=403, detail="Access denied")
+        
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+    if file_record and os.path.exists(file_path):
+        try:
+            import shutil
+            version_num = (file_record.version or 1) + 1
+            backup_dir = os.path.abspath(os.path.join(os.path.dirname(file_path), "Archive"))
+            os.makedirs(backup_dir, exist_ok=True)
+
+            name_only = file_name.rsplit(".", 1)[0]
+            ext = file_name.rsplit(".", 1)[1] if "." in file_name else ""
+            backup_filename = f"{name_only}_v{(file_record.version or 1)}.{ext}"
+            backup_path = os.path.join(backup_dir, backup_filename)
+
+            shutil.copy2(file_path, backup_path)
+
+            new_version = models.FileVersion(
+                file_id=file_record.id,
+                version_num=(file_record.version or 1),
+                path=backup_path,
+                uploaded_by_id=user.id,
+            )
+            db.add(new_version)
+            file_record.version = version_num
+            db.commit()
+        except Exception as exc:
+            pass
+
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(body.content)
+
+    if file_record:
+        file_record.uploaded_at = datetime.utcnow()
+        file_record.uploaded_by_id = user.id
+        db.commit()
+        
+    # Run validation if file is XML
+    log_content = None
+    if file_name.lower().endswith(".xml"):
+        legacy_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "processing", "legacy"))
+        wordtoxml_dir = os.path.join(legacy_dir, "wordtoxml")
+        validate_script = os.path.join(wordtoxml_dir, "validate.pl")
+        
+        if os.path.exists(validate_script):
+            import subprocess
+            try:
+                subprocess.run(
+                    ["perl", "validate.pl", file_path],
+                    cwd=wordtoxml_dir,
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+            except (FileNotFoundError, subprocess.SubprocessError) as e:
+                # Fallback if perl is not installed on host OS or fails
+                log_path = os.path.splitext(file_path)[0] + ".log"
+                with open(log_path, "w", encoding="utf-8") as lf:
+                    lf.write("BITS DTD Validation Log\n")
+                    lf.write(f"Input File : {file_path}\n")
+                    lf.write("---------------------------------\n")
+                    lf.write(f"? VALIDATION SKIPPED (Perl execution failed: {str(e)})\n")
+            
+            # Read newly updated log file
+            log_path = os.path.splitext(file_path)[0] + ".log"
+            if os.path.exists(log_path):
+                with open(log_path, "r", encoding="utf-8") as lf:
+                    log_content = lf.read()
+        
+    return {"status": True, "message": "File saved", "log_content": log_content}
+
 
 @router.post("/admin/users/{user_id}/status")
 async def toggle_user_status(

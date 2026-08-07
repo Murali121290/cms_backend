@@ -25,7 +25,8 @@ def get_dashboard_page_data(db: Session, *, skip: int = 0, limit: int = 100):
 
 
 def get_workspace_dashboard_data(db: Session, user: User):
-    role_lower = user.role.lower() if user.role else ""
+    role_to_use = user.role or user.designation
+    role_lower = role_to_use.lower() if role_to_use else ""
     
     # 1. Determine user classification
     is_manager = role_lower in ["admin", "editorial manager", "project manager", "senior project manager", "asst general manager"]
@@ -178,7 +179,8 @@ def get_workspace_dashboard_data(db: Session, user: User):
     elif role_type == "teamlead":
         # Team Lead workspace
         # 1. Determine stages dynamically associated with this Team Lead's role
-        user_role_lower = (user.role or "").lower().strip()
+        role_to_use = user.role or user.designation
+        user_role_lower = (role_to_use or "").lower().strip()
         team_stages = set()
         allowed_member_roles = set()
         
@@ -213,12 +215,12 @@ def get_workspace_dashboard_data(db: Session, user: User):
             all_members_in_team = db.query(User).filter(User.team == user.team).all()
             team_members = [
                 m for m in all_members_in_team 
-                if m.role and m.role.lower().strip() in allowed_member_roles
+                if (m.role or m.designation) and (m.role or m.designation).lower().strip() in allowed_member_roles
             ]
         else:
             # Fallback to default if role is not configured in any stage
             team_members = db.query(User).filter(User.team == user.team).all()
-            member_roles = {m.role for m in team_members if m.role}
+            member_roles = {m.role or m.designation for m in team_members if m.role or m.designation}
             for stage in stages_in_db:
                 stage_roles = stage.roles or []
                 if isinstance(stage_roles, list) and len(stage_roles) >= 2 and stage_roles[0] == '[' and stage_roles[-1] == ']':
@@ -249,7 +251,7 @@ def get_workspace_dashboard_data(db: Session, user: User):
             
             member_datas.append({
                 "username": member.username,
-                "role": member.role,
+                "role": member.role or member.designation,
                 "email": member.email,
                 "stats": calculate_stats(m_sds),
                 "assignments": [build_workspace_item(sd) for sd in m_sds]
@@ -295,7 +297,7 @@ def get_workspace_dashboard_data(db: Session, user: User):
         sds = db.query(StageDetail).filter(StageDetail.assignee_name.in_(usernames)).all()
         
         # Get unassigned chapters matching the users' roles
-        scope_roles = {u.role for u in users_in_scope if u.role}
+        scope_roles = {u.role or u.designation for u in users_in_scope if u.role or u.designation}
         manager_stages = set()
         for stage in db.query(StageMaster).filter(StageMaster.active_status == True).all():
             stage_roles = stage.roles or []
@@ -344,7 +346,7 @@ def get_workspace_dashboard_data(db: Session, user: User):
             m_sds = [sd for sd in sds if sd.assignee_name == member.username]
             member_datas.append({
                 "username": member.username,
-                "role": member.role,
+                "role": member.role or member.designation,
                 "email": member.email,
                 "stats": calculate_stats(m_sds),
                 "assignments": [build_workspace_item(sd) for sd in m_sds]

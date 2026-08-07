@@ -68,6 +68,7 @@ PROCESS_PERMISSIONS = {
     "bias_scan": ["Team Lead - Editorial", "Technical Editor", "Admin","Language Editor", "Team Lead - Language Editing"],
     "credit_extractor_ai": ["PermissionsManager", "ProjectManager", "Admin"],
     "word_to_xml": ["Admin", "XML Manager", "XML manager"],
+    "xml_to_indesign": ["Admin", "XML Manager", "XML manager"],
 }
 
 
@@ -177,6 +178,66 @@ def background_processing_task(
         generated_files = []
 
         try:
+            if process_type in (
+                "ppd",
+                "reference_validation",
+                "reference_number_validation",
+                "reference_apa_chicago_validation",
+                "reference_report_only",
+                "reference_structuring"
+            ):
+                import redis
+                import time
+                from app.core.config import get_settings
+                settings = get_settings()
+
+                redis_client = redis.from_url(settings.REDIS_URL)
+                lock = redis_client.lock("indesign_conversion_lock", timeout=1200)
+
+                logger.info(f"Task {job_id} entering prioritization lock loop for {process_type}...")
+                while True:
+                    if job_id:
+                        db.expire_all()
+                        job = db.query(models.ProcessingJob).filter(models.ProcessingJob.id == job_id).first()
+                        if job and job.status == "cancelled":
+                            logger.info(f"Job {job_id} was cancelled by user. Exiting.")
+                            return
+
+                    # Check for higher priority jobs waiting
+                    higher_job = None
+                    if job_id:
+                        job = db.query(models.ProcessingJob).filter(models.ProcessingJob.id == job_id).first()
+                        if job:
+                            higher_job = db.query(models.ProcessingJob).filter(
+                                models.ProcessingJob.status.in_(["pending", "processing"]),
+                                models.ProcessingJob.id != job.id,
+                                models.ProcessingJob.process_type.in_([
+                                    "xml_to_indesign",
+                                    "post_prod_conversion",
+                                    "ppd",
+                                    "reference_validation",
+                                    "reference_number_validation",
+                                    "reference_apa_chicago_validation",
+                                    "reference_report_only",
+                                    "reference_structuring"
+                                ])
+                            ).filter(
+                                (models.ProcessingJob.priority > job.priority) |
+                                ((models.ProcessingJob.priority == job.priority) & (models.ProcessingJob.id < job.id))
+                            ).first()
+
+                    if higher_job:
+                        time.sleep(2)
+                        continue
+
+                    # Attempt to acquire lock non-blockingly
+                    acquired = lock.acquire(blocking=False)
+                    if acquired:
+                        break
+                    time.sleep(2)
+
+                logger.info(f"Acquired queue lock. Starting {process_type} for job {job_id}")
+
             if process_type == "permissions":
                 update_job_status(db, job_id, "processing", "Scanning permissions...", 30)
                 generated_files = permissions_engine_cls().process_document(file_path)
@@ -340,6 +401,26 @@ def background_processing_task(
                     generated_files = xml_engine_cls().process_document(file_path)
                     success_msg = "Word to XML conversion completed"
 
+            elif process_type == "xml_to_indesign":
+                update_job_status(db, job_id, "processing", "Processing XML to InDesign conversion...", 30)
+                template_file_id = options.get("template_file_id") if options else None
+                if not template_file_id:
+                    raise ValueError("Missing template_file_id option.")
+                
+                from app.services.file_service import UPLOAD_DIR
+                from app.processing.xml_to_indesign_engine import XMLToInDesignEngine
+                generated_files = XMLToInDesignEngine().process_document(
+                    db=db,
+                    file_path=file_path,
+                    file_record=file_record,
+                    template_file_id=template_file_id,
+                    user_id=user_id,
+                    upload_dir=UPLOAD_DIR,
+                    logger=logger,
+                    job_id=job_id
+                )
+                success_msg = "XML to InDesign conversion completed"
+
             else:
                 raise HTTPException(
                     status_code=501,
@@ -470,7 +551,7 @@ def background_processing_task(
                                 logger.warning(
                                     f"Style injection failed for {processed_filename}: {style_err}"
                                 )
-                        elif processed_filename.endswith(".txt"):
+                        elif processed_filename.endswith(".txt") or processed_filename.endswith(".log"):
                             mime = "text/plain"
                         elif processed_filename.endswith(".zip"):
                             mime = "application/zip"
@@ -484,14 +565,18 @@ def background_processing_task(
                             project_id=file_record.project_id,
                             chapter_id=file_record.chapter_id,
                             version=1,
-                            category=file_record.category,
+                            category=(
+                                "InDesign" if process_type == "xml_to_indesign"
+                                else "XML" if process_type == "word_to_xml"
+                                else file_record.category
+                            ),
                             # Pipeline output is a derived artifact, not an
                             # uploaded source.
                             is_original=False,
                         )
                         db.add(new_record)
                         logger.info(
-                            f"Registered result file: {processed_filename} to category {file_record.category}"
+                            f"Registered result file: {processed_filename} to category {new_record.category}"
                         )
             else:
                 logger.warning(f"No generated files returned from {process_type} processing")
@@ -515,6 +600,12 @@ def background_processing_task(
             update_job_status(db, job_id, "failed", "Error occurred during execution", 100, error=str(exc))
 
     finally:
+        if "lock" in locals():
+            try:
+                lock.release()
+                logger.info(f"Released queue lock for job {job_id}")
+            except Exception:
+                pass
         db.close()
 
 
@@ -618,6 +709,7 @@ def start_process(
         current_step="Pending queue execution",
         progress_pct=0,
         user_id=user.id if user else None,
+        options=options,
     )
     db.add(job)
     db.commit()

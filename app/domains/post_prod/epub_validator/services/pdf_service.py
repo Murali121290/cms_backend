@@ -4,8 +4,7 @@ import pymupdf as fitz
 from bs4 import BeautifulSoup
 
 
-UPLOAD_DIR = os.path.join("uploads", "epub_validator")
-EXTRACT_DIR = "extract"
+from .upload_service import UPLOAD_DIR, EXTRACT_DIR
 
 
 def _check_chapter_cache(folder_name: str, xhtml_filename: str):
@@ -57,7 +56,16 @@ def _extract_pagebreaks(xhtml_path: str) -> list[str]:
 
 
 def _pdf_path(folder_name: str) -> str:
-    return os.path.join(UPLOAD_DIR, folder_name, EXTRACT_DIR, f"{folder_name}.pdf")
+    extract_dir = os.path.join(UPLOAD_DIR, folder_name, EXTRACT_DIR)
+    exact = os.path.join(extract_dir, f"{folder_name}.pdf")
+    if os.path.exists(exact):
+        return exact
+    # Fallback to any non-cached .pdf in extract_dir
+    candidates = [
+        f for f in glob.glob(os.path.join(extract_dir, "*.pdf"))
+        if "_pg-" not in os.path.basename(f)
+    ]
+    return candidates[0] if candidates else exact
 
 
 def find_pdf_page(folder_name: str, xhtml_filename: str) -> dict:

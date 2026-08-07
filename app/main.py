@@ -58,9 +58,17 @@ app.include_router(conversion.router, prefix=f"{settings.API_V1_STR}", tags=["Co
 from app.routers import conversion
 app.include_router(conversion.router, prefix=f"{settings.API_V1_STR}", tags=["Conversion"])
 
-# Post Production Router
-from app.domains.post_prod import api_v1 as post_prod
-app.include_router(post_prod.router, prefix="/api/v2", tags=["Post Production"])
+# Post Production Router (Word Conversion)
+from app.domains.post_prod.word_conversion.api_v1 import router as post_prod_router
+app.include_router(post_prod_router, prefix="/api/v2", tags=["Post Production"])
+
+# CSS Matcher Router
+from app.domains.post_prod.css_matcher import router as css_matcher
+app.include_router(css_matcher, prefix="/api/v2", tags=["CSS Matcher"])
+
+# Word Conversion Router
+from app.domains.post_prod.word_conversion.router import router as word_conversion_router
+app.include_router(word_conversion_router, prefix="/api/v2", tags=["Word Conversion"])
 
 # EPUB Validator Router
 from app.domains.post_prod.epub_validator import router as epub_validator
@@ -86,7 +94,7 @@ def init_data():
 
     from app.database import SessionLocal, Base, engine
     import app.models
-    from app.domains.post_prod.models import PostProdProject, PostProdChapter
+    from app.domains.post_prod.word_conversion.models import PostProdProject, PostProdChapter
     from app.domains.workflow.models import RolesMaster
     from sqlalchemy import text
     db = SessionLocal()
@@ -95,6 +103,28 @@ def init_data():
         if db.bind.dialect.name == "postgresql":
             db.execute(text("SELECT pg_advisory_xact_lock(424242);"))
             
+        # Dynamically add the priority column if it doesn't exist
+        try:
+            db.execute(text("ALTER TABLE processing_jobs ADD COLUMN priority INTEGER DEFAULT 0 NOT NULL;"))
+            db.commit()
+        except Exception:
+            db.rollback()
+
+        # Dynamically add the options column if it doesn't exist
+        try:
+            db.execute(text("ALTER TABLE processing_jobs ADD COLUMN options TEXT;"))
+            db.commit()
+        except Exception:
+            db.rollback()
+
+        # Dynamically add generic metadata columns if they don't exist
+        for col in ["project_code", "chapter_number", "filename"]:
+            try:
+                db.execute(text(f"ALTER TABLE processing_jobs ADD COLUMN {col} TEXT;"))
+                db.commit()
+            except Exception:
+                db.rollback()
+
         Base.metadata.create_all(bind=engine)
             
         # Define all required roles in RolesMaster

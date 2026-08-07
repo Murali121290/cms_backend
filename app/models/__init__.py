@@ -114,6 +114,7 @@ class WebDAVLock(Base):
     owner = relationship("User")
 
 # Import all other domain models to register them in Base.metadata for foreign keys
+from app.domains.projects.models import Project  # noqa: F401
 from app.domains.clients.models import Client  # noqa: F401
 from app.domains.workflow.models import (  # noqa: F401
     RolesMaster,
@@ -122,7 +123,7 @@ from app.domains.workflow.models import (  # noqa: F401
     WorkflowMaster,
     ChapterInfo,
 )
-from app.domains.post_prod.epub_validator.models import EpubBook, EpubBookEvent  # noqa: F401
+from app.domains.post_prod.epub_validator.models import EvProject, EvHistory  # noqa: F401
 
 Chapter = ChapterInfo
 
@@ -140,6 +141,11 @@ class ProcessingJob(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    priority = Column(Integer, default=0, nullable=False)
+    options = Column(JSON, nullable=True)
+    project_code = Column(String, nullable=True)
+    chapter_number = Column(String, nullable=True)
+    filename = Column(String, nullable=True)
 
     file = relationship("File")
     user = relationship("User")

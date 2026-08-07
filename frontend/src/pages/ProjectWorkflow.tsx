@@ -230,7 +230,7 @@ function AssigneeSelect({ value, users, onChange, disabled, widthCls = 'w-28', c
 
   const active = users.filter(u => u.active_status)
   const assignable = stageRolesMap
-    ? active.filter(u => isRoleAllowedForStage(u.role, stageName, stageRolesMap) || u.user_name === value)
+    ? active.filter(u => isRoleAllowedForStage(u.role || u.designation, stageName, stageRolesMap) || u.user_name === value)
     : active
 
   return (

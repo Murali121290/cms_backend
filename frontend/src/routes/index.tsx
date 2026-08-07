@@ -14,6 +14,7 @@ import { CustomerManagement } from '@/pages/settings/CustomerManagement'
 import { StageManagement } from '@/pages/settings/StageManagement'
 import { RolesManagement } from '@/pages/settings/RolesManagement'
 import { WorkflowManagement } from '@/pages/settings/WorkflowManagement'
+import { QueueManagement } from '@/pages/settings/QueueManagement'
 import { Clients } from '@/pages/Clients'
 import { ClientProjects } from '@/pages/ClientProjects'
 import { CreateProjectPage } from '@/pages/CreateProjectPage'
@@ -128,7 +129,7 @@ const router = createBrowserRouter([
       { path: 'post-production/word-conversion/:projectId', element: <PostProdGuard><PostProdChaptersPage /></PostProdGuard> },
       { path: 'post-production/epub-css-matcher', element: <PostProdGuard><PostProdCssMatcher /></PostProdGuard> },
       { path: 'post-production/epub-validator', element: <PostProdGuard><PostProdEpubValidator /></PostProdGuard> },
-      { path: 'post-production/epub-validator/:folderName', element: <PostProdGuard><PostProdEpubValidatorFiles /></PostProdGuard> },
+      { path: 'post-production/epub-validator/:projectId', element: <PostProdGuard><PostProdEpubValidatorFiles /></PostProdGuard> },
       { path: 'post-production/slide-formatter', element: <PostProdGuard><PostProdSlideFormatter /></PostProdGuard> },
       { path: 'reports', element: <ReportsPage /> },
       { path: 'reports/schedule', element: <ScheduleReport /> },
@@ -150,6 +151,7 @@ const router = createBrowserRouter([
       { path: 'settings/roles', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><RolesManagement /></RoleGuard> },
       { path: 'settings/workflow', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><WorkflowManagement /></RoleGuard> },
       { path: 'settings/system', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><Placeholder title="System Settings" /></RoleGuard> },
+      { path: 'settings/queues', element: <RoleGuard allowedRoles={ROLE_PERMISSIONS.access_settings}><QueueManagement /></RoleGuard> },
     ],
   },
 ])

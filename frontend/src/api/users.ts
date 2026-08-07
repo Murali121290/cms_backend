@@ -6,6 +6,7 @@ export interface User {
   email: string
   active_status: boolean
   role: string
+  designation: string
   team: string
   customer_access: string[]
 }
@@ -14,7 +15,8 @@ export interface CreateUserPayload {
   user_name: string
   email: string
   password: string
-  role: string
+  role?: string
+  designation?: string
   team: string
   customer_access: string[]
   active_status?: boolean
@@ -22,6 +24,7 @@ export interface CreateUserPayload {
 
 export interface UpdateUserPayload {
   role?: string
+  designation?: string
   password?: string
   customer_access?: string[]
   team?: string
@@ -34,6 +37,7 @@ const mapUser = (u: any): User => ({
   email: u.email,
   active_status: u.is_active,
   role: u.roles?.[0]?.name ?? '',
+  designation: u.designation ?? '',
   team: u.team ?? '',
   customer_access: u.customer_access ?? [],
 })
@@ -49,6 +53,7 @@ export const usersApi = {
       email: data.email,
       password: data.password,
       role: data.role,
+      designation: data.designation,
       team: data.team,
       customer_access: data.customer_access,
       active_status: data.active_status ?? true,
@@ -58,7 +63,8 @@ export const usersApi = {
 
   update: async (id: number, data: UpdateUserPayload) => {
     const payload: any = {}
-    if (data.role) payload.role = data.role
+    if (data.role !== undefined) payload.role = data.role
+    if (data.designation !== undefined) payload.designation = data.designation
     if (data.team) payload.team = data.team
     if (data.password) payload.password = data.password
     if (data.customer_access !== undefined) payload.customer_access = data.customer_access

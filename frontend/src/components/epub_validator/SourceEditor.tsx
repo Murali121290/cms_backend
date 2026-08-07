@@ -1,16 +1,80 @@
-import { useMemo, useRef, useState, useEffect } from 'react';
+import { useMemo, useRef, useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import CodeMirror, { EditorView, keymap, Prec } from '@uiw/react-codemirror';
 import type { ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { xml } from '@codemirror/lang-xml';
 import { search, findNext, findPrevious } from '@codemirror/search';
 import { cn } from '@/utils/epubValidatorUtils';
 import { FindReplacePanel } from './FindReplacePanel';
+import { linter } from '@codemirror/lint';
+import type { Diagnostic } from '@codemirror/lint';
+
+export interface LintError {
+  line: number;
+  message: string;
+}
+
+export interface SourceEditorRef {
+  scrollToLine: (lineNum: number) => void;
+}
 
 interface Props {
   value: string;
   onChange: (next: string) => void;
   className?: string;
   readOnly?: boolean;
+  errors?: LintError[];
+  onLogLineClick?: (lineNum: number) => void;
+  onSave?: () => void;
+}
+
+// XML tag auto-closer
+const xmlAutoClose = EditorView.inputHandler.of((view, from, to, text) => {
+  if (text !== '>') return false;
+  const line = view.state.doc.lineAt(from);
+  const before = line.text.slice(0, from - line.from);
+  const match = before.match(/<([a-zA-Z0-9_\-]+)(?:\s+[^>]*)*$/);
+  if (match) {
+    const tagName = match[1];
+    if (before.endsWith('/') || before.includes('?') || before.includes('!')) {
+      return false;
+    }
+    view.dispatch({
+      changes: { from, to, insert: `></${tagName}>` },
+      selection: { anchor: from + 1 }
+    });
+    return true;
+  }
+  return false;
+});
+
+// XML Formatter
+export function formatXmlString(xmlStr: string): string {
+  let formatted = '';
+  let indent = 0;
+  const tab = '  ';
+  
+  const cleanXml = xmlStr.replace(/>\s+</g, '><').trim();
+  const reg = /(<[^>]+>)/g;
+  const parts = cleanXml.split(reg);
+  
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (!part) continue;
+    
+    if (part.startsWith('</')) {
+      indent = Math.max(0, indent - 1);
+      formatted += tab.repeat(indent) + part + '\n';
+    } else if (part.startsWith('<') && !part.endsWith('/>') && !part.startsWith('<?') && !part.startsWith('<!')) {
+      formatted += tab.repeat(indent) + part + '\n';
+      indent++;
+    } else if (part.startsWith('<?') || part.startsWith('<!') || part.endsWith('/>')) {
+      formatted += tab.repeat(indent) + part + '\n';
+    } else {
+      formatted += tab.repeat(indent) + part.trim() + '\n';
+    }
+  }
+  
+  return formatted.trim();
 }
 
 /**
@@ -26,10 +90,29 @@ interface Props {
  * The default CodeMirror search UI is replaced with a React panel that matches
  * the app's design system (see FindReplacePanel).
  */
-export function SourceEditor({ value, onChange, className, readOnly = false }: Props) {
-  const cmRef = useRef<ReactCodeMirrorRef | null>(null);
-  const [panelOpen, setPanelOpen] = useState(false);
-  const [replaceMode, setReplaceMode] = useState(false);
+export const SourceEditor = forwardRef<SourceEditorRef, Props>(
+  ({ value, onChange, className, readOnly = false, errors, onLogLineClick, onSave }, ref) => {
+    const cmRef = useRef<ReactCodeMirrorRef | null>(null);
+    const [panelOpen, setPanelOpen] = useState(false);
+    const [replaceMode, setReplaceMode] = useState(false);
+    const [wordWrap, setWordWrap] = useState(true);
+
+    useImperativeHandle(ref, () => ({
+      scrollToLine(lineNum) {
+        const view = cmRef.current?.view;
+        if (!view) return;
+        try {
+          const line = view.state.doc.line(lineNum);
+          view.dispatch({
+            effects: EditorView.scrollIntoView(line.from, { y: 'center' }),
+            selection: { anchor: line.from }
+          });
+          view.focus();
+        } catch (e) {
+          console.error("Failed to scroll to line:", e);
+        }
+      }
+    }));
 
   // Ref-based bridge so the CM keymap (built once) can call the freshest React
   // setters without needing to rebuild extensions on every render.
@@ -41,12 +124,61 @@ export function SourceEditor({ value, onChange, className, readOnly = false }: P
     };
   });
 
+  const onSaveRef = useRef<(() => void) | undefined>(onSave);
+  useEffect(() => {
+    onSaveRef.current = onSave;
+  });
+
+  const lintExtension = useMemo(() => {
+    return linter((view) => {
+      if (!errors || errors.length === 0) return [];
+      const diagnostics: Diagnostic[] = [];
+      const doc = view.state.doc;
+      
+      for (const err of errors) {
+        if (err.line > 0 && err.line <= doc.lines) {
+          try {
+            const line = doc.line(err.line);
+            diagnostics.push({
+              from: line.from,
+              to: line.to,
+              severity: 'error',
+              message: err.message,
+            });
+          } catch (e) {
+            console.error("Failed to add lint highlight:", e);
+          }
+        }
+      }
+      return diagnostics;
+    });
+  }, [errors]);
+
+  const clickExtension = useMemo(() => {
+    if (!onLogLineClick) return [];
+    return EditorView.domEventHandlers({
+      click(event, view) {
+        const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+        if (pos === null) return;
+        const line = view.state.doc.lineAt(pos);
+        const lineText = line.text;
+        const match = lineText.match(/:(\d+):/);
+        if (match) {
+          const targetLine = parseInt(match[1], 10);
+          onLogLineClick(targetLine);
+        }
+      }
+    });
+  }, [onLogLineClick]);
+
   const extensions = useMemo(
     () => [
       xml(),
-      // Provides the search state field + highlight-all styling. We keep the
-      // extension but suppress its default panel via basicSetup below.
       search({ top: true }),
+      xmlAutoClose,
+      lintExtension,
+      clickExtension,
+      wordWrap ? EditorView.lineWrapping : [],
       Prec.highest(
         keymap.of([
           {
@@ -65,6 +197,22 @@ export function SourceEditor({ value, onChange, className, readOnly = false }: P
               return true;
             },
           },
+          {
+            key: 'Mod-s',
+            preventDefault: true,
+            run: () => {
+              onSaveRef.current?.();
+              return true;
+            },
+          },
+          {
+            key: 'Alt-z',
+            preventDefault: true,
+            run: () => {
+              setWordWrap((prev) => !prev);
+              return true;
+            },
+          },
           { key: 'F3', preventDefault: true, run: findNext },
           { key: 'Shift-F3', preventDefault: true, run: findPrevious },
         ]),
@@ -78,6 +226,7 @@ export function SourceEditor({ value, onChange, className, readOnly = false }: P
           fontFamily:
             'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
           lineHeight: '1.5',
+          overflow: 'auto',
         },
         '.cm-content': { padding: '4px 0' },
         '.cm-gutters': {
@@ -106,13 +255,53 @@ export function SourceEditor({ value, onChange, className, readOnly = false }: P
         },
       }),
     ],
-    [],
+    [lintExtension, clickExtension, wordWrap],
   );
 
   const view = cmRef.current?.view ?? null;
 
   return (
     <div className={cn('relative flex flex-col h-full min-h-0', className)}>
+      {/* Editor Toolbar */}
+      <div className="flex items-center gap-1.5 px-3 py-1 bg-gray-50 border-b border-gray-200 text-[11px] text-gray-500 font-sans flex-shrink-0 select-none">
+        <button
+          type="button"
+          onClick={() => {
+            setReplaceMode(false);
+            setPanelOpen(true);
+          }}
+          className="px-2 py-0.5 rounded hover:bg-gray-200 active:bg-gray-300 transition-colors font-medium flex items-center gap-1 border border-gray-300 shadow-sm bg-white"
+          title="Search text (Ctrl+F)"
+        >
+          🔍 Find
+        </button>
+        {!readOnly && (
+          <button
+            type="button"
+            onClick={() => {
+              setReplaceMode(true);
+              setPanelOpen(true);
+            }}
+            className="px-2 py-0.5 rounded hover:bg-gray-200 active:bg-gray-300 transition-colors font-medium flex items-center gap-1 border border-gray-300 shadow-sm bg-white"
+            title="Find and replace text (Ctrl+H)"
+          >
+            ✏️ Replace
+          </button>
+        )}
+        <label
+          className="flex items-center gap-1.5 ml-auto cursor-pointer hover:text-gray-800 transition-colors font-medium text-[11px] select-none"
+          title="Word Wrap text (Alt+Z)"
+        >
+          <input
+            type="checkbox"
+            checked={wordWrap}
+            onChange={(e) => setWordWrap(e.target.checked)}
+            className="rounded border-gray-300 text-primary focus:ring-primary h-3.5 w-3.5 cursor-pointer"
+          />
+          Word Wrap
+        </label>
+      </div>
+
       {panelOpen && view && (
         <FindReplacePanel
           view={view}
@@ -129,6 +318,7 @@ export function SourceEditor({ value, onChange, className, readOnly = false }: P
           extensions={extensions}
           readOnly={readOnly}
           height="100%"
+          style={{ height: '100%' }}
           basicSetup={{
             lineNumbers: true,
             highlightActiveLine: true,
@@ -146,4 +336,4 @@ export function SourceEditor({ value, onChange, className, readOnly = false }: P
       </div>
     </div>
   );
-}
+});

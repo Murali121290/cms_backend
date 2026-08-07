@@ -38,6 +38,7 @@ export type FolderKey =
   | 'manuscript' | 'art' | 'indesign' | 'proof' | 'xml' | 'misc' | 'backup'
   | 'common_art' | 'pdf' | 'font' | 'library' | 'template' | 'print_preset'
   | 'stylesheet_template'
+  | 'template_indesign' | 'template_common_art' | 'template_font' | 'template_library'
 
 export type ColumnKey =
   | 'fileName' | 'fileType' | 'size' | 'uploadedBy' | 'uploadedOn'
@@ -66,7 +67,14 @@ export const COLUMN_DEFINITIONS: Record<ColumnKey, ColumnDefinition> = {
   validationStatus:{ key: 'validationStatus',header: 'Validation',     width: 100 },
 }
 
-export interface FolderConfig { label: string; icon: string; allowUpload: boolean; allowDownload: boolean; columns: ColumnKey[] }
+export interface FolderConfig {
+  label: string
+  icon: string
+  allowUpload: boolean
+  allowDownload: boolean
+  columns: ColumnKey[]
+  parent?: string
+}
 
 export const FOLDER_CONFIG: Record<string, FolderConfig> = {
   manuscript: { label:'Manuscript', icon:'FileText',      allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','pageCount','size','uploadedBy','uploadedOn'] },
@@ -80,11 +88,12 @@ export const FOLDER_CONFIG: Record<string, FolderConfig> = {
 
 export const DESIGN_FOLDER_CONFIG: Record<string, FolderConfig> = {
   indesign:     { label:'Indesign',   icon:'Layers',        allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','packageStatus','size','uploadedBy','uploadedOn'] },
-  common_art:   { label:'Common Art', icon:'Image',         allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
   pdf:          { label:'Pdf',        icon:'FileText',      allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
-  font:         { label:'Font',       icon:'Type',          allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
-  library:      { label:'Library',    icon:'FolderArchive', allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
   template:     { label:'template',   icon:'Layout',        allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
+  template_indesign:   { label:'indesign',   icon:'Layout',  allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'], parent: 'template' },
+  template_common_art: { label:'Common Art', icon:'Image',   allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'], parent: 'template' },
+  template_font:       { label:'Font',       icon:'Type',    allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'], parent: 'template' },
+  template_library:    { label:'Library',    icon:'FolderArchive', allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'], parent: 'template' },
   print_preset: { label:'Print Preset',icon:'Printer',     allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
 }
 
@@ -148,6 +157,7 @@ export type ProcessingActionKey =
   | 'languageEdit' | 'technicalEdit'
   | 'manuscriptAnalysis'
   | 'permissionsCheck' | 'aiCreditExtraction' | 'biasScan' | 'wordToXml'
+  | 'xmlToIndesign'
 
 export const PROCESSING_ACTION_STAGE_MAP: Record<ProcessingActionKey, string[] | '*'> = {
   structuring:          ['Pre-editing','Pre-editing QA'],
@@ -159,7 +169,8 @@ export const PROCESSING_ACTION_STAGE_MAP: Record<ProcessingActionKey, string[] |
   permissionsCheck:     ['Digital Processing'],
   aiCreditExtraction:   ['Digital Processing'],
   biasScan:             ['Digital Processing'],
-  wordToXml:            ['XML Conversion']
+  wordToXml:            ['XML Conversion'],
+  xmlToIndesign:        ['XML Conversion']
 }
 
 export function isProcessingActionVisibleForStage(action: ProcessingActionKey, stageName: string): boolean {
