@@ -234,34 +234,66 @@ async def admin_delete_user(
     return RedirectResponse(url="/admin/users?msg=User+deleted", status_code=302)
 
 
-@router.get("/api/uploads/{project_id}/chapter/{chapter_name}/{subfolder:path}/{file_name}/download")
+def _resolve_chapter(
+    db: Session,
+    *,
+    project: Project,
+    chapter_name: str,
+    chapter_id: Optional[int] = None,
+) -> Optional[models.ChapterInfo]:
+    # Prefer chapter_id when the caller passes it; otherwise the URL slug
+    # ("chapter-01") strips down to just the number, which won't match
+    # display labels like "Ch 01 - Art" without a broader lookup.
+    if chapter_id is not None:
+        chapter = db.query(models.ChapterInfo).filter(
+            models.ChapterInfo.id == chapter_id,
+            models.ChapterInfo.project == project.code,
+        ).first()
+        if chapter:
+            return chapter
+
+    raw = chapter_name.split("-")[-1] if chapter_name else ""
+    try:
+        chapter_no = str(int(raw))
+        padded_no = f"{int(raw):02d}"
+    except (TypeError, ValueError):
+        chapter_no = raw
+        padded_no = raw
+
+    q = db.query(models.ChapterInfo).filter(models.ChapterInfo.project == project.code)
+    chapter = q.filter(
+        (models.ChapterInfo.chapters == raw)
+        | (models.ChapterInfo.chapters == chapter_no)
+        | (models.ChapterInfo.chapters == padded_no)
+    ).first()
+    if chapter or not chapter_no.isdigit():
+        return chapter
+
+    return q.filter(
+        models.ChapterInfo.chapters.ilike(f"%{padded_no}%")
+        | models.ChapterInfo.chapters.ilike(f"%{chapter_no}%")
+    ).first()
+
+
+@router.get("/api/uploads/{project_id}/chapter/{chapter_name}/{subfolder}/{file_name}/download")
 async def download_backup_or_folder_file(
     project_id: int,
     chapter_name: str,
     subfolder: str,
     file_name: str,
+    chapter_id: Optional[int] = None,
     user=Depends(get_current_user_from_cookie),
     db: Session = Depends(database.get_db)
 ):
     import os
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
-        
+
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-        
-    chapter_no = chapter_name.split("-")[-1]
-    chapter = None
-    if chapter_name.startswith("chapter-") and chapter_no.isdigit():
-        chapter = db.query(models.ChapterInfo).filter(
-            models.ChapterInfo.id == int(chapter_no)
-        ).first()
-    if not chapter:
-        chapter = db.query(models.ChapterInfo).filter(
-            models.ChapterInfo.project == project.code,
-            (models.ChapterInfo.chapters == chapter_no) | (models.ChapterInfo.chapters == str(int(chapter_no)))
-        ).first()
+
+    chapter = _resolve_chapter(db, project=project, chapter_name=chapter_name, chapter_id=chapter_id)
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
         
