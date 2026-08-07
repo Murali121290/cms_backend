@@ -2,7 +2,7 @@ import re
 
 from bs4 import BeautifulSoup
 
-from ....engine.registry import rule
+from ..engine.registry import rule
 from ._common import find_opf, read_text
 
 # Case-insensitive, tolerates "Halftitle", "Half title", "Half-title".

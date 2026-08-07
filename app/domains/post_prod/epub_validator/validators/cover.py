@@ -3,7 +3,8 @@ import os
 
 from PIL import Image
 
-from ....engine.registry import rule
+from ..engine.registry import rule
+
 
 _EXPECTED_HEIGHT_PX = 1100
 _EXPECTED_DPI = 300

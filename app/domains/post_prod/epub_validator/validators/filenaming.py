@@ -1,7 +1,7 @@
 import os
 import re
 
-from ....engine.registry import rule
+from ..engine.registry import rule
 from ._common import find_opf, read_text
 
 

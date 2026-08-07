@@ -63,12 +63,19 @@ function RuleRow({
         )}
       >
         <div className="flex items-center justify-between gap-1.5 font-serif">
-          <span className={cn(
-            'text-xs font-medium truncate',
-            isSelected ? 'text-primary' : 'text-foreground',
-          )}>
-            {entry.rule_name}
-          </span>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className={cn(
+              'text-xs font-medium truncate',
+              isSelected ? 'text-primary' : 'text-foreground',
+            )}>
+              {entry.rule_name}
+            </span>
+            {entry.origin === 'customer' && (
+              <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-300 uppercase shrink-0">
+                {entry.customer || 'Customer'}
+              </span>
+            )}
+          </div>
           {passed ? (
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
           ) : errors > 0 ? (

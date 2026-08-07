@@ -2,7 +2,8 @@ import re
 
 from bs4 import BeautifulSoup
 
-from ....engine.registry import rule
+from ..engine.registry import rule
+
 from ._common import find_opf
 
 _PRINTED_RE = re.compile(r"\bprinted\b", re.IGNORECASE)
@@ -35,15 +36,20 @@ def _extract_eisbn(epub_folder: str) -> str | None:
 def validate_no_printed_word(file_details):
     """The word "Printed" must not appear on the copyright page."""
     with open(file_details["full_path"], "r", encoding="utf-8") as f:
-        soup = BeautifulSoup(f.read(), "html.parser")
+        text = f.read()
+        soup = BeautifulSoup(text, "html.parser")
     body_text = soup.get_text(" ", strip=True)
-    if _PRINTED_RE.search(body_text):
+    m = _PRINTED_RE.search(text)
+    if m:
+        line_num = text[:m.start()].count("\n") + 1
         return {"issues_count": 1, "issues": [{
             "type": "printed_word_present",
-            "message": 'Copyright page contains the forbidden word "Printed"',
+            "message": f'Line {line_num}: Copyright page contains the forbidden word "Printed"',
             "category": "Error",
+            "line_number": line_num,
         }]}
     return {"issues_count": 0, "issues": []}
+
 
 
 @rule("ASP-COPY-002")

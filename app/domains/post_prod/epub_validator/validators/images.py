@@ -5,7 +5,7 @@ import re
 from bs4 import BeautifulSoup
 from PIL import Image
 
-from ....engine.registry import rule
+from ..engine.registry import rule
 from ._common import find_opf
 
 _MAX_PIXELS = 4_000_000

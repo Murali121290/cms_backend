@@ -10,7 +10,7 @@ import os
 
 from bs4 import BeautifulSoup
 
-from ....engine.registry import rule
+from ..engine.registry import rule
 from ....services import book_bundle_service as _bundle
 
 

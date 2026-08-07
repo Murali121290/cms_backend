@@ -355,16 +355,25 @@ def get_latest_validation(
 async def validate_file(
     filename: str,
     file: str = Query(None),
-    customer: str = Query(None, description="Override auto-detected customer (v2 engine only)"),
+    customer: str = Query(None, description="Override customer / client_code (v2 engine only)"),
     db: Session = Depends(get_db),
     user=Depends(get_current_user_from_cookie),
 ):
     epub_folder = os.path.join(UPLOAD_DIR, filename, "extract", "epub")
     engine = _select_validate_epub()
+
+    # Automatically resolve customer/client_code from DB if not provided
+    resolved_customer = customer
+    if not resolved_customer:
+        proj = ev_projects_db.get_project_by_folder(db, filename)
+        if proj:
+            resolved_customer = proj.client_code or proj.client
+
     kwargs = {"epub_folder": epub_folder, "folder_name": filename, "target_file": file}
     if engine is _validate_epub_v2:
-        kwargs["customer"] = customer
+        kwargs["customer"] = resolved_customer
     result = await asyncio.to_thread(engine, **kwargs)
+
 
     user_id = getattr(user, "id", None)
     username = getattr(user, "username", None) or getattr(user, "user_name", None)

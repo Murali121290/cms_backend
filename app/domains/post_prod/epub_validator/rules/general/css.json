@@ -4,7 +4,7 @@
       "id": "CSS001",
       "name": "Validate CSS Files via W3C Validator",
       "target_path": "OEBPS/xhtml",
-      "enabled": true,
+      "enabled": false,
       "file_name_pattern": "*.xhtml"
     },
     {

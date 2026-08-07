@@ -48,15 +48,18 @@ def validate_xhtml_well_formed(file_details):
         for m in _re.finditer(fr"<{tag}\b([^>/]*)(?<!/)>", text, _re.IGNORECASE):
             attrs = m.group(1)
             if "/" not in attrs:
+                line_num = text[:m.start()].count("\n") + 1
                 snippet_start = max(0, m.start() - 30)
                 snippet_end = min(len(text), m.end() + 30)
                 issues.append({
                     "type": "xhtml_void_tag_not_self_closed",
-                    "message": f"<{tag}> is a void element and must be self-closed in XHTML.",
+                    "message": f"Line {line_num}: <{tag}> is a void element and must be self-closed in XHTML.",
                     "category": "Warning",
+                    "line_number": line_num,
                     "snippet": text[snippet_start:snippet_end],
                     "file_path": file_details.get("relative_path"),
                 })
+
                 if len(issues) >= 10:
                     break
         if len(issues) >= 10:

@@ -11,7 +11,7 @@ import re
 
 from bs4 import BeautifulSoup
 
-from ....engine.registry import rule
+from ..engine.registry import rule
 
 
 # Matches "see page 23", "(see page 23)", "pp. 12-14", "page 5".

@@ -20,6 +20,7 @@ def validate_internal_xhtml_links(file_details):
 
     for link in links:
         href = link["href"].strip()
+        line_num = getattr(link, "sourceline", None)
         if not href.split("#")[0].endswith(".xhtml"):
             continue
         parts = href.split("#")
@@ -33,22 +34,24 @@ def validate_internal_xhtml_links(file_details):
                 "rule_name": "Missing Internal File",
                 "type": "missing_internal_file",
                 "href": href,
-                "message": "Referenced XHTML file not found",
+                "message": f"{f'Line {line_num}: ' if line_num else ''}Referenced XHTML file not found",
                 "category": "Error",
+                "line_number": line_num,
             })
             continue
 
         if anchor:
             with open(target_file, "r", encoding="utf-8") as f:
-                soup = BeautifulSoup(f, "html.parser")
-            element = soup.find(id=anchor)
+                soup_target = BeautifulSoup(f, "html.parser")
+            element = soup_target.find(id=anchor)
             if not element:
                 issues.append({
                     "rule_name": "Missing Anchor",
                     "type": "missing_anchor",
                     "href": href,
-                    "message": "Referenced anchor not found in target file",
+                    "message": f"{f'Line {line_num}: ' if line_num else ''}Referenced anchor not found in target file",
                     "category": "Error",
+                    "line_number": line_num,
                 })
 
     return {"issues_count": len(issues), "issues": issues}
@@ -92,16 +95,19 @@ def validate_url_text_match(file_details):
     for link in links:
         href = link["href"].strip()
         text = link.get_text(strip=True)
+        line_num = getattr(link, "sourceline", None)
         if href != text:
             issues.append({
                 "type": "url_text_mismatch",
                 "href": href,
                 "expected_text": href,
                 "actual_text": text,
-                "message": "Displayed URL text does not match href",
+                "message": f"{f'Line {line_num}: ' if line_num else ''}Displayed URL text does not match href",
                 "category": "warning",
+                "line_number": line_num,
             })
     return {"issues_count": len(issues), "issues": issues}
+
 
 
 @rule("URL004")
