@@ -10,8 +10,12 @@ alongside the source figures.
 from __future__ import annotations
 
 import io
+import logging
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -21,6 +25,8 @@ import fitz  # PyMuPDF
 from lxml import etree as ET
 from PIL import ExifTags, Image
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from app import models
 from app.domains.projects.models import Project
@@ -35,14 +41,24 @@ PAGE_HEIGHT = 792.0
 MARGIN = 36.0
 TABLE_ROW_HEIGHT = 14.0
 TABLE_LABEL_WIDTH = 140.0
-IMAGE_TOP_PADDING = 12.0
+IMAGE_TOP_PADDING = 28.0
 
 _WML_A = "http://schemas.openxmlformats.org/drawingml/2006/main"
 _WML_R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 _WML_WP = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+_WML_W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+_WML_PIC = "http://schemas.openxmlformats.org/drawingml/2006/picture"
+# The wpg (Word Processing Group) namespace has two flavours in the wild —
+# the 2010 Microsoft one for modern grouped drawings and the OOXML one.
+_WML_WPG_MS = "http://schemas.microsoft.com/office/word/2010/wordprocessingGroup"
+_WML_WPG_ML = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingGroup"
 
 # EMU per point: 914400 EMU = 1 inch = 72 pt, so 12700 EMU = 1 pt.
 _EMU_PER_PT = 12700
+_EMU_PER_INCH = 914400
+# Resolution at which we rasterize composited groups. 300 gives print-quality
+# without ballooning file size for typical figure sizes.
+_COMPOSITE_DPI = 300
 
 
 def _natural_key(s: str):
@@ -108,13 +124,227 @@ class _ImageSource:
         return os.path.getsize(self.path)  # type: ignore[arg-type]
 
 
-def _extract_docx_images(docx_path: str) -> list[_ImageSource]:
-    """Return every embedded image in `docx_path`.
+def _drawing_extent_emu(drawing: ET._Element) -> Optional[tuple[int, int]]:
+    ext = drawing.find(f".//{{{_WML_WP}}}extent")
+    if ext is None:
+        return None
+    try:
+        cx = int(ext.get("cx", "0"))
+        cy = int(ext.get("cy", "0"))
+    except (TypeError, ValueError):
+        return None
+    return (cx, cy) if cx > 0 and cy > 0 else None
 
-    Primary path: walk ``document.xml`` (plus headers/footers/foot- & endnotes)
-    for ``<a:blip>`` elements and resolve each ``r:embed`` against the matching
-    ``*.rels`` file to look up the media entry. This preserves document
-    (reading) order and handles both inline and anchored drawings.
+
+def _pic_xfrm_emu(pic: ET._Element) -> Optional[tuple[int, int, int, int]]:
+    """Return (offset_x, offset_y, ext_cx, ext_cy) in EMU for a <pic:pic>."""
+    spPr = pic.find(f"{{{_WML_PIC}}}spPr")
+    if spPr is None:
+        return None
+    xfrm = spPr.find(f"{{{_WML_A}}}xfrm")
+    if xfrm is None:
+        return None
+    off = xfrm.find(f"{{{_WML_A}}}off")
+    ex = xfrm.find(f"{{{_WML_A}}}ext")
+    if off is None or ex is None:
+        return None
+    try:
+        return (
+            int(off.get("x", "0")),
+            int(off.get("y", "0")),
+            int(ex.get("cx", "0")),
+            int(ex.get("cy", "0")),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _render_drawing_via_soffice(
+    docx_path: str, drawing: ET._Element, sect_pr: Optional[ET._Element]
+) -> Optional[bytes]:
+    """Render a single drawing to PNG bytes by round-tripping through
+    LibreOffice — for grouped drawings that mix rasters and vector shapes
+    (DrawingML custGeom paths etc.) that we can't composite in Python.
+
+    Creates a minimal DOCX containing only this drawing (preserving the
+    original section properties for page size), converts to PDF via
+    ``soffice --headless``, rasterizes page 1, and crops the surrounding
+    whitespace. Slow (~30-40s per call for LibreOffice's startup), so callers
+    should only invoke this for drawings that genuinely need vector rendering.
+    """
+    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    if not soffice:
+        return None
+
+    try:
+        with zipfile.ZipFile(docx_path, "r") as zin:
+            files = {name: zin.read(name) for name in zin.namelist()}
+    except (zipfile.BadZipFile, OSError):
+        return None
+
+    doc_xml_bytes = files.get("word/document.xml")
+    if not doc_xml_bytes:
+        return None
+
+    try:
+        doc_tree = ET.fromstring(doc_xml_bytes)
+    except ET.XMLSyntaxError:
+        return None
+
+    body = doc_tree.find(f"{{{_WML_W}}}body")
+    if body is None:
+        return None
+
+    # Preserve original section properties (page size / margins) so the
+    # drawing renders on a page big enough to contain it; otherwise
+    # LibreOffice defaults to A4 which may crop wide figures. Strip
+    # header / footer references so the DOCX's running header text doesn't
+    # bleed into the figure crop.
+    for child in list(body):
+        body.remove(child)
+    p = ET.SubElement(body, f"{{{_WML_W}}}p")
+    r = ET.SubElement(p, f"{{{_WML_W}}}r")
+    r.append(drawing)
+    if sect_pr is not None:
+        for ref_tag in ("headerReference", "footerReference"):
+            for ref in sect_pr.findall(f"{{{_WML_W}}}{ref_tag}"):
+                sect_pr.remove(ref)
+        body.append(sect_pr)
+
+    try:
+        new_doc_xml = ET.tostring(
+            doc_tree, xml_declaration=True, encoding="UTF-8", standalone=True
+        )
+    except Exception:
+        return None
+    files["word/document.xml"] = new_doc_xml
+
+    with tempfile.TemporaryDirectory() as td:
+        mini_docx = os.path.join(td, "figure.docx")
+        try:
+            with zipfile.ZipFile(mini_docx, "w", zipfile.ZIP_DEFLATED) as zout:
+                for name, data in files.items():
+                    zout.writestr(name, data)
+        except OSError:
+            return None
+
+        # A dedicated user-profile dir keeps concurrent conversions from
+        # trampling one another's soffice lockfiles.
+        profile_dir = os.path.join(td, "sofficeprofile")
+        try:
+            result = subprocess.run(
+                [
+                    soffice,
+                    "--headless",
+                    "--nologo",
+                    "--norestore",
+                    f"-env:UserInstallation=file://{profile_dir}",
+                    "--convert-to",
+                    "pdf",
+                    "--outdir",
+                    td,
+                    mini_docx,
+                ],
+                capture_output=True,
+                timeout=180,
+            )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            logger.warning("soffice conversion failed for grouped drawing: %s", exc)
+            return None
+
+        pdf_path = os.path.join(td, "figure.pdf")
+        if not os.path.exists(pdf_path):
+            logger.warning(
+                "soffice produced no PDF for grouped drawing (rc=%s, stderr=%s)",
+                result.returncode, result.stderr[:200] if result.stderr else b"",
+            )
+            return None
+
+        try:
+            with fitz.open(pdf_path) as pdf:
+                if len(pdf) == 0:
+                    return None
+                pix = pdf[0].get_pixmap(dpi=200, alpha=False)
+                png_bytes = pix.tobytes("png")
+        except Exception as exc:
+            logger.warning("Failed to rasterize soffice PDF: %s", exc)
+            return None
+
+    # Crop the surrounding white space so the figure fills the emitted image
+    # instead of sitting in a big empty page rendered at the DOCX's paper size.
+    try:
+        with Image.open(io.BytesIO(png_bytes)) as im:
+            im = im.convert("RGB")
+            # bbox() finds non-zero pixels, so invert white → black first.
+            from PIL import ImageChops, ImageOps
+            gray = ImageOps.invert(im.convert("L"))
+            # Ignore near-white noise by thresholding.
+            gray = gray.point(lambda p: 255 if p > 8 else 0)
+            bbox = gray.getbbox()
+            if bbox:
+                pad = 20
+                left = max(0, bbox[0] - pad)
+                top = max(0, bbox[1] - pad)
+                right = min(im.width, bbox[2] + pad)
+                bottom = min(im.height, bbox[3] + pad)
+                im = im.crop((left, top, right, bottom))
+            buf = io.BytesIO()
+            im.save(buf, format="PNG", optimize=True)
+            return buf.getvalue()
+    except Exception:
+        return png_bytes
+
+
+def _composite_group_pics(
+    canvas_emu: tuple[int, int],
+    pics: list[tuple[bytes, tuple[int, int, int, int]]],
+) -> Optional[bytes]:
+    """Rasterize a group of positioned pictures onto a single transparent PNG.
+
+    `canvas_emu` is the group's outer extent; each `pics` entry is
+    (image_bytes, (offset_x, offset_y, ext_cx, ext_cy)) in the same EMU
+    coordinate system (chOff assumed to be 0 — the common Word case).
+    """
+    if not pics:
+        return None
+    cw_emu, ch_emu = canvas_emu
+    if cw_emu <= 0 or ch_emu <= 0:
+        return None
+    px_w = max(1, int(round(cw_emu / _EMU_PER_INCH * _COMPOSITE_DPI)))
+    px_h = max(1, int(round(ch_emu / _EMU_PER_INCH * _COMPOSITE_DPI)))
+    canvas = Image.new("RGBA", (px_w, px_h), (255, 255, 255, 0))
+    for data, (x_emu, y_emu, w_emu, h_emu) in pics:
+        if w_emu <= 0 or h_emu <= 0:
+            continue
+        try:
+            im = Image.open(io.BytesIO(data))
+            if im.mode != "RGBA":
+                im = im.convert("RGBA")
+        except Exception:
+            continue
+        px = int(round(x_emu / cw_emu * px_w))
+        py = int(round(y_emu / ch_emu * px_h))
+        pw = max(1, int(round(w_emu / cw_emu * px_w)))
+        ph = max(1, int(round(h_emu / ch_emu * px_h)))
+        try:
+            im = im.resize((pw, ph), Image.LANCZOS)
+        except Exception:
+            continue
+        canvas.paste(im, (px, py), im)
+    buf = io.BytesIO()
+    canvas.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
+
+
+def _extract_docx_images(docx_path: str) -> list[_ImageSource]:
+    """Return every embedded figure in `docx_path`.
+
+    Iterates ``<w:drawing>`` elements — each represents ONE visual figure
+    placement in the document. When a drawing contains multiple pictures
+    inside a ``<wpg:wgp>`` group (e.g. a Word "SmartArt"-style illustration
+    stitched from several bitmap parts), we composite the parts onto a
+    single canvas at their author-placed positions so the reviewer sees the
+    intact artwork instead of one page per fragment.
 
     Fallback: when the reference walk finds nothing but ``word/media/`` has
     entries — as happens with DOCX files whose figures were dropped from the
@@ -155,6 +385,16 @@ def _extract_docx_images(docx_path: str) -> list[_ImageSource]:
         alt = f"word/{raw}"
         return alt if alt in names else None
 
+    def _blip_in_extlst(blip: ET._Element) -> bool:
+        # Skip fallback/alt blips nested inside <a:extLst> (e.g. SVG extensions)
+        # — they're alternate encodings of a parent blip, not separate figures.
+        anc = blip.getparent()
+        while anc is not None:
+            if anc.tag == f"{{{_WML_A}}}extLst":
+                return True
+            anc = anc.getparent()
+        return False
+
     try:
         with zipfile.ZipFile(docx_path) as z:
             names = set(z.namelist())
@@ -178,47 +418,121 @@ def _extract_docx_images(docx_path: str) -> list[_ImageSource]:
                 except (KeyError, ET.XMLSyntaxError):
                     continue
 
+                # Grab the section properties so we can preserve page size /
+                # margins when we spawn a minimal DOCX for LibreOffice rendering.
+                sect_pr_original = None
+                body_el = tree.find(f"{{{_WML_W}}}body")
+                if body_el is not None:
+                    sp = body_el.find(f"{{{_WML_W}}}sectPr")
+                    if sp is not None:
+                        sect_pr_original = sp
+
                 part_dir = os.path.dirname(part_name)
-                for blip in tree.iter(f"{{{_WML_A}}}blip"):
-                    rId = blip.get(f"{{{_WML_R}}}embed") or blip.get(f"{{{_WML_R}}}link")
-                    if not rId:
+                for drawing in tree.iter(f"{{{_WML_W}}}drawing"):
+                    extent_emu = _drawing_extent_emu(drawing)
+                    display_size_pt = (
+                        (extent_emu[0] / _EMU_PER_PT, extent_emu[1] / _EMU_PER_PT)
+                        if extent_emu else None
+                    )
+
+                    # Collect every primary blip in this drawing (skipping SVG
+                    # fallbacks nested in extLst). Preserve the containing
+                    # <pic:pic> so we can read its per-child xfrm when we need
+                    # to composite a group.
+                    entries: list[tuple[str, bytes, Optional[ET._Element]]] = []
+                    for blip in drawing.iter(f"{{{_WML_A}}}blip"):
+                        if _blip_in_extlst(blip):
+                            continue
+                        rId = blip.get(f"{{{_WML_R}}}embed") or blip.get(f"{{{_WML_R}}}link")
+                        if not rId:
+                            continue
+                        target = rels_map.get(rId)
+                        if not target:
+                            continue
+                        media_path = _resolve_media(target, part_dir, names)
+                        if not media_path:
+                            continue
+                        try:
+                            with z.open(media_path) as mf:
+                                data = mf.read()
+                        except KeyError:
+                            continue
+                        # Find the containing <pic:pic> for per-child xfrm.
+                        pic_anc = blip.getparent()
+                        while pic_anc is not None and pic_anc.tag != f"{{{_WML_PIC}}}pic":
+                            pic_anc = pic_anc.getparent()
+                        entries.append((media_path, data, pic_anc))
+                        emitted_media_paths.add(media_path)
+
+                    if not entries:
                         continue
-                    target = rels_map.get(rId)
-                    if not target:
+
+                    if len(entries) == 1:
+                        media_path, data, _ = entries[0]
+                        images.append(_ImageSource(
+                            filename=os.path.basename(media_path),
+                            data=data,
+                            path=None,
+                            source_label=docx_name,
+                            source_ts=source_ts,
+                            display_size_pt=display_size_pt,
+                        ))
                         continue
-                    media_path = _resolve_media(target, part_dir, names)
-                    if not media_path:
-                        continue
-                    try:
-                        with z.open(media_path) as mf:
-                            data = mf.read()
-                    except KeyError:
-                        continue
-                    # Walk up to the containing wp:inline/wp:anchor drawing
-                    # element to grab the author-placed extent (EMU → pt).
-                    display_size_pt = None
-                    ancestor = blip.getparent()
-                    while ancestor is not None:
-                        ext = ancestor.find(f"{{{_WML_WP}}}extent")
-                        if ext is not None:
-                            try:
-                                cx = int(ext.get("cx", "0"))
-                                cy = int(ext.get("cy", "0"))
-                                if cx > 0 and cy > 0:
-                                    display_size_pt = (cx / _EMU_PER_PT, cy / _EMU_PER_PT)
-                            except (TypeError, ValueError):
-                                pass
-                            break
-                        ancestor = ancestor.getparent()
+
+                    # Multiple blips in one drawing → grouped artwork. If the
+                    # drawing also carries vector shapes (wps:wsp with custGeom
+                    # paths — arms, legs, outlines etc.), plain raster
+                    # compositing loses them. Round-trip through LibreOffice
+                    # in that case so the vectors render alongside the rasters.
+                    has_vector_shapes = drawing.find(f".//{{{_WML_A}}}custGeom") is not None
+                    rendered: Optional[bytes] = None
+                    if has_vector_shapes:
+                        # ET's element already lives inside the current tree —
+                        # deepcopy so appending it to a fresh document doesn't
+                        # detach it and break subsequent iteration.
+                        import copy
+                        rendered = _render_drawing_via_soffice(
+                            docx_path, copy.deepcopy(drawing),
+                            copy.deepcopy(sect_pr_original) if sect_pr_original is not None else None,
+                        )
+
+                    if rendered is None:
+                        pics_positioned: list[tuple[bytes, tuple[int, int, int, int]]] = []
+                        for _mp, data, pic_el in entries:
+                            xfrm = _pic_xfrm_emu(pic_el) if pic_el is not None else None
+                            if xfrm is None:
+                                # No per-child xfrm — fall back to filling the canvas.
+                                xfrm = (0, 0, extent_emu[0] if extent_emu else 0,
+                                        extent_emu[1] if extent_emu else 0)
+                            pics_positioned.append((data, xfrm))
+
+                        if extent_emu is None:
+                            # No group extent to draw into — degrade gracefully by
+                            # emitting each part separately, as we would have before.
+                            for media_path, data, _ in entries:
+                                images.append(_ImageSource(
+                                    filename=os.path.basename(media_path),
+                                    data=data,
+                                    path=None,
+                                    source_label=docx_name,
+                                    source_ts=source_ts,
+                                    display_size_pt=None,
+                                ))
+                            continue
+
+                        rendered = _composite_group_pics(extent_emu, pics_positioned)
+                        if rendered is None:
+                            continue
+
+                    first_stem = Path(entries[0][0]).stem
                     images.append(_ImageSource(
-                        filename=os.path.basename(media_path),
-                        data=data,
+                        filename=f"{first_stem}_group.png",
+                        data=rendered,
                         path=None,
                         source_label=docx_name,
                         source_ts=source_ts,
                         display_size_pt=display_size_pt,
                     ))
-                    emitted_media_paths.add(media_path)
 
             # Fallback: any media entry not already emitted via a reference —
             # covers DOCX files whose figures are orphaned in the zip. Sorted
@@ -282,7 +596,7 @@ def _describe_color_space(im) -> Optional[str]:
     return label
 
 
-def _extract_metadata(src: _ImageSource, figure_number: int) -> list[tuple[str, str]]:
+def _extract_metadata(src: _ImageSource) -> list[tuple[str, str]]:
     width = height = None
     dpi_x = dpi_y = None
     fmt = color_space = exif_dt = None
@@ -330,8 +644,14 @@ def _extract_metadata(src: _ImageSource, figure_number: int) -> list[tuple[str, 
     except Exception:
         pass
 
+    # Physical dimensions in picas (1 pica = 1/6 inch, so pixels/DPI * 6).
+    # Falls back to 96 DPI (Word's default screen DPI) when the image doesn't
+    # declare one — otherwise we'd have to hide dimensions for every plain PNG.
     if width and height:
-        dimensions = f"{width} × {height} px"
+        eff_dpi = dpi_x or dpi_y or 96
+        w_pc = width / eff_dpi * 6.0
+        h_pc = height / eff_dpi * 6.0
+        dimensions = f"{w_pc:.1f} × {h_pc:.1f} pc"
     else:
         dimensions = "N/A"
 
@@ -353,9 +673,7 @@ def _extract_metadata(src: _ImageSource, figure_number: int) -> list[tuple[str, 
         return s if s != "—" else "N/A"
 
     return [
-        ("Figure Number", str(figure_number)),
         ("File Name", src.filename or "N/A"),
-        ("Source", src.source_label or "N/A"),
         ("Image Format", fmt_str),
         ("Dimensions", dimensions),
         ("Resolution (DPI)", dpi_str),
@@ -413,20 +731,21 @@ def _insert_image_centered(page: fitz.Page, src: _ImageSource, area: fitz.Rect) 
         # Clamp to the available area (never overflow the page).
         clamp = min(area_w / tw_target, area_h / th_target, 1.0)
         tw, th = tw_target * clamp, th_target * clamp
-        cx = (area.x0 + area.x1) / 2
-        cy = (area.y0 + area.y1) / 2
-        target = fitz.Rect(cx - tw / 2, cy - th / 2, cx + tw / 2, cy + th / 2)
         target_pixel_scale = (tw / w) if (w and w > 0) else 1.0
     elif w and h and w > 0 and h > 0:
         fit_scale = min(area_w / w, area_h / h)
         tw, th = w * fit_scale, h * fit_scale
-        cx = (area.x0 + area.x1) / 2
-        cy = (area.y0 + area.y1) / 2
-        target = fitz.Rect(cx - tw / 2, cy - th / 2, cx + tw / 2, cy + th / 2)
         target_pixel_scale = fit_scale
     else:
-        target = area
+        tw, th = area_w, area_h
         target_pixel_scale = 1.0
+
+    # Horizontally centered on the page; top-aligned within the area so the
+    # image sits directly below the metadata table instead of drifting to the
+    # vertical middle of a mostly-empty half-page.
+    cx = (area.x0 + area.x1) / 2
+    top_y = area.y0
+    target = fitz.Rect(cx - tw / 2, top_y, cx + tw / 2, top_y + th)
 
     data = src.bytes()
     # If the target size requires enlarging the source bitmap, pre-upscale via
@@ -580,9 +899,9 @@ def generate_figure_pdf(
 
     doc = fitz.open()
     try:
-        for idx, src in enumerate(sources, start=1):
+        for src in sources:
             page = doc.new_page(width=PAGE_WIDTH, height=PAGE_HEIGHT)
-            rows = _extract_metadata(src, idx)
+            rows = _extract_metadata(src)
             table_bottom = _draw_metadata_table(page, rows, MARGIN)
             image_area = fitz.Rect(
                 MARGIN,
