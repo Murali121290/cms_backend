@@ -95,7 +95,21 @@ def html_report_dir(folder_name: str) -> Path:
     return _cache_dir(folder_name) / "html"
 
 
+def get_ace_report_zip_path(folder_name: str) -> Path:
+    """Return path to zipped ACE report containing report.html, report.json & assets."""
+    h_dir = html_report_dir(folder_name)
+    if not h_dir.is_dir():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Accessibility report HTML directory not found for '{folder_name}'.",
+        )
+    zip_out = _cache_dir(folder_name) / f"{folder_name}-ace-report.zip"
+    shutil.make_archive(str(zip_out.with_suffix("")), "zip", str(h_dir))
+    return zip_out
+
+
 def get_cached_report(folder_name: str) -> dict[str, Any] | None:
+
     """Return the last normalised report for this book, or None if never run."""
     cache = _cache_path(folder_name)
     if not cache.is_file():

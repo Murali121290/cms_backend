@@ -31,7 +31,9 @@ from .services.ace_service import (
     run_ace,
     get_cached_report as get_cached_ace_report,
     html_report_dir as ace_html_report_dir,
+    get_ace_report_zip_path,
 )
+
 from .services.epubcheck_service import (
     run_epubcheck_report,
     get_cached_epubcheck_report,
@@ -223,7 +225,16 @@ async def save_file_content(
     if not target.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     await asyncio.to_thread(target.write_text, body.content, encoding="utf-8")
+
+    # Repack extracted files into .epub zip and save to output directory
+    try:
+        from .services.repack_service import repack_epub
+        await asyncio.to_thread(repack_epub, folder_name)
+    except Exception:
+        pass
+
     return {"status": True, "message": "File saved"}
+
 
 
 @router.get("/pdf/{folder_name}")
@@ -297,6 +308,17 @@ def get_ace_html_report(folder_name: str, path: str = "report.html"):
     if not target.is_file():
         raise HTTPException(status_code=404, detail="Report file not found.")
     return FileResponse(target)
+
+
+@router.get("/ace/{folder_name}/download-zip")
+def download_ace_report_zip(folder_name: str):
+    zip_path = get_ace_report_zip_path(folder_name)
+    return FileResponse(
+        zip_path,
+        filename=f"{folder_name}-ace-report.zip",
+        media_type="application/zip",
+    )
+
 
 
 @router.get("/epubcheck/{folder_name}")

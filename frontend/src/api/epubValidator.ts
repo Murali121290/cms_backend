@@ -228,6 +228,11 @@ export async function runAceReport(folderName: string): Promise<AceReport> {
   }
 }
 
+export function getAceReportZipUrl(folderName: string): string {
+  return `/api/v2/post-prod/epub-validator/ace/${encodeURIComponent(folderName)}/download-zip`;
+}
+
+
 export interface EpubCheckMessage {
   id: string;
   message: string;
