@@ -3,7 +3,7 @@ import re
 
 from bs4 import BeautifulSoup
 
-from ...engine.registry import rule
+from ..engine.registry import rule
 
 
 @rule("STRUCT001")

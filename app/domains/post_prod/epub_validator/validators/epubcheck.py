@@ -22,7 +22,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from ...engine.registry import rule
+from ..engine.registry import rule
 from app.domains.post_prod.epub_validator.services.upload_service import (
     EXTRACT_DIR,
     UPLOAD_DIR,

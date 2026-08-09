@@ -4,7 +4,7 @@ import re
 from bs4 import BeautifulSoup
 
 from ..engine.registry import rule
-from ....services import book_bundle_service as _bundle
+from ..services import book_bundle_service as _bundle
 from ._common import find_opf
 
 _RIGHTS_RE = re.compile(

@@ -9,7 +9,7 @@ import os
 
 from lxml import etree
 
-from ...engine.registry import rule
+from ..engine.registry import rule
 
 
 _PARSER = etree.XMLParser(recover=False, resolve_entities=False, load_dtd=False, no_network=True)

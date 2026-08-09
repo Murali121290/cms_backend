@@ -11,7 +11,7 @@ import os
 from bs4 import BeautifulSoup
 
 from ..engine.registry import rule
-from ....services import book_bundle_service as _bundle
+from ..services import book_bundle_service as _bundle
 
 
 def _epub_page_labels(epub: str) -> set[str]:
@@ -136,3 +136,38 @@ def validate_page_number_sequence(book_details):
         ),
         "category": "Warning",
     }]}
+
+
+@rule("PAGE001")
+def validate_pagebreak_positions(file_details):
+    file_path = file_details["full_path"]
+    issues = []
+
+    with open(file_path, "r", encoding="utf-8") as f:
+        soup = BeautifulSoup(f.read(), "html.parser")
+
+    pagebreaks = soup.find_all(attrs={"epub:type": "pagebreak"})
+
+    for pb in pagebreaks:
+        line_num = getattr(pb, "sourceline", None)
+        parent = pb.parent
+        if parent and parent.name in ["p", "h1", "h2", "h3", "h4", "h5", "h6"]:
+            issues.append({
+                "rule_name": "Nested Pagebreak",
+                "type": "nested_pagebreak",
+                "message": f"{f'Line {line_num}: ' if line_num else ''}Pagebreak element should not be nested inside <{parent.name}>",
+                "category": "Warning",
+                "line_number": line_num,
+            })
+
+        title = pb.get("title", "").strip()
+        if not title:
+            issues.append({
+                "rule_name": "Missing Pagebreak Title",
+                "type": "missing_pagebreak_title",
+                "message": f"{f'Line {line_num}: ' if line_num else ''}Pagebreak element missing title attribute",
+                "category": "Error",
+                "line_number": line_num,
+            })
+
+    return {"issues_count": len(issues), "issues": issues}

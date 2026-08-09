@@ -3,7 +3,7 @@ import os
 import requests
 from bs4 import BeautifulSoup
 
-from ...engine.registry import rule
+from ..engine.registry import rule
 from ._common import _call_w3c_css_validator
 
 

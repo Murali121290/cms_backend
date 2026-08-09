@@ -16,7 +16,8 @@ from typing import Any
 from fastapi import HTTPException
 
 from .upload_service import UPLOAD_DIR, find_epub_file_path
-from ..validators.general.epubcheck import _find_epubcheck, _run_epubcheck, _severity_to_category
+from ..validators.epubcheck import _find_epubcheck, _run_epubcheck, _severity_to_category
+
 
 
 def _cache_dir(folder_name: str) -> Path:

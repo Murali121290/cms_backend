@@ -4,14 +4,14 @@
       "id": "PAGE001",
       "name": "Validate Pagebreak Position",
       "target_path": "OEBPS/xhtml",
-      "enabled": true,
+      "enabled": false,
       "file_name_pattern": "*.xhtml"
     },
     {
       "id": "PAGE002",
       "name": "Page number sequence has no gaps",
       "scope": "book",
-      "enabled": true
+      "enabled": false
     }
   ]
 }
