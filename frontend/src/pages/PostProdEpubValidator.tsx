@@ -5,6 +5,7 @@ import {
   BookOpen,
   CheckCircle2,
   ChevronRight,
+  Edit,
   Filter,
   FolderOpen,
   Layers,
@@ -33,57 +34,57 @@ import { usersApi, type User } from '@/api/users';
 interface ClientCompany {
   id: number;
   company: string;
-  division?: string;
+  division: string;
 }
 
-// ── Validation badge ──────────────────────────────────────────────────────────
+// ── Validation Badge ──────────────────────────────────────────────────────────
 
 function ValidationBadge({ status }: { status: string | null }) {
-  if (status === 'pass' || status === 'validated' || status === 'Completed') {
+  if (!status) {
     return (
-      <span className="capitalize font-bold px-2 py-0.5 rounded-md text-[9px] border bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400">
-        Completed
+      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-muted/20 text-muted">
+        Not Validated
       </span>
     );
   }
-  if (status === 'in_progress' || status === 'in-progress' || status === 'In Progress') {
+  if (status === 'pass' || status === 'validated') {
     return (
-      <span className="capitalize font-bold px-2 py-0.5 rounded-md text-[9px] border bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400">
-        In Progress
+      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+        Passed
       </span>
     );
   }
   return (
-    <span className="capitalize font-bold px-2 py-0.5 rounded-md text-[9px] border bg-primary/10 border-primary/20 text-primary">
-      Active
+    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-red-500/10 text-red-600 border border-red-500/20">
+      Failed
     </span>
   );
 }
 
-// ── Project card ──────────────────────────────────────────────────────────────
+// ── Project Card ──────────────────────────────────────────────────────────────
 
-interface CardProps {
+interface ProjectCardProps {
   project: EvProject;
   users: User[];
   onDelete: (id: number) => void;
+  onEdit: (project: EvProject) => void;
   onRefresh: () => void;
 }
 
-function ProjectCard({ project, users, onDelete, onRefresh }: CardProps) {
+function ProjectCard({ project, users, onDelete, onEdit, onRefresh }: ProjectCardProps) {
   const navigate = useNavigate();
   const viewer = useSessionStore((s) => s.viewer);
+  const myUsername = (viewer?.username || '').trim().toLowerCase();
 
   const handleCardClick = () => {
     const assigned = (project.assignee || '').trim().toLowerCase();
-    const myUsername = (viewer?.username || '').trim().toLowerCase();
-    const isAdmin = (viewer?.roles || []).includes('Admin') || myUsername === 'admin_hema' || myUsername.startsWith('admin');
 
-    if (!assigned && !isAdmin) {
+    if (!assigned) {
       toast.error('This project is not assigned to anyone. Assign it to open it.');
       return;
     }
 
-    if (assigned && myUsername && assigned !== myUsername && !isAdmin) {
+    if (assigned && myUsername && assigned !== myUsername) {
       toast.error(`This project is assigned to ${project.assignee}. You cannot open it.`);
       return;
     }
@@ -123,7 +124,17 @@ function ProjectCard({ project, users, onDelete, onRefresh }: CardProps) {
             </p>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit(project);
+              }}
+              className="text-muted hover:text-primary transition-colors p-1 rounded hover:bg-primary/10"
+              title="Edit Project Details (eISBN, Copyright Year)"
+            >
+              <Edit size={14} />
+            </button>
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -137,6 +148,22 @@ function ProjectCard({ project, users, onDelete, onRefresh }: CardProps) {
             <ChevronRight size={16} className="shrink-0 mt-0.5 transition-colors text-muted" />
           </div>
         </div>
+
+        {/* eISBN & Copyright Badges */}
+        {(project.eisbn || project.copyright_year) && (
+          <div className="mt-2 flex items-center gap-1.5 flex-wrap text-[10px]">
+            {project.eisbn && (
+              <span className="font-mono bg-primary/10 text-primary border border-primary/20 px-1.5 py-0.5 rounded font-bold">
+                eISBN: {project.eisbn}
+              </span>
+            )}
+            {project.copyright_year && (
+              <span className="font-mono bg-amber-500/10 text-amber-600 border border-amber-500/20 px-1.5 py-0.5 rounded font-bold">
+                © {project.copyright_year}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Assignee + Status badge row */}
         <div className="mt-3 flex items-center justify-between text-[11px]">
@@ -214,9 +241,18 @@ export function PostProdEpubValidator() {
   const [selectedClientId, setSelectedClientId] = useState('');
   const [clientCode, setClientCode] = useState('');
   const [projectName, setProjectName] = useState('');
+  const [eisbn, setEisbn] = useState('');
+  const [copyrightYear, setCopyrightYear] = useState('');
   const [zipFile, setZipFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Edit Modal State
+  const [editingProject, setEditingProject] = useState<EvProject | null>(null);
+  const [editEisbn, setEditEisbn] = useState('');
+  const [editCopyrightYear, setEditCopyrightYear] = useState('');
+  const [editAssignee, setEditAssignee] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -282,7 +318,9 @@ export function PostProdEpubValidator() {
       !q ||
       p.project_name.toLowerCase().includes(q) ||
       p.client.toLowerCase().includes(q) ||
-      (p.client_code ?? '').toLowerCase().includes(q);
+      (p.client_code ?? '').toLowerCase().includes(q) ||
+      (p.eisbn ?? '').toLowerCase().includes(q) ||
+      (p.copyright_year ?? '').toLowerCase().includes(q);
     const vs = p.validation_status ?? 'Active';
     const matchStatus = statusFilter === 'all' || vs === statusFilter;
     const matchAssignee =
@@ -321,6 +359,8 @@ export function PostProdEpubValidator() {
     form.append('client', selectedClient.company);
     form.append('client_code', clientCode);
     form.append('project_name', projectName.trim());
+    if (eisbn.trim()) form.append('eisbn', eisbn.trim());
+    if (copyrightYear.trim()) form.append('copyright_year', copyrightYear.trim());
     form.append('file', zipFile);
 
     try {
@@ -340,8 +380,40 @@ export function PostProdEpubValidator() {
     setSelectedClientId('');
     setClientCode('');
     setProjectName('');
+    setEisbn('');
+    setCopyrightYear('');
     setZipFile(null);
     setErrorMsg(null);
+  };
+
+  // ── Edit project ─────────────────────────────────────────────────────────
+
+  const handleStartEdit = (proj: EvProject) => {
+    setEditingProject(proj);
+    setEditEisbn(proj.eisbn || '');
+    setEditCopyrightYear(proj.copyright_year || '');
+    setEditAssignee(proj.assignee || '');
+  };
+
+  const handleSaveEditProject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingProject) return;
+
+    setSavingEdit(true);
+    try {
+      await updateProject(editingProject.id, {
+        eisbn: editEisbn,
+        copyright_year: editCopyrightYear,
+        assignee: editAssignee,
+      });
+      toast.success('Project details updated successfully');
+      setEditingProject(null);
+      fetchProjects();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update project');
+    } finally {
+      setSavingEdit(false);
+    }
   };
 
   // ── Delete project ───────────────────────────────────────────────────────
@@ -527,6 +599,7 @@ export function PostProdEpubValidator() {
               project={proj}
               users={users}
               onDelete={(id) => setProjectToDelete(id)}
+              onEdit={handleStartEdit}
               onRefresh={fetchProjects}
             />
           ))}
@@ -607,6 +680,34 @@ export function PostProdEpubValidator() {
                 />
               </div>
 
+              {/* Optional eISBN & Copyright Year */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">
+                    eISBN <span className="text-muted/60 font-normal">(Optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={eisbn}
+                    onChange={(e) => setEisbn(e.target.value)}
+                    placeholder="e.g. 9798894107530"
+                    className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-primary transition-colors placeholder:text-muted/40 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">
+                    Copyright Year <span className="text-muted/60 font-normal">(Optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={copyrightYear}
+                    onChange={(e) => setCopyrightYear(e.target.value)}
+                    placeholder="e.g. 2027"
+                    className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-primary transition-colors placeholder:text-muted/40 font-mono"
+                  />
+                </div>
+              </div>
+
               {/* ZIP upload */}
               <div>
                 <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">
@@ -664,6 +765,95 @@ export function PostProdEpubValidator() {
                   className="px-3.5 py-1.5 bg-primary text-primary-foreground font-bold rounded-lg hover:bg-primary/95 transition-colors disabled:opacity-45 disabled:cursor-not-allowed flex items-center gap-1.5 text-xs"
                 >
                   {uploading ? 'Processing ZIP...' : 'Create Project'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Edit Project Modal ─────────────────────────────────────────────────── */}
+      {editingProject && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="bg-card border border-border rounded-xl max-w-md w-full p-4 sm:p-6 shadow-xl space-y-4">
+            {/* Modal header */}
+            <div className="flex justify-between items-start border-b border-border/60 pb-2">
+              <div>
+                <h3 className="text-base font-bold text-text m-0">Edit Project Details</h3>
+                <p className="text-[11px] text-muted mt-0.5 font-medium">
+                  {editingProject.project_name} ({editingProject.client})
+                </p>
+              </div>
+              <button
+                onClick={() => setEditingProject(null)}
+                className="text-muted hover:text-text transition-colors p-1"
+              >
+                <XCircle size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditProject} className="space-y-3.5">
+              {/* eISBN */}
+              <div>
+                <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">
+                  eISBN (Print / Digital ISBN)
+                </label>
+                <input
+                  type="text"
+                  value={editEisbn}
+                  onChange={(e) => setEditEisbn(e.target.value)}
+                  placeholder="e.g. 9798894107530"
+                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-primary transition-colors font-mono placeholder:text-muted/40"
+                />
+              </div>
+
+              {/* Copyright Year */}
+              <div>
+                <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">
+                  Copyright Year
+                </label>
+                <input
+                  type="text"
+                  value={editCopyrightYear}
+                  onChange={(e) => setEditCopyrightYear(e.target.value)}
+                  placeholder="e.g. 2027"
+                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-primary transition-colors font-mono placeholder:text-muted/40"
+                />
+              </div>
+
+              {/* Assignee */}
+              <div>
+                <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">
+                  Assigned User
+                </label>
+                <select
+                  value={editAssignee}
+                  onChange={(e) => setEditAssignee(e.target.value)}
+                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-primary transition-colors"
+                >
+                  <option value="">Unassigned</option>
+                  {users.filter((u) => u.active_status).map((u) => (
+                    <option key={u.id} value={u.user_name}>
+                      {u.user_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setEditingProject(null)}
+                  className="px-3.5 py-1.5 bg-background border border-border hover:bg-accent text-text font-bold rounded-lg transition-colors text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingEdit}
+                  className="px-3.5 py-1.5 bg-primary text-primary-foreground font-bold rounded-lg hover:bg-primary/95 transition-colors disabled:opacity-45 disabled:cursor-not-allowed flex items-center gap-1.5 text-xs"
+                >
+                  {savingEdit ? 'Saving...' : 'Save Changes'}
                 </button>
               </div>
             </form>

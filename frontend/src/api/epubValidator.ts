@@ -124,6 +124,8 @@ export interface EvProject {
   status: string;
   validation_status: string | null;
   assignee: string | null;
+  eisbn?: string | null;
+  copyright_year?: string | null;
   uploaded_by_id: number | null;
   uploaded_at: string;
   updated_at: string;
@@ -151,7 +153,10 @@ export async function createProject(formData: FormData): Promise<{ message: stri
   }
 }
 
-export async function updateProject(projectId: number, payload: { assignee?: string }): Promise<EvProject> {
+export async function updateProject(
+  projectId: number,
+  payload: { assignee?: string; eisbn?: string; copyright_year?: string },
+): Promise<EvProject> {
   try {
     const { data } = await api.put<EvProject>(`/post-prod/epub-validator/projects/${projectId}`, payload);
     return data;

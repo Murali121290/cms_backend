@@ -8,6 +8,7 @@ import {
   FileCode2,
   RotateCw,
   Save,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/utils/epubValidatorUtils';
@@ -253,8 +254,21 @@ function resolveRelative(filePath: string, href: string): string {
 // ─── Modal ───────────────────────────────────────────────────────────────────
 
 export function ValidationDetailModal({ file, folderName, entries, isRevalidating = false, initialTab = 'result', allowedTabs, onClose, onRevalidate }: Props) {
-  const visibleTabs: Tab[] = allowedTabs ?? ['result', 'preview'];
+  const isImageFile = useMemo(() => {
+    const name = (file.file_name || '').toLowerCase();
+    return /\.(png|jpe?g|gif|svg|webp|bmp|ico|tif?f)$/i.test(name);
+  }, [file.file_name]);
+
+  const visibleTabs: Tab[] = isImageFile
+    ? ['result']
+    : (allowedTabs ?? ['result', 'preview']);
   const [activeTab, setActiveTab]       = useState<Tab>(initialTab);
+
+  useEffect(() => {
+    if (!visibleTabs.includes(activeTab)) {
+      setActiveTab('result');
+    }
+  }, [visibleTabs, activeTab]);
   const [selectedRuleId, setSelectedRule] = useState<string | null>(null);
   const sourceEditorRef = useRef<{ scrollToLine: (lineNum: number) => void } | null>(null);
 
@@ -313,9 +327,14 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
     const realEntry = entries.find(e => e.file_details.relative_path && e.file_details.relative_path !== '');
     if (realEntry) return realEntry.file_details.relative_path;
     // Fallback to the file itself
-    return file.path ?? file.relative_path ?? file.file_name;
+    return file.path ?? file.relative_path ?? file.file_name ?? '';
   }, [entries, file]);
 
+  const imageUrl = useMemo(() => {
+    if (!isImageFile || !folderName || !filePath) return null;
+    const encoded = encodeURIComponent(filePath.replace(/\\/g, '/'));
+    return `/api/v2/post-prod/epub-validator/file-data/${folderName}/${encoded}`;
+  }, [isImageFile, folderName, filePath]);
 
   useEffect(() => {
     if (activeTab !== 'result') return;
@@ -496,32 +515,36 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
 
           <div className="flex items-center gap-2 flex-shrink-0">
             {/* Save feedback */}
-            {saveSuccess && (
-              <span className="text-xs text-emerald-600 font-medium flex items-center gap-1 font-sans">
-                <CheckCircle2 className="w-3.5 h-3.5" /> Saved
-              </span>
+            {!isImageFile && (
+              <>
+                {saveSuccess && (
+                  <span className="text-xs text-emerald-600 font-medium flex items-center gap-1 font-sans">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Saved
+                  </span>
+                )}
+                {saveError && (
+                  <span className="text-xs text-red-500 font-medium flex items-center gap-1 font-sans" title={saveError}>
+                    <XCircle className="w-3.5 h-3.5" /> Save failed
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className={cn(
+                    'inline-flex flex-row items-center justify-center gap-2 whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-semibold border border-input bg-background hover:bg-primary/10 hover:border-primary/40 hover:text-primary transition-all shadow-xs disabled:opacity-50 disabled:pointer-events-none',
+                    isDirty && 'border-primary text-primary bg-primary/5',
+                  )}
+                  onClick={handleSave}
+                  disabled={!isDirty || isSaving}
+                >
+                  {isSaving ? (
+                    <RotateCw className="w-3.5 h-3.5 animate-spin shrink-0" />
+                  ) : (
+                    <Save className="w-3.5 h-3.5 shrink-0" />
+                  )}
+                  <span>{isSaving ? 'Saving…' : isDirty ? 'Save*' : 'Save'}</span>
+                </button>
+              </>
             )}
-            {saveError && (
-              <span className="text-xs text-red-500 font-medium flex items-center gap-1 font-sans" title={saveError}>
-                <XCircle className="w-3.5 h-3.5" /> Save failed
-              </span>
-            )}
-            <button
-              type="button"
-              className={cn(
-                'inline-flex flex-row items-center justify-center gap-2 whitespace-nowrap px-3 py-1.5 rounded-md text-xs font-semibold border border-input bg-background hover:bg-primary/10 hover:border-primary/40 hover:text-primary transition-all shadow-xs disabled:opacity-50 disabled:pointer-events-none',
-                isDirty && 'border-primary text-primary bg-primary/5',
-              )}
-              onClick={handleSave}
-              disabled={!isDirty || isSaving}
-            >
-              {isSaving ? (
-                <RotateCw className="w-3.5 h-3.5 animate-spin shrink-0" />
-              ) : (
-                <Save className="w-3.5 h-3.5 shrink-0" />
-              )}
-              <span>{isSaving ? 'Saving…' : isDirty ? 'Save*' : 'Save'}</span>
-            </button>
 
             {onRevalidate && (
               <button
@@ -666,7 +689,7 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
                     transition={{ duration: 0.12 }}
                     className="h-full flex overflow-hidden font-sans"
                   >
-                    {/* Left Column: Validation Findings List */}
+                    {/* Left Column: Validation Findings List for ALL files */}
                     <div className="w-5/12 h-full border-r border-border flex flex-col min-w-[320px] max-w-[480px]">
                       <div className="px-3.5 py-2.5 border-b border-border bg-muted/30 flex items-center justify-between shrink-0 font-sans">
                         <span className="text-xs font-bold text-foreground font-serif uppercase tracking-wider">
@@ -745,15 +768,41 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
                       </div>
                     </div>
 
-                    {/* Right Column: Source Code Editor */}
+                    {/* Right Column: Image Preview if isImageFile ELSE Source Code Editor */}
                     <div className="flex-1 h-full flex flex-col min-w-0 bg-background">
                       <div className="px-4 py-2 border-b border-border bg-muted/20 flex items-center justify-between shrink-0 font-mono text-xs">
                         <span className="font-semibold text-foreground truncate">{filePath}</span>
-                        {isDirty && <span className="text-[10px] font-bold text-amber-500 uppercase font-sans">Unsaved Changes</span>}
+                        {!isImageFile && isDirty && <span className="text-[10px] font-bold text-amber-500 uppercase font-sans">Unsaved Changes</span>}
                       </div>
 
                       <div className="flex-1 overflow-hidden relative">
-                        {sourceLoading ? (
+                        {isImageFile ? (
+                          <div className="h-full flex flex-col items-center justify-center p-6 bg-muted/10 overflow-auto">
+                            {imageUrl ? (
+                              <div className="flex flex-col items-center justify-center gap-3.5 max-w-full">
+                                <div className="p-3 rounded-2xl bg-card border border-border shadow-sm max-w-full overflow-hidden flex items-center justify-center bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] dark:bg-[radial-gradient(#1f2937_1px,transparent_1px)] [background-size:16px_16px]">
+                                  <img
+                                    src={imageUrl}
+                                    alt={file.file_name}
+                                    className="max-h-[60vh] max-w-full object-contain rounded-lg shadow-xs"
+                                    onError={(e) => {
+                                      (e.target as HTMLElement).style.display = 'none';
+                                    }}
+                                  />
+                                </div>
+                                <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground bg-card px-3 py-1.5 rounded-full border border-border/60 shadow-2xs">
+                                  <ImageIcon className="w-3.5 h-3.5 text-emerald-500" />
+                                  <span className="font-semibold text-foreground">{file.file_name}</span>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col items-center justify-center gap-2 text-muted-foreground">
+                                <ImageIcon className="w-10 h-10 text-muted-foreground/40" />
+                                <p className="text-xs font-semibold">Image preview unavailable</p>
+                              </div>
+                            )}
+                          </div>
+                        ) : sourceLoading ? (
                           <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground text-xs font-mono">
                             <RotateCw className="w-5 h-5 animate-spin text-primary" />
                             Loading source code…

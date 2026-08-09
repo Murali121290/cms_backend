@@ -9,13 +9,15 @@
     {
       "id": "ASP-COV-002",
       "name": "Aspen: Cover height is 1100 pixels",
-      "scope": "book",
+      "target_path": "",
+      "file_name_pattern": "cover.jpg",
       "enabled": true
     },
     {
       "id": "ASP-COV-003",
       "name": "Aspen: Cover image is 300 DPI",
-      "scope": "book",
+      "target_path": "",
+      "file_name_pattern": "cover.jpg",
       "enabled": true
     },
     {

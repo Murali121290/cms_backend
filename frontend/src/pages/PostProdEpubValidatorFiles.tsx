@@ -137,27 +137,28 @@ export function PostProdEpubValidatorFiles() {
   const folderName = project ? project.folder_name : (params.folderName || params.projectId || '');
 
   const viewer = useSessionStore((s) => s.viewer);
+  const isSessionLoading = useSessionStore((s) => s.loading);
+
   useEffect(() => {
-    // Skip access check while projects list is loading or if project object is not found yet
-    if (isLoadingProjects || !projects || projects.length === 0 || !project) {
+    // Skip access check while projects or session are loading
+    if (isLoadingProjects || isSessionLoading || !projects || projects.length === 0 || !project) {
       return;
     }
 
     const assigned = (project.assignee || '').trim().toLowerCase();
     const myUsername = (viewer?.username || '').trim().toLowerCase();
-    const isAdmin = (viewer?.roles || []).includes('Admin') || myUsername === 'admin_hema' || myUsername.startsWith('admin');
 
-    if (!assigned && !isAdmin) {
+    if (!assigned) {
       toast.error('This project is not assigned to anyone. Assign it to access it.');
       navigate('/post-production/epub-validator');
       return;
     }
 
-    if (assigned && myUsername && assigned !== myUsername && !isAdmin) {
+    if (assigned && myUsername && assigned !== myUsername) {
       toast.error(`This project is assigned to ${project.assignee}. You cannot access it.`);
       navigate('/post-production/epub-validator');
     }
-  }, [project, projects, isLoadingProjects, viewer, navigate]);
+  }, [project, projects, isLoadingProjects, isSessionLoading, viewer, navigate]);
 
   // ── Files from API ──────────────────────────────────────────────────────────
   const { data: filesData, isLoading, isError } = useQuery({
@@ -483,8 +484,8 @@ export function PostProdEpubValidatorFiles() {
       hasFileEntries: boolean; // true if at least one non-book-level entry exists
     };
     const generalBookMap = new Map<string, RuleAgg>(); // general book-scope rules
-    const generalMap     = new Map<string, RuleAgg>(); // file-scope general rules
-    const customerMap    = new Map<string, RuleAgg>(); // customer rules (both scopes)
+    const generalMap = new Map<string, RuleAgg>(); // file-scope general rules
+    const customerMap = new Map<string, RuleAgg>(); // customer rules (both scopes)
     let totalErrors = 0;
     let totalWarnings = 0;
     let custName: string | null = validationData.customer || null;
@@ -788,10 +789,10 @@ export function PostProdEpubValidatorFiles() {
                 {project && (
                   <span
                     className={`capitalize font-bold px-2 py-0.5 rounded-md text-[9px] border shrink-0 ${project.validation_status === 'pass' || project.validation_status === 'validated' || project.validation_status === 'Completed'
-                        ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
-                        : project.validation_status === 'in_progress' || project.validation_status === 'in-progress' || project.validation_status === 'In Progress'
-                          ? 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400'
-                          : 'bg-primary/10 border-primary/20 text-primary'
+                      ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                      : project.validation_status === 'in_progress' || project.validation_status === 'in-progress' || project.validation_status === 'In Progress'
+                        ? 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400'
+                        : 'bg-primary/10 border-primary/20 text-primary'
                       }`}
                   >
                     {project.validation_status === 'pass' || project.validation_status === 'validated' || project.validation_status === 'Completed'
@@ -1647,8 +1648,8 @@ export function PostProdEpubValidatorFiles() {
                                 variant="image"
                                 layoutMode={layoutMode}
                                 status="pending"
-                                onOpen={() => { setModalAllowedTabs(['result', 'preview']); setModalInitialTab('preview'); setSelectedFile(file); }}
-                                onPreview={() => { setModalAllowedTabs(['result', 'preview']); setModalInitialTab('preview'); setSelectedFile(file); }}
+                                onOpen={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
+                                onPreview={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
                                 index={i}
                               />
                             </motion.div>

@@ -20,13 +20,27 @@ def _serialize(p: EvProject) -> dict[str, Any]:
         "validation_status": p.validation_status,
         "latest_validation_file": p.latest_validation_file,
         "assignee": p.assignee,
+        "eisbn": getattr(p, "eisbn", None),
+        "copyright_year": getattr(p, "copyright_year", None),
         "uploaded_by_id": p.uploaded_by_id,
         "uploaded_at": p.uploaded_at.isoformat() if p.uploaded_at else None,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
     }
 
 
+def _ensure_columns_exist(db: Session) -> None:
+    """Ensure eisbn and copyright_year columns exist on post_prod_ev_projects table."""
+    try:
+        from sqlalchemy import text
+        db.execute(text("ALTER TABLE post_prod_ev_projects ADD COLUMN IF NOT EXISTS eisbn VARCHAR(100);"))
+        db.execute(text("ALTER TABLE post_prod_ev_projects ADD COLUMN IF NOT EXISTS copyright_year VARCHAR(50);"))
+        db.commit()
+    except Exception:
+        db.rollback()
+
+
 def list_projects(db: Session) -> list[dict[str, Any]]:
+    _ensure_columns_exist(db)
     rows = (
         db.query(EvProject)
         .filter(EvProject.is_deleted.is_(False))
@@ -37,6 +51,7 @@ def list_projects(db: Session) -> list[dict[str, Any]]:
 
 
 def get_project_by_id(db: Session, project_id: int) -> Optional[dict[str, Any]]:
+    _ensure_columns_exist(db)
     p = (
         db.query(EvProject)
         .filter(EvProject.id == project_id, EvProject.is_deleted.is_(False))
@@ -64,7 +79,10 @@ def create_project(
     total_files: int,
     user_id: Optional[int],
     assignee: Optional[str] = None,
+    eisbn: Optional[str] = None,
+    copyright_year: Optional[str] = None,
 ) -> dict[str, Any]:
+    _ensure_columns_exist(db)
     # Purge any old soft-deleted project records matching folder_name or project_name
     db.query(EvProject).filter(
         (EvProject.folder_name == folder_name) | (EvProject.project_name == project_name),
@@ -81,6 +99,8 @@ def create_project(
         total_files=total_files,
         status="uploaded",
         assignee=assignee,
+        eisbn=eisbn,
+        copyright_year=copyright_year,
         uploaded_by_id=user_id,
         uploaded_at=now,
         updated_at=now,
@@ -96,9 +116,12 @@ def update_project(
     project_id: int,
     *,
     assignee: Optional[str] = None,
+    eisbn: Optional[str] = None,
+    copyright_year: Optional[str] = None,
     user_id: Optional[int] = None,
     username: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
+    _ensure_columns_exist(db)
     p = (
         db.query(EvProject)
         .filter(EvProject.id == project_id, EvProject.is_deleted.is_(False))
@@ -120,6 +143,10 @@ def update_project(
             )
             db.add(history)
             p.assignee = target_val
+    if eisbn is not None:
+        p.eisbn = eisbn.strip() if eisbn.strip() else None
+    if copyright_year is not None:
+        p.copyright_year = copyright_year.strip() if copyright_year.strip() else None
     db.commit()
     db.refresh(p)
     return _serialize(p)

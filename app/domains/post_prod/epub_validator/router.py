@@ -105,6 +105,8 @@ async def create_project(
     client: str = Form(...),
     client_code: str = Form(""),
     project_name: str = Form(...),
+    eisbn: Optional[str] = Form(None),
+    copyright_year: Optional[str] = Form(None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     user=Depends(get_current_user_from_cookie),
@@ -138,12 +140,16 @@ async def create_project(
         epub_path=result["epub_extract_path"],
         total_files=result.get("total_files", 0),
         user_id=user.id if user else None,
+        eisbn=eisbn,
+        copyright_year=copyright_year,
     )
     return {"message": "Project created successfully", "project": project}
 
 
 class ProjectUpdateRequest(BaseModel):
     assignee: Optional[str] = None
+    eisbn: Optional[str] = None
+    copyright_year: Optional[str] = None
 
 
 @router.put("/projects/{project_id}")

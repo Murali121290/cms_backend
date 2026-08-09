@@ -29,6 +29,8 @@ class EvProject(Base):
     # EPUB metadata
     epub_path = Column(Text, nullable=False)              # abs path to extracted epub/
     total_files = Column(Integer, nullable=False, default=0)
+    eisbn = Column(String(100), nullable=True)            # optional eISBN
+    copyright_year = Column(String(50), nullable=True)    # optional copyright year
 
     # Lifecycle status
     # "uploaded" → "validated" | "failed"
