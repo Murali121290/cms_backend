@@ -12,37 +12,51 @@ from lxml import etree
 from ..engine.registry import rule
 
 
-_PARSER = etree.XMLParser(recover=False, resolve_entities=False, load_dtd=False, no_network=True)
+_PARSER = etree.XMLParser(recover=True, resolve_entities=False, load_dtd=False, no_network=True)
 
 
 @rule("XHTML001")
 def validate_xhtml_well_formed(file_details):
     """xhtml files must be well-formed XML (parses without errors)."""
     file_path = file_details["full_path"]
+    issues = []
+
     try:
+        parser = etree.XMLParser(recover=True, resolve_entities=False, load_dtd=False, no_network=True)
         with open(file_path, "rb") as f:
-            etree.fromstring(f.read(), parser=_PARSER)
-    except etree.XMLSyntaxError as e:
-        return {"issues_count": 1, "issues": [{
-            "type": "xhtml_syntax_error",
-            "message": f"XHTML syntax error: {e.msg}",
-            "category": "Error",
-            "line_number": e.lineno,
-            "file_path": file_details.get("relative_path"),
-        }]}
+            etree.fromstring(f.read(), parser=parser)
+
+        import re as _re
+        for err in parser.error_log:
+            line_num = err.line
+            # If error is a tag mismatch like "Opening and ending tag mismatch: h1 line 10 and body",
+            # extract the actual opening line number (10) for easier user navigation.
+            match = _re.search(r"line\s+(\d+)", err.message, _re.IGNORECASE)
+            if match and "mismatch" in err.message.lower():
+                line_num = int(match.group(1))
+
+            issues.append({
+                "type": "xhtml_syntax_error",
+                "message": f"Line {line_num}: XHTML syntax error: {err.message}",
+                "category": "Error",
+                "line_number": line_num,
+                "file_path": file_details.get("relative_path"),
+            })
+
     except Exception as e:  # noqa: BLE001
-        return {"issues_count": 1, "issues": [{
+        issues.append({
             "type": "xhtml_parse_failed",
             "message": f"Could not parse XHTML: {e}",
             "category": "Warning",
             "file_path": file_details.get("relative_path"),
-        }]}
+        })
+
 
     # Also flag disallowed constructs — unclosed <br>, <img> without self-close.
     with open(file_path, "r", encoding="utf-8") as f:
         text = f.read()
-    issues = []
     for tag in ("br", "hr", "img", "meta", "link"):
+
         # Search for opens that are not self-closing.
         import re as _re
         for m in _re.finditer(fr"<{tag}\b([^>/]*)(?<!/)>", text, _re.IGNORECASE):

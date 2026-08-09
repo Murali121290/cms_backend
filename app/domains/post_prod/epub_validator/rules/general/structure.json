@@ -2,25 +2,25 @@
   "rules": [
     {
       "id": "STRUCT001",
-      "name": "EPUB root has META-INF, OEBPS, and mimetype",
+      "name": "EPUB Folder Structure Check",
       "scope": "book",
       "enabled": true
     },
     {
       "id": "STRUCT002",
-      "name": "META-INF/container.xml exists and points to an OPF",
+      "name": "Container File Check",
       "scope": "book",
       "enabled": true
     },
     {
       "id": "STRUCT003",
-      "name": "Content folder contains OPF, toc.ncx, nav.xhtml, CSS, xhtml/, images/",
+      "name": "EPUB Content Folder Check",
       "scope": "book",
       "enabled": true
     },
     {
       "id": "STRUCT004",
-      "name": "EPUB file extension is lowercase '.epub'",
+      "name": "EPUB File Extension Check",
       "scope": "book",
       "enabled": true
     }

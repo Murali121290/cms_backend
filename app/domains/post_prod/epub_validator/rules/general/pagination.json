@@ -2,14 +2,14 @@
   "rules": [
     {
       "id": "PAGE001",
-      "name": "Validate Pagebreak Position",
+      "name": "Pagebreak Format Check",
       "target_path": "OEBPS/xhtml",
       "enabled": false,
       "file_name_pattern": "*.xhtml"
     },
     {
       "id": "PAGE002",
-      "name": "Page number sequence has no gaps",
+      "name": "Page Number Sequence Check",
       "scope": "book",
       "enabled": false
     }
