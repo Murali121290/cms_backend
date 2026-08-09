@@ -4,14 +4,14 @@
       "id": "CSS001",
       "name": "XHTML CSS Validation",
       "target_path": "OEBPS/xhtml",
-      "enabled": true,
+      "enabled": false,
       "file_name_pattern": "*.xhtml"
     },
     {
       "id": "CSS002",
       "name": "CSS File Validation",
       "target_path": "OEBPS/css",
-      "enabled": true,
+      "enabled": false,
       "file_name_pattern": "*.css"
     }
   ]

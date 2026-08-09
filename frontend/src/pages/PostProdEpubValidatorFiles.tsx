@@ -21,6 +21,8 @@ import {
   User,
   LayoutGrid,
   List,
+  BookMarked,
+  X as XIcon,
 } from 'lucide-react';
 import { XHTMLCard, xhtmlCardVariants } from '@/components/epub_validator/XHTMLCard';
 import { ValidationDetailModal } from '@/components/epub_validator/ValidationDetailModal';
@@ -402,6 +404,8 @@ export function PostProdEpubValidatorFiles() {
 
     for (const entry of validationData.files) {
       const name = entry.file_details.file_name;
+      // Skip book-level entries — they are shown in the Book Overview Panel, not on file cards
+      if (!name || name === '[book-level]' || name === '') continue;
       const agg = map.get(name) ?? { errors: 0, warnings: 0 };
       for (const issue of entry.result.issues) {
         const isError = (issue.category ?? '').toLowerCase() === 'error';
@@ -410,6 +414,8 @@ export function PostProdEpubValidatorFiles() {
       }
       map.set(name, agg);
     }
+
+
     return map;
   }, [validationData]);
 
@@ -448,19 +454,37 @@ export function PostProdEpubValidatorFiles() {
     setActiveFilter((prev) => (prev === status ? null : status));
   };
 
+  const [selectedBookRuleId, setSelectedBookRuleId] = useState<string | null>(null);
+
   const toggleRuleFilter = (ruleKey: string) => {
     setActiveFilter(null);
+    setSelectedBookRuleId(null);
     setSelectedRuleFilter((prev) => (prev === ruleKey ? null : ruleKey));
+  };
+
+  const toggleBookRule = (ruleKey: string) => {
+    setActiveFilter(null);
+    setSelectedRuleFilter(null);
+    setSelectedBookRuleId((prev) => (prev === ruleKey ? null : ruleKey));
   };
 
   // Aggregate rules across all validation data entries
   const ruleSummary = useMemo(() => {
     if (!validationData || !validationData.files) {
-      return { general: [], customer: [], totalErrors: 0, totalWarnings: 0, customerName: null };
+      return { generalBook: [], general: [], customer: [], totalErrors: 0, totalWarnings: 0, customerName: null };
     }
 
-    const generalMap = new Map<string, { rule_id: string; rule_name: string; errors: number; warnings: number; files: Set<string> }>();
-    const customerMap = new Map<string, { rule_id: string; rule_name: string; errors: number; warnings: number; files: Set<string> }>();
+    type RuleAgg = {
+      rule_id: string;
+      rule_name: string;
+      errors: number;
+      warnings: number;
+      files: Set<string>;
+      hasFileEntries: boolean; // true if at least one non-book-level entry exists
+    };
+    const generalBookMap = new Map<string, RuleAgg>(); // general book-scope rules
+    const generalMap     = new Map<string, RuleAgg>(); // file-scope general rules
+    const customerMap    = new Map<string, RuleAgg>(); // customer rules (both scopes)
     let totalErrors = 0;
     let totalWarnings = 0;
     let custName: string | null = validationData.customer || null;
@@ -468,7 +492,14 @@ export function PostProdEpubValidatorFiles() {
     for (const entry of validationData.files) {
       const isCustomer = entry.origin === 'customer';
       if (isCustomer && entry.customer && !custName) custName = entry.customer;
-      const targetMap = isCustomer ? customerMap : generalMap;
+
+      // Detect book-scope entries: [book-level] file_name or empty
+      const fname = entry.file_details.file_name;
+      const isBookScope = !fname || fname === '[book-level]' || fname === '';
+
+      // Customer rules always go to customerMap regardless of scope.
+      // General book-scope rules go to generalBookMap; file-scope general rules go to generalMap.
+      const targetMap = isCustomer ? customerMap : isBookScope ? generalBookMap : generalMap;
       const key = entry.rule_id || entry.rule_name;
 
       const item = targetMap.get(key) ?? {
@@ -477,6 +508,7 @@ export function PostProdEpubValidatorFiles() {
         errors: 0,
         warnings: 0,
         files: new Set<string>(),
+        hasFileEntries: false,
       };
 
       let entryHasErrors = false;
@@ -495,14 +527,16 @@ export function PostProdEpubValidatorFiles() {
         }
       }
 
-      if (entry.result.issues.length > 0 || entryHasErrors || entryHasWarnings) {
-        item.files.add(entry.file_details.file_name);
+      if (!isBookScope && (entry.result.issues.length > 0 || entryHasErrors || entryHasWarnings)) {
+        item.files.add(fname);
+        item.hasFileEntries = true;
       }
 
       targetMap.set(key, item);
     }
 
     return {
+      generalBook: Array.from(generalBookMap.values()),
       general: Array.from(generalMap.values()),
       customer: Array.from(customerMap.values()),
       totalErrors,
@@ -517,10 +551,15 @@ export function PostProdEpubValidatorFiles() {
     const matching = new Set<string>();
     for (const entry of validationData.files) {
       const key = entry.rule_id || entry.rule_name;
+      const name = entry.file_details.file_name;
+      // Skip book-level entries — they don't correspond to a file card
+      if (!name || name === '[book-level]' || name === '') continue;
       if (key === selectedRuleFilter && entry.result.issues.length > 0) {
-        matching.add(entry.file_details.file_name);
+        matching.add(name);
       }
     }
+
+
     return matching;
   }, [selectedRuleFilter, validationData]);
 
@@ -616,10 +655,12 @@ export function PostProdEpubValidatorFiles() {
 
   const selectedEntries = useMemo(() => {
     if (!selectedFile || !validationData) return [];
+    // Only show entries for this specific file — never mix in [book-level] entries
     return validationData.files.filter(
       (e) => e.file_details.file_name === selectedFile.file_name,
     );
   }, [selectedFile, validationData]);
+
 
   return (
     <>
@@ -973,7 +1014,7 @@ export function PostProdEpubValidatorFiles() {
           ) : (
             <div className="flex flex-col lg:flex-row gap-6 items-start">
               {/* Left Rules Sidebar (Validation Rules with Scroll Option) */}
-              {hasValidated && (ruleSummary.general.length > 0 || ruleSummary.customer.length > 0) && (
+              {hasValidated && (ruleSummary.generalBook.length > 0 || ruleSummary.general.length > 0 || ruleSummary.customer.length > 0) && (
                 <div className="w-full lg:w-80 xl:w-96 shrink-0 bg-card rounded-xl border border-border/80 shadow-sm p-4 space-y-4 font-sans">
                   <div className="flex items-center justify-between border-b border-border/60 pb-2.5">
                     <div>
@@ -981,12 +1022,12 @@ export function PostProdEpubValidatorFiles() {
                         Validation Rules
                       </h2>
                       <p className="text-[11px] text-muted-foreground mt-0.5 font-sans">
-                        Filter files by triggered rule
+                        Click a rule to explore issues
                       </p>
                     </div>
-                    {selectedRuleFilter && (
+                    {(selectedRuleFilter || selectedBookRuleId) && (
                       <button
-                        onClick={() => setSelectedRuleFilter(null)}
+                        onClick={() => { setSelectedRuleFilter(null); setSelectedBookRuleId(null); }}
                         className="text-[11px] text-primary hover:underline font-semibold"
                       >
                         Reset
@@ -995,13 +1036,84 @@ export function PostProdEpubValidatorFiles() {
                   </div>
 
                   <div className="space-y-4 max-h-[calc(100vh-14rem)] min-h-[250px] overflow-y-auto pr-1.5 scrollbar-thin scrollbar-thumb-border font-sans">
-                    {/* General Rules Group */}
-                    {ruleSummary.general.length > 0 && (
+
+                    {/* ── General Book Rules (book-scope) ───────────────────── */}
+                    {ruleSummary.generalBook.length > 0 && (
                       <div className="space-y-1.5">
                         <div className="flex items-center justify-between px-1">
-                          <span className="text-[11px] font-bold text-foreground/80 uppercase tracking-wide">
-                            General Rules
+                          <div className="flex items-center gap-1.5">
+                            <BookMarked className="w-3 h-3 text-slate-500" />
+                            <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wide">
+                              General Book
+                            </span>
+                          </div>
+                          <span className="text-[10px] text-muted-foreground font-mono">
+                            ({ruleSummary.generalBook.length})
                           </span>
+                        </div>
+                        <div className="space-y-1">
+                          {ruleSummary.generalBook.map((r) => {
+                            const isSelected = selectedBookRuleId === (r.rule_id || r.rule_name);
+                            return (
+                              <button
+                                key={r.rule_id || r.rule_name}
+                                onClick={() => toggleBookRule(r.rule_id || r.rule_name)}
+                                className={cn(
+                                  'w-full text-left p-2.5 rounded-xl transition-all border text-xs flex items-start justify-between gap-2.5',
+                                  isSelected
+                                    ? 'bg-slate-500/10 border-slate-500/40 ring-1 ring-slate-500/30 text-slate-700 dark:text-slate-300 font-bold shadow-xs'
+                                    : 'bg-card hover:bg-slate-500/5 hover:border-slate-500/30 border-border/60 text-foreground transition-all duration-150',
+                                )}
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    {r.rule_id && (
+                                      <span className="font-mono text-[10px] font-bold text-slate-500 bg-slate-100 dark:bg-slate-800 px-1 py-0.2 rounded shrink-0">
+                                        {r.rule_id}
+                                      </span>
+                                    )}
+                                    <p className="font-medium font-serif truncate leading-tight">
+                                      {r.rule_name}
+                                    </p>
+                                  </div>
+                                  <p className="text-[10px] text-muted-foreground mt-1 font-mono">
+                                    Book-scope rule
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0 pt-0.5">
+                                  {r.errors > 0 && (
+                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500/10 text-red-600 dark:text-red-400">
+                                      <XCircle className="w-3 h-3" />
+                                      {r.errors}
+                                    </span>
+                                  )}
+                                  {r.warnings > 0 && (
+                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                                      <AlertTriangle className="w-3 h-3" />
+                                      {r.warnings}
+                                    </span>
+                                  )}
+                                  {r.errors === 0 && r.warnings === 0 && (
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                                  )}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ── General File Rules ─────────────────────────────────── */}
+                    {ruleSummary.general.length > 0 && (
+                      <div className={cn('space-y-1.5', ruleSummary.generalBook.length > 0 && 'pt-2 border-t border-border/40')}>
+                        <div className="flex items-center justify-between px-1">
+                          <div className="flex items-center gap-1.5">
+                            <FileCode2 className="w-3 h-3 text-foreground/60" />
+                            <span className="text-[11px] font-bold text-foreground/80 uppercase tracking-wide">
+                              General
+                            </span>
+                          </div>
                           <span className="text-[10px] text-muted-foreground font-mono">
                             ({ruleSummary.general.length})
                           </span>
@@ -1021,9 +1133,16 @@ export function PostProdEpubValidatorFiles() {
                                 )}
                               >
                                 <div className="min-w-0 flex-1">
-                                  <p className="font-medium font-serif truncate leading-tight">
-                                    {r.rule_name}
-                                  </p>
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    {r.rule_id && (
+                                      <span className="font-mono text-[10px] font-bold text-muted-foreground bg-muted px-1 py-0.2 rounded shrink-0">
+                                        {r.rule_id}
+                                      </span>
+                                    )}
+                                    <p className="font-medium font-serif truncate leading-tight">
+                                      {r.rule_name}
+                                    </p>
+                                  </div>
                                   <p className="text-[10px] text-muted-foreground mt-1 font-mono">
                                     {r.files.size} file{r.files.size !== 1 ? 's' : ''} affected
                                   </p>
@@ -1052,26 +1171,34 @@ export function PostProdEpubValidatorFiles() {
                       </div>
                     )}
 
-                    {/* Customer Rules Group */}
+                    {/* ── Customer Rules ─────────────────────────────────────── */}
                     {ruleSummary.customer.length > 0 && (
                       <div className="space-y-1.5 pt-2 border-t border-border/40">
                         <div className="flex items-center justify-between px-1">
-                          <span className="text-[11px] font-bold text-primary uppercase tracking-wide">
-                            {ruleSummary.customerName
-                              ? `${ruleSummary.customerName.charAt(0).toUpperCase()}${ruleSummary.customerName.slice(1)} Rules`
-                              : 'Customer Rules'}
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <User className="w-3 h-3 text-primary" />
+                            <span className="text-[11px] font-bold text-primary uppercase tracking-wide">
+                              {ruleSummary.customerName
+                                ? `${ruleSummary.customerName.charAt(0).toUpperCase()}${ruleSummary.customerName.slice(1)} Rules`
+                                : 'Customer Rules'}
+                            </span>
+                          </div>
                           <span className="text-[10px] text-muted-foreground font-mono">
                             ({ruleSummary.customer.length})
                           </span>
                         </div>
                         <div className="space-y-1">
                           {ruleSummary.customer.map((r) => {
-                            const isSelected = selectedRuleFilter === (r.rule_id || r.rule_name);
+                            // If this rule has no file-level entries, it's book-scope — use toggleBookRule
+                            const isBookOnlyRule = !r.hasFileEntries && (r.errors > 0 || r.warnings > 0);
+                            const ruleKey = r.rule_id || r.rule_name;
+                            const isSelected = isBookOnlyRule
+                              ? selectedBookRuleId === ruleKey
+                              : selectedRuleFilter === ruleKey;
                             return (
                               <button
-                                key={r.rule_id || r.rule_name}
-                                onClick={() => toggleRuleFilter(r.rule_id || r.rule_name)}
+                                key={ruleKey}
+                                onClick={() => isBookOnlyRule ? toggleBookRule(ruleKey) : toggleRuleFilter(ruleKey)}
                                 className={cn(
                                   'w-full text-left p-2.5 rounded-xl transition-all border text-xs flex items-start justify-between gap-2.5',
                                   isSelected
@@ -1080,11 +1207,18 @@ export function PostProdEpubValidatorFiles() {
                                 )}
                               >
                                 <div className="min-w-0 flex-1">
-                                  <p className="font-medium font-serif truncate leading-tight">
-                                    {r.rule_name}
-                                  </p>
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    {r.rule_id && (
+                                      <span className="font-mono text-[10px] font-bold text-primary/80 bg-primary/10 px-1 py-0.2 rounded shrink-0">
+                                        {r.rule_id}
+                                      </span>
+                                    )}
+                                    <p className="font-medium font-serif truncate leading-tight">
+                                      {r.rule_name}
+                                    </p>
+                                  </div>
                                   <p className="text-[10px] text-muted-foreground mt-1 font-mono">
-                                    {r.files.size} file{r.files.size !== 1 ? 's' : ''} affected
+                                    {isBookOnlyRule ? 'Book-scope rule' : `${r.files.size} file${r.files.size !== 1 ? 's' : ''} affected`}
                                   </p>
                                 </div>
                                 <div className="flex items-center gap-1 shrink-0 pt-0.5">
@@ -1116,6 +1250,85 @@ export function PostProdEpubValidatorFiles() {
 
               {/* Main Right Area: Summary Stats + Top Category Tabs on top, Files below */}
               <div className="flex-1 min-w-0 space-y-6">
+
+                {/* ── Book Overview Panel (shown when a General Book or customer book-scope rule is selected) ─── */}
+                {selectedBookRuleId && (() => {
+                  const bookEntries = validationData?.files.filter(
+                    (e) => (e.rule_id || e.rule_name) === selectedBookRuleId &&
+                      (!e.file_details.file_name || e.file_details.file_name === '[book-level]' || e.file_details.file_name === '')
+                  ) ?? [];
+                  // Look up rule metadata from both generalBook and customer lists
+                  const bookRule = [...ruleSummary.generalBook, ...ruleSummary.customer].find(
+                    (r) => (r.rule_id || r.rule_name) === selectedBookRuleId
+                  );
+                  const allIssues = bookEntries.flatMap((e) => e.result.issues);
+                  return (
+                    <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 p-4 shadow-sm font-sans">
+                      {/* Header */}
+                      <div className="flex items-start justify-between mb-3 gap-3">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <BookMarked className="w-4 h-4 text-slate-500 shrink-0" />
+                          <div className="min-w-0">
+                            <p className="text-sm font-bold text-foreground font-serif truncate">
+                              {bookRule?.rule_name ?? selectedBookRuleId}
+                            </p>
+                            <p className="text-[11px] font-mono text-slate-500 mt-0.5">{selectedBookRuleId} · Book-scope</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {(bookRule?.errors ?? 0) > 0 && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400">
+                              <XCircle className="w-3 h-3" /> {bookRule!.errors} error{bookRule!.errors !== 1 ? 's' : ''}
+                            </span>
+                          )}
+                          {(bookRule?.warnings ?? 0) > 0 && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">
+                              <AlertTriangle className="w-3 h-3" /> {bookRule!.warnings} warning{bookRule!.warnings !== 1 ? 's' : ''}
+                            </span>
+                          )}
+                          <button
+                            onClick={() => setSelectedBookRuleId(null)}
+                            className="ml-1 p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 hover:text-foreground transition-colors"
+                            title="Close"
+                          >
+                            <XIcon className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Issues list */}
+                      {allIssues.length === 0 ? (
+                        <div className="flex items-center gap-2 py-2 text-[12px] text-emerald-600 dark:text-emerald-400">
+                          <CheckCircle2 className="w-4 h-4" />
+                          No issues found for this rule.
+                        </div>
+                      ) : (
+                        <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-border">
+                          {allIssues.map((issue, idx) => {
+                            const isError = (issue.category ?? '').toLowerCase() === 'error';
+                            return (
+                              <div
+                                key={idx}
+                                className={cn(
+                                  'flex items-start gap-2.5 rounded-lg px-3 py-2 text-xs border',
+                                  isError
+                                    ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800/40 text-red-700 dark:text-red-300'
+                                    : 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/40 text-amber-700 dark:text-amber-300',
+                                )}
+                              >
+                                {isError
+                                  ? <XCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-red-500" />
+                                  : <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-500" />}
+                                <span className="leading-relaxed font-sans">{issue.message}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 {/* ── 5-stat summary row ─────────────────────────────────────────── */}
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 font-sans">
                   <StatCard

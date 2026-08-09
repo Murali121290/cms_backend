@@ -7,6 +7,9 @@ from ..engine.registry import rule
 from ._common import _call_w3c_css_validator
 
 
+_CSS_CACHE: dict[str, list] = {}
+
+
 @rule("CSS001")
 @rule("CSS002")
 def validate_css_w3c(file_details):
@@ -24,8 +27,13 @@ def validate_css_w3c(file_details):
         if not css_content.strip():
             return {"issues_count": 0, "issues": []}
         css_label = file_details["file_name"]
+
+        if file_path in _CSS_CACHE:
+            return {"issues_count": len(_CSS_CACHE[file_path]), "issues": _CSS_CACHE[file_path]}
+
         try:
             issues = _call_w3c_css_validator(css_content, css_label)
+            _CSS_CACHE[file_path] = issues
         except requests.exceptions.Timeout:
             issues = [{
                 "type": "css_validation_failed",
@@ -54,7 +62,6 @@ def validate_css_w3c(file_details):
 
     css_links = soup.find_all("link", rel=lambda r: r and "stylesheet" in r)
 
-    validated_css: dict[str, list] = {}
     for link_tag in css_links:
         href = (link_tag.get("href") or "").strip()
         if not href or href.startswith("http"):
@@ -72,8 +79,8 @@ def validate_css_w3c(file_details):
             })
             continue
 
-        if css_path in validated_css:
-            for issue in validated_css[css_path]:
+        if css_path in _CSS_CACHE:
+            for issue in _CSS_CACHE[css_path]:
                 issues.append(dict(issue, css_file=href))
             continue
 
@@ -81,12 +88,12 @@ def validate_css_w3c(file_details):
             css_content = f.read()
 
         if not css_content.strip():
-            validated_css[css_path] = []
+            _CSS_CACHE[css_path] = []
             continue
 
         try:
             css_file_issues = _call_w3c_css_validator(css_content, href)
-            validated_css[css_path] = css_file_issues
+            _CSS_CACHE[css_path] = css_file_issues
             issues.extend(css_file_issues)
         except requests.exceptions.Timeout:
             issues.append({

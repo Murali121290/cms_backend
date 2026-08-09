@@ -4,25 +4,25 @@
       "id": "PDF001",
       "name": "PDF–EPUB Style Match",
       "scope": "book",
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "STYLE001",
       "name": "Drop Cap Style Check",
       "scope": "book",
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "STYLE002",
       "name": "Line Height Check",
       "scope": "book",
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "STYLE003",
       "name": "Figure & Table Link Check",
       "scope": "book",
-      "enabled": true
+      "enabled": false
     }
   ]
 }

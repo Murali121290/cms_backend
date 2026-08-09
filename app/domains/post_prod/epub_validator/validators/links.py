@@ -21,8 +21,14 @@ _PAGE_CITATION_RE = re.compile(
 )
 
 
+_PAGE_IDS_CACHE: dict[str, set[str]] = {}
+
+
 def _epub_page_ids(epub: str) -> set[str]:
     """Every element id that looks like a page id (id='page_N' or on a pagebreak)."""
+    if epub in _PAGE_IDS_CACHE:
+        return _PAGE_IDS_CACHE[epub]
+
     ids: set[str] = set()
     for xhtml in glob.glob(os.path.join(epub, "**", "*.xhtml"), recursive=True):
         try:
@@ -37,6 +43,8 @@ def _epub_page_ids(epub: str) -> set[str]:
                 ids.add(eid)
             elif "pagebreak" in etype and eid:
                 ids.add(eid)
+
+    _PAGE_IDS_CACHE[epub] = ids
     return ids
 
 
