@@ -369,6 +369,45 @@ def _serialize_file_record(file_record: models.File, *, viewer: models.User, db:
     if file_record.uploaded_by:
         uploaded_by = file_record.uploaded_by.username
 
+    # Image / PDF metadata for the chapter file list's Dimensions / DPI /
+    # Color Profile columns. Cheap for images (PIL only reads the header);
+    # for PDFs we grab first-page dimensions in points via PyMuPDF.
+    width = height = dpi = None
+    color_profile: str | None = None
+    if file_record.path and os.path.exists(file_record.path):
+        ext = os.path.splitext(file_record.filename or "")[1].lower()
+        if ext in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".tif", ".tiff", ".bmp"):
+            try:
+                from PIL import Image as _PILImage
+                with _PILImage.open(file_record.path) as _im:
+                    width, height = _im.size
+                    dpi_info = _im.info.get("dpi") or _im.info.get("jfif_density")
+                    if dpi_info and isinstance(dpi_info, (tuple, list)) and dpi_info[0]:
+                        try:
+                            dpi = int(round(float(dpi_info[0])))
+                        except (TypeError, ValueError):
+                            dpi = None
+                    _MODE_LABELS = {
+                        "1": "Bilevel", "L": "Grayscale", "LA": "Grayscale+A",
+                        "P": "Palette", "PA": "Palette+A",
+                        "RGB": "RGB", "RGBA": "RGB+A", "CMYK": "CMYK",
+                        "YCbCr": "YCbCr", "LAB": "L*a*b*", "HSV": "HSV",
+                        "I": "Grayscale-32", "F": "Grayscale-32F", "I;16": "Grayscale-16",
+                    }
+                    color_profile = _MODE_LABELS.get(_im.mode, _im.mode)
+            except Exception:
+                pass
+        elif ext == ".pdf":
+            try:
+                import fitz as _fitz
+                with _fitz.open(file_record.path) as _doc:
+                    if len(_doc) > 0:
+                        r = _doc[0].rect
+                        width = int(round(r.width))
+                        height = int(round(r.height))
+            except Exception:
+                pass
+
     return schemas_v2.FileRecord(
         id=file_record.id,
         project_id=file_record.project_id,
@@ -384,6 +423,11 @@ def _serialize_file_record(file_record: models.File, *, viewer: models.User, db:
         file_size=file_size,
         uploaded_by=uploaded_by,
         page_count=page_count,
+        width=width,
+        height=height,
+        dpi=dpi,
+        color_profile=color_profile,
+        source_file_id=getattr(file_record, "source_file_id", None),
     )
 
 
@@ -3169,6 +3213,65 @@ def api_v2_upload_chapter_files(
     )
 
 
+@router.post(
+    "/projects/{project_id}/chapters/{chapter_id}/generate-figure-pdf",
+    response_model=schemas_v2.GenerateFigurePdfResponse,
+)
+def api_v2_generate_figure_pdf(
+    project_id: int,
+    chapter_id: int,
+    file_id: Optional[int] = None,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    from app.domains.post_prod.figure_pdf.service import generate_figure_pdf
+
+    try:
+        db_file, figures_included, error = generate_figure_pdf(
+            db,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            actor_user_id=viewer.id,
+            upload_dir=file_service.UPLOAD_DIR,
+            source_file_id=file_id,
+        )
+    except Exception as exc:
+        logger.exception("Figure PDF generation failed for chapter %s", chapter_id)
+        return _error_response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            code="FIGURE_PDF_FAILED",
+            message=f"Failed to generate Figure PDF: {exc}",
+        )
+
+    if error or not db_file:
+        return _error_response(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+                if error and ("not found" in error.lower())
+                else status.HTTP_400_BAD_REQUEST
+            ),
+            code=(
+                "FIGURE_PDF_EMPTY"
+                if error and ("no figures" in error.lower() or "no images" in error.lower())
+                else "FIGURE_PDF_FAILED"
+            ),
+            message=error or "Failed to generate Figure PDF.",
+        )
+
+    return schemas_v2.GenerateFigurePdfResponse(
+        file=_serialize_file_record(db_file, viewer=viewer, db=db),
+        figures_included=figures_included,
+    )
+
+
 @router.get("/uploads/{project_id}/chapter/{chapter_name}/backup-list")
 def api_v2_backup_list(
     project_id: int,
@@ -3183,7 +3286,7 @@ def api_v2_backup_list(
             code="AUTH_REQUIRED",
             message="Authentication required.",
         )
-        
+
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         return _error_response(

@@ -30,6 +30,10 @@ class File(Base):
     filename = Column(String, index=True)
     file_type = Column(String)
     category = Column(String, default="Manuscript") # Art, Manuscript, InDesign, Proof, XML
+    # Points at the file this row was derived from — e.g. a Figure PDF's DOCX
+    # source. Lets the file list nest generated artefacts under their source
+    # instead of showing them as siblings.
+    source_file_id = Column(Integer, ForeignKey("files.id", ondelete="SET NULL"), nullable=True, index=True)
     path = Column(String)
     uploaded_at = Column(DateTime, default=datetime.utcnow)
     version = Column(Integer, default=1)

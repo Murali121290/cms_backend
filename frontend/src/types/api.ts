@@ -209,6 +209,11 @@ export interface FileRecord {
   file_size?: string | null;
   uploaded_by?: string | null;
   page_count?: number | null;
+  width?: number | null;
+  height?: number | null;
+  dpi?: number | null;
+  color_profile?: string | null;
+  source_file_id?: number | null;
 }
 
 export interface FileDeleteInfo {
