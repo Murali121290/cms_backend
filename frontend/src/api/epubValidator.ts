@@ -182,7 +182,7 @@ export async function exportEpub(
   folderName: string,
   stats: { failed: number; warnings: number; pending: number },
   force = false,
-): Promise<ExportConfirmResponse | Blob> {
+): Promise<ExportConfirmResponse | { blob: Blob; filename: string }> {
   try {
     const response = await api.post(
       `/post-prod/epub-validator/export/${folderName}`,
@@ -194,7 +194,16 @@ export async function exportEpub(
       const text = await (response.data as Blob).text();
       return JSON.parse(text) as ExportConfirmResponse;
     }
-    return response.data as Blob;
+
+    // Extract filename from Content-Disposition header
+    const contentDisposition = response.headers['content-disposition'] as string ?? '';
+    let filename = folderName + '.epub';
+    const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
+    if (filenameMatch && filenameMatch[1]) {
+      filename = filenameMatch[1];
+    }
+
+    return { blob: response.data as Blob, filename };
   } catch (err) {
     if (axios.isAxiosError(err) && err.response?.data instanceof Blob) {
       let parsed: { detail?: string; message?: string } | null = null;

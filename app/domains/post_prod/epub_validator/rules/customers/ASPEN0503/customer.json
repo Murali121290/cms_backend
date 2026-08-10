@@ -9,14 +9,14 @@
     {
       "id": "ASP-COV-002",
       "name": "Aspen: Cover height is 1100 pixels",
-      "target_path": "",
+      "target_path": "OEBPS/images",
       "file_name_pattern": "cover.jpg",
       "enabled": true
     },
     {
       "id": "ASP-COV-003",
       "name": "Aspen: Cover image is 300 DPI",
-      "target_path": "",
+      "target_path": "OEBPS/images",
       "file_name_pattern": "cover.jpg",
       "enabled": true
     },
@@ -30,7 +30,7 @@
       "id": "ASP-FILE-001",
       "name": "Aspen: EPUB file named '<eISBN>_EPUB.epub'",
       "scope": "book",
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "ASP-NAV-001",
@@ -310,5 +310,8 @@
       "scope": "book",
       "enabled": true
     }
-  ]
+  ],
+  "export": {
+    "filename_format": "{eisbn}_EPUB.epub"
+  }
 }

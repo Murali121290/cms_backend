@@ -26,6 +26,7 @@ from .services.upload_service import process_upload, get_extract_files, UPLOAD_D
 from .services.validate_service import validate_epub as _validate_epub_legacy
 from .engine.runner import validate_epub as _validate_epub_v2
 from .services import ev_projects_db
+from .services.export_config import get_export_filename
 from .services.pdf_service import find_pdf_page, render_pdf_page, get_chapter_pdf
 from .services.ace_service import (
     run_ace,
@@ -60,7 +61,6 @@ def check_post_prod_access(user=Depends(get_current_user_from_cookie)):
 router = APIRouter(
     prefix="/post-prod/epub-validator",
     tags=["EPUB Validator"],
-    dependencies=[Depends(check_post_prod_access)],
 )
 
 
@@ -163,6 +163,8 @@ def update_project(
         db,
         project_id,
         assignee=body.assignee,
+        eisbn=body.eisbn,
+        copyright_year=body.copyright_year,
         user_id=getattr(user, "id", None),
         username=getattr(user, "username", None) or getattr(user, "user_name", None),
     )
@@ -397,7 +399,11 @@ async def validate_file(
 
 
 @router.post("/export/{folder_name}")
-async def export_epub(folder_name: str, body: ExportRequest):
+async def export_epub(
+    folder_name: str,
+    body: ExportRequest,
+    db: Session = Depends(get_db),
+):
     if (body.failed > 0 or body.warnings > 0 or body.pending > 0) and not body.force:
         parts: list[str] = []
         if body.failed > 0:
@@ -417,6 +423,15 @@ async def export_epub(folder_name: str, body: ExportRequest):
     epub_dir = (Path(UPLOAD_DIR) / folder_name / "extract" / "epub").resolve()
     if not epub_dir.is_dir():
         raise HTTPException(status_code=404, detail="EPUB source directory not found.")
+
+    # Get export filename based on customer configuration
+    project = ev_projects_db.get_project_by_folder(db, folder_name)
+    if project and project.eisbn:
+        filename = f"{project.eisbn}_EPUB.epub"
+    elif project and project.project_name:
+        filename = f"{project.project_name}_EPUB.epub"
+    else:
+        filename = f"{folder_name}_EPUB.epub"
 
     def _build_zip() -> bytes:
         buf = io.BytesIO()
@@ -441,5 +456,5 @@ async def export_epub(folder_name: str, body: ExportRequest):
     return Response(
         content=zip_bytes,
         media_type="application/epub+zip",
-        headers={"Content-Disposition": f'attachment; filename="{folder_name}.epub"'},
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

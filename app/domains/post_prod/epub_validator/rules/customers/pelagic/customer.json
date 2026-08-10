@@ -6,5 +6,8 @@
       "scope": "book",
       "enabled": true
     }
-  ]
+  ],
+  "export": {
+    "filename_format": "{eisbn}_EPUB.epub"
+  }
 }

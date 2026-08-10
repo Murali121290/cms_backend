@@ -611,11 +611,11 @@ export function PostProdEpubValidatorFiles() {
 
   useEffect(() => () => { if (exportSuccessTimer.current) clearTimeout(exportSuccessTimer.current); }, []);
 
-  function triggerDownload(blob: Blob) {
+  function triggerDownload(blob: Blob, filename: string = `${folderName}.epub`) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${folderName}.epub`;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -631,12 +631,12 @@ export function PostProdEpubValidatorFiles() {
         { failed: stats.failed, warnings: stats.warnings, pending: stats.pending },
         force,
       );
-      if (result instanceof Blob) {
-        triggerDownload(result);
+      if ('blob' in result) {
+        triggerDownload(result.blob, result.filename);
         setExportSuccess(true);
         if (exportSuccessTimer.current) clearTimeout(exportSuccessTimer.current);
         exportSuccessTimer.current = setTimeout(() => setExportSuccess(false), 4000);
-      } else if (result.status === 'confirm') {
+      } else if ('status' in result && result.status === 'confirm') {
         setExportConfirmMsg(result.message);
       }
     } catch (err) {
