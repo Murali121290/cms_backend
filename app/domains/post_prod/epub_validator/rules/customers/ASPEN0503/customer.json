@@ -34,7 +34,7 @@
     },
     {
       "id": "ASP-NAV-001",
-      "name": "Aspen: Front Matter present in NAV",
+      "name": "Aspen: Cover and Front Matter present in NAV",
       "target_path": "",
       "file_name_pattern": "nav.xhtml",
       "enabled": true
@@ -53,7 +53,7 @@
       "id": "ASP-NAV-003",
       "name": "Aspen: Authors separated by ',' not 'and' in OPF/NCX",
       "scope": "book",
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "ASP-COPY-001",
@@ -287,32 +287,32 @@
       "name": "Aspen: <img> should be center-aligned via class or inline style",
       "target_path": "OEBPS/xhtml",
       "file_name_pattern": "*.xhtml",
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "ASP-PAGE-001",
       "name": "Aspen: Page ruler (pagebreak marker) present for every non-blank PDF page",
       "scope": "book",
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "ASP-LINK-001",
       "name": "Aspen: Page citations (e.g. 'See page 23') are linked to the page id",
       "target_path": "OEBPS/xhtml",
       "file_name_pattern": "*.xhtml",
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "ASP-LINK-002",
       "name": "Aspen: Glossary terms have two-way links between body and glossary",
       "scope": "book",
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "ASP-LINK-003",
       "name": "Aspen: External links must not have underline styling",
       "scope": "book",
-      "enabled": true
+      "enabled": false
     }
   ],
   "export": {

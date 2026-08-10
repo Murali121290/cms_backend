@@ -162,35 +162,33 @@ export function XHTMLCard({
             </div>
 
             {/* Errors / Warnings Summary */}
-            {!isCss && !isImage && (
-              <div
-                onClick={onOpen}
-                className="flex items-center gap-2 cursor-pointer text-xs shrink-0 font-medium"
-              >
-                {errors > 0 && (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 font-bold text-[11px]">
-                    <XCircle className="w-3.5 h-3.5" />
-                    {errors} {errors === 1 ? 'Error' : 'Errors'}
-                  </span>
-                )}
-                {warnings > 0 && (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 font-bold text-[11px]">
-                    <AlertTriangle className="w-3.5 h-3.5" />
-                    {warnings} {warnings === 1 ? 'Warning' : 'Warnings'}
-                  </span>
-                )}
-                {errors === 0 && warnings === 0 && status === 'passed' && (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold">
-                    <CheckCircle2 className="w-3.5 h-3.5" /> Passed
-                  </span>
-                )}
-                {status === 'pending' && (
-                  <span className="text-slate-400 text-[11px] font-medium flex items-center gap-1 px-2 py-0.5">
-                    <Clock className="w-3.5 h-3.5 text-slate-400" /> Pending
-                  </span>
-                )}
-              </div>
-            )}
+            <div
+              onClick={onOpen}
+              className="flex items-center gap-2 cursor-pointer text-xs shrink-0 font-medium"
+            >
+              {errors > 0 && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 font-bold text-[11px]">
+                  <XCircle className="w-3.5 h-3.5" />
+                  {errors} {errors === 1 ? 'Error' : 'Errors'}
+                </span>
+              )}
+              {warnings > 0 && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 font-bold text-[11px]">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  {warnings} {warnings === 1 ? 'Warning' : 'Warnings'}
+                </span>
+              )}
+              {errors === 0 && warnings === 0 && status === 'passed' && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Passed
+                </span>
+              )}
+              {status === 'pending' && (
+                <span className="text-slate-400 text-[11px] font-medium flex items-center gap-1 px-2 py-0.5">
+                  <Clock className="w-3.5 h-3.5 text-slate-400" /> Pending
+                </span>
+              )}
+            </div>
 
             {/* Actions */}
             <div className="flex items-center gap-2 shrink-0 font-sans">

@@ -422,6 +422,17 @@ export function PostProdEpubValidatorFiles() {
 
   const getFileStatus = (fileName: string): XHTMLFileStatus => {
     const agg = fileIssues.get(fileName);
+
+    // mimetype and container.xml are validated at book-level by STRUCT validators
+    if ((fileName === 'mimetype' || fileName === 'container.xml') && agg === undefined && validationData) {
+      // Check if structure validators passed (STRUCT001, STRUCT002)
+      const structValidations = validationData.files.filter(f =>
+        (f.rule_id === 'STRUCT001' || f.rule_id === 'STRUCT002') &&
+        f.result.issues_count === 0
+      );
+      if (structValidations.length > 0) return 'passed';
+    }
+
     if (agg === undefined) return 'pending';
     if (agg.errors === 0 && agg.warnings === 0) return 'passed';
     if (agg.errors > 0) return 'failed';
@@ -1599,18 +1610,23 @@ export function PostProdEpubValidatorFiles() {
                           initial="hidden"
                           animate="show"
                         >
-                          {visibleCssFiles.map((file, i) => (
+                          {visibleCssFiles.map((file, i) => {
+                            const agg = fileIssues.get(file.file_name) ?? { errors: 0, warnings: 0 };
+                            return (
                             <motion.div key={`css-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
                               <XHTMLCard
                                 file={file}
                                 variant="css"
                                 layoutMode={layoutMode}
-                                status="pending"
+                                status={getFileStatus(file.file_name)}
+                                errors={agg.errors}
+                                warnings={agg.warnings}
                                 onOpen={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
                                 index={i}
                               />
                             </motion.div>
-                          ))}
+                            );
+                          })}
                         </motion.div>
                       )}
                     </div>
@@ -1641,19 +1657,24 @@ export function PostProdEpubValidatorFiles() {
                           initial="hidden"
                           animate="show"
                         >
-                          {visibleImageFiles.map((file, i) => (
+                          {visibleImageFiles.map((file, i) => {
+                            const agg = fileIssues.get(file.file_name) ?? { errors: 0, warnings: 0 };
+                            return (
                             <motion.div key={`img-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
                               <XHTMLCard
                                 file={file}
                                 variant="image"
                                 layoutMode={layoutMode}
-                                status="pending"
+                                status={getFileStatus(file.file_name)}
+                                errors={agg.errors}
+                                warnings={agg.warnings}
                                 onOpen={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
                                 onPreview={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
                                 index={i}
                               />
                             </motion.div>
-                          ))}
+                            );
+                          })}
                         </motion.div>
                       )}
                     </div>
