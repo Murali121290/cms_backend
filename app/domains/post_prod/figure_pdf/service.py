@@ -109,8 +109,19 @@ class _ImageSource:
 
     def open_pil(self) -> Image.Image:
         if self.data is not None:
-            return Image.open(io.BytesIO(self.data))
-        return Image.open(self.path)  # type: ignore[arg-type]
+            img = Image.open(io.BytesIO(self.data))
+        else:
+            img = Image.open(self.path)  # type: ignore[arg-type]
+
+        if getattr(img, "format", None) == "EPS" or (self.filename and self.filename.lower().endswith(".eps")):
+            scale = 4
+            while scale > 1 and (img.width * scale) * (img.height * scale) > 100_000_000:
+                scale -= 1
+            try:
+                img.load(scale=scale)  # type: ignore
+            except Exception:
+                pass
+        return img
 
     def bytes(self) -> bytes:
         if self.data is not None:

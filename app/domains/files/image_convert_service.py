@@ -81,6 +81,15 @@ def convert_image(
         raise FileNotFoundError(f"Source file missing on disk: {src_path}")
 
     with Image.open(src_path) as img:
+        if getattr(img, "format", None) == "EPS" or src_path.suffix.lower() == ".eps":
+            scale = 4
+            while scale > 1 and (img.width * scale) * (img.height * scale) > _MAX_SOURCE_PIXELS:
+                scale -= 1
+            try:
+                img.load(scale=scale)  # type: ignore
+            except Exception as e:
+                logger.warning(f"Failed to load EPS with scale={scale} during convert: {e}")
+
         if img.width * img.height > _MAX_SOURCE_PIXELS:
             raise RuntimeError(
                 f"Source image is too large to convert "

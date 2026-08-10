@@ -90,6 +90,14 @@ def get_or_build_preview(
 
     try:
         with Image.open(src) as img:
+            if getattr(img, "format", None) == "EPS" or src.suffix.lower() == ".eps":
+                scale = 4
+                while scale > 1 and (img.width * scale) * (img.height * scale) > 100_000_000:
+                    scale -= 1
+                try:
+                    img.load(scale=scale)  # type: ignore
+                except Exception as e:
+                    logger.warning(f"Failed to load EPS with scale={scale}: {e}")
             img = ImageOps.exif_transpose(img) or img
             # Downscale for the browser — filerobot fits it to the viewport
             # anyway, and a full-resolution scan makes the editor sluggish.
