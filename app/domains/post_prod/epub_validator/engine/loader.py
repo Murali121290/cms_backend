@@ -29,14 +29,30 @@ def load_general() -> list[dict]:
 
 
 def load_customer(customer: str | None) -> list[dict]:
-    """Reserved for Phase 2. Returns [] until customer modules exist."""
+    """Load customer-specific rules from rules/customers/<client_code>/customer.json (or rules.json)."""
     if not customer:
         return []
-    customer_dir = _RULES_ROOT / "customers" / customer
-    rules_file = customer_dir / "rules.json"
-    if not rules_file.is_file():
+    c_clean = customer.strip()
+    customers_dir = _RULES_ROOT / "customers"
+    if not customers_dir.is_dir():
         return []
-    return _read_rules_file(rules_file)
+
+    # Case-insensitive match on customer / client_code directory
+    target_dir: Path | None = None
+    for p in customers_dir.iterdir():
+        if p.is_dir() and p.name.lower() == c_clean.lower():
+            target_dir = p
+            break
+
+    if target_dir is None:
+        return []
+
+    for fn in ("customer.json", "rules.json"):
+        rf = target_dir / fn
+        if rf.is_file():
+            return _read_rules_file(rf)
+    return []
+
 
 
 def load_overrides(customer: str | None) -> dict:

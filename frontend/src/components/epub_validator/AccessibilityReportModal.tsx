@@ -117,12 +117,12 @@ export function AccessibilityReportModal({ report, folderName, onClose }: Props)
 
             <div className="flex items-center gap-2 shrink-0">
               <a
-                href={reportUrl}
-                download={`${folderName}-ace-report.html`}
-                className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-md border border-border hover:bg-muted transition"
-                aria-label="Download report"
+                href={`/api/v2/post-prod/epub-validator/ace/${encodeURIComponent(folderName)}/download-zip`}
+                download={`${folderName}-ace-report.zip`}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-md bg-primary text-primary-foreground hover:opacity-90 transition shadow-xs"
+                aria-label="Download ACE report zip"
               >
-                <Download className="w-3 h-3" /> Download report
+                <Download className="w-3.5 h-3.5" /> Download ZIP
               </a>
               <a
                 href={reportUrl}
@@ -136,6 +136,7 @@ export function AccessibilityReportModal({ report, folderName, onClose }: Props)
                 <X className="w-4 h-4" />
               </Button>
             </div>
+
           </div>
 
           {/* Row 2: single-line metrics strip */}

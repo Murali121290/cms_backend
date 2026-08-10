@@ -76,6 +76,8 @@ def upgrade() -> None:
         sa.Column("changed_by_username", sa.String(length=255), nullable=True),
         sa.Column("old_assignee", sa.String(length=255), nullable=True),
         sa.Column("new_assignee", sa.String(length=255), nullable=True),
+        sa.Column("result_type", sa.String(length=50), nullable=False, server_default="assignee_change"),
+        sa.Column("validation_result", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
     )

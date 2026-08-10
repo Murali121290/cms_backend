@@ -2,7 +2,7 @@
   "rules": [
     {
       "id": "XHTML001",
-      "name": "XHTML files parse as well-formed XML",
+      "name": "XHTML Syntax Check",
       "target_path": "OEBPS/xhtml",
       "file_name_pattern": "*.xhtml",
       "enabled": true

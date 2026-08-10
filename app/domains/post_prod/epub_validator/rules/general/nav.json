@@ -2,36 +2,36 @@
   "rules": [
     {
       "id": "NAV001",
-      "name": "Validate NAV TOC Headings",
+      "name": "NAV TOC Link Check",
       "target_path": "",
-      "enabled": true,
+      "enabled": false,
       "file_name_pattern": "nav.xhtml"
     },
     {
       "id": "NAV002",
-      "name": "Validate TOC NCX Headings",
+      "name": "NCX TOC Label Check",
       "target_path": "",
-      "enabled": true,
+      "enabled": false,
       "file_name_pattern": "toc.ncx"
     },
     {
       "id": "NAV003",
-      "name": "PDF-EPUB Nav Validator (heading coverage + hierarchy + EISBN)",
+      "name": "PDF-EPUB TOC Match",
       "scope": "book",
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "NAV004",
-      "name": "nav.xhtml contains a 'Cover' entry",
+      "name": "Cover Entry in TOC",
       "target_path": "",
-      "enabled": true,
+      "enabled": false,
       "file_name_pattern": "nav.xhtml"
     },
     {
       "id": "NAV005",
-      "name": "All chapter page ids are listed in nav.xhtml page-list and toc.ncx pageList",
+      "name": "Page List Match Check",
       "scope": "book",
-      "enabled": true
+      "enabled": false
     }
   ]
 }

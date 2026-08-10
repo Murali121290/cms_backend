@@ -44,6 +44,18 @@ export async function validateFolder(folderName: string): Promise<ValidationApiR
   }
 }
 
+export async function getLatestValidation(folderName: string): Promise<ValidationApiResponse | null> {
+  try {
+    const { data } = await api.get<ValidationApiResponse | { status: false }>(
+      `/post-prod/epub-validator/validate/${folderName}/latest`,
+    );
+    if ('status' in data && data.status === false) return null;
+    return data as ValidationApiResponse;
+  } catch {
+    return null;
+  }
+}
+
 export async function getFileContent(folderName: string, filePath: string): Promise<string> {
   try {
     const encoded = filePath.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
@@ -112,6 +124,8 @@ export interface EvProject {
   status: string;
   validation_status: string | null;
   assignee: string | null;
+  eisbn?: string | null;
+  copyright_year?: string | null;
   uploaded_by_id: number | null;
   uploaded_at: string;
   updated_at: string;
@@ -139,7 +153,10 @@ export async function createProject(formData: FormData): Promise<{ message: stri
   }
 }
 
-export async function updateProject(projectId: number, payload: { assignee?: string }): Promise<EvProject> {
+export async function updateProject(
+  projectId: number,
+  payload: { assignee?: string; eisbn?: string; copyright_year?: string },
+): Promise<EvProject> {
   try {
     const { data } = await api.put<EvProject>(`/post-prod/epub-validator/projects/${projectId}`, payload);
     return data;
@@ -165,7 +182,7 @@ export async function exportEpub(
   folderName: string,
   stats: { failed: number; warnings: number; pending: number },
   force = false,
-): Promise<ExportConfirmResponse | Blob> {
+): Promise<ExportConfirmResponse | { blob: Blob; filename: string }> {
   try {
     const response = await api.post(
       `/post-prod/epub-validator/export/${folderName}`,
@@ -177,7 +194,16 @@ export async function exportEpub(
       const text = await (response.data as Blob).text();
       return JSON.parse(text) as ExportConfirmResponse;
     }
-    return response.data as Blob;
+
+    // Extract filename from Content-Disposition header
+    const contentDisposition = response.headers['content-disposition'] as string ?? '';
+    let filename = folderName + '.epub';
+    const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
+    if (filenameMatch && filenameMatch[1]) {
+      filename = filenameMatch[1];
+    }
+
+    return { blob: response.data as Blob, filename };
   } catch (err) {
     if (axios.isAxiosError(err) && err.response?.data instanceof Blob) {
       let parsed: { detail?: string; message?: string } | null = null;
@@ -213,6 +239,59 @@ export async function runAceReport(folderName: string): Promise<AceReport> {
     return data.report;
   } catch (err) {
     throw new Error(getApiErrorMessage(err, 'Accessibility check failed'));
+  }
+}
+
+export function getAceReportZipUrl(folderName: string): string {
+  return `/api/v2/post-prod/epub-validator/ace/${encodeURIComponent(folderName)}/download-zip`;
+}
+
+
+export interface EpubCheckMessage {
+  id: string;
+  message: string;
+  category: 'Error' | 'Warning' | 'Info';
+  severity: string;
+  file_path?: string | null;
+  line_number?: number | null;
+  column_number?: number | null;
+}
+
+export interface EpubCheckReport {
+  status: 'pass' | 'fail';
+  ran_at: string;
+  duration_seconds: number;
+  totals: {
+    error: number;
+    warning: number;
+    info: number;
+    total: number;
+  };
+  messages: EpubCheckMessage[];
+}
+
+export async function getCachedEpubCheckReport(folderName: string): Promise<EpubCheckReport | null> {
+  try {
+    const { data } = await api.get<{ status: boolean; report?: EpubCheckReport; message?: string }>(
+      `/post-prod/epub-validator/epubcheck/${encodeURIComponent(folderName)}`,
+    );
+    return data.status ? data.report ?? null : null;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to load EPUBCheck report'));
+  }
+}
+
+export async function runEpubCheckReport(folderName: string): Promise<EpubCheckReport> {
+  try {
+    const { data } = await api.post<{ status: boolean; report: EpubCheckReport; message?: string }>(
+      `/post-prod/epub-validator/epubcheck/${encodeURIComponent(folderName)}`,
+    );
+    if (!data.status) {
+      throw new Error(data.message || 'EPUBCheck failed');
+    }
+    return data.report;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'EPUBCheck failed'));
   }
 }
 

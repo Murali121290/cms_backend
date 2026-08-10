@@ -2,27 +2,27 @@
   "rules": [
     {
       "id": "PDF001",
-      "name": "PDF-EPUB Style Parity (italic, alignment, indent, images, colour, page count)",
+      "name": "PDF–EPUB Style Match",
       "scope": "book",
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "STYLE001",
-      "name": "Drop cap styling is consistent across all chapters",
+      "name": "Drop Cap Style Check",
       "scope": "book",
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "STYLE002",
-      "name": "CSS line-height values are within a reasonable range",
+      "name": "Line Height Check",
       "scope": "book",
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "STYLE003",
-      "name": "Every figure/table has at least one cross-reference link",
+      "name": "Figure & Table Link Check",
       "scope": "book",
-      "enabled": true
+      "enabled": false
     }
   ]
 }

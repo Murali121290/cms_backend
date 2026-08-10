@@ -18,14 +18,29 @@ def _serialize(p: EvProject) -> dict[str, Any]:
         "total_files": p.total_files,
         "status": p.status,
         "validation_status": p.validation_status,
+        "latest_validation_file": p.latest_validation_file,
         "assignee": p.assignee,
+        "eisbn": getattr(p, "eisbn", None),
+        "copyright_year": getattr(p, "copyright_year", None),
         "uploaded_by_id": p.uploaded_by_id,
         "uploaded_at": p.uploaded_at.isoformat() if p.uploaded_at else None,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
     }
 
 
+def _ensure_columns_exist(db: Session) -> None:
+    """Ensure eisbn and copyright_year columns exist on post_prod_ev_projects table."""
+    try:
+        from sqlalchemy import text
+        db.execute(text("ALTER TABLE post_prod_ev_projects ADD COLUMN IF NOT EXISTS eisbn VARCHAR(100);"))
+        db.execute(text("ALTER TABLE post_prod_ev_projects ADD COLUMN IF NOT EXISTS copyright_year VARCHAR(50);"))
+        db.commit()
+    except Exception:
+        db.rollback()
+
+
 def list_projects(db: Session) -> list[dict[str, Any]]:
+    _ensure_columns_exist(db)
     rows = (
         db.query(EvProject)
         .filter(EvProject.is_deleted.is_(False))
@@ -36,6 +51,7 @@ def list_projects(db: Session) -> list[dict[str, Any]]:
 
 
 def get_project_by_id(db: Session, project_id: int) -> Optional[dict[str, Any]]:
+    _ensure_columns_exist(db)
     p = (
         db.query(EvProject)
         .filter(EvProject.id == project_id, EvProject.is_deleted.is_(False))
@@ -63,7 +79,16 @@ def create_project(
     total_files: int,
     user_id: Optional[int],
     assignee: Optional[str] = None,
+    eisbn: Optional[str] = None,
+    copyright_year: Optional[str] = None,
 ) -> dict[str, Any]:
+    _ensure_columns_exist(db)
+    # Purge any old soft-deleted project records matching folder_name or project_name
+    db.query(EvProject).filter(
+        (EvProject.folder_name == folder_name) | (EvProject.project_name == project_name),
+        EvProject.is_deleted.is_(True),
+    ).delete(synchronize_session=False)
+
     now = datetime.utcnow()
     project = EvProject(
         client=client,
@@ -74,6 +99,8 @@ def create_project(
         total_files=total_files,
         status="uploaded",
         assignee=assignee,
+        eisbn=eisbn,
+        copyright_year=copyright_year,
         uploaded_by_id=user_id,
         uploaded_at=now,
         updated_at=now,
@@ -89,9 +116,12 @@ def update_project(
     project_id: int,
     *,
     assignee: Optional[str] = None,
+    eisbn: Optional[str] = None,
+    copyright_year: Optional[str] = None,
     user_id: Optional[int] = None,
     username: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
+    _ensure_columns_exist(db)
     p = (
         db.query(EvProject)
         .filter(EvProject.id == project_id, EvProject.is_deleted.is_(False))
@@ -108,13 +138,113 @@ def update_project(
                 changed_by_username=username,
                 old_assignee=p.assignee,
                 new_assignee=target_val,
+                result_type="assignee_change",
                 created_at=datetime.utcnow(),
             )
             db.add(history)
             p.assignee = target_val
+    if eisbn is not None:
+        p.eisbn = eisbn.strip() if eisbn.strip() else None
+    if copyright_year is not None:
+        p.copyright_year = copyright_year.strip() if copyright_year.strip() else None
     db.commit()
     db.refresh(p)
     return _serialize(p)
+
+
+def save_validation_run(
+    db: Session,
+    *,
+    folder_name: str,
+    validation_result: dict[str, Any],
+    user_id: Optional[int] = None,
+    username: Optional[str] = None,
+) -> None:
+    """Save a full validation run snapshot as JSON to disk and record execution in DB."""
+    import json
+    import os
+    from .upload_service import UPLOAD_DIR
+
+    p = get_project_by_folder(db, folder_name)
+    if p is None:
+        return
+
+    # Update project status fields
+    files = validation_result.get("files", []) if isinstance(validation_result, dict) else []
+    total_issues = sum(
+        f.get("result", {}).get("issues_count", 0) for f in files if isinstance(f, dict)
+    )
+    val_status = "pass" if total_issues == 0 else "fail"
+    p.validation_status = val_status
+    p.status = "validated" if val_status == "pass" else "failed"
+
+    # Determine assignee slug for filename: {assignee_name}_{timestamp}.json
+    raw_assignee = (p.assignee or username or "unassigned").strip().replace(" ", "_")
+    timestamp_str = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    val_filename = f"{raw_assignee}_{timestamp_str}.json"
+
+    # Ensure project validations folder exists on disk
+    val_dir = os.path.join(UPLOAD_DIR, folder_name, "validations")
+    os.makedirs(val_dir, exist_ok=True)
+
+    # Save JSON file on disk
+    val_file_path = os.path.join(val_dir, val_filename)
+    with open(val_file_path, "w", encoding="utf-8") as f:
+        json.dump(validation_result, f, indent=2)
+
+    p.latest_validation_file = val_filename
+
+    history = EvHistory(
+        project_id=p.id,
+        changed_by_id=user_id,
+        changed_by_username=username,
+        old_assignee=p.assignee,
+        new_assignee=p.assignee,
+        result_type="validation",
+        created_at=datetime.utcnow(),
+    )
+    db.add(history)
+    db.commit()
+
+
+def get_latest_validation_run(
+    db: Session,
+    folder_name: str,
+) -> Optional[dict[str, Any]]:
+    """Retrieve the latest stored validation result payload from disk."""
+    import glob
+    import json
+    import os
+    from .upload_service import UPLOAD_DIR
+
+    p = get_project_by_folder(db, folder_name)
+    if p is None:
+        return None
+
+    val_dir = os.path.join(UPLOAD_DIR, folder_name, "validations")
+
+    # Fast path: read the file specified in latest_validation_file column
+    if p.latest_validation_file:
+        file_path = os.path.join(val_dir, p.latest_validation_file)
+        if os.path.isfile(file_path):
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+
+    # Fallback: find newest *.json file under validations directory
+    pattern = os.path.join(val_dir, "*.json")
+    files = glob.glob(pattern)
+    if not files:
+        return None
+
+    files.sort(key=os.path.getmtime, reverse=True)
+    try:
+        with open(files[0], "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
 
 
 def update_validation_status(

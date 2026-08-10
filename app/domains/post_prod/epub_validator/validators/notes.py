@@ -10,7 +10,7 @@ import re
 
 from bs4 import BeautifulSoup
 
-from ...engine.registry import rule
+from ..engine.registry import rule
 
 
 _FN_HREF_RE = re.compile(r"#(fn[a-z]*[-_]?[\w-]+)$", re.IGNORECASE)

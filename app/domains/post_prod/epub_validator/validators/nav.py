@@ -2,7 +2,7 @@ import re
 
 from bs4 import BeautifulSoup
 
-from ....engine.registry import rule
+from ..engine.registry import rule
 from ._common import find_opf, read_text
 
 # Case-insensitive, tolerates "Halftitle", "Half title", "Half-title".
@@ -12,7 +12,7 @@ _AUTHOR_AND_RE = re.compile(r"\band\b", re.IGNORECASE)
 
 
 @rule("ASP-NAV-001")
-def validate_front_matter_present(file_details):
+def validate_front_matter_present(file_details, rule_config=None):
     """NAV must contain a "Front Matter" section (or epub:type='frontmatter')."""
     text = read_text(file_details["full_path"])
     soup = BeautifulSoup(text, "html.parser")
@@ -41,7 +41,7 @@ def validate_front_matter_present(file_details):
 
 
 @rule("ASP-NAV-002")
-def validate_no_halftitle_word(file_details):
+def validate_no_halftitle_word(file_details, rule_config=None):
     """The words 'Half title', 'Half-title', 'Halftitle' should not appear
     in nav.xhtml or toc.ncx (source, not just displayed text).
     """
@@ -109,5 +109,48 @@ def validate_author_separator(book_details):
                 "message": f"Could not parse NCX: {e}",
                 "category": "Warning",
             })
+
+    return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("NAV001")
+def validate_nav_xhtml(file_details, rule_config=None):
+    file_path = file_details["full_path"]
+    issues = []
+
+    with open(file_path, "r", encoding="utf-8") as f:
+        soup = BeautifulSoup(f.read(), "html.parser")
+
+    nav = soup.find("nav", attrs={"epub:type": "toc"})
+    if not nav:
+        issues.append({
+            "rule_name": "Missing TOC Nav",
+            "type": "missing_toc_nav",
+            "message": "nav.xhtml is missing <nav epub:type='toc'> element",
+            "category": "Error",
+        })
+
+    ol = nav.find("ol") if nav else None
+    if not ol:
+        issues.append({
+            "rule_name": "Missing Main OL",
+            "type": "missing_main_ol",
+            "message": "TOC nav is missing main <ol> list",
+            "category": "Error",
+        })
+
+    if nav:
+        links = nav.find_all("a")
+        for link in links:
+            text = link.get_text(strip=True)
+            line_num = getattr(link, "sourceline", None)
+            if not text:
+                issues.append({
+                    "rule_name": "Empty Nav Link",
+                    "type": "empty_nav_link",
+                    "message": f"{f'Line {line_num}: ' if line_num else ''}Nav link text is empty",
+                    "category": "Error",
+                    "line_number": line_num,
+                })
 
     return {"issues_count": len(issues), "issues": issues}

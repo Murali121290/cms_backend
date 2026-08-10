@@ -29,12 +29,15 @@ class EvProject(Base):
     # EPUB metadata
     epub_path = Column(Text, nullable=False)              # abs path to extracted epub/
     total_files = Column(Integer, nullable=False, default=0)
+    eisbn = Column(String(100), nullable=True)            # optional eISBN
+    copyright_year = Column(String(50), nullable=True)    # optional copyright year
 
     # Lifecycle status
     # "uploaded" → "validated" | "failed"
     status = Column(String(50), nullable=False, default="uploaded")
     # "pass" | "fail" | null (null means never validated)
     validation_status = Column(String(50), nullable=True)
+    latest_validation_file = Column(String(255), nullable=True)
     # Assignee username (free string, mirrors WC pattern)
     assignee = Column(String(255), nullable=True)
 
@@ -52,7 +55,7 @@ class EvProject(Base):
 
 
 class EvHistory(Base):
-    """Assignee change history for post_prod_ev_projects."""
+    """Assignee change & validation execution history for post_prod_ev_projects."""
 
     __tablename__ = "post_prod_ev_history"
 
@@ -69,7 +72,9 @@ class EvHistory(Base):
     changed_by_username = Column(String(255), nullable=True)
     old_assignee = Column(String(255), nullable=True)
     new_assignee = Column(String(255), nullable=True)
+    result_type = Column(String(50), nullable=False, default="assignee_change")  # "assignee_change" | "validation"
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     project = relationship("EvProject", foreign_keys=[project_id])
     changed_by = relationship("User", foreign_keys=[changed_by_id])
+

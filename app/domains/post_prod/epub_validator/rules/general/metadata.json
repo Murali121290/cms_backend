@@ -2,15 +2,15 @@
   "rules": [
     {
       "id": "META001",
-      "name": "OPF: required Dublin Core metadata + dcterms:modified + cover meta",
+      "name": "Required Metadata Check",
       "scope": "book",
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "META002",
-      "name": "OPF: accessibility metadata (schema:accessibility* set)",
+      "name": "Accessibility Metadata Check",
       "scope": "book",
-      "enabled": true
+      "enabled": false
     }
   ]
 }

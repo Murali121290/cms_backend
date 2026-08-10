@@ -26,11 +26,18 @@ from .services.upload_service import process_upload, get_extract_files, UPLOAD_D
 from .services.validate_service import validate_epub as _validate_epub_legacy
 from .engine.runner import validate_epub as _validate_epub_v2
 from .services import ev_projects_db
+from .services.export_config import get_export_filename
 from .services.pdf_service import find_pdf_page, render_pdf_page, get_chapter_pdf
 from .services.ace_service import (
     run_ace,
     get_cached_report as get_cached_ace_report,
     html_report_dir as ace_html_report_dir,
+    get_ace_report_zip_path,
+)
+
+from .services.epubcheck_service import (
+    run_epubcheck_report,
+    get_cached_epubcheck_report,
 )
 
 
@@ -54,7 +61,6 @@ def check_post_prod_access(user=Depends(get_current_user_from_cookie)):
 router = APIRouter(
     prefix="/post-prod/epub-validator",
     tags=["EPUB Validator"],
-    dependencies=[Depends(check_post_prod_access)],
 )
 
 
@@ -99,11 +105,20 @@ async def create_project(
     client: str = Form(...),
     client_code: str = Form(""),
     project_name: str = Form(...),
+    eisbn: Optional[str] = Form(None),
+    copyright_year: Optional[str] = Form(None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     user=Depends(get_current_user_from_cookie),
 ):
-    """Create a new EV project by uploading a ZIP (epub + pdf)."""
+    # Check if an active (non-deleted) project with the same name already exists
+    existing = ev_projects_db.get_project_by_folder(db, project_name.strip())
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{project_name.strip()} already present"
+        )
+
     result = await process_upload(
         file,
         db=db,
@@ -125,12 +140,16 @@ async def create_project(
         epub_path=result["epub_extract_path"],
         total_files=result.get("total_files", 0),
         user_id=user.id if user else None,
+        eisbn=eisbn,
+        copyright_year=copyright_year,
     )
     return {"message": "Project created successfully", "project": project}
 
 
 class ProjectUpdateRequest(BaseModel):
     assignee: Optional[str] = None
+    eisbn: Optional[str] = None
+    copyright_year: Optional[str] = None
 
 
 @router.put("/projects/{project_id}")
@@ -144,6 +163,8 @@ def update_project(
         db,
         project_id,
         assignee=body.assignee,
+        eisbn=body.eisbn,
+        copyright_year=body.copyright_year,
         user_id=getattr(user, "id", None),
         username=getattr(user, "username", None) or getattr(user, "user_name", None),
     )
@@ -212,7 +233,16 @@ async def save_file_content(
     if not target.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     await asyncio.to_thread(target.write_text, body.content, encoding="utf-8")
+
+    # Repack extracted files into .epub zip and save to output directory
+    try:
+        from .services.repack_service import repack_epub
+        await asyncio.to_thread(repack_epub, folder_name)
+    except Exception:
+        pass
+
     return {"status": True, "message": "File saved"}
+
 
 
 @router.get("/pdf/{folder_name}")
@@ -288,42 +318,96 @@ def get_ace_html_report(folder_name: str, path: str = "report.html"):
     return FileResponse(target)
 
 
+@router.get("/ace/{folder_name}/download-zip")
+def download_ace_report_zip(folder_name: str):
+    zip_path = get_ace_report_zip_path(folder_name)
+    return FileResponse(
+        zip_path,
+        filename=f"{folder_name}-ace-report.zip",
+        media_type="application/zip",
+    )
+
+
+
+@router.get("/epubcheck/{folder_name}")
+def get_epubcheck_report_route(folder_name: str):
+    report = get_cached_epubcheck_report(folder_name)
+    if report is None:
+        return {"status": False, "message": "No EPUBCheck report yet."}
+    return {"status": True, "report": report}
+
+
+@router.post("/epubcheck/{folder_name}")
+async def run_epubcheck_report_route(
+    folder_name: str,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    report = await asyncio.to_thread(run_epubcheck_report, folder_name)
+    return {"status": True, "report": report}
+
+
+@router.get("/validate/{filename}/latest")
+def get_latest_validation(
+    filename: str,
+    db: Session = Depends(get_db),
+):
+    """Retrieve the latest stored validation result payload for a project."""
+    run = ev_projects_db.get_latest_validation_run(db, filename)
+    if not run:
+        return {"status": False, "message": "No validation run history found."}
+    return run
+
+
 @router.get("/validate/{filename}")
 async def validate_file(
     filename: str,
     file: str = Query(None),
-    customer: str = Query(None, description="Override auto-detected customer (v2 engine only)"),
+    customer: str = Query(None, description="Override customer / client_code (v2 engine only)"),
     db: Session = Depends(get_db),
     user=Depends(get_current_user_from_cookie),
 ):
     epub_folder = os.path.join(UPLOAD_DIR, filename, "extract", "epub")
     engine = _select_validate_epub()
+
+    # Automatically resolve customer/client_code from DB if not provided
+    resolved_customer = customer
+    if not resolved_customer:
+        proj = ev_projects_db.get_project_by_folder(db, filename)
+        if proj:
+            resolved_customer = proj.client_code or proj.client
+
     kwargs = {"epub_folder": epub_folder, "folder_name": filename, "target_file": file}
     if engine is _validate_epub_v2:
-        kwargs["customer"] = customer
+        kwargs["customer"] = resolved_customer
     result = await asyncio.to_thread(engine, **kwargs)
 
-    files = result.get("files", []) if isinstance(result, dict) else []
-    total_issues = sum(
-        f.get("result", {}).get("issues_count", 0) for f in files if isinstance(f, dict)
-    )
-    validation_status = "pass" if total_issues == 0 else "fail"
-    ev_projects_db.update_validation_status(
-        db, folder_name=filename, validation_status=validation_status
-    )
+
+    user_id = getattr(user, "id", None)
+    username = getattr(user, "username", None) or getattr(user, "user_name", None)
+
+    # Save full validation run snapshot to history table
+    if isinstance(result, dict):
+        ev_projects_db.save_validation_run(
+            db,
+            folder_name=filename,
+            validation_result=result,
+            user_id=user_id,
+            username=username,
+        )
     return result
 
 
 @router.post("/export/{folder_name}")
-async def export_epub(folder_name: str, body: ExportRequest):
-    if body.failed > 0:
-        raise HTTPException(
-            status_code=400,
-            detail="There are validation errors. Please fix them before downloading.",
-        )
-
-    if (body.warnings > 0 or body.pending > 0) and not body.force:
+async def export_epub(
+    folder_name: str,
+    body: ExportRequest,
+    db: Session = Depends(get_db),
+):
+    if (body.failed > 0 or body.warnings > 0 or body.pending > 0) and not body.force:
         parts: list[str] = []
+        if body.failed > 0:
+            parts.append(f"{body.failed} error{'s' if body.failed != 1 else ''}")
         if body.warnings > 0:
             parts.append(f"{body.warnings} warning{'s' if body.warnings != 1 else ''}")
         if body.pending > 0:
@@ -331,7 +415,7 @@ async def export_epub(folder_name: str, body: ExportRequest):
         return {
             "status": "confirm",
             "message": (
-                f"There {'are' if len(parts) > 1 else 'is'} {' and '.join(parts)}."
+                f"There {'are' if len(parts) > 1 or 'error' in parts[0] or 'warning' in parts[0] else 'is'} {' and '.join(parts)}."
                 " Proceed with export anyway?"
             ),
         }
@@ -339,6 +423,15 @@ async def export_epub(folder_name: str, body: ExportRequest):
     epub_dir = (Path(UPLOAD_DIR) / folder_name / "extract" / "epub").resolve()
     if not epub_dir.is_dir():
         raise HTTPException(status_code=404, detail="EPUB source directory not found.")
+
+    # Get export filename based on customer configuration
+    project = ev_projects_db.get_project_by_folder(db, folder_name)
+    if project and project.eisbn:
+        filename = f"{project.eisbn}_EPUB.epub"
+    elif project and project.project_name:
+        filename = f"{project.project_name}_EPUB.epub"
+    else:
+        filename = f"{folder_name}_EPUB.epub"
 
     def _build_zip() -> bytes:
         buf = io.BytesIO()
@@ -363,5 +456,5 @@ async def export_epub(folder_name: str, body: ExportRequest):
     return Response(
         content=zip_bytes,
         media_type="application/epub+zip",
-        headers={"Content-Disposition": f'attachment; filename="{folder_name}.epub"'},
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

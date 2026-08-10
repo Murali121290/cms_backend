@@ -3,8 +3,8 @@ import re
 
 from bs4 import BeautifulSoup
 
-from ...engine.registry import rule
-from ...services import book_bundle_service as _bundle
+from ..engine.registry import rule
+from ..services import book_bundle_service as _bundle
 from ._common import _cli_issue_to_web, _drop_pass_issues
 
 
@@ -13,7 +13,7 @@ def validate_pdf_style_parity(book_details):
     """Book-scope: StyleComparator — paragraph splitting, italic/case/colour
     parity, alignment, indentation, blockquote, images, page count, etc.
     """
-    from ...vendor.pdf_epub_validator import StyleComparator
+    from ..vendor.pdf_epub_validator import StyleComparator
 
     folder = book_details["folder_name"]
     bundle = _bundle.get_epub_bundle(folder)

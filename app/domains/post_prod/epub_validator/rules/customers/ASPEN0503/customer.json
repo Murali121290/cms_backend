@@ -9,13 +9,15 @@
     {
       "id": "ASP-COV-002",
       "name": "Aspen: Cover height is 1100 pixels",
-      "scope": "book",
+      "target_path": "OEBPS/images",
+      "file_name_pattern": "cover.jpg",
       "enabled": true
     },
     {
       "id": "ASP-COV-003",
       "name": "Aspen: Cover image is 300 DPI",
-      "scope": "book",
+      "target_path": "OEBPS/images",
+      "file_name_pattern": "cover.jpg",
       "enabled": true
     },
     {
@@ -24,14 +26,12 @@
       "scope": "book",
       "enabled": true
     },
-
     {
       "id": "ASP-FILE-001",
       "name": "Aspen: EPUB file named '<eISBN>_EPUB.epub'",
       "scope": "book",
-      "enabled": true
+      "enabled": false
     },
-
     {
       "id": "ASP-NAV-001",
       "name": "Aspen: Front Matter present in NAV",
@@ -43,7 +43,10 @@
       "id": "ASP-NAV-002",
       "name": "Aspen: 'Half title' word forbidden in NAV/NCX",
       "target_path": "",
-      "file_name_pattern": ["nav.xhtml", "toc.ncx"],
+      "file_name_pattern": [
+        "nav.xhtml",
+        "toc.ncx"
+      ],
       "enabled": true
     },
     {
@@ -52,111 +55,203 @@
       "scope": "book",
       "enabled": true
     },
-
     {
       "id": "ASP-COPY-001",
       "name": "Aspen: Copyright page must not contain 'Printed'",
       "target_path": "OEBPS/xhtml",
-      "file_name_pattern": ["*Copyright*.xhtml", "*copyright*.xhtml"],
+      "file_name_pattern": [
+        "*Copyright*.xhtml",
+        "*copyright*.xhtml"
+      ],
       "enabled": true
     },
     {
       "id": "ASP-COPY-002",
       "name": "Aspen: Copyright page must contain the eISBN",
       "target_path": "OEBPS/xhtml",
-      "file_name_pattern": ["*Copyright*.xhtml", "*copyright*.xhtml"],
+      "file_name_pattern": [
+        "*Copyright*.xhtml",
+        "*copyright*.xhtml"
+      ],
       "enabled": true
     },
-
     {
       "id": "ASP-META-001",
       "name": "Aspen: OPF dc:publisher = 'Aspen Publishing'",
-      "scope": "book",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
       "enabled": true
     },
     {
       "id": "ASP-META-002",
-      "name": "Aspen: OPF dc:rights matches Aspen copyright pattern",
-      "scope": "book",
+      "name": "Aspen: OPF dc:rights match Copyright string",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
       "enabled": true
     },
     {
       "id": "ASP-META-003",
-      "name": "Aspen: OPF certifier = 'S4Carlisle Publishing Services'",
-      "scope": "book",
+      "name": "Aspen: OPF a11y:certifiedBy = 'S4Carlisle Publishing Services'",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
       "enabled": true
     },
     {
       "id": "ASP-META-004",
-      "name": "Aspen: OPF dcterms:conformsTo = EPUB Accessibility 1.1 - WCAG 2.2 Level AA",
-      "scope": "book",
+      "name": "Aspen: OPF dcterms:conformsTo = 'EPUB Accessibility 1.1 - WCAG 2.2 Level AA'",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
       "enabled": true
     },
     {
       "id": "ASP-META-005",
-      "name": "Aspen: <dc:title> is Title Case / Upper Lower Case",
-      "scope": "book",
+      "name": "Aspen: OPF dc:title is Title Case",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
       "enabled": true
     },
     {
       "id": "ASP-META-006",
-      "name": "Aspen: <dc:date> is the current calendar year",
-      "scope": "book",
+      "name": "Aspen: OPF dc:date is current year",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
       "enabled": true
     },
     {
       "id": "ASP-META-007",
-      "name": "Aspen: <dc:format> page count matches PDF page count",
-      "scope": "book",
+      "name": "Aspen: OPF dc:format page count matches PDF",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
       "enabled": true
     },
     {
       "id": "ASP-META-008",
-      "name": "Aspen: <dc:source> is a urn:isbn Print ISBN + source-of=pagination refines it",
-      "scope": "book",
+      "name": "Aspen: OPF dc:type = 'Text'",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
       "enabled": true
     },
     {
       "id": "ASP-META-009",
-      "name": "Aspen: <dc:identifier> id follows 'Epub-<eISBN>' convention",
-      "scope": "book",
+      "name": "Aspen: OPF dc:identifier id attribute starts with 'Epub-'",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
       "enabled": true
     },
     {
       "id": "ASP-META-010",
-      "name": "Aspen: <meta name=\"cover\" content=\"...\"/> resolves to a manifest item",
-      "scope": "book",
+      "name": "Aspen: OPF dc:language = 'en' or 'en-US'",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
       "enabled": true
     },
     {
       "id": "ASP-META-011",
-      "name": "Aspen: accessibilityHazard contains noSoundHazard, noMotionSimulationHazard, and none",
-      "scope": "book",
+      "name": "Aspen: OPF accessibilityHazard contains 'none' or no-hazard declarations",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
       "enabled": true
     },
     {
       "id": "ASP-META-012",
-      "name": "Aspen: accessMode contains both 'textual' and 'visual'",
-      "scope": "book",
+      "name": "Aspen: OPF accessMode contains both 'textual' and 'visual'",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
       "enabled": true
     },
     {
       "id": "ASP-META-013",
-      "name": "Aspen: accessModeSufficient contains both 'textual,visual' and 'textual'",
-      "scope": "book",
+      "name": "Aspen: OPF accessModeSufficient contains both 'textual,visual' and 'textual'",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
       "enabled": true
     },
     {
       "id": "ASP-META-014",
       "name": "Aspen: <dc:creator> count matches Front Matter author count",
-      "scope": "book",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
       "enabled": true
     },
-
+    {
+      "id": "ASP-META-015",
+      "name": "Aspen: OPF dcterms:modified ISO timestamp check",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true
+    },
+    {
+      "id": "ASP-META-016",
+      "name": "Aspen: OPF accessibilityFeature required values check",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true
+    },
+    {
+      "id": "ASP-META-017",
+      "name": "Aspen: OPF accessibilitySummary present check",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true
+    },
+    {
+      "id": "ASP-META-018",
+      "name": "Aspen: OPF meta name='cover' content resolves to manifest item id",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true
+    },
+    {
+      "id": "ASP-META-019",
+      "name": "Aspen: OPF source-of=pagination refines tag check",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true
+    },
     {
       "id": "ASP-IMG-001",
       "name": "Aspen: All manifest images must be JPEG",
-      "scope": "book",
+      "target_path": "OEBPS/images",
+      "file_name_pattern": "*.*",
+      "allowed_extensions": [".jpg", ".jpeg"],
       "enabled": true
     },
     {
@@ -169,7 +264,8 @@
     {
       "id": "ASP-IMG-003",
       "name": "Aspen: No image over 4,000,000 pixels (W×H)",
-      "scope": "book",
+      "target_path": "OEBPS/images",
+      "file_name_pattern": "*.jpg",
       "enabled": true
     },
     {
@@ -182,7 +278,8 @@
     {
       "id": "ASP-IMG-005",
       "name": "Aspen: All body images must be at least 300 DPI",
-      "scope": "book",
+      "target_path": "OEBPS/images",
+      "file_name_pattern": "*.jpg",
       "enabled": true
     },
     {
@@ -192,14 +289,12 @@
       "file_name_pattern": "*.xhtml",
       "enabled": true
     },
-
     {
       "id": "ASP-PAGE-001",
       "name": "Aspen: Page ruler (pagebreak marker) present for every non-blank PDF page",
       "scope": "book",
       "enabled": true
     },
-
     {
       "id": "ASP-LINK-001",
       "name": "Aspen: Page citations (e.g. 'See page 23') are linked to the page id",
@@ -219,5 +314,8 @@
       "scope": "book",
       "enabled": true
     }
-  ]
+  ],
+  "export": {
+    "filename_format": "{eisbn}_EPUB.epub"
+  }
 }

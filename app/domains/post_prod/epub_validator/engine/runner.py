@@ -28,7 +28,8 @@ def validate_epub(
     `customer` (the customer key or None) — support the Phase 3 UI without
     breaking older clients.
     """
-    resolved_customer = customer if customer is not None else detector.detect(epub_folder)
+    resolved_customer = customer if customer else detector.detect(epub_folder)
+
 
     report = {
         "folder": folder_name,
@@ -131,8 +132,9 @@ def validate_epub(
                     "relative_path": relative_path,
                     "folder_name": folder_name,
                     "epub_root": epub_folder,
+                    "file_path": relative_path,
                 }
-                result = function(file_details)
+                result = function(file_details, rule_config=rule)
                 report["files"].append(_entry(
                     rule, function, target_path, file_pattern,
                     file_details, result, origin, customer_tag,

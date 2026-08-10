@@ -38,9 +38,10 @@ async def process_upload(
     if not file.filename.endswith(".zip"):
         return {"status": False, "message": "Only ZIP files are allowed"}
 
-    filename = Path(file.filename).stem  # e.g. "mybook"
+    folder_name = project_name.strip() if project_name and project_name.strip() else Path(file.filename).stem
+    filename = Path(file.filename).stem  # e.g. "mybook" (for expected inner epub/pdf filenames if matching stem)
 
-    upload_folder = os.path.join(UPLOAD_DIR, filename)
+    upload_folder = os.path.join(UPLOAD_DIR, folder_name)
     zip_path = os.path.join(upload_folder, file.filename)
 
     os.makedirs(upload_folder, exist_ok=True)
@@ -49,32 +50,37 @@ async def process_upload(
     with open(zip_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    expected_epub = f"{filename}.epub"
-    expected_pdf = f"{filename}.pdf"
-
     extract_folder = os.path.join(upload_folder, EXTRACT_DIR)
 
-    # Reject duplicate uploads
+    # If re-uploading an existing or soft-deleted project folder, clear old extracted files
     if os.path.exists(extract_folder):
-        return {"status": False, "message": f"{filename} already present"}
+        shutil.rmtree(extract_folder, ignore_errors=True)
 
     try:
         with zipfile.ZipFile(zip_path, "r") as zip_ref:
             file_list = zip_ref.namelist()
 
-            epub_found = any(os.path.basename(n) == expected_epub for n in file_list)
-            pdf_found = any(os.path.basename(n) == expected_pdf for n in file_list)
+            epub_names = [n for n in file_list if n.lower().endswith(".epub") and not os.path.basename(n).startswith("._")]
+            pdf_names = [n for n in file_list if n.lower().endswith(".pdf") and not os.path.basename(n).startswith("._")]
 
-            if not epub_found or not pdf_found:
+            if not epub_names or not pdf_names:
                 return {
                     "status": False,
-                    "message": f"ZIP must contain {expected_epub} and {expected_pdf}",
+                    "message": "ZIP must contain at least one .epub and one .pdf file",
                 }
+
+            epub_entry = epub_names[0]
+            pdf_entry = pdf_names[0]
 
             os.makedirs(extract_folder)
             zip_ref.extractall(extract_folder)
 
-        epub_path = os.path.join(extract_folder, expected_epub)
+        actual_epub_file = os.path.basename(epub_entry)
+        actual_pdf_file = os.path.basename(pdf_entry)
+
+        epub_path = os.path.join(extract_folder, actual_epub_file)
+        pdf_path = os.path.join(extract_folder, actual_pdf_file)
+
         epub_extract_path = os.path.join(extract_folder, "epub")
         os.makedirs(epub_extract_path, exist_ok=True)
 
@@ -86,11 +92,11 @@ async def process_upload(
         return {
             "status": True,
             "message": "Upload successful",
-            "folder_name": filename,
+            "folder_name": folder_name,
             "extract_folder": extract_folder,
             "epub_extract_path": epub_extract_path,
             "epub_file": epub_path,
-            "pdf_file": os.path.join(extract_folder, expected_pdf),
+            "pdf_file": pdf_path,
             "total_files": total_files,
         }
 
@@ -122,3 +128,40 @@ def get_extract_files(folder_name: str) -> dict:
         "total_files": len(files_data),
         "files": files_data,
     }
+
+
+def find_epub_file_path(folder_name: str) -> Path:
+    """Locate the .epub file for a project dynamically.
+
+    Repacks extracted workspace files (`extract/epub/`) if present so validators
+    always inspect the latest edited XHTML files and outputs copy is updated.
+    """
+    upload_root = Path(UPLOAD_DIR)
+    folder_path = upload_root / folder_name
+    extract_path = folder_path / EXTRACT_DIR
+    unzipped_epub_dir = extract_path / "epub"
+
+    if unzipped_epub_dir.is_dir():
+        from .repack_service import repack_epub
+        return repack_epub(folder_name)
+
+    # 1. Exact match
+    exact = extract_path / f"{folder_name}.epub"
+    if exact.is_file():
+        return exact
+
+    # 2. Any .epub file in extract directory
+    if extract_path.is_dir():
+        for p in extract_path.glob("*.epub"):
+            if not p.name.startswith("._"):
+                return p
+
+    # 3. Any .epub file under folder directory recursively
+    if folder_path.is_dir():
+        for p in folder_path.rglob("*.epub"):
+            if not p.name.startswith("._"):
+                return p
+
+    return exact
+
+

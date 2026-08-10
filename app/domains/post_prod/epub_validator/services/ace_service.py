@@ -48,7 +48,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from .upload_service import EXTRACT_DIR, UPLOAD_DIR
+from .upload_service import EXTRACT_DIR, UPLOAD_DIR, find_epub_file_path
 
 
 ACE_MISSING_MESSAGE = (
@@ -75,7 +75,7 @@ def _find_ace_binary() -> str | None:
 
 def _epub_path(folder_name: str) -> Path:
     """Path to the .epub file that was uploaded for this folder."""
-    return Path(UPLOAD_DIR) / folder_name / EXTRACT_DIR / f"{folder_name}.epub"
+    return find_epub_file_path(folder_name)
 
 
 def _cache_dir(folder_name: str) -> Path:
@@ -95,7 +95,21 @@ def html_report_dir(folder_name: str) -> Path:
     return _cache_dir(folder_name) / "html"
 
 
+def get_ace_report_zip_path(folder_name: str) -> Path:
+    """Return path to zipped ACE report containing report.html, report.json & assets."""
+    h_dir = html_report_dir(folder_name)
+    if not h_dir.is_dir():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Accessibility report HTML directory not found for '{folder_name}'.",
+        )
+    zip_out = _cache_dir(folder_name) / f"{folder_name}-ace-report.zip"
+    shutil.make_archive(str(zip_out.with_suffix("")), "zip", str(h_dir))
+    return zip_out
+
+
 def get_cached_report(folder_name: str) -> dict[str, Any] | None:
+
     """Return the last normalised report for this book, or None if never run."""
     cache = _cache_path(folder_name)
     if not cache.is_file():

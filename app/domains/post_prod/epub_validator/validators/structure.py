@@ -3,13 +3,13 @@ import re
 
 from bs4 import BeautifulSoup
 
-from ...engine.registry import rule
+from ..engine.registry import rule
 
 
 @rule("STRUCT001")
 def validate_epub_layout(book_details):
-    """Root of extracted EPUB must contain META-INF/, OEBPS/ (or an equivalent
-    content folder), and a mimetype file with value 'application/epub+zip'.
+    """Root of extracted EPUB must contain META-INF/, OEBPS/, and a mimetype file
+    with value 'application/epub+zip'.
     """
     epub = book_details["epub_path"]
     issues = []
@@ -22,20 +22,13 @@ def validate_epub_layout(book_details):
             "category": "Error",
         })
 
-    # OEBPS is the conventional content folder, but the spec only requires that
-    # container.xml points at some content folder — accept anything with an OPF.
     oebps = os.path.join(epub, "OEBPS")
     if not os.path.isdir(oebps):
-        has_opf_anywhere = any(
-            f.lower().endswith(".opf")
-            for _root, _dirs, files in os.walk(epub) for f in files
-        )
-        if not has_opf_anywhere:
-            issues.append({
-                "type": "missing_oebps",
-                "message": "Required folder 'OEBPS/' (or an equivalent content folder with an .opf file) is missing.",
-                "category": "Error",
-            })
+        issues.append({
+            "type": "missing_oebps",
+            "message": "Required folder 'OEBPS/' is missing at EPUB root.",
+            "category": "Error",
+        })
 
     mimetype_path = os.path.join(epub, "mimetype")
     if not os.path.isfile(mimetype_path):
@@ -130,82 +123,102 @@ def _find_opf(epub: str) -> str | None:
 
 @rule("STRUCT003")
 def validate_oebps_contents(book_details):
-    """OEBPS/ (or content folder) must contain the expected artefacts:
-    an .opf file, toc.ncx, nav.xhtml, at least one CSS, an xhtml folder, and
-    an images folder.
+    """OEBPS/ must contain the exact expected artefacts:
+    - [ISBN].opf (e.g. 9798894107530.opf)
+    - toc.ncx
+    - nav.xhtml
+    - css/ folder and css/epub.css file
+    - xhtml/ folder
+    - images/ folder
     """
     epub = book_details["epub_path"]
+    folder_name = book_details.get("folder_name", "")
     issues = []
 
+    oebps = os.path.join(epub, "OEBPS")
+    if not os.path.isdir(oebps):
+        # Already reported by STRUCT001, but guard here
+        return {"issues_count": 0, "issues": []}
+
+    # 1. Check OPF file & ISBN naming (e.g. OEBPS/9798894107530.opf or any 10-13 digit ISBN .opf)
     opf_path = _find_opf(epub)
     if opf_path is None:
         issues.append({
             "type": "missing_opf",
-            "message": "No .opf file found anywhere under the EPUB.",
+            "message": "No .opf file found in OEBPS/.",
             "category": "Error",
+            "file_path": "OEBPS",
         })
-        content_root = os.path.join(epub, "OEBPS")
     else:
-        content_root = os.path.dirname(opf_path)
+        opf_filename = os.path.basename(opf_path)
+        # Verify OPF filename matches 10/13-digit ISBN pattern or folder_name
+        isbn_pattern = re.compile(r"^\d{10,13}\.opf$", re.IGNORECASE)
+        if not isbn_pattern.match(opf_filename) and not (folder_name and opf_filename.lower() == f"{folder_name.lower()}.opf"):
+            issues.append({
+                "type": "opf_name_not_isbn",
+                "message": f"OPF file should be named '[ISBN].opf' (found '{opf_filename}').",
+                "category": "Warning",
+                "file_path": f"OEBPS/{opf_filename}",
+            })
 
-    def _exists_named(name: str) -> bool:
-        for root, _dirs, files in os.walk(content_root):
-            for f in files:
-                if f.lower() == name.lower():
-                    return True
-        return False
-
-    def _has_folder(name: str) -> bool:
-        path = os.path.join(content_root, name)
-        return os.path.isdir(path)
-
-    def _has_any_ext(ext: str) -> bool:
-        for root, _dirs, files in os.walk(content_root):
-            for f in files:
-                if f.lower().endswith(ext.lower()):
-                    return True
-        return False
-
-    if not _exists_named("toc.ncx"):
+    # 2. Check OEBPS/toc.ncx
+    toc_ncx = os.path.join(oebps, "toc.ncx")
+    if not os.path.isfile(toc_ncx):
         issues.append({
             "type": "missing_ncx",
-            "message": "Content folder is missing 'toc.ncx'.",
+            "message": "Required file 'OEBPS/toc.ncx' is missing.",
             "category": "Warning",
+            "file_path": "OEBPS/toc.ncx",
         })
 
-    if not _exists_named("nav.xhtml"):
+    # 3. Check OEBPS/nav.xhtml
+    nav_xhtml = os.path.join(oebps, "nav.xhtml")
+    if not os.path.isfile(nav_xhtml):
         issues.append({
             "type": "missing_nav",
-            "message": "Content folder is missing 'nav.xhtml'.",
+            "message": "Required file 'OEBPS/nav.xhtml' is missing.",
             "category": "Error",
+            "file_path": "OEBPS/nav.xhtml",
         })
 
-    if not _has_any_ext(".css"):
+    # 4. Check OEBPS/css folder & OEBPS/css/epub.css
+    css_dir = os.path.join(oebps, "css")
+    if not os.path.isdir(css_dir):
         issues.append({
-            "type": "missing_css",
-            "message": "Content folder has no .css stylesheet.",
-            "category": "Warning",
+            "type": "missing_css_folder",
+            "message": "Required folder 'OEBPS/css/' is missing.",
+            "category": "Error",
+            "file_path": "OEBPS/css",
         })
+    else:
+        epub_css = os.path.join(css_dir, "epub.css")
+        if not os.path.isfile(epub_css):
+            issues.append({
+                "type": "missing_epub_css",
+                "message": "Required stylesheet 'OEBPS/css/epub.css' is missing.",
+                "category": "Error",
+                "file_path": "OEBPS/css/epub.css",
+            })
 
-    if not _has_folder("xhtml") and not _has_any_ext(".xhtml"):
+    # 5. Check OEBPS/xhtml folder
+    xhtml_dir = os.path.join(oebps, "xhtml")
+    if not os.path.isdir(xhtml_dir):
         issues.append({
             "type": "missing_xhtml_folder",
-            "message": "Content folder has no 'xhtml/' folder and no .xhtml files.",
+            "message": "Required folder 'OEBPS/xhtml/' is missing.",
             "category": "Error",
+            "file_path": "OEBPS/xhtml",
         })
 
-    if not _has_folder("images"):
-        # Some EPUBs use 'Images', 'IMG', etc. — warn, don't error.
-        has_alt_image_dir = any(
-            d.lower() in ("images", "image", "img", "media", "assets")
-            for d in os.listdir(content_root) if os.path.isdir(os.path.join(content_root, d))
-        )
-        if not has_alt_image_dir:
-            issues.append({
-                "type": "missing_images_folder",
-                "message": "Content folder has no 'images/' folder.",
-                "category": "Warning",
-            })
+    # 6. Check OEBPS/images folder
+    images_dir = os.path.join(oebps, "images")
+    if not os.path.isdir(images_dir):
+        issues.append({
+            "type": "missing_images_folder",
+            "message": "Required folder 'OEBPS/images/' is missing.",
+            "category": "Warning",
+            "file_path": "OEBPS/images",
+        })
 
     return {"issues_count": len(issues), "issues": issues}
 

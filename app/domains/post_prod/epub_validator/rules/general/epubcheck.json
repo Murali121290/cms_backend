@@ -2,9 +2,8 @@
   "rules": [
     {
       "id": "EXTEPUB001",
-      "name": "IDPF EpubCheck (external CLI) validation",
-      "scope": "book",
-      "enabled": true
+      "name": "EPUBCheck Validation",
+      "enabled": false
     }
   ]
 }
