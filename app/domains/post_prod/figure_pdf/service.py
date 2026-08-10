@@ -32,7 +32,7 @@ from app import models
 from app.domains.projects.models import Project
 from app.utils.timezone import now_ist_naive
 
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".tif", ".tiff", ".bmp"}
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".tif", ".tiff", ".bmp", ".eps"}
 DOCX_EXTS = {".docx", ".docm"}
 
 # US Letter, portrait — points (1 pt = 1/72 in)
