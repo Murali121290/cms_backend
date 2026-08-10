@@ -12,8 +12,8 @@ from alembic import op
 from sqlalchemy.engine.reflection import Inspector
 
 
-revision: str = "0024_add_source_file_id_to_files"
-down_revision: Union[str, Sequence[str], None] = "0023_rename_role_to_designation"
+revision: str = "0026_add_source_file_id_to_files"
+down_revision: Union[str, Sequence[str], None] = "0025_add_ev_eisbn_copyright_year"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

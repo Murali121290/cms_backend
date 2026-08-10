@@ -3296,10 +3296,17 @@ def api_v2_backup_list(
         )
         
     chapter_no = chapter_name.split("-")[-1]
-    chapter = db.query(models.ChapterInfo).filter(
-        models.ChapterInfo.project == project.code,
-        (models.ChapterInfo.chapters == chapter_no) | (models.ChapterInfo.chapters == str(int(chapter_no)))
-    ).first()
+    chapter = None
+    if chapter_name.startswith("chapter-") and chapter_no.isdigit():
+        chapter = db.query(models.ChapterInfo).filter(
+            models.ChapterInfo.project == project.code,
+            models.ChapterInfo.id == int(chapter_no)
+        ).first()
+    if not chapter:
+        chapter = db.query(models.ChapterInfo).filter(
+            models.ChapterInfo.project == project.code,
+            (models.ChapterInfo.chapters == chapter_no) | (models.ChapterInfo.chapters == str(int(chapter_no)))
+        ).first()
     
     if not chapter:
         return {"files": []}
@@ -3362,10 +3369,17 @@ def api_v2_backup_list(
         )
         
     chapter_no = chapter_name.split("-")[-1]
-    chapter = db.query(models.ChapterInfo).filter(
-        models.ChapterInfo.project == project.code,
-        (models.ChapterInfo.chapters == chapter_no) | (models.ChapterInfo.chapters == str(int(chapter_no)))
-    ).first()
+    chapter = None
+    if chapter_name.startswith("chapter-") and chapter_no.isdigit():
+        chapter = db.query(models.ChapterInfo).filter(
+            models.ChapterInfo.project == project.code,
+            models.ChapterInfo.id == int(chapter_no)
+        ).first()
+    if not chapter:
+        chapter = db.query(models.ChapterInfo).filter(
+            models.ChapterInfo.project == project.code,
+            (models.ChapterInfo.chapters == chapter_no) | (models.ChapterInfo.chapters == str(int(chapter_no)))
+        ).first()
     
     if not chapter:
         return {"files": []}

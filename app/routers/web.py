@@ -261,11 +261,18 @@ def _resolve_chapter(
         padded_no = raw
 
     q = db.query(models.ChapterInfo).filter(models.ChapterInfo.project == project.code)
-    chapter = q.filter(
-        (models.ChapterInfo.chapters == raw)
-        | (models.ChapterInfo.chapters == chapter_no)
-        | (models.ChapterInfo.chapters == padded_no)
-    ).first()
+    
+    chapter = None
+    if chapter_name and chapter_name.startswith("chapter-") and raw.isdigit():
+        chapter = q.filter(models.ChapterInfo.id == int(raw)).first()
+        
+    if not chapter:
+        chapter = q.filter(
+            (models.ChapterInfo.chapters == raw)
+            | (models.ChapterInfo.chapters == chapter_no)
+            | (models.ChapterInfo.chapters == padded_no)
+        ).first()
+
     if chapter or not chapter_no.isdigit():
         return chapter
 
