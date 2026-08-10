@@ -445,14 +445,14 @@ export function PostProdEpubValidatorFiles() {
     const total = allFiles.length;
     let passed = 0, warnings = 0, failed = 0, pending = 0;
     for (const f of allFiles) {
-      const agg = fileIssues.get(f.file_name);
-      if (agg === undefined) { pending++; continue; }
-      if (agg.errors === 0 && agg.warnings === 0) passed++;
-      else if (agg.errors > 0) failed++;
-      else warnings++;
+      const status = getFileStatus(f.file_name);
+      if (status === 'passed') passed++;
+      else if (status === 'failed') failed++;
+      else if (status === 'warning') warnings++;
+      else pending++;
     }
     return { total, passed, warnings, failed, pending };
-  }, [allBackendFiles, fileIssues]);
+  }, [allBackendFiles, fileIssues, validationData]);
 
   const hasValidated = validationData !== null;
 
@@ -1413,7 +1413,7 @@ export function PostProdEpubValidatorFiles() {
                           : 'bg-primary/10 text-primary/80',
                       )}
                     >
-                      {xhtmlFiles.length}
+                      {visibleXhtmlFiles.length}
                     </span>
                   </button>
 
@@ -1436,7 +1436,7 @@ export function PostProdEpubValidatorFiles() {
                           : 'bg-violet-500/10 text-violet-600/80 dark:text-violet-400/80',
                       )}
                     >
-                      {cssFiles.length}
+                      {visibleCssFiles.length}
                     </span>
                   </button>
 
@@ -1459,7 +1459,7 @@ export function PostProdEpubValidatorFiles() {
                           : 'bg-emerald-500/10 text-emerald-600/80 dark:text-emerald-400/80',
                       )}
                     >
-                      {imageFiles.length}
+                      {visibleImageFiles.length}
                     </span>
                   </button>
 
@@ -1482,7 +1482,7 @@ export function PostProdEpubValidatorFiles() {
                           : 'bg-sky-500/10 text-sky-600/80 dark:text-sky-400/80',
                       )}
                     >
-                      {otherFiles.length}
+                      {visibleOtherFiles.length}
                     </span>
                   </button>
 
@@ -1687,7 +1687,7 @@ export function PostProdEpubValidatorFiles() {
                         <div className="flex items-center gap-2 flex-wrap">
                           <FileCode2 className="w-4 h-4 text-sky-500" />
                           <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
-                            Other Files
+                            Metadata Files
                           </h2>
                           <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleOtherFiles.length})</span>
                         </div>
