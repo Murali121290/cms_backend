@@ -76,7 +76,12 @@ PREF_DOI_THRESHOLD = 0.5   # prefer DOI source if similarity >= this
 import json
 import atexit
 
-REF_CACHE_FILE = Path("ref_cache.json")
+try:
+    from app.core.paths import REF_CACHE_PATH
+    REF_CACHE_FILE = REF_CACHE_PATH
+except ImportError:
+    REF_CACHE_FILE = Path("ref_cache.json")
+
 REF_CACHE = {
     "crossref_doi": {},
     "crossref_search": {},
@@ -96,18 +101,22 @@ def load_ref_cache():
     global REF_CACHE
     if REF_CACHE_FILE.exists():
         try:
-            with open(REF_CACHE_FILE, 'r', encoding='utf-8') as f:
-                loaded = json.load(f)
-                # merge to ensure all keys exist
-                for k in REF_CACHE:
-                    if k in loaded:
-                        REF_CACHE[k] = loaded[k]
-            print(f"[Info] Loaded ref_cache.json with {sum(len(v) for v in REF_CACHE.values())} entries.")
+            if REF_CACHE_FILE.stat().st_size > 0:
+                with open(REF_CACHE_FILE, 'r', encoding='utf-8') as f:
+                    loaded = json.load(f)
+                    # merge to ensure all keys exist
+                    for k in REF_CACHE:
+                        if k in loaded:
+                            REF_CACHE[k] = loaded[k]
+                print(f"[Info] Loaded ref_cache.json with {sum(len(v) for v in REF_CACHE.values())} entries.")
+            else:
+                print("[Info] ref_cache.json is empty. Initializing empty cache.")
         except Exception as e:
             print(f"[Warning] Failed to load ref_cache.json: {e}")
 
 def save_ref_cache():
     try:
+        REF_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(REF_CACHE_FILE, 'w', encoding='utf-8') as f:
             json.dump(REF_CACHE, f, indent=2)
         print("[Info] Saved ref_cache.json.")
