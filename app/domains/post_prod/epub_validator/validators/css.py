@@ -12,7 +12,7 @@ _CSS_CACHE: dict[str, list] = {}
 
 @rule("CSS001")
 @rule("CSS002")
-def validate_css_w3c(file_details):
+def validate_css_w3c(file_details, rule_config=None):
     """CSS001 (xhtml → linked css) and CSS002 (direct .css) share one function.
 
     Registering it twice matches the legacy behaviour where two rule entries

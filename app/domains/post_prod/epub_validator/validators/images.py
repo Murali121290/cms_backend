@@ -25,27 +25,39 @@ def _iter_manifest_images(opf_path: str):
 
 
 @rule("ASP-IMG-001")
-def validate_images_are_jpeg(book_details):
-    """All images referenced in the OPF manifest must be JPEG."""
-    epub = book_details["epub_path"]
-    opf = find_opf(epub)
-    if not opf:
+def validate_images_are_jpeg(file_details, rule_config=None):
+    """All image files in OEBPS/images must match allowed extensions."""
+    file_path = file_details.get("file_path", "")
+    full_path = file_details.get("full_path", "")
+
+    ext = os.path.splitext(file_path)[1].lower()
+
+    # Get allowed extensions from rule config (default to .jpg, .jpeg)
+    allowed_extensions = []
+    if rule_config and "allowed_extensions" in rule_config:
+        allowed_extensions = [e.lower() for e in rule_config["allowed_extensions"]]
+    if not allowed_extensions:
+        allowed_extensions = [".jpg", ".jpeg"]
+
+    # Skip non-image files
+    image_extensions = {".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp", ".tiff", ".bmp"}
+    if ext not in image_extensions:
         return {"issues_count": 0, "issues": []}
-    issues = []
-    for href, media in _iter_manifest_images(opf):
-        ext = os.path.splitext(href)[1].lower()
-        if ext not in _ALLOWED_EXT or (media and media not in ("image/jpeg", "image/jpg")):
-            issues.append({
-                "type": "image_not_jpeg",
-                "message": f"Image '{href}' is not JPEG (media-type='{media or 'unknown'}')",
-                "category": "Error",
-                "file_path": href,
-            })
-    return {"issues_count": len(issues), "issues": issues}
+
+    # Check if the image file has an allowed extension
+    if ext not in allowed_extensions:
+        return {"issues_count": 1, "issues": [{
+            "type": "image_not_allowed_extension",
+            "message": f"Image '{file_path}' has extension {ext}; allowed: {', '.join(allowed_extensions)}",
+            "category": "Error",
+            "file_path": file_path,
+        }]}
+
+    return {"issues_count": 0, "issues": []}
 
 
 @rule("ASP-IMG-002")
-def validate_no_empty_alt(file_details):
+def validate_no_empty_alt(file_details, rule_config=None):
     """<img> elements must not have empty alt attributes."""
     with open(file_details["full_path"], "r", encoding="utf-8") as f:
         soup = BeautifulSoup(f.read(), "html.parser")
@@ -64,26 +76,34 @@ def validate_no_empty_alt(file_details):
 
 
 @rule("ASP-IMG-003")
-def validate_image_dimensions(book_details):
-    """No image may exceed 4,000,000 pixels (width × height)."""
-    epub = book_details["epub_path"]
+def validate_image_dimensions(file_details, rule_config=None):
+    """No image may exceed 4,000,000 pixels (width × height), except cover.jpg."""
+    file_path = file_details.get("file_path", "")
+    full_path = file_details.get("full_path", "")
+
+    # Skip cover.jpg
+    if os.path.basename(file_path).lower() == "cover.jpg":
+        return {"issues_count": 0, "issues": []}
+
+    if not full_path or not os.path.exists(full_path):
+        return {"issues_count": 0, "issues": []}
+
     issues = []
-    for path in glob.glob(os.path.join(epub, "**", "*.jp*g"), recursive=True):
-        try:
-            with Image.open(path) as img:
-                w, h = img.size
-        except Exception:
-            continue
-        if w * h > _MAX_PIXELS:
-            issues.append({
-                "type": "image_over_pixel_budget",
-                "message": (
-                    f"Image {os.path.relpath(path, epub)} is {w}x{h} = "
-                    f"{w*h:,} pixels; max allowed is {_MAX_PIXELS:,}"
-                ),
-                "category": "Warning",
-                "file_path": os.path.relpath(path, epub),
-            })
+    try:
+        with Image.open(full_path) as img:
+            w, h = img.size
+            if w * h > _MAX_PIXELS:
+                issues.append({
+                    "type": "image_over_pixel_budget",
+                    "message": (
+                        f"Image is {w}x{h} = {w*h:,} pixels; max allowed is {_MAX_PIXELS:,}"
+                    ),
+                    "category": "Warning",
+                    "file_path": file_path,
+                })
+    except Exception:
+        pass
+
     return {"issues_count": len(issues), "issues": issues}
 
 
@@ -91,42 +111,43 @@ _EXPECTED_BODY_DPI = 300
 
 
 @rule("ASP-IMG-005")
-def validate_body_image_dpi(book_details):
+def validate_body_image_dpi(file_details, rule_config=None):
     """Every body image (not just the cover) must be at least 300 DPI."""
-    epub = book_details["epub_path"]
+    file_path = file_details.get("file_path", "")
+    full_path = file_details.get("full_path", "")
+
+    # Skip cover image - ASP-COV-003 handles cover DPI check
+    if os.path.basename(file_path).lower() == "cover.jpg":
+        return {"issues_count": 0, "issues": []}
+
+    if not full_path or not os.path.exists(full_path):
+        return {"issues_count": 0, "issues": []}
+
     issues = []
-    cover_names = {"cover.jpg", "cover.jpeg", "cover.png"}
-    for path in glob.glob(os.path.join(epub, "**", "*.*"), recursive=True):
-        base = os.path.basename(path).lower()
-        if not base.endswith((".jpg", ".jpeg", ".png")):
-            continue
-        if base in cover_names:
-            continue  # ASP-COV-003 owns the cover check
-        try:
-            with Image.open(path) as img:
-                dpi = img.info.get("dpi")
-        except Exception:  # noqa: BLE001
-            continue
-        if dpi is None:
-            issues.append({
-                "type": "image_dpi_unknown",
-                "message": f"Image {os.path.relpath(path, epub)} has no DPI metadata.",
-                "category": "Warning",
-                "file_path": os.path.relpath(path, epub),
-            })
-            continue
-        x_dpi, y_dpi = dpi[0], dpi[1]
-        if round(x_dpi) < _EXPECTED_BODY_DPI or round(y_dpi) < _EXPECTED_BODY_DPI:
-            issues.append({
-                "type": "image_low_dpi",
-                "message": (
-                    f"Image {os.path.relpath(path, epub)} is {x_dpi}x{y_dpi} DPI; "
-                    f"required minimum is {_EXPECTED_BODY_DPI} DPI."
-                ),
-                "category": "Error",
-                "file_path": os.path.relpath(path, epub),
-            })
-    return {"issues_count": len(issues), "issues": issues}
+    try:
+        with Image.open(full_path) as img:
+            dpi = img.info.get("dpi")
+    except Exception:
+        return {"issues_count": 0, "issues": []}
+
+    if dpi is None:
+        return {"issues_count": 1, "issues": [{
+            "type": "image_dpi_unknown",
+            "message": "Image has no DPI metadata.",
+            "category": "Warning",
+            "file_path": file_path,
+        }]}
+
+    x_dpi, y_dpi = dpi[0], dpi[1]
+    if round(x_dpi) < _EXPECTED_BODY_DPI or round(y_dpi) < _EXPECTED_BODY_DPI:
+        return {"issues_count": 1, "issues": [{
+            "type": "image_low_dpi",
+            "message": f"Image is {x_dpi}x{y_dpi} DPI; required minimum is {_EXPECTED_BODY_DPI} DPI.",
+            "category": "Error",
+            "file_path": file_path,
+        }]}
+
+    return {"issues_count": 0, "issues": []}
 
 
 _CENTER_HINTS_RE = re.compile(r"(?:^|\s)(center|centered|center-image|figure-center|img-center)(?:\s|$)", re.IGNORECASE)
@@ -152,7 +173,7 @@ def _css_center_declarations(epub: str) -> set[str]:
 
 
 @rule("ASP-IMG-006")
-def validate_image_center_alignment(file_details):
+def validate_image_center_alignment(file_details, rule_config=None):
     """Body <img> elements should be center-aligned via a class or inline style,
     or wrapped in a <figure>/<div> whose class centers content.
     """
@@ -212,7 +233,7 @@ _LONG_ALT_THRESHOLD = 150
 
 
 @rule("ASP-IMG-004")
-def validate_long_alt_hidden(file_details):
+def validate_long_alt_hidden(file_details, rule_config=None):
     """Long alt text (>150 chars) should be moved to a hidden container
     (aria-describedby, <figcaption class='hidden'>, or details/summary) rather
     than crammed into the alt attribute.

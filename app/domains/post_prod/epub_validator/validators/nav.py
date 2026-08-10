@@ -12,7 +12,7 @@ _AUTHOR_AND_RE = re.compile(r"\band\b", re.IGNORECASE)
 
 
 @rule("ASP-NAV-001")
-def validate_front_matter_present(file_details):
+def validate_front_matter_present(file_details, rule_config=None):
     """NAV must contain a "Front Matter" section (or epub:type='frontmatter')."""
     text = read_text(file_details["full_path"])
     soup = BeautifulSoup(text, "html.parser")
@@ -41,7 +41,7 @@ def validate_front_matter_present(file_details):
 
 
 @rule("ASP-NAV-002")
-def validate_no_halftitle_word(file_details):
+def validate_no_halftitle_word(file_details, rule_config=None):
     """The words 'Half title', 'Half-title', 'Halftitle' should not appear
     in nav.xhtml or toc.ncx (source, not just displayed text).
     """
@@ -114,7 +114,7 @@ def validate_author_separator(book_details):
 
 
 @rule("NAV001")
-def validate_nav_xhtml(file_details):
+def validate_nav_xhtml(file_details, rule_config=None):
     file_path = file_details["full_path"]
     issues = []
 

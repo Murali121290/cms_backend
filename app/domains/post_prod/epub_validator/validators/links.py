@@ -66,7 +66,7 @@ def _page_id_for_number(page_num: str, existing: set[str]) -> str | None:
 
 
 @rule("ASP-LINK-001")
-def validate_page_citation_links(file_details):
+def validate_page_citation_links(file_details, rule_config=None):
     """Text like '(See page 23)' should be inside an <a href='...#page_23'>."""
     with open(file_details["full_path"], "r", encoding="utf-8") as f:
         soup = BeautifulSoup(f.read(), "html.parser")
@@ -242,7 +242,7 @@ from ..services import book_bundle_service as _bundle
 
 
 @rule("URL001")
-def validate_internal_xhtml_links(file_details):
+def validate_internal_xhtml_links(file_details, rule_config=None):
     file_path = file_details["full_path"]
     issues = []
 
@@ -291,7 +291,7 @@ def validate_internal_xhtml_links(file_details):
 
 
 @rule("URL002")
-def validate_external_urls(file_details):
+def validate_external_urls(file_details, rule_config=None):
     file_path = file_details["full_path"]
     with open(file_path, "r", encoding="utf-8") as f:
         soup = BeautifulSoup(f.read(), "html.parser")
@@ -319,7 +319,7 @@ def validate_external_urls(file_details):
 
 
 @rule("URL003")
-def validate_url_text_match(file_details):
+def validate_url_text_match(file_details, rule_config=None):
     file_path = file_details["full_path"]
     issues = []
     with open(file_path, "r", encoding="utf-8") as f:

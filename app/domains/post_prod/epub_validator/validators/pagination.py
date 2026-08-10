@@ -139,7 +139,7 @@ def validate_page_number_sequence(book_details):
 
 
 @rule("PAGE001")
-def validate_pagebreak_positions(file_details):
+def validate_pagebreak_positions(file_details, rule_config=None):
     file_path = file_details["full_path"]
     issues = []
 

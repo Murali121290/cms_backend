@@ -249,7 +249,9 @@
     {
       "id": "ASP-IMG-001",
       "name": "Aspen: All manifest images must be JPEG",
-      "scope": "book",
+      "target_path": "OEBPS/images",
+      "file_name_pattern": "*.*",
+      "allowed_extensions": [".jpg", ".jpeg"],
       "enabled": true
     },
     {
@@ -262,7 +264,8 @@
     {
       "id": "ASP-IMG-003",
       "name": "Aspen: No image over 4,000,000 pixels (W×H)",
-      "scope": "book",
+      "target_path": "OEBPS/images",
+      "file_name_pattern": "*.jpg",
       "enabled": true
     },
     {
@@ -275,7 +278,8 @@
     {
       "id": "ASP-IMG-005",
       "name": "Aspen: All body images must be at least 300 DPI",
-      "scope": "book",
+      "target_path": "OEBPS/images",
+      "file_name_pattern": "*.jpg",
       "enabled": true
     },
     {

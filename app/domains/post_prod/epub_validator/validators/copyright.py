@@ -33,7 +33,7 @@ def _extract_eisbn(epub_folder: str) -> str | None:
 
 
 @rule("ASP-COPY-001")
-def validate_no_printed_word(file_details):
+def validate_no_printed_word(file_details, rule_config=None):
     """The word "Printed" must not appear on the copyright page."""
     with open(file_details["full_path"], "r", encoding="utf-8") as f:
         text = f.read()
@@ -53,7 +53,7 @@ def validate_no_printed_word(file_details):
 
 
 @rule("ASP-COPY-002")
-def validate_eisbn_in_copyright(file_details):
+def validate_eisbn_in_copyright(file_details, rule_config=None):
     """The eISBN (from OPF) must appear on the copyright page."""
     eisbn = _extract_eisbn(file_details["epub_root"])
     if not eisbn:

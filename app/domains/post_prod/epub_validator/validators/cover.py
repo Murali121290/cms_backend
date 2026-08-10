@@ -19,7 +19,7 @@ def _find_cover(epub_folder: str) -> str | None:
 
 
 @rule("ASP-COV-001")
-def validate_cover_filename(target):
+def validate_cover_filename(target, rule_config=None):
     """Cover image must be named cover.jpg."""
     if isinstance(target, dict) and target.get("epub_path"):
         epub = target["epub_path"]
@@ -64,7 +64,7 @@ def validate_cover_filename(target):
 
 
 @rule("ASP-COV-002")
-def validate_cover_height(target):
+def validate_cover_height(target, rule_config=None):
     """Cover height must be 1100 pixels."""
     if isinstance(target, dict) and target.get("file_path"):
         cover = target["file_path"]
@@ -99,7 +99,7 @@ def validate_cover_height(target):
 
 
 @rule("ASP-COV-003")
-def validate_cover_dpi(target):
+def validate_cover_dpi(target, rule_config=None):
     """Cover must be 300 DPI."""
     if isinstance(target, dict) and target.get("file_path"):
         cover = target["file_path"]

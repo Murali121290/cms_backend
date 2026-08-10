@@ -132,8 +132,9 @@ def validate_epub(
                     "relative_path": relative_path,
                     "folder_name": folder_name,
                     "epub_root": epub_folder,
+                    "file_path": relative_path,
                 }
-                result = function(file_details)
+                result = function(file_details, rule_config=rule)
                 report["files"].append(_entry(
                     rule, function, target_path, file_pattern,
                     file_details, result, origin, customer_tag,

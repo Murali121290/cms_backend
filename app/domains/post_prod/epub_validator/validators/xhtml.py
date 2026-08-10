@@ -16,7 +16,7 @@ _PARSER = etree.XMLParser(recover=True, resolve_entities=False, load_dtd=False, 
 
 
 @rule("XHTML001")
-def validate_xhtml_well_formed(file_details):
+def validate_xhtml_well_formed(file_details, rule_config=None):
     """xhtml files must be well-formed XML (parses without errors)."""
     file_path = file_details["full_path"]
     issues = []

@@ -49,7 +49,7 @@ def _find_line(lines: list[str], search_str: str) -> int | None:
 
 
 @rule("ASP-META-001")
-def validate_publisher_is_aspen(book_details):
+def validate_publisher_is_aspen(book_details, rule_config=None):
     """<dc:publisher> must equal 'Aspen Publishing'."""
     soup, opf_path, lines = _load_opf_info(book_details)
     if soup is None:
@@ -78,7 +78,7 @@ def validate_publisher_is_aspen(book_details):
 
 
 @rule("ASP-META-002")
-def validate_rights_string(book_details):
+def validate_rights_string(book_details, rule_config=None):
     """<dc:rights> must match 'Copyright © YYYY Aspen Publishing. All Rights Reserved.'."""
     soup, opf_path, lines = _load_opf_info(book_details)
     if soup is None:
@@ -105,7 +105,7 @@ def validate_rights_string(book_details):
 
 
 @rule("ASP-META-003")
-def validate_certifier(book_details):
+def validate_certifier(book_details, rule_config=None):
     """<meta property="a11y:certifiedBy"> must be 'S4Carlisle Publishing Services'."""
     soup, opf_path, lines = _load_opf_info(book_details)
     if soup is None:
@@ -130,7 +130,7 @@ def validate_certifier(book_details):
 
 
 @rule("ASP-META-004")
-def validate_conforms_to(book_details):
+def validate_conforms_to(book_details, rule_config=None):
     """<meta property="dcterms:conformsTo"> must equal
     'EPUB Accessibility 1.1 - WCAG 2.2 Level AA'.
     """
@@ -187,7 +187,7 @@ def _is_title_case(value: str) -> bool:
 
 
 @rule("ASP-META-005")
-def validate_title_case(book_details):
+def validate_title_case(book_details, rule_config=None):
     """<dc:title> should be Title Case / Upper Lower Case (not ALL CAPS)."""
     soup, opf_path, lines = _load_opf_info(book_details)
     if soup is None:
@@ -224,7 +224,7 @@ def validate_title_case(book_details):
 
 
 @rule("ASP-META-006")
-def validate_date_is_current_year(book_details):
+def validate_date_is_current_year(book_details, rule_config=None):
     """<dc:date> should be the current calendar year."""
     soup, opf_path, lines = _load_opf_info(book_details)
     if soup is None:
@@ -304,7 +304,7 @@ def _get_pdf_page_count(book_details: dict) -> int | None:
 
 
 @rule("ASP-META-007")
-def validate_format_matches_pdf_pages(book_details):
+def validate_format_matches_pdf_pages(book_details, rule_config=None):
     """<dc:format> page count must match the PDF page count."""
     soup, opf_path, lines = _load_opf_info(book_details)
     if soup is None:
@@ -347,7 +347,7 @@ def validate_format_matches_pdf_pages(book_details):
 
 
 @rule("ASP-META-008")
-def validate_source_print_isbn(book_details):
+def validate_source_print_isbn(book_details, rule_config=None):
     """<dc:source> should be present with urn:isbn print ISBN."""
     soup, opf_path, lines = _load_opf_info(book_details)
     if soup is None:
@@ -386,7 +386,7 @@ def validate_source_print_isbn(book_details):
 
 
 @rule("ASP-META-019")
-def validate_source_of_pagination_refines(book_details):
+def validate_source_of_pagination_refines(book_details, rule_config=None):
     """<meta refines="#src-id" property="source-of">pagination</meta> must refine <dc:source>."""
     soup, opf_path, lines = _load_opf_info(book_details)
     if soup is None:
@@ -412,7 +412,7 @@ _EISBN_TAG = re.compile(r"(\d{10,13})")
 
 
 @rule("ASP-META-009")
-def validate_identifier_convention(book_details):
+def validate_identifier_convention(book_details, rule_config=None):
     """<dc:identifier> should have id 'Epub-<eISBN>' and contain the eISBN number."""
     soup, opf_path, lines = _load_opf_info(book_details)
     if soup is None:
@@ -455,7 +455,7 @@ def validate_identifier_convention(book_details):
 
 
 @rule("ASP-META-010")
-def validate_dc_language_is_en(book_details):
+def validate_dc_language_is_en(book_details, rule_config=None):
     """<dc:language> must equal 'en' or 'en-US'."""
     soup, opf_path, lines = _load_opf_info(book_details)
     if soup is None:
@@ -480,7 +480,7 @@ def validate_dc_language_is_en(book_details):
 
 
 @rule("ASP-META-018")
-def validate_cover_manifest_link(book_details):
+def validate_cover_manifest_link(book_details, rule_config=None):
     """<meta name="cover"> content must resolve to an item id in the manifest."""
     soup, opf_path, lines = _load_opf_info(book_details)
     if soup is None:
@@ -510,7 +510,7 @@ _REQUIRED_ACCESS_MODE_SUFFICIENT = {"textual,visual", "textual"}
 
 
 @rule("ASP-META-011")
-def validate_accessibility_hazards_strict(book_details):
+def validate_accessibility_hazards_strict(book_details, rule_config=None):
     """Aspen requires the three specific hazard values: noSoundHazard,
     noMotionSimulationHazard, and none.
     """
@@ -537,7 +537,7 @@ def validate_accessibility_hazards_strict(book_details):
 
 
 @rule("ASP-META-012")
-def validate_access_modes_strict(book_details):
+def validate_access_modes_strict(book_details, rule_config=None):
     """Aspen requires both accessMode=textual AND accessMode=visual."""
     soup, opf_path, lines = _load_opf_info(book_details)
     if soup is None:
@@ -562,7 +562,7 @@ def validate_access_modes_strict(book_details):
 
 
 @rule("ASP-META-013")
-def validate_access_mode_sufficient_strict(book_details):
+def validate_access_mode_sufficient_strict(book_details, rule_config=None):
     """Aspen requires both accessModeSufficient values: 'textual,visual' and 'textual'."""
     soup, opf_path, lines = _load_opf_info(book_details)
     if soup is None:
@@ -636,7 +636,7 @@ def _count_authors_in_front_matter(path: str) -> int | None:
 
 
 @rule("ASP-META-014")
-def validate_creator_count_matches_front_matter(book_details):
+def validate_creator_count_matches_front_matter(book_details, rule_config=None):
     """Count of <dc:creator> in OPF should equal number of authors on the Front Matter page."""
     epub = book_details.get("epub_path") or book_details.get("epub_root") or ""
     if not epub and "full_path" in book_details:
@@ -688,7 +688,7 @@ def validate_creator_count_matches_front_matter(book_details):
 
 
 @rule("ASP-META-015")
-def validate_dcterms_modified(book_details):
+def validate_dcterms_modified(book_details, rule_config=None):
     """<meta property="dcterms:modified"> must be present with valid ISO timestamp."""
     soup, opf_path, lines = _load_opf_info(book_details)
     if soup is None:
@@ -722,7 +722,7 @@ _A11Y_FEATURE_MAP = {
 
 
 @rule("ASP-META-016")
-def validate_accessibility_features(book_details):
+def validate_accessibility_features(book_details, rule_config=None):
     """Aspen requires accessibilityFeature: displayTransformability, printPageNumbers, readingOrder, structuralNavigation, tableOfContents."""
     soup, opf_path, lines = _load_opf_info(book_details)
     if soup is None:
@@ -748,7 +748,7 @@ def validate_accessibility_features(book_details):
 
 
 @rule("ASP-META-017")
-def validate_accessibility_summary_present(book_details):
+def validate_accessibility_summary_present(book_details, rule_config=None):
     """<meta property="schema:accessibilitySummary"> must be present and non-empty."""
     soup, opf_path, lines = _load_opf_info(book_details)
     if soup is None:
