@@ -96,7 +96,7 @@ def validate_rights_string(book_details, rule_config=None):
         return {"issues_count": 1, "issues": [{
             "type": "rights_pattern_mismatch",
             "message": (
-                f"<dc:rights> does not match expected Aspen pattern. Found: '{value}'"
+                f"<dc:rights> does not match expected Aspen pattern 'Copyright © YYYY Aspen Publishing. All Rights Reserved.'. Found: '{value}'"
             ),
             "category": "Error",
             "line_number": _find_line(lines, "dc:rights"),

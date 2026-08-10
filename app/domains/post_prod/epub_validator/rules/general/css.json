@@ -11,7 +11,7 @@
       "id": "CSS002",
       "name": "CSS File Validation",
       "target_path": "OEBPS/css",
-      "enabled": false,
+      "enabled": true,
       "file_name_pattern": "*.css"
     }
   ]

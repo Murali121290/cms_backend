@@ -13,13 +13,34 @@ _AUTHOR_AND_RE = re.compile(r"\band\b", re.IGNORECASE)
 
 @rule("ASP-NAV-001")
 def validate_front_matter_present(file_details, rule_config=None):
-    """NAV must contain a "Front Matter" section (or epub:type='frontmatter')."""
+    """NAV must contain both "Cover" and "Front Matter" sections."""
     text = read_text(file_details["full_path"])
     soup = BeautifulSoup(text, "html.parser")
     nav = soup.find("nav", attrs={"epub:type": "toc"}) or soup.find("nav", id="toc")
     if not nav:
         return {"issues_count": 0, "issues": []}
 
+    issues = []
+
+    # Check for Cover
+    has_cover = False
+    for a in nav.find_all("a"):
+        label = a.get_text(strip=True)
+        if label.lower() == "cover":
+            has_cover = True
+            break
+
+    if not has_cover:
+        has_cover = bool(nav.find(attrs={"epub:type": lambda v: v and "cover" in (v or "").lower()}))
+
+    if not has_cover:
+        issues.append({
+            "type": "cover_missing_from_nav",
+            "message": 'NAV does not contain a "Cover" entry',
+            "category": "Warning",
+        })
+
+    # Check for Front Matter
     has_front_matter = False
     for a in nav.find_all("a"):
         label = a.get_text(strip=True)
@@ -31,13 +52,16 @@ def validate_front_matter_present(file_details, rule_config=None):
         # Fallback: any element in the NAV with epub:type frontmatter
         has_front_matter = bool(nav.find(attrs={"epub:type": lambda v: v and "frontmatter" in v}))
 
-    if has_front_matter:
+    if not has_front_matter:
+        issues.append({
+            "type": "front_matter_missing",
+            "message": 'NAV does not contain a "Front Matter" entry',
+            "category": "Warning",
+        })
+
+    if not issues:
         return {"issues_count": 0, "issues": []}
-    return {"issues_count": 1, "issues": [{
-        "type": "front_matter_missing",
-        "message": 'NAV does not contain a "Front Matter" entry',
-        "category": "Warning",
-    }]}
+    return {"issues_count": len(issues), "issues": issues}
 
 
 @rule("ASP-NAV-002")
