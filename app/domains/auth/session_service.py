@@ -45,6 +45,7 @@ def build_user_context(user, *, include_email: bool = False):
         "username": user.username,
         "roles": [role.name for role in user.roles],
         "id": user.id,
+        "team": getattr(user, "team", None),
     }
     if include_email:
         data["email"] = user.email

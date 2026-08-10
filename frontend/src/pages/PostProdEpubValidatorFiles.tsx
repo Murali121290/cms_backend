@@ -1473,7 +1473,7 @@ export function PostProdEpubValidatorFiles() {
                     )}
                   >
                     <FileCode2 className="w-4 h-4 text-sky-500 shrink-0" />
-                    <span>Other Files</span>
+                    <span>Metadata Files</span>
                     <span
                       className={cn(
                         'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold transition-colors',
