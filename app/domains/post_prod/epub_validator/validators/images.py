@@ -60,18 +60,35 @@ def validate_images_are_jpeg(file_details, rule_config=None):
 def validate_no_empty_alt(file_details, rule_config=None):
     """<img> elements must not have empty alt attributes."""
     with open(file_details["full_path"], "r", encoding="utf-8") as f:
-        soup = BeautifulSoup(f.read(), "html.parser")
+        content = f.read()
+
+    soup = BeautifulSoup(content, "html.parser")
+    lines = content.splitlines()
     issues = []
+
     for img in soup.find_all("img"):
         alt = img.get("alt")
         if alt is None or alt.strip() == "":
             src = img.get("src", "")
-            issues.append({
+            line_num = None
+            if hasattr(img, 'sourceline') and img.sourceline:
+                line_num = img.sourceline
+            else:
+                img_str = str(img)
+                for idx, line in enumerate(lines, 1):
+                    if "src=" in line and src in line:
+                        line_num = idx
+                        break
+
+            issue = {
                 "type": "empty_alt_text",
                 "message": f"<img src='{src}'> has empty or missing alt attribute",
                 "category": "Error",
                 "href": src,
-            })
+            }
+            if line_num:
+                issue["line_number"] = line_num
+            issues.append(issue)
     return {"issues_count": len(issues), "issues": issues}
 
 
@@ -239,8 +256,12 @@ def validate_long_alt_hidden(file_details, rule_config=None):
     than crammed into the alt attribute.
     """
     with open(file_details["full_path"], "r", encoding="utf-8") as f:
-        soup = BeautifulSoup(f.read(), "html.parser")
+        content = f.read()
+
+    soup = BeautifulSoup(content, "html.parser")
+    lines = content.splitlines()
     issues = []
+
     for img in soup.find_all("img"):
         alt = (img.get("alt") or "").strip()
         if len(alt) <= _LONG_ALT_THRESHOLD:
@@ -261,7 +282,18 @@ def validate_long_alt_hidden(file_details, rule_config=None):
                 if "hidden" in classes.lower() or "sr-only" in classes or "display:none" in style.replace(" ", ""):
                     continue
         src = img.get("src", "")
-        issues.append({
+
+        line_num = None
+        if hasattr(img, 'sourceline') and img.sourceline:
+            line_num = img.sourceline
+        else:
+            img_str = str(img)
+            for idx, line in enumerate(lines, 1):
+                if "src=" in line and src in line:
+                    line_num = idx
+                    break
+
+        issue = {
             "type": "long_alt_not_hidden",
             "message": (
                 f"<img src='{src}'> has {len(alt)}-char alt text; long descriptions "
@@ -269,5 +301,8 @@ def validate_long_alt_hidden(file_details, rule_config=None):
             ),
             "category": "Warning",
             "href": src,
-        })
+        }
+        if line_num:
+            issue["line_number"] = line_num
+        issues.append(issue)
     return {"issues_count": len(issues), "issues": issues}
