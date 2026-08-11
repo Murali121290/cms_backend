@@ -17,14 +17,24 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Rename post_prod_projects to post_prod_wc_projects
-    op.rename_table('post_prod_projects', 'post_prod_wc_projects')
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    
+    # Rename post_prod_projects to post_prod_wc_projects if table exists
+    if inspector.has_table('post_prod_projects'):
+        op.rename_table('post_prod_projects', 'post_prod_wc_projects')
 
-    # Rename post_prod_chapters to post_prod_wc_chapters
-    op.rename_table('post_prod_chapters', 'post_prod_wc_chapters')
+    # Rename post_prod_chapters to post_prod_wc_chapters if table exists
+    if inspector.has_table('post_prod_chapters'):
+        op.rename_table('post_prod_chapters', 'post_prod_wc_chapters')
 
 
 def downgrade() -> None:
-    # Rename back to original names
-    op.rename_table('post_prod_wc_chapters', 'post_prod_chapters')
-    op.rename_table('post_prod_wc_projects', 'post_prod_projects')
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    
+    # Rename back to original names if table exists
+    if inspector.has_table('post_prod_wc_chapters'):
+        op.rename_table('post_prod_wc_chapters', 'post_prod_chapters')
+    if inspector.has_table('post_prod_wc_projects'):
+        op.rename_table('post_prod_wc_projects', 'post_prod_projects')

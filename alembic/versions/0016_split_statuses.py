@@ -22,16 +22,20 @@ from sqlalchemy.engine.reflection import Inspector
 def upgrade() -> None:
     conn = op.get_bind()
     inspector = Inspector.from_engine(conn)
-    columns = [col['name'] for col in inspector.get_columns('post_prod_chapters')]
-    if 'conversion_status' not in columns:
-        op.add_column('post_prod_chapters', sa.Column('conversion_status', sa.String(length=50), nullable=True, server_default='YTS'))
-        op.add_column('post_prod_chapters', sa.Column('conversion_completed_at', sa.DateTime(), nullable=True))
-        op.add_column('post_prod_chapters', sa.Column('qc_status', sa.String(length=50), nullable=True, server_default='YTS'))
-        op.add_column('post_prod_chapters', sa.Column('qc_completed_at', sa.DateTime(), nullable=True))
+    if inspector.has_table('post_prod_chapters'):
+        columns = [col['name'] for col in inspector.get_columns('post_prod_chapters')]
+        if 'conversion_status' not in columns:
+            op.add_column('post_prod_chapters', sa.Column('conversion_status', sa.String(length=50), nullable=True, server_default='YTS'))
+            op.add_column('post_prod_chapters', sa.Column('conversion_completed_at', sa.DateTime(), nullable=True))
+            op.add_column('post_prod_chapters', sa.Column('qc_status', sa.String(length=50), nullable=True, server_default='YTS'))
+            op.add_column('post_prod_chapters', sa.Column('qc_completed_at', sa.DateTime(), nullable=True))
 
 
 def downgrade() -> None:
-    op.drop_column('post_prod_chapters', 'qc_completed_at')
-    op.drop_column('post_prod_chapters', 'qc_status')
-    op.drop_column('post_prod_chapters', 'conversion_completed_at')
-    op.drop_column('post_prod_chapters', 'conversion_status')
+    conn = op.get_bind()
+    inspector = Inspector.from_engine(conn)
+    if inspector.has_table('post_prod_chapters'):
+        op.drop_column('post_prod_chapters', 'qc_completed_at')
+        op.drop_column('post_prod_chapters', 'qc_status')
+        op.drop_column('post_prod_chapters', 'conversion_completed_at')
+        op.drop_column('post_prod_chapters', 'conversion_status')

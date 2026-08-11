@@ -19,11 +19,20 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # 1. Rename column 'role' to 'designation' in 'users' table
-    op.alter_column('users', 'role', new_column_name='designation')
+    conn = op.get_bind()
+    from sqlalchemy.engine.reflection import Inspector
+    inspector = Inspector.from_engine(conn)
+    columns = {col['name'] for col in inspector.get_columns('users')}
 
-    # 2. Add new 'role' column as nullable String(50)
-    op.add_column('users', sa.Column('role', sa.String(length=50), nullable=True))
+    # 1. Rename column 'role' to 'designation' in 'users' table if role exists and designation does not
+    if 'role' in columns and 'designation' not in columns:
+        op.alter_column('users', 'role', new_column_name='designation')
+        columns.remove('role')
+        columns.add('designation')
+
+    # 2. Add new 'role' column as nullable String(50) if it doesn't exist
+    if 'role' not in columns:
+        op.add_column('users', sa.Column('role', sa.String(length=50), nullable=True))
 
     # 3. Copy existing 'admin' / 'Admin' roles to the new 'role' column
     op.execute("UPDATE users SET role = designation WHERE designation ILIKE 'admin'")

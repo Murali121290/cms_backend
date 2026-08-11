@@ -22,10 +22,14 @@ from sqlalchemy.engine.reflection import Inspector
 def upgrade() -> None:
     conn = op.get_bind()
     inspector = Inspector.from_engine(conn)
-    columns = [col['name'] for col in inspector.get_columns('post_prod_chapters')]
-    if 'size_bytes' not in columns:
-        op.add_column('post_prod_chapters', sa.Column('size_bytes', sa.Integer(), nullable=True))
+    if inspector.has_table('post_prod_chapters'):
+        columns = [col['name'] for col in inspector.get_columns('post_prod_chapters')]
+        if 'size_bytes' not in columns:
+            op.add_column('post_prod_chapters', sa.Column('size_bytes', sa.Integer(), nullable=True))
 
 
 def downgrade() -> None:
-    op.drop_column('post_prod_chapters', 'size_bytes')
+    conn = op.get_bind()
+    inspector = Inspector.from_engine(conn)
+    if inspector.has_table('post_prod_chapters'):
+        op.drop_column('post_prod_chapters', 'size_bytes')
