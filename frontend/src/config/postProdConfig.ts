@@ -27,7 +27,7 @@ export const POST_PROD_SERVICES: PostProdService[] = [
     title: 'Web PDF Processor',
     description: 'Process and enhance Web PDFs with bookmarks, hyperlinks, page setup, cover pages, and publication-ready formatting.',
     icon: 'FileCog',
-    enabled: false,
+    enabled: true,
   },
   {
     id: 'epub-css-matcher',

@@ -124,6 +124,7 @@ from app.domains.workflow.models import (  # noqa: F401
     ChapterInfo,
 )
 from app.domains.post_prod.epub_validator.models import EvProject, EvHistory  # noqa: F401
+from app.domains.post_prod.web_pdf_processor.models import WebPdfProject, WebPdfHistory  # noqa: F401
 
 Chapter = ChapterInfo
 
