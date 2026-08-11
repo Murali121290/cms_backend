@@ -88,16 +88,27 @@ def get_or_build_preview(
     if cached.exists() and cached.stat().st_size > 0:
         return cached
 
+    # EPS goes through Ghostscript directly with a DPI derived from the EPS
+    # bounding box, so the preview raster lands at exactly _MAX_PREVIEW_EDGE
+    # on its long edge — no upscale from Pillow's coarse `scale` multiplier
+    # and no wasted resolution from a follow-up thumbnail crop.
+    if src.suffix.lower() == ".eps":
+        from app.domains.files import eps_service
+        try:
+            eps_service.eps_to_png(src, cached, target_px_edge=_MAX_PREVIEW_EDGE)
+            if fmt == "jpg":
+                with Image.open(cached) as im:
+                    if im.mode not in ("RGB", "L"):
+                        im = im.convert("RGB")
+                    im.save(cached, format="JPEG", quality=88, optimize=True)
+        except RuntimeError:
+            raise
+        except Exception as e:
+            raise RuntimeError(f"Failed to render EPS preview: {e}") from e
+        return cached
+
     try:
         with Image.open(src) as img:
-            if getattr(img, "format", None) == "EPS" or src.suffix.lower() == ".eps":
-                scale = 4
-                while scale > 1 and (img.width * scale) * (img.height * scale) > 100_000_000:
-                    scale -= 1
-                try:
-                    img.load(scale=scale)  # type: ignore
-                except Exception as e:
-                    logger.warning(f"Failed to load EPS with scale={scale}: {e}")
             img = ImageOps.exif_transpose(img) or img
             # Downscale for the browser — filerobot fits it to the viewport
             # anyway, and a full-resolution scan makes the editor sluggish.
@@ -115,7 +126,6 @@ def get_or_build_preview(
     except UnidentifiedImageError as e:
         raise RuntimeError(f"Could not decode image: {e}") from e
     except OSError as e:
-        # Pillow raises OSError for Ghostscript failures on EPS. Surface it.
         raise RuntimeError(f"Failed to render preview: {e}") from e
 
     return cached

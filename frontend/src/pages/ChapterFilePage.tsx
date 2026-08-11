@@ -1024,7 +1024,7 @@ export function ChapterFilePage({
     // generation to that file so the output PDF is named after its source
     // and nests under it in the file list. Otherwise bundle the whole chapter.
     const only = selectedRows.length === 1 ? selectedRows[0] : null
-    const canScope = !!only && /\.(docx?|jpe?g|png|gif|webp|tiff?|bmp)$/i.test(only.file_name)
+    const canScope = !!only && /\.(docx|docm|jpe?g|png|gif|webp|tiff?|bmp|eps)$/i.test(only.file_name)
     const sourceId = canScope ? only?.db_id : undefined
     setGeneratingFigurePdf(true)
     try {
