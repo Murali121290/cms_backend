@@ -32,7 +32,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column('post_prod_chapters', 'qc_completed_at')
-    op.drop_column('post_prod_chapters', 'qc_status')
-    op.drop_column('post_prod_chapters', 'conversion_completed_at')
-    op.drop_column('post_prod_chapters', 'conversion_status')
+    conn = op.get_bind()
+    inspector = Inspector.from_engine(conn)
+    if inspector.has_table('post_prod_chapters'):
+        op.drop_column('post_prod_chapters', 'qc_completed_at')
+        op.drop_column('post_prod_chapters', 'qc_status')
+        op.drop_column('post_prod_chapters', 'conversion_completed_at')
+        op.drop_column('post_prod_chapters', 'conversion_status')

@@ -19,7 +19,6 @@ depends_on = None
 def upgrade() -> None:
     conn = op.get_bind()
     inspector = sa.inspect(conn)
-
     # Rename post_prod_projects to post_prod_wc_projects if old table exists, or create post_prod_wc_projects if needed
     if inspector.has_table('post_prod_projects'):
         op.rename_table('post_prod_projects', 'post_prod_wc_projects')
@@ -70,6 +69,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     conn = op.get_bind()
     inspector = sa.inspect(conn)
+    # Rename back to original names if table exists
     if inspector.has_table('post_prod_wc_chapters'):
         op.rename_table('post_prod_wc_chapters', 'post_prod_chapters')
     if inspector.has_table('post_prod_wc_projects'):

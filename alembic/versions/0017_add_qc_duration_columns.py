@@ -30,5 +30,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column('post_prod_chapters', 'qc_last_started_at')
-    op.drop_column('post_prod_chapters', 'qc_active_seconds')
+    conn = op.get_bind()
+    inspector = Inspector.from_engine(conn)
+    if inspector.has_table('post_prod_chapters'):
+        op.drop_column('post_prod_chapters', 'qc_last_started_at')
+        op.drop_column('post_prod_chapters', 'qc_active_seconds')

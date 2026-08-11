@@ -29,4 +29,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column('post_prod_chapters', 'size_bytes')
+    conn = op.get_bind()
+    inspector = Inspector.from_engine(conn)
+    if inspector.has_table('post_prod_chapters'):
+        op.drop_column('post_prod_chapters', 'size_bytes')
