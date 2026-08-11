@@ -14,9 +14,16 @@ from bs4 import BeautifulSoup
 from ..engine.registry import rule
 
 
-# Matches "see page 23", "(see page 23)", "pp. 12-14", "page 5".
+# Matches citations: pages, chapters, figures, tables
+# Examples: "page 23", "pp. 12-14", "Chapter 9", "Ch. 9", "Ch. 9.E.1", "Fig. 1.1", "Table 1-1"
 _PAGE_CITATION_RE = re.compile(
-    r"\b(?:see\s+)?p(?:age|p)\.?\s*(\d{1,4})(?:\s*[\-–]\s*\d{1,4})?\b",
+    r"\b(?:see\s+)?"
+    r"(?:"
+    r"p(?:age|p)\.?\s*(\d{1,4})(?:\s*[\-–]\s*\d{1,4})?"  # page/pp: "page 23", "pp. 12-14"
+    r"|ch(?:apter)?\.?\s*(\d+(?:[a-zA-Z]?\.?\d+)*(?:\.\w+)*)"  # chapter: "Ch. 9", "Ch. 9.E.1", "Ch. 9.E.1.a"
+    r"|fig(?:ure)?\.?\s*(\d+(?:\.\d+)*)"  # figure: "Fig. 1.1", "Figure 1"
+    r"|table\.?\s*(\d+(?:\s*[\-–]\s*)?\d*)"  # table: "Table 1-1", "Table 1"
+    r")(?!\w)",  # negative lookahead: not followed by word character
     re.IGNORECASE,
 )
 
@@ -89,15 +96,21 @@ def validate_page_citation_links(file_details, rule_config=None):
         parent = text_node.parent
         if parent is None or parent.name == "a":
             continue
+        line_num = getattr(parent, "sourceline", None)
+
         for m in _PAGE_CITATION_RE.finditer(str(text_node)):
-            num = m.group(1)
-            if page_ids and _page_id_for_number(num, page_ids) is None:
-                continue  # nothing to link to
+            # Extract first non-None group (pages, chapters, figures, or tables)
+            num = next((g for g in m.groups() if g), None)
+            if num is None:
+                continue
+
             issues.append({
+                "rule_name": "Citation Not Linked",
                 "type": "page_citation_not_linked",
-                "message": f"Page citation '{m.group(0)}' is not wrapped in an <a href='#page_{num}'> link.",
+                "message": f"Citation '{m.group(0)}' is not wrapped in a link.",
                 "category": "Warning",
                 "snippet": str(text_node)[max(0, m.start() - 30): m.end() + 30].strip(),
+                "line_number": line_num,
             })
             if len(issues) >= 25:
                 break
