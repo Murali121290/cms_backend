@@ -234,16 +234,12 @@ export function PostProdWebPdfProcessor() {
     try {
       const data = await listProjects();
       setProjects(data);
-      if (selectedProject) {
-        const found = data.find((p) => p.id === selectedProject.id);
-        if (found) setSelectedProject(found);
-      }
     } catch {
       /* silent */
     } finally {
       setLoading(false);
     }
-  }, [selectedProject]);
+  }, []);
 
   const fetchClients = useCallback(async () => {
     try {
@@ -263,7 +259,14 @@ export function PostProdWebPdfProcessor() {
     fetchProjects();
     fetchClients();
     fetchUsers();
-  }, [fetchProjects, fetchClients, fetchUsers]);
+  }, []);
+
+  useEffect(() => {
+    if (selectedProject && projects.length > 0) {
+      const found = projects.find((p) => p.id === selectedProject.id);
+      if (found) setSelectedProject(found);
+    }
+  }, [projects]);
 
   // ── Derived metrics ─────────────────────────────────────────────────────
 
