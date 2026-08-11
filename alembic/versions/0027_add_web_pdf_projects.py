@@ -34,10 +34,10 @@ def upgrade() -> None:
             sa.Column("folder_name", sa.String(length=255), nullable=False),
             sa.Column("pdf_path", sa.Text(), nullable=False),
             sa.Column("total_files", sa.Integer(), nullable=False, server_default="0"),
-            sa.Column("status", sa.String(length=50), nullable=False, server_default="failed"),
-            sa.Column("validation_status", sa.String(length=50), nullable=False, server_default="fail"),
+            sa.Column("status", sa.String(length=50), nullable=False, server_default="Active"),
+            sa.Column("validation_status", sa.String(length=50), nullable=True),
             sa.Column("latest_validation_file", sa.String(length=255), nullable=True),
-            sa.Column("assignee", sa.String(length=255), nullable=True, server_default="admin_hema"),
+            sa.Column("assignee", sa.String(length=255), nullable=True),
             sa.Column(
                 "uploaded_by_id",
                 sa.BigInteger(),
@@ -99,6 +99,19 @@ def upgrade() -> None:
             unique=False,
         )
 
+    # 3. Add merge history fields to post_prod_web_pdf_history (idempotent)
+    existing_cols = [c["name"] for c in inspector.get_columns("post_prod_web_pdf_history")]
+    if "merged_files" not in existing_cols:
+        op.add_column("post_prod_web_pdf_history", sa.Column("merged_files", sa.JSON(), nullable=True))
+    if "merged_output_path" not in existing_cols:
+        op.add_column("post_prod_web_pdf_history", sa.Column("merged_output_path", sa.Text(), nullable=True))
+    if "total_pages" not in existing_cols:
+        op.add_column("post_prod_web_pdf_history", sa.Column("total_pages", sa.Integer(), nullable=True))
+    if "merge_status" not in existing_cols:
+        op.add_column("post_prod_web_pdf_history", sa.Column("merge_status", sa.String(length=20), nullable=True))
+    if "error_message" not in existing_cols:
+        op.add_column("post_prod_web_pdf_history", sa.Column("error_message", sa.Text(), nullable=True))
+
 
 def downgrade() -> None:
     conn = op.get_bind()
@@ -109,3 +122,4 @@ def downgrade() -> None:
 
     if inspector.has_table("post_prod_web_pdf_projects"):
         op.drop_table("post_prod_web_pdf_projects")
+

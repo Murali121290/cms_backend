@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Integer, String, Text, JSON
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -19,10 +19,10 @@ class WebPdfProject(Base):
     pdf_path = Column(Text, nullable=False)
     total_files = Column(Integer, nullable=False, default=0)
 
-    status = Column(String(50), nullable=False, default="failed")
-    validation_status = Column(String(50), nullable=False, default="fail")
+    status = Column(String(50), nullable=False, default="Active")
+    validation_status = Column(String(50), nullable=True, default=None)
     latest_validation_file = Column(String(255), nullable=True)
-    assignee = Column(String(255), nullable=True, default="admin_hema")
+    assignee = Column(String(255), nullable=True, default=None)
 
     uploaded_by_id = Column(
         BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
@@ -37,7 +37,7 @@ class WebPdfProject(Base):
 
 
 class WebPdfHistory(Base):
-    """History of assignee changes for post_prod_web_pdf_projects."""
+    """History of assignee changes and merge operations for post_prod_web_pdf_projects."""
 
     __tablename__ = "post_prod_web_pdf_history"
 
@@ -56,6 +56,13 @@ class WebPdfHistory(Base):
     new_assignee = Column(String(255), nullable=True)
     result_type = Column(String(50), nullable=False, default="assignee_change")
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    # Merge-specific fields
+    merged_files = Column(JSON, nullable=True)
+    merged_output_path = Column(Text, nullable=True)
+    total_pages = Column(Integer, nullable=True)
+    merge_status = Column(String(20), nullable=True)
+    error_message = Column(Text, nullable=True)
 
     project = relationship("WebPdfProject", foreign_keys=[project_id])
     changed_by = relationship("User", foreign_keys=[changed_by_id])

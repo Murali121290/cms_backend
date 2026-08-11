@@ -58,3 +58,40 @@ export async function deleteProject(projectId: number): Promise<void> {
     throw new Error(getApiErrorMessage(err, 'Failed to delete project'));
   }
 }
+
+export interface ProjectFile {
+  filename: string;
+  relative_path: string;
+  absolute_path: string;
+  category: 'FC' | 'FM' | 'TEXT' | 'BM' | 'BC';
+  order: number;
+  size: number;
+}
+
+export async function listProjectFiles(projectId: number): Promise<ProjectFile[]> {
+  try {
+    const { data } = await api.get<ProjectFile[]>(`/post-prod/web-pdf-processor/projects/${projectId}/files`);
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to list project files'));
+  }
+}
+
+export interface MergeFile {
+  filename: string;
+  absolute_path: string;
+  category: string;
+}
+
+export async function mergeProjectFiles(projectId: number, files: MergeFile[]): Promise<{ message: string; merged_path: string }> {
+  try {
+    const { data } = await api.post<{ message: string; merged_path: string }>(
+      `/post-prod/web-pdf-processor/projects/${projectId}/merge`,
+      { files },
+    );
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to merge PDF files'));
+  }
+}
+

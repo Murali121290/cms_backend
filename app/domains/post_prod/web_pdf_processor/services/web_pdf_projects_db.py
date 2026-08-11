@@ -60,7 +60,7 @@ def create_project(
     pdf_path: str,
     total_files: int,
     user_id: Optional[int],
-    assignee: Optional[str] = "admin_hema",
+    assignee: Optional[str] = None,
 ) -> dict[str, Any]:
     # Purge any old soft-deleted project records matching folder_name or project_name
     db.query(WebPdfProject).filter(
@@ -134,3 +134,33 @@ def soft_delete_project(db: Session, *, project_id: int) -> bool:
     p.is_deleted = True
     db.commit()
     return True
+
+
+def record_merge_history(
+    db: Session,
+    *,
+    project_id: int,
+    user_id: Optional[int],
+    username: Optional[str],
+    merged_files: list,
+    merged_output_path: str,
+    total_pages: int,
+    merge_status: str,
+    error_message: Optional[str] = None,
+) -> WebPdfHistory:
+    history = WebPdfHistory(
+        project_id=project_id,
+        changed_by_id=user_id,
+        changed_by_username=username,
+        result_type="merge",
+        created_at=datetime.utcnow(),
+        merged_files=merged_files,
+        merged_output_path=merged_output_path,
+        total_pages=total_pages,
+        merge_status=merge_status,
+        error_message=error_message,
+    )
+    db.add(history)
+    db.commit()
+    db.refresh(history)
+    return history
