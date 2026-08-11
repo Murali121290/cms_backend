@@ -320,3 +320,45 @@ def test_api_v2_multiple_overwrites_preserve_each_archived_version_bytes(
     assert original_download.status_code == 200
     assert original_download.content == b"v1-content"
     assert 'filename="history_v1.docx"' in original_download.headers["content-disposition"]
+
+
+def test_api_v2_upload_xml_override_forces_xml_folder_and_category(
+    auth_cookie_client,
+    admin_user,
+    project_record,
+    chapter_record,
+    db_session,
+    temp_upload_root,
+):
+    client = auth_cookie_client(admin_user)
+
+    # Upload an XML file but passing "InDesign" category
+    response = client.post(
+        f"/api/v2/projects/{project_record.id}/chapters/{chapter_record.id}/files/upload",
+        data={"category": "InDesign"},
+        files={
+            "files": (
+                "forced_xml.xml",
+                b"forced xml content",
+                "application/xml",
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert len(body["uploaded"]) == 1
+    assert body["uploaded"][0]["file"]["filename"] == "forced_xml.xml"
+    assert body["uploaded"][0]["file"]["category"] == "XML"
+
+    file_record = (
+        db_session.query(models.File)
+        .filter(models.File.chapter_id == chapter_record.id, models.File.filename == "forced_xml.xml")
+        .first()
+    )
+    assert file_record is not None
+    assert file_record.category == "XML"
+    expected_path = temp_upload_root / project_record.code / chapter_record.number / "XML" / "forced_xml.xml"
+    assert Path(file_record.path) == expected_path
+    assert expected_path.read_bytes() == b"forced xml content"

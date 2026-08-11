@@ -3465,7 +3465,7 @@ def api_v2_upload_zip(
 
         def determine_category_and_type(name: str) -> tuple[str, str]:
             ext = name.split(".")[-1].lower() if "." in name else ""
-            if ext in ["xml", "html", "xhtml"]:
+            if ext in ["xml", "html", "xhtml", "log"]:
                 return "XML", ext
             elif ext in ["png", "jpg", "jpeg", "gif", "tiff", "tif", "svg", "eps"]:
                 return "Art", ext

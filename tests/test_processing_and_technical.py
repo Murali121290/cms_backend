@@ -342,3 +342,88 @@ def test_background_processing_word_to_xml_registers_xml_and_log_as_xml_category
     assert log_file_record.file_type == "text/plain"
 
 
+def test_background_processing_word_to_xml_pph_renames_indd_suffix(
+    app_env, db_session, admin_user, monkeypatch, file_record
+):
+    import io
+    import zipfile
+    from pathlib import Path
+    from app import models
+    from app.routers.processing import background_processing_task
+    from app.core.config import get_settings
+    from app.integrations.pph.client import PPHClient
+
+    # Ensure the physical file exists
+    input_path = Path(file_record.path)
+    input_path.parent.mkdir(parents=True, exist_ok=True)
+    input_path.write_bytes(b"dummy docx content")
+
+    base_name = Path(file_record.filename).stem
+
+    # Enable PPH and mock the settings
+    settings = get_settings()
+    monkeypatch.setattr(settings, "PPH_ENABLED", True)
+
+    # Mock PPHClient.submit_and_wait to return a zip containing _indd.xml and _indd.log
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w") as z:
+        z.writestr(f"{base_name}_indd.xml", f"<xml>PPH converted: {base_name}</xml>")
+        z.writestr(f"{base_name}_indd.log", f"PPH conversion log details for {base_name}")
+    zip_bytes = zip_buffer.getvalue()
+
+    def mock_submit_and_wait(self, endpoint, files, data=None, poll_interval=None, max_wait=None):
+        return zip_bytes
+
+    monkeypatch.setattr(PPHClient, "submit_and_wait", mock_submit_and_wait)
+
+    file_record.is_checked_out = True
+    file_record.checked_out_by_id = admin_user.id
+    db_session.commit()
+
+    # Run the background processing task (which will import and run XMLEngine with PPH enabled)
+    background_processing_task(
+        file_id=file_record.id,
+        process_type="word_to_xml",
+        user_id=admin_user.id,
+        user_username=admin_user.username,
+    )
+
+    db_session.refresh(file_record)
+    assert file_record.is_checked_out is False
+
+    # Verify that files are renamed to base_name.xml and base_name.log and registered as category XML
+    xml_file_record = (
+        db_session.query(models.File)
+        .filter(
+            models.File.project_id == file_record.project_id,
+            models.File.chapter_id == file_record.chapter_id,
+            models.File.filename == f"{base_name}.xml",
+        )
+        .first()
+    )
+    assert xml_file_record is not None
+    assert xml_file_record.category == "XML"
+    assert xml_file_record.file_type == "application/xml"
+    assert f"{base_name}_indd.xml" not in xml_file_record.filename
+    assert xml_file_record.path.endswith(f"XML\\{base_name}.xml") or xml_file_record.path.endswith(f"XML/{base_name}.xml")
+    assert Path(xml_file_record.path).read_text() == f"<xml>PPH converted: {base_name}</xml>"
+
+    log_file_record = (
+        db_session.query(models.File)
+        .filter(
+            models.File.project_id == file_record.project_id,
+            models.File.chapter_id == file_record.chapter_id,
+            models.File.filename == f"{base_name}.log",
+        )
+        .first()
+    )
+    assert log_file_record is not None
+    assert log_file_record.category == "XML"
+    assert log_file_record.file_type == "text/plain"
+    assert f"{base_name}_indd.log" not in log_file_record.filename
+    assert log_file_record.path.endswith(f"XML\\{base_name}.log") or log_file_record.path.endswith(f"XML/{base_name}.log")
+    assert Path(log_file_record.path).read_text() == f"PPH conversion log details for {base_name}"
+
+
+
+

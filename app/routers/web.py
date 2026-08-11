@@ -400,7 +400,13 @@ async def save_folder_file(
         models.File.filename == file_name
     ).first()
 
-    if file_record:
+    if file_name.lower().endswith((".xml", ".log")):
+        xml_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "XML")
+        file_path = os.path.join(xml_dir, file_name)
+        if file_record:
+            file_record.category = "XML"
+            file_record.path = file_path
+    elif file_record:
         file_path = os.path.join(UPLOAD_DIR, file_record.path)
     else:
         resolved_subfolder = subfolder

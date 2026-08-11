@@ -378,28 +378,16 @@ def background_processing_task(
                     success_msg = f"Structuring completed (mode: {mode})"
 
             elif process_type == "bias_scan":
-                if os.environ.get("PPH_ENABLED", "false").lower() in ("true", "1", "yes"):
-                    generated_files = _run_via_pph(file_path, "/bias-scan")
-                    success_msg = "Bias Scan completed via PPH"
-                else:
-                    generated_files = bias_engine_cls().process_document(file_path)
-                    success_msg = "Bias Scan completed successfully"
+                generated_files = bias_engine_cls().process_document(file_path)
+                success_msg = "Bias Scan completed successfully"
 
             elif process_type == "credit_extractor_ai":
-                if os.environ.get("PPH_ENABLED", "false").lower() in ("true", "1", "yes"):
-                    generated_files = _run_via_pph(file_path, "/credit-extractor")
-                    success_msg = "AI Credit Extraction completed via PPH"
-                else:
-                    generated_files = ai_extractor_engine_cls().process_document(file_path)
-                    success_msg = "AI Credit Extraction completed"
+                generated_files = ai_extractor_engine_cls().process_document(file_path)
+                success_msg = "AI Credit Extraction completed"
 
             elif process_type == "word_to_xml":
-                if os.environ.get("PPH_ENABLED", "false").lower() in ("true", "1", "yes"):
-                    generated_files = _run_via_pph(file_path, "/word-to-xml")
-                    success_msg = "Word to XML conversion completed via PPH"
-                else:
-                    generated_files = xml_engine_cls().process_document(file_path)
-                    success_msg = "Word to XML conversion completed"
+                generated_files = xml_engine_cls().process_document(file_path)
+                success_msg = "Word to XML conversion completed"
 
             elif process_type == "xml_to_indesign":
                 update_job_status(db, job_id, "processing", "Processing XML to InDesign conversion...", 30)
@@ -566,7 +554,8 @@ def background_processing_task(
                             chapter_id=file_record.chapter_id,
                             version=1,
                             category=(
-                                "InDesign" if process_type == "xml_to_indesign"
+                                "XML" if processed_filename.lower().endswith((".xml", ".log"))
+                                else "InDesign" if process_type == "xml_to_indesign"
                                 else "XML" if process_type == "word_to_xml"
                                 else file_record.category
                             ),

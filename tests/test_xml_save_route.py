@@ -64,3 +64,86 @@ def test_xml_save_route(auth_cookie_client, admin_user, db_session):
         os.rmdir(os.path.join(app.services.file_service.UPLOAD_DIR, proj.code))
     except Exception:
         pass
+
+
+def test_xml_save_to_indesign_folder_redirection(auth_cookie_client, admin_user, db_session):
+    client = auth_cookie_client(admin_user)
+    
+    # 1. Create mock project
+    proj = Project(
+        title="Test Project XML Redirection",
+        code="TESTPROJXMLRED",
+        client_name="Test Client",
+        status="Active",
+        xml_standard="BITS"
+    )
+    db_session.add(proj)
+    db_session.commit()
+    
+    # 2. Create mock chapter
+    ch = models.ChapterInfo(
+        client=proj.client_name,
+        project=proj.code,
+        chapters="01",
+        stage_name=None,
+        status="Active"
+    )
+    db_session.add(ch)
+    db_session.commit()
+    
+    # 3. Create a legacy file record under category "InDesign" for the XML file
+    import app.services.file_service
+    file_path = os.path.join(app.services.file_service.UPLOAD_DIR, proj.code, ch.chapters, "InDesign", "Bhuyan45413_ch01.xml")
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write("<root>old</root>")
+        
+    db_file = models.File(
+        project_id=proj.id,
+        chapter_id=ch.id,
+        filename="Bhuyan45413_ch01.xml",
+        file_type="xml",
+        category="InDesign",
+        path=file_path,
+        version=1,
+    )
+    db_session.add(db_file)
+    db_session.commit()
+
+    # 4. Call save route to write mock file, passing "InDesign" in route
+    xml_content = "<root><child>Hello Redirected</child></root>"
+    
+    response = client.put(
+        f"/api/uploads/{proj.id}/chapter/chapter-01/InDesign/Bhuyan45413_ch01.xml/save",
+        json={"content": xml_content}
+    )
+    
+    assert response.status_code == 200
+    res_data = response.json()
+    assert res_data["status"] is True
+    
+    # 5. Verify database record corrected
+    db_session.refresh(db_file)
+    assert db_file.category == "XML"
+    expected_xml_path = os.path.join(app.services.file_service.UPLOAD_DIR, proj.code, ch.chapters, "XML", "Bhuyan45413_ch01.xml")
+    assert db_file.path == expected_xml_path
+    
+    # 6. Verify file exists in XML folder and content is correct
+    assert os.path.exists(expected_xml_path)
+    with open(expected_xml_path, "r", encoding="utf-8") as f:
+        written_content = f.read()
+    assert written_content == xml_content
+    
+    # Cleanup
+    try:
+        os.remove(expected_xml_path)
+        log_path = os.path.splitext(expected_xml_path)[0] + ".log"
+        if os.path.exists(log_path):
+            os.remove(log_path)
+        os.remove(file_path)
+        os.rmdir(os.path.dirname(file_path))
+        os.rmdir(os.path.dirname(expected_xml_path))
+        os.rmdir(os.path.join(app.services.file_service.UPLOAD_DIR, proj.code, ch.chapters))
+        os.rmdir(os.path.join(app.services.file_service.UPLOAD_DIR, proj.code))
+    except Exception:
+        pass

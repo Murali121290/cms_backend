@@ -50,44 +50,11 @@ class XMLToInDesignEngine:
         if not project or not chapter:
             raise ValueError("Associated project or chapter details are missing.")
             
-        # 3. Create target directories and copy the template as a matching .idml file
-        # target folder: uploads/{project_code}/{chapter_number}/InDesign
+        # 3. Create target directory
         indesign_dir = os.path.join(upload_dir, project.code, chapter.number, "InDesign")
         os.makedirs(indesign_dir, exist_ok=True)
         
         xml_base = os.path.splitext(os.path.basename(file_path))[0]
-        idml_filename = f"{xml_base}.idml"
-        idml_path = os.path.join(indesign_dir, idml_filename)
-        
-        # Copy template file to target .idml path
-        shutil.copy2(template_path, idml_path)
-        logger.info(f"Copied template to {idml_path}")
-        
-        # Register the .idml file in DB
-        db_idml_file = db.query(models.File).filter(
-            models.File.chapter_id == chapter.id,
-            models.File.category == "InDesign",
-            models.File.filename == idml_filename
-        ).first()
-        
-        if not db_idml_file:
-            db_idml_file = models.File(
-                project_id=project.id,
-                chapter_id=chapter.id,
-                filename=idml_filename,
-                file_type="application/octet-stream",
-                category="InDesign",
-                path=idml_path,
-                version=1,
-                is_original=False
-            )
-            db.add(db_idml_file)
-        else:
-            db_idml_file.version = (db_idml_file.version or 1) + 1
-            db_idml_file.path = idml_path
-            db_idml_file.uploaded_at = datetime.utcnow()
-            db_idml_file.uploaded_by_id = user_id
-        db.commit()
         
         # 4. Generate temp ZIP file
         temp_zip_fd, temp_zip_path = tempfile.mkstemp(suffix=".zip")
@@ -257,15 +224,142 @@ class XMLToInDesignEngine:
                     logger.info(f"Job {job_id} was cancelled during conversion. Discarding output.")
                     return []
                     
-            # 6. Save response content (INDD file directly)
-            indd_filename = f"{xml_base}.indd"
-            indd_path = os.path.join(indesign_dir, indd_filename)
-            
-            with open(indd_path, "wb") as out_f:
-                out_f.write(response.content)
-            logger.info(f"Generated InDesign INDD file: {indd_path}")
-            
-            return [indd_path]
+            # 6. Save response content (expecting a ZIP file containing INDD and PDF)
+            import io
+
+            try:
+                # Attempt to extract files from the response ZIP
+                with zipfile.ZipFile(io.BytesIO(response.content)) as z:
+                    file_list = z.namelist()
+                    logger.info(f"Received files from Windows InDesign Conversion Server: {file_list}")
+                    
+                    output_files = []
+                    
+                    # 6a. Find and process InDesign INDD file
+                    indd_in_zip = next((f for f in file_list if f.lower().endswith(".indd")), None)
+                    if indd_in_zip:
+                        # Clean name: remove suffix '_indd' if present or use original base
+                        clean_indd_name = f"{xml_base}.indd"
+                        indd_path = os.path.join(indesign_dir, clean_indd_name)
+                        with open(indd_path, "wb") as out_f:
+                            out_f.write(z.read(indd_in_zip))
+                        logger.info(f"Saved generated InDesign file: {indd_path}")
+                        
+                        # Register the INDD file in the database
+                        db_indd_file = db.query(models.File).filter(
+                            models.File.chapter_id == chapter.id,
+                            models.File.category == "InDesign",
+                            models.File.filename == clean_indd_name
+                        ).first()
+                        
+                        if not db_indd_file:
+                            db_indd_file = models.File(
+                                project_id=project.id,
+                                chapter_id=chapter.id,
+                                filename=clean_indd_name,
+                                file_type="application/octet-stream",
+                                category="InDesign",
+                                path=indd_path,
+                                version=1,
+                                is_original=False
+                            )
+                            db.add(db_indd_file)
+                        else:
+                            db_indd_file.version = (db_indd_file.version or 1) + 1
+                            db_indd_file.path = indd_path
+                            db_indd_file.uploaded_at = datetime.utcnow()
+                            if user_id:
+                                db_indd_file.uploaded_by_id = user_id
+                        db.commit()
+                        logger.info(f"Registered INDD file in database: {clean_indd_name}")
+                        output_files.append(indd_path)
+                    else:
+                        raise RuntimeError("No INDD file (.indd) found in InDesign Server response ZIP")
+                    
+                    # 6b. Find and process Proof PDF file
+                    pdf_in_zip = next((f for f in file_list if f.lower().endswith(".pdf")), None)
+                    if pdf_in_zip:
+                        # target folder: uploads/{project_code}/{chapter_number}/Proof
+                        proof_dir = os.path.join(upload_dir, project.code, chapter.number, "Proof")
+                        os.makedirs(proof_dir, exist_ok=True)
+                        
+                        clean_pdf_name = f"{xml_base}.pdf"
+                        pdf_path = os.path.join(proof_dir, clean_pdf_name)
+                        with open(pdf_path, "wb") as out_f:
+                            out_f.write(z.read(pdf_in_zip))
+                        logger.info(f"Saved generated Proof PDF file: {pdf_path}")
+                        
+                        # Register the Proof PDF file in the database
+                        db_pdf_file = db.query(models.File).filter(
+                            models.File.chapter_id == chapter.id,
+                            models.File.category == "Proof",
+                            models.File.filename == clean_pdf_name
+                        ).first()
+                        
+                        if not db_pdf_file:
+                            db_pdf_file = models.File(
+                                project_id=project.id,
+                                chapter_id=chapter.id,
+                                filename=clean_pdf_name,
+                                file_type="application/pdf",
+                                category="Proof",
+                                path=pdf_path,
+                                version=1,
+                                is_original=False
+                            )
+                            db.add(db_pdf_file)
+                        else:
+                            db_pdf_file.version = (db_pdf_file.version or 1) + 1
+                            db_pdf_file.path = pdf_path
+                            db_pdf_file.uploaded_at = datetime.utcnow()
+                            if user_id:
+                                db_pdf_file.uploaded_by_id = user_id
+                        db.commit()
+                        logger.info(f"Registered Proof PDF file in database: {clean_pdf_name}")
+                        # We don't append to output_files anymore to prevent calling service from duplicate registration
+                        pass
+                    else:
+                        logger.warning("No PDF file (.pdf) found in InDesign Server response ZIP")
+                        
+                return []
+
+            except zipfile.BadZipFile:
+                # Fallback: if it's not a ZIP file, it could be the raw INDD file as before
+                logger.warning("InDesign Server returned raw content instead of a ZIP file. Attempting raw INDD fallback...")
+                indd_filename = f"{xml_base}.indd"
+                indd_path = os.path.join(indesign_dir, indd_filename)
+                with open(indd_path, "wb") as out_f:
+                    out_f.write(response.content)
+                logger.info(f"Generated InDesign INDD file (fallback): {indd_path}")
+                
+                # Register the fallback INDD file in the database
+                db_indd_file = db.query(models.File).filter(
+                    models.File.chapter_id == chapter.id,
+                    models.File.category == "InDesign",
+                    models.File.filename == indd_filename
+                ).first()
+                
+                if not db_indd_file:
+                    db_indd_file = models.File(
+                        project_id=project.id,
+                        chapter_id=chapter.id,
+                        filename=indd_filename,
+                        file_type="application/octet-stream",
+                        category="InDesign",
+                        path=indd_path,
+                        version=1,
+                        is_original=False
+                    )
+                    db.add(db_indd_file)
+                else:
+                    db_indd_file.version = (db_indd_file.version or 1) + 1
+                    db_indd_file.path = indd_path
+                    db_indd_file.uploaded_at = datetime.utcnow()
+                    if user_id:
+                        db_indd_file.uploaded_by_id = user_id
+                db.commit()
+                logger.info(f"Registered fallback INDD file in database: {indd_filename}")
+                return []
             
         finally:
             if os.path.exists(temp_zip_path):
