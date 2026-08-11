@@ -230,6 +230,33 @@ export function PostProdWebPdfProcessor() {
 
   // ── Data fetching ───────────────────────────────────────────────────────
 
+  useEffect(() => {
+    let mounted = true;
+
+    const load = async () => {
+      try {
+        const [projectsData, clientsRes, usersList] = await Promise.all([
+          listProjects(),
+          fetch('/api/v2/clients/active').then(r => r.ok ? r.json() : null),
+          usersApi.list(),
+        ]);
+
+        if (mounted) {
+          setProjects(projectsData);
+          if (clientsRes) setClients(clientsRes);
+          setUsers(usersList);
+        }
+      } catch (err) {
+        console.error('Failed to load data', err);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
+    load();
+    return () => { mounted = false; };
+  }, []);
+
   const fetchProjects = useCallback(async () => {
     try {
       const data = await listProjects();
@@ -240,33 +267,6 @@ export function PostProdWebPdfProcessor() {
       setLoading(false);
     }
   }, []);
-
-  const fetchClients = useCallback(async () => {
-    try {
-      const res = await fetch('/api/v2/clients/active');
-      if (res.ok) setClients(await res.json());
-    } catch { /* silent */ }
-  }, []);
-
-  const fetchUsers = useCallback(async () => {
-    try {
-      const uList = await usersApi.list();
-      setUsers(uList);
-    } catch (err) { console.error('Failed to fetch users', err); }
-  }, []);
-
-  useEffect(() => {
-    fetchProjects();
-    fetchClients();
-    fetchUsers();
-  }, []);
-
-  useEffect(() => {
-    if (selectedProject && projects.length > 0) {
-      const found = projects.find((p) => p.id === selectedProject.id);
-      if (found) setSelectedProject(found);
-    }
-  }, [projects]);
 
   // ── Derived metrics ─────────────────────────────────────────────────────
 
