@@ -11,7 +11,7 @@
       "id": "URL002",
       "name": "External Link Check",
       "target_path": "OEBPS/xhtml",
-      "enabled": false,
+      "enabled": true,
       "file_name_pattern": "*.xhtml"
     },
     {
@@ -26,6 +26,13 @@
       "name": "PDF–EPUB Link Match",
       "scope": "book",
       "enabled": false
+    },
+    {
+      "id": "URL005",
+      "name": "Internal Reference Validation",
+      "target_path": "OEBPS/xhtml",
+      "enabled": true,
+      "file_name_pattern": "*.xhtml"
     }
   ]
 }
