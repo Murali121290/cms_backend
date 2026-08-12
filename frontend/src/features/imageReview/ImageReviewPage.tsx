@@ -179,10 +179,20 @@ export function ImageReviewPage() {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const initialFileId = searchParams.get("fileId");
+  const chapterIdParam = searchParams.get("chapterId");
+  // Scope the rail to the chapter the user came from. Without this the
+  // backend returns every image in the project, so same-looking thumbnails
+  // from other chapters would appear and a click could open an unexpected
+  // file. `null` = no scoping (opened without chapter context).
+  const chapterIdFilter = useMemo(() => {
+    if (!chapterIdParam) return null;
+    const n = Number(chapterIdParam);
+    return Number.isFinite(n) ? n : null;
+  }, [chapterIdParam]);
 
   const query = useQuery({
-    queryKey: ["project-images", projectId],
-    queryFn: () => getProjectImages(projectId),
+    queryKey: ["project-images", projectId, chapterIdFilter],
+    queryFn: () => getProjectImages(projectId, { chapterId: chapterIdFilter }),
     enabled: Number.isFinite(projectId),
   });
 

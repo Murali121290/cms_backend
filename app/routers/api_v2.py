@@ -1182,10 +1182,20 @@ def api_v2_chapter_files(
 @router.get("/projects/{project_id}/images")
 def api_v2_project_images(
     project_id: int,
+    chapter_id: int | None = Query(
+        None,
+        description=(
+            "If provided, only return images belonging to this chapter. The "
+            "Image Editor rail passes this so it mirrors the chapter/folder "
+            "the user opened the editor from — without it, the rail would "
+            "surface every image in the project and clicking a look-alike "
+            "thumbnail from another chapter loads an unexpected file."
+        ),
+    ),
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
-    """Return every image file in the project across all chapters.
+    """Return image files in the project, optionally scoped to a chapter.
 
     Powers the dedicated Image Editor page's thumbnail rail. Detects images by
     extension rather than by category so that image assets uploaded outside the
@@ -1208,12 +1218,12 @@ def api_v2_project_images(
         )
 
     image_exts = {"jpg", "jpeg", "png", "gif", "webp", "tif", "tiff", "bmp", "eps"}
-    files = (
-        db.query(models.File)
-        .filter(models.File.project_id == project_id)
-        .order_by(models.File.chapter_id.asc(), models.File.filename.asc())
-        .all()
-    )
+    files_q = db.query(models.File).filter(models.File.project_id == project_id)
+    if chapter_id is not None:
+        files_q = files_q.filter(models.File.chapter_id == chapter_id)
+    files = files_q.order_by(
+        models.File.chapter_id.asc(), models.File.filename.asc()
+    ).all()
 
     chapter_lookup = {
         ch.id: ch
