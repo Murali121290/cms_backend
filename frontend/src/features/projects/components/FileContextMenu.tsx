@@ -699,7 +699,7 @@ export function FileContextMenu({
               <MenuLinkItem
                 icon={FilePen}
                 label="Open in Image Editor"
-                to={`/projects/${projectId}/image-review?fileId=${file.id}`}
+                to={`/projects/${projectId}/image-review?fileId=${file.id}&chapterId=${chapterId}`}
                 onClick={onClose}
               />
             )}

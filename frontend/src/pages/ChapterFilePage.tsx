@@ -699,7 +699,7 @@ export function ChapterFilePage({
   function openEditor(row: FileRow) {
     if (!resolvedIsAssigned) return
     if (row.db_id && /\.(jpe?g|png|gif|webp|tiff?|bmp|eps)$/i.test(row.file_name)) {
-      navigate(`/projects/${pid}/image-review?fileId=${row.db_id}`)
+      navigate(`/projects/${pid}/image-review?fileId=${row.db_id}&chapterId=${cid}`)
       return
     }
     navigate(buildFileViewPath(row, pid, cid, cliId))
@@ -832,7 +832,7 @@ export function ChapterFilePage({
         const isImageRow = /\.(jpe?g|png|gif|webp|tiff?|bmp|eps)$/i.test(name)
         const isDocxRow = /\.docx?$/i.test(name)
         const openTarget = isImageRow
-          ? `/projects/${pid}/image-review?fileId=${fid}`
+          ? `/projects/${pid}/image-review?fileId=${fid}&chapterId=${cid}`
           : isDocxRow
             ? `${uiPaths.structuringReview(pid, cid, fid)}?tab=editor`
             : buildFileViewPath(row.original, pid, cid, cliId)

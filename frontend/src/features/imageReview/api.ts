@@ -22,8 +22,28 @@ export interface ProjectImagesResponse {
   images: ProjectImage[];
 }
 
-export async function getProjectImages(projectId: number): Promise<ProjectImagesResponse> {
-  const res = await apiClient.get<ProjectImagesResponse>(`/projects/${projectId}/images`);
+export interface GetProjectImagesOptions {
+  /**
+   * When provided, the rail is scoped to a single chapter. Without this the
+   * backend returns every image in the project, which is confusing when the
+   * user opened the editor from a specific chapter folder — same-looking
+   * thumbnails from other chapters would appear in the rail.
+   */
+  chapterId?: number | null;
+}
+
+export async function getProjectImages(
+  projectId: number,
+  opts: GetProjectImagesOptions = {},
+): Promise<ProjectImagesResponse> {
+  const params = new URLSearchParams();
+  if (opts.chapterId != null && Number.isFinite(opts.chapterId)) {
+    params.set("chapter_id", String(opts.chapterId));
+  }
+  const qs = params.toString();
+  const res = await apiClient.get<ProjectImagesResponse>(
+    `/projects/${projectId}/images${qs ? `?${qs}` : ""}`,
+  );
   return res.data;
 }
 
