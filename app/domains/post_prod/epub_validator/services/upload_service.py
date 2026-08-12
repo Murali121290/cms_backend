@@ -73,7 +73,17 @@ async def process_upload(
             pdf_entry = pdf_names[0]
 
             os.makedirs(extract_folder)
-            zip_ref.extractall(extract_folder)
+            for member in zip_ref.infolist():
+                if member.is_dir():
+                    continue
+                filename = os.path.basename(member.filename)
+                if not filename or filename.startswith(".") or member.filename.startswith("__MACOSX"):
+                    continue
+                source = zip_ref.open(member)
+                target_path = os.path.join(extract_folder, filename)
+                with open(target_path, "wb") as target:
+                    shutil.copyfileobj(source, target)
+                source.close()
 
         actual_epub_file = os.path.basename(epub_entry)
         actual_pdf_file = os.path.basename(pdf_entry)
