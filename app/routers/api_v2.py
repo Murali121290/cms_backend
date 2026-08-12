@@ -428,6 +428,7 @@ def _serialize_file_record(file_record: models.File, *, viewer: models.User, db:
         dpi=dpi,
         color_profile=color_profile,
         source_file_id=getattr(file_record, "source_file_id", None),
+        is_original=bool(getattr(file_record, "is_original", True)),
     )
 
 
@@ -1192,6 +1193,15 @@ def api_v2_project_images(
             "thumbnail from another chapter loads an unexpected file."
         ),
     ),
+    is_original: bool | None = Query(
+        None,
+        description=(
+            "Filters the returned files by origin: true = only user-uploaded "
+            "originals, false = only converted/derived outputs. Used by the "
+            "Image Editor so that opening a file from the Originals folder "
+            "doesn't surface Converted files (and vice-versa) in the rail."
+        ),
+    ),
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -1221,6 +1231,8 @@ def api_v2_project_images(
     files_q = db.query(models.File).filter(models.File.project_id == project_id)
     if chapter_id is not None:
         files_q = files_q.filter(models.File.chapter_id == chapter_id)
+    if is_original is not None:
+        files_q = files_q.filter(models.File.is_original == is_original)
     files = files_q.order_by(
         models.File.chapter_id.asc(), models.File.filename.asc()
     ).all()

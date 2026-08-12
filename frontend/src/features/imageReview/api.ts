@@ -30,6 +30,13 @@ export interface GetProjectImagesOptions {
    * thumbnails from other chapters would appear in the rail.
    */
   chapterId?: number | null;
+  /**
+   * When set, restricts the rail to originals (true) or converted outputs
+   * (false). Used to preserve the folder context the user opened the editor
+   * from — opening a file from the Originals folder should not surface
+   * Converted files in the rail and vice-versa.
+   */
+  isOriginal?: boolean | null;
 }
 
 export async function getProjectImages(
@@ -39,6 +46,9 @@ export async function getProjectImages(
   const params = new URLSearchParams();
   if (opts.chapterId != null && Number.isFinite(opts.chapterId)) {
     params.set("chapter_id", String(opts.chapterId));
+  }
+  if (opts.isOriginal != null) {
+    params.set("is_original", opts.isOriginal ? "true" : "false");
   }
   const qs = params.toString();
   const res = await apiClient.get<ProjectImagesResponse>(

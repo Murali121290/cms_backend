@@ -696,10 +696,13 @@ export function FileContextMenu({
             {isImage && (
               // Image files can't be opened in the DOCX/OnlyOffice/Word editors —
               // route Art-team edits through the dedicated Image Review page.
+              // Pass a folder derived from is_original so the editor rail is
+              // scoped to Originals vs Converted the same way the file
+              // browser is.
               <MenuLinkItem
                 icon={FilePen}
                 label="Open in Image Editor"
-                to={`/projects/${projectId}/image-review?fileId=${file.id}&chapterId=${chapterId}`}
+                to={`/projects/${projectId}/image-review?fileId=${file.id}&chapterId=${chapterId}&folder=${file.is_original === false ? "converted" : "art"}`}
                 onClick={onClose}
               />
             )}

@@ -35,7 +35,7 @@ export interface ChapterFile {
 }
 
 export type FolderKey =
-  | 'manuscript' | 'art' | 'indesign' | 'proof' | 'xml' | 'misc' | 'backup'
+  | 'manuscript' | 'art' | 'converted' | 'indesign' | 'proof' | 'xml' | 'misc' | 'backup'
   | 'common_art' | 'pdf' | 'font' | 'library' | 'template' | 'print_preset'
   | 'stylesheet_template'
   | 'template_indesign' | 'template_common_art' | 'template_font' | 'template_library'
@@ -79,6 +79,11 @@ export interface FolderConfig {
 export const FOLDER_CONFIG: Record<string, FolderConfig> = {
   manuscript: { label:'Manuscript', icon:'FileText',      allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','pageCount','size','uploadedBy','uploadedOn'] },
   art:        { label:'Art',        icon:'Image',         allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','dimensions','dpi','colorProfile','size','uploadedBy','uploadedOn'] },
+  // Converted holds image files produced by the Image Editor's convert
+  // action (e.g. PNG/JPG rendered from an EPS source). Uploads are disabled
+  // — the folder is populated only by the conversion pipeline, so a user
+  // dropping a file here would create something with no clear source.
+  converted:  { label:'Converted',  icon:'Image',         allowUpload:false, allowDownload:true,  columns:['fileName','fileType','dimensions','dpi','colorProfile','size','uploadedBy','uploadedOn'] },
   indesign:   { label:'Indesign',   icon:'Layers',        allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','packageStatus','size','uploadedBy','uploadedOn'] },
   proof:      { label:'Proof',      icon:'ClipboardCheck',allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','reviewer','reviewStatus','size','uploadedBy','uploadedOn'] },
   xml:        { label:'XML',        icon:'Code2',         allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','xmlType','validationStatus','size','uploadedBy','uploadedOn'] },
@@ -88,6 +93,7 @@ export const FOLDER_CONFIG: Record<string, FolderConfig> = {
 
 export const DESIGN_FOLDER_CONFIG: Record<string, FolderConfig> = {
   indesign:     { label:'Indesign',   icon:'Layers',        allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','packageStatus','size','uploadedBy','uploadedOn'] },
+  converted:    FOLDER_CONFIG.converted,
   pdf:          { label:'Pdf',        icon:'FileText',      allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
   template:     { label:'template',   icon:'Layout',        allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
   template_indesign:   { label:'indesign',   icon:'Layout',  allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'], parent: 'template' },
@@ -103,6 +109,7 @@ export const CE_SUPPORT_FOLDER_CONFIG: Record<string, FolderConfig> = {
 
 export const ART_FOLDER_CONFIG: Record<string, FolderConfig> = {
   art:        FOLDER_CONFIG.art,
+  converted:  FOLDER_CONFIG.converted,
   misc:       FOLDER_CONFIG.misc,
   backup:     FOLDER_CONFIG.backup,
 }
@@ -110,6 +117,7 @@ export const ART_FOLDER_CONFIG: Record<string, FolderConfig> = {
 export const MANUSCRIPT_FOLDER_CONFIG: Record<string, FolderConfig> = {
   manuscript: FOLDER_CONFIG.manuscript,
   indesign:   FOLDER_CONFIG.indesign,
+  converted:  FOLDER_CONFIG.converted,
   proof:      FOLDER_CONFIG.proof,
   xml:        FOLDER_CONFIG.xml,
   misc:       FOLDER_CONFIG.misc,
