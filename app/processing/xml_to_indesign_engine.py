@@ -94,12 +94,13 @@ class XMLToInDesignEngine:
                 
                 # Candidate 1: chapter_dir/Art
                 c1 = os.path.join(chapter_dir, "Art")
-                if os.path.exists(c1) and os.path.isdir(c1):
+                if os.path.exists(c1) and os.path.isdir(c1) and len(os.listdir(c1)) > 0:
                     art_folder = c1
-                else:
-                    # Candidate 2: lowercase art folder
+                
+                # Candidate 2: lowercase art folder
+                if not art_folder:
                     c2 = os.path.join(chapter_dir, "art")
-                    if os.path.exists(c2) and os.path.isdir(c2):
+                    if os.path.exists(c2) and os.path.isdir(c2) and len(os.listdir(c2)) > 0:
                         art_folder = c2
                         
                 # Candidate 3: Search project level for chapter art folders like "Ch 01 - Art/Art"
@@ -139,11 +140,21 @@ class XMLToInDesignEngine:
                                 if matched:
                                     for sub in ["Art", "art"]:
                                         sub_path = os.path.join(entry_path, sub)
-                                        if os.path.exists(sub_path) and os.path.isdir(sub_path):
+                                        if os.path.exists(sub_path) and os.path.isdir(sub_path) and len(os.listdir(sub_path)) > 0:
                                             art_folder = sub_path
                                             break
                                     if art_folder:
                                         break
+
+                # Fallback: if no folder with files is found, fallback to existing empty folder (for logging/structure)
+                if not art_folder:
+                    c1 = os.path.join(chapter_dir, "Art")
+                    if os.path.exists(c1) and os.path.isdir(c1):
+                        art_folder = c1
+                    else:
+                        c2 = os.path.join(chapter_dir, "art")
+                        if os.path.exists(c2) and os.path.isdir(c2):
+                            art_folder = c2
 
                 if art_folder and os.path.exists(art_folder):
                     logger.info(f"Packaging art files from folder: {art_folder}")
@@ -245,6 +256,20 @@ class XMLToInDesignEngine:
                             out_f.write(z.read(indd_in_zip))
                         logger.info(f"Saved generated InDesign file: {indd_path}")
                         
+                        # Copy art files into indesign_dir/artfile and indesign_dir/Links to preserve graphic links
+                        if art_folder and os.path.exists(art_folder):
+                            for sub_folder_name in ["artfile", "Links"]:
+                                target_art_dir = os.path.join(indesign_dir, sub_folder_name)
+                                os.makedirs(target_art_dir, exist_ok=True)
+                                logger.info(f"Copying art files from {art_folder} to {target_art_dir}...")
+                                for root_art, _, art_files in os.walk(art_folder):
+                                    for art_file in art_files:
+                                        src_art_path = os.path.join(root_art, art_file)
+                                        rel_art_path = os.path.relpath(src_art_path, art_folder)
+                                        dst_art_path = os.path.join(target_art_dir, rel_art_path)
+                                        os.makedirs(os.path.dirname(dst_art_path), exist_ok=True)
+                                        shutil.copy2(src_art_path, dst_art_path)
+                        
                         # Register the INDD file in the database
                         db_indd_file = db.query(models.File).filter(
                             models.File.chapter_id == chapter.id,
@@ -331,6 +356,20 @@ class XMLToInDesignEngine:
                 with open(indd_path, "wb") as out_f:
                     out_f.write(response.content)
                 logger.info(f"Generated InDesign INDD file (fallback): {indd_path}")
+                
+                # Copy art files into indesign_dir/artfile and indesign_dir/Links to preserve graphic links
+                if art_folder and os.path.exists(art_folder):
+                    for sub_folder_name in ["artfile", "Links"]:
+                        target_art_dir = os.path.join(indesign_dir, sub_folder_name)
+                        os.makedirs(target_art_dir, exist_ok=True)
+                        logger.info(f"Copying art files from {art_folder} to {target_art_dir}...")
+                        for root_art, _, art_files in os.walk(art_folder):
+                            for art_file in art_files:
+                                src_art_path = os.path.join(root_art, art_file)
+                                rel_art_path = os.path.relpath(src_art_path, art_folder)
+                                dst_art_path = os.path.join(target_art_dir, rel_art_path)
+                                os.makedirs(os.path.dirname(dst_art_path), exist_ok=True)
+                                shutil.copy2(src_art_path, dst_art_path)
                 
                 # Register the fallback INDD file in the database
                 db_indd_file = db.query(models.File).filter(

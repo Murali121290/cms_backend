@@ -683,7 +683,10 @@ def test_project_delete_removes_project_row_and_project_directory(
 
     assert response.status_code == 302
     assert response.headers["location"] == "/dashboard?msg=Book+Deleted"
-    assert db_session.query(Project).filter(Project.id == project_record.id).first() is None
+    db_session.expire_all()
+    db_project = db_session.query(Project).filter(Project.id == project_record.id).first()
+    assert db_project is not None
+    assert db_project.is_deleted is True
     assert not project_dir.exists()
 
 

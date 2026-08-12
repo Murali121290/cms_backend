@@ -377,17 +377,7 @@ async def save_folder_file(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
         
-    chapter_no = chapter_name.split("-")[-1]
-    chapter = None
-    if chapter_name.startswith("chapter-") and chapter_no.isdigit():
-        chapter = db.query(models.ChapterInfo).filter(
-            models.ChapterInfo.id == int(chapter_no)
-        ).first()
-    if not chapter:
-        chapter = db.query(models.ChapterInfo).filter(
-            models.ChapterInfo.project == project.code,
-            (models.ChapterInfo.chapters == chapter_no) | (models.ChapterInfo.chapters == str(int(chapter_no)))
-        ).first()
+    chapter = _resolve_chapter(db, project=project, chapter_name=chapter_name)
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
         
