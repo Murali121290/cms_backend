@@ -440,6 +440,71 @@ async def get_folder_file_layout_preview(
         else:
             html_str = f"<html><head>{css_style_tag}</head><body>{html_str}</body></html>"
 
+    # Resolve and rewrite image paths to route to actual Art/Links download endpoints
+    try:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html_str, "html.parser")
+        
+        # Scan potential art/links directories for the chapter
+        art_files = {}
+        candidate_dirs = [
+            os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "Art"),
+            os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "art"),
+            os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "InDesign", "Links"),
+            os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "InDesign", "artfile"),
+            os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "Links"),
+            os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "artfile"),
+        ]
+        
+        for c_dir in candidate_dirs:
+            if os.path.exists(c_dir):
+                for fname in os.listdir(c_dir):
+                    stem, ext = os.path.splitext(fname)
+                    stem = stem.lower()
+                    if stem not in art_files:
+                        art_files[stem] = []
+                    art_files[stem].append((fname, os.path.basename(c_dir), c_dir))
+                    
+        for img in soup.find_all("img"):
+            src = img.get("src")
+            if src:
+                img_filename = os.path.basename(src)
+                img_stem, img_ext = os.path.splitext(img_filename)
+                img_stem_lower = img_stem.lower()
+                
+                matched_file = None
+                if img_stem_lower in art_files:
+                    candidates = art_files[img_stem_lower]
+                    web_friendly_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
+                    # 1. Prefer web friendly files (e.g. .png, .jpg)
+                    for c_name, c_folder, c_dir in candidates:
+                        _, c_ext = os.path.splitext(c_name)
+                        if c_ext.lower() in web_friendly_exts:
+                            matched_file = (c_name, c_folder, c_dir)
+                            break
+                    # 2. Prefer c_name with exact same extension as referenced in XML if not found
+                    if not matched_file:
+                        for c_name, c_folder, c_dir in candidates:
+                            _, c_ext = os.path.splitext(c_name)
+                            if c_ext.lower() == img_ext.lower():
+                                matched_file = (c_name, c_folder, c_dir)
+                                break
+                    # 3. Fallback to first candidate
+                    if not matched_file:
+                        matched_file = candidates[0]
+                        
+                if matched_file:
+                    c_name, c_folder, c_dir = matched_file
+                    ch_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters)
+                    # Resolve relative folder path (handles InDesign/Links nesting correctly)
+                    resolved_folder = os.path.relpath(c_dir, ch_dir).replace("\\", "/")
+                    img["src"] = f"/api/uploads/{project_id}/chapter/{chapter_name}/{resolved_folder}/{c_name}/download"
+                    
+        html_str = str(soup)
+    except Exception:
+        # Fallback to unmodified HTML if parsing fails
+        pass
+
     return HTMLResponse(content=html_str)
 
 
