@@ -8,20 +8,169 @@
 import glob
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import requests
 from bs4 import BeautifulSoup
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from ..engine.registry import rule
 
 
-# Matches "see page 23", "(see page 23)", "pp. 12-14", "page 5".
+# Matches citations: pages, chapters, figures, tables
+# Examples: "page 23", "pp. 12-14", "Chapter 9", "Ch. 9", "Ch. 9.E.1", "Fig. 1.1", "Table 1-1"
 _PAGE_CITATION_RE = re.compile(
-    r"\b(?:see\s+)?p(?:age|p)\.?\s*(\d{1,4})(?:\s*[\-–]\s*\d{1,4})?\b",
+    r"\b(?:see\s+)?"
+    r"(?:"
+    r"p(?:age|p)\.?\s*(\d{1,4})(?:\s*[\-–]\s*\d{1,4})?"  # page/pp: "page 23", "pp. 12-14"
+    r"|ch(?:apter)?\.?\s*(\d+(?:[a-zA-Z]?\.?\d+)*(?:\.\w+)*)"  # chapter: "Ch. 9", "Ch. 9.E.1", "Ch. 9.E.1.a"
+    r"|fig(?:ure)?\.?\s*(\d+(?:\.\d+)*)"  # figure: "Fig. 1.1", "Figure 1"
+    r"|table\.?\s*(\d+(?:\s*[\-–]\s*)?\d*)"  # table: "Table 1-1", "Table 1"
+    r")(?!\w)",  # negative lookahead: not followed by word character
     re.IGNORECASE,
 )
 
 
 _PAGE_IDS_CACHE: dict[str, set[str]] = {}
+
+# URL validation constants and helpers for URL002
+_URL_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0 Safari/537.36"
+    )
+}
+
+
+def _make_session() -> requests.Session:
+    """Create a requests session with retry logic."""
+    session = requests.Session()
+    retry = Retry(
+        total=3,
+        connect=3,
+        read=3,
+        backoff_factor=2,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["HEAD", "GET"],
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+
+def _check_mailto(href: str) -> dict | None:
+    """Validate mailto: links. Return issue dict if invalid, else None."""
+    # Extract email part (remove "mailto:" prefix)
+    if not href.startswith("mailto:"):
+        return None
+
+    email_part = href[7:].strip()  # Remove "mailto:"
+
+    # Check for common malformations
+    if not email_part:
+        return {
+            "rule_name": "Empty mailto",
+            "type": "mailto_invalid",
+            "href": href,
+            "category": "Error",
+            "message": "mailto: link has no email address",
+        }
+
+    # Check for invalid characters after email (like ",call")
+    if "," in email_part:
+        parts = email_part.split(",")
+        email = parts[0].strip()
+        extra = ",".join(parts[1:]).strip()
+        if extra and not extra.startswith("?"):  # "?cc=..." is valid
+            return {
+                "rule_name": "mailto malformed",
+                "type": "mailto_invalid",
+                "href": href,
+                "category": "Warning",
+                "message": f"mailto: has invalid suffix '{extra}'. Use ?cc=, ?bcc=, or ?subject=",
+            }
+
+    # Basic email format validation (simplified)
+    email = email_part.split("?")[0].strip()  # Get just the email, ignore query params
+    if "@" not in email:
+        return {
+            "rule_name": "Invalid email format",
+            "type": "mailto_invalid",
+            "href": href,
+            "category": "Error",
+            "message": f"Invalid email format: {email}",
+        }
+
+    # Check for obvious typos
+    if email.endswith((".c", ".co")):  # Missing .com, .org, etc.
+        return {
+            "rule_name": "Incomplete email domain",
+            "type": "mailto_invalid",
+            "href": href,
+            "category": "Warning",
+            "message": f"Email domain may be incomplete: {email}",
+        }
+
+    return None
+
+
+def _check_single_url(href: str, session: requests.Session) -> dict | None:
+    """Return an issue dict if the URL has a problem, else None."""
+    try:
+        resp = session.head(href, timeout=30, allow_redirects=True,
+                           verify=False, headers=_URL_HEADERS)
+        code = resp.status_code
+        if code in (403, 405):
+            resp = session.get(href, timeout=30, allow_redirects=True,
+                              verify=False, headers=_URL_HEADERS, stream=True)
+            code = resp.status_code
+        if code < 400:
+            return None
+        if code == 404:
+            sev, msg = "Error", "URL not found"
+        elif code == 403:
+            sev, msg = "Warning", "Access forbidden or bot blocked"
+        elif code == 405:
+            sev, msg = "Warning", "Method not allowed"
+        elif code >= 500:
+            sev, msg = "Warning", "Server error"
+        else:
+            sev, msg = "Warning", "External URL issue"
+        return {
+            "rule_name": "External URL Issue",
+            "type": "external_url_issue",
+            "href": href,
+            "status_code": code,
+            "category": sev,
+            "message": f"{msg}. Status code - {code}",
+        }
+    except requests.exceptions.Timeout:
+        return {
+            "rule_name": "URL Timeout",
+            "type": "external_url_issue",
+            "href": href,
+            "category": "Warning",
+            "message": "Request timeout",
+        }
+    except requests.exceptions.ConnectionError:
+        return {
+            "rule_name": "Connection Error",
+            "type": "external_url_issue",
+            "href": href,
+            "category": "Error",
+            "message": "Connection error",
+        }
+    except Exception as e:
+        return {
+            "rule_name": "URL Check Error",
+            "type": "external_url_issue",
+            "href": href,
+            "category": "Error",
+            "message": str(e),
+        }
 
 
 def _epub_page_ids(epub: str) -> set[str]:
@@ -89,15 +238,21 @@ def validate_page_citation_links(file_details, rule_config=None):
         parent = text_node.parent
         if parent is None or parent.name == "a":
             continue
+        line_num = getattr(parent, "sourceline", None)
+
         for m in _PAGE_CITATION_RE.finditer(str(text_node)):
-            num = m.group(1)
-            if page_ids and _page_id_for_number(num, page_ids) is None:
-                continue  # nothing to link to
+            # Extract first non-None group (pages, chapters, figures, or tables)
+            num = next((g for g in m.groups() if g), None)
+            if num is None:
+                continue
+
             issues.append({
+                "rule_name": "Citation Not Linked",
                 "type": "page_citation_not_linked",
-                "message": f"Page citation '{m.group(0)}' is not wrapped in an <a href='#page_{num}'> link.",
+                "message": f"Citation '{m.group(0)}' is not wrapped in a link.",
                 "category": "Warning",
                 "snippet": str(text_node)[max(0, m.start() - 30): m.end() + 30].strip(),
+                "line_number": line_num,
             })
             if len(issues) >= 25:
                 break
@@ -296,24 +451,46 @@ def validate_external_urls(file_details, rule_config=None):
     with open(file_path, "r", encoding="utf-8") as f:
         soup = BeautifulSoup(f.read(), "html.parser")
 
-    hrefs = [
-        link["href"].strip()
-        for link in soup.find_all("a", href=True, class_="url")
-        if link["href"].strip().startswith(("http://", "https://"))
-    ]
+    hrefs = []
+    mailto_links = []
 
-    if not hrefs:
-        return {"issues_count": 0, "issues": []}
+    for link in soup.find_all("a", href=True):
+        href = link["href"].strip()
+        line_num = getattr(link, "sourceline", None)
 
-    session = _make_session()
+        # Check mailto: links
+        if href.startswith("mailto:"):
+            mailto_links.append((href, line_num))
+            continue
+
+        # Check external links: http://, https://, //, www., or ftp://
+        if href.startswith(("http://", "https://", "//", "www.", "ftp://")):
+            hrefs.append((href, line_num))
+        # Skip internal: relative paths (xhtml, #anchor, /)
+        elif href.startswith(("#", "/")):
+            continue
+
     issues = []
 
-    with ThreadPoolExecutor(max_workers=10) as pool:
-        futures = {pool.submit(_check_single_url, href, session): href for href in hrefs}
-        for future in as_completed(futures):
-            result = future.result()
-            if result:
-                issues.append(result)
+    # Validate mailto: links (synchronous)
+    for href, line_num in mailto_links:
+        result = _check_mailto(href)
+        if result:
+            result["line_number"] = line_num
+            issues.append(result)
+
+    # Validate external URLs (parallel)
+    if hrefs:
+        session = _make_session()
+        with ThreadPoolExecutor(max_workers=10) as pool:
+            futures = {pool.submit(_check_single_url, href, session): (href, line_num)
+                       for href, line_num in hrefs}
+            for future in as_completed(futures):
+                result = future.result()
+                if result:
+                    href, line_num = futures[future]
+                    result["line_number"] = line_num
+                    issues.append(result)
 
     return {"issues_count": len(issues), "issues": issues}
 
@@ -353,4 +530,129 @@ def validate_pdf_link_checker(book_details):
         return {"issues_count": 0, "issues": []}
     cli_issues = LinkChecker(bundle).run_all()
     issues = _drop_pass_issues([_cli_issue_to_web(i) for i in cli_issues])
+    return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("URL005")
+def validate_internal_references(file_details, rule_config=None):
+    """Validate internal references: anchors, non-XHTML files, root-relative paths."""
+    file_path = file_details["full_path"]
+    issues = []
+
+    with open(file_path, "r", encoding="utf-8") as f:
+        soup = BeautifulSoup(f.read(), "html.parser")
+
+    links = soup.find_all("a", href=True)
+    epub_root = file_details.get("epub_root", "")
+
+    for link in links:
+        href = link["href"].strip()
+        line_num = getattr(link, "sourceline", None)
+
+        # Skip external links and mailto
+        if href.startswith(("http://", "https://", "mailto:", "//")):
+            continue
+
+        # Skip already validated by URL001 (XHTML files in same dir)
+        if href.split("#")[0].endswith(".xhtml") and not href.startswith("/"):
+            continue
+
+        # 1. Pure anchors (#section)
+        if href.startswith("#"):
+            anchor = href[1:]
+            if not anchor:
+                issues.append({
+                    "rule_name": "Empty Anchor",
+                    "type": "empty_anchor",
+                    "href": href,
+                    "message": "Link has empty anchor (#)",
+                    "category": "Error",
+                    "line_number": line_num,
+                })
+                continue
+
+            # Check if anchor exists in current file
+            current_file_id = soup.find(id=anchor)
+            if not current_file_id:
+                issues.append({
+                    "rule_name": "Missing Anchor in Current File",
+                    "type": "missing_anchor_self",
+                    "href": href,
+                    "id": anchor,
+                    "message": f"Anchor '{anchor}' not found in current file",
+                    "category": "Error",
+                    "line_number": line_num,
+                })
+            continue
+
+        # 2. Root-relative paths (/path/to/file)
+        if href.startswith("/"):
+            if not epub_root:
+                issues.append({
+                    "rule_name": "Cannot Validate Root Path",
+                    "type": "root_path_no_epub",
+                    "href": href,
+                    "message": "Root-relative path but EPUB root not found",
+                    "category": "Warning",
+                    "line_number": line_num,
+                })
+                continue
+
+            # Remove leading slash and check if file exists
+            target_file = os.path.normpath(os.path.join(epub_root, href.lstrip("/")))
+            file_part = target_file.split("#")[0]
+
+            if not os.path.exists(file_part):
+                issues.append({
+                    "rule_name": "Missing Root Path File",
+                    "type": "missing_root_file",
+                    "href": href,
+                    "message": "Root-relative file not found",
+                    "category": "Error",
+                    "line_number": line_num,
+                })
+                continue
+
+            # Check anchor in root-relative file
+            if "#" in href:
+                anchor = href.split("#")[1]
+                try:
+                    with open(file_part, "r", encoding="utf-8") as f:
+                        target_soup = BeautifulSoup(f, "html.parser")
+                    if not target_soup.find(id=anchor):
+                        issues.append({
+                            "rule_name": "Missing Anchor in Root Path File",
+                            "type": "missing_anchor_root",
+                            "href": href,
+                            "id": anchor,
+                            "message": f"Anchor '{anchor}' not found in target file",
+                            "category": "Error",
+                            "line_number": line_num,
+                        })
+                except Exception as e:
+                    issues.append({
+                        "rule_name": "Cannot Read Root Path File",
+                        "type": "root_file_read_error",
+                        "href": href,
+                        "message": f"Error reading file: {e}",
+                        "category": "Warning",
+                        "line_number": line_num,
+                    })
+            continue
+
+        # 3. Non-XHTML files (images, PDFs, etc.)
+        # Check if file exists in current directory
+        current_dir = os.path.dirname(file_path)
+        target_file = os.path.normpath(os.path.join(current_dir, href.split("#")[0]))
+
+        if not os.path.exists(target_file):
+            issues.append({
+                "rule_name": "Missing File",
+                "type": "missing_file",
+                "href": href,
+                "message": "Referenced file not found",
+                "category": "Error",
+                "line_number": line_num,
+            })
+
     return {"issues_count": len(issues), "issues": issues}

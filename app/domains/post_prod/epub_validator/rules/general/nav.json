@@ -4,14 +4,14 @@
       "id": "NAV001",
       "name": "NAV TOC Link Check",
       "target_path": "",
-      "enabled": false,
+      "enabled": true,
       "file_name_pattern": "nav.xhtml"
     },
     {
       "id": "NAV002",
-      "name": "NCX TOC Label Check",
+      "name": "NCX and Navigation link Check",
       "target_path": "",
-      "enabled": false,
+      "enabled": true,
       "file_name_pattern": "toc.ncx"
     },
     {
@@ -24,7 +24,7 @@
       "id": "NAV004",
       "name": "Cover Entry in TOC",
       "target_path": "",
-      "enabled": false,
+      "enabled": true,
       "file_name_pattern": "nav.xhtml"
     },
     {
