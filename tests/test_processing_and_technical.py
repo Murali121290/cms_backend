@@ -425,5 +425,55 @@ def test_background_processing_word_to_xml_pph_renames_indd_suffix(
     assert Path(log_file_record.path).read_text() == f"PPH conversion log details for {base_name}"
 
 
+def test_background_processing_indesign_to_xml_registers_xml_as_misc_category(
+    monkeypatch,
+    admin_user,
+    file_record,
+    db_session,
+):
+    from app.routers.processing import background_processing_task
+
+    called_process = []
+
+    xml_path = Path(file_record.path).parent.parent / "Misc" / f"{Path(file_record.filename).stem}_final.xml"
+
+    def _fake_xml_process(*args, **kwargs):
+        called_process.append(kwargs)
+        xml_path.parent.mkdir(parents=True, exist_ok=True)
+        xml_path.write_bytes(b"<xml>test indesign to xml</xml>")
+        return [str(xml_path)]
+
+    from app.processing.indesign_to_xml_engine import InDesignToXMLEngine
+    monkeypatch.setattr(InDesignToXMLEngine, "process_document", _fake_xml_process)
+
+    file_record.is_checked_out = True
+    file_record.checked_out_by_id = admin_user.id
+    db_session.commit()
+
+    background_processing_task(
+        file_id=file_record.id,
+        process_type="indesign_to_xml",
+        user_id=admin_user.id,
+        user_username=admin_user.username,
+    )
+
+    db_session.refresh(file_record)
+    assert file_record.is_checked_out is False
+
+    xml_file_record = (
+        db_session.query(models.File)
+        .filter(
+            models.File.project_id == file_record.project_id,
+            models.File.chapter_id == file_record.chapter_id,
+            models.File.filename == f"{Path(file_record.filename).stem}_final.xml",
+        )
+        .first()
+    )
+    assert xml_file_record is not None
+    assert xml_file_record.category == "Misc"
+    assert xml_file_record.file_type == "application/xml"
+
+
+
 
 

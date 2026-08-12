@@ -69,6 +69,7 @@ PROCESS_PERMISSIONS = {
     "credit_extractor_ai": ["PermissionsManager", "ProjectManager", "Admin"],
     "word_to_xml": ["Admin", "XML Manager", "XML manager"],
     "xml_to_indesign": ["Admin", "XML Manager", "XML manager"],
+    "indesign_to_xml": ["Admin", "XML Manager", "XML manager"],
 }
 
 
@@ -409,6 +410,21 @@ def background_processing_task(
                 )
                 success_msg = "XML to InDesign conversion completed"
 
+            elif process_type == "indesign_to_xml":
+                update_job_status(db, job_id, "processing", "Processing InDesign to XML conversion...", 30)
+                from app.services.file_service import UPLOAD_DIR
+                from app.processing.indesign_to_xml_engine import InDesignToXMLEngine
+                generated_files = InDesignToXMLEngine().process_document(
+                    db=db,
+                    file_path=file_path,
+                    file_record=file_record,
+                    user_id=user_id,
+                    upload_dir=UPLOAD_DIR,
+                    logger=logger,
+                    job_id=job_id
+                )
+                success_msg = "InDesign to XML conversion completed"
+
             else:
                 raise HTTPException(
                     status_code=501,
@@ -554,7 +570,8 @@ def background_processing_task(
                             chapter_id=file_record.chapter_id,
                             version=1,
                             category=(
-                                "XML" if processed_filename.lower().endswith((".xml", ".log"))
+                                "Misc" if process_type == "indesign_to_xml"
+                                else "XML" if processed_filename.lower().endswith((".xml", ".log"))
                                 else "InDesign" if process_type == "xml_to_indesign"
                                 else "XML" if process_type == "word_to_xml"
                                 else file_record.category
@@ -725,7 +742,7 @@ def start_process(
     }
 
 
-def get_structuring_status(db: Session, *, file_id: int, user):
+def get_structuring_status(db: Session, *, file_id: int, user, process_type: str = "structuring"):
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
@@ -736,7 +753,7 @@ def get_structuring_status(db: Session, *, file_id: int, user):
     from app.models import ProcessingJob
     job = db.query(ProcessingJob).filter(
         ProcessingJob.file_id == file_id,
-        ProcessingJob.process_type == "structuring"
+        ProcessingJob.process_type == process_type
     ).order_by(ProcessingJob.created_at.desc()).first()
 
     if job:
