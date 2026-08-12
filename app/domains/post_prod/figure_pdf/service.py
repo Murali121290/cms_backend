@@ -722,7 +722,103 @@ def _draw_metadata_table(page: fitz.Page, rows: list[tuple[str, str]], top: floa
     return bottom
 
 
+def _fit_rect_in_area(width_pt: float, height_pt: float, area: fitz.Rect) -> fitz.Rect:
+    """Center a ``width_pt × height_pt`` box inside ``area``, top-aligned."""
+    area_w = area.x1 - area.x0
+    area_h = area.y1 - area.y0
+    if width_pt <= 0 or height_pt <= 0:
+        return fitz.Rect(area.x0, area.y0, area.x1, area.y1)
+    scale = min(area_w / width_pt, area_h / height_pt, 1.0)
+    tw = width_pt * scale
+    th = height_pt * scale
+    cx = (area.x0 + area.x1) / 2
+    return fitz.Rect(cx - tw / 2, area.y0, cx + tw / 2, area.y0 + th)
+
+
+def _insert_eps_vector(page: fitz.Page, src: _ImageSource, area: fitz.Rect) -> bool:
+    """Embed EPS as vector by round-tripping through Ghostscript's pdfwrite."""
+    from app.domains.files import eps_service
+
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp_pdf = Path(tmp.name)
+        try:
+            eps_service.eps_to_pdf(Path(src.path), tmp_pdf)  # type: ignore[arg-type]
+            with fitz.open(str(tmp_pdf)) as ep:
+                if ep.page_count == 0:
+                    return False
+                first = ep.load_page(0)
+                pw, ph = first.rect.width, first.rect.height
+                target = _fit_rect_in_area(pw, ph, area)
+                page.show_pdf_page(target, ep, 0)
+            return True
+        finally:
+            try:
+                tmp_pdf.unlink(missing_ok=True)  # type: ignore[call-arg]
+            except TypeError:
+                if tmp_pdf.exists():
+                    tmp_pdf.unlink()
+    except Exception as exc:
+        logger.warning("EPS vector embed failed for %s: %s", src.filename, exc)
+        return False
+
+
+def _insert_eps_raster(page: fitz.Page, src: _ImageSource, area: fitz.Rect) -> bool:
+    """Fallback: rasterize EPS via Ghostscript at a target-sized DPI."""
+    from app.domains.files import eps_service
+
+    try:
+        bbox = eps_service.read_bbox_points(Path(src.path))  # type: ignore[arg-type]
+        area_w = area.x1 - area.x0
+        area_h = area.y1 - area.y0
+        if bbox:
+            wpt, hpt = bbox
+            scale = min(area_w / wpt, area_h / hpt, 1.0)
+            target_pt_edge = max(wpt, hpt) * scale
+        else:
+            target_pt_edge = max(area_w, area_h)
+        # 300 DPI at the drawn size — print-quality without runaway pixel counts.
+        target_px_edge = max(600, int(round((target_pt_edge / 72.0) * 300)))
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp_png = Path(tmp.name)
+        try:
+            eps_service.eps_to_png(
+                Path(src.path),  # type: ignore[arg-type]
+                tmp_png,
+                target_px_edge=target_px_edge,
+            )
+            with Image.open(tmp_png) as im:
+                w, h = im.size
+                buf = io.BytesIO()
+                if im.mode not in ("RGB", "RGBA", "L"):
+                    im = im.convert("RGBA")
+                im.save(buf, format="PNG")
+            target = _fit_rect_in_area(w, h, area)
+            page.insert_image(target, stream=buf.getvalue())
+            return True
+        finally:
+            try:
+                tmp_png.unlink(missing_ok=True)  # type: ignore[call-arg]
+            except TypeError:
+                if tmp_png.exists():
+                    tmp_png.unlink()
+    except Exception as exc:
+        logger.warning("EPS high-DPI raster failed for %s: %s", src.filename, exc)
+        return False
+
+
 def _insert_image_centered(page: fitz.Page, src: _ImageSource, area: fitz.Rect) -> None:
+    # Standalone EPS on disk gets a vector-preserving path: render to PDF via
+    # Ghostscript and embed via show_pdf_page, so the figure stays resolution-
+    # independent. Fall back to high-DPI Ghostscript raster if vector embed
+    # fails, and only then to the Pillow path below.
+    ext = Path(src.filename or "").suffix.lower() if src.filename else ""
+    if ext == ".eps" and src.path and src.data is None:
+        if _insert_eps_vector(page, src, area):
+            return
+        if _insert_eps_raster(page, src, area):
+            return
+
     w = h = None
     try:
         with src.open_pil() as im:

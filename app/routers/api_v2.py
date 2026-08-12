@@ -2756,14 +2756,18 @@ async def api_v2_edit_save_file(
     orig_ext = orig_name.rsplit(".", 1)[-1].lower() if "." in orig_name else ""
     pil_format = FORMAT_MAP.get(orig_ext)
 
-    if pil_format is not None:
-        target_filename = orig_name
-        target_ext = "jpg" if orig_ext == "jpeg" else orig_ext
-    else:
+    # EPS is vector; a canvas-edited round-trip is inherently raster. Pillow's
+    # Level-2 EPS encoder would produce a raster-wrapped-in-EPS that pretends
+    # to still be vector. Instead, always write a `-edited.png` sibling and
+    # leave the original EPS untouched.
+    if orig_ext == "eps" or pil_format is None:
         stem = orig_name.rsplit(".", 1)[0] if "." in orig_name else orig_name
         target_filename = f"{stem}-edited.png"
         target_ext = "png"
         pil_format = "PNG"
+    else:
+        target_filename = orig_name
+        target_ext = "jpg" if orig_ext == "jpeg" else orig_ext
 
     base_path = os.path.dirname(file_record.path)
     target_path = os.path.join(base_path, target_filename)
@@ -2797,8 +2801,10 @@ async def api_v2_edit_save_file(
         # LZW is lossless and widely supported by print/prepress toolchains.
         save_kwargs["compression"] = "tiff_lzw"
 
-    # Archive the current version, then write the new one atomically.
-    if os.path.exists(file_record.path):
+    # Archive the current version only when we're about to overwrite it.
+    # Sibling writes (EPS→-edited.png, or any unknown-format fallback) leave
+    # the original file record intact, so archiving would just create noise.
+    if target_path == file_record.path and os.path.exists(file_record.path):
         try:
             version_service.archive_existing_file(
                 db,
@@ -2852,8 +2858,11 @@ async def api_v2_edit_save_file(
             version=1,
             uploaded_at=now_ist_naive(),
             # Fallback path for formats Pillow can't encode (e.g. EPS): we
-            # write a `-edited.png` sibling. It's derived, not an upload.
+            # write a `-edited.png` sibling. It's derived, not an upload —
+            # and it nests under the source EPS via source_file_id so the
+            # file list groups the edit under the original.
             is_original=False,
+            source_file_id=file_record.id,
         )
         db.add(result)
         db.commit()
