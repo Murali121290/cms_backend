@@ -300,7 +300,7 @@
       "name": "Aspen: Page citations (e.g. 'See page 23') are linked to the page id",
       "target_path": "OEBPS/xhtml",
       "file_name_pattern": "*.xhtml",
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "ASP-LINK-002",

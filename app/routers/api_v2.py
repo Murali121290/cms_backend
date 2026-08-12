@@ -3496,7 +3496,7 @@ def api_v2_upload_zip(
 
         def determine_category_and_type(name: str) -> tuple[str, str]:
             ext = name.split(".")[-1].lower() if "." in name else ""
-            if ext in ["xml", "html", "xhtml"]:
+            if ext in ["xml", "html", "xhtml", "log"]:
                 return "XML", ext
             elif ext in ["png", "jpg", "jpeg", "gif", "tiff", "tif", "svg", "eps"]:
                 return "Art", ext
@@ -4217,6 +4217,8 @@ def api_v2_processing_status(
         "bias_scan",
         "credit_extractor_ai",
         "word_to_xml",
+        "indesign_to_xml",
+        "xml_to_indesign",
     )
     if process_type not in supported_types:
         return _error_response(
@@ -4229,7 +4231,7 @@ def api_v2_processing_status(
         if process_type in ("reference_validation", "reference_structuring"):
             status_payload = processing_service.get_reference_validation_status(db, file_id=file_id, user=viewer)
         else:
-            status_payload = processing_service.get_structuring_status(db, file_id=file_id, user=viewer)
+            status_payload = processing_service.get_structuring_status(db, file_id=file_id, user=viewer, process_type=process_type)
     except HTTPException as exc:
         code = "PROCESSING_STATUS_FAILED"
         if exc.status_code == 401:

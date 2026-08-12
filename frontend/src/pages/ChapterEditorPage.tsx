@@ -154,7 +154,9 @@ export function ChapterEditorPage() {
 
   const [showOutline, setShowOutline] = useState(true)
   const [showLog, setShowLog] = useState(true)
-  const [activeRightTab, setActiveRightTab] = useState<'log' | 'xpath' | 'shortcuts' | 'design' | 'manuscript'>('log')
+  const [activeRightTab, setActiveRightTab] = useState<'log' | 'xpath' | 'shortcuts' | 'design' | 'manuscript' | 'layout_preview'>('log')
+  const [layoutPreviewUrl, setLayoutPreviewUrl] = useState<string | null>(null)
+  const [layoutLoading, setLayoutLoading] = useState(false)
   const [designPdfUrl, setDesignPdfUrl] = useState<string | null>(null)
   const [designLoading, setDesignLoading] = useState(false)
   const [manuscriptHtmlUrl, setManuscriptHtmlUrl] = useState<string | null>(null)
@@ -449,6 +451,14 @@ export function ChapterEditorPage() {
       })
   }, [ext, fileUrl, logFileUrl])
 
+  const loadLayoutPreview = () => {
+    if (!projectId || !chapterId || !decodedFilename) return
+    setLayoutLoading(true)
+    const chFolder = chapter?.chapters ? chapter.chapters.replace(/^chapter-/, '') : chapterId
+    const url = `/api/uploads/${projectId}/chapter/chapter-${chFolder}/${decodedSubfolder}/${encodeURIComponent(decodedFilename)}/layout-preview?t=${Date.now()}`
+    setLayoutPreviewUrl(url)
+  }
+
   const handleXmlSave = async () => {
     if (!saveUrl || xmlContent === null || xmlSaving) return
     setXmlSaving(true)
@@ -468,6 +478,9 @@ export function ChapterEditorPage() {
         setLogContent(data.log_content)
       }
       toast.success('XML file saved successfully')
+      if (layoutPreviewUrl) {
+        loadLayoutPreview()
+      }
     } catch (err) {
       toast.error('Failed to save XML file')
     } finally {
@@ -694,6 +707,19 @@ export function ChapterEditorPage() {
                     >
                       Format XML
                     </button>
+                    {ext === 'xml' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowLog(true)
+                          setActiveRightTab('layout_preview')
+                          loadLayoutPreview()
+                        }}
+                        className={`px-2 py-0.5 rounded border text-[11px] transition-colors ${showLog && activeRightTab === 'layout_preview' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                      >
+                        {layoutLoading ? 'Loading Layout...' : 'Layout HTML'}
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => {
@@ -762,6 +788,18 @@ export function ChapterEditorPage() {
                     >
                       Conversion Log
                     </button>
+                    {ext === 'xml' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveRightTab('layout_preview')
+                          loadLayoutPreview()
+                        }}
+                        className={`flex-1 text-[11px] font-semibold uppercase tracking-wider transition-colors border-b-2 ${activeRightTab === 'layout_preview' ? 'border-blue-600 text-blue-600 bg-white' : 'border-transparent text-gray-500 hover:bg-gray-50 hover:text-gray-700'}`}
+                      >
+                        Layout HTML
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => setActiveRightTab('xpath')}
@@ -798,6 +836,27 @@ export function ChapterEditorPage() {
                     </button>
                   </div>
                   <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                    {activeRightTab === 'layout_preview' && (
+                      <div className="flex-1 flex flex-col min-h-0 bg-white relative">
+                        {layoutLoading && (
+                          <div className="absolute inset-0 bg-white/70 flex items-center justify-center text-xs text-gray-500 gap-1.5 z-10">
+                            <Loader2 size={14} className="animate-spin text-blue-600" /> Generating Layout Preview...
+                          </div>
+                        )}
+                        {layoutPreviewUrl ? (
+                          <iframe
+                            src={layoutPreviewUrl}
+                            onLoad={() => setLayoutLoading(false)}
+                            className="w-full h-full border-0 bg-white"
+                            title="Layout HTML Preview"
+                          />
+                        ) : (
+                          <div className="flex-1 flex items-center justify-center text-xs text-gray-400 font-sans p-4 text-center">
+                            Could not generate Layout Preview.
+                          </div>
+                        )}
+                      </div>
+                    )}
                     {activeRightTab === 'log' && (
                       <SourceEditor
                         value={logContent ?? 'Loading log...'}

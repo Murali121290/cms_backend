@@ -4,37 +4,35 @@
       "id": "URL001",
       "name": "Internal Link Check",
       "target_path": "OEBPS/xhtml",
-      "enabled": false,
-      "file_name_pattern": [
-        "*_chapter*.xhtml",
-        "*_ch*.xhtml"
-      ]
+      "enabled": true,
+      "file_name_pattern": "*.xhtml"
     },
     {
       "id": "URL002",
       "name": "External Link Check",
       "target_path": "OEBPS/xhtml",
-      "enabled": false,
-      "file_name_pattern": [
-        "*_chapter*.xhtml",
-        "*_ch*.xhtml"
-      ]
+      "enabled": true,
+      "file_name_pattern": "*.xhtml"
     },
     {
       "id": "URL003",
       "name": "URL Text Match Check",
       "target_path": "OEBPS/xhtml",
       "enabled": false,
-      "file_name_pattern": [
-        "*_chapter*.xhtml",
-        "*_ch*.xhtml"
-      ]
+     "file_name_pattern": "*.xhtml"
     },
     {
       "id": "URL004",
       "name": "PDF–EPUB Link Match",
       "scope": "book",
       "enabled": false
+    },
+    {
+      "id": "URL005",
+      "name": "Internal Reference Validation",
+      "target_path": "OEBPS/xhtml",
+      "enabled": true,
+      "file_name_pattern": "*.xhtml"
     }
   ]
 }

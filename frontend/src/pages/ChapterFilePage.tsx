@@ -35,7 +35,7 @@ import { XmlToIndesignModal } from '@/components/XmlToIndesignModal'
 import {
   startLanguageEdit,
   startPpdGeneration, startPermissionsCheck, startCreditExtraction,
-  startBiasScan, startWordToXml, getProcessingStatus,
+  startBiasScan, startWordToXml, getProcessingStatus, startIndesignToXml,
 } from '@/api/processing'
 import { deleteFile, generateFigurePdf } from '@/api/files'
 import { useChapterFilesQuery } from '@/features/projects/useChapterFilesQuery'
@@ -495,6 +495,16 @@ function ProcessingActionsMenu({
             }}
           >
             <Layers size={12} /> Generate InDesign
+          </button>
+        )}
+
+        {showAction('indesignToXml') && fname.endsWith('.indd') && row?.subfolder?.toLowerCase() === 'indesign' && (
+          <button
+            disabled={!fid}
+            className={btnCls}
+            onClick={() => fid && setConfirmStep({ actionName: 'InDesign to XML', jobFn: () => startIndesignToXml(fid), pollFileId: fid, pollProcessType: 'indesign_to_xml' })}
+          >
+            <FileCode size={12} /> InDesign to XML
           </button>
         )}
       </div>

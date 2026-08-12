@@ -355,6 +355,160 @@ async def download_backup_or_folder_file(
     )
 
 
+@router.get("/api/uploads/{project_id}/chapter/{chapter_name}/{subfolder:path}/{file_name}/layout-preview")
+async def get_folder_file_layout_preview(
+    project_id: int,
+    chapter_name: str,
+    subfolder: str,
+    file_name: str,
+    user=Depends(get_current_user_from_cookie),
+    db: Session = Depends(database.get_db)
+):
+    import os
+    from lxml import etree
+    from fastapi.responses import HTMLResponse
+    
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+        
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    chapter = _resolve_chapter(db, project=project, chapter_name=chapter_name)
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+
+    file_record = db.query(models.File).filter(
+        models.File.project_id == project_id,
+        models.File.chapter_id == chapter.id,
+        models.File.filename == file_name
+    ).first()
+
+    if file_record:
+        file_path = os.path.join(UPLOAD_DIR, file_record.path)
+    else:
+        resolved_subfolder = subfolder
+        chapter_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters)
+        if os.path.exists(chapter_dir):
+            for d in os.listdir(chapter_dir):
+                if d.lower() == subfolder.lower():
+                    resolved_subfolder = d
+                    break
+        file_path = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, resolved_subfolder, file_name)
+
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="XML file not found")
+
+    try:
+        with open(file_path, "rb") as f:
+            xml_content = f.read()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read XML: {str(e)}")
+
+    legacy_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "processing", "legacy"))
+    wordtoxml_dir = os.path.join(legacy_dir, "wordtoxml")
+    xsl_path = os.path.join(wordtoxml_dir, "style.xsl")
+    css_path = os.path.join(wordtoxml_dir, "style.css")
+
+    if not os.path.exists(xsl_path):
+        raise HTTPException(status_code=500, detail="XSLT style.xsl not found in server legacy directory")
+
+    try:
+        xml_tree = etree.fromstring(xml_content)
+        xsl_tree = etree.parse(xsl_path)
+        transform = etree.XSLT(xsl_tree)
+        result_tree = transform(xml_tree)
+        html_str = etree.tostring(result_tree, encoding="utf-8", method="html").decode("utf-8")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"XSLT transformation failed: {str(e)}")
+
+    css_style_tag = ""
+    if os.path.exists(css_path):
+        try:
+            with open(css_path, "r", encoding="utf-8") as css_f:
+                css_content = css_f.read()
+            css_style_tag = f"<style>\n{css_content}\n</style>"
+        except Exception:
+            pass
+
+    if css_style_tag:
+        html_str = html_str.replace('<link rel="stylesheet" type="text/css" href="style.css">', "")
+        html_str = html_str.replace('<link rel="stylesheet" type="text/css" href="style.css"/>', "")
+        if "</head>" in html_str:
+            html_str = html_str.replace("</head>", f"{css_style_tag}\n</head>")
+        else:
+            html_str = f"<html><head>{css_style_tag}</head><body>{html_str}</body></html>"
+
+    # Resolve and rewrite image paths to route to actual Art/Links download endpoints
+    try:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html_str, "html.parser")
+        
+        # Scan potential art/links directories for the chapter
+        art_files = {}
+        candidate_dirs = [
+            os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "Art"),
+            os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "art"),
+            os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "InDesign", "Links"),
+            os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "InDesign", "artfile"),
+            os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "Links"),
+            os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "artfile"),
+        ]
+        
+        for c_dir in candidate_dirs:
+            if os.path.exists(c_dir):
+                for fname in os.listdir(c_dir):
+                    stem, ext = os.path.splitext(fname)
+                    stem = stem.lower()
+                    if stem not in art_files:
+                        art_files[stem] = []
+                    art_files[stem].append((fname, os.path.basename(c_dir), c_dir))
+                    
+        for img in soup.find_all("img"):
+            src = img.get("src")
+            if src:
+                img_filename = os.path.basename(src)
+                img_stem, img_ext = os.path.splitext(img_filename)
+                img_stem_lower = img_stem.lower()
+                
+                matched_file = None
+                if img_stem_lower in art_files:
+                    candidates = art_files[img_stem_lower]
+                    web_friendly_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
+                    # 1. Prefer web friendly files (e.g. .png, .jpg)
+                    for c_name, c_folder, c_dir in candidates:
+                        _, c_ext = os.path.splitext(c_name)
+                        if c_ext.lower() in web_friendly_exts:
+                            matched_file = (c_name, c_folder, c_dir)
+                            break
+                    # 2. Prefer c_name with exact same extension as referenced in XML if not found
+                    if not matched_file:
+                        for c_name, c_folder, c_dir in candidates:
+                            _, c_ext = os.path.splitext(c_name)
+                            if c_ext.lower() == img_ext.lower():
+                                matched_file = (c_name, c_folder, c_dir)
+                                break
+                    # 3. Fallback to first candidate
+                    if not matched_file:
+                        matched_file = candidates[0]
+                        
+                if matched_file:
+                    c_name, c_folder, c_dir = matched_file
+                    ch_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters)
+                    # Resolve relative folder path (handles InDesign/Links nesting correctly)
+                    resolved_folder = os.path.relpath(c_dir, ch_dir).replace("\\", "/")
+                    img["src"] = f"/api/uploads/{project_id}/chapter/{chapter_name}/{resolved_folder}/{c_name}/download"
+                    
+        html_str = str(soup)
+    except Exception:
+        # Fallback to unmodified HTML if parsing fails
+        pass
+
+    return HTMLResponse(content=html_str)
+
+
+
 class SaveContentRequest(BaseModel):
     content: str
 
@@ -377,17 +531,7 @@ async def save_folder_file(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
         
-    chapter_no = chapter_name.split("-")[-1]
-    chapter = None
-    if chapter_name.startswith("chapter-") and chapter_no.isdigit():
-        chapter = db.query(models.ChapterInfo).filter(
-            models.ChapterInfo.id == int(chapter_no)
-        ).first()
-    if not chapter:
-        chapter = db.query(models.ChapterInfo).filter(
-            models.ChapterInfo.project == project.code,
-            (models.ChapterInfo.chapters == chapter_no) | (models.ChapterInfo.chapters == str(int(chapter_no)))
-        ).first()
+    chapter = _resolve_chapter(db, project=project, chapter_name=chapter_name)
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
         
@@ -400,7 +544,13 @@ async def save_folder_file(
         models.File.filename == file_name
     ).first()
 
-    if file_record:
+    if file_name.lower().endswith((".xml", ".log")) and not any(file_name.lower().endswith(x) for x in ("_final.xml", "_final.log", "_finalxml.xml")):
+        xml_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "XML")
+        file_path = os.path.join(xml_dir, file_name)
+        if file_record:
+            file_record.category = "XML"
+            file_record.path = file_path
+    elif file_record:
         file_path = os.path.join(UPLOAD_DIR, file_record.path)
     else:
         resolved_subfolder = subfolder
@@ -484,6 +634,38 @@ async def save_folder_file(
             if os.path.exists(log_path):
                 with open(log_path, "r", encoding="utf-8") as lf:
                     log_content = lf.read()
+                
+                # Register or update log file in the database
+                log_filename = os.path.basename(log_path)
+                db_log = db.query(models.File).filter(
+                    models.File.project_id == project_id,
+                    models.File.chapter_id == chapter.id,
+                    models.File.filename == log_filename
+                ).first()
+                
+                # Resolve relative path for DB
+                rel_log_path = os.path.relpath(log_path, UPLOAD_DIR).replace("\\", "/")
+                
+                if not db_log:
+                    db_log = models.File(
+                        filename=log_filename,
+                        path=rel_log_path,
+                        file_type="text/plain",
+                        project_id=project_id,
+                        chapter_id=chapter.id,
+                        category=file_record.category if file_record else "Misc",
+                        version=1,
+                        is_original=False
+                    )
+                    db.add(db_log)
+                    db.commit()
+                else:
+                    db_log.path = rel_log_path
+                    db_log.category = file_record.category if file_record else "Misc"
+                    db_log.uploaded_at = datetime.utcnow()
+                    if user:
+                        db_log.uploaded_by_id = user.id
+                    db.commit()
         
     return {"status": True, "message": "File saved", "log_content": log_content}
 

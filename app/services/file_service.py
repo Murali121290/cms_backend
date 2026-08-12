@@ -87,15 +87,16 @@ def upload_chapter_files(
     if not project or not chapter:
         return {"project": project, "chapter": chapter, "uploaded": [], "skipped": []}
 
-    safe_cat = category.replace(" ", "_")
-    base_path = f"{upload_dir}/{project.code}/{chapter.number}/{safe_cat}"
-    os.makedirs(base_path, exist_ok=True)
     uploaded_results = []
     skipped_results = []
 
     for upload in files:
         if not upload.filename:
             continue
+
+        file_category = category
+        if upload.filename.lower().endswith((".xml", ".log")):
+            file_category = "XML"
 
         if upload.filename.lower().endswith(".zip") and category in ["Design", "Art"]:
             import zipfile
@@ -109,9 +110,17 @@ def upload_chapter_files(
                         if not fname or member.endswith("/") or "__MACOSX" in member or fname.startswith("."):
                             continue
 
+                        member_category = file_category
+                        if fname.lower().endswith((".xml", ".log")):
+                            member_category = "XML"
+
+                        member_safe_cat = member_category.replace(" ", "_")
+                        member_base_path = f"{upload_dir}/{project.code}/{chapter.number}/{member_safe_cat}"
+                        os.makedirs(member_base_path, exist_ok=True)
+
                         existing_file = db.query(models.File).filter(
                             models.File.chapter_id == chapter_id,
-                            models.File.category == category,
+                            models.File.category == member_category,
                             models.File.filename == fname,
                         ).first()
 
@@ -129,7 +138,7 @@ def upload_chapter_files(
                             version_entry = version_service.archive_existing_file(
                                 db,
                                 existing_file=existing_file,
-                                base_path=base_path,
+                                base_path=member_base_path,
                                 uploaded_by_id=actor_user_id,
                             )
 
@@ -149,7 +158,7 @@ def upload_chapter_files(
                                 }
                             )
                         else:
-                            file_path = f"{base_path}/{fname}"
+                            file_path = f"{member_base_path}/{fname}"
                             with z.open(member) as src, open(file_path, "wb") as dst:
                                 shutil.copyfileobj(src, dst)
 
@@ -159,7 +168,7 @@ def upload_chapter_files(
                                 chapter_id=chapter_id,
                                 filename=fname,
                                 file_type=ext,
-                                category=category,
+                                category=member_category,
                                 path=file_path,
                                 version=1,
                                 uploaded_by_id=actor_user_id,
@@ -181,9 +190,13 @@ def upload_chapter_files(
                     }
                 )
         else:
+            file_safe_cat = file_category.replace(" ", "_")
+            file_base_path = f"{upload_dir}/{project.code}/{chapter.number}/{file_safe_cat}"
+            os.makedirs(file_base_path, exist_ok=True)
+
             existing_file = db.query(models.File).filter(
                 models.File.chapter_id == chapter_id,
-                models.File.category == category,
+                models.File.category == file_category,
                 models.File.filename == upload.filename,
             ).first()
 
@@ -201,7 +214,7 @@ def upload_chapter_files(
                 version_entry = version_service.archive_existing_file(
                     db,
                     existing_file=existing_file,
-                    base_path=base_path,
+                    base_path=file_base_path,
                     uploaded_by_id=actor_user_id,
                 )
 
@@ -221,7 +234,7 @@ def upload_chapter_files(
                     }
                 )
             else:
-                file_path = f"{base_path}/{upload.filename}"
+                file_path = f"{file_base_path}/{upload.filename}"
                 with open(file_path, "wb") as buffer:
                     shutil.copyfileobj(upload.file, buffer)
 
@@ -231,7 +244,7 @@ def upload_chapter_files(
                     chapter_id=chapter_id,
                     filename=upload.filename,
                     file_type=ext,
-                    category=category,
+                    category=file_category,
                     path=file_path,
                     version=1,
                     uploaded_by_id=actor_user_id,
