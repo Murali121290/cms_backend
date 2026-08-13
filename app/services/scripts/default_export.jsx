@@ -34,14 +34,14 @@ try {
     if (outLower.indexOf(".pdf") !== -1) {
         format = ExportFormat.PDF_TYPE;
     } else if (outLower.indexOf(".txt") !== -1) {
-        format = ExportFormat.TXT;
+        format = ExportFormat.TEXT_TYPE;
     } else if (outLower.indexOf(".xml") !== -1) {
         format = ExportFormat.XML;
     }
 
     var outFile = new File(outputFile);
 
-    if (format === ExportFormat.RTF || format === ExportFormat.TXT) {
+    if (format === ExportFormat.RTF || format === ExportFormat.TEXT_TYPE) {
         // Document does not support RTF/TXT directly, we merge and export stories
         var tempDoc = app.documents.add(false);
         try {

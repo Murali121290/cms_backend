@@ -60,17 +60,17 @@ try {
     var outLower = outputFile.toLowerCase();
     var format = ExportFormat.RTF; // Default to RTF (Rich Text Format)
     
-    if (outLower.indexOf(".pdf") !== -1) {
+    } else if (outLower.indexOf(".pdf") !== -1) {
         format = ExportFormat.PDF_TYPE;
     } else if (outLower.indexOf(".txt") !== -1) {
-        format = ExportFormat.TXT;
+        format = ExportFormat.TEXT_TYPE;
     } else if (outLower.indexOf(".xml") !== -1) {
         format = ExportFormat.XML;
     }
 
     var outFile = new File(outputFile);
 
-    if (format === ExportFormat.RTF || format === ExportFormat.TXT) {
+    if (format === ExportFormat.RTF || format === ExportFormat.TEXT_TYPE) {
         // Document does not support RTF/TXT directly, we merge and export stories
         var tempDoc = app.documents.add(false);
         try {
@@ -114,81 +114,148 @@ try {
             logFile.close();
         } catch (logErr) {}
     }
+}
+"""
+
+XML_JSX_CONTENT = r"""// Adobe InDesign ExtendScript to import XML into a template and save as INDD
+app.scriptPreferences.userInteractionLevel = UserInteractionLevels.NEVER_INTERACT;
+try {
+    var xmlFilePath = "";
+    var templateFilePath = "";
+    var outputFilePath = "";
+
+    try {
+        xmlFilePath = app.scriptArgs.getValue("XmlFile");
+        templateFilePath = app.scriptArgs.getValue("TemplateFile");
+        outputFilePath = app.scriptArgs.getValue("OutputFile");
+    } catch (e) {}
+
+    if (!xmlFilePath && typeof arguments !== "undefined" && arguments.length >= 3) {
+        xmlFilePath = arguments[0];
+        templateFilePath = arguments[1];
+        outputFilePath = arguments[2];
+    }
+
+    if (!xmlFilePath || !templateFilePath || !outputFilePath) {
+        throw new Error("Missing XmlFile, TemplateFile, or OutputFile arguments.");
+    }
+
+    var templateFile = new File(templateFilePath);
+    if (!templateFile.exists) {
+        throw new Error("Template file does not exist: " + templateFilePath);
+    }
+    
+    var xmlFile = new File(xmlFilePath);
+    if (!xmlFile.exists) {
+        throw new Error("XML file does not exist: " + xmlFilePath);
+    }
+
+    var doc = app.open(templateFile, false);
+    
+    // Import XML
+    doc.importXML(xmlFile);
+    
+    // Save as .indd document
+    var outputFile = new File(outputFilePath);
+    doc.save(outputFile);
+    doc.close(SaveOptions.NO);
+
+} catch (err) {
+    if (outputFilePath) {
+        try {
+            var logFile = new File(outputFilePath + ".error.txt");
+            logFile.open("w");
+            logFile.write("InDesign XML Import Error: " + err.message + "\nLine: " + err.line + "\nStack: " + err.stack);
+            logFile.close();
+        } catch (logErr) {}
+    }
     throw err;
 }
 """
 
+def update_slide_master(presentation, template_ppt):
+
+    # Apply template
+    presentation.ApplyTemplate(template_ppt)
+
+    # Refresh all slides
+    for i in range(1, presentation.Slides.Count + 1):
+        slide = presentation.Slides(i)
+
+        try:
+            slide.FollowMasterBackground = True
+        except:
+            pass
+
+        try:
+            slide.DisplayMasterShapes = True
+        except:
+            pass
 def apply_ppt_template(input_ppt, template_ppt, output_ppt, session_id):
 
     powerpoint = None
     presentation = None
+    template_presentation = None
 
     try:
-        logger.info(
-            f"[{session_id}] Starting PowerPoint template processing"
-        )
+        logger.info(f"[{session_id}] Starting PowerPoint template processing")
 
         pythoncom.CoInitialize()
 
-        powerpoint = win32com.client.Dispatch(
-            "PowerPoint.Application"
-        )
-
+        powerpoint = win32com.client.Dispatch("PowerPoint.Application")
         powerpoint.Visible = True
 
         input_ppt = os.path.abspath(input_ppt)
         template_ppt = os.path.abspath(template_ppt)
         output_ppt = os.path.abspath(output_ppt)
 
-        logger.info(
-            f"[{session_id}] Opening PPT: {input_ppt}"
-        )
-
+        # Open target presentation
         presentation = powerpoint.Presentations.Open(
             input_ppt,
             WithWindow=False
         )
 
+        # Open template presentation (read only)
+        template_presentation = powerpoint.Presentations.Open(
+            template_ppt,
+            WithWindow=False,
+            ReadOnly=True
+        )
+
+        # Apply template
+        presentation.ApplyTemplate(template_ppt)
+
+        # -------------------------------
+        # Apply template slide size
+        # -------------------------------
+        presentation.PageSetup.SlideWidth = template_presentation.PageSetup.SlideWidth
+        presentation.PageSetup.SlideHeight = template_presentation.PageSetup.SlideHeight
 
         logger.info(
-            f"[{session_id}] Applying template: {template_ppt}"
+            f"[{session_id}] Applied slide size: "
+            f"{presentation.PageSetup.SlideWidth} x "
+            f"{presentation.PageSetup.SlideHeight}"
         )
+        # update_slide_master(presentation, template_ppt)
 
-        presentation.ApplyTemplate(
-            template_ppt
-        )
+        # Save
+        presentation.SaveAs(output_ppt)
 
-
-        logger.info(
-            f"[{session_id}] Saving output PPT: {output_ppt}"
-        )
-
-        presentation.SaveAs(
-            output_ppt
-        )
-
-
+        template_presentation.Close()
         presentation.Close()
-        presentation = None
-
-
-        logger.info(
-            f"[{session_id}] PowerPoint template completed"
-        )
 
         return output_ppt
 
-
     except Exception as e:
-
-        logger.error(
-            f"[{session_id}] PPT template error: {str(e)}"
-        )
-
-        raise e
-
+        logger.error(f"[{session_id}] PPT template error: {e}")
+        raise
 
     finally:
+        try:
+            if template_presentation:
+                template_presentation.Close()
+        except:
+            pass
 
         try:
             if presentation:
@@ -196,13 +263,11 @@ def apply_ppt_template(input_ppt, template_ppt, output_ppt, session_id):
         except:
             pass
 
-
         try:
             if powerpoint:
                 powerpoint.Quit()
         except:
             pass
-
 
         pythoncom.CoUninitialize()
 def get_jsx_script_path(client_name: str = None):
@@ -657,8 +722,386 @@ def apply_ppt_template_api(
             status_code=500,
             detail=str(e)
         )
+
+@app.post("/convert-xml-to-indesign")
+def convert_xml_to_indesign(file: UploadFile = File(...)):
+    start_time = time.time()
+    session_id = str(uuid.uuid4())
+    
+    # 1. Sync script from network share if newer
+    network_jsx = r"\\10.1.1.100\common_share\Murali Balu\SpringerXMLProcessor.jsx"
+    local_jsx = r"C:\Users\muraliba\Documents\SpringerXMLProcessor.jsx"
+    run_jsx = r"C:\Users\muraliba\Documents\SpringerXMLProcessor_run.jsx"
+    workflow_base_dir = r"C:\Users\muraliba\Documents\temp_conversions"
+
+    logger.info(f"[{session_id}] Checking network share JSX for updates...")
+    if os.path.exists(network_jsx):
+        try:
+            if not os.path.exists(local_jsx) or os.path.getmtime(network_jsx) > os.path.getmtime(local_jsx):
+                logger.info(f"[{session_id}] Syncing {network_jsx} to {local_jsx}...")
+                os.makedirs(os.path.dirname(local_jsx), exist_ok=True)
+                shutil.copy2(network_jsx, local_jsx)
+        except Exception as sync_ex:
+            logger.warning(f"[{session_id}] Failed to sync network JSX script: {str(sync_ex)}")
+    else:
+        logger.warning(f"[{session_id}] Network JSX script not found at {network_jsx}")
+
+    # Terminate any zombie InDesign processes
+    import subprocess
+    logger.info(f"[{session_id}] Cleaning up zombie InDesign processes...")
+    try:
+        subprocess.run(["taskkill", "/F", "/IM", "InDesign.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as tk_ex:
+        logger.warning(f"[{session_id}] taskkill cleanup failed: {str(tk_ex)}")
+
+    temp_dir = os.path.join(workflow_base_dir, session_id)
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    logger.info(f"[{session_id}] Received XML-to-InDesign conversion request")
+    uploaded_file_path = os.path.join(temp_dir, file.filename)
+    
+    try:
+        with open(uploaded_file_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+        logger.info(f"[{session_id}] Saved zip to {uploaded_file_path}")
+    except Exception as e:
+        logger.error(f"[{session_id}] Failed to save uploaded file: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+
+    # Extract zip file
+    import zipfile
+    try:
+        with zipfile.ZipFile(uploaded_file_path, "r") as z:
+            z.extractall(temp_dir)
+        logger.info(f"[{session_id}] Unzipped XML-to-InDesign package successfully")
+    except Exception as zip_ex:
+        logger.error(f"[{session_id}] ZIP extraction failed: {str(zip_ex)}")
+        raise HTTPException(status_code=400, detail=f"Failed to extract ZIP archive: {str(zip_ex)}")
+
+    # Locate XML and INDT files recursively
+    xml_path = None
+    indt_path = None
+    
+    for root, _, filenames in os.walk(temp_dir):
+        for fname in filenames:
+            if fname.lower().endswith(".xml"):
+                xml_path = os.path.abspath(os.path.join(root, fname))
+            elif fname.lower().endswith(".indt"):
+                indt_path = os.path.abspath(os.path.join(root, fname))
+                
+    if not xml_path:
+        raise HTTPException(status_code=400, detail="No XML file (.xml) found in zip package")
+    if not indt_path:
+        raise HTTPException(status_code=400, detail="No InDesign template (.indt) found in zip package")
+        
+    logger.info(f"[{session_id}] XML found: {xml_path}")
+    logger.info(f"[{session_id}] Template found: {indt_path}")
+    
+    # 2. Prepare paths for InDesign ScriptArgs
+    xml_dir = os.path.dirname(xml_path)
+    xml_basename = os.path.splitext(os.path.basename(xml_path))[0]
+    output_indd_path = os.path.join(xml_dir, f"{xml_basename}.indd")
+    output_pdf_path = os.path.join(xml_dir, f"{xml_basename}.pdf")
+    
+    artwork_path = os.path.join(temp_dir, "artfile")
+    if not os.path.exists(artwork_path):
+        artwork_path = temp_dir
+
+    if not os.path.exists(local_jsx):
+        raise HTTPException(status_code=500, detail=f"Local InDesign script missing: {local_jsx}")
+
+    try:
+        import win32com.client
+        import pythoncom
+    except ImportError:
+        raise HTTPException(status_code=500, detail="pywin32 is not installed on this server")
+        
+    # COM execution
+    pythoncom.CoInitialize()
+    try:
+        logger.info(f"[{session_id}] Dispatching InDesign.Application...")
+        indesign_app = win32com.client.Dispatch("InDesign.Application")
+        
+        try:
+            indesign_app.DoScript("app.scriptPreferences.userInteractionLevel = UserInteractionLevels.NEVER_INTERACT;", 1246973031)
+        except Exception as ui_ex:
+            logger.warning(f"[{session_id}] Could not set userInteractionLevel: {str(ui_ex)}")
+            
+        # Pass parameters via ScriptArgs
+        logger.info(f"[{session_id}] Setting ScriptArgs for {local_jsx}...")
+        indesign_app.ScriptArgs.SetValue("template_path", os.path.abspath(indt_path))
+        indesign_app.ScriptArgs.SetValue("job_doc", os.path.abspath(output_indd_path))
+        indesign_app.ScriptArgs.SetValue("pdf_path", os.path.abspath(output_pdf_path))
+        indesign_app.ScriptArgs.SetValue("tokenid", session_id)
+        indesign_app.ScriptArgs.SetValue("xml_path", os.path.abspath(xml_path))
+        indesign_app.ScriptArgs.SetValue("artwork_path", os.path.abspath(artwork_path))
+
+        logger.info(f"[{session_id}] Running ExtendScript JSX script directly: {local_jsx}...")
+        indesign_app.DoScript(local_jsx, 1246973031)
+        
+        # Close leftover open documents
+        try:
+            while indesign_app.Documents.Count > 0:
+                indesign_app.Documents.Item(1).Close(1852776783) # idNo
+        except Exception:
+            pass
+            
+        # Verify output exists
+        if not os.path.exists(output_indd_path):
+            raise Exception("InDesign XML Import script completed, but output .indd file was not generated.")
+            
+        # Create output ZIP containing both indd and pdf
+        out_zip_path = os.path.join(temp_dir, f"output_{session_id}.zip")
+        with zipfile.ZipFile(out_zip_path, "w", zipfile.ZIP_DEFLATED) as out_zf:
+            out_zf.write(output_indd_path, os.path.basename(output_indd_path))
+            if os.path.exists(output_pdf_path):
+                out_zf.write(output_pdf_path, os.path.basename(output_pdf_path))
+                logger.info(f"[{session_id}] Packaged PDF into output zip: {output_pdf_path}")
+            else:
+                logger.warning(f"[{session_id}] Output PDF file not found to package!")
+
+        # Read zip bytes into response
+        with open(out_zip_path, "rb") as fh:
+            zip_bytes = fh.read()
+            
+        processing_time = time.time() - start_time
+        logger.info(f"[{session_id}] XML to InDesign completed successfully in {processing_time:.2f} seconds")
+        
+        from starlette.responses import Response
+        return Response(
+            content=zip_bytes,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="output_{session_id}.zip"'}
+        )
+        
+    except Exception as err:
+        logger.error(f"[{session_id}] XML to InDesign execution failed: {str(err)}")
+        raise HTTPException(status_code=500, detail=str(err))
+    finally:
+        pythoncom.CoUninitialize()
+        # Keep temp directory (disabled cleanup as requested)
+        # try:
+        #     shutil.rmtree(temp_dir)
+        # except Exception as cleanup_ex:
+        #     logger.warning(f"[{session_id}] Failed to clean up temp dir {temp_dir}: {str(cleanup_ex)}")
+
+@app.post("/convert-indesign-to-xml")
+def convert_indesign_to_xml(file: UploadFile = File(...), client: str = None):
+    start_time = time.time()
+    session_id = str(uuid.uuid4())
+    
+    # Terminate zombie processes
+    import subprocess
+    logger.info(f"[{session_id}] Cleaning up zombie processes before starting...")
+    try:
+        subprocess.run(["taskkill", "/F", "/IM", "InDesign.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as tk_ex:
+        logger.warning(f"[{session_id}] taskkill cleanup failed: {str(tk_ex)}")
+
+    temp_dir = os.path.abspath(f"temp_conversions/{session_id}")
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    logger.info(f"[{session_id}] Received indesign-to-xml request for file: {file.filename}")
+    is_zip = file.filename.lower().endswith(".zip")
+    
+    uploaded_file_path = os.path.join(temp_dir, file.filename)
+    try:
+        with open(uploaded_file_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+    except Exception as e:
+        logger.error(f"[{session_id}] Failed to save uploaded file: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+        
+    input_path = None
+    if is_zip:
+        import zipfile
+        try:
+            logger.info(f"[{session_id}] Unzipping packaged archive...")
+            with zipfile.ZipFile(uploaded_file_path, "r") as z:
+                z.extractall(temp_dir)
+            
+            # Find the .indd file recursively
+            for root, _, filenames in os.walk(temp_dir):
+                for fname in filenames:
+                    if fname.lower().endswith(".indd"):
+                        input_path = os.path.abspath(os.path.join(root, fname))
+                        break
+                if input_path:
+                    break
+                    
+            if not input_path:
+                raise Exception("No .indd file found in the uploaded ZIP archive.")
+            logger.info(f"[{session_id}] Located .indd file inside archive: {input_path}")
+        except Exception as zip_ex:
+            logger.error(f"[{session_id}] ZIP extraction failed: {str(zip_ex)}")
+            raise HTTPException(status_code=400, detail=str(zip_ex))
+    else:
+        input_path = os.path.abspath(uploaded_file_path)
+
+    indd_basename = os.path.basename(input_path)
+    indd_name_no_ext = os.path.splitext(indd_basename)[0]
+    output_xml_path = os.path.join(os.path.dirname(input_path), f"{indd_name_no_ext}_final.xml")
+    
+    try:
+        import win32com.client
+        import pythoncom
+    except ImportError:
+        logger.error(f"[{session_id}] pywin32 or pythoncom is not installed on this server.")
+        raise HTTPException(status_code=500, detail="pywin32 is not installed on the Windows server")
+
+    pythoncom.CoInitialize()
+    try:
+        logger.info(f"[{session_id}] Dispatching InDesign.Application...")
+        indesign_app = win32com.client.Dispatch("InDesign.Application")
+        
+        try:
+            indesign_app.DoScript("app.scriptPreferences.userInteractionLevel = UserInteractionLevels.NEVER_INTERACT;", 1246973031)
+        except Exception as ui_ex:
+            logger.warning(f"[{session_id}] Could not set UserInteractionLevel: {str(ui_ex)}")
+        
+        # Find Springer_Finaxml.jsx
+        jsx_script = None
+        candidates = [
+            r"C:\Users\muraliba\Documents\Springer_Finaxml.jsx",
+            os.path.abspath("Springer_Finaxml.jsx"),
+            os.path.abspath("app/services/scripts/Springer_Finaxml.jsx"),
+        ]
+        for candidate in candidates:
+            if os.path.exists(candidate):
+                jsx_script = os.path.abspath(candidate)
+                break
+                
+        if not jsx_script:
+            # Fallback to default_export.jsx
+            jsx_script = os.path.abspath("default_export.jsx")
+            logger.info(f"[{session_id}] Springer_Finaxml.jsx not found. Using default_export.jsx: {jsx_script}")
+        else:
+            logger.info(f"[{session_id}] Using Springer_Finaxml.jsx script at: {jsx_script}")
+        # If we are using Springer_Finaxml.jsx, we want to clear the old logs so we can wait for batch execution
+        is_springer_jsx = os.path.basename(jsx_script) == "Springer_Finaxml.jsx"
+        log_path = None
+        epub_log_path = None
+        if is_springer_jsx:
+            script_dir = os.path.dirname(jsx_script)
+            log_path = os.path.join(script_dir, "finalxml", "finalxml.log")
+            epub_log_path = os.path.join(script_dir, "epub", "epub.log")
+            for p, name in [(log_path, "finalxml.log"), (epub_log_path, "epub.log")]:
+                if os.path.exists(p):
+                    try:
+                        os.remove(p)
+                    except Exception as e:
+                        logger.warning(f"[{session_id}] Could not remove old {name}: {e}")
+
+        # Use absolute paths with backslashes
+        abs_input = os.path.abspath(input_path).replace("/", "\\")
+        abs_output = os.path.abspath(output_xml_path).replace("/", "\\")
+        
+        indesign_app.ScriptArgs.SetValue("InputFile", abs_input)
+        indesign_app.ScriptArgs.SetValue("OutputFile", abs_output)
+            
+        args = [abs_input, abs_output]
+        indesign_app.DoScript(jsx_script, 1246973031, args)
+        
+        # If we ran Springer_Finaxml.jsx, we wait for both finalxml.bat and epub.bat processes to finish
+        if is_springer_jsx:
+            if log_path:
+                logger.info(f"[{session_id}] Waiting for Springer finalxml.bat processing...")
+                start_wait = time.time()
+                while time.time() - start_wait < 45:
+                    if os.path.exists(log_path):
+                        try:
+                            # Attempt to open file to ensure it's not locked by writing process
+                            with open(log_path, "r") as lf:
+                                lf.read()
+                            logger.info(f"[{session_id}] finalxml.bat completed successfully.")
+                            break
+                        except Exception:
+                            pass
+                    time.sleep(0.5)
+            if epub_log_path:
+                logger.info(f"[{session_id}] Waiting for Springer epub.bat processing...")
+                start_wait = time.time()
+                while time.time() - start_wait < 45:
+                    if os.path.exists(epub_log_path):
+                        try:
+                            # Attempt to open file to ensure it's not locked by writing process
+                            with open(epub_log_path, "r") as lf:
+                                lf.read()
+                            logger.info(f"[{session_id}] epub.bat completed successfully.")
+                            break
+                        except Exception:
+                            pass
+                    time.sleep(0.5)
+            
+        try:
+            while indesign_app.Documents.Count > 0:
+                indesign_app.Documents.Item(1).Close(1852776783) # idNo
+        except Exception:
+            pass
+ 
+        # Springer_Finaxml.jsx automatically outputs to *_finalxml.xml in the .indd directory
+        # Let's locate it, rename it to *_final.xml (which is output_xml_path)
+        if is_springer_jsx:
+            indd_dir = os.path.dirname(input_path)
+            expected_jsx_xml = os.path.join(indd_dir, f"{indd_name_no_ext}_finalxml.xml")
+            if os.path.exists(expected_jsx_xml):
+                try:
+                    if os.path.exists(output_xml_path):
+                        os.remove(output_xml_path)
+                    os.rename(expected_jsx_xml, output_xml_path)
+                    logger.info(f"[{session_id}] Renamed {expected_jsx_xml} to {output_xml_path}")
+                except Exception as rename_err:
+                    logger.warning(f"[{session_id}] Failed to rename Springer XML output: {str(rename_err)}")
+            
+        if not os.path.exists(output_xml_path):
+            # Check if there is an error log
+            error_log_path = output_xml_path + ".log.txt"
+            if os.path.exists(error_log_path):
+                with open(error_log_path, "r", encoding="utf-8") as err_f:
+                    err_msg = err_f.read()
+                raise Exception(f"InDesign JSX export failed: {err_msg}")
+            raise Exception("Export failed. Output XML file was not created by InDesign.")
+            
+        logger.info(f"[{session_id}] XML exported successfully to {output_xml_path}")
+        
+        # Package all output files into ZIP response
+        import io
+        import zipfile
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as out_zf:
+            for root, _, filenames in os.walk(temp_dir):
+                for fname in filenames:
+                    ext = os.path.splitext(fname)[1].lower()
+                    if ext in (".xml", ".epub", ".log", ".jpg", ".jpeg") and not fname.endswith(".zip"):
+                        file_abs_path = os.path.join(root, fname)
+                        rel_path = os.path.relpath(file_abs_path, temp_dir)
+                        out_zf.write(file_abs_path, rel_path)
+                        logger.info(f"[{session_id}] Zipped result file: {rel_path}")
+            if log_path and os.path.exists(log_path):
+                out_zf.write(log_path, "finalxml_batch.log")
+            if epub_log_path and os.path.exists(epub_log_path):
+                out_zf.write(epub_log_path, "epub_batch.log")
+            
+        zip_bytes = zip_buffer.getvalue()
+        processing_time = time.time() - start_time
+        logger.info(f"[{session_id}] InDesign to XML completed successfully in {processing_time:.2f} seconds")
+        
+        from starlette.responses import Response
+        return Response(
+            content=zip_bytes,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="output_{session_id}.zip"'}
+        )
+        
+    except Exception as err:
+        logger.error(f"[{session_id}] InDesign to XML execution failed: {str(err)}")
+        raise HTTPException(status_code=500, detail=str(err))
+    finally:
+        pythoncom.CoUninitialize()
+
 @app.get("/health")
 def health_check():
+
     return {"status": "healthy", "service": "indesign-to-word-converter", "log_file": log_file}
 
 if __name__ == "__main__":
