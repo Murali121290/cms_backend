@@ -23,7 +23,7 @@ import {
   Code2, Download, ExternalLink, Eye, File, FileCode, FileOutput, FilePen, FileText,
   FolderOpen, History, Image, Languages, Layers, Loader2, LogIn, LogOut,
   ScanLine, Search, ShieldCheck, Sparkles, Trash2,
-  Upload, Wrench, X, CheckCircle2, Archive, ClipboardCheck, Type, FolderArchive, Layout, Printer,
+  Upload, Wrench, X, CheckCircle2, Archive, ClipboardCheck, Type, FolderArchive, Layout, Printer, BookOpen,
 } from 'lucide-react'
 import { FOLDER_CONFIG, COLUMN_DEFINITIONS, fileTypeIcon, isProcessingActionVisibleForStage, getFolderConfigForChapter } from '@/config/fileManagerConfig'
 import type { FolderKey, ColumnKey, ProcessingActionKey } from '@/config/fileManagerConfig'
@@ -201,6 +201,7 @@ function FolderIcon({ name, size = 14, color }: { name: string; size?: number; c
     case 'Layout': return <Layout size={size} style={s} className="flex-shrink-0" />
     case 'Printer': return <Printer size={size} style={s} className="flex-shrink-0" />
     case 'FileCode': return <FileCode size={size} style={s} className="flex-shrink-0" />
+    case 'BookOpen': return <BookOpen size={size} style={s} className="flex-shrink-0" />
     default: return <File size={size} style={s} className="flex-shrink-0" />
   }
 }

@@ -561,6 +561,10 @@ def background_processing_task(
                             mime = "application/zip"
                         elif processed_filename.endswith(".xml"):
                             mime = "application/xml"
+                        elif processed_filename.endswith(".epub"):
+                            mime = "application/epub+zip"
+                        elif processed_filename.endswith((".jpg", ".jpeg")):
+                            mime = "image/jpeg"
 
                         new_record = models.File(
                             filename=processed_filename,

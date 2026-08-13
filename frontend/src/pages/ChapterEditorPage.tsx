@@ -133,6 +133,145 @@ function OutlineNode({ node, onSelect }: { node: OutlineItem; onSelect: (line: n
   );
 }
 
+interface EpubViewerProps {
+  src: string;
+}
+
+function EpubViewer({ src }: EpubViewerProps) {
+  const [loaded, setLoaded] = useState(false);
+  const [toc, setToc] = useState<any[]>([]);
+  const [currentSection, setCurrentSection] = useState<string | null>(null);
+  const viewerRef = useRef<HTMLDivElement>(null);
+  const bookRef = useRef<any>(null);
+  const renditionRef = useRef<any>(null);
+
+  useEffect(() => {
+    const checkEPub = setInterval(() => {
+      if ((window as any).ePub) {
+        clearInterval(checkEPub);
+        setLoaded(true);
+      }
+    }, 100);
+    return () => clearInterval(checkEPub);
+  }, []);
+
+  useEffect(() => {
+    if (!loaded || !viewerRef.current) return;
+
+    if (viewerRef.current) {
+      viewerRef.current.innerHTML = '';
+    }
+
+    try {
+      const book = (window as any).ePub(src);
+      bookRef.current = book;
+
+      const rendition = book.renderTo(viewerRef.current, {
+        width: '100%',
+        height: '100%',
+        flow: 'paginated',
+        spread: 'none',
+      });
+      renditionRef.current = rendition;
+
+      rendition.display();
+
+      book.loaded.navigation.then((nav: any) => {
+        setToc(nav.toc || []);
+      });
+
+      rendition.on('relocated', (location: any) => {
+        if (location && location.start) {
+          setCurrentSection(location.start.href);
+        }
+      });
+    } catch (err) {
+      console.error("Error loading epub:", err);
+    }
+
+    return () => {
+      if (bookRef.current) {
+        try {
+          bookRef.current.destroy();
+        } catch (e) {}
+      }
+    };
+  }, [loaded, src]);
+
+  const handlePrev = () => {
+    if (renditionRef.current) {
+      renditionRef.current.prev();
+    }
+  };
+
+  const handleNext = () => {
+    if (renditionRef.current) {
+      renditionRef.current.next();
+    }
+  };
+
+  const handleSelectToc = (href: string) => {
+    if (renditionRef.current) {
+      renditionRef.current.display(href);
+    }
+  };
+
+  if (!loaded) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+        <span className="ml-2 text-xs text-gray-500 font-sans">Loading EPUB Reader engine...</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full flex flex-col bg-white overflow-hidden font-sans">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-gray-50 select-none flex-shrink-0">
+        <div className="flex items-center gap-3">
+          {toc.length > 0 && (
+            <select
+              className="text-xs border border-gray-300 rounded px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+              onChange={(e) => handleSelectToc(e.target.value)}
+              value={currentSection || ''}
+            >
+              <option value="">Table of Contents</option>
+              {toc.map((item, idx) => (
+                <option key={idx} value={item.href}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handlePrev}
+            className="p-1 px-3 rounded border border-gray-200 bg-white text-xs font-semibold hover:bg-gray-50 active:bg-gray-100 transition-colors"
+          >
+            ◀ Prev
+          </button>
+          <button
+            type="button"
+            onClick={handleNext}
+            className="p-1 px-3 rounded border border-gray-200 bg-white text-xs font-semibold hover:bg-gray-50 active:bg-gray-100 transition-colors"
+          >
+            Next ▶
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 relative overflow-hidden bg-gray-100 flex justify-center p-4">
+        <div 
+          ref={viewerRef} 
+          className="w-full max-w-[800px] h-full bg-white shadow-md rounded border border-gray-200 overflow-hidden"
+        />
+      </div>
+    </div>
+  );
+}
+
 export function ChapterEditorPage() {
   const { projectId, chapterId, subfolder, filename } = useParams<{
     projectId:  string
@@ -245,7 +384,7 @@ export function ChapterEditorPage() {
       }
       
       const resolver = xmlDoc.createNSResolver(
-        xmlDoc.ownerDocument === null ? xmlDoc.documentElement : xmlDoc.ownerDocument.documentElement
+        xmlDoc.documentElement || xmlDoc
       );
       
       const result = xmlDoc.evaluate(
@@ -261,6 +400,7 @@ export function ChapterEditorPage() {
       
       for (let i = 0; i < result.snapshotLength; i++) {
         const node = result.snapshotItem(i);
+        if (!node) continue;
         let tagName = node.nodeName || 'Match';
         let textVal = node.textContent?.trim() || '';
         
@@ -273,7 +413,7 @@ export function ChapterEditorPage() {
         }
         
         let lineNum = 1;
-        const outerHTML = (node as Element).outerHTML;
+        const outerHTML = node.nodeType === Node.ELEMENT_NODE ? (node as Element).outerHTML : '';
         const searchVal = outerHTML ? outerHTML.split('\n')[0].trim() : textVal;
         
         for (let idx = 0; idx < lines.length; idx++) {
@@ -325,6 +465,17 @@ export function ChapterEditorPage() {
       script.id = scriptId;
       script.type = 'module';
       script.src = 'https://cdn.jsdelivr.net/npm/pdfjs-viewer-element/dist/pdfjs-viewer-element.js';
+      document.body.appendChild(script);
+    }
+  }, [])
+
+  useEffect(() => {
+    const scriptId = 'epubjs-script';
+    let script = document.getElementById(scriptId) as HTMLScriptElement | null;
+    if (!script) {
+      script = document.createElement('script');
+      script.id = scriptId;
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/epub.js/0.3.88/epub.min.js';
       document.body.appendChild(script);
     }
   }, [])
@@ -641,6 +792,8 @@ export function ChapterEditorPage() {
             <img src={fileUrl} alt={decodedFilename}
               className="max-w-full max-h-full object-contain rounded-lg shadow-md"/>
           </div>
+        ) : ext === 'epub' ? (
+          <EpubViewer src={fileUrl} />
         ) : ext === 'xml' ? (
           xmlLoading ? (
             <div className="h-full flex items-center justify-center">

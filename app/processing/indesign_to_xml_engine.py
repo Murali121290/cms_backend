@@ -142,17 +142,23 @@ class InDesignToXMLEngine:
                     file_list = z.namelist()
                     logger.info(f"Received files from Windows InDesign Conversion Server: {file_list}")
                     
-                    xml_in_zip = next((f for f in file_list if f.lower().endswith(".xml")), None)
-                    if xml_in_zip:
-                        indd_base = os.path.splitext(os.path.basename(file_path))[0]
-                        xml_filename = f"{indd_base}_final.xml"
-                        xml_path = os.path.join(misc_dir, xml_filename)
-                        with open(xml_path, "wb") as out_f:
-                            out_f.write(z.read(xml_in_zip))
-                        logger.info(f"Saved generated InDesign XML export file: {xml_path}")
-                        return [xml_path]
-                    else:
+                    saved_files = []
+                    for zname in file_list:
+                        if zname.endswith("/") or zname.endswith("\\"):
+                            continue
+                        basename = os.path.basename(zname)
+                        ext = os.path.splitext(basename)[1].lower()
+                        if ext in (".xml", ".epub", ".log", ".jpg", ".jpeg"):
+                            out_path = os.path.join(misc_dir, basename)
+                            with open(out_path, "wb") as out_f:
+                                out_f.write(z.read(zname))
+                            logger.info(f"Saved generated InDesign output file: {out_path}")
+                            saved_files.append(out_path)
+                            
+                    if not any(f.lower().endswith(".xml") for f in saved_files):
                         raise RuntimeError("No XML file (.xml) found in InDesign Server response ZIP")
+                        
+                    return saved_files
             except zipfile.BadZipFile:
                 raise RuntimeError("Response from InDesign Server is not a valid ZIP file.")
 

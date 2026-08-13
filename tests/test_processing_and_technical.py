@@ -425,7 +425,7 @@ def test_background_processing_word_to_xml_pph_renames_indd_suffix(
     assert Path(log_file_record.path).read_text() == f"PPH conversion log details for {base_name}"
 
 
-def test_background_processing_indesign_to_xml_registers_xml_as_misc_category(
+def test_background_processing_indesign_to_xml_registers_all_formats_as_misc_category(
     monkeypatch,
     admin_user,
     file_record,
@@ -435,13 +435,21 @@ def test_background_processing_indesign_to_xml_registers_xml_as_misc_category(
 
     called_process = []
 
-    xml_path = Path(file_record.path).parent.parent / "Misc" / f"{Path(file_record.filename).stem}_final.xml"
+    misc_dir = Path(file_record.path).parent.parent / "Misc"
+    stem = Path(file_record.filename).stem
+    xml_path = misc_dir / f"{stem}_final.xml"
+    epub_path = misc_dir / f"{stem}_final.epub"
+    log_path = misc_dir / f"{stem}_final.log"
+    jpg_path = misc_dir / f"{stem}_fig_09_01.jpg"
 
     def _fake_xml_process(*args, **kwargs):
         called_process.append(kwargs)
-        xml_path.parent.mkdir(parents=True, exist_ok=True)
-        xml_path.write_bytes(b"<xml>test indesign to xml</xml>")
-        return [str(xml_path)]
+        misc_dir.mkdir(parents=True, exist_ok=True)
+        xml_path.write_bytes(b"<xml>test</xml>")
+        epub_path.write_bytes(b"epub-data")
+        log_path.write_bytes(b"log-data")
+        jpg_path.write_bytes(b"image-data")
+        return [str(xml_path), str(epub_path), str(log_path), str(jpg_path)]
 
     from app.processing.indesign_to_xml_engine import InDesignToXMLEngine
     monkeypatch.setattr(InDesignToXMLEngine, "process_document", _fake_xml_process)
@@ -460,18 +468,25 @@ def test_background_processing_indesign_to_xml_registers_xml_as_misc_category(
     db_session.refresh(file_record)
     assert file_record.is_checked_out is False
 
-    xml_file_record = (
-        db_session.query(models.File)
-        .filter(
-            models.File.project_id == file_record.project_id,
-            models.File.chapter_id == file_record.chapter_id,
-            models.File.filename == f"{Path(file_record.filename).stem}_final.xml",
+    # Check all records
+    for fname, expected_mime in [
+        (f"{stem}_final.xml", "application/xml"),
+        (f"{stem}_final.epub", "application/epub+zip"),
+        (f"{stem}_final.log", "text/plain"),
+        (f"{stem}_fig_09_01.jpg", "image/jpeg"),
+    ]:
+        rec = (
+            db_session.query(models.File)
+            .filter(
+                models.File.project_id == file_record.project_id,
+                models.File.chapter_id == file_record.chapter_id,
+                models.File.filename == fname,
+            )
+            .first()
         )
-        .first()
-    )
-    assert xml_file_record is not None
-    assert xml_file_record.category == "Misc"
-    assert xml_file_record.file_type == "application/xml"
+        assert rec is not None, f"File record {fname} was not created"
+        assert rec.category == "Misc"
+        assert rec.file_type == expected_mime
 
 
 

@@ -454,6 +454,8 @@ async def get_folder_file_layout_preview(
             os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "InDesign", "artfile"),
             os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "Links"),
             os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "artfile"),
+            os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "Misc"),
+            os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "misc"),
         ]
         
         for c_dir in candidate_dirs:

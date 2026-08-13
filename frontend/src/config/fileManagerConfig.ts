@@ -200,6 +200,7 @@ export const FILE_TYPE_ICONS: Record<string, FileTypeIcon> = {
   svg:{ icon:'Image',color:'#EA580C' },    bmp:{ icon:'Image',color:'#6B7280' },
   indd:{ icon:'Layers',color:'#FF3366' },  idml:{ icon:'Layers',color:'#FF3366' },
   xml:{ icon:'Code2',color:'#059669' },    zip:{ icon:'Archive',color:'#78716C' },
+  epub:{ icon:'BookOpen',color:'#A855F7' },
   default:{ icon:'File',color:'#9CA3AF' },
 }
 
