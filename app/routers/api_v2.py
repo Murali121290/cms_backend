@@ -3303,6 +3303,65 @@ def api_v2_generate_figure_pdf(
     )
 
 
+@router.post(
+    "/projects/{project_id}/chapters/{chapter_id}/generate-figure-assessment",
+    response_model=schemas_v2.GenerateFigureAssessmentResponse,
+)
+def api_v2_generate_figure_assessment(
+    project_id: int,
+    chapter_id: int,
+    file_id: Optional[int] = None,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    from app.domains.post_prod.figure_pdf.service import generate_figure_assessment
+
+    try:
+        db_file, figures_included, error = generate_figure_assessment(
+            db,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            actor_user_id=viewer.id,
+            upload_dir=file_service.UPLOAD_DIR,
+            source_file_id=file_id,
+        )
+    except Exception as exc:
+        logger.exception("Figure Assessment generation failed for chapter %s", chapter_id)
+        return _error_response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            code="FIGURE_ASSESSMENT_FAILED",
+            message=f"Failed to generate Figure Assessment: {exc}",
+        )
+
+    if error or not db_file:
+        return _error_response(
+            status_code=(
+                status.HTTP_404_NOT_FOUND
+                if error and ("not found" in error.lower())
+                else status.HTTP_400_BAD_REQUEST
+            ),
+            code=(
+                "FIGURE_ASSESSMENT_EMPTY"
+                if error and ("no figures" in error.lower() or "no images" in error.lower())
+                else "FIGURE_ASSESSMENT_FAILED"
+            ),
+            message=error or "Failed to generate Figure Assessment.",
+        )
+
+    return schemas_v2.GenerateFigureAssessmentResponse(
+        file=_serialize_file_record(db_file, viewer=viewer, db=db),
+        figures_included=figures_included,
+    )
+
+
 @router.get("/uploads/{project_id}/chapter/{chapter_name}/backup-list")
 def api_v2_backup_list(
     project_id: int,

@@ -1021,12 +1021,11 @@ def generate_figure_pdf(
         base_path = f"{upload_dir}/{project.code}/{chapter.chapters}/Art"
         os.makedirs(base_path, exist_ok=True)
 
-        timestamp = now_ist_naive().strftime("%Y%m%d_%H%M%S")
         if source_file is not None:
             source_stem = Path(source_file.filename or "source").stem or "source"
-            filename = f"{source_stem}_Figure_PDF_{timestamp}.pdf"
+            filename = f"{source_stem}_ArtProof.pdf"
         else:
-            filename = f"Figure_PDF_{chapter.chapters}_{timestamp}.pdf"
+            filename = f"{chapter.chapters}_ArtProof.pdf"
         out_path = os.path.join(base_path, filename)
         doc.save(out_path, garbage=4, deflate=True)
     finally:
@@ -1037,6 +1036,231 @@ def generate_figure_pdf(
         chapter_id=chapter_id,
         filename=filename,
         file_type="pdf",
+        category="Art",
+        path=out_path,
+        version=1,
+        is_original=False,
+        uploaded_by_id=actor_user_id,
+        source_file_id=source_file.id if source_file is not None else None,
+    )
+    db.add(db_file)
+    db.commit()
+    db.refresh(db_file)
+    return db_file, len(sources), None
+
+
+# Columns and layout follow the sample "Information Management" xlsx the team
+# uses today. Plain formatting, no bold/fill/borders, empty strings (not None)
+# for cells the tool cannot auto-fill so the sheet looks byte-identical to a
+# freshly-created blank template.
+_ASSESSMENT_COLUMNS = (
+    "ART NAME",
+    "FIGURE NO.",
+    "PART NO.",
+    "TYPE",
+    "ART CLASSIFICATION",
+    "SUPPLIED IMAGE COLOR",
+    "SUPPLIED IMAGE MODE",
+    "SUPPLIED IMAGE TYPE",
+    "SUPPLIED SIZE",
+    "FINAL SIZE",
+    "SPECIAL INSTRUCTION ",  # trailing space matches the sample header
+    "FINAL ART COLOR",
+    "COMPLEXITY",
+    "RESOLUTION (HALFTONE ONLY)",
+    "STATUS",
+)
+
+
+def _fmt_size_assessment(n: int) -> str:
+    """File-size formatter matching the sample ("1 MB", "236 K", "902 K")."""
+    if n < 1024:
+        return f"{n} B"
+    if n < 1024 * 1024:
+        return f"{round(n / 1024)} K"
+    if n < 1024 * 1024 * 1024:
+        return f"{round(n / (1024 * 1024))} MB"
+    return f"{round(n / (1024 * 1024 * 1024))} GB"
+
+
+_FIGURE_NUM_RE = re.compile(r"[Ff]ig(?:ure)?[\s_\-]*(\d+(?:\.\d+)*)")
+_IMAGE_INDEX_RE = re.compile(r"image[\s_\-]*0*(\d+)", re.IGNORECASE)
+
+
+def _extract_figure_number(filename: str, chapter_prefix: str) -> str:
+    """Best-effort figure number for the FIGURE NO. column.
+
+    Matches ``Figure3.1.jpg`` → ``3.1`` directly, or combines the chapter
+    prefix with an ``imageNNN`` index (``ch003-image001.tif`` with prefix
+    ``3`` → ``3.1``). Returns "" when nothing sensible can be extracted.
+    """
+    stem = Path(filename or "").stem
+    m = _FIGURE_NUM_RE.search(stem)
+    if m:
+        return m.group(1)
+    m = _IMAGE_INDEX_RE.search(stem)
+    if m and chapter_prefix:
+        return f"{chapter_prefix}.{int(m.group(1))}"
+    return ""
+
+
+_COLOR_SPACE_ONLY = {
+    "1": "B&W",
+    "L": "Grayscale",
+    "LA": "Grayscale",
+    "P": "Indexed",
+    "PA": "Indexed",
+    "RGB": "RGB",
+    "RGBA": "RGB",
+    "CMYK": "CMYK",
+    "YCbCr": "RGB",
+    "I": "Grayscale",
+    "F": "Grayscale",
+}
+
+
+def _assessment_row_values(src: "_ImageSource", chapter_prefix: str) -> list[str]:
+    """Build the 15-column row for an image source, in _ASSESSMENT_COLUMNS order."""
+    width = height = None
+    dpi_x = dpi_y = None
+    pil_mode = fmt = color_space = None
+    size_bytes = src.size_bytes()
+    try:
+        with src.open_pil() as im:
+            width, height = im.size
+            fmt = im.format
+            pil_mode = im.mode
+            color_space = _COLOR_SPACE_ONLY.get(im.mode, im.mode)
+            dpi_val = im.info.get("dpi") or im.info.get("jfif_density")
+            if dpi_val and isinstance(dpi_val, (tuple, list)) and len(dpi_val) >= 2:
+                try:
+                    dx, dy = float(dpi_val[0]), float(dpi_val[1])
+                    if dx > 0:
+                        dpi_x = int(round(dx))
+                    if dy > 0:
+                        dpi_y = int(round(dy))
+                except (TypeError, ValueError):
+                    pass
+    except Exception:
+        pass
+
+    fmt_str = (fmt or Path(src.filename).suffix.lstrip(".").upper()) if src.filename else ""
+
+    if dpi_x and dpi_y and dpi_x == dpi_y:
+        dpi_str = f"{dpi_x} DPI"
+    elif dpi_x and dpi_y:
+        dpi_str = f"{dpi_x} × {dpi_y} DPI"
+    elif dpi_x or dpi_y:
+        dpi_str = f"{dpi_x or dpi_y} DPI"
+    else:
+        dpi_str = ""
+
+    figure_no = _extract_figure_number(src.filename or "", chapter_prefix)
+    is_image = Path(src.filename or "").suffix.lower() in IMAGE_EXTS
+
+    return [
+        src.filename or "",                               # ART NAME
+        figure_no,                                        # FIGURE NO.
+        "",                                               # PART NO.
+        "Figure" if is_image else "",                     # TYPE
+        "",                                               # ART CLASSIFICATION
+        color_space or "",                                # SUPPLIED IMAGE COLOR
+        pil_mode or "",                                   # SUPPLIED IMAGE MODE
+        (fmt_str or "").upper(),                          # SUPPLIED IMAGE TYPE
+        _fmt_size_assessment(size_bytes),                 # SUPPLIED SIZE
+        "",                                               # FINAL SIZE
+        "",                                               # SPECIAL INSTRUCTION
+        "",                                               # FINAL ART COLOR
+        "",                                               # COMPLEXITY
+        dpi_str,                                          # RESOLUTION (HALFTONE ONLY)
+        "",                                               # STATUS
+    ]
+
+
+def generate_figure_assessment(
+    db: Session,
+    *,
+    project_id: int,
+    chapter_id: int,
+    actor_user_id: Optional[int],
+    upload_dir: str,
+    source_file_id: Optional[int] = None,
+) -> Tuple[Optional[models.File], int, Optional[str]]:
+    """Generate a Figure Assessment xlsx for the chapter.
+
+    Layout matches the team's "Information Management" template — 15 columns,
+    plain Calibri 12 with no header styling, no frozen panes, empty strings for
+    blank cells. Auto-fills what can be derived from image metadata (ART NAME,
+    FIGURE NO., TYPE, SUPPLIED IMAGE COLOR/MODE/TYPE, SUPPLIED SIZE, RESOLUTION
+    for images with a real DPI) and leaves the manually-managed columns blank.
+    """
+    from openpyxl import Workbook
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == chapter_id).first()
+    if not project or not chapter:
+        return None, 0, "Project or chapter not found."
+
+    source_file: Optional[models.File] = None
+    if source_file_id is not None:
+        source_file = db.query(models.File).filter(
+            models.File.id == source_file_id,
+            models.File.chapter_id == chapter_id,
+        ).first()
+        if not source_file:
+            return None, 0, "Source file not found in this chapter."
+        sources = _collect_images_from_file(source_file)
+        if not sources:
+            return None, 0, (
+                f"No figures found in {source_file.filename}. The file must be a DOCX "
+                "with embedded images or an image file."
+            )
+    else:
+        sources = _collect_images_from_chapter(db, chapter_id)
+        if not sources:
+            return None, 0, (
+                "No figures found. Upload images to the Art folder or add a DOCX "
+                "containing embedded figures to this chapter."
+            )
+
+    chapter_num_match = re.search(r"(\d+)", chapter.chapters or "")
+    chapter_prefix = str(int(chapter_num_match.group(1))) if chapter_num_match else ""
+
+    sheet_title_raw = (
+        f"{chapter_prefix}. {chapter.chapter_title}"
+        if chapter_prefix and chapter.chapter_title
+        else (chapter.chapter_title or chapter.chapters or "Figure Assessment")
+    )
+    # Excel sheet titles: max 31 chars, no []:*?/\
+    sheet_title = re.sub(r"[\[\]:*?/\\]", "", sheet_title_raw)[:31]
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = sheet_title
+
+    for col_idx, header in enumerate(_ASSESSMENT_COLUMNS, start=1):
+        ws.cell(row=1, column=col_idx, value=header)
+
+    for row_idx, src in enumerate(sources, start=2):
+        for col_idx, value in enumerate(_assessment_row_values(src, chapter_prefix), start=1):
+            ws.cell(row=row_idx, column=col_idx, value=value)
+
+    base_path = f"{upload_dir}/{project.code}/{chapter.chapters}/Art"
+    os.makedirs(base_path, exist_ok=True)
+
+    if source_file is not None:
+        source_stem = Path(source_file.filename or "source").stem or "source"
+        filename = f"{source_stem}_ArtAssessment.xlsx"
+    else:
+        filename = f"{chapter.chapters}_ArtAssessment.xlsx"
+    out_path = os.path.join(base_path, filename)
+    wb.save(out_path)
+
+    db_file = models.File(
+        project_id=project_id,
+        chapter_id=chapter_id,
+        filename=filename,
+        file_type="xlsx",
         category="Art",
         path=out_path,
         version=1,

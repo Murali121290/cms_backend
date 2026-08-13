@@ -37,7 +37,7 @@ import {
   startPpdGeneration, startPermissionsCheck, startCreditExtraction,
   startBiasScan, startWordToXml, getProcessingStatus, startIndesignToXml,
 } from '@/api/processing'
-import { deleteFile, generateFigurePdf } from '@/api/files'
+import { deleteFile, downloadFile, generateFigureAssessment, generateFigurePdf } from '@/api/files'
 import { useChapterFilesQuery } from '@/features/projects/useChapterFilesQuery'
 import { uiPaths } from '@/utils/appPaths'
 import { openInWordWithFallback } from '@/utils/openInWord'
@@ -619,6 +619,7 @@ export function ChapterFilePage({
   const [deleteConfirmRow, setDeleteConfirmRow] = useState<FileRow | null>(null)
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [generatingFigurePdf, setGeneratingFigurePdf] = useState(false)
+  const [generatingAssessment, setGeneratingAssessment] = useState(false)
   const [expandedSources, setExpandedSources] = useState<Record<number, boolean>>({})
   const queryClient = useQueryClient()
   const [xmlToIndesignFile, setXmlToIndesignFile] = useState<{ id: number; name: string } | null>(null)
@@ -1072,7 +1073,7 @@ export function ChapterFilePage({
       const res = await generateFigurePdf(pid, cid, sourceId)
       const label = sourceId ? ` from ${only?.file_name}` : ''
       toast.success(
-        `Figure PDF generated${label} (${res.figures_included} figure${res.figures_included === 1 ? '' : 's'})`,
+        `Proof generated${label} (${res.figures_included} figure${res.figures_included === 1 ? '' : 's'})`,
       )
       if (sourceId) setExpandedSources(s => ({ ...s, [sourceId]: true }))
       void filesQuery.refetch()
@@ -1080,10 +1081,46 @@ export function ChapterFilePage({
       const msg = e?.response?.data?.message
         || e?.response?.data?.error?.message
         || e?.response?.data?.detail
-        || 'Failed to generate Figure PDF'
+        || 'Failed to generate Proof'
       toast.error(msg)
     } finally {
       setGeneratingFigurePdf(false)
+    }
+  }
+
+  async function handleGenerateAssessment() {
+    if (generatingAssessment) return
+    const only = selectedRows.length === 1 ? selectedRows[0] : null
+    const canScope = !!only && /\.(docx|docm|jpe?g|png|gif|webp|tiff?|bmp|eps)$/i.test(only.file_name)
+    const sourceId = canScope ? only?.db_id : undefined
+    setGeneratingAssessment(true)
+    try {
+      const res = await generateFigureAssessment(pid, cid, sourceId)
+      const label = sourceId ? ` from ${only?.file_name}` : ''
+      toast.success(
+        `Assessment generated${label} (${res.figures_included} figure${res.figures_included === 1 ? '' : 's'})`,
+      )
+      if (sourceId) setExpandedSources(s => ({ ...s, [sourceId]: true }))
+      void filesQuery.refetch()
+      try {
+        const { blob, filename } = await downloadFile(res.file.id, res.file.filename)
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = filename
+        document.body.appendChild(a); a.click(); document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+      } catch {
+        toast.error('Assessment generated but auto-download failed — use the file list to download it.')
+      }
+    } catch (e: any) {
+      const msg = e?.response?.data?.message
+        || e?.response?.data?.error?.message
+        || e?.response?.data?.detail
+        || 'Failed to generate Assessment'
+      toast.error(msg)
+    } finally {
+      setGeneratingAssessment(false)
     }
   }
 
@@ -1227,28 +1264,45 @@ export function ChapterFilePage({
           </button>
         )}
 
-        {/* Generate Figure PDF — Art track only */}
+        {/* Generate Proof + Generate Assessment — Art track only */}
         {activeFolder === 'art' && (() => {
           const only = selectedRows.length === 1 ? selectedRows[0] : null
           const scopedSource = only && /\.(docx?|jpe?g|png|gif|webp|tiff?|bmp)$/i.test(only.file_name)
             ? only.file_name
             : null
-          const tooltip = scopedSource
-            ? `Generate Figure PDF from ${scopedSource}`
+          const proofTooltip = scopedSource
+            ? `Generate Proof from ${scopedSource}`
             : 'Bundle every figure in this Art track into a single PDF (select a single DOCX row to generate from just that file)'
+          const assessmentTooltip = scopedSource
+            ? `Generate Assessment from ${scopedSource}`
+            : 'Generate an assessment report for this Art track (select a single DOCX row to scope to that file)'
           return (
-            <button
-              onClick={() => void handleGenerateFigurePdf()}
-              disabled={!resolvedIsAssigned || generatingFigurePdf}
-              title={tooltip}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors shadow-sm
-                ${resolvedIsAssigned && !generatingFigurePdf
-                  ? 'border-primary text-primary hover:bg-accent'
-                  : 'border-border text-muted opacity-50 cursor-not-allowed'}`}
-            >
-              {generatingFigurePdf ? <Loader2 size={12} className="animate-spin" /> : <FileOutput size={12} />}
-              {generatingFigurePdf ? 'Generating…' : (scopedSource ? 'Generate Figure PDF (selected)' : 'Generate Figure PDF')}
-            </button>
+            <>
+              <button
+                onClick={() => void handleGenerateFigurePdf()}
+                disabled={!resolvedIsAssigned || generatingFigurePdf}
+                title={proofTooltip}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors shadow-sm
+                  ${resolvedIsAssigned && !generatingFigurePdf
+                    ? 'border-primary text-primary hover:bg-accent'
+                    : 'border-border text-muted opacity-50 cursor-not-allowed'}`}
+              >
+                {generatingFigurePdf ? <Loader2 size={12} className="animate-spin" /> : <FileOutput size={12} />}
+                {generatingFigurePdf ? 'Generating…' : (scopedSource ? 'Generate Proof (selected)' : 'Generate Proof')}
+              </button>
+              <button
+                onClick={() => void handleGenerateAssessment()}
+                disabled={!resolvedIsAssigned || generatingAssessment}
+                title={assessmentTooltip}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors shadow-sm
+                  ${resolvedIsAssigned && !generatingAssessment
+                    ? 'border-primary text-primary hover:bg-accent'
+                    : 'border-border text-muted opacity-50 cursor-not-allowed'}`}
+              >
+                {generatingAssessment ? <Loader2 size={12} className="animate-spin" /> : <FileOutput size={12} />}
+                {generatingAssessment ? 'Generating…' : (scopedSource ? 'Generate Assessment (selected)' : 'Generate Assessment')}
+              </button>
+            </>
           )
         })()}
 
@@ -1437,19 +1491,27 @@ export function ChapterFilePage({
                       </tr>
                     ))}
                   </thead>
-                  <tbody className="divide-y divide-border">
-                    {table.getRowModel().rows.map(row => (
-                      <tr
-                        key={row.id}
-                        className="hover:bg-accent/30 transition-colors cursor-default"
-                      >
-                        {row.getVisibleCells().map(cell => (
-                          <td key={cell.id} className="px-3 py-2.5 text-xs overflow-hidden">
-                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
+                  <tbody>
+                    {table.getRowModel().rows.map((row, idx) => {
+                      // Only draw a divider between parent groups. A row where
+                      // is_child is false starts a new group; the very first
+                      // row obviously doesn't need a top border.
+                      const startsNewGroup = idx > 0 && !row.original.is_child
+                      return (
+                        <tr
+                          key={row.id}
+                          className={`hover:bg-accent/30 transition-colors cursor-default ${
+                            startsNewGroup ? 'border-t border-border' : ''
+                          }`}
+                        >
+                          {row.getVisibleCells().map(cell => (
+                            <td key={cell.id} className="px-3 py-2.5 text-xs overflow-hidden">
+                              {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                            </td>
+                          ))}
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               )}
