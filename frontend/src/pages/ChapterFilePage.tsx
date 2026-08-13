@@ -124,6 +124,23 @@ function buildFileViewPath(row: FileRow, pid: number, cid: number, cliId?: strin
   return `${base}/view/${encodeURIComponent(row.subfolder)}/${encodeURIComponent(row.file_name)}`
 }
 
+// Image extensions the Image Editor convert action can produce (or is fed
+// with). A non-original file with one of these extensions lives in the
+// dedicated "Converted" folder rather than its source's category folder.
+// EPS is deliberately excluded from the "convertible-outputs" set because
+// user-uploaded EPS files are the primary source format — keeping them in
+// their category folder as originals is the whole point of this split.
+const CONVERTED_IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'tif', 'tiff', 'gif', 'bmp', 'webp'])
+
+function fileExt(filename: string): string {
+  const i = filename.lastIndexOf('.')
+  return i >= 0 ? filename.slice(i + 1).toLowerCase() : ''
+}
+
+function isConvertedImage(file: { filename: string; is_original?: boolean }): boolean {
+  return file.is_original === false && CONVERTED_IMAGE_EXTS.has(fileExt(file.filename))
+}
+
 function categoryToFolderKey(category: string, chapterName: string): FolderKey {
   const c = category.toLowerCase()
   const chName = chapterName.toLowerCase()
@@ -147,6 +164,18 @@ function categoryToFolderKey(category: string, chapterName: string): FolderKey {
   if (c === 'xml') return 'xml'
   if (c === 'backup') return 'backup'
   return 'misc'
+}
+
+// Folder resolution used by the chapter file list. Splits converted image
+// outputs into their own folder so the source category (Art / InDesign /
+// etc.) shows only originals; everything else falls back to the plain
+// category → folder mapping.
+function fileToFolderKey(
+  file: { category: string; filename: string; is_original?: boolean },
+  chapterName: string,
+): FolderKey {
+  if (isConvertedImage(file)) return 'converted'
+  return categoryToFolderKey(file.category, chapterName)
 }
 
 function fmtDate(iso: string) {
@@ -613,7 +642,7 @@ export function ChapterFilePage({
 
     if (filesQuery.data?.files?.length) {
       const inFolder = filesQuery.data.files
-        .filter(f => categoryToFolderKey(f.category, resolvedChapterName) === activeFolder)
+        .filter(f => fileToFolderKey(f, resolvedChapterName) === activeFolder)
 
       // Nesting: group derived files under their source. A row whose
       // source_file_id points at another row in the same folder renders as a
@@ -686,7 +715,7 @@ export function ChapterFilePage({
     const m: Record<string, number> = {}
     FOLDER_KEYS.forEach(k => {
       if (filesQuery.data?.files)
-        m[k] = filesQuery.data.files.filter(f => categoryToFolderKey(f.category, resolvedChapterName) === k).length
+        m[k] = filesQuery.data.files.filter(f => fileToFolderKey(f, resolvedChapterName) === k).length
       else if (chapterFolderData)
         m[k] = chapterFolderData.files[activeFolderConfig[k]?.label || k]?.length ?? 0
       else
@@ -699,7 +728,9 @@ export function ChapterFilePage({
   function openEditor(row: FileRow) {
     if (!resolvedIsAssigned) return
     if (row.db_id && /\.(jpe?g|png|gif|webp|tiff?|bmp|eps)$/i.test(row.file_name)) {
-      navigate(`/projects/${pid}/image-review?fileId=${row.db_id}&chapterId=${cid}`)
+      // Pass the current folder so the editor rail is scoped to the same
+      // Originals-vs-Converted split the user is viewing here.
+      navigate(`/projects/${pid}/image-review?fileId=${row.db_id}&chapterId=${cid}&folder=${activeFolder}`)
       return
     }
     navigate(buildFileViewPath(row, pid, cid, cliId))
@@ -832,7 +863,7 @@ export function ChapterFilePage({
         const isImageRow = /\.(jpe?g|png|gif|webp|tiff?|bmp|eps)$/i.test(name)
         const isDocxRow = /\.docx?$/i.test(name)
         const openTarget = isImageRow
-          ? `/projects/${pid}/image-review?fileId=${fid}&chapterId=${cid}`
+          ? `/projects/${pid}/image-review?fileId=${fid}&chapterId=${cid}&folder=${activeFolder}`
           : isDocxRow
             ? `${uiPaths.structuringReview(pid, cid, fid)}?tab=editor`
             : buildFileViewPath(row.original, pid, cid, cliId)

@@ -180,6 +180,7 @@ export function ImageReviewPage() {
   const [searchParams] = useSearchParams();
   const initialFileId = searchParams.get("fileId");
   const chapterIdParam = searchParams.get("chapterId");
+  const folderParam = searchParams.get("folder");
   // Scope the rail to the chapter the user came from. Without this the
   // backend returns every image in the project, so same-looking thumbnails
   // from other chapters would appear and a click could open an unexpected
@@ -189,10 +190,22 @@ export function ImageReviewPage() {
     const n = Number(chapterIdParam);
     return Number.isFinite(n) ? n : null;
   }, [chapterIdParam]);
+  // Preserve the caller's folder context. Opening a converted file should
+  // only show other converted files in the rail; opening anything else
+  // (Art / InDesign / etc.) should only show originals. When there's no
+  // folder in the URL the rail falls back to showing both sections.
+  const isOriginalFilter = useMemo<boolean | null>(() => {
+    if (!folderParam) return null;
+    return folderParam === "converted" ? false : true;
+  }, [folderParam]);
 
   const query = useQuery({
-    queryKey: ["project-images", projectId, chapterIdFilter],
-    queryFn: () => getProjectImages(projectId, { chapterId: chapterIdFilter }),
+    queryKey: ["project-images", projectId, chapterIdFilter, isOriginalFilter],
+    queryFn: () =>
+      getProjectImages(projectId, {
+        chapterId: chapterIdFilter,
+        isOriginal: isOriginalFilter,
+      }),
     enabled: Number.isFinite(projectId),
   });
 
@@ -202,10 +215,6 @@ export function ImageReviewPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
   const [search, setSearch] = useState("");
-  // Derived files (convert outputs) clutter the rail: every JPG→EPS or
-  // JPG→TIF produces a new card even though the "real" asset is the
-  // original upload. Hide them by default; expose a small toggle to reveal.
-  const [showDerived, setShowDerived] = useState(false);
   const [saveMsg, setSaveMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [replaceDialogFor, setReplaceDialogFor] = useState<ProjectImage | null>(null);
 
@@ -271,9 +280,6 @@ export function ImageReviewPage() {
       // rail refreshes with both records and users mistake a nearby thumb
       // for the conversion result.
       setSelectedId(res.file.id);
-      // Reveal the derived list so the freshly-converted file is visible in
-      // the rail (rail hides derived by default to keep the sidebar clean).
-      setShowDerived(true);
       setSaveMsg({
         kind: "ok",
         text: `Converted to ${res.file.file_type.toUpperCase()} as ${res.file.filename}`,
@@ -332,10 +338,17 @@ export function ImageReviewPage() {
 
   const backTarget = useMemo(() => {
     if (selected?.chapter_id != null) {
-      return `/projects/${projectId}/chapters/${selected.chapter_id}?folder=art`;
+      // Prefer the folder the caller opened the editor from so Back lands
+      // the user exactly where they were. Fall back to a folder derived
+      // from `is_original` when the URL didn't carry that context, so a
+      // converted PNG doesn't bounce the user to Art (where it isn't
+      // listed) and vice-versa.
+      const folder =
+        folderParam ?? (selected.is_original ? "art" : "converted");
+      return `/projects/${projectId}/chapters/${selected.chapter_id}?folder=${folder}`;
     }
     return `/projects/${projectId}`;
-  }, [projectId, selected?.chapter_id]);
+  }, [projectId, selected?.chapter_id, selected?.is_original, folderParam]);
   const goBack = () => navigate(backTarget);
 
   const rotate = (dir: -1 | 1) =>
@@ -601,24 +614,41 @@ export function ImageReviewPage() {
     }
   }, []);
 
-  // ── Search + filtered list ───────────────────────────────────────────────
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    let list = showDerived ? images : images.filter((img) => img.is_original);
-    if (q) {
-      list = list.filter(
-        (img) =>
-          img.filename.toLowerCase().includes(q) ||
-          (img.chapter_number && img.chapter_number.toLowerCase().includes(q)),
-      );
-    }
-    return list;
-  }, [images, search, showDerived]);
+  // ── Search + grouped lists ───────────────────────────────────────────────
+  // Rail is split into two independent sections — Originals (uploaded source
+  // files) and Converted (outputs of the convert action). Both sections are
+  // always rendered so users don't need a toggle to reveal derived files,
+  // and the search input filters within each section.
+  const matchesSearch = useCallback(
+    (img: ProjectImage, q: string) =>
+      !q ||
+      img.filename.toLowerCase().includes(q) ||
+      Boolean(img.chapter_number && img.chapter_number.toLowerCase().includes(q)),
+    [],
+  );
 
-  const derivedCount = useMemo(
-    () => images.filter((img) => !img.is_original).length,
+  const filteredOriginals = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return images.filter((img) => img.is_original && matchesSearch(img, q));
+  }, [images, search, matchesSearch]);
+
+  const filteredConverted = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return images.filter((img) => !img.is_original && matchesSearch(img, q));
+  }, [images, search, matchesSearch]);
+
+  // Combined list drives batch actions (checkbox select-all / export /
+  // replace) so those operations span both sections.
+  const filtered = useMemo(
+    () => [...filteredOriginals, ...filteredConverted],
+    [filteredOriginals, filteredConverted],
+  );
+
+  const originalsTotal = useMemo(
+    () => images.filter((img) => img.is_original).length,
     [images],
   );
+  const convertedTotal = images.length - originalsTotal;
 
   const previewFilter = "none";
   const previewTransform =
@@ -912,23 +942,10 @@ export function ImageReviewPage() {
           <div className="px-3 py-3 border-b border-slate-200">
             <div className="flex items-center justify-between mb-2">
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                {showDerived ? `All Images (${images.length})` : `Originals (${images.length - derivedCount})`}
+                Images ({images.length})
               </span>
               {query.isFetching && <Loader2 className="w-3 h-3 animate-spin text-slate-400" />}
             </div>
-            {derivedCount > 0 && (
-              <button
-                type="button"
-                onClick={() => setShowDerived((v) => !v)}
-                className={`mb-2 w-full text-[10px] font-semibold uppercase tracking-wider px-2 py-1 rounded-md border transition-colors ${
-                  showDerived
-                    ? "border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100"
-                    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                }`}
-              >
-                {showDerived ? `Hide ${derivedCount} derived` : `Show ${derivedCount} derived`}
-              </button>
-            )}
             <div className="relative mb-2">
               <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
@@ -955,20 +972,39 @@ export function ImageReviewPage() {
             />
           </div>
 
-          <div className="flex-1 overflow-y-auto p-2 space-y-2">
-            {filtered.map((img) => (
-              <ImageCard
-                key={img.id}
-                image={img}
-                selected={img.id === selectedId}
-                checked={checkedIds.has(img.id)}
-                onClick={() => setSelectedId(img.id)}
-                onToggleCheck={() => toggleChecked(img.id)}
+          <div className="flex-1 overflow-y-auto p-2">
+            {/* Folder scoping hides the "other" section entirely so opening
+                a file from Originals never surfaces Converted files, and
+                vice-versa. When no folder param is supplied we fall back to
+                showing both sections. */}
+            {isOriginalFilter !== false && (
+              <RailSection
+                title="Originals"
+                total={originalsTotal}
+                items={filteredOriginals}
+                selectedId={selectedId}
+                checkedIds={checkedIds}
+                onSelect={setSelectedId}
+                onToggleCheck={toggleChecked}
+                searching={search.trim().length > 0}
               />
-            ))}
-            {filtered.length === 0 && !query.isLoading && (
+            )}
+            {isOriginalFilter === null && <div className="h-3" />}
+            {isOriginalFilter !== true && (
+              <RailSection
+                title="Converted"
+                total={convertedTotal}
+                items={filteredConverted}
+                selectedId={selectedId}
+                checkedIds={checkedIds}
+                onSelect={setSelectedId}
+                onToggleCheck={toggleChecked}
+                searching={search.trim().length > 0}
+              />
+            )}
+            {images.length === 0 && !query.isLoading && (
               <div className="p-4 text-[11px] text-slate-500 text-center">
-                {search ? "No matches." : "No images."}
+                No images.
               </div>
             )}
           </div>
@@ -1311,6 +1347,70 @@ function DpiPopover({
         </div>
       </div>
     </div>
+  );
+}
+
+// ─── Rail section ───────────────────────────────────────────────────────────
+// One of two groups in the sidebar (Originals / Converted). Renders its own
+// header with a total-vs-visible count (so a search that filters items out
+// still communicates the underlying group size), and an empty-state message
+// that distinguishes "nothing here yet" from "search matched none".
+
+function RailSection({
+  title,
+  total,
+  items,
+  selectedId,
+  checkedIds,
+  onSelect,
+  onToggleCheck,
+  searching,
+}: {
+  title: string;
+  total: number;
+  items: ProjectImage[];
+  selectedId: number | null;
+  checkedIds: Set<number>;
+  onSelect: (id: number) => void;
+  onToggleCheck: (id: number) => void;
+  searching: boolean;
+}) {
+  return (
+    <section>
+      <div className="sticky top-0 z-10 bg-white/95 backdrop-blur-sm px-1 py-1.5 flex items-baseline gap-2 border-b border-slate-100">
+        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+          {title}
+        </span>
+        <span className="text-[10px] font-semibold text-slate-400">
+          {searching && items.length !== total
+            ? `${items.length} / ${total}`
+            : total}
+        </span>
+      </div>
+      <div className="pt-2 space-y-2">
+        {items.map((img) => (
+          <ImageCard
+            key={img.id}
+            image={img}
+            selected={img.id === selectedId}
+            checked={checkedIds.has(img.id)}
+            onClick={() => onSelect(img.id)}
+            onToggleCheck={() => onToggleCheck(img.id)}
+          />
+        ))}
+        {items.length === 0 && (
+          <div className="px-2 py-3 text-[11px] text-slate-400 text-center">
+            {searching
+              ? "No matches."
+              : total === 0
+                ? title === "Converted"
+                  ? "No converted files yet."
+                  : "No originals."
+                : "No matches."}
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 

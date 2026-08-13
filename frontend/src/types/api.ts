@@ -214,6 +214,7 @@ export interface FileRecord {
   dpi?: number | null;
   color_profile?: string | null;
   source_file_id?: number | null;
+  is_original?: boolean;
 }
 
 export interface FileDeleteInfo {

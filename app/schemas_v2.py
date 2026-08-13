@@ -177,6 +177,10 @@ class FileRecord(BaseModel):
     # Set when this file was generated from another file (e.g. Figure PDF from
     # its source DOCX). Frontend groups derived artefacts under their source.
     source_file_id: int | None = None
+    # False for pipeline/convert/edit outputs. Frontend uses this to route
+    # converted image files (e.g. PNG from EPS) to a dedicated "Converted"
+    # folder instead of the source's category folder.
+    is_original: bool = True
 
 
 class DashboardResponse(BaseModel):
