@@ -148,7 +148,7 @@ class InDesignToXMLEngine:
                             continue
                         basename = os.path.basename(zname)
                         ext = os.path.splitext(basename)[1].lower()
-                        if ext in (".xml", ".epub", ".log", ".jpg", ".jpeg"):
+                        if ext in (".xml", ".epub", ".log", ".jpg", ".jpeg", ".docx"):
                             out_path = os.path.join(misc_dir, basename)
                             with open(out_path, "wb") as out_f:
                                 out_f.write(z.read(zname))
