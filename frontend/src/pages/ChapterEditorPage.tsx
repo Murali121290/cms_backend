@@ -7,7 +7,7 @@
  */
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, FileText, Save, Loader2, Download } from 'lucide-react'
+import { ArrowLeft, FileText, Save, Loader2, Download, Maximize2, Minimize2 } from 'lucide-react'
 import { DocxViewer } from '@/components/DocxViewer'
 import { SourceEditor, SourceEditorRef, formatXmlString } from '@/components/epub_validator/SourceEditor'
 import 'pdfjs-viewer-element'
@@ -141,9 +141,34 @@ function EpubViewer({ src }: EpubViewerProps) {
   const [loaded, setLoaded] = useState(false);
   const [toc, setToc] = useState<any[]>([]);
   const [currentSection, setCurrentSection] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<HTMLDivElement>(null);
   const bookRef = useRef<any>(null);
   const renditionRef = useRef<any>(null);
+
+  const toggleFullscreen = () => {
+    if (!containerRef.current) return;
+    if (!document.fullscreenElement) {
+      containerRef.current.requestFullscreen().then(() => {
+        setIsFullscreen(true);
+      }).catch(err => {
+        console.error("Error enabling fullscreen:", err);
+      });
+    } else {
+      document.exitFullscreen().then(() => {
+        setIsFullscreen(false);
+      });
+    }
+  };
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
 
   useEffect(() => {
     const checkEPub = setInterval(() => {
@@ -162,37 +187,58 @@ function EpubViewer({ src }: EpubViewerProps) {
       viewerRef.current.innerHTML = '';
     }
 
-    try {
-      const book = (window as any).ePub(src);
-      bookRef.current = book;
+    let active = true;
+    let currentBook: any = null;
 
-      const rendition = book.renderTo(viewerRef.current, {
-        width: '100%',
-        height: '100%',
-        flow: 'paginated',
-        spread: 'none',
-      });
-      renditionRef.current = rendition;
+    fetch(src, { credentials: 'include' })
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to fetch EPUB file');
+        return res.arrayBuffer();
+      })
+      .then(buffer => {
+        if (!active || !viewerRef.current) return;
 
-      rendition.display();
+        try {
+          const book = (window as any).ePub(buffer);
+          currentBook = book;
+          bookRef.current = book;
 
-      book.loaded.navigation.then((nav: any) => {
-        setToc(nav.toc || []);
-      });
+          const rendition = book.renderTo(viewerRef.current, {
+            width: '100%',
+            height: '100%',
+            flow: 'paginated',
+            spread: 'none',
+          });
+          renditionRef.current = rendition;
 
-      rendition.on('relocated', (location: any) => {
-        if (location && location.start) {
-          setCurrentSection(location.start.href);
+          rendition.display();
+
+          book.loaded.navigation.then((nav: any) => {
+            if (active) {
+              setToc(nav.toc || []);
+            }
+          });
+
+          rendition.on('relocated', (location: any) => {
+            if (active && location && location.start) {
+              setCurrentSection(location.start.href);
+            }
+          });
+        } catch (err) {
+          console.error("Error loading epub:", err);
+          toast.error("Failed to parse EPUB archive");
         }
+      })
+      .catch(err => {
+        console.error("Error fetching EPUB buffer:", err);
+        toast.error("Failed to load EPUB file content");
       });
-    } catch (err) {
-      console.error("Error loading epub:", err);
-    }
 
     return () => {
-      if (bookRef.current) {
+      active = false;
+      if (currentBook) {
         try {
-          bookRef.current.destroy();
+          currentBook.destroy();
         } catch (e) {}
       }
     };
@@ -226,7 +272,7 @@ function EpubViewer({ src }: EpubViewerProps) {
   }
 
   return (
-    <div className="h-full flex flex-col bg-white overflow-hidden font-sans">
+    <div ref={containerRef} className="h-full flex flex-col bg-white overflow-hidden font-sans">
       <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-gray-50 select-none flex-shrink-0">
         <div className="flex items-center gap-3">
           {toc.length > 0 && (
@@ -258,6 +304,15 @@ function EpubViewer({ src }: EpubViewerProps) {
             className="p-1 px-3 rounded border border-gray-200 bg-white text-xs font-semibold hover:bg-gray-50 active:bg-gray-100 transition-colors"
           >
             Next ▶
+          </button>
+          <button
+            type="button"
+            onClick={toggleFullscreen}
+            title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
+            className="p-1 px-2.5 rounded border border-gray-200 bg-white text-xs hover:bg-gray-50 active:bg-gray-100 transition-colors flex items-center justify-center gap-1.5"
+          >
+            {isFullscreen ? <Minimize2 size={12} className="text-gray-600" /> : <Maximize2 size={12} className="text-gray-600" />}
+            <span className="font-semibold text-gray-700">{isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}</span>
           </button>
         </div>
       </div>
@@ -469,16 +524,7 @@ export function ChapterEditorPage() {
     }
   }, [])
 
-  useEffect(() => {
-    const scriptId = 'epubjs-script';
-    let script = document.getElementById(scriptId) as HTMLScriptElement | null;
-    if (!script) {
-      script = document.createElement('script');
-      script.id = scriptId;
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/epub.js/0.3.88/epub.min.js';
-      document.body.appendChild(script);
-    }
-  }, [])
+
 
   const decodedFilename  = filename  ? decodeURIComponent(filename)  : ''
   const decodedSubfolder = subfolder ? decodeURIComponent(subfolder) : ''
