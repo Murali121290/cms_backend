@@ -251,7 +251,10 @@
       "name": "Aspen: All manifest images must be JPEG",
       "target_path": "OEBPS/images",
       "file_name_pattern": "*.*",
-      "allowed_extensions": [".jpg", ".jpeg"],
+      "allowed_extensions": [
+        ".jpg",
+        ".jpeg"
+      ],
       "enabled": true
     },
     {
@@ -273,7 +276,7 @@
       "name": "Aspen: Long alt text should be moved to a hidden container",
       "target_path": "OEBPS/xhtml",
       "file_name_pattern": "*.xhtml",
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "ASP-IMG-005",
