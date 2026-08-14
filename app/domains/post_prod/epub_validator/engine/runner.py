@@ -67,7 +67,11 @@ def validate_epub(
         }
 
     def _run_book_scope(rule, function, origin, customer_tag):
-        book_details = {"folder_name": folder_name, "epub_path": epub_folder}
+        book_details = {
+            "folder_name": folder_name,
+            "epub_path": epub_folder,
+            "chapter_filter": target_file,  # Pass chapter filter if validating single chapter
+        }
         try:
             result = function(book_details)
         except Exception as e:  # noqa: BLE001

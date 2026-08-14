@@ -1,0 +1,10 @@
+{
+  "rules": [
+    {
+      "id": "PARA-MERGE-001",
+      "name": "PDF-EPUB Merged Paragraph Detection",
+      "scope": "book",
+      "enabled": true
+    }
+  ]
+}

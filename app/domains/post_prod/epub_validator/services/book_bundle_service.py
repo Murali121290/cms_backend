@@ -17,18 +17,18 @@ from ..vendor.pdf_epub_validator.pdf_parser import PdfDoc
 
 
 _PDF_CACHE: dict = {}   # folder_name -> (mtime, PdfDoc)
-UPLOAD_DIR = os.path.join("uploads", "epub_validator")
+from .upload_service import UPLOAD_DIR
 
 
 def _find_source(folder_name: str, ext: str) -> Optional[str]:
     """Locate the original .epub or .pdf file the user uploaded."""
     pattern = os.path.join(UPLOAD_DIR, folder_name, "extract", f"*.{ext}")
-    matches = glob.glob(pattern)
+    matches = [m for m in glob.glob(pattern) if "_pg-" not in os.path.basename(m)]
     if matches:
         return matches[0]
     # Fall back to anywhere under the upload folder
     pattern = os.path.join(UPLOAD_DIR, folder_name, "**", f"*.{ext}")
-    matches = sorted(glob.glob(pattern, recursive=True), key=len)
+    matches = [m for m in sorted(glob.glob(pattern, recursive=True), key=len) if "_pg-" not in os.path.basename(m)]
     return matches[0] if matches else None
 
 
