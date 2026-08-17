@@ -1,5 +1,6 @@
 import glob
 import os
+import re
 import pymupdf as fitz
 from bs4 import BeautifulSoup
 
@@ -43,15 +44,19 @@ def _extract_pagebreaks(xhtml_path: str) -> list[str]:
         soup = BeautifulSoup(f.read(), "html.parser")
 
     pages = []
-    for span in soup.find_all("span", {"epub:type": "pagebreak"}):
-        if span.get("epub:type") == "pagebreak" or span.get("role") == "doc-pagebreak":
+    for span in soup.find_all("span"):
+        role = span.get("role") or ""
+        epub_type = span.get("epub:type") or ""
+        # Check attrs keys directly since namespace attributes can be formatted differently
+        is_pb = (role == "doc-pagebreak" or 
+                 epub_type == "pagebreak" or 
+                 any("pagebreak" in str(v) for v in span.attrs.values()))
+        if is_pb:
             label = span.get("aria-label") or span.get("id", "")
-            # id may be "page_14" — strip prefix
-            label = label.replace("page_", "").strip()
-            try:
-                pages.append(str(label))
-            except ValueError:
-                pass
+            # e.g. "page 103" -> "103"
+            label = label.replace("page", "").replace("_", "").replace("-", "").strip()
+            if label:
+                pages.append(label)
     return pages
 
 
@@ -60,12 +65,27 @@ def _pdf_path(folder_name: str) -> str:
     exact = os.path.join(extract_dir, f"{folder_name}.pdf")
     if os.path.exists(exact):
         return exact
-    # Fallback to any non-cached .pdf in extract_dir
-    candidates = [
-        f for f in glob.glob(os.path.join(extract_dir, "*.pdf"))
-        if "_pg-" not in os.path.basename(f)
-    ]
-    return candidates[0] if candidates else exact
+    
+    # Identify the main full PDF by looking for ISBN name or large file size or not starting with numbers like "13_Chapter_" or "24_Chapter_"
+    candidates = []
+    for f in glob.glob(os.path.join(extract_dir, "*.pdf")):
+        base = os.path.basename(f)
+        if "_pg-" in base:
+            continue
+        # Exclude cut chapter PDFs that start with digits and "Chapter_"
+        if re.match(r"^\d+_[Cc]hapter", base):
+            continue
+        candidates.append(f)
+        
+    if candidates:
+        # Prefer the one matching folder_name if available, else largest file size
+        for c in candidates:
+            if folder_name in os.path.basename(c):
+                return c
+        candidates.sort(key=os.path.getsize, reverse=True)
+        return candidates[0]
+        
+    return exact
 
 
 def find_pdf_page(folder_name: str, xhtml_filename: str) -> dict:
@@ -109,6 +129,93 @@ def find_pdf_page(folder_name: str, xhtml_filename: str) -> dict:
                     "end_page": end_page,
                     "total_pages": total
                 }
+
+            # ── Fallback path: Use bookmarks/TOC matching ────────────────────
+            # Try to extract chapter number from filename
+            chapter_num = None
+            ch_match = re.search(r'Chapter[_\s-]*(\d+)', xhtml_filename, re.IGNORECASE)
+            if ch_match:
+                chapter_num = int(ch_match.group(1))
+
+            # Extract XHTML start & end page numbers from pagebreak list
+            def roman_to_int(s):
+                s = s.lower().strip()
+                if not re.match(r'^[ivxlcdm]+$', s):
+                    return None
+                roman_values = {'i': 1, 'v': 5, 'x': 10, 'l': 50, 'c': 100, 'd': 500, 'm': 1000}
+                total_val = 0
+                prev_value = 0
+                for char in reversed(s):
+                    value = roman_values.get(char, 0)
+                    if value < prev_value:
+                        total_val -= value
+                    else:
+                        total_val += value
+                    prev_value = value
+                return total_val if total_val > 0 else None
+
+            def parse_page_val(p_str):
+                if p_str.isdigit():
+                    return int(p_str), False
+                roman_val = roman_to_int(p_str)
+                if roman_val is not None:
+                    return roman_val, True
+                return None, False
+
+            p_start_val, start_is_roman = parse_page_val(pages[0])
+            p_end_val, end_is_roman = parse_page_val(pages[-1])
+
+            if p_start_val is not None and p_end_val is not None:
+                doc = fitz.open(pdf_file)
+                toc = doc.get_toc()
+                best_bookmark = None
+
+                for item in toc:
+                    level, title, pdf_page = item[0], item[1], item[2]
+
+                    # Front matter
+                    if chapter_num is None or not re.search(r'Ch(?:apter)?', title, re.IGNORECASE):
+                        if start_is_roman and re.search(r'FM|Front\s*Matter', title, re.IGNORECASE):
+                            page_match = re.search(r'[_\s]p[_\s]*([ivxlcdm]+)[_\s-]*([ivxlcdm]+)', title, re.IGNORECASE)
+                            if page_match:
+                                log_start = roman_to_int(page_match.group(1))
+                                log_end = roman_to_int(page_match.group(2))
+                                if log_start is not None and log_end is not None:
+                                    if p_start_val >= log_start and p_end_val <= log_end:
+                                        best_bookmark = bookmark = {"pdf_page": pdf_page, "logical_range": (log_start, log_end)}
+                                        break
+                        continue
+
+                    # Chapters
+                    chapter_match = re.search(r'Ch(?:apter)?[_\s]*(\d+)(?:[_\s-]*Ch(?:apter)?[_\s]*(\d+))?', title, re.IGNORECASE)
+                    if chapter_match:
+                        ch_start = int(chapter_match.group(1))
+                        ch_end = int(chapter_match.group(2)) if chapter_match.group(2) else ch_start
+                        if ch_start <= chapter_num <= ch_end:
+                            page_match = re.search(r'[_\s]p(?:age)?[_\s]*(\d+)[_\s-]*(\d+)', title, re.IGNORECASE)
+                            if page_match:
+                                log_start = int(page_match.group(1))
+                                log_end = int(page_match.group(2))
+                                if p_start_val >= log_start and p_end_val <= log_end:
+                                    best_bookmark = {"pdf_page": pdf_page, "logical_range": (log_start, log_end)}
+                                    break
+                            else:
+                                best_bookmark = {"pdf_page": pdf_page, "logical_range": (None, None)}
+
+                doc.close()
+
+                if best_bookmark:
+                    bookmark_pdf_start = best_bookmark["pdf_page"]
+                    log_start, log_end = best_bookmark["logical_range"]
+                    if log_start is not None:
+                        offset = bookmark_pdf_start - log_start
+                        pdf_start = p_start_val + offset
+                        pdf_end = p_end_val + offset
+                        return {
+                            "page": max(1, pdf_start),
+                            "end_page": min(total, pdf_end),
+                            "total_pages": total
+                        }
 
             return {
                 "page": 1,

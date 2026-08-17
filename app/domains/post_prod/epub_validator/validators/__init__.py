@@ -17,8 +17,10 @@ from . import (  # noqa: F401
     nav,
     notes,
     pagination,
+    paragraph_merge,
     structure,
     style,
+    style_mismatch,
     xhtml,
 )
 

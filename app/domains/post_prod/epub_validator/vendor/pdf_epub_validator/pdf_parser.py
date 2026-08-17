@@ -115,7 +115,7 @@ class PdfParser:
     def __init__(self, pdf_path: str):
         self.pdf_path = pdf_path
 
-    def parse(self, max_pages: Optional[int] = None) -> PdfDoc:
+    def parse(self, max_pages: Optional[int] = None, page_indices: Optional[List[int] | Set[int]] = None) -> PdfDoc:
         if not _HAVE_FITZ:
             raise RuntimeError("PyMuPDF (fitz) is required. pip install PyMuPDF")
 
@@ -129,8 +129,15 @@ class PdfParser:
         page_labels = self._page_labels(doc)
         max_label: Optional[str] = None
 
-        n = doc.page_count if max_pages is None else min(doc.page_count, max_pages)
-        for pno in range(n):
+        if page_indices is not None:
+            targets = sorted(list(page_indices))
+        else:
+            n = doc.page_count if max_pages is None else min(doc.page_count, max_pages)
+            targets = list(range(n))
+
+        for pno in targets:
+            if pno < 0 or pno >= doc.page_count:
+                continue
             page = doc.load_page(pno)
             label = page_labels.get(pno)
             p = self._parse_page(page, pno + 1, label)
@@ -153,7 +160,7 @@ class PdfParser:
 
         return PdfDoc(
             path=self.pdf_path,
-            page_count=n,
+            page_count=len(targets),
             pages=pages,
             paragraphs=all_paras,
             italic_words_global=global_italic,

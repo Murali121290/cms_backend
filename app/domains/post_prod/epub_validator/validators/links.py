@@ -24,10 +24,10 @@ _PAGE_CITATION_RE = re.compile(
     r"\b(?:see\s+)?"
     r"(?:"
     r"p(?:age|p)\.?\s*(\d{1,4})(?:\s*[\-–]\s*\d{1,4})?"  # page/pp: "page 23", "pp. 12-14"
-    r"|ch(?:apter)?\.?\s*(\d+(?:[a-zA-Z]?\.?\d+)*(?:\.\w+)*)"  # chapter: "Ch. 9", "Ch. 9.E.1", "Ch. 9.E.1.a"
-    r"|fig(?:ure)?\.?\s*(\d+(?:\.\d+)*)"  # figure: "Fig. 1.1", "Figure 1"
-    r"|table\.?\s*(\d+(?:\s*[\-–]\s*)?\d*)"  # table: "Table 1-1", "Table 1"
-    r")(?!\w)",  # negative lookahead: not followed by word character
+    r"|ch(?:apter)?\.?\s*(\d+(?:[a-zA-Z]?\.?\d+)*(?:\.\w+)*)(?:\s*[\-–]\s*\d+(?:[a-zA-Z]?\.?\d+)*(?:\.\w+)*)?"  # chapter: "Ch. 9", "Ch. 9-10"
+    r"|fig(?:ure)?\.?\s*(\d+(?:[\.\-–]\d+)*)"  # figure: "Fig. 1.1", "Fig. 1-1"
+    r"|table\.?\s*(\d+(?:[\.\-–]\d+)*)"  # table: "Table 1-1", "Table 1"
+    r")[a-zA-Z]*(?![0-9\-–])",  # capture mashed letters; negative lookahead for digits/dashes
     re.IGNORECASE,
 )
 
@@ -43,15 +43,20 @@ _URL_HEADERS = {
     )
 }
 
+# Cache: url -> issue dict (or None if URL is healthy).
+# Persists for the lifetime of the process so the same URL is never
+# fetched twice across different .xhtml files in one validation run.
+_URL_RESULT_CACHE: dict[str, dict | None] = {}
+
 
 def _make_session() -> requests.Session:
     """Create a requests session with retry logic."""
     session = requests.Session()
     retry = Retry(
-        total=3,
-        connect=3,
-        read=3,
-        backoff_factor=2,
+        total=1,           # reduced from 3 — avoids long stalls on dead URLs
+        connect=1,
+        read=1,
+        backoff_factor=1,  # reduced from 2 — wait: 1s between retries
         status_forcelist=[429, 500, 502, 503, 504],
         allowed_methods=["HEAD", "GET"],
     )
@@ -120,11 +125,11 @@ def _check_mailto(href: str) -> dict | None:
 def _check_single_url(href: str, session: requests.Session) -> dict | None:
     """Return an issue dict if the URL has a problem, else None."""
     try:
-        resp = session.head(href, timeout=30, allow_redirects=True,
+        resp = session.head(href, timeout=10, allow_redirects=True,  # reduced from 30s
                            verify=False, headers=_URL_HEADERS)
         code = resp.status_code
         if code in (403, 405):
-            resp = session.get(href, timeout=30, allow_redirects=True,
+            resp = session.get(href, timeout=10, allow_redirects=True,  # reduced from 30s
                               verify=False, headers=_URL_HEADERS, stream=True)
             code = resp.status_code
         if code < 400:
@@ -214,6 +219,25 @@ def _page_id_for_number(page_num: str, existing: set[str]) -> str | None:
     return None
 
 
+_CHAPTER_NUMS_CACHE: dict[str, set[str]] = {}
+
+def _epub_chapter_numbers(epub: str) -> set[str]:
+    if epub in _CHAPTER_NUMS_CACHE:
+        return _CHAPTER_NUMS_CACHE[epub]
+
+    nums: set[str] = set()
+    for xhtml in glob.glob(os.path.join(epub, "**", "*.xhtml"), recursive=True):
+        basename = os.path.basename(xhtml).lower()
+        # Match base chapter numbers in filenames like ch110.xhtml, chapter-11.xhtml
+        m = re.search(r'(?:ch|chapter|c|part|sec(?:tion)?)[_-]?(\d+)', basename)
+        if m:
+            nums.add(m.group(1).lstrip("0") or "0")
+
+
+    _CHAPTER_NUMS_CACHE[epub] = nums
+    return nums
+
+
 @rule("ASP-LINK-001")
 def validate_page_citation_links(file_details, rule_config=None):
     """Text like '(See page 23)' should be inside an <a href='...#page_23'>."""
@@ -234,9 +258,16 @@ def validate_page_citation_links(file_details, rule_config=None):
 
     issues = []
     body = soup.find("body") or soup
+    
+    # Unwrap inline formatting tags to prevent fragmented text nodes
+    for tag in body.find_all(['span', 'strong', 'b', 'i', 'em', 'sup', 'sub', 'u']):
+        tag.unwrap()
+    if hasattr(body, 'smooth'):
+        body.smooth()
+
     for text_node in body.find_all(string=True):
         parent = text_node.parent
-        if parent is None or parent.name == "a":
+        if parent is None or text_node.find_parent(["a", "h1", "h2", "h3", "h4", "h5", "h6", "figure", "figcaption"]):
             continue
         line_num = getattr(parent, "sourceline", None)
 
@@ -245,6 +276,16 @@ def validate_page_citation_links(file_details, rule_config=None):
             num = next((g for g in m.groups() if g), None)
             if num is None:
                 continue
+
+            # If it is a chapter citation, only validate if the base chapter exists in this book
+            if m.group(2) is not None and epub:
+                chapter_num_full = m.group(2).lstrip("0") or "0"
+                base_match = re.match(r'^(\d+)', chapter_num_full)
+                base_chapter = base_match.group(1) if base_match else chapter_num_full
+                
+                available_chapters = _epub_chapter_numbers(epub)
+                if available_chapters and base_chapter not in available_chapters:
+                    continue
 
             issues.append({
                 "rule_name": "Citation Not Linked",
@@ -479,18 +520,27 @@ def validate_external_urls(file_details, rule_config=None):
             result["line_number"] = line_num
             issues.append(result)
 
-    # Validate external URLs (parallel)
+    # Validate external URLs (parallel), skipping already-cached URLs
     if hrefs:
+        unchecked = [(href, ln) for href, ln in hrefs if href not in _URL_RESULT_CACHE]
         session = _make_session()
-        with ThreadPoolExecutor(max_workers=10) as pool:
-            futures = {pool.submit(_check_single_url, href, session): (href, line_num)
-                       for href, line_num in hrefs}
-            for future in as_completed(futures):
-                result = future.result()
-                if result:
-                    href, line_num = futures[future]
-                    result["line_number"] = line_num
-                    issues.append(result)
+
+        # Fetch only URLs we haven't seen before
+        if unchecked:
+            with ThreadPoolExecutor(max_workers=10) as pool:
+                futures = {pool.submit(_check_single_url, href, session): (href, ln)
+                           for href, ln in unchecked}
+                for future in as_completed(futures):
+                    href, ln = futures[future]
+                    _URL_RESULT_CACHE[href] = future.result()  # store result (None = OK)
+
+        # Apply cached results for all hrefs in this file
+        for href, line_num in hrefs:
+            result = _URL_RESULT_CACHE.get(href)
+            if result:
+                result = dict(result)  # copy so we don't mutate the cache
+                result["line_number"] = line_num
+                issues.append(result)
 
     return {"issues_count": len(issues), "issues": issues}
 

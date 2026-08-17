@@ -7,6 +7,12 @@
       "enabled": false
     },
     {
+      "id": "STYLE-MATCH-001",
+      "name": "Bold/Italic Mismatch Detection",
+      "scope": "book",
+      "enabled": true
+    },
+    {
       "id": "STYLE001",
       "name": "Drop Cap Style Check",
       "scope": "book",
