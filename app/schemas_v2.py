@@ -576,6 +576,12 @@ class GenerateFigurePdfResponse(BaseModel):
     figures_included: int
 
 
+class GenerateFigureAssessmentResponse(BaseModel):
+    status: Literal["ok"] = "ok"
+    file: FileRecord
+    figures_included: int
+
+
 class VersionRecord(BaseModel):
     id: int
     file_id: int

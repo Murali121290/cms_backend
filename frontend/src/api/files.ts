@@ -13,6 +13,12 @@ export interface GenerateFigurePdfResponse {
   figures_included: number;
 }
 
+export interface GenerateFigureAssessmentResponse {
+  status: "ok";
+  file: FileRecord;
+  figures_included: number;
+}
+
 
 function getDownloadFilename(contentDisposition: string | undefined, fallbackFilename: string) {
   if (!contentDisposition) {
@@ -109,6 +115,15 @@ export async function downloadFileVersion(fileId: number, versionId: number, fal
 export async function generateFigurePdf(projectId: number, chapterId: number, fileId?: number) {
   const response = await apiClient.post<GenerateFigurePdfResponse>(
     `/projects/${projectId}/chapters/${chapterId}/generate-figure-pdf`,
+    undefined,
+    fileId != null ? { params: { file_id: fileId } } : undefined,
+  );
+  return response.data;
+}
+
+export async function generateFigureAssessment(projectId: number, chapterId: number, fileId?: number) {
+  const response = await apiClient.post<GenerateFigureAssessmentResponse>(
+    `/projects/${projectId}/chapters/${chapterId}/generate-figure-assessment`,
     undefined,
     fileId != null ? { params: { file_id: fileId } } : undefined,
   );
