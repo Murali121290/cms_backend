@@ -20,6 +20,7 @@ def validate_epub(
     folder_name: str,
     target_file: str | None = None,
     customer: str | None = None,
+    progress_callback=None,
 ) -> dict:
     """Run general rules and (if a customer is detected/provided) the customer's
     rules against an extracted EPUB.
@@ -46,6 +47,14 @@ def validate_epub(
 
     asset_index = _build_asset_to_chapters_index(_bundle.get_epub_bundle(folder_name))
 
+    def _count_active(rules: list[dict]) -> int:
+        return len([r for r in rules if r.get("enabled", True) and registry.get(r["id"])])
+
+    general_rules = loader.load_general()
+    customer_rules = loader.load_customer(resolved_customer) if resolved_customer else []
+    grand_total = _count_active(general_rules) + _count_active(customer_rules)
+    global_index = [0]  # mutable counter shared across both _run calls
+
     def _run(rules: list[dict], origin: str, customer_tag: str | None) -> None:
         for rule in rules:
             if not rule.get("enabled", True):
@@ -53,6 +62,19 @@ def validate_epub(
             function = registry.get(rule["id"])
             if function is None:
                 continue
+
+            global_index[0] += 1
+            if progress_callback:
+                try:
+                    progress_callback({
+                        "rule_id": rule["id"],
+                        "rule_name": rule.get("name", rule["id"]),
+                        "index": global_index[0],
+                        "total": grand_total,
+                        "origin": origin,
+                    })
+                except Exception:
+                    pass  # never let progress reporting crash the validation
 
             if rule.get("scope") == "book":
                 _run_book_scope(rule, function, origin, customer_tag)
@@ -150,9 +172,8 @@ def validate_epub(
                     file_details, result, origin, customer_tag,
                 ))
 
-    _run(loader.load_general(), origin="general", customer_tag=None)
+    _run(general_rules, origin="general", customer_tag=None)
     if resolved_customer:
-        _run(loader.load_customer(resolved_customer),
-             origin="customer", customer_tag=resolved_customer)
+        _run(customer_rules, origin="customer", customer_tag=resolved_customer)
 
     return report

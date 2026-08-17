@@ -10,7 +10,7 @@
       "id": "STYLE-MATCH-001",
       "name": "Bold/Italic Mismatch Detection",
       "scope": "book",
-      "enabled": true
+      "enabled": false
     },
     {
       "id": "STYLE001",

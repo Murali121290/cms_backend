@@ -38,6 +38,9 @@ import {
   getFiles,
   validateFolder,
   validateFile,
+  startValidation,
+  pollTaskStatus,
+  type ValidationProgress,
   exportEpub,
   getCachedAceReport,
   runAceReport,
@@ -255,6 +258,23 @@ export function PostProdEpubValidatorFiles() {
 
   const [isValidating, setIsValidating] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [validationProgress, setValidationProgress] = useState<ValidationProgress | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── localStorage helpers — persist task_id across refresh/navigation ────────
+  const TASK_KEY = `epub_task:${folderName}`;
+  const saveTask = (id: string, startTime: number = Date.now()) => {
+    try { localStorage.setItem(TASK_KEY, JSON.stringify({ id, startTime })); } catch { /* noop */ }
+  };
+  const clearTask = () => { try { localStorage.removeItem(TASK_KEY); } catch { /* noop */ } };
+  const getSavedTask = (): { id: string, startTime: number } | null => {
+    try {
+      const data = localStorage.getItem(TASK_KEY);
+      if (!data) return null;
+      if (!data.startsWith('{')) return { id: data, startTime: Date.now() }; // Legacy string format
+      return JSON.parse(data);
+    } catch { return null; }
+  };
 
   const [aceReport, setAceReport] = useState<AceReport | null>(null);
   const [isAceRunning, setIsAceRunning] = useState(false);
@@ -272,17 +292,20 @@ export function PostProdEpubValidatorFiles() {
 
   // Elapsed-time counter while validation runs
   const [elapsed, setElapsed] = useState(0);
+  const [taskStartTime, setTaskStartTime] = useState<number | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    if (isValidating) {
-      setElapsed(0);
-      timerRef.current = setInterval(() => setElapsed((s) => s + 1), 1000);
-    } else {
+    if (isValidating && taskStartTime) {
+      setElapsed(Math.floor((Date.now() - taskStartTime) / 1000));
+      timerRef.current = setInterval(() => {
+        setElapsed(Math.floor((Date.now() - taskStartTime) / 1000));
+      }, 1000);
+    } else if (!isValidating) {
       if (timerRef.current) clearInterval(timerRef.current);
     }
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [isValidating]);
+  }, [isValidating, taskStartTime]);
 
   useEffect(() => {
     if (!folderName) return;
@@ -290,6 +313,56 @@ export function PostProdEpubValidatorFiles() {
     getCachedEpubCheckReport(folderName).then((r) => { if (r) setEpubCheckReport(r); }).catch(() => undefined);
     getLatestValidation(folderName).then((res) => { if (res) setValidationData(res); }).catch(() => undefined);
   }, [folderName]);
+
+  // Auto-resume polling on page refresh / navigate-back
+  useEffect(() => {
+    if (!folderName) return;
+    const saved = getSavedTask();
+    if (!saved) return;
+    const { id: savedTaskId, startTime } = saved;
+
+    // There's a stored task — check if it's still running
+    let cancelled = false;
+    (async () => {
+      try {
+        const status = await pollTaskStatus(folderName, savedTaskId);
+        if (cancelled) return;
+
+        if (status.status === 'completed') {
+          // Task already finished while we were away — just clear and show latest result
+          clearTask();
+          getLatestValidation(folderName).then((res) => { if (res) setValidationData(res); }).catch(() => undefined);
+          return;
+        }
+        if (status.status === 'failed') {
+          clearTask();
+          return;
+        }
+        // Still pending or running — resume polling
+        setTaskStartTime(startTime);
+        setIsValidating(true);
+        setValidationProgress(status);
+        startPolling(savedTaskId)
+          .catch((err: unknown) => {
+            setValidationError(err instanceof Error ? err.message : 'Validation failed');
+          })
+          .finally(() => {
+            if (!cancelled) {
+              setIsValidating(false);
+              setValidationProgress(null);
+              if (pollRef.current) clearInterval(pollRef.current);
+            }
+          });
+      } catch {
+        // task_id is stale / redis expired — clean up silently
+        clearTask();
+      }
+    })();
+
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [folderName]);
+
 
   useEffect(() => {
     if (isAceRunning) {
@@ -326,24 +399,60 @@ export function PostProdEpubValidatorFiles() {
     };
   };
 
+  // ── Shared polling logic ─────────────────────────────────────────────────────
+  const startPolling = (task_id: string) => {
+    return new Promise<void>((resolve, reject) => {
+      pollRef.current = setInterval(async () => {
+        try {
+          const progress = await pollTaskStatus(folderName, task_id);
+          setValidationProgress(progress);
+
+          if (progress.status === 'completed') {
+            clearInterval(pollRef.current!);
+            clearTask();
+            if (progress.result) setValidationData(progress.result);
+            resolve();
+          } else if (progress.status === 'failed') {
+            clearInterval(pollRef.current!);
+            clearTask();
+            reject(new Error(progress.error ?? 'Validation failed'));
+          }
+        } catch (err) {
+          clearInterval(pollRef.current!);
+          clearTask();
+          reject(err);
+        }
+      }, 2000);
+    });
+  };
+
   const handleValidateAll = async () => {
     setIsValidating(true);
     setValidationError(null);
-    // Reset to Pending so the dashboard reflects "fresh run in progress"
-    // immediately instead of showing the previous run's numbers.
+    setValidationProgress(null);
     setValidationData(null);
+
     try {
-      const result = await validateFolder(folderName);
-      setValidationData(result);
-    } catch {
-      setValidationError('Validation request failed. Is the backend running?');
+      const { task_id } = await startValidation(folderName);
+      const startTime = Date.now();
+      saveTask(task_id, startTime); // persist so refresh can resume
+      setTaskStartTime(startTime);
+      await startPolling(task_id);
+    } catch (err) {
+      setValidationError(
+        err instanceof Error ? err.message : 'Validation request failed. Is the backend running?',
+      );
     } finally {
       setIsValidating(false);
+      setValidationProgress(null);
+      if (pollRef.current) clearInterval(pollRef.current);
     }
   };
 
+
   // ── Per-file validation ─────────────────────────────────────────────────────
   const [validatingFiles, setValidatingFiles] = useState<Set<string>>(new Set());
+  const [singleFileProgress, setSingleFileProgress] = useState<Record<string, ValidationProgress>>({});
 
   const handleValidateFile = async (fileName: string) => {
     setValidatingFiles((prev) => {
@@ -357,11 +466,36 @@ export function PostProdEpubValidatorFiles() {
       return { ...prev, files: prev.files.filter((e) => e.file_details.file_name !== fileName) };
     });
     try {
-      const result = await validateFile(folderName, fileName);
-      setValidationData((prev) => mergeValidation(prev, result));
-    } catch {
-      setValidationError(`Validation failed for ${fileName}. Is the backend running?`);
+      const { task_id } = await startValidation(folderName, fileName);
+      let finalResult: ValidationApiResponse | null = null;
+      let cancelled = false;
+
+      while (!cancelled) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        const status = await pollTaskStatus(folderName, task_id);
+
+        if (status.status === 'completed') {
+          const res = await getLatestValidation(folderName);
+          finalResult = res;
+          break;
+        } else if (status.status === 'failed') {
+          throw new Error(status.error || 'Validation failed');
+        } else {
+          setSingleFileProgress((prev) => ({ ...prev, [fileName]: status }));
+        }
+      }
+
+      if (finalResult) {
+        setValidationData(finalResult);
+      }
+    } catch (err) {
+      setValidationError(err instanceof Error ? err.message : `Validation failed for ${fileName}. Is the backend running?`);
     } finally {
+      setSingleFileProgress((prev) => {
+        const next = { ...prev };
+        delete next[fileName];
+        return next;
+      });
       setValidatingFiles((prev) => {
         const next = new Set(prev);
         next.delete(fileName);
@@ -704,6 +838,7 @@ export function PostProdEpubValidatorFiles() {
             folderName={folderName}
             entries={selectedEntries}
             isRevalidating={validatingFiles.has(selectedFile.file_name)}
+            validationProgress={singleFileProgress[selectedFile.file_name]}
             initialTab={modalInitialTab}
             allowedTabs={modalAllowedTabs}
             onClose={() => setSelectedFile(null)}
@@ -861,21 +996,19 @@ export function PostProdEpubValidatorFiles() {
                 disabled={isValidating || isLoading}
                 className="inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg bg-primary text-white hover:bg-primary/90 transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
               >
-                {isValidating ? (
-                  <Loader2 className="w-4 h-4 animate-spin shrink-0 text-white" />
-                ) : (
+                {!isValidating && (
                   <Play className="w-4 h-4 shrink-0 text-white fill-white" />
                 )}
                 <span className="whitespace-nowrap text-white">
                   {isValidating
-                    ? `Validating… ${fmtElapsed(elapsed)}`
+                    ? 'Validating…'
                     : hasValidated ? 'Re-run validation' : 'Validate all'}
                 </span>
               </button>
 
               <button
                 onClick={handleRunEpubCheck}
-                disabled={isEpubCheckRunning || isLoading}
+                disabled={isEpubCheckRunning || isLoading || isValidating}
                 className="inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-primary/10 text-foreground hover:border-primary/40 hover:text-primary transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
               >
                 {isEpubCheckRunning ? (
@@ -890,7 +1023,7 @@ export function PostProdEpubValidatorFiles() {
 
               <button
                 onClick={handleRunAce}
-                disabled={isAceRunning || isLoading}
+                disabled={isAceRunning || isLoading || isValidating}
                 className="inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-primary/10 text-foreground hover:border-primary/40 hover:text-primary transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
               >
                 {isAceRunning ? (
@@ -924,7 +1057,8 @@ export function PostProdEpubValidatorFiles() {
                 {aceReport && !isAceRunning && (
                   <button
                     onClick={() => setAceModalOpen(true)}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-all border border-primary/20"
+                    disabled={isValidating}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-all border border-primary/20 disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none"
                   >
                     <Eye className="w-3.5 h-3.5 shrink-0" />
                     <span>View Accessibility Report</span>
@@ -934,7 +1068,8 @@ export function PostProdEpubValidatorFiles() {
                 {epubCheckReport && !isEpubCheckRunning && (
                   <button
                     onClick={() => setEpubCheckModalOpen(true)}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-all border border-primary/20"
+                    disabled={isValidating}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-all border border-primary/20 disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none"
                   >
                     <Eye className="w-3.5 h-3.5 shrink-0" />
                     <span>View EPUBCheck Report</span>
@@ -945,19 +1080,74 @@ export function PostProdEpubValidatorFiles() {
           </div>
         </div>
 
-        {/* Indeterminate progress stripe while validating */}
-        {isValidating && (
-          <div className="h-0.5 w-full bg-muted overflow-hidden relative">
-            <motion.div
-              className="h-full w-1/3 bg-primary rounded-full absolute"
-              animate={{ x: ['-100%', '400%'] }}
-              transition={{ repeat: Infinity, duration: 1.4, ease: 'easeInOut' }}
-            />
-          </div>
-        )}
-
         {/* ── Content ────────────────────────────────────────────────────────── */}
-        <div className="space-y-6">
+        <div className="space-y-6 relative min-h-[60vh]">
+          <AnimatePresence>
+            {isValidating && (
+              <>
+                {/* Full-height backdrop with lighter blur */}
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="absolute -inset-x-4 -inset-y-4 z-40 bg-background/40 backdrop-blur-[3px] rounded-xl h-[calc(100%+2rem)]"
+                />
+                
+                {/* Fixed modal card so it stays in viewport without taking up document space */}
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.96 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.96 }}
+                  className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none"
+                >
+                  <div className="bg-card p-8 rounded-2xl shadow-xl border border-border w-full max-w-md flex flex-col items-center pointer-events-auto mt-16">
+                    <Loader2 className="w-12 h-12 text-primary animate-spin mb-4" />
+                    <h3 className="text-xl font-bold mb-2 text-foreground">Validating EPUB</h3>
+                    <p className="text-sm text-muted-foreground mb-8 text-center">
+                      Please wait while we check your book against the rules.
+                    </p>
+
+                    <div className="w-full space-y-2">
+                      {validationProgress?.status === 'running' && (
+                        <div className="flex items-center justify-between px-1 text-xs font-mono text-muted-foreground">
+                          <span className="truncate max-w-[280px]">
+                            {validationProgress.origin === 'customer' ? '🏷 ' : '📋 '}
+                            {validationProgress.rule_id} — {validationProgress.rule_name}
+                          </span>
+                          <span className="shrink-0 ml-2 font-bold tabular-nums">
+                            {validationProgress.index} / {validationProgress.total}
+                          </span>
+                        </div>
+                      )}
+                      <div className="h-2 w-full bg-muted overflow-hidden relative rounded-full">
+                        {validationProgress?.status === 'running' && validationProgress.total ? (
+                          <motion.div
+                            className="h-full bg-primary rounded-full absolute left-0 top-0"
+                            animate={{
+                              width: `${Math.round(((validationProgress.index ?? 0) / validationProgress.total) * 100)}%`,
+                            }}
+                            transition={{ duration: 0.3, ease: 'easeOut' }}
+                          />
+                        ) : (
+                          <motion.div
+                            className="h-full w-1/3 bg-primary rounded-full absolute"
+                            animate={{ x: ['-100%', '400%'] }}
+                            transition={{ repeat: Infinity, duration: 1.4, ease: 'easeInOut' }}
+                          />
+                        )}
+                      </div>
+                      <div className="flex justify-between items-center text-xs text-muted-foreground pt-1 px-1 font-semibold">
+                        <span>{fmtElapsed(elapsed)}</span>
+                        {validationProgress?.status === 'running' && validationProgress.total && (
+                          <span>{Math.round(((validationProgress.index ?? 0) / validationProgress.total) * 100)}%</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
           {/* Validation error banner */}
           {validationError && (
             <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-danger/10 border border-danger/20 text-xs text-danger font-sans">

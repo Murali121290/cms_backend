@@ -44,6 +44,49 @@ export async function validateFolder(folderName: string): Promise<ValidationApiR
   }
 }
 
+// ─── Celery background validation ─────────────────────────────────────────────
+
+export interface ValidationProgress {
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  rule_id?: string;
+  rule_name?: string;
+  index?: number;
+  total?: number;
+  origin?: string;
+  result?: ValidationApiResponse;
+  error?: string;
+}
+
+export async function startValidation(
+  folderName: string,
+  fileName?: string,
+): Promise<{ task_id: string; status: string }> {
+  try {
+    const { data } = await api.post<{ task_id: string; status: string }>(
+      `/post-prod/epub-validator/validate/${folderName}/start`,
+      null,
+      { params: fileName ? { file: fileName } : undefined }
+    );
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to start validation'));
+  }
+}
+
+export async function pollTaskStatus(
+  folderName: string,
+  taskId: string,
+): Promise<ValidationProgress> {
+  try {
+    const { data } = await api.get<ValidationProgress>(
+      `/post-prod/epub-validator/validate/${folderName}/task-status/${taskId}`,
+    );
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to poll task status'));
+  }
+}
+
 export async function getLatestValidation(folderName: string): Promise<ValidationApiResponse | null> {
   try {
     const { data } = await api.get<ValidationApiResponse | { status: false }>(

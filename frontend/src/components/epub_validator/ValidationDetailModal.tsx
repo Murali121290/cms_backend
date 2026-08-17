@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/utils/epubValidatorUtils';
-import { getFileContent, getPdfPage, saveFileContent } from '@/api/epubValidator';
+import { getFileContent, getPdfPage, saveFileContent, ValidationProgress } from '@/api/epubValidator';
 import { SourceEditor } from './SourceEditor';
 import type { XHTMLFile, ValidationFileEntry, ValidationIssue } from '@/types/epubValidator';
 
@@ -21,6 +21,7 @@ interface Props {
   folderName: string;
   entries: ValidationFileEntry[];
   isRevalidating?: boolean;
+  validationProgress?: ValidationProgress;
   initialTab?: Tab;
   allowedTabs?: Tab[];
   onClose: () => void;
@@ -253,7 +254,7 @@ function resolveRelative(filePath: string, href: string): string {
 
 // ─── Modal ───────────────────────────────────────────────────────────────────
 
-export function ValidationDetailModal({ file, folderName, entries, isRevalidating = false, initialTab = 'result', allowedTabs, onClose, onRevalidate }: Props) {
+export function ValidationDetailModal({ file, folderName, entries, isRevalidating = false, validationProgress, initialTab = 'result', allowedTabs, onClose, onRevalidate }: Props) {
   const isImageFile = useMemo(() => {
     const name = (file.file_name || '').toLowerCase();
     return /\.(png|jpe?g|gif|svg|webp|bmp|ico|tif?f)$/i.test(name);
@@ -564,7 +565,73 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
         </div>
 
         {/* Body */}
-        <div className="flex flex-1 min-h-0">
+        <div className="flex flex-1 min-h-0 relative">
+
+          {/* Revalidation Overlay */}
+          <AnimatePresence>
+            {isRevalidating && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="absolute inset-0 z-50 bg-white/40 dark:bg-black/40 flex flex-col items-center justify-center rounded-b-xl"
+              >
+                <div className="bg-card p-8 rounded-2xl shadow-xl border border-border w-full max-w-md flex flex-col items-center pointer-events-auto text-center">
+                  <RotateCw className="w-12 h-12 text-primary animate-spin mb-4" />
+                  <div className="w-full mb-2">
+                    {validationProgress?.status === 'pending' ? (
+                      <h3 className="text-xl font-bold text-foreground">
+                        Preparing validation engine...
+                      </h3>
+                    ) : (
+                      <>
+                        <h3 className="text-xl font-bold text-foreground mb-1">Validating</h3>
+                        <p className="text-base font-semibold text-primary/80 break-all px-2 leading-tight">
+                          {file.file_name}
+                        </p>
+                      </>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground mb-8 text-center">
+                    {validationProgress?.status === 'pending'
+                      ? 'Initializing rules and loading documents.'
+                      : 'Checking for errors and warnings.'}
+                  </p>
+
+                  <div className="w-full space-y-3">
+                    {validationProgress?.status === 'running' && (
+                      <div className="flex flex-col items-center justify-center gap-1.5 px-1 text-xs font-mono text-muted-foreground">
+                        <span className="text-center w-full break-words leading-relaxed">
+                          {validationProgress.origin === 'customer' ? '🏷 ' : '📋 '}
+                          <span className="font-bold text-foreground">{validationProgress.rule_id}</span> — {validationProgress.rule_name}
+                        </span>
+                        <span className="shrink-0 font-bold tabular-nums">
+                          {validationProgress.index} / {validationProgress.total}
+                        </span>
+                      </div>
+                    )}
+                    <div className="h-2 w-full bg-muted overflow-hidden relative rounded-full">
+                      {validationProgress?.status === 'running' && validationProgress.total ? (
+                        <motion.div
+                          className="h-full bg-primary rounded-full absolute left-0 top-0"
+                          animate={{
+                            width: `${Math.round(((validationProgress.index ?? 0) / validationProgress.total) * 100)}%`,
+                          }}
+                          transition={{ duration: 0.3, ease: 'easeOut' }}
+                        />
+                      ) : (
+                        <motion.div
+                          className="h-full w-1/3 bg-primary rounded-full absolute"
+                          animate={{ x: ['-100%', '400%'] }}
+                          transition={{ repeat: Infinity, duration: 1.4, ease: 'easeInOut' }}
+                        />
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Left sidebar — only on Validation Result tab */}
           {activeTab === 'result' && (

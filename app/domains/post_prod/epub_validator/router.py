@@ -347,6 +347,92 @@ async def run_epubcheck_report_route(
     return {"status": True, "report": report}
 
 
+@router.post("/validate/{filename}/start")
+async def start_validation(
+    filename: str,
+    file: str = Query(None),
+    customer: str = Query(None, description="Override customer / client_code"),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Dispatch EPUB validation as a Celery background task.
+
+    Returns immediately with a task_id. Poll
+    GET /validate/{filename}/task-status/{task_id} to track progress.
+    """
+    from app.core.worker import run_epub_validation_task
+
+    epub_folder = os.path.join(UPLOAD_DIR, filename, "extract", "epub")
+
+    # Resolve customer from DB if not provided
+    resolved_customer = customer
+    if not resolved_customer:
+        proj = ev_projects_db.get_project_by_folder(db, filename)
+        if proj:
+            resolved_customer = proj.client_code or proj.client
+
+    user_id = getattr(user, "id", None)
+    username = getattr(user, "username", None) or getattr(user, "user_name", None)
+
+    task = run_epub_validation_task.delay(
+        folder_name=filename,
+        epub_folder=epub_folder,
+        target_file=file,
+        customer=resolved_customer,
+        user_id=user_id,
+        username=username,
+    )
+    return {"task_id": task.id, "status": "pending"}
+
+
+@router.get("/validate/{filename}/task-status/{task_id}")
+async def get_validation_task_status(filename: str, task_id: str):
+    """Poll the status of a background EPUB validation task.
+
+    Response shape:
+      { "status": "pending" }
+      { "status": "running", "rule_id": "URL002", "rule_name": "...", "index": 5, "total": 22 }
+      { "status": "completed", "result": { ... } }
+      { "status": "failed", "error": "..." }
+    """
+    import json
+    from app.core.celery_app import celery_app
+    from app.core.config import get_settings
+
+    # Use a cached Redis client to avoid connection pool exhaustion
+    global _redis_client
+    if 'redis_lib' not in globals():
+        import redis as redis_lib
+    if globals().get('_redis_client') is None:
+        settings = get_settings()
+        globals()['_redis_client'] = redis_lib.from_url(settings.REDIS_URL)
+    
+    r = globals()['_redis_client']
+
+    # 1. Check Redis progress key first (fast path — written by the task)
+    raw = r.get(f"epub_progress:{task_id}")
+    if raw:
+        progress = json.loads(raw)
+        if progress.get("status") in ("running", "failed"):
+            return progress
+        if progress.get("status") == "completed":
+            # Fetch actual result from Celery backend
+            task_result = celery_app.AsyncResult(task_id)
+            result = task_result.result if task_result.ready() else None
+            return {"status": "completed", "result": result}
+
+    # 2. Fall back to Celery task state
+    task_result = celery_app.AsyncResult(task_id)
+    state = task_result.state  # PENDING | STARTED | SUCCESS | FAILURE
+
+    if state == "SUCCESS":
+        return {"status": "completed", "result": task_result.result}
+    if state == "FAILURE":
+        return {"status": "failed", "error": str(task_result.result)}
+    # PENDING or STARTED
+    return {"status": "pending"}
+
+
 @router.get("/validate/{filename}/latest")
 def get_latest_validation(
     filename: str,
@@ -364,18 +450,19 @@ async def validate_file(
     filename: str,
     file: str = Query(None),
     customer: str = Query(None, description="Override customer / client_code (v2 engine only)"),
-    db: Session = Depends(get_db),
     user=Depends(get_current_user_from_cookie),
 ):
+    from app.database import SessionLocal
     epub_folder = os.path.join(UPLOAD_DIR, filename, "extract", "epub")
     engine = _select_validate_epub()
 
     # Automatically resolve customer/client_code from DB if not provided
     resolved_customer = customer
     if not resolved_customer:
-        proj = ev_projects_db.get_project_by_folder(db, filename)
-        if proj:
-            resolved_customer = proj.client_code or proj.client
+        with SessionLocal() as db:
+            proj = ev_projects_db.get_project_by_folder(db, filename)
+            if proj:
+                resolved_customer = proj.client_code or proj.client
 
     kwargs = {"epub_folder": epub_folder, "folder_name": filename, "target_file": file}
     if engine is _validate_epub_v2:
@@ -388,14 +475,17 @@ async def validate_file(
 
     # Save full validation run snapshot to history table
     if isinstance(result, dict):
-        ev_projects_db.save_validation_run(
-            db,
-            folder_name=filename,
-            validation_result=result,
-            user_id=user_id,
-            username=username,
-        )
-    return result
+        with SessionLocal() as db:
+            ev_projects_db.save_validation_run(
+                db,
+                folder_name=filename,
+                validation_result=result,
+                user_id=user_id,
+                username=username,
+            )
+            ev_projects_db.update_project_status(db, filename, "completed", error=None)
+
+    return {"status": True, "result": result}
 
 
 @router.post("/export/{folder_name}")
