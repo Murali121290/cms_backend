@@ -300,7 +300,7 @@
     },
     {
       "id": "ASP-LINK-001",
-      "name": "Aspen: Page citations (e.g. 'See page 23') are linked to the page id",
+      "name": "Aspen: Page citations must be linked to the corresponding page ID",
       "target_path": "OEBPS/xhtml",
       "file_name_pattern": "*.xhtml",
       "enabled": true

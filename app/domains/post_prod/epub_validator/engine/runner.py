@@ -12,6 +12,7 @@ from ..services.validate_service import (
 
 # Register all v2 validators. Importing the package triggers @rule side effects.
 from .. import validators as _validators  # noqa: F401
+from ..validators import links as _links_validator  # for per-run cache reset
 
 
 def validate_epub(
@@ -28,6 +29,11 @@ def validate_epub(
     `customer` (the customer key or None) — support the Phase 3 UI without
     breaking older clients.
     """
+    # Reset per-run caches so each validation starts fresh.
+    # Within a single run, the same data is reused across all rules (no re-parsing).
+    _links_validator._URL_RESULT_CACHE.clear()   # URL check results
+    _bundle._EPUB_CACHE.clear()                  # EpubBundle (parsed EPUB)
+
     resolved_customer = customer if customer else detector.detect(epub_folder)
 
 
