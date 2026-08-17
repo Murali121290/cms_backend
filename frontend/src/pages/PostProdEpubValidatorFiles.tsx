@@ -452,6 +452,7 @@ export function PostProdEpubValidatorFiles() {
 
   // ── Per-file validation ─────────────────────────────────────────────────────
   const [validatingFiles, setValidatingFiles] = useState<Set<string>>(new Set());
+  const [singleFileProgress, setSingleFileProgress] = useState<Record<string, ValidationProgress>>({});
 
   const handleValidateFile = async (fileName: string) => {
     setValidatingFiles((prev) => {
@@ -465,11 +466,36 @@ export function PostProdEpubValidatorFiles() {
       return { ...prev, files: prev.files.filter((e) => e.file_details.file_name !== fileName) };
     });
     try {
-      const result = await validateFile(folderName, fileName);
-      setValidationData((prev) => mergeValidation(prev, result));
-    } catch {
-      setValidationError(`Validation failed for ${fileName}. Is the backend running?`);
+      const { task_id } = await startValidation(folderName, fileName);
+      let finalResult: ValidationApiResponse | null = null;
+      let cancelled = false;
+
+      while (!cancelled) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        const status = await pollTaskStatus(folderName, task_id);
+
+        if (status.status === 'completed') {
+          const res = await getLatestValidation(folderName);
+          finalResult = res;
+          break;
+        } else if (status.status === 'failed') {
+          throw new Error(status.error || 'Validation failed');
+        } else {
+          setSingleFileProgress((prev) => ({ ...prev, [fileName]: status }));
+        }
+      }
+
+      if (finalResult) {
+        setValidationData(finalResult);
+      }
+    } catch (err) {
+      setValidationError(err instanceof Error ? err.message : `Validation failed for ${fileName}. Is the backend running?`);
     } finally {
+      setSingleFileProgress((prev) => {
+        const next = { ...prev };
+        delete next[fileName];
+        return next;
+      });
       setValidatingFiles((prev) => {
         const next = new Set(prev);
         next.delete(fileName);
@@ -812,6 +838,7 @@ export function PostProdEpubValidatorFiles() {
             folderName={folderName}
             entries={selectedEntries}
             isRevalidating={validatingFiles.has(selectedFile.file_name)}
+            validationProgress={singleFileProgress[selectedFile.file_name]}
             initialTab={modalInitialTab}
             allowedTabs={modalAllowedTabs}
             onClose={() => setSelectedFile(null)}

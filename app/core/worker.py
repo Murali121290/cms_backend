@@ -121,6 +121,7 @@ def run_epub_validation_task(
     self,
     folder_name: str,
     epub_folder: str,
+    target_file: str | None = None,
     customer: str | None = None,
     user_id: int | None = None,
     username: str | None = None,
@@ -156,6 +157,7 @@ def run_epub_validation_task(
         result = validate_epub(
             epub_folder=epub_folder,
             folder_name=folder_name,
+            target_file=target_file,
             customer=customer,
             progress_callback=_write_progress,
         )

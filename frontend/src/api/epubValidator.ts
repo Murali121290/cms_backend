@@ -59,10 +59,13 @@ export interface ValidationProgress {
 
 export async function startValidation(
   folderName: string,
+  fileName?: string,
 ): Promise<{ task_id: string; status: string }> {
   try {
     const { data } = await api.post<{ task_id: string; status: string }>(
       `/post-prod/epub-validator/validate/${folderName}/start`,
+      null,
+      { params: fileName ? { file: fileName } : undefined }
     );
     return data;
   } catch (err) {
