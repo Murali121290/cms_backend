@@ -13,6 +13,7 @@ celery_app = Celery(
 celery_app.conf.task_routes = {
     "app.core.worker.process_document": "main-queue",
     "app.core.worker.run_post_prod_conversion_task": "main-queue",
+    "app.core.worker.run_epub_validation_task": "main-queue",
 }
 celery_app.conf.update(
     task_serializer="json",
