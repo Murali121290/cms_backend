@@ -171,6 +171,7 @@ def run_epub_validation_task(
                 validation_result=result,
                 user_id=user_id,
                 username=username,
+                target_file=target_file,
             )
         finally:
             db.close()
