@@ -197,7 +197,7 @@ function IssueRow({ issue, onClick }: { issue: DisplayIssue; onClick?: () => voi
             )}
           </div>
           {issue.message && (
-            <p className="text-xs text-muted-foreground mt-0.5 break-words font-sans">{issue.message}</p>
+            <p className="text-xs text-muted-foreground mt-0.5 whitespace-pre-wrap break-all font-sans">{issue.message}</p>
           )}
           {issue.href && (
             <p className="text-xs font-mono text-muted-foreground mt-0.5 break-all opacity-70">{issue.href}</p>
@@ -883,6 +883,11 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
                             onChange={(val) => setEditedContent(val)}
                             className="h-full"
                             onSave={handleSave}
+                            errors={displayedIssues.map((issue) => ({
+                              line: issue.line_number ?? 0,
+                              message: issue.message || 'Unknown error',
+                              extract: issue.extract,
+                            }))}
                           />
                         )}
                       </div>

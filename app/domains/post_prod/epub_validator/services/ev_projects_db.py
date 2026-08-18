@@ -159,40 +159,57 @@ def save_validation_run(
     validation_result: dict[str, Any],
     user_id: Optional[int] = None,
     username: Optional[str] = None,
+    target_file: Optional[str] = None,
 ) -> None:
-    """Save a full validation run snapshot as JSON to disk and record execution in DB."""
+    """Save a full or partial validation run snapshot as JSON to disk and record execution in DB."""
     import json
     import os
+    import glob
+    from datetime import datetime
     from .upload_service import UPLOAD_DIR
 
     p = get_project_by_folder(db, folder_name)
     if p is None:
         return
 
-    # Update project status fields
-    files = validation_result.get("files", []) if isinstance(validation_result, dict) else []
-    total_issues = sum(
-        f.get("result", {}).get("issues_count", 0) for f in files if isinstance(f, dict)
-    )
-    val_status = "pass" if total_issues == 0 else "fail"
-    p.validation_status = val_status
-    p.status = "validated" if val_status == "pass" else "failed"
-
-    # Determine assignee slug for filename: {assignee_name}_{timestamp}.json
-    raw_assignee = (p.assignee or username or "unassigned").strip().replace(" ", "_")
-    timestamp_str = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    val_filename = f"{raw_assignee}_{timestamp_str}.json"
-
-    # Ensure project validations folder exists on disk
     val_dir = os.path.join(UPLOAD_DIR, folder_name, "validations")
     os.makedirs(val_dir, exist_ok=True)
 
-    # Save JSON file on disk
-    val_file_path = os.path.join(val_dir, val_filename)
-    with open(val_file_path, "w", encoding="utf-8") as f:
-        json.dump(validation_result, f, indent=2)
+    if target_file:
+        # Sanitize target_file to be used as a filename
+        safe_target = target_file.replace("/", "__").replace("\\", "__")
+        val_filename = f"{safe_target}.json"
+        val_file_path = os.path.join(val_dir, val_filename)
+        with open(val_file_path, "w", encoding="utf-8") as f:
+            json.dump(validation_result, f, indent=2)
+    else:
+        # Clear out existing JSON files for an overall validation
+        for old_file in glob.glob(os.path.join(val_dir, "*.json")):
+            try:
+                os.remove(old_file)
+            except Exception:
+                pass
 
-    p.latest_validation_file = val_filename
+        # Update project status fields
+        files = validation_result.get("files", []) if isinstance(validation_result, dict) else []
+        total_issues = sum(
+            f.get("result", {}).get("issues_count", 0) for f in files if isinstance(f, dict)
+        )
+        val_status = "pass" if total_issues == 0 else "fail"
+        p.validation_status = val_status
+        p.status = "validated" if val_status == "pass" else "failed"
+
+        # Determine assignee slug for filename: {assignee_name}_{timestamp}.json
+        raw_assignee = (p.assignee or username or "unassigned").strip().replace(" ", "_")
+        timestamp_str = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        val_filename = f"{raw_assignee}_{timestamp_str}.json"
+
+        # Save JSON file on disk
+        val_file_path = os.path.join(val_dir, val_filename)
+        with open(val_file_path, "w", encoding="utf-8") as f:
+            json.dump(validation_result, f, indent=2)
+
+        p.latest_validation_file = val_filename
 
     history = EvHistory(
         project_id=p.id,
@@ -200,7 +217,7 @@ def save_validation_run(
         changed_by_username=username,
         old_assignee=p.assignee,
         new_assignee=p.assignee,
-        result_type="validation",
+        result_type="partial_validation" if target_file else "validation",
         created_at=datetime.utcnow(),
     )
     db.add(history)
@@ -222,6 +239,7 @@ def get_latest_validation_run(
         return None
 
     val_dir = os.path.join(UPLOAD_DIR, folder_name, "validations")
+    base_result = None
 
     # Fast path: read the file specified in latest_validation_file column
     if p.latest_validation_file:
@@ -229,22 +247,77 @@ def get_latest_validation_run(
         if os.path.isfile(file_path):
             try:
                 with open(file_path, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                    base_result = json.load(f)
             except Exception:
                 pass
 
     # Fallback: find newest *.json file under validations directory
-    pattern = os.path.join(val_dir, "*.json")
-    files = glob.glob(pattern)
-    if not files:
-        return None
+    if not base_result:
+        pattern = os.path.join(val_dir, "*.json")
+        files = glob.glob(pattern)
+        # Avoid picking up individual target_file.json files as the base if possible
+        overall_files = [f for f in files if "_" in os.path.basename(f) and not os.path.basename(f).endswith(".xhtml.json") and not os.path.basename(f).endswith(".html.json")]
+        if overall_files:
+            overall_files.sort(key=os.path.getmtime, reverse=True)
+            try:
+                with open(overall_files[0], "r", encoding="utf-8") as f:
+                    base_result = json.load(f)
+            except Exception:
+                pass
 
-    files.sort(key=os.path.getmtime, reverse=True)
-    try:
-        with open(files[0], "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
+    if not base_result:
+        # If there's no baseline, start with an empty shell so we can still display partial validations
+        base_result = {
+            "folder": folder_name,
+            "customer": p.client_code or p.client,
+            "epub_path": p.epub_path,
+            "files": []
+        }
+
+    # Merge individual file validation overrides dynamically
+    pattern = os.path.join(val_dir, "*.json")
+    all_files = glob.glob(pattern)
+    individual_files = [f for f in all_files if os.path.basename(f) != p.latest_validation_file and (f.endswith(".xhtml.json") or f.endswith(".html.json") or f.endswith(".json"))]
+    
+    # Only keep the individual files that are NOT the baseline itself (or other baselines)
+    # We identify them by the fact that they don't have a date timestamp like _20260818_
+    # To be safer, we just exclude the latest_validation_file. But what if there are old baselines?
+    # Old baselines should have been deleted by Validate All. If they exist, they might corrupt the merge.
+    # A safe heuristic: individual files contain "xhtml" or "html" in their names usually. 
+    # For now we'll process all files that don't look like assignee_timestamp.json
+    
+    if individual_files:
+        base_files = base_result.get("files", [])
+        
+        for ind_file in individual_files:
+            # Skip old overall validations (which look like "admin_hema_YYYYMMDD_HHMMSS.json")
+            import re
+            if re.search(r"_\d{8}_\d{6}\.json$", os.path.basename(ind_file)):
+                continue
+
+            try:
+                with open(ind_file, "r", encoding="utf-8") as f:
+                    ind_data = json.load(f)
+                    
+                    if isinstance(ind_data, dict) and "files" in ind_data and ind_data["files"]:
+                        # Find the target_file_name from the first rule result
+                        first_rule = ind_data["files"][0]
+                        target_file_name = first_rule.get("file_details", {}).get("file_name")
+                        
+                        if target_file_name:
+                            # Remove old rule results for this specific file from base_result
+                            base_files = [
+                                rule for rule in base_files
+                                if rule.get("file_details", {}).get("file_name") != target_file_name
+                            ]
+                            # Append the new rule results for this file
+                            base_files.extend(ind_data["files"])
+            except Exception:
+                pass
+                
+        base_result["files"] = base_files
+
+    return base_result
 
 
 def update_validation_status(

@@ -57,6 +57,7 @@ def validate_publisher_is_aspen(book_details, rule_config=None):
             "type": "opf_missing",
             "message": "Could not locate OPF to verify publisher",
             "category": "Warning",
+            "extract": "<metadata",
         }]}
     pub = soup.find("dc:publisher")
     if pub is None:
@@ -65,6 +66,7 @@ def validate_publisher_is_aspen(book_details, rule_config=None):
             "message": "<dc:publisher> not present in OPF",
             "category": "Error",
             "line_number": _find_line(lines, "<metadata"),
+            "extract": "<metadata",
         }]}
     value = pub.get_text(strip=True)
     if value != "Aspen Publishing":
@@ -73,6 +75,7 @@ def validate_publisher_is_aspen(book_details, rule_config=None):
             "message": f"Expected publisher 'Aspen Publishing', found '{value}'",
             "category": "Error",
             "line_number": _find_line(lines, "dc:publisher"),
+            "extract": value,
         }]}
     return {"issues_count": 0, "issues": []}
 
@@ -90,6 +93,7 @@ def validate_rights_string(book_details, rule_config=None):
             "message": "<dc:rights> not present in OPF",
             "category": "Error",
             "line_number": _find_line(lines, "<metadata"),
+            "extract": "<metadata",
         }]}
     value = rights.get_text(strip=True)
     if not _RIGHTS_RE.search(value):
@@ -100,6 +104,7 @@ def validate_rights_string(book_details, rule_config=None):
             ),
             "category": "Error",
             "line_number": _find_line(lines, "dc:rights"),
+            "extract": value,
         }]}
     return {"issues_count": 0, "issues": []}
 
@@ -117,6 +122,7 @@ def validate_certifier(book_details, rule_config=None):
             "message": '<meta property="a11y:certifiedBy"> not present',
             "category": "Error",
             "line_number": _find_line(lines, "<metadata"),
+            "extract": "<metadata",
         }]}
     value = meta.get_text(strip=True)
     if value != "S4Carlisle Publishing Services":
@@ -125,6 +131,7 @@ def validate_certifier(book_details, rule_config=None):
             "message": f"Expected certifier 'S4Carlisle Publishing Services', found '{value}'",
             "category": "Error",
             "line_number": _find_line(lines, "a11y:certifiedBy"),
+            "extract": value,
         }]}
     return {"issues_count": 0, "issues": []}
 
@@ -144,6 +151,7 @@ def validate_conforms_to(book_details, rule_config=None):
             "message": '<meta property="dcterms:conformsTo"> not present',
             "category": "Error",
             "line_number": _find_line(lines, "<metadata"),
+            "extract": "<metadata",
         }]}
     expected = "EPUB Accessibility 1.1 - WCAG 2.2 Level AA"
     value = meta.get_text(strip=True)
@@ -153,6 +161,7 @@ def validate_conforms_to(book_details, rule_config=None):
             "message": f"Expected conformsTo '{expected}', found '{value}'",
             "category": "Error",
             "line_number": _find_line(lines, "dcterms:conformsTo"),
+            "extract": value,
         }]}
     return {"issues_count": 0, "issues": []}
 
@@ -205,6 +214,7 @@ def validate_title_case(book_details, rule_config=None):
             "message": f"<dc:title> should be Title Case, not ALL CAPS. Found: '{value}'",
             "category": "Error",
             "line_number": line_num,
+            "extract": value,
         }]}
     if value.islower():
         return {"issues_count": 1, "issues": [{
@@ -212,6 +222,7 @@ def validate_title_case(book_details, rule_config=None):
             "message": f"<dc:title> should be Title Case. Found: '{value}'",
             "category": "Error",
             "line_number": line_num,
+            "extract": value,
         }]}
     if not _is_title_case(value):
         return {"issues_count": 1, "issues": [{
@@ -219,6 +230,7 @@ def validate_title_case(book_details, rule_config=None):
             "message": f"<dc:title> may not be in Title Case: '{value}'",
             "category": "Warning",
             "line_number": line_num,
+            "extract": value,
         }]}
     return {"issues_count": 0, "issues": []}
 
@@ -236,6 +248,7 @@ def validate_date_is_current_year(book_details, rule_config=None):
             "message": "<dc:date> not present in OPF",
             "category": "Warning",
             "line_number": _find_line(lines, "<metadata"),
+            "extract": "<metadata",
         }]}
     value = date_el.get_text(strip=True)
     line_num = _find_line(lines, "dc:date")
@@ -246,6 +259,7 @@ def validate_date_is_current_year(book_details, rule_config=None):
             "message": f"<dc:date> should start with a 4-digit year. Found: '{value}'",
             "category": "Warning",
             "line_number": line_num,
+            "extract": value,
         }]}
     year = int(m.group(1))
     current = datetime.date.today().year
@@ -255,6 +269,7 @@ def validate_date_is_current_year(book_details, rule_config=None):
             "message": f"<dc:date> year is {year}; expected current year {current}.",
             "category": "Warning",
             "line_number": line_num,
+            "extract": value,
         }]}
     return {"issues_count": 0, "issues": []}
 
@@ -316,6 +331,7 @@ def validate_format_matches_pdf_pages(book_details, rule_config=None):
             "message": "<dc:format> not present in OPF.",
             "category": "Warning",
             "line_number": _find_line(lines, "<metadata"),
+            "extract": "<metadata",
         }]}
     value = fmt_el.get_text(strip=True)
     line_num = _find_line(lines, "dc:format")
@@ -326,6 +342,7 @@ def validate_format_matches_pdf_pages(book_details, rule_config=None):
             "message": f"<dc:format> has no parseable page count. Found: '{value}'",
             "category": "Warning",
             "line_number": line_num,
+            "extract": value,
         }]}
     declared = int(m.group(1))
     actual = _get_pdf_page_count(book_details)
@@ -335,6 +352,7 @@ def validate_format_matches_pdf_pages(book_details, rule_config=None):
             "message": f"<dc:format> declares {declared} pages but no PDF is available to verify.",
             "category": "Warning",
             "line_number": line_num,
+            "extract": value,
         }]}
     if declared != actual:
         return {"issues_count": 1, "issues": [{
@@ -342,6 +360,7 @@ def validate_format_matches_pdf_pages(book_details, rule_config=None):
             "message": f"<dc:format> declares {declared} pages; PDF has {actual}.",
             "category": "Error",
             "line_number": line_num,
+            "extract": value,
         }]}
     return {"issues_count": 0, "issues": []}
 
@@ -360,6 +379,7 @@ def validate_source_print_isbn(book_details, rule_config=None):
             "message": "<dc:source> (Print ISBN) not present in OPF.",
             "category": "Error",
             "line_number": _find_line(lines, "<metadata"),
+            "extract": "<metadata",
         }]}
 
     issues = []
@@ -371,6 +391,7 @@ def validate_source_print_isbn(book_details, rule_config=None):
             "message": f"<dc:source> should be 'urn:isbn:<PrintISBN>'. Found: '{value}'",
             "category": "Error",
             "line_number": line_num,
+            "extract": value,
         })
 
     src_id = src.get("id")
@@ -380,6 +401,7 @@ def validate_source_print_isbn(book_details, rule_config=None):
             "message": "<dc:source> is missing an 'id' attribute (e.g. id=\"src-id\").",
             "category": "Error",
             "line_number": line_num,
+            "extract": "dc:source",
         })
 
     return {"issues_count": len(issues), "issues": issues}
@@ -403,6 +425,7 @@ def validate_source_of_pagination_refines(book_details, rule_config=None):
             "message": f"Missing required pagination refines tag: <meta refines=\"{target_id}\" property=\"source-of\">pagination</meta>",
             "category": "Error",
             "line_number": _find_line(lines, "source-of") or _find_line(lines, "<metadata"),
+            "extract": "source-of",
         }]}
 
     return {"issues_count": 0, "issues": []}
@@ -424,6 +447,7 @@ def validate_identifier_convention(book_details, rule_config=None):
             "message": "<dc:identifier> not present in OPF.",
             "category": "Error",
             "line_number": _find_line(lines, "<metadata"),
+            "extract": "<metadata",
         }]}
 
     issues = []
@@ -443,6 +467,7 @@ def validate_identifier_convention(book_details, rule_config=None):
                         "message": f"Identifier id should be '{expected_id}'; found '{id_attr}'.",
                         "category": "Warning",
                         "line_number": line_num,
+                        "extract": value,
                     })
     if not found_epub_id:
         issues.append({
@@ -450,6 +475,7 @@ def validate_identifier_convention(book_details, rule_config=None):
             "message": "No <dc:identifier> has an id starting with 'Epub-'. Aspen convention is id=\"Epub-<eISBN>\".",
             "category": "Warning",
             "line_number": _find_line(lines, "dc:identifier"),
+            "extract": "dc:identifier",
         })
     return {"issues_count": len(issues), "issues": issues}
 
@@ -467,6 +493,7 @@ def validate_dc_language_is_en(book_details, rule_config=None):
             "message": "<dc:language> not present in OPF.",
             "category": "Error",
             "line_number": _find_line(lines, "<metadata"),
+            "extract": "<metadata",
         }]}
     val = lang.get_text(strip=True).lower()
     if val not in ("en", "en-us"):
@@ -475,6 +502,7 @@ def validate_dc_language_is_en(book_details, rule_config=None):
             "message": f"<dc:language> should be 'en' or 'en-US'. Found: '{lang.get_text(strip=True)}'",
             "category": "Error",
             "line_number": _find_line(lines, "dc:language"),
+            "extract": val,
         }]}
     return {"issues_count": 0, "issues": []}
 
@@ -498,6 +526,7 @@ def validate_cover_manifest_link(book_details, rule_config=None):
             "message": f"<meta name=\"cover\" content=\"{content}\"/> does not match any <item id=...> in the manifest.",
             "category": "Error",
             "line_number": _find_line(lines, 'name="cover"'),
+            "extract": content,
         }]}
     return {"issues_count": 0, "issues": []}
 
@@ -533,6 +562,7 @@ def validate_accessibility_hazards_strict(book_details, rule_config=None):
         ),
         "category": "Error",
         "line_number": _find_line(lines, "accessibilityHazard") or _find_line(lines, "<metadata"),
+        "extract": "accessibilityHazard",
     }]}
 
 
@@ -558,6 +588,7 @@ def validate_access_modes_strict(book_details, rule_config=None):
         ),
         "category": "Error",
         "line_number": _find_line(lines, "accessMode") or _find_line(lines, "<metadata"),
+        "extract": "accessMode",
     }]}
 
 
@@ -583,6 +614,7 @@ def validate_access_mode_sufficient_strict(book_details, rule_config=None):
         ),
         "category": "Error",
         "line_number": _find_line(lines, "accessModeSufficient") or _find_line(lines, "<metadata"),
+        "extract": "accessModeSufficient",
     }]}
 
 
@@ -658,6 +690,7 @@ def validate_creator_count_matches_front_matter(book_details, rule_config=None):
             "message": "<dc:creator> (Author) is missing in OPF.",
             "category": "Error",
             "line_number": _find_line(lines, "<metadata"),
+            "extract": "<metadata",
         }]}
 
     fm_path = _find_front_matter_file(epub)
@@ -674,6 +707,7 @@ def validate_creator_count_matches_front_matter(book_details, rule_config=None):
             "message": f"Front Matter file '{fm_name}' was found, but no author names could be detected to verify against OPF <dc:creator> count ({opf_count}).",
             "category": "Warning",
             "line_number": _find_line(lines, "dc:creator") or _find_line(lines, "<metadata"),
+            "extract": "dc:creator",
         }]}
 
     if opf_count != fm_count:
@@ -682,6 +716,7 @@ def validate_creator_count_matches_front_matter(book_details, rule_config=None):
             "message": f"OPF declares {opf_count} <dc:creator> tag(s), but Front Matter page ({fm_name}) lists {fm_count} author(s).",
             "category": "Error",
             "line_number": _find_line(lines, "dc:creator") or _find_line(lines, "<metadata"),
+            "extract": "dc:creator",
         }]}
 
     return {"issues_count": 0, "issues": []}
@@ -700,6 +735,7 @@ def validate_dcterms_modified(book_details, rule_config=None):
             "message": "<meta property=\"dcterms:modified\"> is missing in OPF.",
             "category": "Error",
             "line_number": _find_line(lines, "<metadata"),
+            "extract": "<metadata",
         }]}
     val = meta.get_text(strip=True)
     if not re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", val):
@@ -708,6 +744,7 @@ def validate_dcterms_modified(book_details, rule_config=None):
             "message": f"<meta property=\"dcterms:modified\"> timestamp must end with 'Z' for UTC (YYYY-MM-DDTHH:MM:SSZ). Found: '{val}'",
             "category": "Error",
             "line_number": _find_line(lines, "dcterms:modified"),
+            "extract": val,
         }]}
     return {"issues_count": 0, "issues": []}
 
@@ -744,6 +781,7 @@ def validate_accessibility_features(book_details, rule_config=None):
         ),
         "category": "Error",
         "line_number": _find_line(lines, "accessibilityFeature") or _find_line(lines, "<metadata"),
+        "extract": "accessibilityFeature",
     }]}
 
 
@@ -760,6 +798,7 @@ def validate_accessibility_summary_present(book_details, rule_config=None):
             "message": "<meta property=\"schema:accessibilitySummary\"> is missing or empty in OPF.",
             "category": "Error",
             "line_number": _find_line(lines, "<metadata"),
+            "extract": "<metadata",
         }]}
     return {"issues_count": 0, "issues": []}
 

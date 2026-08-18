@@ -59,6 +59,12 @@ def validate_epub(
         for rule in rules:
             if not rule.get("enabled", True):
                 continue
+
+            # Skip the rule entirely if the target_file is in the rule's exclude_files
+            exclude_files = rule.get("exclude_files", [])
+            if target_file and target_file in exclude_files:
+                continue
+
             function = registry.get(rule["id"])
             if function is None:
                 continue
@@ -111,16 +117,17 @@ def validate_epub(
                     "category": "Error",
                 }],
             }
-        report["files"].append(_entry(
-            rule, function, "", "[book-scope]",
-            {
-                "file_name": "[book-level]",
-                "full_path": epub_folder,
-                "relative_path": "",
-                "folder_name": folder_name,
-            },
-            result, origin, customer_tag,
-        ))
+        if not target_file:
+            report["files"].append(_entry(
+                rule, function, "", "[book-scope]",
+                {
+                    "file_name": "[book-level]",
+                    "full_path": epub_folder,
+                    "relative_path": "",
+                    "folder_name": folder_name,
+                },
+                result, origin, customer_tag,
+            ))
 
         for rel_path, chapter_issues in _group_chapter_issues(
             result.get("issues", []), asset_index

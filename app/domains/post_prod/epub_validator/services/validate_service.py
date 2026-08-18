@@ -807,20 +807,28 @@ def _call_w3c_css_validator(css_content, css_file_label):
 
     issues = []
     for error in raw_errors:
+        line_val = error.get("line")
+        context_val = (error.get("context") or "").strip()
         issues.append({
             "type": "css_error",
             "css_file": css_file_label,
-            "line": error.get("line"),
-            "context": (error.get("context") or "").strip(),
+            "line": line_val,
+            "line_number": line_val,
+            "context": context_val,
+            "extract": context_val,
             "message": (error.get("message") or "CSS error").strip(),
             "category": "Error"
         })
     for warning in raw_warnings:
+        line_val = warning.get("line")
+        context_val = (warning.get("context") or "").strip()
         issues.append({
             "type": "css_warning",
             "css_file": css_file_label,
-            "line": warning.get("line"),
-            "context": (warning.get("context") or "").strip(),
+            "line": line_val,
+            "line_number": line_val,
+            "context": context_val,
+            "extract": context_val,
             "message": (warning.get("message") or "CSS warning").strip(),
             "category": "Warning"
         })

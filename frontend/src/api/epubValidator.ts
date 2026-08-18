@@ -289,6 +289,14 @@ export function getAceReportZipUrl(folderName: string): string {
   return `/api/v2/post-prod/epub-validator/ace/${encodeURIComponent(folderName)}/download-zip`;
 }
 
+export interface ValidationIssue {
+  type: string;
+  category?: string;
+  message: string;
+  line_number?: number;
+  snippet?: string;
+  extract?: string;
+}
 
 export interface EpubCheckMessage {
   id: string;

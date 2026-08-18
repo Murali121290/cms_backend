@@ -29,9 +29,10 @@
     },
     {
       "id": "NAV005",
-      "name": "Page List Match Check",
-      "scope": "book",
-      "enabled": false
+      "name": "Page List Link Check",
+      "target_path": "",
+      "enabled": true,
+      "file_name_pattern": "nav.xhtml"
     }
   ]
 }

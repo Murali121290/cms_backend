@@ -293,6 +293,7 @@ def validate_page_citation_links(file_details, rule_config=None):
                 "message": f"Citation '{m.group(0)}' is not wrapped in a link.",
                 "category": "Warning",
                 "snippet": str(text_node)[max(0, m.start() - 30): m.end() + 30].strip(),
+                "extract": m.group(0),
                 "line_number": line_num,
             })
             if len(issues) >= 25:
@@ -466,6 +467,7 @@ def validate_internal_xhtml_links(file_details, rule_config=None):
                 "message": f"{f'Line {line_num}: ' if line_num else ''}Referenced XHTML file not found",
                 "category": "Error",
                 "line_number": line_num,
+                "extract": href,
             })
             continue
 
@@ -481,6 +483,7 @@ def validate_internal_xhtml_links(file_details, rule_config=None):
                     "message": f"{f'Line {line_num}: ' if line_num else ''}Referenced anchor not found in target file",
                     "category": "Error",
                     "line_number": line_num,
+                    "extract": href,
                 })
 
     return {"issues_count": len(issues), "issues": issues}
@@ -501,12 +504,12 @@ def validate_external_urls(file_details, rule_config=None):
 
         # Check mailto: links
         if href.startswith("mailto:"):
-            mailto_links.append((href, line_num))
+            mailto_links.append((href, line_num, href))
             continue
 
         # Check external links: http://, https://, //, www., or ftp://
         if href.startswith(("http://", "https://", "//", "www.", "ftp://")):
-            hrefs.append((href, line_num))
+            hrefs.append((href, line_num, href))
         # Skip internal: relative paths (xhtml, #anchor, /)
         elif href.startswith(("#", "/")):
             continue
@@ -514,32 +517,34 @@ def validate_external_urls(file_details, rule_config=None):
     issues = []
 
     # Validate mailto: links (synchronous)
-    for href, line_num in mailto_links:
+    for href, line_num, extract_text in mailto_links:
         result = _check_mailto(href)
         if result:
             result["line_number"] = line_num
+            result["extract"] = extract_text
             issues.append(result)
 
     # Validate external URLs (parallel), skipping already-cached URLs
     if hrefs:
-        unchecked = [(href, ln) for href, ln in hrefs if href not in _URL_RESULT_CACHE]
+        unchecked = [(href, ln, ext) for href, ln, ext in hrefs if href not in _URL_RESULT_CACHE]
         session = _make_session()
 
         # Fetch only URLs we haven't seen before
         if unchecked:
             with ThreadPoolExecutor(max_workers=10) as pool:
-                futures = {pool.submit(_check_single_url, href, session): (href, ln)
-                           for href, ln in unchecked}
+                futures = {pool.submit(_check_single_url, href, session): (href, ln, ext)
+                           for href, ln, ext in unchecked}
                 for future in as_completed(futures):
-                    href, ln = futures[future]
+                    href, ln, ext = futures[future]
                     _URL_RESULT_CACHE[href] = future.result()  # store result (None = OK)
 
         # Apply cached results for all hrefs in this file
-        for href, line_num in hrefs:
+        for href, line_num, extract_text in hrefs:
             result = _URL_RESULT_CACHE.get(href)
             if result:
                 result = dict(result)  # copy so we don't mutate the cache
                 result["line_number"] = line_num
+                result["extract"] = extract_text
                 issues.append(result)
 
     return {"issues_count": len(issues), "issues": issues}
@@ -565,6 +570,7 @@ def validate_url_text_match(file_details, rule_config=None):
                 "message": f"{f'Line {line_num}: ' if line_num else ''}Displayed URL text does not match href",
                 "category": "warning",
                 "line_number": line_num,
+                "extract": href,
             })
     return {"issues_count": len(issues), "issues": issues}
 
