@@ -287,6 +287,12 @@ def validate_page_citation_links(file_details, rule_config=None):
                 if available_chapters and base_chapter not in available_chapters:
                     continue
 
+            # If it is a page citation, only validate if the page exists in this book
+            if m.group(1) is not None and epub:
+                page_num = m.group(1).lstrip("0") or "0"
+                if page_ids and _page_id_for_number(page_num, page_ids) is None:
+                    continue
+
             issues.append({
                 "rule_name": "Citation Not Linked",
                 "type": "page_citation_not_linked",
