@@ -144,37 +144,104 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
             let to = line.to;
 
             if (err.extract) {
-              // Build a regex that allows optional HTML tags between every character of the extract
-              // This is crucial because backend rules extract plain text (e.g., 'Table 1-1'), 
-              // but the raw HTML line might have tags interspersed (e.g., 'Table 1-<span>1</span>').
-              const escapedExtract = err.extract.split('').map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-              // Allow optional HTML tags and also optional whitespace mapping since get_text() might compress spaces
-              const regexPattern = escapedExtract.join('(?:<[^>]+>)*');
+              // Robust fuzzy matching: map plain text characters back to source indices.
+              const plainToSource: number[] = [];
+              let plainText = '';
+              const raw = line.text;
               
-              try {
-                const regex = new RegExp(regexPattern, 'i');
-                const match = line.text.match(regex);
-                if (match && match.index !== undefined) {
-                  from = line.from + match.index;
-                  to = from + match[0].length;
-                  
-                  diagnostics.push({
-                    from,
-                    to,
-                    severity: 'error',
-                    message: err.message,
-                  });
+              // Helper to decode a single HTML entity
+              const decodeEntity = (entity: string) => {
+                const txt = document.createElement('textarea');
+                txt.innerHTML = entity;
+                return txt.value;
+              };
+
+              let i = 0;
+              while (i < raw.length) {
+                if (raw[i] === '<') {
+                  // Skip HTML tag
+                  while (i < raw.length && raw[i] !== '>') i++;
+                  if (i < raw.length) i++; // skip '>'
+                } else if (raw[i] === '&') {
+                  // Parse HTML entity
+                  const start = i;
+                  while (i < raw.length && raw[i] !== ';' && raw[i] !== '<' && raw[i] !== ' ' && (i - start) < 10) i++;
+                  if (i < raw.length && raw[i] === ';') {
+                    i++; // include ';'
+                    const entity = raw.slice(start, i);
+                    const decoded = decodeEntity(entity);
+                    for (const char of decoded) {
+                      plainText += char;
+                      plainToSource.push(start); // map to the start of the entity
+                    }
+                  } else {
+                    // Not a valid entity, treat as literal '&'
+                    plainText += '&';
+                    plainToSource.push(start);
+                    i = start + 1;
+                  }
+                } else {
+                  // Normal character
+                  plainText += raw[i];
+                  plainToSource.push(i);
+                  i++;
                 }
-              } catch (regexErr) {
-                // Fallback to simple indexOf if regex fails for any reason
-                const idx = line.text.indexOf(err.extract);
+              }
+
+              // Since BeautifulSoup get_text(strip=True) might compress multiple spaces, 
+              // we can normalize whitespace in both plainText and err.extract for comparison,
+              // but we need to keep the mapping intact.
+              // To avoid complexity, we'll try an exact indexOf first, and if it fails, 
+              // we just fallback to the old simple indexOf on the raw line.
+              
+              let matchIdx = plainText.indexOf(err.extract);
+              
+              // If we didn't find it exactly, try ignoring multiple spaces
+              if (matchIdx === -1) {
+                const normExtract = err.extract.replace(/\s+/g, ' ').trim();
+                const normPlain = plainText.replace(/\s+/g, ' ');
+                let normIdx = normPlain.indexOf(normExtract);
+                
+                if (normIdx !== -1) {
+                  // Map normIdx back to plainText index by walking through plainText
+                  let plainIdx = 0;
+                  let nIdx = 0;
+                  while (plainIdx < plainText.length && nIdx < normIdx) {
+                    if (plainText[plainIdx] === ' ' && plainText[plainIdx - 1] === ' ') {
+                      plainIdx++;
+                      continue;
+                    }
+                    nIdx++;
+                    plainIdx++;
+                  }
+                  matchIdx = plainIdx;
+                }
+              }
+
+              if (matchIdx !== -1) {
+                let mappedStart = plainToSource[matchIdx];
+                // mappedEnd is the source index of the LAST matched character, plus its length (1, or more if it was an entity)
+                // We'll just grab the mapped index of the character AFTER the match, if it exists.
+                let endMatchIdx = matchIdx + err.extract.length;
+                
+                let mappedEnd = raw.length;
+                if (endMatchIdx < plainToSource.length) {
+                   mappedEnd = plainToSource[endMatchIdx];
+                }
+
+                diagnostics.push({
+                  from: line.from + mappedStart,
+                  to: line.from + mappedEnd,
+                  severity: 'error',
+                  message: err.message,
+                });
+              } else {
+                // Absolute fallback to simple indexOf on the raw string
+                const idx = raw.indexOf(err.extract);
                 if (idx !== -1) {
-                  from = line.from + idx;
-                  to = from + err.extract.length;
-                  
                   diagnostics.push({
-                    from,
-                    to,
+                    from: line.from + idx,
+                    to: line.from + idx + err.extract.length,
                     severity: 'error',
                     message: err.message,
                   });

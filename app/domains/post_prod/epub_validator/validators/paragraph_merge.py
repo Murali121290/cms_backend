@@ -69,7 +69,7 @@ def _extract_list_marker(text: str) -> Optional[str]:
 
 
 _NAV_COVER_RE = re.compile(
-    r"\b(nav|cover|titlepage|copyright|toc|contents)\b", re.IGNORECASE,
+    r"(^|[_.-])(nav|navigation|cover|title|titlepage|copyright|toc|contents)\b", re.IGNORECASE,
 )
 
 

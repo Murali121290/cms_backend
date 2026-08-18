@@ -111,16 +111,17 @@ def validate_epub(
                     "category": "Error",
                 }],
             }
-        report["files"].append(_entry(
-            rule, function, "", "[book-scope]",
-            {
-                "file_name": "[book-level]",
-                "full_path": epub_folder,
-                "relative_path": "",
-                "folder_name": folder_name,
-            },
-            result, origin, customer_tag,
-        ))
+        if not target_file:
+            report["files"].append(_entry(
+                rule, function, "", "[book-scope]",
+                {
+                    "file_name": "[book-level]",
+                    "full_path": epub_folder,
+                    "relative_path": "",
+                    "folder_name": folder_name,
+                },
+                result, origin, customer_tag,
+            ))
 
         for rel_path, chapter_issues in _group_chapter_issues(
             result.get("issues", []), asset_index

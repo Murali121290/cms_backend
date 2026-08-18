@@ -94,7 +94,7 @@ def validate_ncx_nav_sync(file_details, rule_config=None):
     # Read NCX file
     try:
         with open(file_path, "r", encoding="utf-8") as f:
-            ncx_soup = BeautifulSoup(f, "xml")
+            ncx_soup = BeautifulSoup(f, "html.parser")
     except Exception as e:
         issues.append({
             "rule_name": "NCX Read Error",
@@ -129,7 +129,7 @@ def validate_ncx_nav_sync(file_details, rule_config=None):
 
     # Extract NCX items
     ncx_items = []
-    for navpoint in ncx_soup.find_all("navPoint"):
+    for navpoint in ncx_soup.find_all("navpoint"):
         text_tag = navpoint.find("text")
         content_tag = navpoint.find("content")
         title = text_tag.get_text(strip=True) if text_tag else ""
@@ -138,6 +138,8 @@ def validate_ncx_nav_sync(file_details, rule_config=None):
             "title": title,
             "href": href,
             "line_number": getattr(navpoint, "sourceline", None),
+            "text_line": getattr(text_tag, "sourceline", getattr(navpoint, "sourceline", None)),
+            "content_line": getattr(content_tag, "sourceline", getattr(navpoint, "sourceline", None)),
         })
 
     # Extract NAV items
@@ -183,7 +185,8 @@ def validate_ncx_nav_sync(file_details, rule_config=None):
                 "actual_text": nav_title,
                 "message": f"Item {i+1}: NCX and NAV title text do not match",
                 "category": "Error",
-                "line_number": ncx_item["line_number"],
+                "line_number": ncx_item["text_line"],
+                "extract": ncx_title,
             })
         # Case mismatch
         elif ncx_title != nav_title:
@@ -195,7 +198,8 @@ def validate_ncx_nav_sync(file_details, rule_config=None):
                 "actual_text": nav_title,
                 "message": f"Item {i+1}: NCX and NAV title casing does not match",
                 "category": "Warning",
-                "line_number": ncx_item["line_number"],
+                "line_number": ncx_item["text_line"],
+                "extract": ncx_title,
             })
 
         # File reference match
@@ -210,7 +214,8 @@ def validate_ncx_nav_sync(file_details, rule_config=None):
                 "actual_file": nav_file,
                 "message": f"Item {i+1}: NCX and NAV file references do not match",
                 "category": "Error",
-                "line_number": ncx_item["line_number"],
+                "line_number": ncx_item["content_line"],
+                "extract": ncx_href,
             })
 
     return {"issues_count": len(issues), "issues": issues}
@@ -317,6 +322,7 @@ def validate_nav_xhtml(file_details, rule_config=None):
                 "message": "Nav link text is empty",
                 "category": "Error",
                 "line_number": line_num,
+                "extract": href,
             })
             continue
 
@@ -343,6 +349,7 @@ def validate_nav_xhtml(file_details, rule_config=None):
                 "message": "Referenced file not found",
                 "category": "Error",
                 "line_number": line_num,
+                "extract": href,
             })
             continue
 
@@ -359,6 +366,7 @@ def validate_nav_xhtml(file_details, rule_config=None):
                     "message": "Directory contains no XHTML files",
                     "category": "Error",
                     "line_number": line_num,
+                    "extract": href,
                 })
                 continue
             # Use the first xhtml file found
@@ -376,6 +384,7 @@ def validate_nav_xhtml(file_details, rule_config=None):
                 "message": f"Could not read target file: {e}",
                 "category": "Error",
                 "line_number": line_num,
+                "extract": href,
             })
             continue
 
@@ -391,6 +400,7 @@ def validate_nav_xhtml(file_details, rule_config=None):
                     "message": "Referenced Anchor ID id not found",
                     "category": "Error",
                     "line_number": line_num,
+                    "extract": href,
                 })
                 continue
         else:
@@ -404,6 +414,7 @@ def validate_nav_xhtml(file_details, rule_config=None):
                     "message": "No heading found in chapter",
                     "category": "Warning",
                     "line_number": line_num,
+                    "extract": href,
                 })
                 continue
 
@@ -429,6 +440,7 @@ def validate_nav_xhtml(file_details, rule_config=None):
                            f'classes({", ".join(heading_classes)}). Heading hierarchy not checked.'),
                 "category": "Warning",
                 "line_number": line_num,
+                "extract": nav_text,
             })
             continue
 
@@ -446,6 +458,7 @@ def validate_nav_xhtml(file_details, rule_config=None):
                 "message": "Nav text and heading text mismatch",
                 "category": "Error",
                 "line_number": line_num,
+                "extract": nav_text,
             })
         # Case-sensitive mismatch
         if nav_text != heading_text:
@@ -458,6 +471,7 @@ def validate_nav_xhtml(file_details, rule_config=None):
                 "message": "Case mismatch",
                 "category": "Warning",
                 "line_number": line_num,
+                 "extract": nav_text
             })
 
         # Heading level validation
@@ -565,6 +579,8 @@ def validate_cover_entry_required(file_details, rule_config=None):
                     "href": href,
                     "message": "Cover file referenced in nav does not exist",
                     "category": "Error",
+                    "line_number": getattr(cover_link, "sourceline", None),
+                    "extract": href,
                 })
 
     return {"issues_count": len(issues), "issues": issues}
