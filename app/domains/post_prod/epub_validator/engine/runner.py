@@ -59,6 +59,12 @@ def validate_epub(
         for rule in rules:
             if not rule.get("enabled", True):
                 continue
+
+            # Skip the rule entirely if the target_file is in the rule's exclude_files
+            exclude_files = rule.get("exclude_files", [])
+            if target_file and target_file in exclude_files:
+                continue
+
             function = registry.get(rule["id"])
             if function is None:
                 continue
