@@ -883,6 +883,11 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
                             onChange={(val) => setEditedContent(val)}
                             className="h-full"
                             onSave={handleSave}
+                            errors={displayedIssues.map((issue) => ({
+                              line: issue.line_number ?? 0,
+                              message: issue.message || 'Unknown error',
+                              extract: issue.extract,
+                            }))}
                           />
                         )}
                       </div>

@@ -293,6 +293,7 @@ def validate_page_citation_links(file_details, rule_config=None):
                 "message": f"Citation '{m.group(0)}' is not wrapped in a link.",
                 "category": "Warning",
                 "snippet": str(text_node)[max(0, m.start() - 30): m.end() + 30].strip(),
+                "extract": m.group(0),
                 "line_number": line_num,
             })
             if len(issues) >= 25:

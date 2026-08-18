@@ -11,6 +11,7 @@ import type { Diagnostic } from '@codemirror/lint';
 export interface LintError {
   line: number;
   message: string;
+  extract?: string;
 }
 
 export interface SourceEditorRef {
@@ -139,12 +140,47 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
         if (err.line > 0 && err.line <= doc.lines) {
           try {
             const line = doc.line(err.line);
-            diagnostics.push({
-              from: line.from,
-              to: line.to,
-              severity: 'error',
-              message: err.message,
-            });
+            let from = line.from;
+            let to = line.to;
+
+            if (err.extract) {
+              // Build a regex that allows optional HTML tags between every character of the extract
+              // This is crucial because backend rules extract plain text (e.g., 'Table 1-1'), 
+              // but the raw HTML line might have tags interspersed (e.g., 'Table 1-<span>1</span>').
+              const escapedExtract = err.extract.split('').map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+              // Allow optional HTML tags and also optional whitespace mapping since get_text() might compress spaces
+              const regexPattern = escapedExtract.join('(?:<[^>]+>)*');
+              
+              try {
+                const regex = new RegExp(regexPattern, 'i');
+                const match = line.text.match(regex);
+                if (match && match.index !== undefined) {
+                  from = line.from + match.index;
+                  to = from + match[0].length;
+                  
+                  diagnostics.push({
+                    from,
+                    to,
+                    severity: 'error',
+                    message: err.message,
+                  });
+                }
+              } catch (regexErr) {
+                // Fallback to simple indexOf if regex fails for any reason
+                const idx = line.text.indexOf(err.extract);
+                if (idx !== -1) {
+                  from = line.from + idx;
+                  to = from + err.extract.length;
+                  
+                  diagnostics.push({
+                    from,
+                    to,
+                    severity: 'error',
+                    message: err.message,
+                  });
+                }
+              }
+            }
           } catch (e) {
             console.error("Failed to add lint highlight:", e);
           }
@@ -252,6 +288,10 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
         '.cm-searchMatch-selected, .cm-searchMatch-selected span': {
           color: '#0f172a !important',
           fontWeight: '600',
+        },
+        '.cm-lintRange-error': {
+          backgroundColor: 'rgba(239, 68, 68, 0.2) !important', // Light red background (tailwind red-500 at 20%)
+          backgroundImage: 'none !important', // Remove the default red squiggly underline
         },
       }),
     ],
