@@ -4,8 +4,11 @@
       "id": "PARA-MERGE-001",
       "name": "PDF-EPUB Merged Paragraph Detection",
       "scope": "book",
-      "exclude_files": ["nav.xhtml", "toc.ncx"],
-      "enabled": true
+      "exclude_files": [
+        "nav.xhtml",
+        "toc.ncx"
+      ],
+      "enabled": false
     }
   ]
 }
