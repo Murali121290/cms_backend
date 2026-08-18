@@ -65,8 +65,8 @@ services:
     container_name: cms_backend
     env_file: .env
     volumes:
-      # Use named volumes for uploads and runtime data on Windows
-      - cms_runtime_data:/opt/cms_runtime/data
+      # Use NFS directory for uploads and runtime data
+      - ./data/cms_runtime_data:/opt/cms_runtime/data
       - ./outputs:/app/outputs
       - ./data:/app/data
       - ./temp_reports:/app/temp_reports
@@ -100,7 +100,7 @@ services:
     container_name: cms_celery_worker
     env_file: .env
     volumes:
-      - cms_runtime_data:/opt/cms_runtime/data
+      - ./data/cms_runtime_data:/opt/cms_runtime/data
       - ./outputs:/app/outputs
       - ./data:/app/data
       - ./temp_reports:/app/temp_reports
@@ -170,9 +170,9 @@ services:
     expose:
       - "5000"
     volumes:
-      - ai_structuring_uploads:/app/uploads
-      - ai_structuring_outputs:/app/outputs
-      - ai_structuring_data:/app/data
+      - ./data/ai_structuring/uploads:/app/uploads
+      - ./data/ai_structuring/outputs:/app/outputs
+      - ./data/ai_structuring/data:/app/data
     depends_on:
       redis:
         condition: service_healthy
@@ -196,9 +196,9 @@ services:
     stop_grace_period: 600s
     env_file: ./ai_structuring_backend/.env
     volumes:
-      - ai_structuring_uploads:/app/uploads
-      - ai_structuring_outputs:/app/outputs
-      - ai_structuring_data:/app/data
+      - ./data/ai_structuring/uploads:/app/uploads
+      - ./data/ai_structuring/outputs:/app/outputs
+      - ./data/ai_structuring/data:/app/data
     depends_on:
       redis:
         condition: service_healthy
@@ -255,7 +255,3 @@ volumes:
   postgres_data:
   certbot_webroot:
   ref_cache:
-  cms_runtime_data:
-  ai_structuring_uploads:
-  ai_structuring_outputs:
-  ai_structuring_data:
