@@ -360,6 +360,18 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
           backgroundColor: 'rgba(239, 68, 68, 0.2) !important', // Light red background (tailwind red-500 at 20%)
           backgroundImage: 'none !important', // Remove the default red squiggly underline
         },
+        '.cm-tooltip': {
+          maxWidth: '600px !important',
+        },
+        '.cm-tooltip-lint': {
+          whiteSpace: 'pre-wrap !important',
+          wordBreak: 'break-all !important',
+        },
+        '.cm-diagnostic': {
+          whiteSpace: 'pre-wrap !important',
+          wordBreak: 'break-all !important',
+          lineHeight: '1.4',
+        },
       }),
     ],
     [lintExtension, clickExtension, wordWrap],

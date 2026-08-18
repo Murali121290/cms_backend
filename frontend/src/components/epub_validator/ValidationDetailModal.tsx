@@ -197,7 +197,7 @@ function IssueRow({ issue, onClick }: { issue: DisplayIssue; onClick?: () => voi
             )}
           </div>
           {issue.message && (
-            <p className="text-xs text-muted-foreground mt-0.5 break-words font-sans">{issue.message}</p>
+            <p className="text-xs text-muted-foreground mt-0.5 whitespace-pre-wrap break-all font-sans">{issue.message}</p>
           )}
           {issue.href && (
             <p className="text-xs font-mono text-muted-foreground mt-0.5 break-all opacity-70">{issue.href}</p>
