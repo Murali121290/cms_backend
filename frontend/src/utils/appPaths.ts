@@ -39,6 +39,13 @@ export const uiPaths = {
   ) => fileId
     ? `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/reference-review`
     : `/projects/${projectId}/chapters/${chapterId}/reference-review`,
+  fileReview: (
+    projectId: number | string,
+    chapterId: number | string,
+    fileId: number | string,
+    view: "editor" | "reference" = "editor",
+  ) =>
+    `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/review?view=${view}`,
   fileEditor: (
     projectId: number | string,
     chapterId: number | string,

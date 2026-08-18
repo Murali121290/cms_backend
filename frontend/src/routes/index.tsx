@@ -1,4 +1,4 @@
-import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom'
+import { createBrowserRouter, RouterProvider, Navigate, useLocation, useParams } from 'react-router-dom'
 import { AppLayout } from '@/layouts/AppLayout'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { RoleGuard } from '@/components/RoleGuard'
@@ -29,6 +29,7 @@ import { TechnicalReviewPage } from '@/pages/TechnicalReviewPage'
 import { TechnicalEditorPage } from '@/pages/TechnicalEditorPage'
 import { StructuringReviewPage } from '@/pages/StructuringReviewPage'
 import { ReferenceValidationReviewPage } from '@/pages/ReferenceValidationReviewPage'
+import { FileReviewPage } from '@/pages/FileReviewPage'
 import { FileEditorPage } from '@/pages/FileEditorPage'
 import { DocxEditorPage } from '@/pages/DocxEditorPage'
 import { StylesheetsPage } from '@/pages/StylesheetsPage'
@@ -54,6 +55,19 @@ function PostProdGuard({ children }: { children: React.ReactNode }) {
     return <Navigate to="/" replace />
   }
   return <>{children}</>
+}
+
+// Old standalone routes redirect into the combined tabbed page, preserving
+// any inner query params (e.g. ?tab=onlyoffice on structuring-review).
+function ReviewRedirect({ view }: { view: 'editor' | 'reference' }) {
+  const { clientId, projectId, chapterId, fileId } = useParams()
+  const location = useLocation()
+  const base = clientId
+    ? `/clients/${clientId}/projects/${projectId}/chapters/${chapterId}/files/${fileId}/review`
+    : `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/review`
+  const params = new URLSearchParams(location.search)
+  params.set('view', view)
+  return <Navigate to={`${base}?${params.toString()}${location.hash}`} replace />
 }
 
 const router = createBrowserRouter([
@@ -109,18 +123,20 @@ const router = createBrowserRouter([
       // ── File-level pages (projects prefix) ──────────────────────────────────
       { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/edit', element: <FileEditorPage /> },
       { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/wysiwyg', element: <DocxEditorPage /> },
-      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/structuring-review', element: <StructuringReviewPage /> },
+      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/review', element: <FileReviewPage /> },
+      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/structuring-review', element: <ReviewRedirect view="editor" /> },
       { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/technical-review', element: <TechnicalReviewPage /> },
       { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/technical-editor', element: <TechnicalEditorPage /> },
-      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/reference-review', element: <ReferenceValidationReviewPage /> },
+      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/reference-review', element: <ReviewRedirect view="reference" /> },
 
       // ── File-level pages (clients prefix) ───────────────────────────────────
       { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/edit', element: <FileEditorPage /> },
       { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/wysiwyg', element: <DocxEditorPage /> },
-      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/structuring-review', element: <StructuringReviewPage /> },
+      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/review', element: <FileReviewPage /> },
+      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/structuring-review', element: <ReviewRedirect view="editor" /> },
       { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/technical-review', element: <TechnicalReviewPage /> },
       { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/technical-editor', element: <TechnicalEditorPage /> },
-      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/reference-review', element: <ReferenceValidationReviewPage /> },
+      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/reference-review', element: <ReviewRedirect view="reference" /> },
 
       { path: 'projects', element: <ProjectsPage /> },
       { path: 'chapters', element: <Placeholder title="Chapters" /> },
