@@ -584,3 +584,85 @@ def validate_cover_entry_required(file_details, rule_config=None):
                 })
 
     return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("NAV005")
+def validate_page_list_links(file_details, rule_config=None):
+    """Validate that page list items contain properly linked anchor tags."""
+    text = read_text(file_details["full_path"])
+    soup = BeautifulSoup(text, "html.parser")
+    issues = []
+
+    # Find the nav element with role="doc-pagelist" or epub:type="page-list"
+    page_list_nav = soup.find("nav", attrs={"role": "doc-pagelist"}) or soup.find("nav", attrs={"epub:type": "page-list"})
+
+    if not page_list_nav:
+        return {"issues_count": 0, "issues": []}
+
+    # Check for direct text or <p> tags inside the <nav> element
+    if page_list_nav.find("p"):
+        issues.append({
+            "rule_name": "Page List Link Check",
+            "type": "page_list_contains_p_tag",
+            "message": "Page list <nav> element must not contain a <p> tag.",
+            "category": "Error",
+            "line_number": getattr(page_list_nav, "sourceline", None),
+            "extract": str(page_list_nav)[:100],
+        })
+
+    has_nav_direct_text = False
+    nav_direct_text_snippet = ""
+    for child in page_list_nav.contents:
+        if child.name is None and str(child).strip():
+            has_nav_direct_text = True
+            nav_direct_text_snippet = str(child).strip()
+            break
+            
+    if has_nav_direct_text:
+        issues.append({
+            "rule_name": "Page List Link Check",
+            "type": "page_list_nav_direct_text",
+            "message": "Page list <nav> element must not contain direct text.",
+            "category": "Error",
+            "line_number": getattr(page_list_nav, "sourceline", None),
+            "extract": nav_direct_text_snippet[:100],
+        })
+
+    ols = page_list_nav.find_all("ol")
+    for ol in ols:
+        # We find direct <li> elements to handle nested lists properly
+        for li in ol.find_all("li", recursive=False):
+            a_tag = li.find("a")
+            
+            # Check 1: <li> must contain an <a> tag with an href
+            if not a_tag or not a_tag.get("href"):
+                issues.append({
+                    "rule_name": "Page List Link Check",
+                    "type": "page_list_link_missing",
+                    "message": "Page list <li> element must contain an <a> tag with an href.",
+                    "category": "Error",
+                    "line_number": getattr(li, "sourceline", None),
+                    "extract": li.get_text(strip=True) or str(li)[:100],
+                })
+                continue
+            
+            # Check 2: <li> must not contain direct text outside the <a> tag
+            has_direct_text = False
+            li_direct_text_snippet = ""
+            for child in li.contents:
+                if child.name is None and str(child).strip():
+                    has_direct_text = True
+                    li_direct_text_snippet = str(child).strip()
+                    break
+                    
+            if has_direct_text:
+                issues.append({
+                    "rule_name": "Page List Link Check",
+                    "type": "page_list_direct_text",
+                    "message": "Page list <li> element must not contain direct text outside the <a> tag.",
+                    "category": "Error",
+                    "line_number": getattr(li, "sourceline", None),
+                    "extract": li_direct_text_snippet[:100],
+                })
+
+    return {"issues_count": len(issues), "issues": issues}
