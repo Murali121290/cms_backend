@@ -19,7 +19,7 @@
       "name": "URL Text Match Check",
       "target_path": "OEBPS/xhtml",
       "enabled": false,
-     "file_name_pattern": "*.xhtml"
+      "file_name_pattern": "*.xhtml"
     },
     {
       "id": "URL004",
@@ -31,7 +31,7 @@
       "id": "URL005",
       "name": "Internal Reference Validation",
       "target_path": "OEBPS/xhtml",
-      "enabled": true,
+      "enabled": false,
       "file_name_pattern": "*.xhtml"
     }
   ]

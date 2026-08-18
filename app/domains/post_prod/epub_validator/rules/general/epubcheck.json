@@ -3,7 +3,7 @@
     {
       "id": "EXTEPUB001",
       "name": "EPUBCheck Validation",
-      "enabled": true,
+      "enabled": false,
       "scope": "book"
     }
   ]
