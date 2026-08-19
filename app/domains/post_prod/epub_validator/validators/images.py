@@ -33,9 +33,10 @@ def validate_images_are_jpeg(file_details, rule_config=None):
     ext = os.path.splitext(file_path)[1].lower()
 
     # Get allowed extensions from rule config (default to .jpg, .jpeg)
+    inner_config = rule_config.get("rule_config", {}) if rule_config else {}
     allowed_extensions = []
-    if rule_config and "allowed_extensions" in rule_config:
-        allowed_extensions = [e.lower() for e in rule_config["allowed_extensions"]]
+    if "allowed_extensions" in inner_config:
+        allowed_extensions = [e.lower() for e in inner_config["allowed_extensions"]]
     if not allowed_extensions:
         return {"issues_count": 1, "issues": [{
             "type": "rule_configuration_error",

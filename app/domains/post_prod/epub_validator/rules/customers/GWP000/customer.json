@@ -1,0 +1,41 @@
+{
+  "rules": [
+    {
+      "id": "STRUCT001",
+      "name": "EPUB Folder Structure Check",
+      "scope": "book",
+      "enabled": true
+    },
+    {
+      "id": "STRUCT002",
+      "name": "Container File Check",
+      "scope": "book",
+      "enabled": true
+    },
+    {
+      "id": "STRUCT003",
+      "name": "EPUB Content Folder Check",
+      "scope": "book",
+      "rule_config": {
+        "opf_name": "content.opf",
+        "css_folder": "Styles",
+        "css_file": "stylesheet.css",
+        "xhtml_folder": "Text",
+        "images_folder": "Images",
+        "nav_file": "nav.xhtml",
+        "toc_file": "toc.ncx"
+      },
+      "enabled": true
+    },
+    {
+      "id": "STRUCT005",
+      "name": "Sequential XHTML Naming Check",
+      "scope": "book",
+      "rule_config": {
+        "xhtml_folder": "Text",
+        "start_number": 1
+      },
+      "enabled": true
+    }
+  ]
+}

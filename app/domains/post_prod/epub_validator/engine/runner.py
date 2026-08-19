@@ -112,7 +112,12 @@ def validate_epub(
             "chapter_filter": target_file,  # Pass chapter filter if validating single chapter
         }
         try:
-            result = function(book_details)
+            import inspect
+            sig = inspect.signature(function)
+            if "rule_config" in sig.parameters:
+                result = function(book_details, rule_config=rule)
+            else:
+                result = function(book_details)
         except Exception as e:  # noqa: BLE001
             result = {
                 "issues_count": 1,
@@ -178,7 +183,14 @@ def validate_epub(
                     "epub_root": epub_folder,
                     "file_path": relative_path,
                 }
-                result = function(file_details, rule_config=rule)
+                
+                import inspect
+                sig = inspect.signature(function)
+                if "rule_config" in sig.parameters:
+                    result = function(file_details, rule_config=rule)
+                else:
+                    result = function(file_details)
+                    
                 report["files"].append(_entry(
                     rule, function, target_path, file_pattern,
                     file_details, result, origin, customer_tag,
