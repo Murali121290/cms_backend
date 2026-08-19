@@ -22,6 +22,7 @@
         "css_file": "stylesheet.css",
         "xhtml_folder": "Text",
         "images_folder": "Images",
+        "fonts_folder": "Fonts",
         "nav_file": "nav.xhtml",
         "toc_file": "toc.ncx"
       },

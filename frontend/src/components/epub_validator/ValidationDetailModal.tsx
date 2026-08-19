@@ -9,10 +9,11 @@ import {
   RotateCw,
   Save,
   Image as ImageIcon,
+  Edit2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/utils/epubValidatorUtils';
-import { getFileContent, getPdfPage, saveFileContent, ValidationProgress } from '@/api/epubValidator';
+import { getFileContent, getPdfPage, saveFileContent, ValidationProgress, renameEpubFile } from '@/api/epubValidator';
 import { SourceEditor } from './SourceEditor';
 import type { XHTMLFile, ValidationFileEntry, ValidationIssue } from '@/types/epubValidator';
 
@@ -26,6 +27,7 @@ interface Props {
   allowedTabs?: Tab[];
   onClose: () => void;
   onRevalidate?: () => void;
+  onRenameSuccess?: (newName: string) => void;
 }
 
 export type Tab = 'result' | 'preview' | 'pdf';
@@ -254,7 +256,7 @@ function resolveRelative(filePath: string, href: string): string {
 
 // ─── Modal ───────────────────────────────────────────────────────────────────
 
-export function ValidationDetailModal({ file, folderName, entries, isRevalidating = false, validationProgress, initialTab = 'result', allowedTabs, onClose, onRevalidate }: Props) {
+export function ValidationDetailModal({ file, folderName, entries, isRevalidating = false, validationProgress, initialTab = 'result', allowedTabs, onClose, onRevalidate, onRenameSuccess }: Props) {
   const isImageFile = useMemo(() => {
     const name = (file.file_name || '').toLowerCase();
     return /\.(png|jpe?g|gif|svg|webp|bmp|ico|tif?f)$/i.test(name);
@@ -272,6 +274,28 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
   }, [visibleTabs, activeTab]);
   const [selectedRuleId, setSelectedRule] = useState<string | null>(null);
   const sourceEditorRef = useRef<{ scrollToLine: (lineNum: number) => void } | null>(null);
+
+  // ── Rename state ─────────────────────────────────────────────────────────────
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState(file.file_name || '');
+  const [isRenamingLoading, setIsRenamingLoading] = useState(false);
+
+  async function handleRenameSubmit() {
+    if (!renameValue || renameValue === file.file_name) {
+      setIsRenaming(false);
+      return;
+    }
+    setIsRenamingLoading(true);
+    try {
+      await renameEpubFile(folderName, filePath, renameValue);
+      setIsRenaming(false);
+      if (onRenameSuccess) onRenameSuccess(renameValue);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Rename failed');
+    } finally {
+      setIsRenamingLoading(false);
+    }
+  }
 
   // ── Source fetch ─────────────────────────────────────────────────────────────
   const [sourceContent, setSourceContent] = useState<string | null>(null);
@@ -498,7 +522,35 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
               <FileCode2 className="w-4 h-4 text-primary" />
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-foreground truncate font-serif">{file.file_name}</p>
+              {isRenaming ? (
+                <div className="flex items-center gap-2 mb-1">
+                  <input
+                    type="text"
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    className="text-sm border border-input rounded-md px-2 py-1 bg-background text-foreground min-w-[200px]"
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleRenameSubmit();
+                      if (e.key === 'Escape') setIsRenaming(false);
+                    }}
+                    disabled={isRenamingLoading}
+                  />
+                  <Button size="sm" onClick={handleRenameSubmit} disabled={isRenamingLoading} className="h-7 text-xs">
+                    {isRenamingLoading ? 'Saving...' : 'Save'}
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setIsRenaming(false)} disabled={isRenamingLoading} className="h-7 text-xs">
+                    Cancel
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-semibold text-foreground truncate font-serif">{file.file_name}</p>
+                  <button onClick={() => { setRenameValue(file.file_name || ''); setIsRenaming(true); }} className="text-muted-foreground hover:text-primary transition-colors" title="Rename file">
+                    <Edit2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
               <p className="text-xs text-muted-foreground flex items-center gap-1 flex-wrap font-sans">
                 Validation session
                 {totalErrors > 0 && (
