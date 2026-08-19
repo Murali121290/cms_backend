@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE temp SYSTEM "temp.dtd">
+<root>
+<doctype root='article' path='C:\DPS_IOP\DTD\archivearticle.dtd'/>
+
+<!-- para style -->
+<pstyle xpath='//book-body/book-part/book-part-meta/title-group/label' idstyle='ChapterNumber'/>
+<pstyle xpath='//book-body/book-part/book-part-meta/title-group/title' idstyle='ChapterTitle'/>
+<pstyle xpath='//book-body/book-part/book-part-meta/contrib-group' idstyle='ChapterAuthor'/>
+<pstyle xpath='//book-body/book-part/book-part-meta/abstract/title' idstyle='SP-Head2'/>
+<pstyle xpath='//book-body/book-part/book-part-meta/abstract/p' idstyle='Para-FL'/>
+<pstyle xpath='//book-body/book-part/book-part-meta/kwd-group/title' idstyle='SP-Head2'/>
+<pstyle xpath='//book-body/book-part/book-part-meta/kwd-group/kwd' idstyle='Para-FL'/>
+<pstyle xpath='//body//sec/title' idstyle='Head1'/>
+<pstyle xpath='//body//sec/sec/title' idstyle='Head2'/>
+<pstyle xpath='//body//sec/sec/sec/title' idstyle='Head3'/>
+<pstyle xpath='//body//sec/sec/sec/sec/title' idstyle='Head4'/>
+<pstyle xpath='//body//sec/p' idstyle='ParaFirstLine-Ind'/>
+<pstyle xpath='//body//sec/p[1]' idstyle='Para-FL'/>
+<pstyle xpath='//sec[@disp-level="LearnObject"]/title' idstyle='LearnObjHeading'/>
+<pstyle xpath='//sec[@disp-level="LearnObject"]/p' idstyle='LearnObj-Para-FL'/>
+<pstyle xpath='//fig/caption' idstyle='FigureLegend'/>
+<pstyle xpath='//fig/p' idstyle='FigureSource'/>
+<pstyle xpath='//fig' idstyle='Image'/>
+<pstyle xpath='//table' idstyle='Image'/>
+<pstyle xpath='//table-wrap/caption' idstyle='TableCaption'/>
+<pstyle xpath='//table-wrap-foot/fn' idstyle='TableFooter'/>
+<pstyle xpath='//ref/mixed-citation' idstyle='Reference-Alphabetical'/>
+<pstyle xpath='//ref/mixed-citation/label' idstyle='Reference-Numbered'/>
+<pstyle xpath='//boxed-text/caption' idstyle='FE-01-Title'/>
+
+<!-- box -->
+<pstyle xpath='//boxed-text[@id]/caption' idstyle='Box-01-BoxTitle'/>
+<pstyle xpath='//boxed-text[@id]/attrib' idstyle='Box-01-Note'/>
+
+<!-- case study -->
+<pstyle xpath='//boxed-text[@content-type="case study"]/caption' idstyle='FE-CaseStudyTitle'/>
+<pstyle xpath='//boxed-text[@content-type="case study"]/sec/title' idstyle='FE-CaseStudyHead1'/>
+<pstyle xpath='//boxed-text[@content-type="case study"]/sec/sec/title' idstyle='FE-CaseStudyHead2'/>
+<pstyle xpath='//boxed-text[@content-type="case study"]/p' idstyle='FE-CaseStudy-ParaFirstLine-Ind'/>
+<pstyle xpath='//boxed-text[@content-type="case study"]/p[1]' idstyle='FE-CaseStudy-Para-FL'/>
+<pstyle xpath='//boxed-text[@content-type="case study"]//sec/p' idstyle='FE-CaseStudy-ParaFirstLine-Ind'/>
+<pstyle xpath='//boxed-text[@content-type="case study"]//sec/p[1]' idstyle='FE-CaseStudy-Para-FL'/>
+
+
+<!-- list and disp-quote -->
+<multistyle xpath='//sec/list[@list-type="order"]' childname='list-item' idstyle='NumberList1'/>
+<multistyle xpath='//sec/list[@list-type="bullet"]' childname='list-item' idstyle='BulletList1'/>
+<multistyle xpath='//disp-quote' childname='p' idstyle='eXtractTxt'/>
+<multistyle xpath='//sec[@disp-level="LearnObject"]//list[@list-type="order"]' childname='list-item' idstyle='LearnObj-NumberList1'/>
+<multistyle xpath='//sec[@disp-level="LearnObject"]//list[@list-type="bullet"]' childname='list-item' idstyle='LearnObj-BulletList1'/>
+<multistyle xpath='//boxed-text[@content-type="case study"]//sec//list[@list-type="order"]' childname='list-item' idstyle='FE-CaseStudy-NumberList1'/>
+<multistyle xpath='//boxed-text[@content-type="case study"]//sec//list[@list-type="bullet"]' childname='list-item' idstyle='FE-CaseStudy-NumberList1'/>
+<multistyle xpath='//boxed-text[@content-type="case study"]//list[@list-type="order"]' childname='list-item' idstyle='FE-CaseStudy-NumberList1'/>
+<multistyle xpath='//boxed-text[@content-type="case study"]//list[@list-type="bullet"]' childname='list-item' idstyle='FE-CaseStudy-BulletList1'/>
+<multistyle xpath='//boxed-text[@id]/list[@list-type="bullet"]' childname='list-item' idstyle='Box-01-BulletList1'/>
+<multistyle xpath='//boxed-text[@id]/list[@list-type="bullet"]/list[@list-type="bullet"]' childname='list-item' idstyle='Box-01-BulletList2'/>
+<multistyle xpath='//boxed-text/list[@list-type="order"]' childname='list-item' idstyle='FE-01-NumberList1'/>
+
+<!-- cstyle -->
+<cstyle xpath='//italic' idstyle='italic'/>
+<cstyle xpath='//bold' idstyle='bold'/>
+<cstyle xpath='//sub' idstyle='subscript'/>
+<cstyle xpath='//sup' idstyle='superscript'/>
+<cstyle xpath='//bold//italic' idstyle='bolditalics'/>
+<cstyle xpath='//italic//bold' idstyle='bolditalics'/>
+<cstyle xpath='//sup//italic' idstyle='italicsuperscript'/>
+<cstyle xpath='//italic//sup' idstyle='italicsuperscript'/>
+<cstyle xpath='//sub//italic' idstyle='italicsubscript'/>
+<cstyle xpath='//italic//sub' idstyle='italicsubscript'/>
+<cstyle xpath='//sup//bold' idstyle='boldsuperscript'/>
+<cstyle xpath='//bold//sup' idstyle='boldsuperscript'/>
+<cstyle xpath='//sub//bold' idstyle='boldsubscript'/>
+<cstyle xpath='//bold//sub' idstyle='boldsubscript'/>
+<cstyle xpath='//sc' idstyle='smallcaps'/>
+<cstyle xpath='//underline' idstyle='underline'/>
+<cstyle xpath='//monospace' idstyle='monospace'/>
+<cstyle xpath='//sc//italic' idstyle='italicsmallcaps'/>
+<cstyle xpath='//italic//sc' idstyle='italicsmallcaps'/>
+<cstyle xpath='//sc//bold' idstyle='boldsmallcaps'/>
+<cstyle xpath='//bold//sc' idstyle='boldsmallcaps'/>
+<cstyle xpath='//sup//bold//italic' idstyle='bolditalicsuperscript'/>
+<cstyle xpath='//sup//italic//bold' idstyle='bolditalicsuperscript'/>
+<cstyle xpath='//italic//sup//bold' idstyle='bolditalicsuperscript'/>
+<cstyle xpath='//italic//bold//sup' idstyle='bolditalicsuperscript'/>
+<cstyle xpath='//bold//italic//sup' idstyle='bolditalicsuperscript'/>
+<cstyle xpath='//bold//sup//italic' idstyle='bolditalicsuperscript'/>
+<cstyle xpath='//sub//bold//italic' idstyle='bolditalicsubscript'/>
+<cstyle xpath='//sub//italic//bold' idstyle='bolditalicsubscript'/>
+<cstyle xpath='//italic//sub//bold' idstyle='bolditalicsubscript'/>
+<cstyle xpath='//italic//bold//sub' idstyle='bolditalicsubscript'/>
+<cstyle xpath='//bold//italic//sub' idstyle='bolditalicsubscript'/>
+<cstyle xpath='//bold//sub//italic' idstyle='bolditalicsubscript'/>
+<cstyle xpath='//mixed-citation//source' idstyle='bib_journal'/>
+<cstyle xpath='//mixed-citation//volume' idstyle='bib_volume'/>
+<cstyle xpath='//mixed-citation//issue' idstyle='bib_issue'/>
+<cstyle xpath='//mixed-citation//fpage' idstyle='bib_fpage'/>
+<cstyle xpath='//mixed-citation//lpage' idstyle='bib_lpage'/>
+<cstyle xpath='//mixed-citation//year' idstyle='bib_year'/>
+<cstyle xpath='//mixed-citation[@mixed-citation-type="journal"]//source' idstyle='italic'/>
+<cstyle xpath='//mixed-citation//conf-name' idstyle='italic'/>
+<cstyle xpath='//mixed-citation//conf-loc' idstyle='italic'/>
+<cstyle xpath='//mixed-citation//conf-date' idstyle='italic'/>
+
+<!-- table conversion -->
+<tableconversion format='htmltoindesign'/>
+
+<onlyforpdf xpath='//fig/label' text='&#x2002;' pos='after'/>
+<onlyforpdf xpath='//boxed-text/label' text=' ' pos='after'/>
+<onlyforpdf xpath='//table-wrap/label' text=' ' pos='after'/>
+<onlyforpdf xpath='//kwd-group/kwd' text=', ' pos='after'/>
+<onlyforpdf xpath='//ref/mixed-citation/label' text='&#x0009;' pos='before'/>
+<onlyforpdf xpath='//ref/mixed-citation/label' text='&#x0009;' pos='after'/>
+
+<insertbreak xpath='//abstract' pos='before'/>
+<insertbreak xpath='//kwd-group' pos='before'/>
+<insertbreak xpath='//sec' pos='before'/>
+<insertbreak xpath='//list' pos='before'/>
+<insertbreak xpath='//boxed-text' pos='before'/>
+<insertbreak xpath='//fig' pos='before'/>
+<insertbreak xpath='//table-wrap' pos='before'/>
+<insertbreak xpath='//ref' pos='before'/>
+<insertbreak xpath='//boxed-text/sec' pos='before'/>
+
+<delelt xpath='//abstract/mybreak[1]'/>
+<delelt xpath='//title-group/mybreak[1]'/>
+<delelt xpath='//kwd-group/mybreak[1]'/>
+<delelt xpath='//sec/mybreak[1]'/>
+<delelt xpath='//list/mybreak[1]'/>
+<delelt xpath='//boxed-text/mybreak[1]'/>
+<delelt xpath='//boxed-text/mybreak[1]'/>
+<delelt xpath='//fig/mybreak[1]'/>
+<delelt xpath='//fig/mybreak[1]'/>
+<delelt xpath='//table-wrap/mybreak[1]'/>
+<delelt xpath='//table-wrap/mybreak[1]'/>
+<delelt xpath='//ref/mybreak[1]'/>
+<delelt xpath='//ref-list/mybreak[1]'/>
+<delelt xpath='//boxed-text/caption/mybreak[1]'/>
+
+<postfr>
+          <fr>
+                <f><![CDATA[<\!DOCTYPE ([^>]*)>]]></f>
+                <r><![CDATA[<\!-- <\!DOCTYPE $1> -->]]></r>
+          </fr>
+          <fr>
+                <f><![CDATA[<\/kwd><onlyforpdf>, <\/onlyforpdf>\s*<kwd]]></f>
+                <r><![CDATA[<\/kwd><onlyforpdf>, <\/onlyforpdf><kwd]]></r>
+          </fr>
+          <fr>
+                <f><![CDATA[<onlyforpdf>, <\/onlyforpdf><\/kwd-group>]]></f>
+                <r><![CDATA[<\/kwd-group>]]></r>
+          </fr>
+          <fr>
+                <f><![CDATA[<\/caption><sec]]></f>
+                <r><![CDATA[<\/caption>\n<sec]]></r>
+          </fr>
+          <fr>
+                <f><![CDATA[<\!--<highlight>-->]]></f>
+                <r><![CDATA[<highlight>]]></r>
+          </fr>
+          <fr>
+                <f><![CDATA[<\!--<\/highlight>-->]]></f>
+                <r><![CDATA[<\/highlight>]]></r>
+          </fr>
+          <fr>
+                <f><![CDATA[<\!--<query>-->]]></f>
+                <r><![CDATA[<query>]]></r>
+          </fr>
+          <fr>
+                <f><![CDATA[<\!--<\/query>-->]]></f>
+                <r><![CDATA[<\/query>]]></r>
+          </fr>
+</postfr>
+</root>

@@ -35,7 +35,7 @@ import { XmlToIndesignModal } from '@/components/XmlToIndesignModal'
 import {
   startLanguageEdit,
   startPpdGeneration, startPermissionsCheck, startCreditExtraction,
-  startBiasScan, startWordToXml, getProcessingStatus, startIndesignToXml,
+  startBiasScan, startWordToXml, getProcessingStatus, startIndesignToXml, startExtractDesignCss, startStyleValidation,
 } from '@/api/processing'
 import { deleteFile, downloadFile, generateFigureAssessment, generateFigurePdf } from '@/api/files'
 import { useChapterFilesQuery } from '@/features/projects/useChapterFilesQuery'
@@ -485,6 +485,22 @@ function ProcessingActionsMenu({
           </button>
         )}
 
+        {showAction('wordToXml') && (
+          <button
+            disabled={!fid}
+            type="button"
+            className={btnCls}
+            onClick={() => fid && setConfirmStep({
+              actionName: 'Style Validation',
+              jobFn: () => startStyleValidation(fid),
+              pollFileId: fid,
+              pollProcessType: 'style_validation'
+            })}
+          >
+            <ShieldCheck size={12} /> Style Validation
+          </button>
+        )}
+
         {showAction('xmlToIndesign') && fname.endsWith('.xml') && row?.subfolder?.toLowerCase() === 'xml' && (
           <button
             disabled={!fid}
@@ -506,6 +522,22 @@ function ProcessingActionsMenu({
             onClick={() => fid && setConfirmStep({ actionName: 'InDesign to XML', jobFn: () => startIndesignToXml(fid), pollFileId: fid, pollProcessType: 'indesign_to_xml' })}
           >
             <FileCode size={12} /> InDesign to XML
+          </button>
+        )}
+
+        {(fname.endsWith('.indd') || fname.endsWith('.indt')) && (row?.subfolder?.toLowerCase() === 'indesign' || row?.subfolder?.toLowerCase() === 'design' || row?.subfolder?.toLowerCase() === 'template') && (
+          <button
+            disabled={!fid}
+            type="button"
+            className={btnCls}
+            onClick={() => fid && setConfirmStep({
+              actionName: 'Extract Layout CSS',
+              jobFn: () => startExtractDesignCss(fid),
+              pollFileId: fid,
+              pollProcessType: 'extract_design_css'
+            })}
+          >
+            <Wrench size={12} /> Extract Layout CSS
           </button>
         )}
       </div>

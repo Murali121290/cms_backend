@@ -391,6 +391,7 @@ export function ProjectWorkflow() {
     { key: 'library', label: 'Library' },
     { key: 'template', label: 'template' },
     { key: 'print_preset', label: 'Print Preset' },
+    { key: 'misc', label: 'Misc' },
   ]
 
   useEffect(() => {

@@ -4278,6 +4278,8 @@ def api_v2_processing_status(
         "word_to_xml",
         "indesign_to_xml",
         "xml_to_indesign",
+        "style_validation",
+        "extract_design_css",
     )
     if process_type not in supported_types:
         return _error_response(

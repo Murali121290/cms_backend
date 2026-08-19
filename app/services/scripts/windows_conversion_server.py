@@ -981,11 +981,12 @@ def convert_indesign_to_xml(file: UploadFile = File(...), client: str = None):
         is_springer_jsx = os.path.basename(jsx_script) == "Springer_Finaxml.jsx"
         log_path = None
         epub_log_path = None
+        docx_output_path = os.path.join(os.path.dirname(input_path), f"{indd_name_no_ext}_final.docx")
         if is_springer_jsx:
             script_dir = os.path.dirname(jsx_script)
             log_path = os.path.join(script_dir, "finalxml", "finalxml.log")
             epub_log_path = os.path.join(script_dir, "epub", "epub.log")
-            for p, name in [(log_path, "finalxml.log"), (epub_log_path, "epub.log")]:
+            for p, name in [(log_path, "finalxml.log"), (epub_log_path, "epub.log"), (docx_output_path, f"{indd_name_no_ext}_final.docx")]:
                 if os.path.exists(p):
                     try:
                         os.remove(p)
@@ -1032,6 +1033,20 @@ def convert_indesign_to_xml(file: UploadFile = File(...), client: str = None):
                         except Exception:
                             pass
                     time.sleep(0.5)
+            if docx_output_path:
+                logger.info(f"[{session_id}] Waiting for Springer RTFtoDocx.exe conversion to {docx_output_path}...")
+                start_wait = time.time()
+                while time.time() - start_wait < 45:
+                    if os.path.exists(docx_output_path) and os.path.getsize(docx_output_path) > 0:
+                        try:
+                            # Attempt to open file to ensure it's not locked by writing process
+                            with open(docx_output_path, "rb") as lf:
+                                lf.read(100)
+                            logger.info(f"[{session_id}] DOCX conversion completed successfully.")
+                            break
+                        except Exception:
+                            pass
+                    time.sleep(0.5)
             
         try:
             while indesign_app.Documents.Count > 0:
@@ -1072,7 +1087,7 @@ def convert_indesign_to_xml(file: UploadFile = File(...), client: str = None):
             for root, _, filenames in os.walk(temp_dir):
                 for fname in filenames:
                     ext = os.path.splitext(fname)[1].lower()
-                    if ext in (".xml", ".epub", ".log", ".jpg", ".jpeg") and not fname.endswith(".zip"):
+                    if ext in (".xml", ".epub", ".log", ".jpg", ".jpeg", ".docx") and not fname.endswith(".zip"):
                         file_abs_path = os.path.join(root, fname)
                         rel_path = os.path.relpath(file_abs_path, temp_dir)
                         out_zf.write(file_abs_path, rel_path)
@@ -1095,6 +1110,128 @@ def convert_indesign_to_xml(file: UploadFile = File(...), client: str = None):
         
     except Exception as err:
         logger.error(f"[{session_id}] InDesign to XML execution failed: {str(err)}")
+        raise HTTPException(status_code=500, detail=str(err))
+    finally:
+        pythoncom.CoUninitialize()
+
+@app.post("/extract-design-css")
+def extract_design_css(file: UploadFile = File(...)):
+    start_time = time.time()
+    session_id = str(uuid.uuid4())
+    logger.info(f"[{session_id}] Received extract-design-css request for file: {file.filename}")
+    
+    is_zip = file.filename.lower().endswith(".zip")
+    
+    temp_dir = os.path.abspath(f"temp_conversions/{session_id}")
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    uploaded_file_path = os.path.join(temp_dir, file.filename)
+    try:
+        with open(uploaded_file_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+    except Exception as e:
+        logger.error(f"[{session_id}] Failed to save uploaded file: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+        
+    input_path = None
+    if is_zip:
+        import zipfile
+        try:
+            with zipfile.ZipFile(uploaded_file_path, "r") as z:
+                z.extractall(temp_dir)
+            for root, _, filenames in os.walk(temp_dir):
+                for fname in filenames:
+                    if fname.lower().endswith((".indd", ".indt")):
+                        input_path = os.path.abspath(os.path.join(root, fname))
+                        break
+                if input_path:
+                    break
+            if not input_path:
+                raise Exception("No .indd or .indt file found in the uploaded ZIP.")
+        except Exception as zip_ex:
+            logger.error(f"[{session_id}] ZIP extraction failed: {str(zip_ex)}")
+            raise HTTPException(status_code=400, detail=str(zip_ex))
+    else:
+        input_path = os.path.abspath(uploaded_file_path)
+
+    if not input_path or not input_path.lower().endswith((".indd", ".indt")):
+        raise HTTPException(status_code=400, detail="Uploaded file is not a valid InDesign document (.indd/.indt)")
+
+    indd_basename = os.path.basename(input_path)
+    indd_name_no_ext = os.path.splitext(indd_basename)[0]
+    output_css_path = os.path.join(os.path.dirname(input_path), "layout_design.css")
+    
+    if os.path.exists(output_css_path):
+        try:
+            os.remove(output_css_path)
+        except Exception:
+            pass
+
+    import win32com.client
+    import pythoncom
+    pythoncom.CoInitialize()
+    
+    try:
+        indesign_app = win32com.client.Dispatch("InDesign.Application")
+        
+        try:
+            indesign_app.DoScript("app.scriptPreferences.userInteractionLevel = UserInteractionLevels.NEVER_INTERACT;", 1246973031)
+        except Exception:
+            pass
+            
+        jsx_script = os.path.abspath("app/services/scripts/extract_css.jsx")
+        if not os.path.exists(jsx_script):
+            jsx_script = os.path.abspath("extract_css.jsx")
+        if not os.path.exists(jsx_script):
+            jsx_script = r"C:\Users\muraliba\Documents\CSS\extract_css.jsx"
+            
+        if not os.path.exists(jsx_script):
+            raise Exception("extract_css.jsx script file not found on Windows server.")
+
+        abs_input = os.path.abspath(input_path).replace("/", "\\")
+        abs_output = os.path.abspath(output_css_path).replace("/", "\\")
+        
+        indesign_app.ScriptArgs.SetValue("InputFile", abs_input)
+        indesign_app.ScriptArgs.SetValue("OutputFile", abs_output)
+        
+        args = [abs_input, abs_output]
+        indesign_app.DoScript(jsx_script, 1246973031, args)
+        
+        logger.info(f"[{session_id}] Waiting for layout_design.css to be written...")
+        start_wait = time.time()
+        css_content = None
+        while time.time() - start_wait < 20:
+            err_log = output_css_path + ".err.log"
+            if os.path.exists(err_log):
+                with open(err_log, "r") as err_f:
+                    err_msg = err_f.read()
+                raise Exception(f"InDesign CSS extraction script failed: {err_msg}")
+                
+            if os.path.exists(output_css_path) and os.path.getsize(output_css_path) > 0:
+                try:
+                    with open(output_css_path, "r", encoding="utf-8") as f:
+                        css_content = f.read()
+                    break
+                except Exception:
+                    pass
+            time.sleep(0.5)
+            
+        try:
+            while indesign_app.Documents.Count > 0:
+                indesign_app.Documents.Item(1).Close(1852776783)
+        except Exception:
+            pass
+            
+        if not css_content:
+            raise Exception("CSS extraction failed: output file layout_design.css was not created.")
+            
+        logger.info(f"[{session_id}] CSS extraction completed successfully in {time.time() - start_time:.2f} seconds")
+        
+        from starlette.responses import Response
+        return Response(content=css_content, media_type="text/css")
+        
+    except Exception as err:
+        logger.error(f"[{session_id}] extract_design_css failed: {str(err)}")
         raise HTTPException(status_code=500, detail=str(err))
     finally:
         pythoncom.CoUninitialize()

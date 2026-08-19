@@ -101,6 +101,7 @@ export const DESIGN_FOLDER_CONFIG: Record<string, FolderConfig> = {
   template_font:       { label:'Font',       icon:'Type',    allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'], parent: 'template' },
   template_library:    { label:'Library',    icon:'FolderArchive', allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'], parent: 'template' },
   print_preset: { label:'Print Preset',icon:'Printer',     allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
+  misc:         FOLDER_CONFIG.misc,
 }
 
 export const CE_SUPPORT_FOLDER_CONFIG: Record<string, FolderConfig> = {
@@ -198,7 +199,7 @@ export const FILE_TYPE_ICONS: Record<string, FileTypeIcon> = {
   png:{ icon:'Image',color:'#059669' },    tif:{ icon:'Image',color:'#7C3AED' },
   tiff:{ icon:'Image',color:'#7C3AED' },   eps:{ icon:'Image',color:'#DB2777' },
   svg:{ icon:'Image',color:'#EA580C' },    bmp:{ icon:'Image',color:'#6B7280' },
-  indd:{ icon:'Layers',color:'#FF3366' },  idml:{ icon:'Layers',color:'#FF3366' },
+  indd:{ icon:'Layers',color:'#FF3366' },  idml:{ icon:'Layers',color:'#FF3366' },  indt:{ icon:'Layers',color:'#FF3366' },
   xml:{ icon:'Code2',color:'#059669' },    zip:{ icon:'Archive',color:'#78716C' },
   epub:{ icon:'BookOpen',color:'#A855F7' },
   default:{ icon:'File',color:'#9CA3AF' },

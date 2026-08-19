@@ -406,106 +406,11 @@ async def get_folder_file_layout_preview(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read XML: {str(e)}")
 
-    legacy_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "processing", "legacy"))
-    wordtoxml_dir = os.path.join(legacy_dir, "wordtoxml")
-    xsl_path = os.path.join(wordtoxml_dir, "style.xsl")
-    css_path = os.path.join(wordtoxml_dir, "style.css")
-
-    if not os.path.exists(xsl_path):
-        raise HTTPException(status_code=500, detail="XSLT style.xsl not found in server legacy directory")
-
     try:
-        xml_tree = etree.fromstring(xml_content)
-        xsl_tree = etree.parse(xsl_path)
-        transform = etree.XSLT(xsl_tree)
-        result_tree = transform(xml_tree)
-        html_str = etree.tostring(result_tree, encoding="utf-8", method="html").decode("utf-8")
+        from app.processing.xml_engine import XMLEngine
+        html_str = XMLEngine.generate_layout_html(db, file_path, project, chapter)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"XSLT transformation failed: {str(e)}")
-
-    css_style_tag = ""
-    if os.path.exists(css_path):
-        try:
-            with open(css_path, "r", encoding="utf-8") as css_f:
-                css_content = css_f.read()
-            css_style_tag = f"<style>\n{css_content}\n</style>"
-        except Exception:
-            pass
-
-    if css_style_tag:
-        html_str = html_str.replace('<link rel="stylesheet" type="text/css" href="style.css">', "")
-        html_str = html_str.replace('<link rel="stylesheet" type="text/css" href="style.css"/>', "")
-        if "</head>" in html_str:
-            html_str = html_str.replace("</head>", f"{css_style_tag}\n</head>")
-        else:
-            html_str = f"<html><head>{css_style_tag}</head><body>{html_str}</body></html>"
-
-    # Resolve and rewrite image paths to route to actual Art/Links download endpoints
-    try:
-        from bs4 import BeautifulSoup
-        soup = BeautifulSoup(html_str, "html.parser")
-        
-        # Scan potential art/links directories for the chapter
-        art_files = {}
-        candidate_dirs = [
-            os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "Art"),
-            os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "art"),
-            os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "InDesign", "Links"),
-            os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "InDesign", "artfile"),
-            os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "Links"),
-            os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "artfile"),
-            os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "Misc"),
-            os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "misc"),
-        ]
-        
-        for c_dir in candidate_dirs:
-            if os.path.exists(c_dir):
-                for fname in os.listdir(c_dir):
-                    stem, ext = os.path.splitext(fname)
-                    stem = stem.lower()
-                    if stem not in art_files:
-                        art_files[stem] = []
-                    art_files[stem].append((fname, os.path.basename(c_dir), c_dir))
-                    
-        for img in soup.find_all("img"):
-            src = img.get("src")
-            if src:
-                img_filename = os.path.basename(src)
-                img_stem, img_ext = os.path.splitext(img_filename)
-                img_stem_lower = img_stem.lower()
-                
-                matched_file = None
-                if img_stem_lower in art_files:
-                    candidates = art_files[img_stem_lower]
-                    web_friendly_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
-                    # 1. Prefer web friendly files (e.g. .png, .jpg)
-                    for c_name, c_folder, c_dir in candidates:
-                        _, c_ext = os.path.splitext(c_name)
-                        if c_ext.lower() in web_friendly_exts:
-                            matched_file = (c_name, c_folder, c_dir)
-                            break
-                    # 2. Prefer c_name with exact same extension as referenced in XML if not found
-                    if not matched_file:
-                        for c_name, c_folder, c_dir in candidates:
-                            _, c_ext = os.path.splitext(c_name)
-                            if c_ext.lower() == img_ext.lower():
-                                matched_file = (c_name, c_folder, c_dir)
-                                break
-                    # 3. Fallback to first candidate
-                    if not matched_file:
-                        matched_file = candidates[0]
-                        
-                if matched_file:
-                    c_name, c_folder, c_dir = matched_file
-                    ch_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters)
-                    # Resolve relative folder path (handles InDesign/Links nesting correctly)
-                    resolved_folder = os.path.relpath(c_dir, ch_dir).replace("\\", "/")
-                    img["src"] = f"/api/uploads/{project_id}/chapter/{chapter_name}/{resolved_folder}/{c_name}/download"
-                    
-        html_str = str(soup)
-    except Exception:
-        # Fallback to unmodified HTML if parsing fails
-        pass
+        raise HTTPException(status_code=500, detail=f"Failed to generate layout HTML: {str(e)}")
 
     return HTMLResponse(content=html_str)
 
@@ -668,6 +573,49 @@ async def save_folder_file(
                     if user:
                         db_log.uploaded_by_id = user.id
                     db.commit()
+
+        # Regenerate layout HTML on XML save
+        try:
+            from app.processing.xml_engine import XMLEngine
+            html_content = XMLEngine.generate_layout_html(db, file_path, project, chapter)
+            xml_dir = os.path.dirname(file_path)
+            base_name = os.path.splitext(file_name)[0]
+            layout_html_path = os.path.join(xml_dir, f"{base_name}_layout.html")
+            
+            with open(layout_html_path, "w", encoding="utf-8") as out_h:
+                out_h.write(html_content)
+                
+            # Register or update layout HTML record in DB under XML category
+            layout_filename = os.path.basename(layout_html_path)
+            db_layout = db.query(models.File).filter(
+                models.File.project_id == project_id,
+                models.File.chapter_id == chapter.id,
+                models.File.filename == layout_filename
+            ).first()
+            
+            rel_layout_path = os.path.relpath(layout_html_path, UPLOAD_DIR).replace("\\", "/")
+            if not db_layout:
+                db_layout = models.File(
+                    filename=layout_filename,
+                    path=rel_layout_path,
+                    file_type="text/html",
+                    project_id=project_id,
+                    chapter_id=chapter.id,
+                    category="XML",
+                    version=1,
+                    is_original=False
+                )
+                db.add(db_layout)
+                db.commit()
+            else:
+                db_layout.path = rel_layout_path
+                db_layout.category = "XML"
+                db_layout.uploaded_at = datetime.utcnow()
+                if user:
+                    db_layout.uploaded_by_id = user.id
+                db.commit()
+        except Exception as layout_err:
+            print(f"Failed to regenerate layout HTML file during save: {layout_err}")
         
     return {"status": True, "message": "File saved", "log_content": log_content}
 

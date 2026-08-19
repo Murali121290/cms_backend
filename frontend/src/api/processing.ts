@@ -85,3 +85,9 @@ export const startWordToXml = (fileId: number) =>
 
 export const startIndesignToXml = (fileId: number) =>
   startProcessingJob(fileId, "indesign_to_xml", "style");
+
+export const startExtractDesignCss = (fileId: number) =>
+  startProcessingJob(fileId, "extract_design_css", "style");
+
+export const startStyleValidation = (fileId: number) =>
+  startProcessingJob(fileId, "style_validation", "style");

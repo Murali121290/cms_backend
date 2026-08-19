@@ -70,6 +70,8 @@ PROCESS_PERMISSIONS = {
     "word_to_xml": ["Admin", "XML Manager", "XML manager"],
     "xml_to_indesign": ["Admin", "XML Manager", "XML manager"],
     "indesign_to_xml": ["Admin", "XML Manager", "XML manager"],
+    "extract_design_css": ["Admin", "XML Manager", "XML manager"],
+    "style_validation": ["Admin", "XML Manager", "XML manager"],
 }
 
 
@@ -425,6 +427,99 @@ def background_processing_task(
                 )
                 success_msg = "InDesign to XML conversion completed"
 
+            elif process_type == "extract_design_css":
+                update_job_status(db, job_id, "processing", "Extracting CSS from InDesign template...", 30)
+                from app.core.config import get_settings
+                import redis
+                import requests
+                
+                settings = get_settings()
+                if not settings.INDESIGN_SERVER_URL:
+                    raise ValueError("Windows InDesign Conversion Server is not configured. Please set INDESIGN_SERVER_URL.")
+                
+                url = f"{settings.INDESIGN_SERVER_URL.rstrip('/')}/extract-design-css"
+                redis_client = redis.from_url(settings.REDIS_URL)
+                lock = redis_client.lock("indesign_conversion_lock", timeout=600)
+                
+                logger.info(f"[{job_id}] Acquiring InDesign lock for CSS extraction...")
+                lock.acquire(blocking=True)
+                try:
+                    logger.info(f"[{job_id}] Lock acquired. Sending CSS extraction request to: {url}")
+                    with open(file_path, "rb") as f_in:
+                        response = requests.post(
+                            url,
+                            files={"file": (os.path.basename(file_path), f_in.read(), "application/octet-stream")},
+                            timeout=(30.0, 300)
+                        )
+                    if response.status_code != 200:
+                        raise RuntimeError(f"Remote InDesign server returned status code {response.status_code}. Response: {response.text}")
+                finally:
+                    try:
+                        lock.release()
+                    except Exception:
+                        pass
+                
+                from app.domains.projects.models import Project
+                from app.services.file_service import UPLOAD_DIR
+                project = db.query(Project).filter(Project.id == file_record.project_id).first()
+                chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == file_record.chapter_id).first()
+                
+                misc_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "Misc")
+                os.makedirs(misc_dir, exist_ok=True)
+                
+                css_output_path = os.path.join(misc_dir, "layout_design.css")
+                with open(css_output_path, "wb") as f_out:
+                    f_out.write(response.content)
+                logger.info(f"[{job_id}] Saved extracted CSS: {css_output_path}")
+                
+                generated_files = [css_output_path]
+                success_msg = "InDesign CSS extraction completed successfully"
+
+            elif process_type == "style_validation":
+                update_job_status(db, job_id, "processing", "Running Word document style validation...", 30)
+                import sys
+                import subprocess
+                from app.domains.projects.models import Project
+                from app.services.file_service import UPLOAD_DIR
+                
+                project = db.query(Project).filter(Project.id == file_record.project_id).first()
+                chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == file_record.chapter_id).first()
+                
+                manuscript_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "Manuscript")
+                os.makedirs(manuscript_dir, exist_ok=True)
+                
+                base_name = os.path.splitext(os.path.basename(file_path))[0]
+                output_report_path = os.path.join(manuscript_dir, f"{base_name}_style_report.html")
+                
+                script_path = os.path.abspath("app/services/scripts/springerstylevalidation.py")
+                config_path = os.path.abspath("app/services/scripts/springerstyles.json")
+                
+                if not os.path.exists(script_path):
+                    raise FileNotFoundError(f"Style validation script not found: {script_path}")
+                if not os.path.exists(config_path):
+                    raise FileNotFoundError(f"Style validation configuration not found: {config_path}")
+                    
+                logger.info(f"[{job_id}] Executing style validation script: {script_path}")
+                try:
+                    result = subprocess.run(
+                        [sys.executable, script_path, "-d", file_path, "-c", config_path, "-o", output_report_path],
+                        capture_output=True,
+                        text=True,
+                        check=False
+                    )
+                    logger.info(f"[{job_id}] Style validation output: {result.stdout}")
+                    if result.stderr:
+                        logger.warning(f"[{job_id}] Style validation stderr: {result.stderr}")
+                except Exception as run_err:
+                    logger.error(f"[{job_id}] Failed to run style validation subprocess: {str(run_err)}")
+                    raise RuntimeError(f"Failed to execute style validation: {str(run_err)}")
+                    
+                if not os.path.exists(output_report_path) or os.path.getsize(output_report_path) == 0:
+                    raise FileNotFoundError("Style validation report was not successfully generated.")
+                    
+                generated_files = [output_report_path]
+                success_msg = "Word document style validation completed"
+
             else:
                 raise HTTPException(
                     status_code=501,
@@ -557,6 +652,8 @@ def background_processing_task(
                                 )
                         elif processed_filename.endswith(".txt") or processed_filename.endswith(".log"):
                             mime = "text/plain"
+                        elif processed_filename.endswith(".css"):
+                            mime = "text/css"
                         elif processed_filename.endswith(".zip"):
                             mime = "application/zip"
                         elif processed_filename.endswith(".xml"):
@@ -574,8 +671,9 @@ def background_processing_task(
                             chapter_id=file_record.chapter_id,
                             version=1,
                             category=(
-                                "Misc" if process_type == "indesign_to_xml"
-                                else "XML" if processed_filename.lower().endswith((".xml", ".log"))
+                                "Misc" if process_type in ("indesign_to_xml", "extract_design_css")
+                                else "Manuscript" if process_type == "style_validation"
+                                else "XML" if processed_filename.lower().endswith((".xml", ".log", ".html"))
                                 else "InDesign" if process_type == "xml_to_indesign"
                                 else "XML" if process_type == "word_to_xml"
                                 else file_record.category
