@@ -1,6 +1,86 @@
 {
   "rules": [
     {
+      "id": "STRUCT001",
+      "name": "EPUB Folder Structure Check",
+      "scope": "book",
+      "enabled": true
+    },
+    {
+      "id": "STRUCT002",
+      "name": "Container File Check",
+      "scope": "book",
+      "enabled": true
+    },
+    {
+      "id": "STRUCT003",
+      "name": "EPUB Content Folder Check",
+      "scope": "book",
+      "enabled": true
+    },
+    {
+      "id": "STRUCT004",
+      "name": "EPUB File Extension Check",
+      "scope": "book",
+      "enabled": true
+    },
+    {
+      "id": "CSS002",
+      "name": "CSS File Validation",
+      "target_path": "OEBPS/css",
+      "enabled": true,
+      "file_name_pattern": "*.css"
+    },
+    {
+      "id": "XHTML001",
+      "name": "XHTML Syntax Check",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true
+    },
+    {
+      "id": "URL001",
+      "name": "Internal Link Check",
+      "target_path": "OEBPS/xhtml",
+      "enabled": true,
+      "file_name_pattern": "*.xhtml"
+    },
+    {
+      "id": "URL002",
+      "name": "External Link Check",
+      "target_path": "OEBPS/xhtml",
+      "enabled": true,
+      "file_name_pattern": "*.xhtml"
+    },
+    {
+      "id": "NAV001",
+      "name": "NAV TOC Link Check",
+      "target_path": "",
+      "enabled": true,
+      "file_name_pattern": "nav.xhtml"
+    },
+    {
+      "id": "NAV002",
+      "name": "NCX and Navigation link Check",
+      "target_path": "",
+      "enabled": true,
+      "file_name_pattern": "toc.ncx"
+    },
+    {
+      "id": "NAV004",
+      "name": "Cover Entry in TOC",
+      "target_path": "",
+      "enabled": true,
+      "file_name_pattern": "nav.xhtml"
+    },
+    {
+      "id": "NAV005",
+      "name": "Page List Link Check",
+      "target_path": "",
+      "enabled": true,
+      "file_name_pattern": "nav.xhtml"
+    },
+    {
       "id": "ASP-COV-001",
       "name": "Aspen: Cover file named cover.jpg",
       "scope": "book",
