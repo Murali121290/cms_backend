@@ -56,10 +56,10 @@
   --color-navy-800: #1c2233;
   --color-navy-900: #0f1424;
 
-  /* ── Warm surface scale — subtle backgrounds on cream base ──────────── */
-  --color-surface-50:  #FBF8F1;
-  --color-surface-100: #F2ECDF;
-  --color-surface-200: #E7DFCC;
+  /* ── Neutral surface scale — subtle grey page backgrounds ───────────── */
+  --color-surface-50:  #F8FAFC;
+  --color-surface-100: #F1F5F9;
+  --color-surface-200: #E2E8F0;
 
   /* ── Success (emerald) scale ────────────────────────────────────────── */
   --color-success-50:  #ecfdf5;
