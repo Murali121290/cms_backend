@@ -50,8 +50,13 @@ def validate_epub(
     def _count_active(rules: list[dict]) -> int:
         return len([r for r in rules if r.get("enabled", True) and registry.get(r["id"])])
 
-    general_rules = loader.load_general()
     customer_rules = loader.load_customer(resolved_customer) if resolved_customer else []
+    
+    if customer_rules:
+        general_rules = []
+    else:
+        general_rules = loader.load_general()
+        
     grand_total = _count_active(general_rules) + _count_active(customer_rules)
     global_index = [0]  # mutable counter shared across both _run calls
 
@@ -179,8 +184,9 @@ def validate_epub(
                     file_details, result, origin, customer_tag,
                 ))
 
-    _run(general_rules, origin="general", customer_tag=None)
-    if resolved_customer:
+    if customer_rules:
         _run(customer_rules, origin="customer", customer_tag=resolved_customer)
+    else:
+        _run(general_rules, origin="general", customer_tag=None)
 
     return report
