@@ -267,7 +267,7 @@ def validate_page_citation_links(file_details, rule_config=None):
 
     for text_node in body.find_all(string=True):
         parent = text_node.parent
-        if parent is None or text_node.find_parent(["a", "h1", "h2", "h3", "h4", "h5", "h6", "figure", "figcaption"]):
+        if parent is None or text_node.find_parent(["a", "h1", "h2", "h3", "h4", "h5", "h6", "figure", "figcaption", "header", "title"]):
             continue
         line_num = getattr(parent, "sourceline", None)
 
@@ -276,6 +276,17 @@ def validate_page_citation_links(file_details, rule_config=None):
             num = next((g for g in m.groups() if g), None)
             if num is None:
                 continue
+
+            # Ignore table/figure captions at the start of a <p> tag right before or after a table/image
+            is_figure = m.group(3) is not None
+            is_table = m.group(4) is not None
+            
+            if (is_table or is_figure) and parent and parent.name == "p" and m.start() < 10:
+                next_tag = parent.find_next_sibling()
+                valid_targets = ["table"]
+                
+                if next_tag and next_tag.name in valid_targets:
+                    continue
 
             # If it is a chapter citation, only validate if the base chapter exists in this book
             if m.group(2) is not None and epub:

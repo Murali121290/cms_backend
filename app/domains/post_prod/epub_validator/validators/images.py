@@ -37,10 +37,18 @@ def validate_images_are_jpeg(file_details, rule_config=None):
     if rule_config and "allowed_extensions" in rule_config:
         allowed_extensions = [e.lower() for e in rule_config["allowed_extensions"]]
     if not allowed_extensions:
-        allowed_extensions = [".jpg", ".jpeg"]
+        return {"issues_count": 1, "issues": [{
+            "type": "rule_configuration_error",
+            "message": "Rule configuration is missing 'allowed_extensions'. Please configure it in customer.json.",
+            "category": "Error",
+            "file_path": file_path,
+        }]}
 
     # Skip non-image files
-    image_extensions = {".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp", ".tiff", ".bmp"}
+    image_extensions = {
+        ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp", ".tiff", ".bmp", 
+        ".ico", ".heic", ".heif", ".avif", ".jxl", ".eps", ".raw"
+    }
     if ext not in image_extensions:
         return {"issues_count": 0, "issues": []}
 
@@ -51,6 +59,7 @@ def validate_images_are_jpeg(file_details, rule_config=None):
             "message": f"Image '{file_path}' has extension {ext}; allowed: {', '.join(allowed_extensions)}",
             "category": "Error",
             "file_path": file_path,
+            "extract": ext,
         }]}
 
     return {"issues_count": 0, "issues": []}
@@ -69,6 +78,12 @@ def validate_no_empty_alt(file_details, rule_config=None):
     for img in soup.find_all("img"):
         alt = img.get("alt")
         if alt is None or alt.strip() == "":
+            role = img.get("role", "")
+            if isinstance(role, list):
+                role = " ".join(role)
+            if role.lower() == "presentation":
+                continue
+
             src = img.get("src", "")
             line_num = None
             if hasattr(img, 'sourceline') and img.sourceline:
@@ -80,11 +95,22 @@ def validate_no_empty_alt(file_details, rule_config=None):
                         line_num = idx
                         break
 
+            import re
+            extract_text = str(img)
+            if line_num and line_num <= len(lines):
+                raw_line = lines[line_num - 1]
+                img_match = re.search(r'<img[^>]*>', raw_line, re.IGNORECASE)
+                if img_match:
+                    img_tag = img_match.group(0)
+                    alt_match = re.search(r'alt\s*=\s*["\'][^"\']*["\']|alt\b', img_tag, re.IGNORECASE)
+                    extract_text = alt_match.group(0) if alt_match else img_tag
+
             issue = {
                 "type": "empty_alt_text",
                 "message": f"<img src='{src}'> has empty or missing alt attribute",
                 "category": "Error",
                 "href": src,
+                "extract": extract_text,
             }
             if line_num:
                 issue["line_number"] = line_num
