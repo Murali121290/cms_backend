@@ -253,3 +253,61 @@ def validate_meta_viewport(file_details, rule_config=None):
         issues.append(issue)
 
     return {"issues_count": len(issues), "issues": issues}
+
+@rule("GWP-CSS-003")
+def validate_font_size(file_details, rule_config=None):
+    """GWP000: No font sizes smaller than 10px, 7.5pt, 0.625em, 62.5%"""
+    file_path = file_details["full_path"]
+    issues = []
+    
+    if not file_path.lower().endswith(".css"):
+        return {"issues_count": 0, "issues": []}
+        
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+            lines = content.split('\n')
+    except Exception:
+        return {"issues_count": 0, "issues": []}
+
+    import re
+    # Matches font-size: <number><unit>
+    pattern = re.compile(r'font-size\s*:\s*([\d\.]+)\s*(px|pt|em|%)', re.IGNORECASE)
+    
+    inner_config = rule_config.get("rule_config", {}) if rule_config else {}
+    if not inner_config or "thresholds" not in inner_config:
+        issues.append({
+            "type": "missing_rule_config",
+            "message": "Rule configuration for GWP-CSS-003 must include 'thresholds'.",
+            "category": "Error",
+            "file_path": file_details.get("relative_path")
+        })
+        return {"issues_count": len(issues), "issues": issues}
+        
+    thresholds = inner_config["thresholds"]
+    
+    for i, line in enumerate(lines):
+        for match in pattern.finditer(line):
+            val_str = match.group(1)
+            unit = match.group(2).lower()
+            
+            try:
+                val = float(val_str)
+            except ValueError:
+                continue
+                
+            if val < thresholds.get(unit, 0):
+                extract = line.strip()
+                if len(extract) > 150:
+                    extract = extract[:150] + "..."
+                    
+                issues.append({
+                    "type": "small_font_size",
+                    "message": f"Font size {val}{unit} is too small. Minimum allowed is {thresholds[unit]}{unit}.",
+                    "category": "Error",
+                    "file_path": file_details.get("relative_path"),
+                    "extract": extract,
+                    "line_number": i + 1
+                })
+
+    return {"issues_count": len(issues), "issues": issues}

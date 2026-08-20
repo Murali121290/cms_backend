@@ -300,6 +300,21 @@
       "target_path": "OEBPS/Text",
       "file_name_pattern": "*.xhtml",
       "enabled": true
+    },
+    {
+      "id": "GWP-CSS-003",
+      "name": "Font Size Check",
+      "target_path": "OEBPS/Styles",
+      "file_name_pattern": "*.css",
+      "rule_config": {
+        "thresholds": {
+          "px": 10.0,
+          "pt": 7.5,
+          "em": 0.625,
+          "%": 62.5
+        }
+      },
+      "enabled": true
     }
   ]
 }
