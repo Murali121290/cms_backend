@@ -613,7 +613,7 @@ def validate_url_text_match(file_details, rule_config=None):
                     "href": href,
                     "expected_text": href,
                     "actual_text": text,
-                    "message": f"{f'Line {line_num}: ' if line_num else ''}Displayed URL text does not match href",
+                    "message": "Displayed URL text does not match href",
                     "category": "warning",
                     "line_number": line_num,
                     "extract": href,
