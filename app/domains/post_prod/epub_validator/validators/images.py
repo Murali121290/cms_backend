@@ -333,3 +333,21 @@ def validate_long_alt_hidden(file_details, rule_config=None):
             issue["line_number"] = line_num
         issues.append(issue)
     return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("GWP-IMG-001")
+def validate_gwp_image_filename_format(file_details, rule_config=None):
+    """GWP000: Image file name format: Chapter and figure should be separated by a dash. Do not use a period."""
+    file_path = file_details.get("file_path", "")
+    filename = os.path.basename(file_path)
+    stem, ext = os.path.splitext(filename)
+    
+    issues = []
+    if "." in stem:
+        issues.append({
+            "type": "invalid_image_filename_format",
+            "message": f"Image file name '{filename}' contains a period before the extension. Chapter and figure numbers should be separated by a dash.",
+            "category": "Error",
+            "file_path": file_path,
+        })
+    return {"issues_count": len(issues), "issues": issues}
