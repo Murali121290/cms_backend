@@ -37,6 +37,168 @@
         "start_number": 1
       },
       "enabled": true
+    },
+    {
+      "id": "CSS002",
+      "name": "CSS File Validation",
+      "target_path": "OEBPS/Styles",
+      "enabled": true,
+      "file_name_pattern": "*.css"
+    },
+    {
+      "id": "XHTML001",
+      "name": "XHTML Syntax Check",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true
+    },
+    {
+      "id": "URL001",
+      "name": "Internal Link Check",
+      "target_path": "OEBPS/Text",
+      "enabled": false,
+      "file_name_pattern": "*.xhtml"
+    },
+    {
+      "id": "URL002",
+      "name": "External Link Check",
+      "target_path": "OEBPS/Text",
+      "enabled": false,
+      "file_name_pattern": "*.xhtml"
+    },
+    {
+      "id": "NAV001",
+      "name": "NAV TOC Link Check",
+      "target_path": "OEBPS",
+      "enabled": false,
+      "file_name_pattern": "nav.xhtml"
+    },
+    {
+      "id": "NAV002",
+      "name": "NCX and Navigation link Check",
+      "target_path": "OEBPS",
+      "enabled": false,
+      "file_name_pattern": "toc.ncx"
+    },
+    {
+      "id": "XHTML002",
+      "name": "EPUB Type Semantics Check",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true,
+      "rule_config": {
+        "file_heuristics": [
+          {
+            "pattern": "titlepage",
+            "expected_body": "frontmatter",
+            "expected_tag": "section",
+            "expected_epub_type": "titlepage"
+          },
+          {
+            "pattern": "copyright",
+            "expected_body": "frontmatter",
+            "expected_tag": "section",
+            "expected_epub_type": "copyright-page"
+          },
+          {
+            "pattern": "preface",
+            "expected_body": "frontmatter",
+            "expected_tag": "section",
+            "expected_epub_type": "preface",
+            "expected_role": "doc-preface"
+          },
+          {
+            "pattern": "nav.xhtml",
+            "expected_body": "frontmatter",
+            "expected_tag": "nav",
+            "expected_epub_type": "toc"
+          },
+          {
+            "pattern": "toc",
+            "expected_body": "frontmatter",
+            "expected_tag": "section",
+            "expected_epub_type": "toc",
+            "expected_role": "doc-toc"
+          },
+          {
+            "pattern": "contents",
+            "expected_body": "frontmatter",
+            "expected_tag": "section",
+            "expected_epub_type": "toc",
+            "expected_role": "doc-toc"
+          },
+          {
+            "patterns": ["chapter", "ch"],
+            "expected_body": "bodymatter",
+            "expected_tag": "section",
+            "expected_epub_type": "chapter",
+            "expected_role": "doc-chapter"
+          },
+          {
+            "pattern": "appendix",
+            "expected_body": "backmatter",
+            "expected_tag": "section",
+            "expected_epub_type": "appendix"
+          },
+          {
+            "pattern": "glossary",
+            "expected_body": "backmatter",
+            "expected_tag": "section",
+            "expected_epub_type": "glossary"
+          },
+          {
+            "pattern": "index",
+            "expected_body": "backmatter",
+            "expected_tag": "section",
+            "expected_epub_type": "index"
+          }
+        ],
+        "global_pairings": [
+          {
+            "epub_type": "chapter",
+            "required_role": "doc-chapter"
+          },
+          {
+            "epub_type": "preface",
+            "required_role": "doc-preface"
+          },
+          {
+            "epub_type": "toc",
+            "required_role": "doc-toc",
+            "tag": "section"
+          }
+        ]
+      }
+    },
+    {
+      "id": "XHTML003",
+      "name": "Declare language on all content pages",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true,
+      "rule_config": {
+        "expected_lang": "en"
+      }
+    },
+    {
+      "id": "XHTML004",
+      "name": "<title> element is unique per page",
+      "scope": "book",
+      "enabled": true
+    },
+    {
+      "id": "XHTML005",
+      "name": "No <br/> allowed inside headings",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true
+    },
+    {
+      "id": "XHTML006",
+      "name": "Single <h1> per page and no adjacent headings",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true
     }
   ]
 }

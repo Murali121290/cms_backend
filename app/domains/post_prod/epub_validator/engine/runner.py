@@ -128,6 +128,15 @@ def validate_epub(
                 }],
             }
         if not target_file:
+            from ..services.validate_service import _chapters_for_issue
+            unmapped_issues = [
+                i for i in result.get("issues", [])
+                if not _chapters_for_issue(i, asset_index)
+            ]
+            book_level_result = {
+                "issues_count": len(unmapped_issues),
+                "issues": unmapped_issues,
+            }
             report["files"].append(_entry(
                 rule, function, "", "[book-scope]",
                 {
@@ -136,7 +145,7 @@ def validate_epub(
                     "relative_path": "",
                     "folder_name": folder_name,
                 },
-                result, origin, customer_tag,
+                book_level_result, origin, customer_tag,
             ))
 
         for rel_path, chapter_issues in _group_chapter_issues(
