@@ -231,6 +231,26 @@
         "max_width": 1000,
         "exclude_patterns": ["icon", "header", "aside"]
       }
+    },
+    {
+      "id": "GWP-XHTML-001",
+      "name": "Heading Section Role Check",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true,
+      "rule_config": {
+        "expected_heading": "introduction",
+        "expected_role": "doc-introduction",
+        "expected_heading_level": "h2",
+        "expected_parent_tag": "section"
+      }
+    },
+    {
+      "id": "GWP-XHTML-002",
+      "name": "Figure Structure Check",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true
     }
   ]
 }
