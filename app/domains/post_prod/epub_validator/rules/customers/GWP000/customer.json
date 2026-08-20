@@ -251,6 +251,13 @@
       "target_path": "OEBPS/Text",
       "file_name_pattern": "*.xhtml",
       "enabled": true
+    },
+    {
+      "id": "GWP-XHTML-003",
+      "name": "Table Structure Check",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true
     }
   ]
 }
