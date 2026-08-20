@@ -303,6 +303,13 @@
     },
     {
       "id": "GWP-CSS-003",
+      "name": "Font and Line Height Relative Unit Check",
+      "target_path": "OEBPS/Styles",
+      "file_name_pattern": "*.css",
+      "enabled": true
+    },
+    {
+      "id": "GWP-CSS-004",
       "name": "Font Size Check",
       "target_path": "OEBPS/Styles",
       "file_name_pattern": "*.css",
