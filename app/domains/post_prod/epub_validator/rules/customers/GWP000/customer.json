@@ -229,7 +229,11 @@
       "rule_config": {
         "min_width": 500,
         "max_width": 1000,
-        "exclude_patterns": ["icon", "header", "aside"]
+        "exclude_patterns": [
+          "icon",
+          "header",
+          "aside"
+        ]
       }
     },
     {
@@ -286,6 +290,13 @@
     {
       "id": "GWP-CSS-001",
       "name": "Inline CSS Check",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true
+    },
+    {
+      "id": "GWP-CSS-002",
+      "name": "Meta Viewport Check",
       "target_path": "OEBPS/Text",
       "file_name_pattern": "*.xhtml",
       "enabled": true

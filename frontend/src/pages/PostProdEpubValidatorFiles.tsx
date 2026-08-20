@@ -23,6 +23,7 @@ import {
   List,
   BookMarked,
   X as XIcon,
+  Type,
 } from 'lucide-react';
 import { XHTMLCard, xhtmlCardVariants } from '@/components/epub_validator/XHTMLCard';
 import { ValidationDetailModal } from '@/components/epub_validator/ValidationDetailModal';
@@ -222,7 +223,18 @@ export function PostProdEpubValidatorFiles() {
     [filesData],
   );
 
-  // 4) Other files (nav, content.opf, toc.ncx, container.xml, mimetype, etc.)
+  // 4) Fonts
+  const fontFiles = useMemo(
+    () => (filesData?.files ?? [])
+      .filter((f) => {
+        const name = f.file_name.toLowerCase();
+        return name.endsWith('.ttf') || name.endsWith('.otf') || name.endsWith('.woff') || name.endsWith('.woff2');
+      })
+      .sort((a, b) => naturalSort(a.file_name, b.file_name)),
+    [filesData],
+  );
+
+  // 5) Other files (nav, content.opf, toc.ncx, container.xml, mimetype, etc.)
   const otherFiles = useMemo(
     () => (filesData?.files ?? [])
       .filter((f) => {
@@ -230,7 +242,8 @@ export function PostProdEpubValidatorFiles() {
         const isXhtmlChapter = (name.endsWith('.xhtml') || name.endsWith('.html') || name.endsWith('.htm')) && !isNavFile(f.file_name, f.path);
         const isCss = name.endsWith('.css');
         const isImg = isImageFile(f.file_name, f.path);
-        return !isXhtmlChapter && !isCss && !isImg;
+        const isFont = name.endsWith('.ttf') || name.endsWith('.otf') || name.endsWith('.woff') || name.endsWith('.woff2');
+        return !isXhtmlChapter && !isCss && !isImg && !isFont;
       })
       .sort((a, b) => naturalSort(a.file_name, b.file_name)),
     [filesData],
@@ -591,7 +604,7 @@ export function PostProdEpubValidatorFiles() {
   const hasValidated = validationData !== null;
 
   // ── Category Tab & Status & Rule filters ─────────────────────────────────────
-  const [activeCategoryTab, setActiveCategoryTab] = useState<'chapters' | 'css' | 'images' | 'other' | 'all'>('chapters');
+  const [activeCategoryTab, setActiveCategoryTab] = useState<'chapters' | 'css' | 'images' | 'fonts' | 'other' | 'all'>('chapters');
   const [activeFilter, setActiveFilter] = useState<XHTMLFileStatus | null>(null);
   const [selectedRuleFilter, setSelectedRuleFilter] = useState<string | null>(null);
 
@@ -739,6 +752,16 @@ export function PostProdEpubValidatorFiles() {
     return imageFiles;
   }, [imageFiles, activeFilter, selectedRuleFilter, ruleMatchingFiles]);
 
+  const visibleFontFiles = useMemo(() => {
+    if (selectedRuleFilter && ruleMatchingFiles) {
+      return fontFiles.filter((f) => ruleMatchingFiles.has(f.file_name));
+    }
+    if (activeFilter) {
+      return fontFiles.filter((f) => getFileStatus(f.file_name) === activeFilter);
+    }
+    return fontFiles;
+  }, [fontFiles, activeFilter, selectedRuleFilter, ruleMatchingFiles]);
+
   const visibleOtherFiles = useMemo(() => {
     if (selectedRuleFilter && ruleMatchingFiles) {
       return otherFiles.filter((f) => ruleMatchingFiles.has(f.file_name));
@@ -749,7 +772,7 @@ export function PostProdEpubValidatorFiles() {
     return otherFiles;
   }, [otherFiles, activeFilter, selectedRuleFilter, ruleMatchingFiles, fileIssues]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const totalVisibleCount = visibleXhtmlFiles.length + visibleCssFiles.length + visibleImageFiles.length + visibleOtherFiles.length;
+  const totalVisibleCount = visibleXhtmlFiles.length + visibleCssFiles.length + visibleImageFiles.length + visibleFontFiles.length + visibleOtherFiles.length;
 
   // ── Export state ────────────────────────────────────────────────────────────
   const [isExporting, setIsExporting] = useState(false);
@@ -1662,6 +1685,29 @@ export function PostProdEpubValidatorFiles() {
                   </button>
 
                   <button
+                    onClick={() => setActiveCategoryTab('fonts')}
+                    className={cn(
+                      'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
+                      activeCategoryTab === 'fonts'
+                        ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 shadow-xs'
+                        : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                    )}
+                  >
+                    <Type className="w-4 h-4 text-indigo-500 shrink-0" />
+                    <span>Fonts</span>
+                    <span
+                      className={cn(
+                        'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold transition-colors',
+                        activeCategoryTab === 'fonts'
+                          ? 'bg-indigo-500/20 text-indigo-600 dark:text-indigo-400'
+                          : 'bg-indigo-500/10 text-indigo-600/80 dark:text-indigo-400/80',
+                      )}
+                    >
+                      {visibleFontFiles.length}
+                    </span>
+                  </button>
+
+                  <button
                     onClick={() => setActiveCategoryTab('other')}
                     className={cn(
                       'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
@@ -1878,7 +1924,59 @@ export function PostProdEpubValidatorFiles() {
                     </div>
                   )}
 
-                  {/* ── 4. Other files Tab View ────────────────────────────────── */}
+                  {/* ── 4. Fonts Tab View ────────────────────────────────── */}
+                  {(activeCategoryTab === 'fonts' || activeCategoryTab === 'all') && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Type className="w-4 h-4 text-indigo-500" />
+                          <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
+                            Fonts
+                          </h2>
+                          <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleFontFiles.length})</span>
+                        </div>
+                      </div>
+                      {visibleFontFiles.length === 0 ? (
+                        <p className="text-xs text-muted-foreground italic py-1">No font files in this section.</p>
+                      ) : (
+                        <motion.div
+                          className={cn(
+                            layoutMode === 'grid'
+                              ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
+                              : 'space-y-2.5',
+                          )}
+                          variants={containerVariants}
+                          initial="hidden"
+                          animate="show"
+                        >
+                          {visibleFontFiles.map((file, i) => {
+                            const status = getFileStatus(file.file_name);
+                            const agg = fileIssues.get(file.file_name);
+                            const canValidate = false; // Fonts typically aren't validated directly
+                            return (
+                              <motion.div key={`font-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
+                                <XHTMLCard
+                                  file={file}
+                                  variant="other"
+                                  layoutMode={layoutMode}
+                                  status={status}
+                                  errors={agg?.errors ?? 0}
+                                  warnings={agg?.warnings ?? 0}
+                                  isValidating={validatingFiles.has(file.file_name)}
+                                  onValidate={canValidate ? () => handleValidateFile(file.file_name) : undefined}
+                                  onOpen={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
+                                  onPreview={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
+                                  index={i}
+                                />
+                              </motion.div>
+                            );
+                          })}
+                        </motion.div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* ── 5. Other files Tab View ────────────────────────────────── */}
                   {(activeCategoryTab === 'other' || activeCategoryTab === 'all') && (
                     <div className="space-y-3">
                       <div className="flex items-center justify-between border-b border-border/60 pb-2">

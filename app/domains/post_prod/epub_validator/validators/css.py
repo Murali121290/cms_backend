@@ -199,3 +199,57 @@ def validate_gwp_inline_css(file_details, rule_config=None):
         issues.append(issue)
 
     return {"issues_count": len(issues), "issues": issues}
+
+@rule("GWP-CSS-002")
+def validate_meta_viewport(file_details, rule_config=None):
+    """GWP001: Include meta viewport on all pages."""
+    file_path = file_details["full_path"]
+    issues = []
+    
+    # We only want to run this check on XHTML/HTML files
+    if not file_path.lower().endswith(".xhtml") and not file_path.lower().endswith(".html"):
+        return {"issues_count": 0, "issues": []}
+    
+    try:
+        from bs4 import BeautifulSoup
+        with open(file_path, "r", encoding="utf-8") as f:
+            html_text = f.read()
+            soup = BeautifulSoup(html_text, "xml")
+    except Exception:
+        return {"issues_count": 0, "issues": []}
+
+    viewport_meta = soup.find("meta", attrs={"name": "viewport"})
+    expected_content = "width=device-width, initial-scale=1"
+    
+    if not viewport_meta or viewport_meta.get("content") != expected_content:
+        import re
+        # Find the <head> tag to attach the error to, or default to line 1
+        head_tag = soup.find("head")
+        line = 1
+        extract = "<head>"
+        
+        if head_tag:
+            line = getattr(head_tag, 'sourceline', 1)
+            extract_end = str(head_tag).find('>')
+            extract = str(head_tag)[:extract_end+1] if extract_end != -1 else "<head>"
+            
+            if not getattr(head_tag, 'sourceline', None):
+                masked_html = re.sub(r'<!--.*?-->', lambda m: ' ' * len(m.group(0)), html_text, flags=re.DOTALL)
+                idx = masked_html.find("<head")
+                if idx != -1:
+                    line = masked_html.count('\n', 0, idx) + 1
+                    raw_end = html_text.find('>', idx)
+                    if raw_end != -1:
+                        extract = html_text[idx:raw_end+1]
+
+        issue = {
+            "type": "missing_meta_viewport",
+            "message": 'Include meta viewport on all pages: <meta content="width=device-width, initial-scale=1" name="viewport"/>',
+            "category": "Error",
+            "file_path": file_details.get("relative_path"),
+            "extract": extract,
+            "line_number": line
+        }
+        issues.append(issue)
+
+    return {"issues_count": len(issues), "issues": issues}
