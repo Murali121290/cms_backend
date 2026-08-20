@@ -250,6 +250,7 @@ def validate_gwp_presentational_tables(file_details, rule_config=None):
             line, extract = get_element_info(table)
             issue = {
                 "type": "table_inside_figure",
+                "rule_name": "Table inside figure",
                 "message": "Do not use tables for presentational purposes that could be achieved with CSS (e.g. placing a table inside a <figure> for layout).",
                 "category": "Error",
                 "file_path": file_details.get("relative_path"),
@@ -261,7 +262,7 @@ def validate_gwp_presentational_tables(file_details, rule_config=None):
             line, extract = get_element_info(table)
             issue = {
                 "type": "presentational_table_warning",
-                "rule_name": rule_config.get("name", "Presentational Table Check") if rule_config else "Presentational Table Check",
+                "rule_name": "Presentational table check",
                 "message": "Table contains no header (<th>) elements. Do not use tables for presentational purposes (like layout) that could be achieved with CSS.",
                 "category": "Warning",
                 "file_path": file_details.get("relative_path"),
