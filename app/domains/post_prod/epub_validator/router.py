@@ -77,6 +77,10 @@ class SaveFileRequest(BaseModel):
     content: str
 
 
+class RenameFileRequest(BaseModel):
+    new_name: str
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # 1.  Project CRUD
 # ════════════════════════════════════════════════════════════════════════════
@@ -242,6 +246,42 @@ async def save_file_content(
         pass
 
     return {"status": True, "message": "File saved"}
+
+
+@router.post("/file-data/{folder_name}/{file_path:path}/rename")
+async def rename_file_content(
+    folder_name: str,
+    file_path: str,
+    body: RenameFileRequest,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    base = (Path(UPLOAD_DIR) / folder_name / EXTRACT_DIR / "epub").resolve()
+    target = (base / file_path).resolve()
+    
+    if not str(target).startswith(str(base)):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+        
+    new_target = (target.parent / body.new_name).resolve()
+    
+    if not str(new_target).startswith(str(target.parent)):
+        raise HTTPException(status_code=403, detail="Invalid new name")
+        
+    if new_target.exists() and str(new_target) != str(target):
+         raise HTTPException(status_code=409, detail="A file with the new name already exists")
+         
+    target.rename(new_target)
+
+    # Repack extracted files into .epub zip and save to output directory
+    try:
+        from .services.repack_service import repack_epub
+        await asyncio.to_thread(repack_epub, folder_name)
+    except Exception:
+        pass
+
+    return {"status": True, "message": "File renamed successfully"}
 
 
 

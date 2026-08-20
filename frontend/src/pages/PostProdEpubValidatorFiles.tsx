@@ -164,7 +164,7 @@ export function PostProdEpubValidatorFiles() {
   }, [project, projects, isLoadingProjects, isSessionLoading, viewer, navigate]);
 
   // ── Files from API ──────────────────────────────────────────────────────────
-  const { data: filesData, isLoading, isError } = useQuery({
+  const { data: filesData, isLoading, isError, refetch: refetchFiles } = useQuery({
     queryKey: ['epub-files', folderName],
     queryFn: () => getFiles(folderName),
     enabled: !!folderName,
@@ -847,6 +847,10 @@ export function PostProdEpubValidatorFiles() {
                 ? () => handleValidateFile(selectedFile.file_name)
                 : undefined
             }
+            onRenameSuccess={(newName) => {
+              refetchFiles();
+              setSelectedFile(prev => prev ? { ...prev, file_name: newName } : prev);
+            }}
           />
         )}
       </AnimatePresence>

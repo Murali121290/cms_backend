@@ -18,7 +18,7 @@
       "id": "URL003",
       "name": "URL Text Match Check",
       "target_path": "OEBPS/xhtml",
-      "enabled": false,
+      "enabled": true,
       "file_name_pattern": "*.xhtml"
     },
     {

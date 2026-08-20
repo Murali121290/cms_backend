@@ -124,6 +124,19 @@ export async function saveFileContent(
   }
 }
 
+export async function renameEpubFile(
+  folderName: string,
+  filePath: string,
+  newName: string,
+): Promise<void> {
+  const encoded = filePath.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
+  try {
+    await api.post(`/post-prod/epub-validator/file-data/${folderName}/${encoded}/rename`, { new_name: newName });
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to rename file'));
+  }
+}
+
 export async function validateFile(
   folderName: string,
   fileName: string,

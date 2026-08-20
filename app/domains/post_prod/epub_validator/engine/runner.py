@@ -112,7 +112,12 @@ def validate_epub(
             "chapter_filter": target_file,  # Pass chapter filter if validating single chapter
         }
         try:
-            result = function(book_details)
+            import inspect
+            sig = inspect.signature(function)
+            if "rule_config" in sig.parameters:
+                result = function(book_details, rule_config=rule)
+            else:
+                result = function(book_details)
         except Exception as e:  # noqa: BLE001
             result = {
                 "issues_count": 1,
@@ -123,6 +128,15 @@ def validate_epub(
                 }],
             }
         if not target_file:
+            from ..services.validate_service import _chapters_for_issue
+            unmapped_issues = [
+                i for i in result.get("issues", [])
+                if not _chapters_for_issue(i, asset_index)
+            ]
+            book_level_result = {
+                "issues_count": len(unmapped_issues),
+                "issues": unmapped_issues,
+            }
             report["files"].append(_entry(
                 rule, function, "", "[book-scope]",
                 {
@@ -131,7 +145,7 @@ def validate_epub(
                     "relative_path": "",
                     "folder_name": folder_name,
                 },
-                result, origin, customer_tag,
+                book_level_result, origin, customer_tag,
             ))
 
         for rel_path, chapter_issues in _group_chapter_issues(
@@ -178,7 +192,14 @@ def validate_epub(
                     "epub_root": epub_folder,
                     "file_path": relative_path,
                 }
-                result = function(file_details, rule_config=rule)
+                
+                import inspect
+                sig = inspect.signature(function)
+                if "rule_config" in sig.parameters:
+                    result = function(file_details, rule_config=rule)
+                else:
+                    result = function(file_details)
+                    
                 report["files"].append(_entry(
                     rule, function, target_path, file_pattern,
                     file_details, result, origin, customer_tag,
