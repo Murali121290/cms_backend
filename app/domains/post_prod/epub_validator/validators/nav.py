@@ -460,8 +460,8 @@ def validate_nav_xhtml(file_details, rule_config=None):
                 "line_number": line_num,
                 "extract": nav_text,
             })
-        # Case-sensitive mismatch
-        if nav_text != heading_text:
+        # True case mismatch (only triggers if the text is identical ignoring case)
+        elif nav_text != heading_text:
             issues.append({
                 "rule_name": "Heading Case Mismatch",
                 "type": "heading_case_mismatch",

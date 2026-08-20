@@ -151,6 +151,38 @@ function RuleRow({
   );
 }
 
+import { diffChars } from 'diff';
+
+// ─── Diff rendering helper ───────────────────────────────────────────────────
+
+function DiffText({ expected, actual, type }: { expected: string; actual: string; type: 'expected' | 'actual' }) {
+  if (!expected || !actual) {
+    return <span className={type === 'expected' ? 'text-emerald-800 dark:text-emerald-300' : 'text-red-800 dark:text-red-300'}>{type === 'expected' ? expected : actual}</span>;
+  }
+
+  const differences = diffChars(expected, actual);
+  
+  return (
+    <span className="font-mono leading-relaxed break-words">
+      {differences.map((part, i) => {
+        if (type === 'expected') {
+          if (part.added) return null;
+          if (part.removed) {
+            return <span key={i} className="bg-emerald-200 dark:bg-emerald-900/60 text-emerald-900 dark:text-emerald-100 font-bold px-0.5 rounded">{part.value}</span>;
+          }
+          return <span key={i} className="text-emerald-800 dark:text-emerald-300">{part.value}</span>;
+        } else {
+          if (part.removed) return null;
+          if (part.added) {
+            return <span key={i} className="bg-red-200 dark:bg-red-900/60 text-red-900 dark:text-red-100 font-bold px-0.5 rounded">{part.value}</span>;
+          }
+          return <span key={i} className="text-red-800 dark:text-red-300">{part.value}</span>;
+        }
+      })}
+    </span>
+  );
+}
+
 // ─── Issue row in right panel ────────────────────────────────────────────────
 
 function IssueRow({ issue, onClick }: { issue: DisplayIssue; onClick?: () => void }) {
@@ -227,13 +259,13 @@ function IssueRow({ issue, onClick }: { issue: DisplayIssue; onClick?: () => voi
           {issue.expected_text && (
             <div className="px-3 py-1.5 flex items-start gap-2 border-b border-inherit">
               <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 shrink-0 w-14 font-sans pt-0.5">Expected</span>
-              <span className="text-emerald-800 dark:text-emerald-300 break-words font-mono leading-relaxed">{issue.expected_text}</span>
+              <DiffText expected={issue.expected_text} actual={issue.actual_text || ''} type="expected" />
             </div>
           )}
           {issue.actual_text && (
             <div className="px-3 py-1.5 flex items-start gap-2">
               <span className="text-[10px] font-bold uppercase tracking-wider text-red-600 dark:text-red-400 shrink-0 w-14 font-sans pt-0.5">Actual</span>
-              <span className="text-red-800 dark:text-red-300 break-words font-mono leading-relaxed">{issue.actual_text}</span>
+              <DiffText expected={issue.expected_text || ''} actual={issue.actual_text} type="actual" />
             </div>
           )}
         </div>
