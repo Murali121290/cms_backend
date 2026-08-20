@@ -118,3 +118,84 @@ def validate_css_w3c(file_details, rule_config=None):
             })
 
     return {"issues_count": len(issues), "issues": issues}
+
+@rule("GWP-CSS-001")
+def validate_gwp_inline_css(file_details, rule_config=None):
+    """GWP000: Ensure CSS is in a separate file, not inline or embedded."""
+    file_path = file_details["full_path"]
+    issues = []
+    
+    # We only want to run this check on XHTML files, not CSS files
+    if not file_path.lower().endswith(".xhtml") and not file_path.lower().endswith(".html"):
+        return {"issues_count": 0, "issues": []}
+    
+    try:
+        from bs4 import BeautifulSoup
+        with open(file_path, "r", encoding="utf-8") as f:
+            html_text = f.read()
+            soup = BeautifulSoup(html_text, "xml")
+    except Exception:
+        return {"issues_count": 0, "issues": []}
+
+    def get_element_info(el):
+        line = getattr(el, 'sourceline', None)
+        s = str(el)
+        end = s.find('>')
+        extract = s[:end+1] if end != -1 else s
+        
+        if not line:
+            import re
+            masked_html = re.sub(r'<!--.*?-->', lambda m: ' ' * len(m.group(0)), html_text, flags=re.DOTALL)
+            all_tags = soup.find_all(el.name)
+            try:
+                tag_index = next(i for i, tag in enumerate(all_tags) if tag is el)
+                pattern = re.compile(rf"<{el.name}\b", re.IGNORECASE)
+                matches = list(pattern.finditer(masked_html))
+                if tag_index < len(matches):
+                    idx = matches[tag_index].start()
+                    line = masked_html.count('\n', 0, idx) + 1
+                    raw_end = html_text.find('>', idx)
+                    if raw_end != -1:
+                        extract = html_text[idx:raw_end+1]
+            except StopIteration:
+                pass
+                
+            if not line:
+                idx = masked_html.find(extract)
+                if idx != -1:
+                    line = masked_html.count('\n', 0, idx) + 1
+                        
+        if len(extract) > 150:
+            extract = extract[:150] + "..."
+        return line, extract
+
+    # Check for <style> tags
+    style_tags = soup.find_all("style")
+    for tag in style_tags:
+        line, extract = get_element_info(tag)
+        issue = {
+            "type": "embedded_style_tag",
+            "rule_name": "Embedded style tag",
+            "message": "CSS is in a separate file, not inline. Remove <style> tags. See http://kb.daisy.org/publishing/docs/html/separation.html",
+            "category": "Error",
+            "file_path": file_details.get("relative_path"),
+            "extract": extract
+        }
+        if line: issue["line_number"] = line
+        issues.append(issue)
+
+    # Check for inline style attributes
+    for tag in soup.find_all(style=True):
+        line, extract = get_element_info(tag)
+        issue = {
+            "type": "inline_style_attribute",
+            "rule_name": "Inline style attribute",
+            "message": "CSS is in a separate file, not inline. Remove 'style' attribute. See http://kb.daisy.org/publishing/docs/html/separation.html",
+            "category": "Error",
+            "file_path": file_details.get("relative_path"),
+            "extract": extract
+        }
+        if line: issue["line_number"] = line
+        issues.append(issue)
+
+    return {"issues_count": len(issues), "issues": issues}
