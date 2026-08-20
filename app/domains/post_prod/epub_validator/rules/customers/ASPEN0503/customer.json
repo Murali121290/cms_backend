@@ -62,6 +62,13 @@
       "file_name_pattern": "*.xhtml"
     },
     {
+      "id": "URL003",
+      "name": "URL Text Match Check",
+      "target_path": "OEBPS/xhtml",
+      "enabled": true,
+      "file_name_pattern": "*.xhtml"
+    },
+    {
       "id": "NAV001",
       "name": "NAV TOC Link Check",
       "target_path": "",

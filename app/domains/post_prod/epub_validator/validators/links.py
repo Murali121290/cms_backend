@@ -594,22 +594,30 @@ def validate_url_text_match(file_details, rule_config=None):
     issues = []
     with open(file_path, "r", encoding="utf-8") as f:
         soup = BeautifulSoup(f.read(), "html.parser")
-    links = soup.find_all("a", href=True, class_="url")
+    # Remove class_="url" requirement
+    links = soup.find_all("a", href=True)
     for link in links:
         href = link["href"].strip()
         text = link.get_text(strip=True)
         line_num = getattr(link, "sourceline", None)
-        if href != text:
-            issues.append({
-                "type": "url_text_mismatch",
-                "href": href,
-                "expected_text": href,
-                "actual_text": text,
-                "message": f"{f'Line {line_num}: ' if line_num else ''}Displayed URL text does not match href",
-                "category": "warning",
-                "line_number": line_num,
-                "extract": href,
-            })
+        
+        # Only validate if both href and text look like URLs (start with http, https, or www)
+        if href.startswith(("http://", "https://", "www.")) and text.lower().startswith(("http://", "https://", "www.")):
+            # Normalize by stripping http:// and https:// for the comparison
+            norm_href = href.replace("http://", "").replace("https://", "")
+            norm_text = text.replace("http://", "").replace("https://", "")
+            
+            if norm_href != norm_text:
+                issues.append({
+                    "type": "url_text_mismatch",
+                    "href": href,
+                    "expected_text": href,
+                    "actual_text": text,
+                    "message": f"{f'Line {line_num}: ' if line_num else ''}Displayed URL text does not match href",
+                    "category": "warning",
+                    "line_number": line_num,
+                    "extract": href,
+                })
     return {"issues_count": len(issues), "issues": issues}
 
 
