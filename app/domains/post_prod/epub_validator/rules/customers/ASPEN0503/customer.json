@@ -114,7 +114,10 @@
       "name": "Aspen: Cover image is 300 DPI",
       "target_path": "OEBPS/images",
       "file_name_pattern": "cover.jpg",
-      "enabled": true
+      "enabled": true,
+      "rule_config": {
+        "expected_dpi": 300
+      }
     },
     {
       "id": "ASP-COV-004",
@@ -377,14 +380,20 @@
       "enabled": false
     },
     {
-      "id": "ASP-IMG-005",
+      "id": "IMG-001",
       "name": "Aspen: All body images must be at least 300 DPI",
       "target_path": "OEBPS/images",
       "file_name_pattern": "*.jpg",
-      "enabled": true
+      "enabled": true,
+      "rule_config": {
+        "expected_dpi": 300,
+        "exclude_files": [
+          "cover.jpg"
+        ]
+      }
     },
     {
-      "id": "ASP-IMG-006",
+      "id": "ASP-IMG-005",
       "name": "Aspen: <img> should be center-aligned via class or inline style",
       "target_path": "OEBPS/xhtml",
       "file_name_pattern": "*.xhtml",

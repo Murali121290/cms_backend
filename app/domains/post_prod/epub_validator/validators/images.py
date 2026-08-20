@@ -150,131 +150,7 @@ def validate_image_dimensions(file_details, rule_config=None):
 
     return {"issues_count": len(issues), "issues": issues}
 
-
-_EXPECTED_BODY_DPI = 300
-
-
-@rule("ASP-IMG-005")
-def validate_body_image_dpi(file_details, rule_config=None):
-    """Every body image (not just the cover) must be at least 300 DPI."""
-    file_path = file_details.get("file_path", "")
-    full_path = file_details.get("full_path", "")
-
-    # Skip cover image - ASP-COV-003 handles cover DPI check
-    if os.path.basename(file_path).lower() == "cover.jpg":
-        return {"issues_count": 0, "issues": []}
-
-    if not full_path or not os.path.exists(full_path):
-        return {"issues_count": 0, "issues": []}
-
-    issues = []
-    try:
-        with Image.open(full_path) as img:
-            dpi = img.info.get("dpi")
-    except Exception:
-        return {"issues_count": 0, "issues": []}
-
-    if dpi is None:
-        return {"issues_count": 1, "issues": [{
-            "type": "image_dpi_unknown",
-            "message": "Image has no DPI metadata.",
-            "category": "Warning",
-            "file_path": file_path,
-        }]}
-
-    x_dpi, y_dpi = dpi[0], dpi[1]
-    if round(x_dpi) < _EXPECTED_BODY_DPI or round(y_dpi) < _EXPECTED_BODY_DPI:
-        return {"issues_count": 1, "issues": [{
-            "type": "image_low_dpi",
-            "message": f"Image is {x_dpi}x{y_dpi} DPI; required minimum is {_EXPECTED_BODY_DPI} DPI.",
-            "category": "Error",
-            "file_path": file_path,
-        }]}
-
-    return {"issues_count": 0, "issues": []}
-
-
-_CENTER_HINTS_RE = re.compile(r"(?:^|\s)(center|centered|center-image|figure-center|img-center)(?:\s|$)", re.IGNORECASE)
-
-
-def _css_center_declarations(epub: str) -> set[str]:
-    """Return CSS class names whose ruleset makes children center-aligned."""
-    centering_classes: set[str] = set()
-    for css_path in glob.glob(os.path.join(epub, "**", "*.css"), recursive=True):
-        try:
-            with open(css_path, "r", encoding="utf-8") as f:
-                css = f.read()
-        except Exception:  # noqa: BLE001
-            continue
-        for m in re.finditer(r"\.([\w-]+)\s*\{([^{}]*)\}", css):
-            cls = m.group(1)
-            body = m.group(2).lower()
-            if "text-align" in body and "center" in body:
-                centering_classes.add(cls)
-            elif "margin" in body and "auto" in body and "display" in body and "block" in body:
-                centering_classes.add(cls)
-    return centering_classes
-
-
-@rule("ASP-IMG-006")
-def validate_image_center_alignment(file_details, rule_config=None):
-    """Body <img> elements should be center-aligned via a class or inline style,
-    or wrapped in a <figure>/<div> whose class centers content.
-    """
-    with open(file_details["full_path"], "r", encoding="utf-8") as f:
-        soup = BeautifulSoup(f.read(), "html.parser")
-
-    epub = file_details.get("epub_root")
-    if not epub:
-        # walk up to find EPUB root (contains OEBPS or META-INF)
-        p = file_details["full_path"]
-        for _ in range(8):
-            p = os.path.dirname(p)
-            if os.path.isdir(os.path.join(p, "META-INF")) or os.path.basename(p).lower() == "epub":
-                epub = p if os.path.isdir(os.path.join(p, "META-INF")) else os.path.dirname(p)
-                break
-    css_centered_classes = _css_center_declarations(epub) if epub else set()
-
-    def _is_centered(el) -> bool:
-        classes = el.get("class") or []
-        if any(_CENTER_HINTS_RE.search(c) for c in classes):
-            return True
-        if any(c in css_centered_classes for c in classes):
-            return True
-        style = (el.get("style") or "").lower().replace(" ", "")
-        if "text-align:center" in style:
-            return True
-        if "margin:0auto" in style or "margin:auto" in style:
-            return True
-        return False
-
-    issues = []
-    for img in soup.find_all("img"):
-        if _is_centered(img):
-            continue
-        parent = img.parent
-        centered = False
-        while parent is not None and parent.name != "body":
-            if _is_centered(parent):
-                centered = True
-                break
-            parent = parent.parent
-        if not centered:
-            src = img.get("src", "")
-            issues.append({
-                "type": "image_not_centered",
-                "message": (
-                    f"<img src='{src}'> is not center-aligned via class or inline style. "
-                    "Aspen convention is center placement."
-                ),
-                "category": "Warning",
-                "href": src,
-            })
-    return {"issues_count": len(issues), "issues": issues}
-
-
 _LONG_ALT_THRESHOLD = 150
-
 
 @rule("ASP-IMG-004")
 def validate_long_alt_hidden(file_details, rule_config=None):
@@ -335,6 +211,84 @@ def validate_long_alt_hidden(file_details, rule_config=None):
     return {"issues_count": len(issues), "issues": issues}
 
 
+_CENTER_HINTS_RE = re.compile(r"(?:^|\s)(center|centered|center-image|figure-center|img-center)(?:\s|$)", re.IGNORECASE)
+
+
+def _css_center_declarations(epub: str) -> set[str]:
+    """Return CSS class names whose ruleset makes children center-aligned."""
+    centering_classes: set[str] = set()
+    for css_path in glob.glob(os.path.join(epub, "**", "*.css"), recursive=True):
+        try:
+            with open(css_path, "r", encoding="utf-8") as f:
+                css = f.read()
+        except Exception:  # noqa: BLE001
+            continue
+        for m in re.finditer(r"\.([\w-]+)\s*\{([^{}]*)\}", css):
+            cls = m.group(1)
+            body = m.group(2).lower()
+            if "text-align" in body and "center" in body:
+                centering_classes.add(cls)
+            elif "margin" in body and "auto" in body and "display" in body and "block" in body:
+                centering_classes.add(cls)
+    return centering_classes
+
+
+@rule("ASP-IMG-005")
+def validate_image_center_alignment(file_details, rule_config=None):
+    """Body <img> elements should be center-aligned via a class or inline style,
+    or wrapped in a <figure>/<div> whose class centers content.
+    """
+    with open(file_details["full_path"], "r", encoding="utf-8") as f:
+        soup = BeautifulSoup(f.read(), "html.parser")
+
+    epub = file_details.get("epub_root")
+    if not epub:
+        # walk up to find EPUB root (contains OEBPS or META-INF)
+        p = file_details["full_path"]
+        for _ in range(8):
+            p = os.path.dirname(p)
+            if os.path.isdir(os.path.join(p, "META-INF")) or os.path.basename(p).lower() == "epub":
+                epub = p if os.path.isdir(os.path.join(p, "META-INF")) else os.path.dirname(p)
+                break
+    css_centered_classes = _css_center_declarations(epub) if epub else set()
+
+    def _is_centered(el) -> bool:
+        classes = el.get("class") or []
+        if any(_CENTER_HINTS_RE.search(c) for c in classes):
+            return True
+        if any(c in css_centered_classes for c in classes):
+            return True
+        style = (el.get("style") or "").lower().replace(" ", "")
+        if "text-align:center" in style:
+            return True
+        if "margin:0auto" in style or "margin:auto" in style:
+            return True
+        return False
+
+    issues = []
+    for img in soup.find_all("img"):
+        if _is_centered(img):
+            continue
+        parent = img.parent
+        centered = False
+        while parent is not None and parent.name != "body":
+            if _is_centered(parent):
+                centered = True
+                break
+            parent = parent.parent
+        if not centered:
+            src = img.get("src", "")
+            issues.append({
+                "type": "image_not_centered",
+                "message": (
+                    f"<img src='{src}'> is not center-aligned via class or inline style. "
+                    "Aspen convention is center placement."
+                ),
+                "category": "Warning",
+                "href": src,
+            })
+    return {"issues_count": len(issues), "issues": issues}
+
 @rule("GWP-IMG-001")
 def validate_gwp_image_filename_format(file_details, rule_config=None):
     """GWP000: Image file name format: Chapter and figure should be separated by a dash. Do not use a period."""
@@ -351,3 +305,125 @@ def validate_gwp_image_filename_format(file_details, rule_config=None):
             "file_path": file_path,
         })
     return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("IMG-001")
+def validate_body_image_dpi(file_details, rule_config=None):
+    """Every body image (not just the cover) must be at least 300 DPI."""
+    file_path = file_details.get("file_path", "")
+    full_path = file_details.get("full_path", "")
+
+    expected_dpi = None
+    exclude_files = []
+
+    if rule_config and "rule_config" in rule_config:
+        config = rule_config["rule_config"]
+        expected_dpi = config.get("expected_dpi")
+        if "exclude_files" in config:
+            exclude_files = [f.lower() for f in config["exclude_files"]]
+
+    if expected_dpi is None:
+        return {"issues_count": 1, "issues": [{
+            "type": "rule_configuration_error",
+            "message": "Rule configuration is missing 'expected_dpi'. Please configure it in customer.json.",
+            "category": "Error",
+            "file_path": file_path,
+        }]}
+
+    # Skip excluded files
+    if os.path.basename(file_path).lower() in exclude_files:
+        return {"issues_count": 0, "issues": []}
+
+    if not full_path or not os.path.exists(full_path):
+        return {"issues_count": 0, "issues": []}
+
+    issues = []
+    try:
+        with Image.open(full_path) as img:
+            dpi = img.info.get("dpi")
+    except Exception:
+        return {"issues_count": 0, "issues": []}
+
+    if dpi is None:
+        return {"issues_count": 1, "issues": [{
+            "type": "image_dpi_unknown",
+            "message": f"Image has no DPI metadata; cannot confirm {expected_dpi} DPI.",
+            "category": "Warning",
+            "file_path": file_path,
+        }]}
+
+    x_dpi, y_dpi = dpi[0], dpi[1]
+    if round(x_dpi) < expected_dpi or round(y_dpi) < expected_dpi:
+        return {"issues_count": 1, "issues": [{
+            "type": "image_low_dpi",
+            "message": f"Image is {x_dpi}x{y_dpi} DPI; required minimum is {expected_dpi} DPI.",
+            "category": "Error",
+            "file_path": file_path,
+        }]}
+
+    return {"issues_count": 0, "issues": []}
+
+@rule("IMG-002")
+def validate_image_width(file_details, rule_config=None):
+    """Images should have a width between min_width and max_width, excluding icons/headers/asides."""
+    file_path = file_details.get("file_path", "")
+    full_path = file_details.get("full_path", "")
+
+    min_width = None
+    max_width = None
+    exclude_files = []
+    exclude_patterns = []
+
+    if rule_config and "rule_config" in rule_config:
+        config = rule_config["rule_config"]
+        min_width = config.get("min_width")
+        max_width = config.get("max_width")
+        if "exclude_files" in config:
+            exclude_files = [f.lower() for f in config["exclude_files"]]
+        if "exclude_patterns" in config:
+            exclude_patterns = [p.lower() for p in config["exclude_patterns"]]
+
+    if min_width is None or max_width is None:
+        return {"issues_count": 1, "issues": [{
+            "type": "rule_configuration_error",
+            "message": "Rule configuration is missing 'min_width' or 'max_width'. Please configure it in customer.json.",
+            "category": "Error",
+            "file_path": file_path,
+        }]}
+
+    filename_lower = os.path.basename(file_path).lower()
+    
+    # Check exclusions
+    if filename_lower in exclude_files:
+        return {"issues_count": 0, "issues": []}
+        
+    for pattern in exclude_patterns:
+        if pattern in filename_lower:
+             return {"issues_count": 0, "issues": []}
+
+    if not full_path or not os.path.exists(full_path):
+        return {"issues_count": 0, "issues": []}
+
+    issues = []
+    try:
+        with Image.open(full_path) as img:
+            w, _h = img.size
+            if w < min_width:
+                issues.append({
+                    "type": "image_width_too_small",
+                    "message": f"Image width is {w}px (less than recommended {min_width}px). Content may appear unclear.",
+                    "category": "Warning",
+                    "file_path": file_path,
+                })
+            elif w > max_width:
+                issues.append({
+                    "type": "image_width_too_large",
+                    "message": f"Image width is {w}px (greater than recommended {max_width}px). May lead to longer load times.",
+                    "category": "Warning",
+                    "file_path": file_path,
+                })
+    except Exception:
+        pass
+
+    return {"issues_count": len(issues), "issues": issues}
+

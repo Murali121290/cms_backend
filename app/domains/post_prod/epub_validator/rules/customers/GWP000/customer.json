@@ -128,7 +128,10 @@
             "expected_role": "doc-toc"
           },
           {
-            "patterns": ["chapter", "ch"],
+            "patterns": [
+              "chapter",
+              "ch"
+            ],
             "expected_body": "bodymatter",
             "expected_tag": "section",
             "expected_epub_type": "chapter",
@@ -206,6 +209,28 @@
       "target_path": "OEBPS/Images",
       "file_name_pattern": "*.*",
       "enabled": true
+    },
+    {
+      "id": "IMG-001",
+      "name": "Image DPI Check",
+      "target_path": "OEBPS/Images",
+      "file_name_pattern": "*.*",
+      "enabled": true,
+      "rule_config": {
+        "expected_dpi": 150
+      }
+    },
+    {
+      "id": "IMG-002",
+      "name": "Image Width Check",
+      "target_path": "OEBPS/Images",
+      "file_name_pattern": "*.*",
+      "enabled": true,
+      "rule_config": {
+        "min_width": 500,
+        "max_width": 1000,
+        "exclude_patterns": ["icon", "header", "aside"]
+      }
     }
   ]
 }

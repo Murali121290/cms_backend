@@ -720,20 +720,24 @@ export function PostProdEpubValidatorFiles() {
   }, [xhtmlFiles, activeFilter, selectedRuleFilter, ruleMatchingFiles, fileIssues]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const visibleCssFiles = useMemo(() => {
-    if (selectedRuleFilter) return [];
+    if (selectedRuleFilter && ruleMatchingFiles) {
+      return cssFiles.filter((f) => ruleMatchingFiles.has(f.file_name));
+    }
     if (activeFilter) {
       return cssFiles.filter((f) => getFileStatus(f.file_name) === activeFilter);
     }
     return cssFiles;
-  }, [cssFiles, activeFilter, selectedRuleFilter]);
+  }, [cssFiles, activeFilter, selectedRuleFilter, ruleMatchingFiles]);
 
   const visibleImageFiles = useMemo(() => {
-    if (selectedRuleFilter) return [];
+    if (selectedRuleFilter && ruleMatchingFiles) {
+      return imageFiles.filter((f) => ruleMatchingFiles.has(f.file_name));
+    }
     if (activeFilter) {
       return imageFiles.filter((f) => getFileStatus(f.file_name) === activeFilter);
     }
     return imageFiles;
-  }, [imageFiles, activeFilter, selectedRuleFilter]);
+  }, [imageFiles, activeFilter, selectedRuleFilter, ruleMatchingFiles]);
 
   const visibleOtherFiles = useMemo(() => {
     if (selectedRuleFilter && ruleMatchingFiles) {
