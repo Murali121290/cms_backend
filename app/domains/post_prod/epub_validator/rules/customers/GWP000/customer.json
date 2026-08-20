@@ -258,6 +258,30 @@
       "target_path": "OEBPS/Text",
       "file_name_pattern": "*.xhtml",
       "enabled": true
+    },
+    {
+      "id": "GWP-XHTML-004",
+      "name": "Table Column Count Check",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true,
+      "rule_config": {
+        "max_columns": 4
+      }
+    },
+    {
+      "id": "GWP-XHTML-005",
+      "name": "Pagebreak Formatting Check",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true
+    },
+    {
+      "id": "GWP-XHTML-006",
+      "name": "Presentational Table Check",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true
     }
   ]
 }

@@ -679,3 +679,87 @@ def validate_gwp_introduction_role(file_details, rule_config=None):
                     issues.append(issue)
 
     return {"issues_count": len(issues), "issues": issues}
+
+@rule("GWP-XHTML-005")
+def validate_gwp_pagebreak_placement(file_details, rule_config=None):
+    """GWP000: Ensure pagebreak spans are not inside heading tags and have up-to-date formatting."""
+    file_path = file_details["full_path"]
+    issues = []
+    
+    try:
+        from bs4 import BeautifulSoup
+        with open(file_path, "r", encoding="utf-8") as f:
+            html_text = f.read()
+            soup = BeautifulSoup(html_text, "xml")
+    except Exception:
+        return {"issues_count": 0, "issues": []}
+
+    def get_element_info(el):
+        line = getattr(el, 'sourceline', None)
+        s = str(el)
+        end = s.find('>')
+        extract = s[:end+1] if end != -1 else s
+        
+        if not line:
+            import re
+            masked_html = re.sub(r'<!--.*?-->', lambda m: ' ' * len(m.group(0)), html_text, flags=re.DOTALL)
+            all_tags = soup.find_all(el.name)
+            try:
+                tag_index = next(i for i, tag in enumerate(all_tags) if tag is el)
+                pattern = re.compile(rf"<{el.name}\b", re.IGNORECASE)
+                matches = list(pattern.finditer(masked_html))
+                if tag_index < len(matches):
+                    idx = matches[tag_index].start()
+                    line = masked_html.count('\n', 0, idx) + 1
+                    raw_end = html_text.find('>', idx)
+                    if raw_end != -1:
+                        extract = html_text[idx:raw_end+1]
+            except StopIteration:
+                pass
+                
+            if not line:
+                idx = masked_html.find(extract)
+                if idx != -1:
+                    line = masked_html.count('\n', 0, idx) + 1
+                        
+        if len(extract) > 150:
+            extract = extract[:150] + "..."
+        return line, extract
+
+    pagebreaks = soup.find_all(lambda tag: tag.name == "span" and (tag.get("role") == "doc-pagebreak" or tag.get("epub:type") == "pagebreak"))
+    
+    for pb in pagebreaks:
+        heading_parent = pb.find_parent(["h1", "h2", "h3", "h4", "h5", "h6"])
+        if heading_parent:
+            line, extract = get_element_info(pb)
+            issue = {
+                "type": "pagebreak_inside_heading",
+                "rule_name": "Pagebreak inside heading check",
+                "message": f"Pagebreak spans must not be placed inside heading tags (<{heading_parent.name}>).",
+                "category": "Error",
+                "file_path": file_details.get("relative_path"),
+                "extract": extract
+            }
+            if line: issue["line_number"] = line
+            issues.append(issue)
+            
+        # Check for up-to-date formatting attributes
+        missing_attrs = []
+        for attr in ["aria-labelledby", "id", "epub:type", "role"]:
+            if not pb.get(attr):
+                missing_attrs.append(attr)
+                
+        if missing_attrs or pb.get("epub:type") != "pagebreak" or pb.get("role") != "doc-pagebreak":
+            line, extract = get_element_info(pb)
+            issue = {
+                "type": "pagebreak_invalid_formatting",
+                "rule_name": "Pagebreak invalid formatting",
+                "message": "Pagebreak span is missing up-to-date formatting (requires aria-labelledby, id, epub:type=\"pagebreak\", and role=\"doc-pagebreak\").",
+                "category": "Error",
+                "file_path": file_details.get("relative_path"),
+                "extract": extract
+            }
+            if line: issue["line_number"] = line
+            issues.append(issue)
+
+    return {"issues_count": len(issues), "issues": issues}
