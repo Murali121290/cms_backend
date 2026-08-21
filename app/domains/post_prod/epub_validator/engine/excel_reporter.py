@@ -52,13 +52,17 @@ def generate_gwp_report(
     current_row = 3
     
     # Map rule_id -> issues from validation_result
-    # The result has "files": [{ "rule_id": "...", "result": {"issues_count": N, "issues": [...] } }]
+    # The result has "files": [{ "rule_id": "...", "rule_name": "...", "result": {"issues_count": N, "issues": [...] } }]
     rule_issues = {}
+    rule_names = {}
     for f in validation_result.get("files", []):
         rid = f.get("rule_id")
+        rname = f.get("rule_name")
         res = f.get("result", {})
         issues = res.get("issues", [])
         if rid:
+            if rname:
+                rule_names[rid] = rname
             if rid not in rule_issues:
                 rule_issues[rid] = []
             
@@ -107,7 +111,14 @@ def generate_gwp_report(
             notes = "\n\n".join(all_issues)
             return "Fail", notes
         else:
-            return "Pass", ""
+            passed_names = []
+            for rid in rule_ids:
+                if rid in rule_names:
+                    passed_names.append(f"{rule_names[rid]}")
+                else:
+                    passed_names.append(rid)
+            notes = "Passed checks:\n- " + "\n- ".join(passed_names)
+            return "Pass", notes
 
     # Build the rows
     for category in template.get("structure", []):

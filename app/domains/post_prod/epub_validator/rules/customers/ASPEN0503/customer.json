@@ -187,13 +187,16 @@
       }
     },
     {
-      "id": "ASP-META-002",
-      "name": "Aspen: OPF dc:rights match Copyright string",
+      "id": "COM-META-002",
+      "name": "OPF dc:rights match Copyright string",
       "target_path": "OEBPS",
       "file_name_pattern": [
         "*.opf"
       ],
-      "enabled": true
+      "enabled": true,
+      "rule_config": {
+        "expected_rights_pattern": "copyright\\s*©\\s*\\d{4}\\s+aspen\\s+publishing\\.?\\s+all\\s+rights\\s+reserved\\.?"
+      }
     },
     {
       "id": "ASP-META-003",

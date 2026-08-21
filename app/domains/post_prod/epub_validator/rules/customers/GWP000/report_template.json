@@ -515,7 +515,7 @@
           "default_notes": "",
           "resources": "",
           "rule_ids": [
-            "COM-META-001"
+            "COM-META-003"
           ]
         },
         {
@@ -523,21 +523,34 @@
           "default_status": "Yet to check",
           "default_notes": "",
           "resources": "<meta property=\"pageBreakSource\">urn:isbn:TEXTBOOK ISBN</meta>\n<meta property=\"schema:accessMode\">textual</meta>\n<meta property=\"schema:accessMode\">visual</meta>\n<meta property=\"schema:accessibilityFeature\">MathML</meta>\n<meta property=\"schema:accessModeSufficient\">textual,visual</meta>\n<meta property=\"schema:accessModeSufficient\">textual</meta>\n<meta property=\"schema:accessibilityFeature\">readingOrder</meta>\n<meta property=\"schema:accessibilityFeature\">structuralNavigation</meta>\n<meta property=\"schema:accessibilityFeature\">ARIA</meta>\n<meta property=\"schema:accessibilityFeature\">tableOfContents</meta>\n<meta property=\"schema:accessibilityFeature\">pageBreakMarkers</meta>\n<meta property=\"schema:accessibilityFeature\">pageNavigation</meta>\n<meta property=\"schema:accessibilityFeature\">displayTransformability</meta>\n<meta property=\"schema:accessibilityFeature\">describedMath</meta>\n<meta property=\"schema:accessibilityFeature\">index</meta>\n<meta property=\"schema:accessibilitySummary\">A very complex book with a lot of images, tables, list items and complex formatting, which are defined with accessible structural markup. There are multiple linked references to various figures in this EPUB however there are no back links provided. There is a page list and embedded page-breaks within this EPUB to aid in the ability to go to a specific page. Additionally, blank pages have been removed from the EPUB while their page break labels have been left in, for reasons of structural flow.</meta> \n<meta property=\"schema:accessibilityHazard\">none</meta>\n<meta property=\"schema:accessibilityFeature\">alternativeText</meta>\n<meta property=\"schema:accessibilityFeature\">longDescription</meta>\n\nNote: If the product does not include MathML, remove any metadata related to MathML.",
-          "rule_ids": []
+          "rule_ids": [
+            "COM-META-005",
+            "COM-META-006",
+            "COM-META-007",
+            "COM-META-008",
+            "COM-META-009",
+            "COM-META-010"
+          ]
         },
         {
           "name": "Required accessibility conformance metadata",
           "default_status": "Yet to check",
           "default_notes": "",
           "resources": "<meta property=\"dcterms:conformsTo\" id=\"conf\">EPUB Accessibility 1.1 - WCAG 2.2 Level AA</meta>\n<meta property=\"a11y:certifiedBy\" refines=\"#conf\" id=\"certifier\">Benetech</meta>\n<meta property=\"a11y:certifierCredential\" refines=\"#certifier\">https://bornaccessible.org/certification/gca-credential/</meta>",
-          "rule_ids": []
+          "rule_ids": [
+            "COM-META-011",
+            "COM-META-012",
+            "COM-META-013"
+          ]
         },
         {
           "name": "linear=\"no\" included on itemref for Alt.xhtml file",
           "default_status": "Yet to check",
           "default_notes": "",
           "resources": "",
-          "rule_ids": []
+          "rule_ids": [
+            "COM-SPINE-001"
+          ]
         },
         {
           "name": "epub:type=\"toc\" in the navigation",

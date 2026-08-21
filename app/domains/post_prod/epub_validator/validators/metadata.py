@@ -51,7 +51,15 @@ def _find_line(lines: list[str], search_str: str) -> int | None:
 @rule("COM-META-001")
 def validate_publisher_name(book_details, rule_config=None):
     """<dc:publisher> must equal expected publisher from config."""
-    expected_publisher = (rule_config or {}).get("expected_publisher", "Aspen Publishing")
+    config_dict = (rule_config or {}).get("rule_config", {})
+    expected_publisher = config_dict.get("expected_publisher")
+    if not expected_publisher:
+        return {"issues_count": 1, "issues": [{
+            "type": "configuration_error",
+            "message": "Rule configuration missing: 'expected_publisher' is required",
+            "category": "Error",
+            "extract": "",
+        }]}
     soup, opf_path, lines = _load_opf_info(book_details)
     if soup is None:
         return {"issues_count": 1, "issues": [{
@@ -81,9 +89,18 @@ def validate_publisher_name(book_details, rule_config=None):
     return {"issues_count": 0, "issues": []}
 
 
-@rule("ASP-META-002")
+@rule("COM-META-002")
 def validate_rights_string(book_details, rule_config=None):
-    """<dc:rights> must match 'Copyright © YYYY Aspen Publishing. All Rights Reserved.'."""
+    """<dc:rights> must match expected pattern from config."""
+    config_dict = (rule_config or {}).get("rule_config", {})
+    expected_pattern = config_dict.get("expected_rights_pattern")
+    if not expected_pattern:
+        return {"issues_count": 1, "issues": [{
+            "type": "configuration_error",
+            "message": "Rule configuration missing: 'expected_rights_pattern' is required",
+            "category": "Error",
+            "extract": "",
+        }]}
     soup, opf_path, lines = _load_opf_info(book_details)
     if soup is None:
         return {"issues_count": 0, "issues": []}
@@ -97,11 +114,11 @@ def validate_rights_string(book_details, rule_config=None):
             "extract": "<metadata",
         }]}
     value = rights.get_text(strip=True)
-    if not _RIGHTS_RE.search(value):
+    if not re.search(expected_pattern, value, re.IGNORECASE):
         return {"issues_count": 1, "issues": [{
             "type": "rights_pattern_mismatch",
             "message": (
-                f"<dc:rights> does not match expected Aspen pattern 'Copyright © YYYY Aspen Publishing. All Rights Reserved.'. Found: '{value}'"
+                f"<dc:rights> does not match expected pattern. Found: '{value}'"
             ),
             "category": "Error",
             "line_number": _find_line(lines, "dc:rights"),
@@ -194,6 +211,358 @@ def _is_title_case(value: str) -> bool:
         if not core[0].isupper():
             return False
     return True
+
+
+
+
+def _check_meta_values_com(soup, lines, prop, expected_values):
+    issues = []
+    found_values = {
+        m.get_text(strip=True)
+        for m in soup.find_all("meta", attrs={"property": prop})
+    }
+    missing = expected_values - found_values
+    if missing:
+        issues.append({
+            "type": f"missing_{prop.replace(':', '_')}",
+            "message": f"Missing required {prop} values: {', '.join(missing)}",
+            "category": "Error",
+            "line_number": _find_line(lines, "<metadata"),
+            "extract": prop,
+        })
+    return issues
+
+
+@rule("COM-META-005")
+def validate_page_break_source(book_details, rule_config=None):
+    """Validate pageBreakSource based on configuration."""
+    config_dict = (rule_config or {}).get("rule_config", {})
+    required_prefix = config_dict.get("required_prefix")
+    if not required_prefix:
+        return {"issues_count": 1, "issues": [{"type": "configuration_error", "message": "Missing required_prefix in rule_config for COM-META-005.", "category": "Error", "line_number": 0}]}
+
+    soup, opf_path, lines = _load_opf_info(book_details)
+    if soup is None:
+        return {"issues_count": 0, "issues": []}
+    
+    issues = []
+    pb_source = soup.find("meta", attrs={"property": "pageBreakSource"})
+    if pb_source is None:
+        issues.append({
+            "type": "missing_pageBreakSource",
+            "message": "Missing required pageBreakSource",
+            "category": "Error",
+            "line_number": _find_line(lines, "<metadata"),
+            "extract": "pageBreakSource",
+        })
+    elif not pb_source.get_text(strip=True).startswith(required_prefix):
+        issues.append({
+            "type": "invalid_pageBreakSource",
+            "message": f"pageBreakSource should start with '{required_prefix}'. Found: '{pb_source.get_text(strip=True)}'",
+            "category": "Error",
+            "line_number": _find_line(lines, "pageBreakSource"),
+            "extract": pb_source.get_text(strip=True),
+        })
+
+    return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("COM-META-006")
+def validate_access_mode(book_details, rule_config=None):
+    """Validate schema:accessMode requirements based on configuration."""
+    config_dict = (rule_config or {}).get("rule_config", {})
+    expected_values = set(config_dict.get("expected_values", []))
+    if not expected_values:
+        return {"issues_count": 1, "issues": [{"type": "configuration_error", "message": "Missing expected_values in rule_config for COM-META-006.", "category": "Error", "line_number": 0}]}
+
+    soup, opf_path, lines = _load_opf_info(book_details)
+    if soup is None:
+        return {"issues_count": 0, "issues": []}
+    issues = _check_meta_values_com(soup, lines, "schema:accessMode", expected_values)
+    return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("COM-META-007")
+def validate_access_mode_sufficient(book_details, rule_config=None):
+    """Validate schema:accessModeSufficient requirements based on configuration."""
+    config_dict = (rule_config or {}).get("rule_config", {})
+    expected_values = set(config_dict.get("expected_values", []))
+    if not expected_values:
+        return {"issues_count": 1, "issues": [{"type": "configuration_error", "message": "Missing expected_values in rule_config for COM-META-007.", "category": "Error", "line_number": 0}]}
+
+    soup, opf_path, lines = _load_opf_info(book_details)
+    if soup is None:
+        return {"issues_count": 0, "issues": []}
+    issues = _check_meta_values_com(soup, lines, "schema:accessModeSufficient", expected_values)
+    return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("COM-META-008")
+def validate_accessibility_feature(book_details, rule_config=None):
+    """Validate schema:accessibilityFeature requirements based on configuration."""
+    config_dict = (rule_config or {}).get("rule_config", {})
+    expected_values = set(config_dict.get("expected_values", []))
+    conditional_mathml_values = set(config_dict.get("conditional_mathml_values", []))
+    
+    if not expected_values:
+        return {"issues_count": 1, "issues": [{"type": "configuration_error", "message": "Missing expected_values in rule_config for COM-META-008.", "category": "Error", "line_number": 0}]}
+
+    soup, opf_path, lines = _load_opf_info(book_details)
+    if soup is None:
+        return {"issues_count": 0, "issues": []}
+
+    has_mathml = soup.find("item", attrs={"properties": lambda x: x and "mathml" in x.split()}) is not None
+    required_features = set(expected_values)
+    if has_mathml:
+        required_features.update(conditional_mathml_values)
+
+    issues = _check_meta_values_com(soup, lines, "schema:accessibilityFeature", required_features)
+    return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("COM-META-009")
+def validate_accessibility_summary(book_details, rule_config=None):
+    """Validate schema:accessibilitySummary requirements based on configuration."""
+    config_dict = (rule_config or {}).get("rule_config", {})
+    expected_summary = config_dict.get("expected_summary")
+    is_required = config_dict.get("is_required", True)
+
+    if not expected_summary:
+        return {"issues_count": 1, "issues": [{"type": "configuration_error", "message": "Missing expected_summary in rule_config for COM-META-009.", "category": "Error", "line_number": 0}]}
+
+    soup, opf_path, lines = _load_opf_info(book_details)
+    if soup is None:
+        return {"issues_count": 0, "issues": []}
+
+    issues = []
+    summary = soup.find("meta", attrs={"property": "schema:accessibilitySummary"})
+    if summary is None:
+        if is_required:
+            issues.append({
+                "type": "missing_accessibilitySummary",
+                "message": "Missing required schema:accessibilitySummary",
+                "category": "Error",
+                "line_number": _find_line(lines, "<metadata"),
+                "extract": "schema:accessibilitySummary",
+            })
+    else:
+        if summary.get_text(strip=True) != expected_summary:
+            issues.append({
+                "type": "invalid_accessibilitySummary",
+                "message": f"schema:accessibilitySummary does not match the exact expected string in configuration.",
+                "category": "Warning",
+                "line_number": _find_line(lines, "schema:accessibilitySummary"),
+                "extract": summary.get_text(strip=True),
+            })
+    return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("COM-META-010")
+def validate_accessibility_hazard(book_details, rule_config=None):
+    """Validate schema:accessibilityHazard requirements based on configuration."""
+    config_dict = (rule_config or {}).get("rule_config", {})
+    expected_values = set(config_dict.get("expected_values", []))
+
+    if not expected_values:
+        return {"issues_count": 1, "issues": [{"type": "configuration_error", "message": "Missing expected_values in rule_config for COM-META-010.", "category": "Error", "line_number": 0}]}
+
+    soup, opf_path, lines = _load_opf_info(book_details)
+    if soup is None:
+        return {"issues_count": 0, "issues": []}
+
+    issues = _check_meta_values_com(soup, lines, "schema:accessibilityHazard", expected_values)
+    return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("COM-META-011")
+def validate_conforms_to(book_details, rule_config=None):
+    """Validate dcterms:conformsTo metadata."""
+    config_dict = (rule_config or {}).get("rule_config", {})
+    expected_text = config_dict.get("expected_text")
+    if not expected_text:
+        return {"issues_count": 1, "issues": [{"type": "configuration_error", "message": "Missing expected_text in rule_config for COM-META-011.", "category": "Error", "line_number": 0}]}
+
+    soup, opf_path, lines = _load_opf_info(book_details)
+    if soup is None:
+        return {"issues_count": 0, "issues": []}
+
+    issues = []
+    tag = soup.find("meta", attrs={"property": "dcterms:conformsTo"})
+    if not tag:
+        issues.append({
+            "type": "missing_conformsTo",
+            "message": "Missing required dcterms:conformsTo metadata",
+            "category": "Error",
+            "line_number": _find_line(lines, "<metadata"),
+            "extract": "dcterms:conformsTo",
+        })
+    else:
+        if tag.get_text(strip=True) != expected_text:
+            issues.append({
+                "type": "invalid_conformsTo",
+                "message": f"Expected dcterms:conformsTo to be '{expected_text}'",
+                "category": "Error",
+                "line_number": getattr(tag, "sourceline", _find_line(lines, "dcterms:conformsTo")),
+                "extract": tag.get_text(strip=True),
+            })
+        if not tag.get("id"):
+            issues.append({
+                "type": "missing_id_conformsTo",
+                "message": "dcterms:conformsTo must have an 'id' attribute",
+                "category": "Error",
+                "line_number": getattr(tag, "sourceline", _find_line(lines, "dcterms:conformsTo")),
+                "extract": "id attribute missing",
+            })
+            
+    return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("COM-META-012")
+def validate_certified_by(book_details, rule_config=None):
+    """Validate a11y:certifiedBy metadata and its refines attribute."""
+    config_dict = (rule_config or {}).get("rule_config", {})
+    expected_text = config_dict.get("expected_text")
+    if not expected_text:
+        return {"issues_count": 1, "issues": [{"type": "configuration_error", "message": "Missing expected_text in rule_config for COM-META-012.", "category": "Error", "line_number": 0}]}
+
+    soup, opf_path, lines = _load_opf_info(book_details)
+    if soup is None:
+        return {"issues_count": 0, "issues": []}
+
+    issues = []
+    tag = soup.find("meta", attrs={"property": "a11y:certifiedBy"})
+    if not tag:
+        issues.append({
+            "type": "missing_certifiedBy",
+            "message": "Missing required a11y:certifiedBy metadata",
+            "category": "Error",
+            "line_number": _find_line(lines, "<metadata"),
+            "extract": "a11y:certifiedBy",
+        })
+    else:
+        if tag.get_text(strip=True) != expected_text:
+            issues.append({
+                "type": "invalid_certifiedBy",
+                "message": f"Expected a11y:certifiedBy to be '{expected_text}'",
+                "category": "Error",
+                "line_number": getattr(tag, "sourceline", _find_line(lines, "a11y:certifiedBy")),
+                "extract": tag.get_text(strip=True),
+            })
+        
+        # Check refines matches conformsTo id
+        conforms_tag = soup.find("meta", attrs={"property": "dcterms:conformsTo"})
+        expected_refines = f"#{conforms_tag.get('id')}" if conforms_tag and conforms_tag.get("id") else None
+        if expected_refines and tag.get("refines") != expected_refines:
+            issues.append({
+                "type": "invalid_refines_certifiedBy",
+                "message": f"a11y:certifiedBy refines attribute should match dcterms:conformsTo id ({expected_refines})",
+                "category": "Error",
+                "line_number": getattr(tag, "sourceline", _find_line(lines, "a11y:certifiedBy")),
+                "extract": tag.get("refines", "missing"),
+            })
+        
+        if not tag.get("id"):
+            issues.append({
+                "type": "missing_id_certifiedBy",
+                "message": "a11y:certifiedBy must have an 'id' attribute",
+                "category": "Error",
+                "line_number": getattr(tag, "sourceline", _find_line(lines, "a11y:certifiedBy")),
+                "extract": "id attribute missing",
+            })
+            
+    return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("COM-META-013")
+def validate_certifier_credential(book_details, rule_config=None):
+    """Validate a11y:certifierCredential metadata and its refines attribute."""
+    config_dict = (rule_config or {}).get("rule_config", {})
+    expected_text = config_dict.get("expected_text")
+    if not expected_text:
+        return {"issues_count": 1, "issues": [{"type": "configuration_error", "message": "Missing expected_text in rule_config for COM-META-013.", "category": "Error", "line_number": 0}]}
+
+    soup, opf_path, lines = _load_opf_info(book_details)
+    if soup is None:
+        return {"issues_count": 0, "issues": []}
+
+    issues = []
+    tag = soup.find("meta", attrs={"property": "a11y:certifierCredential"})
+    if not tag:
+        issues.append({
+            "type": "missing_certifierCredential",
+            "message": "Missing required a11y:certifierCredential metadata",
+            "category": "Error",
+            "line_number": _find_line(lines, "<metadata"),
+            "extract": "a11y:certifierCredential",
+        })
+    else:
+        if tag.get_text(strip=True) != expected_text:
+            issues.append({
+                "type": "invalid_certifierCredential",
+                "message": f"Expected a11y:certifierCredential to be '{expected_text}'",
+                "category": "Error",
+                "line_number": getattr(tag, "sourceline", _find_line(lines, "a11y:certifierCredential")),
+                "extract": tag.get_text(strip=True),
+            })
+            
+        # Check refines matches certifiedBy id
+        certified_by_tag = soup.find("meta", attrs={"property": "a11y:certifiedBy"})
+        expected_refines = f"#{certified_by_tag.get('id')}" if certified_by_tag and certified_by_tag.get("id") else None
+        if expected_refines and tag.get("refines") != expected_refines:
+            issues.append({
+                "type": "invalid_refines_certifierCredential",
+                "message": f"a11y:certifierCredential refines attribute should match a11y:certifiedBy id ({expected_refines})",
+                "category": "Error",
+                "line_number": getattr(tag, "sourceline", _find_line(lines, "a11y:certifierCredential")),
+                "extract": tag.get("refines", "missing"),
+            })
+            
+    return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("COM-SPINE-001")
+def validate_spine_linear(book_details, rule_config=None):
+    """Validate that specific files in the spine have linear='no'."""
+    config_dict = (rule_config or {}).get("rule_config", {})
+    file_suffix = config_dict.get("file_suffix")
+    expected_linear = config_dict.get("expected_linear", "no")
+
+    if not file_suffix:
+        return {"issues_count": 1, "issues": [{"type": "configuration_error", "message": "Missing file_suffix in rule_config for COM-SPINE-001.", "category": "Error", "line_number": 0}]}
+
+    soup, opf_path, lines = _load_opf_info(book_details)
+    if soup is None:
+        return {"issues_count": 0, "issues": []}
+
+    issues = []
+    
+    # Find items in manifest ending with file_suffix
+    manifest_items = soup.find_all("item")
+    target_ids = []
+    for item in manifest_items:
+        href = item.get("href", "")
+        if href.endswith(file_suffix):
+            target_ids.append(item.get("id"))
+            
+    if not target_ids:
+        # No files matching the suffix were found, which might be fine
+        return {"issues_count": 0, "issues": []}
+        
+    spine_items = soup.find_all("itemref")
+    for itemref in spine_items:
+        idref = itemref.get("idref")
+        if idref in target_ids:
+            linear = itemref.get("linear", "yes") # default is yes if not specified
+            if linear != expected_linear:
+                issues.append({
+                    "type": "invalid_linear_spine",
+                    "message": f"Spine itemref '{idref}' for file ending in '{file_suffix}' must have linear='{expected_linear}'",
+                    "category": "Error",
+                    "line_number": getattr(itemref, "sourceline", _find_line(lines, f"idref=\"{idref}\"")),
+                    "extract": str(itemref),
+                })
+
+    return {"issues_count": len(issues), "issues": issues}
 
 
 @rule("ASP-META-005")
@@ -529,6 +898,51 @@ def validate_cover_manifest_link(book_details, rule_config=None):
             "line_number": _find_line(lines, 'name="cover"'),
             "extract": content,
         }]}
+    return {"issues_count": 0, "issues": []}
+
+
+@rule("COM-META-003")
+def validate_metadata_presence(book_details, rule_config=None):
+    """Verify that required metadata tags are present in the OPF."""
+    config_dict = (rule_config or {}).get("rule_config", {})
+    required_tags = config_dict.get("required_tags", ["dc:title", "dc:creator", "dc:identifier", "dc:language"])
+    
+    soup, opf_path, lines = _load_opf_info(book_details)
+    if soup is None:
+         return {"issues_count": 0, "issues": []}
+         
+    issues = []
+    for tag in required_tags:
+        if not soup.find(tag):
+            issues.append({
+                "type": "missing_metadata",
+                "message": f"Required metadata tag <{tag}> is missing.",
+                "category": "Error",
+                "line_number": _find_line(lines, "<metadata"),
+                "extract": "<metadata",
+            })
+            
+    return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("COM-META-004")
+def validate_a11y_metadata_presence(book_details, rule_config=None):
+    """Verify that basic accessibility metadata is present in the OPF."""
+    soup, opf_path, lines = _load_opf_info(book_details)
+    if soup is None:
+         return {"issues_count": 0, "issues": []}
+         
+    # Check for any schema:access... tags
+    a11y_tags = soup.find_all(lambda tag: tag.name == "meta" and tag.has_attr("property") and "schema:access" in tag["property"])
+    if not a11y_tags:
+        return {"issues_count": 1, "issues": [{
+            "type": "missing_a11y_metadata",
+            "message": "No basic accessibility metadata (e.g. schema:accessMode, schema:accessibilityFeature) found.",
+            "category": "Error",
+            "line_number": _find_line(lines, "<metadata"),
+            "extract": "<metadata",
+        }]}
+        
     return {"issues_count": 0, "issues": []}
 
 
