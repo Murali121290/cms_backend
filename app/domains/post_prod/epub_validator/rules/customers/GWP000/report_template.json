@@ -453,14 +453,20 @@
           "default_status": "Yet to check",
           "default_notes": "",
           "resources": "",
-          "rule_ids": []
+          "rule_ids": [
+            "COM-NCX-001",
+            "COM-NCX-002"
+          ]
         },
         {
           "name": "Content is linked in the navigation (referencing nav.xhtml file)",
           "default_status": "Yet to check",
           "default_notes": "",
           "resources": "",
-          "rule_ids": []
+          "rule_ids": [
+            "NAV001",
+            "NAV005"
+          ]
         },
         {
           "name": "Figures are listed in the navigation. (referencing nav.xhtml file)",
@@ -515,7 +521,9 @@
           "default_notes": "",
           "resources": "",
           "rule_ids": [
-            "COM-META-003"
+            "COM-META-003",
+            "COM-NCX-003",
+            "COM-NCX-004"
           ]
         },
         {
@@ -557,21 +565,27 @@
           "default_status": "Yet to check",
           "default_notes": "",
           "resources": "",
-          "rule_ids": []
+          "rule_ids": [
+            "COM-NAV-001"
+          ]
         },
         {
           "name": "epub:type=\"page-list\" in the navigation",
           "default_status": "Yet to check",
           "default_notes": "",
           "resources": "",
-          "rule_ids": []
+          "rule_ids": [
+            "COM-NAV-002"
+          ]
         },
         {
           "name": "epub:type=\"landmarks\" in the navigation",
           "default_status": "Yet to check",
           "default_notes": "",
           "resources": "",
-          "rule_ids": []
+          "rule_ids": [
+            "COM-NAV-003"
+          ]
         },
         {
           "name": "Landmarks contain: Cover*, Front Matter (Title Page, Copyright, TOC, About Author, Acknowledgements, etc.), Start of Content, Back Matter (Glossary, Index, etc.)",

@@ -37,7 +37,9 @@
       "id": "COM-META-003",
       "name": "OPF Basic Metadata Presence",
       "target_path": "OEBPS",
-      "file_name_pattern": ["*.opf"],
+      "file_name_pattern": [
+        "*.opf"
+      ],
       "enabled": true,
       "rule_config": {
         "required_tags": [
@@ -57,7 +59,9 @@
       "id": "COM-META-005",
       "name": "pageBreakSource Metadata",
       "target_path": "OEBPS",
-      "file_name_pattern": ["*.opf"],
+      "file_name_pattern": [
+        "*.opf"
+      ],
       "enabled": true,
       "rule_config": {
         "required_prefix": "urn:isbn:"
@@ -67,38 +71,66 @@
       "id": "COM-META-006",
       "name": "accessMode Metadata",
       "target_path": "OEBPS",
-      "file_name_pattern": ["*.opf"],
+      "file_name_pattern": [
+        "*.opf"
+      ],
       "enabled": true,
       "rule_config": {
-        "expected_values": ["textual", "visual"]
+        "expected_values": [
+          "textual",
+          "visual"
+        ]
       }
     },
     {
       "id": "COM-META-007",
       "name": "accessModeSufficient Metadata",
       "target_path": "OEBPS",
-      "file_name_pattern": ["*.opf"],
+      "file_name_pattern": [
+        "*.opf"
+      ],
       "enabled": true,
       "rule_config": {
-        "expected_values": ["textual,visual", "textual"]
+        "expected_values": [
+          "textual,visual",
+          "textual"
+        ]
       }
     },
     {
       "id": "COM-META-008",
       "name": "accessibilityFeature Metadata",
       "target_path": "OEBPS",
-      "file_name_pattern": ["*.opf"],
+      "file_name_pattern": [
+        "*.opf"
+      ],
       "enabled": true,
       "rule_config": {
-        "expected_values": ["readingOrder", "structuralNavigation", "ARIA", "tableOfContents", "pageBreakMarkers", "pageNavigation", "displayTransformability", "index", "alternativeText", "longDescription"],
-        "conditional_mathml_values": ["MathML", "describedMath"]
+        "expected_values": [
+          "readingOrder",
+          "structuralNavigation",
+          "ARIA",
+          "tableOfContents",
+          "pageBreakMarkers",
+          "pageNavigation",
+          "displayTransformability",
+          "index",
+          "alternativeText",
+          "longDescription"
+        ],
+        "conditional_mathml_values": [
+          "MathML",
+          "describedMath"
+        ]
       }
     },
     {
       "id": "COM-META-009",
       "name": "accessibilitySummary Metadata",
       "target_path": "OEBPS",
-      "file_name_pattern": ["*.opf"],
+      "file_name_pattern": [
+        "*.opf"
+      ],
       "enabled": true,
       "rule_config": {
         "expected_summary": "A very complex book with a lot of images, tables, list items and complex formatting, which are defined with accessible structural markup. There are multiple linked references to various figures in this EPUB however there are no back links provided. There is a page list and embedded page-breaks within this EPUB to aid in the ability to go to a specific page. Additionally, blank pages have been removed from the EPUB while their page break labels have been left in, for reasons of structural flow.",
@@ -109,17 +141,23 @@
       "id": "COM-META-010",
       "name": "accessibilityHazard Metadata",
       "target_path": "OEBPS",
-      "file_name_pattern": ["*.opf"],
+      "file_name_pattern": [
+        "*.opf"
+      ],
       "enabled": true,
       "rule_config": {
-        "expected_values": ["none"]
+        "expected_values": [
+          "none"
+        ]
       }
     },
     {
       "id": "COM-META-011",
       "name": "dcterms:conformsTo Metadata",
       "target_path": "OEBPS",
-      "file_name_pattern": ["*.opf"],
+      "file_name_pattern": [
+        "*.opf"
+      ],
       "enabled": true,
       "rule_config": {
         "expected_text": "EPUB Accessibility 1.1 - WCAG 2.2 Level AA"
@@ -129,7 +167,9 @@
       "id": "COM-META-012",
       "name": "a11y:certifiedBy Metadata",
       "target_path": "OEBPS",
-      "file_name_pattern": ["*.opf"],
+      "file_name_pattern": [
+        "*.opf"
+      ],
       "enabled": true,
       "rule_config": {
         "expected_text": "Benetech"
@@ -139,7 +179,9 @@
       "id": "COM-META-013",
       "name": "a11y:certifierCredential Metadata",
       "target_path": "OEBPS",
-      "file_name_pattern": ["*.opf"],
+      "file_name_pattern": [
+        "*.opf"
+      ],
       "enabled": true,
       "rule_config": {
         "expected_text": "https://bornaccessible.org/certification/gca-credential/"
@@ -149,11 +191,49 @@
       "id": "COM-SPINE-001",
       "name": "Alt.xhtml Spine linear='no' Check",
       "target_path": "OEBPS",
-      "file_name_pattern": ["*.opf"],
+      "file_name_pattern": [
+        "*.opf"
+      ],
       "enabled": true,
       "rule_config": {
         "file_suffix": "Alt.xhtml",
         "expected_linear": "no"
+      }
+    },
+    {
+      "id": "COM-NAV-001",
+      "name": "Navigation epub:type='toc'",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "nav.xhtml"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_type": "toc"
+      }
+    },
+    {
+      "id": "COM-NAV-002",
+      "name": "Navigation epub:type='page-list'",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "nav.xhtml"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_type": "page-list"
+      }
+    },
+    {
+      "id": "COM-NAV-003",
+      "name": "Navigation epub:type='landmarks'",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "nav.xhtml"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_type": "landmarks"
       }
     },
     {
@@ -235,6 +315,13 @@
       "target_path": "OEBPS",
       "enabled": false,
       "file_name_pattern": "toc.ncx"
+    },
+    {
+      "id": "NAV005",
+      "name": "Page List Link Check",
+      "target_path": "OEBPS",
+      "enabled": true,
+      "file_name_pattern": "nav.xhtml"
     },
     {
       "id": "XHTML002",
@@ -503,6 +590,34 @@
       "id": "GWP-LINK-001",
       "name": "1:1 Internal Backlinks Check",
       "scope": "book",
+      "enabled": false
+    },
+    {
+      "id": "COM-NCX-001",
+      "name": "toc.ncx navPoint Check",
+      "target_path": "OEBPS",
+      "file_name_pattern": "toc.ncx",
+      "enabled": true
+    },
+    {
+      "id": "COM-NCX-002",
+      "name": "toc.ncx pageTarget Check",
+      "target_path": "OEBPS",
+      "file_name_pattern": "toc.ncx",
+      "enabled": true
+    },
+    {
+      "id": "COM-NCX-003",
+      "name": "toc.ncx PDF Page Count Check",
+      "target_path": "OEBPS",
+      "file_name_pattern": "toc.ncx",
+      "enabled": false
+    },
+    {
+      "id": "COM-NCX-004",
+      "name": "toc.ncx ISBN Match Check",
+      "target_path": "OEBPS",
+      "file_name_pattern": "toc.ncx",
       "enabled": false
     }
   ]
