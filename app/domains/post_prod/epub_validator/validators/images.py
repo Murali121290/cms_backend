@@ -306,6 +306,125 @@ def validate_gwp_image_filename_format(file_details, rule_config=None):
         })
     return {"issues_count": len(issues), "issues": issues}
 
+@rule("GWP-IMG-002")
+def validate_gwp_alt_tags(file_details, rule_config=None):
+    """GWP000: Include alt placeholder on all image tags. Decorative image indicator: alt=\"\" and role=\"presentation\"."""
+    with open(file_details["full_path"], "r", encoding="utf-8") as f:
+        content = f.read()
+
+    soup = BeautifulSoup(content, "html.parser")
+    lines = content.splitlines()
+    issues = []
+
+    for img in soup.find_all("img"):
+        has_alt = img.has_attr("alt")
+        alt = img.get("alt", "")
+        
+        role = img.get("role", "")
+        if isinstance(role, list):
+            role = " ".join(role)
+        is_presentation = (role.lower() == "presentation")
+
+        error_msg = None
+        rule_name = None
+        if not has_alt:
+            error_msg = f"<img src='{img.get('src', '')}'> is missing the alt attribute entirely (must have at least alt=\"\")"
+            rule_name = "Missing Alt Attribute"
+        elif alt.strip() == "" and not is_presentation:
+            error_msg = f"<img src='{img.get('src', '')}'> has empty alt attribute but is missing role=\"presentation\""
+            rule_name = "Missing Presentation Role"
+        elif is_presentation and alt.strip() != "":
+            error_msg = f"Decorative <img src='{img.get('src', '')}'> (role=\"presentation\") must have empty alt=\"\""
+            rule_name = "Invalid Decorative Alt"
+            
+        if not error_msg:
+            continue
+
+        src = img.get("src", "")
+        line_num = None
+        if hasattr(img, 'sourceline') and img.sourceline:
+            line_num = img.sourceline
+        else:
+            img_str = str(img)
+            for idx, line in enumerate(lines, 1):
+                if "src=" in line and src in line:
+                    line_num = idx
+                    break
+
+        import re
+        extract_text = str(img)
+        if line_num and line_num <= len(lines):
+            raw_line = lines[line_num - 1]
+            img_match = re.search(r'<img[^>]*>', raw_line, re.IGNORECASE)
+            if img_match:
+                img_tag = img_match.group(0)
+                alt_match = re.search(r'alt\s*=\s*["\'][^"\']*["\']|alt\b', img_tag, re.IGNORECASE)
+                extract_text = alt_match.group(0) if alt_match else img_tag
+
+        issue = {
+            "type": "alt_attribute_error",
+            "rule_name": rule_name,
+            "message": error_msg,
+            "category": "Error",
+            "href": src,
+            "extract": extract_text,
+        }
+        if line_num:
+            issue["line_number"] = line_num
+        issues.append(issue)
+
+    return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("GWP-IMG-003")
+def validate_all_images_in_opf(file_details, rule_config=None):
+    """GWP000: All images are tagged in the OPF file."""
+    inner_config = rule_config.get("rule_config", {}) if rule_config else {}
+    target_image_folder = inner_config.get("image_folder", "images").lower()
+
+    epub_folder = file_details.get("epub_path")
+    full_path = file_details.get("full_path")
+    if not epub_folder or not full_path:
+        return {"issues_count": 0, "issues": []}
+        
+    path_parts = [p.lower() for p in os.path.normpath(full_path).split(os.sep)]
+    if target_image_folder not in path_parts:
+        return {"issues_count": 0, "issues": []}
+        
+    opf = find_opf(epub_folder)
+    configured_opf_path = inner_config.get("opf_path")
+    if configured_opf_path:
+        possible_opf = os.path.join(epub_folder, configured_opf_path)
+        if os.path.isfile(possible_opf):
+            opf = possible_opf
+
+    if not opf or not os.path.isfile(opf):
+        return {"issues_count": 1, "issues": [{
+            "type": "missing_opf",
+            "message": "OPF file not found to verify image tags.",
+            "category": "Error"
+        }]}
+        
+    opf_dir = os.path.dirname(opf)
+    manifest_images = set()
+    import urllib.parse
+    for href, _ in _iter_manifest_images(opf):
+        href_unquoted = urllib.parse.unquote(href)
+        manifest_images.add(os.path.normpath(os.path.join(opf_dir, href_unquoted)))
+        
+    abs_path = os.path.normpath(full_path)
+    issues = []
+    if abs_path not in manifest_images:
+        rel_path = os.path.relpath(abs_path, epub_folder)
+        issues.append({
+            "type": "untagged_image",
+            "rule_name": "Image Not in OPF",
+            "message": f"Image file '{rel_path}' is physically present but not declared in the OPF manifest.",
+            "category": "Error"
+        })
+                    
+    return {"issues_count": len(issues), "issues": issues}
+
 
 @rule("IMG-001")
 def validate_body_image_dpi(file_details, rule_config=None):

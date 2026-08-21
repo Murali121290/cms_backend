@@ -322,6 +322,26 @@
         }
       },
       "enabled": true
+    },
+    {
+      "id": "GWP-IMG-002",
+      "name": "Alt Attribute & Decorative Image Check",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.xhtml",
+        "*.html"
+      ],
+      "enabled": true
+    },
+    {
+      "id": "GWP-IMG-003",
+      "name": "All Images Tagged in OPF",
+      "target_path": "OEBPS",
+      "rule_config": {
+        "opf_path": "OEBPS/content.opf",
+        "image_folder": "Images"
+      },
+      "enabled": true
     }
   ]
 }
