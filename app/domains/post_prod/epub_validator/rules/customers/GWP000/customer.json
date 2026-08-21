@@ -316,7 +316,7 @@
       "id": "NAV001",
       "name": "NAV TOC Link Check",
       "target_path": "OEBPS",
-      "enabled": false,
+      "enabled": true,
       "file_name_pattern": "nav.xhtml"
     },
     {
@@ -327,10 +327,17 @@
       "file_name_pattern": "*index*.xhtml"
     },
     {
+      "id": "INDEX002",
+      "name": "Index Unordered List Format Check",
+      "target_path": "OEBPS",
+      "enabled": true,
+      "file_name_pattern": "*index*.xhtml"
+    },
+    {
       "id": "NAV002",
       "name": "NCX and Navigation link Check",
       "target_path": "OEBPS",
-      "enabled": false,
+      "enabled": true,
       "file_name_pattern": "toc.ncx"
     },
     {
@@ -642,6 +649,41 @@
       "name": "Confirm no cover.xhtml",
       "scope": "book",
       "target_path": "",
+      "enabled": true
+    },
+    {
+      "id": "GLOS001",
+      "name": "Glossary Format Check (dl, dt, dd)",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*glossary*.xhtml",
+      "enabled": true
+    },
+    {
+      "id": "GLOS002",
+      "name": "Glossary Term Backlinks Title Check",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*glossary*.xhtml",
+      "enabled": true
+    },
+    {
+      "id": "GWP-KT-001",
+      "name": "Key Term Tagging Check",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true
+    },
+    {
+      "id": "GWP-ED-001",
+      "name": "Extended Description Unique Links Check",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*extended*.xhtml",
+      "enabled": false
+    },
+    {
+      "id": "GWP-QUOTE-001",
+      "name": "Quotation Markup Check",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*.xhtml",
       "enabled": true
     }
   ]

@@ -652,21 +652,27 @@
           "default_status": "Yet to check",
           "default_notes": "",
           "resources": "",
-          "rule_ids": []
+          "rule_ids": [
+            "GLOS001"
+          ]
         },
         {
           "name": "Glossary term number links include meaningful text using the title attribute",
           "default_status": "Yet to check",
           "default_notes": "",
           "resources": "<a href=\"ch06.xhtml#i-trm1\" role=\"doc-backlink\" title=\"Back to Chapter 6 on the term 'ac generator'\">6</a>",
-          "rule_ids": []
+          "rule_ids": [
+            "GLOS002"
+          ]
         },
         {
           "name": "Index page formatted using unordered list tags",
           "default_status": "Yet to check",
           "default_notes": "",
           "resources": "",
-          "rule_ids": []
+          "rule_ids": [
+            "INDEX002"
+          ]
         },
         {
           "name": "Key Terms found in the chapter opener: Should not include links to the key terms found in the content and glossary.",
@@ -687,7 +693,9 @@
           "default_status": "Yet to check",
           "default_notes": "",
           "resources": "Example:\nCorrect:\n<p class=\"TX\"><b class=\"KT\"><a href=\"27_Glossary.xhtml#trm534\" id=\"itrm534\">Well-being</a></b> can be described as the ability to function positively and feel a sense of satisfaction with one's life. \u2026</p>\n\nIncorrect:\n<p class=\"TX\"><span class=\"KT\"><a href=\"27_Glossary.xhtml#trm534\" id=\"itrm534\">Well-being</a></span> can be described as the ability to function positively and feel a sense of satisfaction with one's life. \u2026</p>",
-          "rule_ids": []
+          "rule_ids": [
+            "GWP-KT-001"
+          ]
         },
         {
           "name": "Extended Description is the page title of the extended descriptions file",
@@ -708,7 +716,9 @@
           "default_status": "Yet to check",
           "default_notes": "",
           "resources": "Example using <blockquote> element:\n<figure>\n<blockquote epub:type=\"epigraph\" role=\"doc-epigraph\">\n<p class=\"EPI\">\u201cIf you want to be happy, set a dream that commands your thoughts, liberates your energy, and inspires your hopes.\u201d</p>\n</blockquote>\n<figcaption><p class=\"EPIS\">&#8212;Andrew Carnegie</p></figcaption>\n</figure>\n\nExample using <q> tag:\n<p>The therapist occasionally responds with questions like <q>What do you think that means?</q> or <q>How did that make you feel?</q></p>",
-          "rule_ids": []
+          "rule_ids": [
+            "GWP-QUOTE-001"
+          ]
         }
       ]
     }

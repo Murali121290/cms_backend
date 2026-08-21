@@ -999,3 +999,54 @@ def validate_index_links(file_details, rule_config=None):
                         })
                         
     return {"issues_count": len(issues), "issues": issues}
+
+@rule("INDEX002")
+def validate_index_list_format(file_details, rule_config=None):
+    """Validate that index entries use unordered lists."""
+    import os
+    text = read_text(file_details["full_path"])
+    soup = BeautifulSoup(text, "html.parser")
+    issues = []
+
+    # Find the index element
+    index_nav = soup.find(attrs={"role": "doc-index"}) or soup.find(attrs={"epub:type": "index"})
+
+    if not index_nav:
+        if "index" not in os.path.basename(file_details["full_path"]).lower():
+            return {"issues_count": 0, "issues": []}
+        index_nav = soup.find("body") or soup
+
+    # Find all p tags inside index_nav with a class containing 'index'
+    index_ps = index_nav.find_all("p", class_=lambda x: x and any(c.startswith("index") for c in (x.split() if isinstance(x, str) else x)))
+    
+    for p in index_ps:
+        # Check if it is inside an <li> tag
+        if not p.find_parent("li"):
+            s = str(p)
+            idx = text.find(s[:20])
+            if idx == -1:
+                text_val = p.get_text(strip=True)
+                if text_val:
+                    idx = text.find(text_val[:20])
+                    
+            line = text.count('\n', 0, idx) + 1 if idx != -1 else getattr(p, "sourceline", None)
+            
+            raw_extract = str(p)[:150]
+            if idx != -1:
+                tag_start = text.rfind('<p', max(0, idx-100), idx+1)
+                if tag_start != -1:
+                    raw_extract = text[tag_start:tag_start+150]
+                else:
+                    raw_extract = text[idx:idx+150]
+            
+            issue = {
+                "type": "invalid_index_format",
+                "message": "Index entries should be formatted using unordered list (<ul> and <li>) tags.",
+                "category": "Error",
+                "file_path": file_details.get("relative_path"),
+                "extract": raw_extract
+            }
+            if line: issue["line_number"] = line
+            issues.append(issue)
+
+    return {"issues_count": len(issues), "issues": issues}

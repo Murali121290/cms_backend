@@ -763,3 +763,292 @@ def validate_gwp_pagebreak_placement(file_details, rule_config=None):
             issues.append(issue)
 
     return {"issues_count": len(issues), "issues": issues}
+
+@rule("GLOS001")
+def validate_glossary_dl_tags(file_details, rule_config=None):
+    """Glossary page formatted using description list tags (dl, dt, dd)."""
+    file_path = file_details["full_path"]
+    issues = []
+    
+    try:
+        from bs4 import BeautifulSoup
+        with open(file_path, "r", encoding="utf-8") as f:
+            html_text = f.read()
+            soup = BeautifulSoup(html_text, "xml")
+    except Exception as e:
+        return {"issues_count": 0, "issues": []}
+
+    glossary_section = soup.find(lambda tag: tag.name == "section" and (tag.get("role") == "doc-glossary" or tag.get("epub:type") == "glossary"))
+    # Some files might not use the semantic wrapper; if the rule targets *glossary.xhtml, we check for dl anyway.
+    if not glossary_section:
+        glossary_section = soup.find("body")
+
+    if glossary_section:
+        dls = glossary_section.find_all("dl")
+        if not dls:
+            issues.append({
+                "type": "glossary_missing_dl",
+                "rule_name": "Glossary missing dl",
+                "message": "Glossary is missing <dl> tags. Terms must be formatted using description list tags (dl, dt, dd).",
+                "category": "Error",
+                "file_path": file_details.get("relative_path"),
+            })
+        else:
+            for dl in dls:
+                if not dl.find_all("dt") or not dl.find_all("dd"):
+                    issues.append({
+                        "type": "glossary_missing_dt_dd",
+                        "rule_name": "Glossary missing dt dd",
+                        "message": "Glossary <dl> is missing <dt> or <dd> tags. Terms must use dl, dt, dd.",
+                        "category": "Error",
+                        "file_path": file_details.get("relative_path"),
+                    })
+                    break
+
+        # Flag any <p> or <div> that are styled as terms/definitions instead of using dt/dd
+        invalid_terms = glossary_section.find_all(["p", "div", "span"], attrs={"role": ["term", "definition"]})
+        invalid_terms += glossary_section.find_all(["p", "div"], class_=lambda x: x and any(c.lower() in ["term", "definition", "def"] for c in x.split()))
+        
+        for invalid in invalid_terms:
+            s = str(invalid)
+            idx = html_text.find(s[:20])
+            line = html_text.count('\n', 0, idx) + 1 if idx != -1 else None
+            issue = {
+                "type": "invalid_glossary_term_tag",
+                "rule_name": "Glossary Format",
+                "message": f"Glossary terms must be formatted using description list tags (dl, dt, dd). Found <{invalid.name}> tag acting as a term or definition.",
+                "category": "Error",
+                "file_path": file_details.get("relative_path"),
+                "extract": str(invalid)[:150]
+            }
+            if line: issue["line_number"] = line
+            issues.append(issue)
+
+    return {"issues_count": len(issues), "issues": issues}
+
+@rule("GLOS002")
+def validate_glossary_term_backlinks(file_details, rule_config=None):
+    """Glossary term number links include meaningful text using the title attribute."""
+    file_path = file_details["full_path"]
+    issues = []
+    
+    try:
+        from bs4 import BeautifulSoup
+        with open(file_path, "r", encoding="utf-8") as f:
+            html_text = f.read()
+            soup = BeautifulSoup(html_text, "xml")
+    except Exception as e:
+        return {"issues_count": 0, "issues": []}
+
+    backlinks = soup.find_all("a", attrs={"role": "doc-backlink"})
+    for link in backlinks:
+        title = link.get("title", "").strip()
+        if not title:
+            s = str(link)
+            idx = html_text.find(s[:20])
+            line = html_text.count('\n', 0, idx) + 1 if idx != -1 else None
+            issue = {
+                "type": "glossary_backlink_missing_title",
+                "message": "Glossary term number links must include meaningful text using the title attribute (e.g., title=\"Back to Chapter 6 on the term 'ac generator'\").",
+                "category": "Error",
+                "file_path": file_details.get("relative_path"),
+                "extract": str(link)[:150]
+            }
+            if line: issue["line_number"] = line
+            issues.append(issue)
+
+    return {"issues_count": len(issues), "issues": issues}
+
+@rule("GWP-KT-001")
+def validate_key_term_tagging(file_details, rule_config=None):
+    """Key terms within content are properly using <b> and <i> tags (not <span>)."""
+    file_path = file_details["full_path"]
+    issues = []
+    
+    try:
+        from bs4 import BeautifulSoup
+        with open(file_path, "r", encoding="utf-8") as f:
+            html_text = f.read()
+            soup = BeautifulSoup(html_text, "xml")
+    except Exception as e:
+        return {"issues_count": 0, "issues": []}
+
+    kt_elements = soup.find_all(class_=lambda x: x and "KT" in x.split())
+    for el in kt_elements:
+        if el.name not in ["b", "i", "strong", "em"]:
+            text_val = el.get_text(strip=True)
+            idx = html_text.find(text_val[:20]) if text_val else html_text.find('KT')
+            if idx == -1:
+                s = str(el)
+                idx = html_text.find(s[:20])
+            line = html_text.count('\n', 0, idx) + 1 if idx != -1 else None
+            
+            raw_extract = str(el)[:150]
+            if idx != -1:
+                tag_start = html_text.rfind(f'<{el.name}', max(0, idx-150), idx+1)
+                if tag_start != -1:
+                    raw_extract = html_text[tag_start:tag_start+150]
+                else:
+                    raw_extract = html_text[idx:idx+150]
+                    
+            issue = {
+                "type": "invalid_kt_tag",
+                "message": f"Key terms must be properly using <b> and <i> tags. Found <{el.name} class=\"{el.get('class')}\">.",
+                "category": "Error",
+                "file_path": file_details.get("relative_path"),
+                "extract": raw_extract
+            }
+            if line: issue["line_number"] = line
+            issues.append(issue)
+
+    # Check glossary links since they also act as key terms
+    glossary_links = soup.find_all("a", href=lambda x: x and "_glossary.xhtml#" in x)
+    valid_tags = ["b", "i", "strong", "em"]
+    for a in glossary_links:
+        # Avoid duplicate errors if this link is already inside an element with class="KT"
+        if a.find_parent(class_=lambda x: x and "KT" in x.split()) or (a.get("class") and "KT" in a.get("class")):
+            continue
+            
+        is_valid = False
+        
+        # Check if the <a> tag is inside a <b>, <i>, <strong>, or <em>
+        if a.parent and a.parent.name in valid_tags:
+            is_valid = True
+            
+        # Check if the <a> tag's inner text is wrapped in a <b>, <i>, <strong>, or <em>
+        if not is_valid:
+            for child in a.find_all(valid_tags):
+                if child.get_text(strip=True) == a.get_text(strip=True):
+                    is_valid = True
+                    break
+                    
+        if not is_valid:
+            href_val = a.get("href", "")
+            idx = html_text.find(f'"{href_val}"')
+            if idx == -1:
+                idx = html_text.find(f"'{href_val}'")
+            if idx == -1:
+                text_val = a.get_text(strip=True)
+                if text_val:
+                    idx = html_text.find(text_val[:20])
+                    
+            line = html_text.count('\n', 0, idx) + 1 if idx != -1 else None
+            
+            raw_extract = str(a.parent)[:150] if a.parent else str(a)[:150]
+            if idx != -1:
+                a_start = html_text.rfind('<a', max(0, idx-100), idx+1)
+                if a_start != -1:
+                    span_start = html_text.rfind('<span', max(0, a_start-50), a_start)
+                    if span_start != -1 and 'c_term' in html_text[span_start:a_start]:
+                        raw_extract = html_text[span_start:span_start+150]
+                    else:
+                        raw_extract = html_text[a_start:a_start+150]
+                else:
+                    raw_extract = html_text[idx:idx+150]
+                    
+            issue = {
+                "type": "invalid_kt_tag_glossary_link",
+                "message": f"Glossary links must be formatted with <b> or <i> tags. Found link without bold/italic wrapping.",
+                "category": "Error",
+                "file_path": file_details.get("relative_path"),
+                "extract": raw_extract
+            }
+            if line: issue["line_number"] = line
+            issues.append(issue)
+
+    return {"issues_count": len(issues), "issues": issues}
+
+@rule("GWP-ED-001")
+def validate_extended_description_links(file_details, rule_config=None):
+    """Each link found on the Extended Description page should contain unique text."""
+    file_path = file_details["full_path"]
+    issues = []
+    
+    try:
+        from bs4 import BeautifulSoup
+        with open(file_path, "r", encoding="utf-8") as f:
+            html_text = f.read()
+            soup = BeautifulSoup(html_text, "xml")
+    except Exception as e:
+        return {"issues_count": 0, "issues": []}
+
+    backlinks = []
+    for a in soup.find_all("a"):
+        parent_class = a.parent.get("class", []) if a.parent and a.parent.name == "p" else []
+        if a.get("role") == "doc-backlink" or "araiaback" in parent_class:
+            backlinks.append(a)
+            
+    seen_texts = set()
+    for link in backlinks:
+        text = link.get_text(strip=True).lower()
+        if text == "back to main text":
+            s = str(link)
+            idx = html_text.find(s[:20])
+            line = html_text.count('\n', 0, idx) + 1 if idx != -1 else None
+            issue = {
+                "type": "generic_ed_link_text",
+                "rule_name": "Extended Description Links",
+                "message": "Extended Description link uses generic text 'Back to main text'. Must be unique (e.g. 'Back to Figure 1-1').",
+                "category": "Error",
+                "file_path": file_details.get("relative_path"),
+                "extract": str(link)[:150]
+            }
+            if line: issue["line_number"] = line
+            issues.append(issue)
+        elif text in seen_texts:
+            s = str(link)
+            idx = html_text.find(s[:20])
+            line = html_text.count('\n', 0, idx) + 1 if idx != -1 else None
+            issue = {
+                "type": "duplicate_ed_link_text",
+                "rule_name": "Extended Description Links",
+                "message": f"Extended Description link text '{link.get_text(strip=True)}' is used more than once. Each link should contain unique text.",
+                "category": "Error",
+                "file_path": file_details.get("relative_path"),
+                "extract": str(link)[:150]
+            }
+            if line: issue["line_number"] = line
+            issues.append(issue)
+        else:
+            seen_texts.add(text)
+
+    return {"issues_count": len(issues), "issues": issues}
+
+@rule("GWP-QUOTE-001")
+def validate_blockquote_q_tags(file_details, rule_config=None):
+    """Blockquotes should be identified using <blockquote> for long quotes, <q> for short."""
+    file_path = file_details["full_path"]
+    issues = []
+    
+    try:
+        from bs4 import BeautifulSoup
+        with open(file_path, "r", encoding="utf-8") as f:
+            html_text = f.read()
+            soup = BeautifulSoup(html_text, "xml")
+    except Exception as e:
+        return {"issues_count": 0, "issues": []}
+
+    for p in soup.find_all("p"):
+        if p.find_parent("blockquote"):
+            continue
+            
+        if p.find("q"):
+            continue
+            
+        text = p.get_text(strip=True)
+        if len(text) > 1:
+            if text[0] in ['"', '“', '‘'] and text[-1] in ['"', '”', '’']:
+                s = str(p)
+                idx = html_text.find(s[:20])
+                line = html_text.count('\n', 0, idx) + 1 if idx != -1 else None
+                issue = {
+                    "type": "missing_quote_markup",
+                    "message": "Blockquotes should be identified using <blockquote> element for long quotations. *use <q> for inline (short) quotations.",
+                    "category": "Warning",
+                    "file_path": file_details.get("relative_path"),
+                    "extract": str(p)[:150]
+                }
+                if line: issue["line_number"] = line
+                issues.append(issue)
+
+    return {"issues_count": len(issues), "issues": issues}
