@@ -48,9 +48,10 @@ def _find_line(lines: list[str], search_str: str) -> int | None:
     return None
 
 
-@rule("ASP-META-001")
-def validate_publisher_is_aspen(book_details, rule_config=None):
-    """<dc:publisher> must equal 'Aspen Publishing'."""
+@rule("COM-META-001")
+def validate_publisher_name(book_details, rule_config=None):
+    """<dc:publisher> must equal expected publisher from config."""
+    expected_publisher = (rule_config or {}).get("expected_publisher", "Aspen Publishing")
     soup, opf_path, lines = _load_opf_info(book_details)
     if soup is None:
         return {"issues_count": 1, "issues": [{
@@ -69,10 +70,10 @@ def validate_publisher_is_aspen(book_details, rule_config=None):
             "extract": "<metadata",
         }]}
     value = pub.get_text(strip=True)
-    if value != "Aspen Publishing":
+    if value != expected_publisher:
         return {"issues_count": 1, "issues": [{
             "type": "publisher_mismatch",
-            "message": f"Expected publisher 'Aspen Publishing', found '{value}'",
+            "message": f"Expected publisher '{expected_publisher}', found '{value}'",
             "category": "Error",
             "line_number": _find_line(lines, "dc:publisher"),
             "extract": value,

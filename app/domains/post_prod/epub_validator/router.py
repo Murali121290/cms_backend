@@ -591,6 +591,18 @@ async def export_epub(
     )
 
 
+import tempfile
+import re
+from app.domains.post_prod.epub_validator.engine.excel_reporter import generate_gwp_report
+
+def sanitize_for_excel(text: str) -> str:
+    """Removes ANSI escape codes and unprintable control characters that break openpyxl."""
+    if not text:
+        return text
+    text = re.sub(r'\x1b\[[0-9;]*m', '', text)
+    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', text)
+    return text
+
 @router.get("/export/{folder_name}/qa-report")
 def export_qa_report(
     folder_name: str,
@@ -626,8 +638,56 @@ def export_qa_report(
     assignee_name = project.assignee if project and project.assignee else ""
     uploaded_date = project.uploaded_at.strftime('%m/%d/%y') if project and project.uploaded_at else datetime.now().strftime('%m/%d/%y')
     
+    # Evaluate EPUBCheck
+    epubcheck_status = "Yet to check"
+    epubcheck_notes = ""
+    epubcheck_report = get_cached_epubcheck_report(folder_name)
+    if epubcheck_report:
+        if epubcheck_report.get("status") == "fatal":
+            epubcheck_status = "Fail"
+            epubcheck_notes = epubcheck_report.get("message", "EPUBCheck failed catastrophically.")
+        else:
+            messages = epubcheck_report.get("messages", [])
+            errors = [m for m in messages if str(m.get("severity")).lower() in ["error", "fatal"]]
+            if errors:
+                epubcheck_status = "Fail"
+                epubcheck_notes = "\n".join([f"[{m.get('severity')}] {m.get('message')}" for m in errors[:10]])
+                if len(errors) > 10:
+                    epubcheck_notes += f"\n...and {len(errors) - 10} more."
+            else:
+                epubcheck_status = "Pass"
+
+    # Evaluate ACE
+    ace_status = "Yet to check"
+    ace_notes = ""
+    ace_report = get_cached_ace_report(folder_name)
+    if ace_report:
+        if ace_report.get("status") == "fatal":
+            ace_status = "Fail"
+            ace_notes = ace_report.get("message", "ACE failed catastrophically.")
+        else:
+            violations = ace_report.get("violations", [])
+            if violations:
+                ace_status = "Fail"
+                ace_notes = "\n".join([f"[{v.get('impact')}] {v.get('rule_title')}: {v.get('message')}" for v in violations[:10]])
+                if len(violations) > 10:
+                    ace_notes += f"\n...and {len(violations) - 10} more."
+            else:
+                ace_status = "Pass"
+                
+    epubcheck_notes = sanitize_for_excel(epubcheck_notes)
+    ace_notes = sanitize_for_excel(ace_notes)
+            
     try:
-        generate_gwp_report(validation_result, template_path, tmp_path, assignee_name, uploaded_date)
+        generate_gwp_report(
+            validation_result,
+            template_path,
+            tmp_path,
+            assignee_name,
+            uploaded_date,
+            epubcheck_result={"status": epubcheck_status, "notes": epubcheck_notes},
+            ace_result={"status": ace_status, "notes": ace_notes}
+        )
         with open(tmp_path, "rb") as f:
             xlsx_bytes = f.read()
     finally:

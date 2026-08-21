@@ -10,6 +10,18 @@
       "enabled": true
     },
     {
+      "id": "COM-META-001",
+      "name": "OPF dc:publisher = 'The Goodheart-Willcox Company, Inc'",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_publisher": "The Goodheart-Willcox Company, Inc"
+      }
+    },
+    {
       "id": "STRUCT001",
       "name": "EPUB Folder Structure Check",
       "scope": "book",

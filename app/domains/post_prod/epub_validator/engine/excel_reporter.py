@@ -4,7 +4,15 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill
 from datetime import datetime
 
-def generate_gwp_report(validation_result: dict, template_path: str, output_xlsx_path: str, assignee_name: str = "", uploaded_date: str = ""):
+def generate_gwp_report(
+    validation_result: dict, 
+    template_path: str, 
+    output_xlsx_path: str, 
+    assignee_name: str = "", 
+    uploaded_date: str = "",
+    epubcheck_result: dict = None,
+    ace_result: dict = None
+):
     """Generates an Excel report matching the GWP template from the validation result."""
     
     with open(template_path, "r") as f:
@@ -72,6 +80,12 @@ def generate_gwp_report(validation_result: dict, template_path: str, output_xlsx
         single_rule = criteria.get("rule_id")
         if single_rule and single_rule not in rule_ids:
             rule_ids.append(single_rule)
+            
+        # Virtual rule checks (works for any customer template that maps these IDs)
+        if "EPUBCHECK" in rule_ids and epubcheck_result:
+            return epubcheck_result.get("status", "Yet to check"), epubcheck_result.get("notes", "")
+        if "ACE_CHECK" in rule_ids and ace_result:
+            return ace_result.get("status", "Yet to check"), ace_result.get("notes", "")
             
         if not rule_ids:
             return criteria.get("default_status", ""), criteria.get("default_notes", "")

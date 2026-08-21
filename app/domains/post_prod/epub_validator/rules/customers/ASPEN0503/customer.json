@@ -175,13 +175,16 @@
       "enabled": true
     },
     {
-      "id": "ASP-META-001",
-      "name": "Aspen: OPF dc:publisher = 'Aspen Publishing'",
+      "id": "COM-META-001",
+      "name": "OPF dc:publisher = 'Aspen Publishing'",
       "target_path": "OEBPS",
       "file_name_pattern": [
         "*.opf"
       ],
-      "enabled": true
+      "enabled": true,
+      "rule_config": {
+        "expected_publisher": "Aspen Publishing"
+      }
     },
     {
       "id": "ASP-META-002",

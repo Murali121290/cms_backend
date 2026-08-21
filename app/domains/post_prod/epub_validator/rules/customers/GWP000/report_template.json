@@ -42,7 +42,9 @@
           "default_status": "Yet to check",
           "default_notes": "",
           "resources": "https://github.com/IDPF/epubcheck",
-          "rule_ids": []
+          "rule_ids": [
+            "EPUBCHECK"
+          ]
         },
         {
           "name": "CSS file validates on its own, outside of the EPUB",
@@ -58,7 +60,9 @@
           "default_status": "Yet to check",
           "default_notes": "",
           "resources": "https://github.com/daisy/ace/releases",
-          "rule_ids": []
+          "rule_ids": [
+            "ACE_CHECK"
+          ]
         }
       ]
     },
@@ -510,7 +514,9 @@
           "default_status": "Yet to check",
           "default_notes": "",
           "resources": "",
-          "rule_ids": []
+          "rule_ids": [
+            "COM-META-001"
+          ]
         },
         {
           "name": "Required accessibility metadata",
