@@ -18,18 +18,7 @@ from urllib3.util.retry import Retry
 from ..engine.registry import rule
 
 
-# Matches citations: pages, chapters, figures, tables
-# Examples: "page 23", "pp. 12-14", "Chapter 9", "Ch. 9", "Ch. 9.E.1", "Fig. 1.1", "Table 1-1"
-_PAGE_CITATION_RE = re.compile(
-    r"\b(?:see\s+)?"
-    r"(?:"
-    r"p(?:age|p)\.?\s*(\d{1,4})(?:\s*[\-–]\s*\d{1,4})?"  # page/pp: "page 23", "pp. 12-14"
-    r"|ch(?:apter)?\.?\s*(\d+(?:[a-zA-Z]?\.?\d+)*(?:\.\w+)*)(?:\s*[\-–]\s*\d+(?:[a-zA-Z]?\.?\d+)*(?:\.\w+)*)?"  # chapter: "Ch. 9", "Ch. 9-10"
-    r"|fig(?:ure)?\.?\s*(\d+(?:[\.\-–]\d+)*)"  # figure: "Fig. 1.1", "Fig. 1-1"
-    r"|table\.?\s*(\d+(?:[\.\-–]\d+)*)"  # table: "Table 1-1", "Table 1"
-    r")[a-zA-Z]*(?![0-9\-–])",  # capture mashed letters; negative lookahead for digits/dashes
-    re.IGNORECASE,
-)
+
 
 
 _PAGE_IDS_CACHE: dict[str, set[str]] = {}
@@ -238,7 +227,7 @@ def _epub_chapter_numbers(epub: str) -> set[str]:
     return nums
 
 
-@rule("ASP-LINK-001")
+@rule("COM-LINK-001")
 def validate_page_citation_links(file_details, rule_config=None):
     """Text like '(See page 23)' should be inside an <a href='...#page_23'>."""
     with open(file_details["full_path"], "r", encoding="utf-8") as f:
@@ -265,21 +254,35 @@ def validate_page_citation_links(file_details, rule_config=None):
     if hasattr(body, 'smooth'):
         body.smooth()
 
+    config_dict = (rule_config or {}).get("rule_config", {})
+    custom_regex = config_dict.get("citation_regex")
+    if not custom_regex:
+        issues.append({
+            "type": "config_error",
+            "message": "Missing 'citation_regex' in rule config",
+            "category": "Error"
+        })
+        return {"issues_count": len(issues), "issues": issues}
+        
+    regex = re.compile(custom_regex, re.IGNORECASE)
+
     for text_node in body.find_all(string=True):
         parent = text_node.parent
         if parent is None or text_node.find_parent(["a", "h1", "h2", "h3", "h4", "h5", "h6", "figure", "figcaption", "header", "title"]):
             continue
         line_num = getattr(parent, "sourceline", None)
 
-        for m in _PAGE_CITATION_RE.finditer(str(text_node)):
+        for m in regex.finditer(str(text_node)):
             # Extract first non-None group (pages, chapters, figures, or tables)
             num = next((g for g in m.groups() if g), None)
             if num is None:
                 continue
 
             # Ignore table/figure captions at the start of a <p> tag right before or after a table/image
-            is_figure = m.group(3) is not None
-            is_table = m.group(4) is not None
+            is_figure = m.group(3) is not None if len(m.groups()) >= 3 else False
+            is_table = m.group(4) is not None if len(m.groups()) >= 4 else False
+            is_unit = m.group(5) is not None if len(m.groups()) >= 5 else False
+            is_lesson = m.group(6) is not None if len(m.groups()) >= 6 else False
             
             if (is_table or is_figure) and parent and parent.name == "p" and m.start() < 10:
                 next_tag = parent.find_next_sibling()

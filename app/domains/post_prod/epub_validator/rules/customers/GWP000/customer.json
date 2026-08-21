@@ -303,11 +303,28 @@
       "file_name_pattern": "*.xhtml"
     },
     {
+      "id": "COM-LINK-001",
+      "name": "Internal Cross-Reference Check",
+      "target_path": "OEBPS/Text",
+      "enabled": true,
+      "file_name_pattern": "*.xhtml",
+      "rule_config": {
+        "citation_regex": "\\b(?:see\\s+)?(?:p(?:age|p)\\.?\\s*(\\d{1,4})(?:\\s*[\\-–]\\s*\\d{1,4})?|ch(?:apter)?\\.?\\s*(\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)(?:\\s*[\\-–]\\s*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|fig(?:ure)?\\.?\\s*(\\d+(?:[\\.\\-–]\\d+)*)|table\\.?\\s*(\\d+(?:[\\.\\-–]\\d+)*)|unit\\.?\\s*(\\d+(?:[\\.\\-–]\\d+)*)|lesson\\.?\\s*(\\d+(?:[\\.\\-–]\\d+)*))[a-zA-Z]*(?![0-9\\-–])"
+      }
+    },
+    {
       "id": "NAV001",
       "name": "NAV TOC Link Check",
       "target_path": "OEBPS",
       "enabled": false,
       "file_name_pattern": "nav.xhtml"
+    },
+    {
+      "id": "INDEX001",
+      "name": "Index Link Check",
+      "target_path": "OEBPS",
+      "enabled": true,
+      "file_name_pattern": "*index*.xhtml"
     },
     {
       "id": "NAV002",
@@ -619,6 +636,13 @@
       "target_path": "OEBPS",
       "file_name_pattern": "toc.ncx",
       "enabled": false
+    },
+    {
+      "id": "STRUCT006",
+      "name": "Confirm no cover.xhtml",
+      "scope": "book",
+      "target_path": "",
+      "enabled": true
     }
   ]
 }

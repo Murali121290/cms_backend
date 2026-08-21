@@ -332,3 +332,23 @@ def validate_sequential_xhtml_names(book_details, rule_config=None):
         expected_num += 1
 
     return {"issues_count": len(issues), "issues": issues}
+
+@rule("STRUCT006")
+def validate_no_cover_xhtml(book_details, rule_config=None):
+    """Ensure cover.xhtml is removed from EPUB."""
+    epub = book_details["epub_path"]
+    issues = []
+    
+    for root, _dirs, files in os.walk(epub):
+        for f in files:
+            if f.lower() == "cover.xhtml":
+                rel_path = os.path.relpath(os.path.join(root, f), epub)
+                issues.append({
+                    "rule_name": "Cover XHTML Check",
+                    "type": "cover_xhtml_present",
+                    "message": f"File 'cover.xhtml' found at '{rel_path}', but it should be removed.",
+                    "category": "Error",
+                    "file_path": rel_path,
+                })
+                
+    return {"issues_count": len(issues), "issues": issues}

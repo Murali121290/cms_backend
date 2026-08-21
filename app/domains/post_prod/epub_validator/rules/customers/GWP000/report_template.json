@@ -480,14 +480,18 @@
           "default_status": "Yet to check",
           "default_notes": "",
           "resources": "",
-          "rule_ids": []
+          "rule_ids": [
+            "INDEX001"
+          ]
         },
         {
           "name": "Internal cross-references are linked (\"Figure XX-XX\", \"unit X\", \"chapter X\", \"lesson XX-XX\", etc.)",
           "default_status": "Yet to check",
           "default_notes": "",
           "resources": "",
-          "rule_ids": []
+          "rule_ids": [
+            "COM-LINK-001"
+          ]
         },
         {
           "name": "Do notlink external references in \"Reference\" or \"Bibliography\" sections of the text (for security and to reduce the likelihood of a broken link inside of the EPUB)",
@@ -604,7 +608,9 @@
           "default_status": "Yet to check",
           "default_notes": "",
           "resources": "",
-          "rule_ids": []
+          "rule_ids": [
+            "STRUCT006"
+          ]
         },
         {
           "name": "Confirm title.xhtml page is built out and not an image",

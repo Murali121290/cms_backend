@@ -899,3 +899,103 @@ def validate_ncx_isbn(file_details, rule_config=None):
         })
 
     return {"issues_count": len(issues), "issues": issues}
+
+@rule("INDEX001")
+def validate_index_links(file_details, rule_config=None):
+    """Validate that index items contain properly linked anchor tags."""
+    import os
+    import urllib.parse
+    
+    text = read_text(file_details["full_path"])
+    soup = BeautifulSoup(text, "html.parser")
+    issues = []
+
+    # Find the index element with role="doc-index" or epub:type="index"
+    index_nav = soup.find(attrs={"role": "doc-index"}) or soup.find(attrs={"epub:type": "index"})
+
+    if not index_nav:
+        # Check if the filename has 'index'
+        if "index" not in os.path.basename(file_details["full_path"]).lower():
+            return {"issues_count": 0, "issues": []}
+        index_nav = soup.find("body") or soup
+        
+    target_ids_cache = {}
+
+    for a_tag in index_nav.find_all("a"):
+        href = a_tag.get("href")
+        if not href:
+            issues.append({
+                "rule_name": "Index link missing href",
+                "type": "index_link_missing_href",
+                "message": "Index <a> tag is missing an href attribute.",
+                "category": "Error",
+                "line_number": getattr(a_tag, "sourceline", None),
+                "extract": str(a_tag)[:100],
+            })
+            continue
+
+        a_text = a_tag.get_text(strip=True).lower()
+        if "#" in href:
+            target_id = href.split("#", 1)[-1].lower()
+            import re
+            
+            clean_target_id = re.sub(r'^(page|p)[_-]?', '', target_id)
+            
+            # The text inside index link could be something like 147f
+            a_text_digits = re.sub(r'\D', '', a_text)
+            id_digits = re.sub(r'\D', '', clean_target_id)
+            
+            if a_text_digits and id_digits and a_text_digits != id_digits:
+                issues.append({
+                    "rule_name": "Index text mismatch",
+                    "type": "index_text_mismatch",
+                    "message": f"Index link text '{a_text}' does not match the target ID '{target_id}' in the href.",
+                    "category": "Error",
+                    "line_number": getattr(a_tag, "sourceline", None),
+                    "extract": str(a_tag)[:100],
+                })
+                
+        # Check if the target file exists
+        if href:
+            if "#" in href:
+                chapter_file = href.split("#", 1)[0]
+            else:
+                chapter_file = href
+                
+            if chapter_file:
+                target_path = os.path.join(os.path.dirname(file_details["full_path"]), chapter_file)
+                target_path = urllib.parse.unquote(target_path)
+                
+                if not os.path.exists(target_path):
+                    issues.append({
+                        "rule_name": "Index target missing",
+                        "type": "index_target_missing",
+                        "message": f"Target file '{chapter_file}' does not exist.",
+                        "category": "Error",
+                        "line_number": getattr(a_tag, "sourceline", None),
+                        "extract": str(a_tag)[:100],
+                    })
+                    continue
+                    
+                # Check target ID exists
+                if "#" in href:
+                    target_id = href.split("#", 1)[-1]
+                    if target_path not in target_ids_cache:
+                        try:
+                            target_text = read_text(target_path)
+                            target_soup = BeautifulSoup(target_text, "html.parser")
+                            target_ids_cache[target_path] = {tag.get("id") for tag in target_soup.find_all(id=True)}
+                        except Exception as e:
+                            target_ids_cache[target_path] = set()
+                            
+                    if target_id not in target_ids_cache[target_path]:
+                        issues.append({
+                            "rule_name": "Index target ID missing",
+                            "type": "index_target_id_missing",
+                            "message": f"Target ID '{target_id}' does not exist in '{chapter_file}'.",
+                            "category": "Error",
+                            "line_number": getattr(a_tag, "sourceline", None),
+                            "extract": str(a_tag)[:100],
+                        })
+                        
+    return {"issues_count": len(issues), "issues": issues}
