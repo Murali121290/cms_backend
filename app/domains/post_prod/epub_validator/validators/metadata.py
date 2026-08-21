@@ -802,3 +802,33 @@ def validate_accessibility_summary_present(book_details, rule_config=None):
         }]}
     return {"issues_count": 0, "issues": []}
 
+@rule("GWP-META-000")
+def validate_gwp_opf_version(book_details, rule_config=None):
+    """Check OPF file in Chrome. Version="3.0" should be at the top of the page within the package information."""
+    soup, opf_path, lines = _load_opf_info(book_details)
+    if soup is None:
+        return {"issues_count": 0, "issues": []}
+    
+    package = soup.find("package")
+    if not package:
+        # Fallback if package is namespaced
+        package = soup.find(lambda tag: tag.name.endswith("package"))
+
+    if package and package.get("version") != "3.0":
+        return {"issues_count": 1, "issues": [{
+            "type": "opf_version_not_3_0",
+            "message": f"OPF package version is '{package.get('version')}', expected '3.0'.",
+            "category": "Error",
+            "line_number": _find_line(lines, "<package"),
+            "extract": f"<package version=\"{package.get('version')}\""
+        }]}
+    elif not package:
+        return {"issues_count": 1, "issues": [{
+            "type": "opf_package_missing",
+            "message": "OPF package tag is missing.",
+            "category": "Error",
+            "line_number": 1,
+            "extract": ""
+        }]}
+        
+    return {"issues_count": 0, "issues": []}

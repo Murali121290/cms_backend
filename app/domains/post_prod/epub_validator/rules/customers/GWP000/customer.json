@@ -1,6 +1,15 @@
 {
   "rules": [
     {
+      "id": "GWP-META-000",
+      "name": "OPF Version Check",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true
+    },
+    {
       "id": "STRUCT001",
       "name": "EPUB Folder Structure Check",
       "scope": "book",

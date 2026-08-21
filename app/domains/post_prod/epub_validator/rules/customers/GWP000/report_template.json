@@ -33,7 +33,9 @@
           "default_status": "Yet to check",
           "default_notes": "",
           "resources": "Check OPF file in Chrome. Version=\"3.0\" should be at the top of the page within the package information.\nhttp://www.idpf.org/epub/30/spec/epub30-publications-20111011.html",
-          "rule_ids": []
+          "rule_ids": [
+            "GWP-META-000"
+          ]
         },
         {
           "name": "EPUB validates with EPUB-Checker",
