@@ -1079,6 +1079,29 @@ export function PostProdEpubValidatorFiles() {
                 )}
                 <span className="whitespace-nowrap">{isExporting ? 'Exporting…' : 'Export EPUB'}</span>
               </button>
+
+              {validationData?.customer === 'GWP000' && (
+                <button
+                  onClick={async () => {
+                    try {
+                      setIsExporting(true);
+                      const { exportQaReport } = await import('@/api/epubValidator');
+                      const result = await exportQaReport(folderName);
+                      triggerDownload(result.blob, result.filename);
+                      toast.success('QA Report downloaded');
+                    } catch (err) {
+                      toast.error(err instanceof Error ? err.message : 'Failed to download report');
+                    } finally {
+                      setIsExporting(false);
+                    }
+                  }}
+                  disabled={isExporting || isLoading || isValidating}
+                  className="inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-green-500/10 text-green-700 hover:border-green-500/40 hover:text-green-600 transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
+                >
+                  <Download className="w-4 h-4 shrink-0" />
+                  <span className="whitespace-nowrap">Download QA Report</span>
+                </button>
+              )}
             </div>
 
 

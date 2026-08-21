@@ -342,6 +342,12 @@
         "image_folder": "Images"
       },
       "enabled": true
+    },
+    {
+      "id": "GWP-LINK-001",
+      "name": "1:1 Internal Backlinks Check",
+      "scope": "book",
+      "enabled": false
     }
   ]
 }

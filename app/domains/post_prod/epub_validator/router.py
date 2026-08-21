@@ -588,3 +588,47 @@ async def export_epub(
         media_type="application/epub+zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/export/{folder_name}/qa-report")
+def export_qa_report(
+    folder_name: str,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Generates and downloads a custom Excel QA report for GWP000."""
+    run = ev_projects_db.get_latest_validation_run(db, folder_name)
+    if not run or not run.get("files"):
+        raise HTTPException(status_code=404, detail="No validation results found for this project.")
+        
+    validation_result = run
+    customer = validation_result.get("customer")
+    
+    if customer != "GWP000":
+        # Fallback or allow other customers later, for now we only support GWP000 template
+        raise HTTPException(status_code=400, detail="QA Report is only available for GWP000 projects.")
+        
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    template_path = os.path.join(current_dir, f"rules/customers/{customer}/report_template.json")
+    if not os.path.exists(template_path):
+        raise HTTPException(status_code=404, detail=f"Report template not found for this customer. Path checked: {template_path}")
+        
+    # Make a temporary file for the Excel report
+    import tempfile
+    from app.domains.post_prod.epub_validator.engine.excel_reporter import generate_gwp_report
+    
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".xlsx")
+    os.close(tmp_fd)
+    
+    try:
+        generate_gwp_report(validation_result, template_path, tmp_path)
+        with open(tmp_path, "rb") as f:
+            xlsx_bytes = f.read()
+    finally:
+        os.remove(tmp_path)
+        
+    return Response(
+        content=xlsx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{folder_name}_QA_Report.xlsx"'},
+    )

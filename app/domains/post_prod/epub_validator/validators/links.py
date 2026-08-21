@@ -758,3 +758,74 @@ def validate_internal_references(file_details, rule_config=None):
             })
 
     return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("GWP-LINK-001")
+def validate_1_to_1_backlinks(book_details, rule_config=None):
+    """
+    GWP000: All internal links must have a 1:1 backlink relationship.
+    This rule checks that for every internal link from File A to File B, 
+    there is a corresponding link from File B back to File A.
+    """
+    epub_path = book_details.get("epub_path")
+    if not epub_path:
+        return {"issues_count": 0, "issues": []}
+
+    xhtml_files = glob.glob(os.path.join(epub_path, "**", "*.xhtml"), recursive=True)
+    html_files = glob.glob(os.path.join(epub_path, "**", "*.html"), recursive=True)
+    all_files = xhtml_files + html_files
+    
+    issues = []
+    
+    # Map: source_file -> set of target_files
+    links_from_to = {}
+    
+    for filepath in all_files:
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                soup = BeautifulSoup(f.read(), "html.parser")
+        except Exception:
+            continue
+            
+        current_dir = os.path.dirname(filepath)
+        for a in soup.find_all("a", href=True):
+            href = a["href"].strip()
+            # Ignore external links and self-anchor links
+            if href.startswith(("http://", "https://", "mailto:", "//", "#")):
+                continue
+                
+            parts = href.split("#")
+            target_rel = parts[0]
+            if not target_rel:
+                continue
+                
+            target_file = os.path.normpath(os.path.join(current_dir, target_rel))
+            # Only consider links to other xhtml/html files in the book
+            if target_file != filepath and os.path.exists(target_file):
+                if filepath not in links_from_to:
+                    links_from_to[filepath] = set()
+                links_from_to[filepath].add(target_file)
+                
+    # Verify the 1:1 relationship
+    for source_file, target_files in links_from_to.items():
+        filename = os.path.basename(source_file).lower()
+        # Skip typical navigational files that are not expected to have backlinks
+        if filename in ("toc.xhtml", "nav.xhtml", "cover.xhtml", "title.xhtml", "titlepage.xhtml", "contents.xhtml"):
+            continue
+            
+        for target_file in target_files:
+            target_filename = os.path.basename(target_file).lower()
+            if target_filename in ("toc.xhtml", "nav.xhtml", "cover.xhtml", "title.xhtml", "titlepage.xhtml", "contents.xhtml"):
+                continue
+                
+            target_links = links_from_to.get(target_file, set())
+            if source_file not in target_links:
+                issues.append({
+                    "rule_name": "Missing Backlink",
+                    "type": "missing_1_to_1_backlink",
+                    "message": f"File links to '{os.path.basename(target_file)}' but no backlink exists.",
+                    "category": "Error",
+                    "file_path": os.path.relpath(source_file, epub_path),
+                })
+
+    return {"issues_count": len(issues), "issues": issues}
