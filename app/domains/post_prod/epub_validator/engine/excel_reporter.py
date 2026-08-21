@@ -4,7 +4,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill
 from datetime import datetime
 
-def generate_gwp_report(validation_result: dict, template_path: str, output_xlsx_path: str):
+def generate_gwp_report(validation_result: dict, template_path: str, output_xlsx_path: str, assignee_name: str = ""):
     """Generates an Excel report matching the GWP template from the validation result."""
     
     with open(template_path, "r") as f:
@@ -20,9 +20,18 @@ def generate_gwp_report(validation_result: dict, template_path: str, output_xlsx
     
     # 2. Metadata row (e.g. Date file rec'd...)
     metadata_row = template.get("metadata_row", [])
-    # Optionally dynamically update the date
-    metadata_row[1] = f"Date file review complete: {datetime.now().strftime('%m/%d/%y')}"
-    ws.append(metadata_row)
+    current_date = datetime.now().strftime('%m/%d/%y')
+    
+    updated_metadata = []
+    for cell in metadata_row:
+        if "{date}" in cell:
+            cell = cell.replace("{date}", current_date)
+        if "{assignee name}" in cell:
+            display_name = assignee_name if assignee_name else "Unknown"
+            cell = cell.replace("{assignee name}", display_name)
+        updated_metadata.append(cell)
+            
+    ws.append(updated_metadata)
     
     # 3. Headers
     # The actual headers are usually the first criteria in the 'Uncategorized' category.
@@ -53,6 +62,13 @@ def generate_gwp_report(validation_result: dict, template_path: str, output_xlsx
     # Helper to evaluate status based on mapped rules
     def evaluate_criteria(criteria):
         rule_ids = criteria.get("rule_ids", [])
+        if not isinstance(rule_ids, list):
+            rule_ids = [rule_ids]
+            
+        single_rule = criteria.get("rule_id")
+        if single_rule and single_rule not in rule_ids:
+            rule_ids.append(single_rule)
+            
         if not rule_ids:
             return criteria.get("default_status", ""), criteria.get("default_notes", "")
             
@@ -65,7 +81,7 @@ def generate_gwp_report(validation_result: dict, template_path: str, output_xlsx
                 all_issues.extend(rule_issues[rid])
                 
         if not rules_executed:
-            # The rules were not enabled or run, fallback to default
+            # Rules mapped but not found in validation results
             return criteria.get("default_status", ""), criteria.get("default_notes", "")
             
         if all_issues:
@@ -97,6 +113,21 @@ def generate_gwp_report(validation_result: dict, template_path: str, output_xlsx
             else:
                 status, notes = evaluate_criteria(criteria)
                 ws.append([name, status, notes, resources])
+                
+                # Apply colors based on status
+                status_cell = ws.cell(row=current_row, column=2)
+                lower_status = status.lower()
+                if lower_status == "pass":
+                    status_cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+                    status_cell.font = Font(color="006100")
+                elif lower_status == "fail":
+                    status_cell.fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+                    status_cell.font = Font(color="9C0006")
+                elif lower_status == "yet to check":
+                    status_cell.fill = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
+                    status_cell.font = Font(color="9C5700")
+                elif lower_status == "n/a":
+                    status_cell.fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
                 
             # Alignment for all cells in this row
             for col in range(1, 5):

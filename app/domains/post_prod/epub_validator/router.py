@@ -620,8 +620,12 @@ def export_qa_report(
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=".xlsx")
     os.close(tmp_fd)
     
+    # Get project to retrieve assignee name
+    project = ev_projects_db.get_project_by_folder(db, folder_name)
+    assignee_name = project.assignee if project and project.assignee else ""
+    
     try:
-        generate_gwp_report(validation_result, template_path, tmp_path)
+        generate_gwp_report(validation_result, template_path, tmp_path, assignee_name)
         with open(tmp_path, "rb") as f:
             xlsx_bytes = f.read()
     finally:
