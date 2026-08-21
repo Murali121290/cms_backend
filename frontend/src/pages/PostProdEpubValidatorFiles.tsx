@@ -1707,28 +1707,30 @@ export function PostProdEpubValidatorFiles() {
                     </span>
                   </button>
 
-                  <button
-                    onClick={() => setActiveCategoryTab('fonts')}
-                    className={cn(
-                      'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
-                      activeCategoryTab === 'fonts'
-                        ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 shadow-xs'
-                        : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
-                    )}
-                  >
-                    <Type className="w-4 h-4 text-indigo-500 shrink-0" />
-                    <span>Fonts</span>
-                    <span
+                  {fontFiles.length > 0 && (
+                    <button
+                      onClick={() => setActiveCategoryTab('fonts')}
                       className={cn(
-                        'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold transition-colors',
+                        'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
                         activeCategoryTab === 'fonts'
-                          ? 'bg-indigo-500/20 text-indigo-600 dark:text-indigo-400'
-                          : 'bg-indigo-500/10 text-indigo-600/80 dark:text-indigo-400/80',
+                          ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 shadow-xs'
+                          : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
                       )}
                     >
-                      {visibleFontFiles.length}
-                    </span>
-                  </button>
+                      <Type className="w-4 h-4 text-indigo-500 shrink-0" />
+                      <span>Fonts</span>
+                      <span
+                        className={cn(
+                          'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold transition-colors',
+                          activeCategoryTab === 'fonts'
+                            ? 'bg-indigo-500/20 text-indigo-600 dark:text-indigo-400'
+                            : 'bg-indigo-500/10 text-indigo-600/80 dark:text-indigo-400/80',
+                        )}
+                      >
+                        {visibleFontFiles.length}
+                      </span>
+                    </button>
+                  )}
 
                   <button
                     onClick={() => setActiveCategoryTab('other')}

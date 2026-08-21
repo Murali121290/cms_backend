@@ -1,10 +1,10 @@
 {
   "title": "EPUB QA Checklist for Goodheart-Willcox Publisher",
   "metadata_row": [
-    "Date file rec'd from vendor: {date}",
-    "Production Specialist: {assignee name}",
+    "Date file rec'd: {uploaded_date}",
+    "",
     "Date file review complete: {date}",
-    ""
+    "Production Specialist: {assignee name}"
   ],
   "headers": [
     "",

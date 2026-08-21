@@ -4,7 +4,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill
 from datetime import datetime
 
-def generate_gwp_report(validation_result: dict, template_path: str, output_xlsx_path: str, assignee_name: str = ""):
+def generate_gwp_report(validation_result: dict, template_path: str, output_xlsx_path: str, assignee_name: str = "", uploaded_date: str = ""):
     """Generates an Excel report matching the GWP template from the validation result."""
     
     with open(template_path, "r") as f:
@@ -26,6 +26,10 @@ def generate_gwp_report(validation_result: dict, template_path: str, output_xlsx
     for cell in metadata_row:
         if "{date}" in cell:
             cell = cell.replace("{date}", current_date)
+        if "{uploaded_date}" in cell:
+            # Replace with the uploaded date; fallback to current date if missing
+            display_date = uploaded_date if uploaded_date else current_date
+            cell = cell.replace("{uploaded_date}", display_date)
         if "{assignee name}" in cell:
             display_name = assignee_name if assignee_name else "Unknown"
             cell = cell.replace("{assignee name}", display_name)

@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, Form, Query, UploadFile, File, HTTPExcep
 from fastapi.responses import FileResponse, Response
 from pathlib import Path
 from typing import Optional
+from datetime import datetime
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -620,12 +621,13 @@ def export_qa_report(
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=".xlsx")
     os.close(tmp_fd)
     
-    # Get project to retrieve assignee name
+    # Get project to retrieve assignee name and uploaded date
     project = ev_projects_db.get_project_by_folder(db, folder_name)
     assignee_name = project.assignee if project and project.assignee else ""
+    uploaded_date = project.uploaded_at.strftime('%m/%d/%y') if project and project.uploaded_at else datetime.now().strftime('%m/%d/%y')
     
     try:
-        generate_gwp_report(validation_result, template_path, tmp_path, assignee_name)
+        generate_gwp_report(validation_result, template_path, tmp_path, assignee_name, uploaded_date)
         with open(tmp_path, "rb") as f:
             xlsx_bytes = f.read()
     finally:
