@@ -1,10 +1,11 @@
-import { useState, useRef, useEffect, useLayoutEffect, createContext, useContext } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, createContext, useContext } from "react";
 import { createPortal } from "react-dom";
 import {
   ArrowLeft,
   BookOpen,
   CheckCircle2,
   ChevronRight,
+  ClipboardCheck,
   Clock,
   Download,
   FileText,
@@ -34,6 +35,9 @@ import { VersionHistoryPanel } from "@/features/structuringReview/components/Ver
 import { useParagraphStyles } from "@/features/editor/useParagraphStyles";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { uiPaths } from "@/utils/appPaths";
+import { ReferenceValidationReviewPage } from "@/pages/ReferenceValidationReviewPage";
+
+type StructuringTab = "overview" | "editor" | "onlyoffice" | "collabora" | "reference";
 
 const ToolbarPopoverContext = createContext<{
   openId: string | null;
@@ -158,11 +162,26 @@ export function StructuringReviewPage() {
   const editorSave = useEditorSaveRuns(normalizedFileId);
   const stylesQuery = useParagraphStyles();
 
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
-  const defaultTab: "overview" | "editor" | "onlyoffice" | "collabora" =
-    (tabParam === "editor" || tabParam === "onlyoffice" || tabParam === "collabora" || tabParam === "overview") ? tabParam : "overview";
-  const [activeTab, setActiveTab] = useState<"overview" | "editor" | "onlyoffice" | "collabora">(defaultTab);
+  const defaultTab: StructuringTab =
+    (tabParam === "editor" || tabParam === "onlyoffice" || tabParam === "collabora" || tabParam === "overview" || tabParam === "reference") ? tabParam : "overview";
+  const [activeTab, setActiveTab] = useState<StructuringTab>(defaultTab);
+  // Persist selected tab in the URL so a reload restores the same tab.
+  const selectTab = useCallback(
+    (next: StructuringTab) => {
+      setActiveTab(next);
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          params.set("tab", next);
+          return params;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [trackChangesEnabled, setTrackChangesEnabled] = useState(false);
   const [sidePanelTab, setSidePanelTab] = useState<"styles" | "changes">("styles");
@@ -199,67 +218,138 @@ export function StructuringReviewPage() {
     );
   }
 
-  // ── Loading ───────────────────────────────────────────────────────────────
-  if (reviewQuery.isPending) {
+  // Shared tab-strip renderer so the Reference Review tab can also show it
+  // when structuring metadata isn't available yet.
+  const renderTabStrip = (showOnlyOffice: boolean) => (
+    <div className="flex border-b border-navy-200">
+      <button
+        onClick={() => selectTab("overview")}
+        className={`py-3 px-6 font-semibold text-sm flex items-center gap-2 border-b-2 transition-all ${activeTab === "overview"
+          ? "border-navy-600 text-navy-800"
+          : "border-transparent text-navy-400 hover:text-navy-600"
+          }`}
+      >
+        <LayoutDashboard className="w-4 h-4" />
+        Document Overview
+      </button>
+      <button
+        onClick={() => selectTab("editor")}
+        className={`py-3 px-6 font-semibold text-sm flex items-center gap-2 border-b-2 transition-all ${activeTab === "editor"
+          ? "border-navy-600 text-navy-800"
+          : "border-transparent text-navy-400 hover:text-navy-600"
+          }`}
+      >
+        <FileText className="w-4 h-4" />
+        Structuring Review
+      </button>
+      <button
+        onClick={() => selectTab("reference")}
+        className={`py-3 px-6 font-semibold text-sm flex items-center gap-2 border-b-2 transition-all ${activeTab === "reference"
+          ? "border-navy-600 text-navy-800"
+          : "border-transparent text-navy-400 hover:text-navy-600"
+          }`}
+      >
+        <ClipboardCheck className="w-4 h-4" />
+        Reference Review
+      </button>
+      {showOnlyOffice && (
+        <button
+          onClick={() => selectTab("onlyoffice")}
+          className={`py-3 px-6 font-semibold text-sm flex items-center gap-2 border-b-2 transition-all ${activeTab === "onlyoffice"
+            ? "border-navy-600 text-navy-800"
+            : "border-transparent text-navy-400 hover:text-navy-600"
+            }`}
+        >
+          <BookOpen className="w-4 h-4" />
+          Office Editor
+        </button>
+      )}
+    </div>
+  );
+
+  // ── Reference Review tab ─────────────────────────────────────────────────
+  // Render Reference Review even when the structuring metadata query is
+  // still pending or has failed. The reference-review flow has its own
+  // independent data pipeline and must not be gated on structuring output.
+  if (activeTab === "reference") {
     return (
-      <main className="page-enter min-h-screen bg-surface-100 p-6">
-        <div className="max-w-6xl mx-auto space-y-6">
-          <div className="h-14 skeleton-shimmer rounded-md" aria-hidden="true" />
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 space-y-3">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <SkeletonCard key={i} />
-              ))}
-            </div>
-            <div className="space-y-4">
-              <SkeletonCard />
-              <SkeletonCard />
-            </div>
+      <main className={`page-enter min-h-screen bg-surface-100 flex flex-col ${isFullscreen ? "p-2" : "px-6 pt-3 pb-6"}`}>
+        <div className={`w-full flex-1 flex flex-col ${isFullscreen ? "max-w-none px-0" : "px-4 space-y-3"}`}>
+          {!isFullscreen && renderTabStrip(false)}
+          <div className="flex-1 -mx-4 -mb-6">
+            <ReferenceValidationReviewPage />
           </div>
         </div>
       </main>
+    );
+  }
+
+  // Shell used by loading/error/no-data screens so the user can still switch
+  // to the Reference Review tab when structuring metadata is unavailable.
+  const withTabShell = (body: React.ReactNode) => (
+    <main className="page-enter min-h-screen bg-surface-100 flex flex-col px-6 pt-3 pb-6">
+      <div className="w-full flex-1 flex flex-col px-4 space-y-3">
+        {renderTabStrip(false)}
+        <div className="flex-1 flex items-center justify-center">{body}</div>
+      </div>
+    </main>
+  );
+
+  // ── Loading ───────────────────────────────────────────────────────────────
+  if (reviewQuery.isPending) {
+    return withTabShell(
+      <div className="max-w-6xl w-full mx-auto space-y-6">
+        <div className="h-14 skeleton-shimmer rounded-md" aria-hidden="true" />
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 space-y-3">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <SkeletonCard key={i} />
+            ))}
+          </div>
+          <div className="space-y-4">
+            <SkeletonCard />
+            <SkeletonCard />
+          </div>
+        </div>
+      </div>,
     );
   }
 
   // ── Error ─────────────────────────────────────────────────────────────────
   if (reviewQuery.isError) {
-    return (
-      <main className="page-enter min-h-screen bg-surface-100 p-6 flex items-center justify-center">
-        <div className="bg-white rounded-lg shadow-card p-10 max-w-md w-full text-center space-y-4">
-          <EmptyState
-            title="Structuring review unavailable"
-            description={getApiErrorMessage(
-              reviewQuery.error,
-              "The frontend shell could not load the structuring review metadata.",
-            )}
-          />
-          <div className="flex items-center justify-center gap-3">
-            <Button variant="primary" onClick={() => void reviewQuery.refetch()}>
-              Try Again
-            </Button>
-            <Link to={uiPaths.chapterDetail(normalizedProjectId, normalizedChapterId)}>
-              <Button variant="secondary">Back to Chapter</Button>
-            </Link>
-          </div>
+    return withTabShell(
+      <div className="bg-white rounded-lg shadow-card p-10 max-w-md w-full text-center space-y-4">
+        <EmptyState
+          title="Structuring review unavailable"
+          description={getApiErrorMessage(
+            reviewQuery.error,
+            "The frontend shell could not load the structuring review metadata.",
+          )}
+        />
+        <div className="flex items-center justify-center gap-3">
+          <Button variant="primary" onClick={() => void reviewQuery.refetch()}>
+            Try Again
+          </Button>
+          <Link to={uiPaths.chapterDetail(normalizedProjectId, normalizedChapterId)}>
+            <Button variant="secondary">Back to Chapter</Button>
+          </Link>
         </div>
-      </main>
+      </div>,
     );
   }
 
   // ── No data ───────────────────────────────────────────────────────────────
   if (!reviewQuery.data) {
-    return (
-      <main className="page-enter min-h-screen bg-surface-100 p-6 flex items-center justify-center">
-        <div className="bg-white rounded-lg shadow-card p-10 max-w-md w-full text-center space-y-4">
-          <EmptyState
-            title="Structuring review unavailable"
-            description="The structuring review contract returned no data."
-          />
-          <Link to={uiPaths.chapterDetail(normalizedProjectId, normalizedChapterId)}>
-            <Button variant="primary">Back to Chapter</Button>
-          </Link>
-        </div>
-      </main>
+    return withTabShell(
+      <div className="bg-white rounded-lg shadow-card p-10 max-w-md w-full text-center space-y-4">
+        <EmptyState
+          title="Structuring review unavailable"
+          description="The structuring review contract returned no data."
+        />
+        <Link to={uiPaths.chapterDetail(normalizedProjectId, normalizedChapterId)}>
+          <Button variant="primary">Back to Chapter</Button>
+        </Link>
+      </div>,
     );
   }
 
@@ -325,55 +415,7 @@ export function StructuringReviewPage() {
         )}
 
         {/* Tab Controls */}
-        {!isFullscreen && (
-          <div className="flex border-b border-navy-200">
-            <button
-              onClick={() => setActiveTab("overview")}
-              className={`py-3 px-6 font-semibold text-sm flex items-center gap-2 border-b-2 transition-all ${activeTab === "overview"
-                ? "border-navy-600 text-navy-800"
-                : "border-transparent text-navy-400 hover:text-navy-600"
-                }`}
-            >
-              <LayoutDashboard className="w-4 h-4" />
-              Document Overview
-            </button>
-            <button
-              onClick={() => setActiveTab("editor")}
-              className={`py-3 px-6 font-semibold text-sm flex items-center gap-2 border-b-2 transition-all ${activeTab === "editor"
-                ? "border-navy-600 text-navy-800"
-                : "border-transparent text-navy-400 hover:text-navy-600"
-                }`}
-            >
-              <FileText className="w-4 h-4" />
-              Style Editor Workspace
-            </button>
-            {onlyoffice_available && (
-              <button
-                onClick={() => setActiveTab("onlyoffice")}
-                className={`py-3 px-6 font-semibold text-sm flex items-center gap-2 border-b-2 transition-all ${activeTab === "onlyoffice"
-                  ? "border-navy-600 text-navy-800"
-                  : "border-transparent text-navy-400 hover:text-navy-600"
-                  }`}
-              >
-                <BookOpen className="w-4 h-4" />
-                Office Editor
-              </button>
-            )}
-            {/* {review.editor.collabora_url && (
-              <button
-                onClick={() => setActiveTab("collabora")}
-                className={`py-3 px-6 font-semibold text-sm flex items-center gap-2 border-b-2 transition-all ${
-                  activeTab === "collabora"
-                    ? "border-navy-600 text-navy-800"
-                    : "border-transparent text-navy-400 hover:text-navy-600"
-                }`}
-              >
-                <BookOpen className="w-4 h-4" />
-                Collabora Office Editor
-              </button>
-            )} */}
-          </div>
-        )}
+        {!isFullscreen && renderTabStrip(onlyoffice_available)}
 
         {/* Error banner only — success feedback comes from the save button's state */}
         {editorSave.errorMessage && (
@@ -750,6 +792,7 @@ export function StructuringReviewPage() {
             </div>
           </div>
         )}
+
       </div>
 
       {/* Floating Fullscreen Exit Button */}

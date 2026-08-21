@@ -79,7 +79,7 @@ export function useAutoLogout() {
       const timeSinceLastActivity = Date.now() - lastActivityRef.current
 
       // Check if page pathname is an active editor route (OnlyOffice or WYSIWYG)
-      const isEditorOpen = /(\/edit|\/wysiwyg|structuring-review|technical-review|technical-editor|reference-review|image-review|stylesheets)/.test(pathname)
+      const isEditorOpen = /(\/edit|\/wysiwyg|\/review|structuring-review|technical-review|technical-editor|reference-review|image-review|stylesheets)/.test(pathname)
 
       // 1. If user has been active locally in the last 5 minutes OR is in an editor route, refresh session
       if (timeSinceLastActivity < 5 * 60 * 1000 || isEditorOpen) {

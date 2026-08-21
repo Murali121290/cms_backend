@@ -1,4 +1,4 @@
-import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom'
+import { createBrowserRouter, RouterProvider, Navigate, useLocation, useParams } from 'react-router-dom'
 import { AppLayout } from '@/layouts/AppLayout'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { RoleGuard } from '@/components/RoleGuard'
@@ -56,6 +56,34 @@ function PostProdGuard({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+// The Structuring Review page hosts the Reference Review as an inner tab
+// (see StructuringReviewPage's ?tab=reference). Legacy .../reference-review
+// URLs redirect into it. Any pre-existing query params are preserved.
+function ReferenceTabRedirect() {
+  const { clientId, projectId, chapterId, fileId } = useParams()
+  const location = useLocation()
+  const base = clientId
+    ? `/clients/${clientId}/projects/${projectId}/chapters/${chapterId}/files/${fileId}/structuring-review`
+    : `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/structuring-review`
+  const params = new URLSearchParams(location.search)
+  params.set('tab', 'reference')
+  return <Navigate to={`${base}?${params.toString()}${location.hash}`} replace />
+}
+
+// Back-compat for the intermediate .../review?view= URLs that briefly existed.
+function LegacyFileReviewRedirect() {
+  const { clientId, projectId, chapterId, fileId } = useParams()
+  const location = useLocation()
+  const params = new URLSearchParams(location.search)
+  const view = params.get('view') === 'reference' ? 'reference' : 'editor'
+  params.delete('view')
+  params.set('tab', view)
+  const base = clientId
+    ? `/clients/${clientId}/projects/${projectId}/chapters/${chapterId}/files/${fileId}/structuring-review`
+    : `/projects/${projectId}/chapters/${chapterId}/files/${fileId}/structuring-review`
+  return <Navigate to={`${base}?${params.toString()}${location.hash}`} replace />
+}
+
 const router = createBrowserRouter([
   // ── Public routes ──────────────────────────────────────────────────────────
   { path: '/portal', element: <WorkflowPortalPage /> },
@@ -109,18 +137,20 @@ const router = createBrowserRouter([
       // ── File-level pages (projects prefix) ──────────────────────────────────
       { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/edit', element: <FileEditorPage /> },
       { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/wysiwyg', element: <DocxEditorPage /> },
+      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/review', element: <LegacyFileReviewRedirect /> },
       { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/structuring-review', element: <StructuringReviewPage /> },
       { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/technical-review', element: <TechnicalReviewPage /> },
       { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/technical-editor', element: <TechnicalEditorPage /> },
-      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/reference-review', element: <ReferenceValidationReviewPage /> },
+      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/reference-review', element: <ReferenceTabRedirect /> },
 
       // ── File-level pages (clients prefix) ───────────────────────────────────
       { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/edit', element: <FileEditorPage /> },
       { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/wysiwyg', element: <DocxEditorPage /> },
+      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/review', element: <LegacyFileReviewRedirect /> },
       { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/structuring-review', element: <StructuringReviewPage /> },
       { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/technical-review', element: <TechnicalReviewPage /> },
       { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/technical-editor', element: <TechnicalEditorPage /> },
-      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/reference-review', element: <ReferenceValidationReviewPage /> },
+      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/reference-review', element: <ReferenceTabRedirect /> },
 
       { path: 'projects', element: <ProjectsPage /> },
       { path: 'chapters', element: <Placeholder title="Chapters" /> },
