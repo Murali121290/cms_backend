@@ -664,5 +664,389 @@ def validate_page_list_links(file_details, rule_config=None):
                     "line_number": getattr(li, "sourceline", None),
                     "extract": li_direct_text_snippet[:100],
                 })
+                
+            # Check 3: Text in <a> tag must match the page number/identifier in the href
+            a_text = a_tag.get_text(strip=True).lower()
+            href = a_tag.get("href", "")
+            if "#" in href:
+                target_id = href.split("#", 1)[-1].lower()
+                # Remove common prefixes like 'page_', 'page-', 'page', 'p_', 'p-', 'p'
+                import re
+                clean_target_id = re.sub(r'^(page|p)[_-]?', '', target_id)
+                if a_text != clean_target_id:
+                    issues.append({
+                        "rule_name": "page list text mismatch",
+                        "type": "page_list_text_mismatch",
+                        "message": f"Page list link text '{a_text}' does not match the target ID '{target_id}' in the href.",
+                        "category": "Error",
+                        "line_number": getattr(a_tag, "sourceline", None),
+                        "extract": str(a_tag)[:100],
+                    })
+                    
+            # Check 4: Target file must exist
+            if href:
+                import os
+                if "#" in href:
+                    chapter_file = href.split("#", 1)[0]
+                else:
+                    chapter_file = href
+                    
+                file_path = file_details["full_path"]
+                current_dir = os.path.dirname(file_path)
+                target_file_path = os.path.normpath(os.path.join(current_dir, chapter_file))
+                
+                if not os.path.exists(target_file_path):
+                    issues.append({
+                        "rule_name": "Page list missing file",
+                        "type": "page_list_missing_file",
+                        "message": f"Referenced file '{chapter_file}' does not exist.",
+                        "category": "Error",
+                        "line_number": getattr(a_tag, "sourceline", None),
+                        "extract": href,
+                    })
+                elif "#" in href:
+                    exact_target_id = href.split("#", 1)[1]
+                    try:
+                        with open(target_file_path, "r", encoding="utf-8") as tf:
+                            tf_soup = BeautifulSoup(tf.read(), "html.parser")
+                            target_el = tf_soup.find(id=exact_target_id)
+                            if not target_el:
+                                target_el = tf_soup.find(attrs={"name": exact_target_id})
+                            if not target_el:
+                                issues.append({
+                                    "rule_name": "Page list missing target ID",
+                                    "type": "page_list_missing_target_id",
+                                    "message": f"Target ID '{exact_target_id}' does not exist in '{chapter_file}'.",
+                                    "category": "Error",
+                                    "line_number": getattr(a_tag, "sourceline", None),
+                                    "extract": href,
+                                })
+                    except Exception:
+                        pass
+
+    return {"issues_count": len(issues), "issues": issues}
+
+@rule("COM-NAV-001")
+@rule("COM-NAV-002")
+@rule("COM-NAV-003")
+def validate_nav_epub_type(file_details, rule_config=None):
+    """Validate that the navigation document contains a <nav> element with a specific epub:type."""
+    config_dict = (rule_config or {}).get("rule_config", {})
+    expected_type = config_dict.get("expected_type")
+    
+    if not expected_type:
+        return {"issues_count": 1, "issues": [{"type": "configuration_error", "message": "Missing expected_type in rule_config.", "category": "Error"}]}
+        
+    text = read_text(file_details["full_path"])
+    soup = BeautifulSoup(text, "html.parser")
+    
+    issues = []
+    
+    # Get all epub:type attributes from <nav> elements
+    nav_elements = soup.find_all("nav")
+    found_types = set()
+    for nav in nav_elements:
+        epub_type = nav.get("epub:type")
+        if epub_type:
+            # epub:type can have multiple values separated by space
+            found_types.update(epub_type.split())
+            
+    if expected_type not in found_types:
+        issues.append({
+            "type": "missing_nav_epub_type",
+            "message": f'Navigation document is missing <nav epub:type="{expected_type}">',
+            "category": "Error",
+        })
+            
+    return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("COM-NCX-001")
+def validate_ncx_navpoint(file_details, rule_config=None):
+    """Ensure navPoint elements are present and have content src."""
+    file_path = file_details["full_path"]
+    issues = []
+    
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            ncx_soup = BeautifulSoup(f, "xml")
+    except Exception as e:
+        return {"issues_count": 1, "issues": [{"type": "ncx_read_error", "message": f"Could not read NCX file: {e}", "category": "Error"}]}
+
+    navpoints = ncx_soup.find_all("navPoint")
+    if not navpoints:
+        issues.append({
+            "type": "missing_navpoint",
+            "message": "No <navPoint> elements found in toc.ncx.",
+            "category": "Error",
+        })
+        return {"issues_count": len(issues), "issues": issues}
+
+    for np in navpoints:
+        content = np.find("content")
+        if not content or not content.get("src"):
+            issues.append({
+                "type": "invalid_navpoint",
+                "message": f"<navPoint id='{np.get('id', '')}'> is missing a valid <content src='...'>.",
+                "category": "Error",
+                "line_number": getattr(np, "sourceline", None)
+            })
+
+    return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("COM-NCX-002")
+def validate_ncx_pagetarget(file_details, rule_config=None):
+    """Ensure pageTarget elements exist in toc.ncx pageList."""
+    file_path = file_details["full_path"]
+    issues = []
+    
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            ncx_soup = BeautifulSoup(f, "xml")
+    except Exception as e:
+        return {"issues_count": 1, "issues": [{"type": "ncx_read_error", "message": f"Could not read NCX file: {e}", "category": "Error"}]}
+
+    pagelist = ncx_soup.find("pageList")
+    if not pagelist:
+        issues.append({
+            "type": "missing_pagelist",
+            "message": "No <pageList> element found in toc.ncx.",
+            "category": "Error",
+        })
+        return {"issues_count": len(issues), "issues": issues}
+
+    pagetargets = pagelist.find_all("pageTarget")
+    if not pagetargets:
+        issues.append({
+            "type": "missing_pagetarget",
+            "message": "No <pageTarget> elements found in <pageList>.",
+            "category": "Error",
+        })
+
+    return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("COM-NCX-003")
+def validate_ncx_pdf_page_count(file_details, rule_config=None):
+    """Check that dtb:totalPageCount and dtb:maxPageNumber match the PDF page count."""
+    from .metadata import _get_pdf_page_count
+    file_path = file_details["full_path"]
+    issues = []
+    
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            ncx_soup = BeautifulSoup(f, "xml")
+    except Exception as e:
+        return {"issues_count": 1, "issues": [{"type": "ncx_read_error", "message": f"Could not read NCX file: {e}", "category": "Error"}]}
+
+    actual = _get_pdf_page_count(file_details)
+    if actual is None:
+        return {"issues_count": 1, "issues": [{"type": "pdf_unavailable", "message": "No PDF is available to verify page count.", "category": "Warning"}]}
+
+    for meta_name in ["dtb:totalPageCount", "dtb:maxPageNumber"]:
+        meta = ncx_soup.find("meta", {"name": meta_name})
+        if not meta:
+            issues.append({"type": f"missing_{meta_name.replace(':', '_')}", "message": f"Missing <meta name='{meta_name}'> in toc.ncx.", "category": "Error"})
+            continue
+            
+        declared = meta.get("content")
+        try:
+            declared_int = int(declared)
+            if declared_int != actual:
+                issues.append({
+                    "type": f"{meta_name.replace(':', '_')}_mismatch",
+                    "message": f"toc.ncx {meta_name} declares {declared_int} pages; PDF has {actual}.",
+                    "category": "Error",
+                    "line_number": getattr(meta, "sourceline", None)
+                })
+        except (ValueError, TypeError):
+            issues.append({"type": "invalid_page_count", "message": f"Invalid {meta_name} value: '{declared}'", "category": "Error", "line_number": getattr(meta, "sourceline", None)})
+
+    return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("COM-NCX-004")
+def validate_ncx_isbn(file_details, rule_config=None):
+    """Check that dtb:uid in toc.ncx matches the OPF eISBN."""
+    from .copyright import _extract_eisbn
+    file_path = file_details["full_path"]
+    issues = []
+    
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            ncx_soup = BeautifulSoup(f, "xml")
+    except Exception as e:
+        return {"issues_count": 1, "issues": [{"type": "ncx_read_error", "message": f"Could not read NCX file: {e}", "category": "Error"}]}
+
+    eisbn = _extract_eisbn(file_details["epub_root"])
+    if not eisbn:
+        return {"issues_count": 1, "issues": [{"type": "eisbn_unknown", "message": "Could not extract eISBN from OPF to check toc.ncx.", "category": "Warning"}]}
+
+    meta = ncx_soup.find("meta", {"name": "dtb:uid"})
+    if not meta:
+        return {"issues_count": 1, "issues": [{"type": "missing_dtb_uid", "message": "Missing <meta name='dtb:uid'> in toc.ncx.", "category": "Error"}]}
+
+    declared = meta.get("content", "").replace("-", "")
+    expected = eisbn.replace("-", "")
+    
+    if expected not in declared and declared not in expected:
+        issues.append({
+            "type": "uid_mismatch",
+            "message": f"toc.ncx dtb:uid ({declared}) does not match OPF eISBN ({expected}).",
+            "category": "Error",
+            "line_number": getattr(meta, "sourceline", None)
+        })
+
+    return {"issues_count": len(issues), "issues": issues}
+
+@rule("INDEX001")
+def validate_index_links(file_details, rule_config=None):
+    """Validate that index items contain properly linked anchor tags."""
+    import os
+    import urllib.parse
+    
+    text = read_text(file_details["full_path"])
+    soup = BeautifulSoup(text, "html.parser")
+    issues = []
+
+    # Find the index element with role="doc-index" or epub:type="index"
+    index_nav = soup.find(attrs={"role": "doc-index"}) or soup.find(attrs={"epub:type": "index"})
+
+    if not index_nav:
+        # Check if the filename has 'index'
+        if "index" not in os.path.basename(file_details["full_path"]).lower():
+            return {"issues_count": 0, "issues": []}
+        index_nav = soup.find("body") or soup
+        
+    target_ids_cache = {}
+
+    for a_tag in index_nav.find_all("a"):
+        href = a_tag.get("href")
+        if not href:
+            issues.append({
+                "rule_name": "Index link missing href",
+                "type": "index_link_missing_href",
+                "message": "Index <a> tag is missing an href attribute.",
+                "category": "Error",
+                "line_number": getattr(a_tag, "sourceline", None),
+                "extract": str(a_tag)[:100],
+            })
+            continue
+
+        a_text = a_tag.get_text(strip=True).lower()
+        if "#" in href:
+            target_id = href.split("#", 1)[-1].lower()
+            import re
+            
+            clean_target_id = re.sub(r'^(page|p)[_-]?', '', target_id)
+            
+            # The text inside index link could be something like 147f
+            a_text_digits = re.sub(r'\D', '', a_text)
+            id_digits = re.sub(r'\D', '', clean_target_id)
+            
+            if a_text_digits and id_digits and a_text_digits != id_digits:
+                issues.append({
+                    "rule_name": "Index text mismatch",
+                    "type": "index_text_mismatch",
+                    "message": f"Index link text '{a_text}' does not match the target ID '{target_id}' in the href.",
+                    "category": "Error",
+                    "line_number": getattr(a_tag, "sourceline", None),
+                    "extract": str(a_tag)[:100],
+                })
+                
+        # Check if the target file exists
+        if href:
+            if "#" in href:
+                chapter_file = href.split("#", 1)[0]
+            else:
+                chapter_file = href
+                
+            if chapter_file:
+                target_path = os.path.join(os.path.dirname(file_details["full_path"]), chapter_file)
+                target_path = urllib.parse.unquote(target_path)
+                
+                if not os.path.exists(target_path):
+                    issues.append({
+                        "rule_name": "Index target missing",
+                        "type": "index_target_missing",
+                        "message": f"Target file '{chapter_file}' does not exist.",
+                        "category": "Error",
+                        "line_number": getattr(a_tag, "sourceline", None),
+                        "extract": str(a_tag)[:100],
+                    })
+                    continue
+                    
+                # Check target ID exists
+                if "#" in href:
+                    target_id = href.split("#", 1)[-1]
+                    if target_path not in target_ids_cache:
+                        try:
+                            target_text = read_text(target_path)
+                            target_soup = BeautifulSoup(target_text, "html.parser")
+                            target_ids_cache[target_path] = {tag.get("id") for tag in target_soup.find_all(id=True)}
+                        except Exception as e:
+                            target_ids_cache[target_path] = set()
+                            
+                    if target_id not in target_ids_cache[target_path]:
+                        issues.append({
+                            "rule_name": "Index target ID missing",
+                            "type": "index_target_id_missing",
+                            "message": f"Target ID '{target_id}' does not exist in '{chapter_file}'.",
+                            "category": "Error",
+                            "line_number": getattr(a_tag, "sourceline", None),
+                            "extract": str(a_tag)[:100],
+                        })
+                        
+    return {"issues_count": len(issues), "issues": issues}
+
+@rule("INDEX002")
+def validate_index_list_format(file_details, rule_config=None):
+    """Validate that index entries use unordered lists."""
+    import os
+    text = read_text(file_details["full_path"])
+    soup = BeautifulSoup(text, "html.parser")
+    issues = []
+
+    # Find the index element
+    index_nav = soup.find(attrs={"role": "doc-index"}) or soup.find(attrs={"epub:type": "index"})
+
+    if not index_nav:
+        if "index" not in os.path.basename(file_details["full_path"]).lower():
+            return {"issues_count": 0, "issues": []}
+        index_nav = soup.find("body") or soup
+
+    # Find all p tags inside index_nav with a class containing 'index'
+    index_ps = index_nav.find_all("p", class_=lambda x: x and any(c.startswith("index") for c in (x.split() if isinstance(x, str) else x)))
+    
+    for p in index_ps:
+        # Check if it is inside an <li> tag
+        if not p.find_parent("li"):
+            s = str(p)
+            idx = text.find(s[:20])
+            if idx == -1:
+                text_val = p.get_text(strip=True)
+                if text_val:
+                    idx = text.find(text_val[:20])
+                    
+            line = text.count('\n', 0, idx) + 1 if idx != -1 else getattr(p, "sourceline", None)
+            
+            raw_extract = str(p)[:150]
+            if idx != -1:
+                tag_start = text.rfind('<p', max(0, idx-100), idx+1)
+                if tag_start != -1:
+                    raw_extract = text[tag_start:tag_start+150]
+                else:
+                    raw_extract = text[idx:idx+150]
+            
+            issue = {
+                "type": "invalid_index_format",
+                "message": "Index entries should be formatted using unordered list (<ul> and <li>) tags.",
+                "category": "Error",
+                "file_path": file_details.get("relative_path"),
+                "extract": raw_extract
+            }
+            if line: issue["line_number"] = line
+            issues.append(issue)
 
     return {"issues_count": len(issues), "issues": issues}

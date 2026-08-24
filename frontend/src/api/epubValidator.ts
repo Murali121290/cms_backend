@@ -273,6 +273,35 @@ export async function exportEpub(
   }
 }
 
+export async function exportQaReport(folderName: string): Promise<{ blob: Blob; filename: string }> {
+  try {
+    const response = await api.get(
+      `/post-prod/epub-validator/export/${folderName}/qa-report`,
+      { responseType: 'blob', timeout: 60_000 },
+    );
+    
+    // Extract filename from Content-Disposition header
+    const contentDisposition = response.headers['content-disposition'] as string ?? '';
+    let filename = folderName + '_QA_Report.xlsx';
+    const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
+    if (filenameMatch && filenameMatch[1]) {
+      filename = filenameMatch[1];
+    }
+    
+    return { blob: response.data as Blob, filename };
+  } catch (err) {
+    if (axios.isAxiosError(err) && err.response?.data instanceof Blob) {
+      let parsed: { detail?: string; message?: string } | null = null;
+      try {
+        const text = await err.response.data.text();
+        parsed = JSON.parse(text);
+      } catch { /* not JSON */ }
+      if (parsed) throw new Error(parsed.detail ?? parsed.message ?? 'Failed to export QA report');
+    }
+    throw new Error(getApiErrorMessage(err, 'Failed to export QA report'));
+  }
+}
+
 export async function getCachedAceReport(folderName: string): Promise<AceReport | null> {
   try {
     const { data } = await api.get<{ status: boolean; report?: AceReport; message?: string }>(

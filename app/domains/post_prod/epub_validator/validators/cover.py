@@ -7,7 +7,6 @@ from ..engine.registry import rule
 
 
 _EXPECTED_HEIGHT_PX = 1100
-_EXPECTED_DPI = 300
 
 
 def _find_cover(epub_folder: str) -> str | None:
@@ -101,6 +100,18 @@ def validate_cover_height(target, rule_config=None):
 @rule("ASP-COV-003")
 def validate_cover_dpi(target, rule_config=None):
     """Cover must be 300 DPI."""
+    expected_dpi = None
+    if rule_config and "rule_config" in rule_config:
+        expected_dpi = rule_config["rule_config"].get("expected_dpi")
+    
+    if expected_dpi is None:
+        return {"issues_count": 1, "issues": [{
+            "type": "rule_configuration_error",
+            "message": "Rule configuration is missing 'expected_dpi'. Please configure it in customer.json.",
+            "category": "Error",
+            "file_path": str(target) if target else "",
+        }]}
+
     if isinstance(target, dict) and target.get("file_path"):
         cover = target["file_path"]
         epub = target.get("epub_path") or (os.path.dirname(cover) if cover else "")
@@ -126,15 +137,15 @@ def validate_cover_dpi(target, rule_config=None):
     if dpi is None:
         return {"issues_count": 1, "issues": [{
             "type": "cover_dpi_unknown",
-            "message": "Cover image has no DPI metadata; cannot confirm 300 DPI",
+            "message": f"Cover image has no DPI metadata; cannot confirm {expected_dpi} DPI",
             "category": "Warning",
             "file_path": os.path.relpath(cover, epub) if epub else cover,
         }]}
     x_dpi, y_dpi = dpi[0], dpi[1]
-    if round(x_dpi) < _EXPECTED_DPI or round(y_dpi) < _EXPECTED_DPI:
+    if round(x_dpi) < expected_dpi or round(y_dpi) < expected_dpi:
         return {"issues_count": 1, "issues": [{
             "type": "cover_low_dpi",
-            "message": f"Cover DPI is {x_dpi}x{y_dpi}; expected at least {_EXPECTED_DPI} DPI",
+            "message": f"Cover DPI is {x_dpi}x{y_dpi}; expected at least {expected_dpi} DPI",
             "category": "Error",
             "file_path": os.path.relpath(cover, epub) if epub else cover,
         }]}

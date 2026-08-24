@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, Form, Query, UploadFile, File, HTTPExcep
 from fastapi.responses import FileResponse, Response
 from pathlib import Path
 from typing import Optional
+from datetime import datetime
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -587,4 +588,113 @@ async def export_epub(
         content=zip_bytes,
         media_type="application/epub+zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+import tempfile
+import re
+from app.domains.post_prod.epub_validator.engine.excel_reporter import generate_gwp_report
+
+def sanitize_for_excel(text: str) -> str:
+    """Removes ANSI escape codes and unprintable control characters that break openpyxl."""
+    if not text:
+        return text
+    text = re.sub(r'\x1b\[[0-9;]*m', '', text)
+    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', text)
+    return text
+
+@router.get("/export/{folder_name}/qa-report")
+def export_qa_report(
+    folder_name: str,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Generates and downloads a custom Excel QA report for GWP000."""
+    run = ev_projects_db.get_latest_validation_run(db, folder_name)
+    if not run or not run.get("files"):
+        raise HTTPException(status_code=404, detail="No validation results found for this project.")
+        
+    validation_result = run
+    customer = validation_result.get("customer")
+    
+    if customer != "GWP000":
+        # Fallback or allow other customers later, for now we only support GWP000 template
+        raise HTTPException(status_code=400, detail="QA Report is only available for GWP000 projects.")
+        
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    template_path = os.path.join(current_dir, f"rules/customers/{customer}/report_template.json")
+    if not os.path.exists(template_path):
+        raise HTTPException(status_code=404, detail=f"Report template not found for this customer. Path checked: {template_path}")
+        
+    # Make a temporary file for the Excel report
+    import tempfile
+    from app.domains.post_prod.epub_validator.engine.excel_reporter import generate_gwp_report
+    
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".xlsx")
+    os.close(tmp_fd)
+    
+    # Get project to retrieve assignee name and uploaded date
+    project = ev_projects_db.get_project_by_folder(db, folder_name)
+    assignee_name = project.assignee if project and project.assignee else ""
+    uploaded_date = project.uploaded_at.strftime('%m/%d/%y') if project and project.uploaded_at else datetime.now().strftime('%m/%d/%y')
+    
+    # Evaluate EPUBCheck
+    epubcheck_status = "Yet to check"
+    epubcheck_notes = ""
+    epubcheck_report = get_cached_epubcheck_report(folder_name)
+    if epubcheck_report:
+        if epubcheck_report.get("status") == "fatal":
+            epubcheck_status = "Fail"
+            epubcheck_notes = epubcheck_report.get("message", "EPUBCheck failed catastrophically.")
+        else:
+            messages = epubcheck_report.get("messages", [])
+            errors = [m for m in messages if str(m.get("severity")).lower() in ["error", "fatal"]]
+            if errors:
+                epubcheck_status = "Fail"
+                epubcheck_notes = "\n".join([f"[{m.get('severity')}] {m.get('message')}" for m in errors[:10]])
+                if len(errors) > 10:
+                    epubcheck_notes += f"\n...and {len(errors) - 10} more."
+            else:
+                epubcheck_status = "Pass"
+
+    # Evaluate ACE
+    ace_status = "Yet to check"
+    ace_notes = ""
+    ace_report = get_cached_ace_report(folder_name)
+    if ace_report:
+        if ace_report.get("status") == "fatal":
+            ace_status = "Fail"
+            ace_notes = ace_report.get("message", "ACE failed catastrophically.")
+        else:
+            violations = ace_report.get("violations", [])
+            if violations:
+                ace_status = "Fail"
+                ace_notes = "\n".join([f"[{v.get('impact')}] {v.get('rule_title')}: {v.get('message')}" for v in violations[:10]])
+                if len(violations) > 10:
+                    ace_notes += f"\n...and {len(violations) - 10} more."
+            else:
+                ace_status = "Pass"
+                
+    epubcheck_notes = sanitize_for_excel(epubcheck_notes)
+    ace_notes = sanitize_for_excel(ace_notes)
+            
+    try:
+        generate_gwp_report(
+            validation_result,
+            template_path,
+            tmp_path,
+            assignee_name,
+            uploaded_date,
+            epubcheck_result={"status": epubcheck_status, "notes": epubcheck_notes},
+            ace_result={"status": ace_status, "notes": ace_notes}
+        )
+        with open(tmp_path, "rb") as f:
+            xlsx_bytes = f.read()
+    finally:
+        os.remove(tmp_path)
+        
+    return Response(
+        content=xlsx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{folder_name}_QA_Report.xlsx"'},
     )

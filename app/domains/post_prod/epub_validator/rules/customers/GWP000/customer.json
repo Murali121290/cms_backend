@@ -1,6 +1,242 @@
 {
   "rules": [
     {
+      "id": "GWP-META-000",
+      "name": "OPF Version Check",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true
+    },
+    {
+      "id": "COM-META-001",
+      "name": "OPF dc:publisher = 'The Goodheart-Willcox Company, Inc'",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_publisher": "The Goodheart-Willcox Company, Inc"
+      }
+    },
+    {
+      "id": "COM-META-002",
+      "name": "OPF dc:rights match Copyright string",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_rights_pattern": "copyright\\s*©\\s*\\d{4}\\s+by\\s+the\\s+goodheart-willcox\\s+company,\\s+inc\\.?"
+      }
+    },
+    {
+      "id": "COM-META-003",
+      "name": "OPF Basic Metadata Presence",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "required_tags": [
+          "dc:title",
+          "dc:creator",
+          "dc:identifier",
+          "dc:language",
+          "dc:date",
+          "dc:source",
+          "dc:publisher",
+          "dc:description",
+          "dc:rights"
+        ]
+      }
+    },
+    {
+      "id": "COM-META-005",
+      "name": "pageBreakSource Metadata",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "required_prefix": "urn:isbn:"
+      }
+    },
+    {
+      "id": "COM-META-006",
+      "name": "accessMode Metadata",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_values": [
+          "textual",
+          "visual"
+        ]
+      }
+    },
+    {
+      "id": "COM-META-007",
+      "name": "accessModeSufficient Metadata",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_values": [
+          "textual,visual",
+          "textual"
+        ]
+      }
+    },
+    {
+      "id": "COM-META-008",
+      "name": "accessibilityFeature Metadata",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_values": [
+          "readingOrder",
+          "structuralNavigation",
+          "ARIA",
+          "tableOfContents",
+          "pageBreakMarkers",
+          "pageNavigation",
+          "displayTransformability",
+          "index",
+          "alternativeText",
+          "longDescription"
+        ],
+        "conditional_mathml_values": [
+          "MathML",
+          "describedMath"
+        ]
+      }
+    },
+    {
+      "id": "COM-META-009",
+      "name": "accessibilitySummary Metadata",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_summary": "A very complex book with a lot of images, tables, list items and complex formatting, which are defined with accessible structural markup. There are multiple linked references to various figures in this EPUB however there are no back links provided. There is a page list and embedded page-breaks within this EPUB to aid in the ability to go to a specific page. Additionally, blank pages have been removed from the EPUB while their page break labels have been left in, for reasons of structural flow.",
+        "is_required": false
+      }
+    },
+    {
+      "id": "COM-META-010",
+      "name": "accessibilityHazard Metadata",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_values": [
+          "none"
+        ]
+      }
+    },
+    {
+      "id": "COM-META-011",
+      "name": "dcterms:conformsTo Metadata",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_text": "EPUB Accessibility 1.1 - WCAG 2.2 Level AA"
+      }
+    },
+    {
+      "id": "COM-META-012",
+      "name": "a11y:certifiedBy Metadata",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_text": "Benetech"
+      }
+    },
+    {
+      "id": "COM-META-013",
+      "name": "a11y:certifierCredential Metadata",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_text": "https://bornaccessible.org/certification/gca-credential/"
+      }
+    },
+    {
+      "id": "COM-SPINE-001",
+      "name": "Alt.xhtml Spine linear='no' Check",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.opf"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "file_suffix": "Alt.xhtml",
+        "expected_linear": "no"
+      }
+    },
+    {
+      "id": "COM-NAV-001",
+      "name": "Navigation epub:type='toc'",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "nav.xhtml"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_type": "toc"
+      }
+    },
+    {
+      "id": "COM-NAV-002",
+      "name": "Navigation epub:type='page-list'",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "nav.xhtml"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_type": "page-list"
+      }
+    },
+    {
+      "id": "COM-NAV-003",
+      "name": "Navigation epub:type='landmarks'",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "nav.xhtml"
+      ],
+      "enabled": true,
+      "rule_config": {
+        "expected_type": "landmarks"
+      }
+    },
+    {
       "id": "STRUCT001",
       "name": "EPUB Folder Structure Check",
       "scope": "book",
@@ -67,18 +303,49 @@
       "file_name_pattern": "*.xhtml"
     },
     {
+      "id": "COM-LINK-001",
+      "name": "Internal Cross-Reference Check",
+      "target_path": "OEBPS/Text",
+      "enabled": true,
+      "file_name_pattern": "*.xhtml",
+      "rule_config": {
+        "citation_regex": "\\b(?:see\\s+)?(?:p(?:age|p)\\.?\\s*(\\d{1,4})(?:\\s*[\\-–]\\s*\\d{1,4})?|ch(?:apter)?\\.?\\s*(\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)(?:\\s*[\\-–]\\s*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|fig(?:ure)?\\.?\\s*(\\d+(?:[\\.\\-–]\\d+)*)|table\\.?\\s*(\\d+(?:[\\.\\-–]\\d+)*)|unit\\.?\\s*(\\d+(?:[\\.\\-–]\\d+)*)|lesson\\.?\\s*(\\d+(?:[\\.\\-–]\\d+)*))[a-zA-Z]*(?![0-9\\-–])"
+      }
+    },
+    {
       "id": "NAV001",
       "name": "NAV TOC Link Check",
       "target_path": "OEBPS",
-      "enabled": false,
+      "enabled": true,
       "file_name_pattern": "nav.xhtml"
+    },
+    {
+      "id": "INDEX001",
+      "name": "Index Link Check",
+      "target_path": "OEBPS",
+      "enabled": true,
+      "file_name_pattern": "*index*.xhtml"
+    },
+    {
+      "id": "INDEX002",
+      "name": "Index Unordered List Format Check",
+      "target_path": "OEBPS",
+      "enabled": true,
+      "file_name_pattern": "*index*.xhtml"
     },
     {
       "id": "NAV002",
       "name": "NCX and Navigation link Check",
       "target_path": "OEBPS",
-      "enabled": false,
+      "enabled": true,
       "file_name_pattern": "toc.ncx"
+    },
+    {
+      "id": "NAV005",
+      "name": "Page List Link Check",
+      "target_path": "OEBPS",
+      "enabled": true,
+      "file_name_pattern": "nav.xhtml"
     },
     {
       "id": "XHTML002",
@@ -128,7 +395,10 @@
             "expected_role": "doc-toc"
           },
           {
-            "patterns": ["chapter", "ch"],
+            "patterns": [
+              "chapter",
+              "ch"
+            ],
             "expected_body": "bodymatter",
             "expected_tag": "section",
             "expected_epub_type": "chapter",
@@ -196,6 +466,222 @@
     {
       "id": "XHTML006",
       "name": "Single <h1> per page and no adjacent headings",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true
+    },
+    {
+      "id": "GWP-IMG-001",
+      "name": "Image Filename Format Check",
+      "target_path": "OEBPS/Images",
+      "file_name_pattern": "*.*",
+      "enabled": true
+    },
+    {
+      "id": "IMG-001",
+      "name": "Image DPI Check",
+      "target_path": "OEBPS/Images",
+      "file_name_pattern": "*.*",
+      "enabled": true,
+      "rule_config": {
+        "expected_dpi": 150
+      }
+    },
+    {
+      "id": "IMG-002",
+      "name": "Image Width Check",
+      "target_path": "OEBPS/Images",
+      "file_name_pattern": "*.*",
+      "enabled": true,
+      "rule_config": {
+        "min_width": 500,
+        "max_width": 1000,
+        "exclude_patterns": [
+          "icon",
+          "header",
+          "aside"
+        ]
+      }
+    },
+    {
+      "id": "GWP-XHTML-001",
+      "name": "Heading Section Role Check",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true,
+      "rule_config": {
+        "expected_heading": "introduction",
+        "expected_role": "doc-introduction",
+        "expected_heading_level": "h2",
+        "expected_parent_tag": "section"
+      }
+    },
+    {
+      "id": "GWP-XHTML-002",
+      "name": "Figure Structure Check",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true
+    },
+    {
+      "id": "GWP-XHTML-003",
+      "name": "Table Structure Check",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true
+    },
+    {
+      "id": "GWP-XHTML-004",
+      "name": "Table Column Count Check",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true,
+      "rule_config": {
+        "max_columns": 4
+      }
+    },
+    {
+      "id": "GWP-XHTML-005",
+      "name": "Pagebreak Formatting Check",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true
+    },
+    {
+      "id": "GWP-XHTML-006",
+      "name": "Presentational Table Check",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true
+    },
+    {
+      "id": "GWP-CSS-001",
+      "name": "Inline CSS Check",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true
+    },
+    {
+      "id": "GWP-CSS-002",
+      "name": "Meta Viewport Check",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true
+    },
+    {
+      "id": "GWP-CSS-003",
+      "name": "Font and Line Height Relative Unit Check",
+      "target_path": "OEBPS/Styles",
+      "file_name_pattern": "*.css",
+      "enabled": true
+    },
+    {
+      "id": "GWP-CSS-004",
+      "name": "Font Size Check",
+      "target_path": "OEBPS/Styles",
+      "file_name_pattern": "*.css",
+      "rule_config": {
+        "thresholds": {
+          "px": 10.0,
+          "pt": 7.5,
+          "em": 0.625,
+          "%": 62.5
+        }
+      },
+      "enabled": true
+    },
+    {
+      "id": "GWP-IMG-002",
+      "name": "Alt Attribute & Decorative Image Check",
+      "target_path": "OEBPS",
+      "file_name_pattern": [
+        "*.xhtml",
+        "*.html"
+      ],
+      "enabled": true
+    },
+    {
+      "id": "GWP-IMG-003",
+      "name": "All Images Tagged in OPF",
+      "target_path": "OEBPS",
+      "rule_config": {
+        "opf_path": "OEBPS/content.opf",
+        "image_folder": "Images"
+      },
+      "enabled": true
+    },
+    {
+      "id": "GWP-LINK-001",
+      "name": "1:1 Internal Backlinks Check",
+      "scope": "book",
+      "enabled": false
+    },
+    {
+      "id": "COM-NCX-001",
+      "name": "toc.ncx navPoint Check",
+      "target_path": "OEBPS",
+      "file_name_pattern": "toc.ncx",
+      "enabled": true
+    },
+    {
+      "id": "COM-NCX-002",
+      "name": "toc.ncx pageTarget Check",
+      "target_path": "OEBPS",
+      "file_name_pattern": "toc.ncx",
+      "enabled": true
+    },
+    {
+      "id": "COM-NCX-003",
+      "name": "toc.ncx PDF Page Count Check",
+      "target_path": "OEBPS",
+      "file_name_pattern": "toc.ncx",
+      "enabled": false
+    },
+    {
+      "id": "COM-NCX-004",
+      "name": "toc.ncx ISBN Match Check",
+      "target_path": "OEBPS",
+      "file_name_pattern": "toc.ncx",
+      "enabled": false
+    },
+    {
+      "id": "STRUCT006",
+      "name": "Confirm no cover.xhtml",
+      "scope": "book",
+      "target_path": "",
+      "enabled": true
+    },
+    {
+      "id": "GLOS001",
+      "name": "Glossary Format Check (dl, dt, dd)",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*glossary*.xhtml",
+      "enabled": true
+    },
+    {
+      "id": "GLOS002",
+      "name": "Glossary Term Backlinks Title Check",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*glossary*.xhtml",
+      "enabled": true
+    },
+    {
+      "id": "GWP-KT-001",
+      "name": "Key Term Tagging Check",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true
+    },
+    {
+      "id": "GWP-ED-001",
+      "name": "Extended Description Unique Links Check",
+      "target_path": "OEBPS/Text",
+      "file_name_pattern": "*extended*.xhtml",
+      "enabled": false
+    },
+    {
+      "id": "GWP-QUOTE-001",
+      "name": "Quotation Markup Check",
       "target_path": "OEBPS/Text",
       "file_name_pattern": "*.xhtml",
       "enabled": true

@@ -11,6 +11,7 @@ from . import (  # noqa: F401
     css,
     epubcheck,
     filenaming,
+    figure,
     images,
     links,
     metadata,
@@ -21,6 +22,7 @@ from . import (  # noqa: F401
     structure,
     style,
     style_mismatch,
+    table,
     xhtml,
 )
 
