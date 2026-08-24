@@ -673,7 +673,10 @@ def _get_pdf_page_count(book_details: dict) -> int | None:
         if pdf_files:
             target_pdf = pdf_files[0]
             try:
-                import fitz  # PyMuPDF
+                try:
+                    import pymupdf as fitz
+                except ImportError:
+                    import fitz  # PyMuPDF
                 doc = fitz.open(target_pdf)
                 count = len(doc)
                 doc.close()

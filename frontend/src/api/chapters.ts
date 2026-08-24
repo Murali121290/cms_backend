@@ -23,6 +23,10 @@ export interface Chapter {
   delayed_stages: Record<string, number> | null
   created_at: string
   updated_at: string
+  // File pipeline status badges
+  xml_status?: 'valid' | 'invalid' | 'pending' | null
+  indesign_status?: 'generated' | null
+  final_delivery_status?: 'generated' | null
 }
 
 export interface ChapterUpdate {

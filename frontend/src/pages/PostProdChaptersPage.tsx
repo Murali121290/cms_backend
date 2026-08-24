@@ -876,7 +876,7 @@ export function PostProdChaptersPage() {
                     if (tab === 'indesign') label = 'Chapter'
                     else if (tab === 'docx') label = 'Word'
                     else if (tab === 'images') label = 'Images'
-                    else if (tab === 'misc') label = 'Misc'
+                    else if (tab === 'misc') label = 'Final delivery'
 
                     const count = chapterFiles ? chapterFiles[tab]?.length || 0 : 0
 

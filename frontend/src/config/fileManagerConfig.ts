@@ -87,7 +87,7 @@ export const FOLDER_CONFIG: Record<string, FolderConfig> = {
   indesign:   { label:'Indesign',   icon:'Layers',        allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','packageStatus','size','uploadedBy','uploadedOn'] },
   proof:      { label:'Proof',      icon:'ClipboardCheck',allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','reviewer','reviewStatus','size','uploadedBy','uploadedOn'] },
   xml:        { label:'XML',        icon:'Code2',         allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','xmlType','validationStatus','size','uploadedBy','uploadedOn'] },
-  misc:       { label:'Misc',       icon:'FolderOpen',    allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
+  misc:       { label:'Final delivery', icon:'FolderOpen',    allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
   backup:     { label:'Backup',     icon:'Archive',       allowUpload:false, allowDownload:true,  columns:['fileName','fileType','size','uploadedOn'] },
 }
 
@@ -117,10 +117,9 @@ export const ART_FOLDER_CONFIG: Record<string, FolderConfig> = {
 
 export const MANUSCRIPT_FOLDER_CONFIG: Record<string, FolderConfig> = {
   manuscript: FOLDER_CONFIG.manuscript,
-  indesign:   FOLDER_CONFIG.indesign,
-  converted:  FOLDER_CONFIG.converted,
-  proof:      FOLDER_CONFIG.proof,
   xml:        FOLDER_CONFIG.xml,
+  indesign:   FOLDER_CONFIG.indesign,
+  proof:      FOLDER_CONFIG.proof,
   misc:       FOLDER_CONFIG.misc,
   backup:     FOLDER_CONFIG.backup,
 }

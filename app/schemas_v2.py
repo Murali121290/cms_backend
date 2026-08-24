@@ -151,6 +151,9 @@ class ChapterSummary(BaseModel):
     has_indesign: bool
     has_proof: bool
     has_xml: bool
+    xml_status: str | None = None
+    indesign_status: str | None = None
+    final_delivery_status: str | None = None
 
 
 class FileRecord(BaseModel):

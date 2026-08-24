@@ -282,6 +282,9 @@ def _serialize_chapter_summary(chapter: models.Chapter):
         has_indesign=has_ind,
         has_proof=has_proof,
         has_xml=has_xml,
+        xml_status=getattr(chapter, "xml_status", None),
+        indesign_status=getattr(chapter, "indesign_status", None),
+        final_delivery_status=getattr(chapter, "final_delivery_status", None),
     )
 
 
@@ -399,7 +402,10 @@ def _serialize_file_record(file_record: models.File, *, viewer: models.User, db:
                 pass
         elif ext == ".pdf":
             try:
-                import fitz as _fitz
+                try:
+                    import pymupdf as _fitz
+                except ImportError:
+                    import fitz as _fitz
                 with _fitz.open(file_record.path) as _doc:
                     if len(_doc) > 0:
                         r = _doc[0].rect
@@ -1097,10 +1103,14 @@ def api_v2_project_indesign_templates(
     if not design_chapter:
         return []
         
+    from sqlalchemy import or_
     template_files = db.query(models.File).filter(
         models.File.chapter_id == design_chapter.id,
         models.File.category == "template/indesign",
-        models.File.filename.ilike("%.indt")
+        or_(
+            models.File.filename.ilike("%.indt"),
+            models.File.filename.ilike("%.indd")
+        )
     ).all()
     
     return [_serialize_file_record(file_record, viewer=viewer, db=db) for file_record in template_files]
@@ -4178,6 +4188,163 @@ def api_v2_download_file_version(
         filename=version_service.get_archived_filename(version_entry),
         media_type="application/octet-stream",
     )
+
+
+from pydantic import BaseModel
+class BatchJobStartRequest(BaseModel):
+    process_type: str
+    chapter_ids: list[int]
+    mode: str = "style"
+    options: Optional[dict] = None
+
+
+@router.post("/projects/{project_id}/batch-jobs")
+def api_v2_start_batch_jobs(
+    project_id: int,
+    payload: BatchJobStartRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+
+    results = []
+    errors = []
+    
+    # Resolve batch options dictionary
+    batch_options = payload.options or {}
+    if payload.process_type == "xml_to_indesign" and "template_file_id" not in batch_options:
+        try:
+            from app.services import stylesheet_service
+            active_ss = stylesheet_service.get_active_stylesheet_for_project(db, project_id=project.id)
+            if active_ss:
+                file_ids = stylesheet_service._deserialize_file_ids(active_ss.analyzed_file_ids)
+                if file_ids:
+                    batch_options["template_file_id"] = file_ids[0]
+                    logger.info(f"Resolved default template_file_id={file_ids[0]} from active stylesheet for batch XML to InDesign.")
+        except Exception as ss_err:
+            logger.warning(f"Failed to resolve stylesheet template: {ss_err}")
+            
+        if "template_file_id" not in batch_options:
+            fallback_template = db.query(models.File).filter(
+                models.File.project_id == project.id,
+                models.File.category.in_(["template/indesign", "InDesign"]),
+                models.File.filename.like("%.indt")
+            ).order_by(models.File.uploaded_at.desc()).first()
+            
+            if not fallback_template:
+                fallback_template = db.query(models.File).filter(
+                    models.File.project_id == project.id,
+                    models.File.category.in_(["template/indesign", "InDesign"]),
+                    models.File.filename.like("%.indd")
+                ).order_by(models.File.uploaded_at.desc()).first()
+
+            if fallback_template:
+                batch_options["template_file_id"] = fallback_template.id
+                logger.info(f"Resolved fallback template_file_id={fallback_template.id} from templates.")
+
+    # Determine target category and extension based on process_type
+    target_category = None
+    target_extensions = []
+    
+    if payload.process_type == "word_to_xml":
+        target_category = "Manuscript"
+        target_extensions = [".docx"]
+    elif payload.process_type == "xml_to_indesign":
+        target_category = "XML"
+        target_extensions = [".xml"]
+    elif payload.process_type == "indesign_to_xml":
+        target_category = "InDesign"
+        target_extensions = [".indd", ".zip"]
+    else:
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="INVALID_PROCESS_TYPE",
+            message=f"Batch processing not supported for type: {payload.process_type}",
+        )
+
+    for ch_id in payload.chapter_ids:
+        # Load the chapter
+        chapter = db.query(models.ChapterInfo).filter(
+            models.ChapterInfo.id == ch_id,
+            models.ChapterInfo.project == project.project_code
+        ).first()
+        if not chapter:
+            errors.append({"chapter_id": ch_id, "error": "Chapter not found"})
+            continue
+            
+        # Find the latest eligible file in this chapter matching the target extensions
+        file_query = db.query(models.File).filter(
+            models.File.project_id == project.id,
+            models.File.chapter_id == chapter.id,
+            models.File.category == target_category
+        )
+        
+        if target_extensions:
+            eligible_files = [
+                f for f in file_query.all()
+                if os.path.splitext(f.filename)[1].lower() in target_extensions
+            ]
+            eligible_files.sort(key=lambda x: x.uploaded_at or datetime.min, reverse=True)
+            file_record = eligible_files[0] if eligible_files else None
+        else:
+            file_record = file_query.order_by(models.File.uploaded_at.desc()).first()
+        
+        if not file_record:
+            errors.append({
+                "chapter_id": ch_id, 
+                "error": f"No eligible file found in category {target_category} with extensions {target_extensions}"
+            })
+            continue
+
+        try:
+            resp = processing_service.start_process(
+                db,
+                file_id=file_record.id,
+                process_type=payload.process_type,
+                background_tasks=background_tasks,
+                mode=payload.mode,
+                user=viewer,
+                upload_dir=file_service.UPLOAD_DIR,
+                logger=logger,
+                background_task_callable=_api_v2_background_processing_task,
+                options=batch_options,
+            )
+            results.append({
+                "chapter_id": ch_id,
+                "chapter_name": chapter.chapters,
+                "file_id": file_record.id,
+                "filename": file_record.filename,
+                "job_id": resp.get("job_id"),
+                "success": True
+            })
+        except Exception as e:
+            errors.append({
+                "chapter_id": ch_id,
+                "chapter_name": chapter.chapters,
+                "error": str(e)
+            })
+
+    return {
+        "success": len(results) > 0,
+        "triggered_count": len(results),
+        "results": results,
+        "errors": errors
+    }
 
 
 @router.post("/files/{file_id}/processing-jobs", response_model=schemas_v2.ProcessingStartResponse)

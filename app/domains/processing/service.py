@@ -633,7 +633,6 @@ def background_processing_task(
                         file_record.uploaded_at = now_ist_naive()
                         logger.info(f"In-place overwrite: {file_record.filename} (v{file_record.version})")
                     else:
-                        # All other types (references logs/reports, bias, xml, etc.) create new records
                         mime = "application/octet-stream"
                         if processed_filename.endswith(".html"):
                             mime = "text/html"
@@ -663,29 +662,80 @@ def background_processing_task(
                         elif processed_filename.endswith((".jpg", ".jpeg")):
                             mime = "image/jpeg"
 
-                        new_record = models.File(
-                            filename=processed_filename,
-                            path=processed_path,
-                            file_type=mime,
-                            project_id=file_record.project_id,
-                            chapter_id=file_record.chapter_id,
-                            version=1,
-                            category=(
-                                "Misc" if process_type in ("indesign_to_xml", "extract_design_css")
-                                else "Manuscript" if process_type == "style_validation"
-                                else "XML" if processed_filename.lower().endswith((".xml", ".log", ".html"))
-                                else "InDesign" if process_type == "xml_to_indesign"
-                                else "XML" if process_type == "word_to_xml"
-                                else file_record.category
-                            ),
-                            # Pipeline output is a derived artifact, not an
-                            # uploaded source.
-                            is_original=False,
+                        new_category = (
+                            "Misc" if process_type in ("indesign_to_xml", "extract_design_css")
+                            else "Manuscript" if process_type == "style_validation"
+                            else "XML" if processed_filename.lower().endswith((".xml", ".log", ".html"))
+                            else "InDesign" if process_type == "xml_to_indesign"
+                            else "XML" if process_type == "word_to_xml"
+                            else file_record.category
                         )
-                        db.add(new_record)
-                        logger.info(
-                            f"Registered result file: {processed_filename} to category {new_record.category}"
-                        )
+
+                        existing_file = db.query(models.File).filter(
+                            models.File.project_id == file_record.project_id,
+                            models.File.chapter_id == file_record.chapter_id,
+                            models.File.category == new_category,
+                            models.File.filename == processed_filename
+                        ).first()
+
+                        if existing_file:
+                            try:
+                                from app.domains.files.version_service import archive_existing_file
+                                from app.domains.projects.models import Project
+                                from app.services.file_service import UPLOAD_DIR
+                                project = db.query(Project).filter(Project.id == file_record.project_id).first()
+                                chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == file_record.chapter_id).first()
+                                
+                                if project and chapter:
+                                    backup_dir = os.path.abspath(
+                                        f"{UPLOAD_DIR}/{project.code}/{chapter.number}/{new_category}"
+                                    )
+                                else:
+                                    backup_dir = os.path.dirname(existing_file.path)
+
+                                # Create archive record
+                                archive_existing_file(
+                                    db,
+                                    existing_file=existing_file,
+                                    base_path=backup_dir,
+                                    uploaded_by_id=user_id,
+                                )
+                                # Overwrite existing physical file
+                                target_path = existing_file.path
+                                if target_path and target_path != processed_path:
+                                    if os.path.exists(target_path):
+                                        try:
+                                            os.remove(target_path)
+                                        except Exception:
+                                            pass
+                                    shutil.move(processed_path, target_path)
+                                else:
+                                    existing_file.path = processed_path
+
+                                # Increment version and update details
+                                existing_file.version = (existing_file.version or 1) + 1
+                                existing_file.uploaded_by_id = user_id
+                                existing_file.uploaded_at = now_ist_naive()
+                                existing_file.file_type = mime
+                                logger.info(f"Updated existing file version: {existing_file.filename} (v{existing_file.version})")
+                            except Exception as backup_err:
+                                logger.error(f"Backup/version bump failed for existing file: {backup_err}")
+                        else:
+                            new_record = models.File(
+                                filename=processed_filename,
+                                path=processed_path,
+                                file_type=mime,
+                                project_id=file_record.project_id,
+                                chapter_id=file_record.chapter_id,
+                                version=1,
+                                category=new_category,
+                                is_original=False,
+                                uploaded_by_id=user_id,
+                            )
+                            db.add(new_record)
+                            logger.info(
+                                f"Registered result file: {processed_filename} to category {new_record.category}"
+                            )
             else:
                 logger.warning(f"No generated files returned from {process_type} processing")
 

@@ -192,3 +192,70 @@ class ChapterInfo(Base):
     def art_count(self) -> int:
         return sum(1 for f in self.files if f.category == "Art")
 
+    @property
+    def xml_status(self) -> Optional[str]:
+        """Derive XML validation status from uploaded files.
+        - None      → no XML file present
+        - 'pending' → XML present but no .log file yet
+        - 'valid'   → .log has no error/invalid markers
+        - 'invalid' → .log contains error/invalid markers
+        """
+        import os
+        xml_files = [f for f in self.files if f.category == "XML" and f.filename.lower().endswith(".xml")]
+        if not xml_files:
+            return None
+        # Pick the latest XML file
+        xml_file = sorted(xml_files, key=lambda f: f.uploaded_at)[-1]
+        base = os.path.splitext(xml_file.filename)[0]
+        log_files = [f for f in self.files if f.filename == f"{base}.log"]
+        if not log_files:
+            return "pending"
+        log_file = sorted(log_files, key=lambda f: f.uploaded_at)[-1]
+        if log_file.path:
+            from app.services.file_service import UPLOAD_DIR
+            full_path = os.path.join(UPLOAD_DIR, log_file.path) if not os.path.isabs(log_file.path) else log_file.path
+            if os.path.exists(full_path):
+                try:
+                    content = open(full_path, encoding="utf-8", errors="ignore").read()
+                    content_upper = content.upper()
+                    # Explicit pass marker written by the DTD validator (e.g. "? VALIDATION PASSED")
+                    if "VALIDATION PASSED" in content_upper:
+                        return "valid"
+                    # Explicit fail/skip markers
+                    if "VALIDATION FAILED" in content_upper or "VALIDATION SKIPPED" in content_upper:
+                        return "invalid"
+                    # Fallback: any line prefixed "ERROR:" is a failure
+                    if any(line.strip().lower().startswith("error") for line in content.splitlines()):
+                        return "invalid"
+                    # Log exists but no clear marker yet
+                    return "pending"
+                except Exception:
+                    pass
+        return "pending"
+
+    @property
+    def indesign_status(self) -> Optional[str]:
+        """Returns 'generated' if an .indd file exists in the InDesign category (and on disk)."""
+        import os
+        from app.services.file_service import UPLOAD_DIR
+        for f in self.files:
+            if f.category == "InDesign" and f.filename.lower().endswith(".indd"):
+                if f.path:
+                    full = os.path.join(UPLOAD_DIR, f.path) if not os.path.isabs(f.path) else f.path
+                    if os.path.exists(full):
+                        return "generated"
+        return None
+
+    @property
+    def final_delivery_status(self) -> Optional[str]:
+        """Returns 'generated' if any file exists in the Misc (Final delivery) category (and on disk)."""
+        import os
+        from app.services.file_service import UPLOAD_DIR
+        for f in self.files:
+            if f.category.lower() in ("misc", "final delivery", "miscellaneous"):
+                if f.path:
+                    full = os.path.join(UPLOAD_DIR, f.path) if not os.path.isabs(f.path) else f.path
+                    if os.path.exists(full):
+                        return "generated"
+        return None
+
