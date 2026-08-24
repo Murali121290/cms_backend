@@ -5,13 +5,13 @@ import {
   BookOpen,
   CheckCircle2,
   ChevronRight,
-  ClipboardCheck,
   Clock,
   Download,
   FileText,
   Info,
   Layers,
   LayoutDashboard,
+  Library,
   Maximize2,
   MessageSquare,
   Minimize2,
@@ -35,9 +35,9 @@ import { VersionHistoryPanel } from "@/features/structuringReview/components/Ver
 import { useParagraphStyles } from "@/features/editor/useParagraphStyles";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { uiPaths } from "@/utils/appPaths";
-import { ReferenceValidationReviewPage } from "@/pages/ReferenceValidationReviewPage";
+import { ReferenceReviewSidePanel } from "@/features/referenceReview/components/ReferenceReviewSidePanel";
 
-type StructuringTab = "overview" | "editor" | "onlyoffice" | "collabora" | "reference";
+type StructuringTab = "overview" | "editor" | "onlyoffice" | "collabora";
 
 const ToolbarPopoverContext = createContext<{
   openId: string | null;
@@ -164,8 +164,15 @@ export function StructuringReviewPage() {
 
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
+  // Legacy `?tab=reference` URLs now land on the unified Structuring Review
+  // workspace (which contains both the editor and the Reference Review panel
+  // side by side), so map them to `editor`.
   const defaultTab: StructuringTab =
-    (tabParam === "editor" || tabParam === "onlyoffice" || tabParam === "collabora" || tabParam === "overview" || tabParam === "reference") ? tabParam : "overview";
+    tabParam === "reference"
+      ? "editor"
+      : (tabParam === "editor" || tabParam === "onlyoffice" || tabParam === "collabora" || tabParam === "overview")
+        ? tabParam
+        : "overview";
   const [activeTab, setActiveTab] = useState<StructuringTab>(defaultTab);
   // Persist selected tab in the URL so a reload restores the same tab.
   const selectTab = useCallback(
@@ -185,6 +192,7 @@ export function StructuringReviewPage() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [trackChangesEnabled, setTrackChangesEnabled] = useState(false);
   const [sidePanelTab, setSidePanelTab] = useState<"styles" | "changes">("styles");
+  const [showReferencePanel, setShowReferencePanel] = useState(false);
   const location = useLocation();
   const xsltContent = (location.state as { xsltContent?: string } | null)?.xsltContent;
 
@@ -218,8 +226,10 @@ export function StructuringReviewPage() {
     );
   }
 
-  // Shared tab-strip renderer so the Reference Review tab can also show it
-  // when structuring metadata isn't available yet.
+  // Top-level tab strip: Document Overview | Structuring Review.
+  // The Structuring Review tab renders a unified workspace containing both
+  // the WYSIWYG editor and the Reference Review panel side by side — there
+  // is no separate top-level or sub-level Reference Review tab.
   const renderTabStrip = (showOnlyOffice: boolean) => (
     <div className="flex border-b border-navy-200">
       <button
@@ -242,16 +252,6 @@ export function StructuringReviewPage() {
         <FileText className="w-4 h-4" />
         Structuring Review
       </button>
-      <button
-        onClick={() => selectTab("reference")}
-        className={`py-3 px-6 font-semibold text-sm flex items-center gap-2 border-b-2 transition-all ${activeTab === "reference"
-          ? "border-navy-600 text-navy-800"
-          : "border-transparent text-navy-400 hover:text-navy-600"
-          }`}
-      >
-        <ClipboardCheck className="w-4 h-4" />
-        Reference Review
-      </button>
       {showOnlyOffice && (
         <button
           onClick={() => selectTab("onlyoffice")}
@@ -267,25 +267,8 @@ export function StructuringReviewPage() {
     </div>
   );
 
-  // ── Reference Review tab ─────────────────────────────────────────────────
-  // Render Reference Review even when the structuring metadata query is
-  // still pending or has failed. The reference-review flow has its own
-  // independent data pipeline and must not be gated on structuring output.
-  if (activeTab === "reference") {
-    return (
-      <main className={`page-enter min-h-screen bg-surface-100 flex flex-col ${isFullscreen ? "p-2" : "px-6 pt-3 pb-6"}`}>
-        <div className={`w-full flex-1 flex flex-col ${isFullscreen ? "max-w-none px-0" : "px-4 space-y-3"}`}>
-          {!isFullscreen && renderTabStrip(false)}
-          <div className="flex-1 -mx-4 -mb-6">
-            <ReferenceValidationReviewPage />
-          </div>
-        </div>
-      </main>
-    );
-  }
-
   // Shell used by loading/error/no-data screens so the user can still switch
-  // to the Reference Review tab when structuring metadata is unavailable.
+  // to Document Overview when structuring metadata is unavailable.
   const withTabShell = (body: React.ReactNode) => (
     <main className="page-enter min-h-screen bg-surface-100 flex flex-col px-6 pt-3 pb-6">
       <div className="w-full flex-1 flex flex-col px-4 space-y-3">
@@ -606,9 +589,16 @@ export function StructuringReviewPage() {
           </div>
         )}
 
-        {/* ── TAB 2: EDITOR WORKSPACE ────────────────────────────── */}
+        {/* ── TAB 2: STRUCTURING REVIEW WORKSPACE ────────────────────
+             Unified two-column layout: the WYSIWYG editor sits on the left
+             and the full Reference Review workspace (its own editor +
+             validation sidebar with Citations / References / Changes /
+             Issues / Missing / Validate / Save / Export) sits on the right.
+             The right panel is hidden in fullscreen so the editor gets the
+             full viewport. */}
         {(activeTab === "editor" || isFullscreen) && activeTab !== "onlyoffice" && (
-          <div className={`flex-1 flex flex-col min-h-0 page-enter ${isFullscreen ? "" : "mt-3"}`}>
+          <div className={`flex-1 flex min-h-0 page-enter gap-3 ${isFullscreen ? "" : "mt-3"}`}>
+            <div className="flex-1 min-w-0 flex flex-col min-h-0">
             {xhtmlQuery.isPending && !xsltContent ? (
               <div style={{ padding: "24px", textAlign: "center" }}>Loading document…</div>
             ) : (
@@ -716,10 +706,42 @@ export function StructuringReviewPage() {
                       }}
                     />
                   </ToolbarPopover>
+                  {/* Reference Review toggle — opens/closes the right-side
+                      Reference Review panel. Hidden by default; editor
+                      reflows to full width when the panel is closed. */}
+                  <button
+                    type="button"
+                    aria-pressed={showReferencePanel}
+                    onClick={() => setShowReferencePanel((prev) => !prev)}
+                    title="Reference Review — citations, references, and validation"
+                    className={`px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md border shrink-0 inline-flex items-center gap-1.5 transition-all duration-150 cursor-pointer ${
+                      showReferencePanel
+                        ? "bg-orange-600 text-white border-orange-500"
+                        : "bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-slate-100"
+                    }`}
+                  >
+                    <Library className="w-3.5 h-3.5" />
+                    Reference Review
+                  </button>
                 </ToolbarPopoverGroup>
               }
             />
               </>
+            )}
+            </div>
+
+            {/* Right column: compact Reference Review side panel.
+                Hidden by default; the toolbar's Reference Review toggle
+                opens and closes it. When closed, the editor reflows to
+                the full available width. Also hidden in fullscreen so
+                the editor gets the whole viewport. */}
+            {!isFullscreen && showReferencePanel && (
+              <div
+                className="w-[380px] shrink-0 flex flex-col bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden sticky top-3 self-start"
+                style={{ height: "calc(100vh - 260px)" }}
+              >
+                <ReferenceReviewSidePanel fileId={normalizedFileId} editorRef={editorRef} />
+              </div>
             )}
           </div>
         )}
