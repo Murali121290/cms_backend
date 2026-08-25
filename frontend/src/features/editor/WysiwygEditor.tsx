@@ -65,6 +65,7 @@ import Heading from "@tiptap/extension-heading";
 import { TrackChanges } from "./TrackChanges";
 import { OccurrenceHighlight, type Occurrence } from "./OccurrenceHighlight";
 import { RunAnchor } from "./RunAnchor";
+import { Bookmark } from "./Bookmark";
 import { CharStyle } from "./CharStyle";
 import { FontSize } from "./FontSize";
 import { Comment } from "./Comment";
@@ -461,6 +462,19 @@ export interface WysiwygEditorProps {
   currentUser?: string;
   fileId?: string;
   toolbarExtras?: React.ReactNode;
+  // When true, the sticky rich-text toolbar is not rendered. Used when the
+  // editor is embedded inside another workspace that already provides its
+  // own toolbar chrome.
+  hideToolbar?: boolean;
+  // When true, the save/export bar is rendered inline at the bottom of the
+  // editor's container (position: relative) instead of pinned to the
+  // viewport with position: fixed. Prevents two editors on the same page
+  // from stacking their save bars on top of each other.
+  inlineSaveBar?: boolean;
+  // When true, the primary Save button in the save bar is not rendered.
+  // Used when an external panel (e.g. Reference Review's "Save & Export")
+  // owns the save action to avoid a duplicate button.
+  hideSaveButton?: boolean;
 }
 
 const ToolbarButton = ({
@@ -525,6 +539,9 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
       currentUser,
       fileId,
       toolbarExtras,
+      hideToolbar = false,
+      inlineSaveBar = false,
+      hideSaveButton = false,
     }: WysiwygEditorProps,
     ref
   ) {
@@ -627,6 +644,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         }),
         OccurrenceHighlight,
         RunAnchor,
+        Bookmark,
         CharStyle,
         PageBreak,
         Comment,
@@ -1251,6 +1269,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         )}
 
         {/* â”€â”€ Toolbar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+        {!hideToolbar && (
         <div className="sticky top-0 z-10 bg-[#090d16] border-b border-slate-800 px-3 py-2 flex items-center gap-1.5 overflow-x-auto shadow-md flex-wrap">
 
           {/* Font Family */}
@@ -1657,6 +1676,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
             </div>
           )}
         </div>
+        )}
 
         {/* â”€â”€ Find & Replace Bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         {showFindReplace && (
@@ -2065,18 +2085,24 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
 
         {/* â”€â”€ Save Bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         <div
-          className={`fixed bottom-0 right-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur-sm px-6 py-3 flex items-center gap-3 shadow-[0_-2px_12px_rgba(15,23,42,0.08)] ${
-            sidebarCollapsed ? "left-16" : "left-60"
-          }`}
+          className={
+            inlineSaveBar
+              ? "border-t border-slate-200 bg-white px-4 py-2 flex items-center gap-3 flex-wrap shrink-0"
+              : `fixed bottom-0 right-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur-sm px-6 py-3 flex items-center gap-3 shadow-[0_-2px_12px_rgba(15,23,42,0.08)] ${
+                  sidebarCollapsed ? "left-16" : "left-60"
+                }`
+          }
         >
-          <Button
-            variant="primary"
-            onClick={handleSave}
-            disabled={isSaving}
-            leftIcon={isSaving ? undefined : <Save className="w-4 h-4" />}
-          >
-            {isSaving ? "Saving..." : saveLabel}
-          </Button>
+          {!hideSaveButton && (
+            <Button
+              variant="primary"
+              onClick={handleSave}
+              disabled={isSaving}
+              leftIcon={isSaving ? undefined : <Save className="w-4 h-4" />}
+            >
+              {isSaving ? "Saving..." : saveLabel}
+            </Button>
+          )}
 
           {exportHref && (
             <a href={exportHref} download className="no-underline">
