@@ -4,6 +4,7 @@ import {
   AlertCircle,
   AlertTriangle,
   ArrowUpRight,
+  Bookmark as BookmarkIcon,
   BookOpen,
   Calendar,
   CheckCircle2,
@@ -14,9 +15,11 @@ import {
   Inbox,
   Minus,
   MinusCircle,
+  Plus,
   RefreshCw,
   SearchX,
   Sparkles,
+  Trash2,
   XCircle,
 } from "lucide-react";
 
@@ -27,8 +30,15 @@ import { useReferenceReviewQuery } from "../useReferenceReviewQuery";
 import { useReferenceSave } from "../useReferenceSave";
 import { useReferenceValidateOnly } from "../useReferenceValidateOnly";
 import { stampBookmarks } from "../stampBookmarks";
+import {
+  addManualBookmark,
+  listBookmarks,
+  removeBookmark,
+  goToBookmark,
+  type BookmarkInfo,
+} from "../bookmarkOps";
 
-type PanelTab = "citations" | "references" | "changes" | "issues" | "missing";
+type PanelTab = "citations" | "references" | "changes" | "issues" | "missing" | "bookmarks";
 type FilterKey = "all" | "matched" | "missing" | "unused";
 
 interface Props {
@@ -43,6 +53,12 @@ export function ReferenceReviewSidePanel({ fileId, editorRef }: Props) {
   const [activeTab, setActiveTab] = useState<PanelTab>("citations");
   const [filter, setFilter] = useState<FilterKey>("all");
   const [lastValidatedAt, setLastValidatedAt] = useState<Date | null>(null);
+  const [bookmarks, setBookmarks] = useState<BookmarkInfo[]>([]);
+  const [bookmarkSort, setBookmarkSort] = useState<"name" | "location">("name");
+  const [addModal, setAddModal] = useState<
+    | { open: false }
+    | { open: true; range: { from: number; to: number }; snippet: string; error?: string }
+  >({ open: false });
 
   const reviewQuery = useReferenceReviewQuery(
     fileId,
@@ -77,7 +93,65 @@ export function ReferenceReviewSidePanel({ fileId, editorRef }: Props) {
     const editor = editorRef.current?.editor;
     if (!editor) return;
     stampBookmarks(editor, referenceEntries, citationPairs);
+    setBookmarks(listBookmarks(editor));
   }, [reviewQuery.data, referenceEntries, citationPairs, editorRef]);
+
+  // Keep the panel's bookmark list in sync with editor edits (manual add,
+  // delete, or edits that split marks). Subscribes on mount and refreshes
+  // on every doc transaction — the read is O(doc) but only runs while the
+  // panel is mounted, and the list length is small.
+  useEffect(() => {
+    const editor = editorRef.current?.editor;
+    if (!editor) return;
+    const refresh = () => setBookmarks(listBookmarks(editor));
+    refresh();
+    editor.on("transaction", refresh);
+    return () => {
+      editor.off("transaction", refresh);
+    };
+  }, [editorRef, reviewQuery.data]);
+
+  const openAddBookmarkModal = () => {
+    const editor = editorRef.current?.editor;
+    if (!editor) return;
+    const { from, to } = editor.state.selection;
+    if (from === to) {
+      setAddModal({
+        open: true,
+        range: { from, to },
+        snippet: "",
+        error: "Select some text in the editor first, then click Add Bookmark.",
+      });
+      return;
+    }
+    const snippet = editor.state.doc.textBetween(from, to, " ").slice(0, 80);
+    setAddModal({ open: true, range: { from, to }, snippet });
+  };
+
+  const submitAddBookmark = (rawName: string) => {
+    const editor = editorRef.current?.editor;
+    if (!editor || !addModal.open) return;
+    const res = addManualBookmark(editor, rawName, addModal.range);
+    if (!res.ok) {
+      setAddModal({ ...addModal, error: res.error });
+      return;
+    }
+    setBookmarks(listBookmarks(editor));
+    setAddModal({ open: false });
+  };
+
+  const handleDeleteBookmark = (bm: BookmarkInfo) => {
+    if (bm.role !== "manual") return; // auto-bookmarks come back on next validate
+    const editor = editorRef.current?.editor;
+    if (!editor) return;
+    if (!window.confirm(`Delete bookmark "${bm.name}"?`)) return;
+    removeBookmark(editor, bm.name, "manual");
+    setBookmarks(listBookmarks(editor));
+  };
+
+  const handleGoToBookmark = (bm: BookmarkInfo) => {
+    goToBookmark(editorRef.current?.editor, bm.name);
+  };
 
   const flashBlock = (el: HTMLElement | null) => {
     if (!el || !el.scrollIntoView) return;
@@ -211,12 +285,12 @@ export function ReferenceReviewSidePanel({ fileId, editorRef }: Props) {
     return false;
   };
 
+  // Validate ONLY — hits the validate-only endpoint against whatever HTML
+  // was last saved. Does not persist current editor edits; the user must
+  // click Save & Export first if they want fresh edits validated.
   const handleValidate = async () => {
-    const editor = editorRef.current?.editor;
-    if (!editor || !reviewQuery.data) return;
-    const html = editor.getHTML();
+    if (fileId == null) return;
     try {
-      await saveMutation.save(reviewQuery.data.save_endpoint, html);
       await validateMutation.mutateAsync({
         style: styleOverride === "AUTO" ? undefined : styleOverride,
         citationFormat: citationFormat === "auto" ? undefined : citationFormat,
@@ -224,18 +298,18 @@ export function ReferenceReviewSidePanel({ fileId, editorRef }: Props) {
       setLastValidatedAt(new Date());
       await reviewQuery.refetch();
     } catch {
-      /* surfaced via saveMutation.errorMessage */
+      /* surfaced via validateMutation error state */
     }
   };
 
-  // Save reference changes, then trigger the export download. Combined so
-  // there's exactly one export path from this panel.
+  // Save ONLY, then trigger the export download. No implicit validate/refetch:
+  // the save endpoint already refreshes server-side state and the export URL
+  // is stable, so refetching would just cause the panel counts to churn.
   const handleSaveAndExport = async () => {
     const editor = editorRef.current?.editor;
     if (!editor || !reviewQuery.data) return;
     try {
       await saveMutation.save(reviewQuery.data.save_endpoint, editor.getHTML());
-      await reviewQuery.refetch();
     } catch {
       return; // error surfaced via saveMutation.errorMessage
     }
@@ -410,7 +484,70 @@ export function ReferenceReviewSidePanel({ fileId, editorRef }: Props) {
             }
           />
         );
+      case "bookmarks":
+        return renderBookmarksTab();
     }
+  };
+
+  const renderBookmarksTab = () => {
+    const sorted = [...bookmarks].sort((a, b) => {
+      if (bookmarkSort === "location") return a.from - b.from;
+      return a.name.localeCompare(b.name, undefined, { numeric: true });
+    });
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={openAddBookmarkModal}
+            className="inline-flex items-center gap-1.5 h-7 px-2.5 text-xs font-semibold rounded-md bg-navy-800 text-white hover:bg-navy-900 transition-colors"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Add Bookmark
+          </button>
+          <div className="ml-auto flex items-center gap-1 text-[10px] text-navy-500">
+            <span className="uppercase tracking-wide font-semibold">Sort</span>
+            <button
+              type="button"
+              onClick={() => setBookmarkSort("name")}
+              className={`px-1.5 py-0.5 rounded ${bookmarkSort === "name" ? "bg-navy-100 text-navy-800 font-semibold" : "text-navy-500 hover:text-navy-700"}`}
+            >
+              Name
+            </button>
+            <button
+              type="button"
+              onClick={() => setBookmarkSort("location")}
+              className={`px-1.5 py-0.5 rounded ${bookmarkSort === "location" ? "bg-navy-100 text-navy-800 font-semibold" : "text-navy-500 hover:text-navy-700"}`}
+            >
+              Location
+            </button>
+          </div>
+        </div>
+        {sorted.length === 0 ? (
+          <EmptyState
+            Icon={BookmarkIcon}
+            message={
+              <>
+                No bookmarks yet. Click <span className="font-semibold">Validate</span> to
+                generate <span className="font-mono text-[10px]">REF{"{n}"}</span> anchors,
+                or select text and click <span className="font-semibold">Add Bookmark</span>.
+              </>
+            }
+          />
+        ) : (
+          <ul className="space-y-1.5">
+            {sorted.map((bm) => (
+              <BookmarkRow
+                key={`${bm.name}::${bm.role}`}
+                bm={bm}
+                onGoTo={() => handleGoToBookmark(bm)}
+                onDelete={bm.role === "manual" ? () => handleDeleteBookmark(bm) : undefined}
+              />
+            ))}
+          </ul>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -486,11 +623,11 @@ export function ReferenceReviewSidePanel({ fileId, editorRef }: Props) {
           <button
             type="button"
             onClick={handleValidate}
-            disabled={saveMutation.isPending || validateMutation.isPending}
+            disabled={validateMutation.isPending}
             className="ml-auto inline-flex items-center gap-1.5 h-7 px-3 text-xs font-semibold rounded-md bg-emerald-500 text-white hover:bg-emerald-600 active:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed shadow-subtle transition-colors"
           >
             <RefreshCw
-              className={`w-3.5 h-3.5 ${saveMutation.isPending || validateMutation.isPending ? "animate-spin" : ""}`}
+              className={`w-3.5 h-3.5 ${validateMutation.isPending ? "animate-spin" : ""}`}
             />
             Validate
           </button>
@@ -538,6 +675,14 @@ export function ReferenceReviewSidePanel({ fileId, editorRef }: Props) {
           Icon={SearchX}
           onClick={() => setActiveTab("missing")}
           tone={missingCount > 0 ? "warning" : "info"}
+        />
+        <TabBtn
+          active={activeTab === "bookmarks"}
+          count={bookmarks.length}
+          label="Marks"
+          Icon={BookmarkIcon}
+          onClick={() => setActiveTab("bookmarks")}
+          tone="info"
         />
       </div>
 
@@ -631,6 +776,15 @@ export function ReferenceReviewSidePanel({ fileId, editorRef }: Props) {
           {saveMutation.isPending ? "Saving…" : "Save & Export"}
         </button>
       </div>
+
+      {addModal.open && (
+        <AddBookmarkModal
+          snippet={addModal.snippet}
+          error={addModal.error}
+          onSubmit={submitAddBookmark}
+          onCancel={() => setAddModal({ open: false })}
+        />
+      )}
     </div>
   );
 }
@@ -938,6 +1092,145 @@ function EmptyState({
     <div className="px-4 py-10 flex flex-col items-center gap-2 text-center">
       <Icon className={`w-8 h-8 ${iconCls}`} />
       <div className="text-xs text-navy-500 max-w-[240px] leading-relaxed">{message}</div>
+    </div>
+  );
+}
+
+function BookmarkRow({
+  bm,
+  onGoTo,
+  onDelete,
+}: {
+  bm: BookmarkInfo;
+  onGoTo: () => void;
+  onDelete?: () => void;
+}) {
+  const rolePill =
+    bm.role === "manual"
+      ? "bg-sky-50 text-sky-700 border-sky-200"
+      : bm.role === "target"
+        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+        : "bg-slate-100 text-slate-700 border-slate-200";
+  return (
+    <li className="bg-white rounded-md border border-slate-200 px-3 py-2 flex items-center gap-3">
+      <BookmarkIcon
+        className={`w-4 h-4 shrink-0 ${bm.role === "manual" ? "text-sky-500" : "text-slate-400"}`}
+      />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5">
+          <span className="text-sm font-semibold text-navy-800 truncate">{bm.name}</span>
+          <span
+            className={`shrink-0 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded border ${rolePill}`}
+          >
+            {bm.role}
+          </span>
+        </div>
+        {bm.snippet && (
+          <div className="text-[11px] text-navy-500 mt-0.5 line-clamp-1 leading-snug">
+            {bm.snippet}
+          </div>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={onGoTo}
+        className="shrink-0 inline-flex items-center gap-1 text-[11px] font-semibold text-sky-600 hover:text-sky-700 hover:underline"
+      >
+        Go To
+        <ArrowUpRight className="w-3 h-3" />
+      </button>
+      {onDelete && (
+        <button
+          type="button"
+          onClick={onDelete}
+          title="Delete bookmark"
+          className="shrink-0 p-1 rounded text-rose-500 hover:bg-rose-50"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      )}
+    </li>
+  );
+}
+
+function AddBookmarkModal({
+  snippet,
+  error,
+  onSubmit,
+  onCancel,
+}: {
+  snippet: string;
+  error?: string;
+  onSubmit: (name: string) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState("");
+  const disabled = !snippet; // no selection was captured
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm"
+      onClick={onCancel}
+    >
+      <div
+        className="bg-white rounded-lg shadow-xl w-[360px] max-w-[90vw] p-5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-2 mb-3">
+          <BookmarkIcon className="w-4 h-4 text-navy-700" />
+          <h3 className="text-sm font-bold text-navy-800">Add Bookmark</h3>
+        </div>
+        {snippet && (
+          <div className="mb-3 p-2 rounded-md bg-slate-50 border border-slate-200">
+            <div className="text-[10px] uppercase font-bold tracking-wide text-navy-500 mb-1">
+              Selected text
+            </div>
+            <div className="text-xs text-navy-800 line-clamp-2 italic">"{snippet}"</div>
+          </div>
+        )}
+        <label className="block">
+          <span className="text-[10px] uppercase font-bold tracking-wide text-navy-500">
+            Bookmark name
+          </span>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !disabled) onSubmit(name);
+              if (e.key === "Escape") onCancel();
+            }}
+            autoFocus
+            disabled={disabled}
+            placeholder="e.g. ChapterIntro"
+            className="mt-1 w-full px-2.5 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-navy-400 disabled:bg-slate-100"
+          />
+        </label>
+        <div className="mt-1 text-[10px] text-navy-500">
+          Letters, digits, or underscore; must start with a letter; max 40 chars.
+        </div>
+        {error && (
+          <div className="mt-2 text-[11px] font-medium text-rose-600 bg-rose-50 border border-rose-200 rounded px-2 py-1">
+            {error}
+          </div>
+        )}
+        <div className="mt-4 flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-3 h-8 text-xs font-semibold rounded-md text-navy-700 hover:bg-slate-100"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => onSubmit(name)}
+            disabled={disabled}
+            className="px-3 h-8 text-xs font-semibold rounded-md bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            Add
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

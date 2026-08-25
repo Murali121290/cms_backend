@@ -609,6 +609,11 @@ class XhtmlToDocxDeltaEngine:
         
         # Track unique revision/bookmark IDs
         next_id = [_get_unique_bookmark_id(doc)]  # Use list to allow mutation
+        # Track user-authored bookmark names (data-bookmark-role set) already
+        # emitted in this traversal — a Reference Review REF{n} mark can
+        # render as multiple <a> chunks when the paragraph has mixed
+        # formatting, and Word bookmark names must be unique per document.
+        emitted_named_bookmarks: set = set()
 
         def parse_style(style_str):
             if not style_str:
@@ -1100,7 +1105,20 @@ class XhtmlToDocxDeltaEngine:
                         char_style=node_char_style, is_del=current_is_del
                     )
 
-            if bm_name and bm_name.startswith("r_bm_"):
+            # Wrap in <w:bookmarkStart/w:bookmarkEnd> for either
+            #   (a) auto-generated run identity bookmarks (r_bm_*), or
+            #   (b) explicit user/reference-review bookmarks that carry a
+            #       data-bookmark-role attribute (e.g. REF25 from the
+            #       Reference Review auto-bookmark flow).
+            # For (b) we emit the Word bookmark only on the first occurrence
+            # of a given name so we don't produce duplicate bookmark names.
+            bm_role = el.get("data-bookmark-role")
+            is_named_user_bm = bool(bm_name) and bm_role in ("target", "source", "manual")
+            if is_named_user_bm and bm_name in emitted_named_bookmarks:
+                process_text_and_children(current_xml_parent)
+            elif bm_name and (bm_name.startswith("r_bm_") or is_named_user_bm):
+                if is_named_user_bm:
+                    emitted_named_bookmarks.add(bm_name)
                 wrap_in_bookmark(current_xml_parent, bm_name, process_text_and_children)
             else:
                 process_text_and_children(current_xml_parent)
