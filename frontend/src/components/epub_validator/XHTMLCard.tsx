@@ -201,13 +201,30 @@ export function XHTMLCard({
                   <span className="whitespace-nowrap">View Source</span>
                 </button>
               ) : isImage ? (
-                <button
-                  onClick={onPreview || onOpen}
-                  className="inline-flex flex-row items-center justify-center gap-1.5 px-3.5 py-1.5 h-8.5 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-primary/10 text-foreground hover:border-primary/40 hover:text-primary transition-all shadow-xs shrink-0 whitespace-nowrap"
-                >
-                  <Eye className="w-3.5 h-3.5 shrink-0" />
-                  <span className="whitespace-nowrap">View Image</span>
-                </button>
+                <>
+                  <button
+                    onClick={onPreview || onOpen}
+                    className="inline-flex flex-row items-center justify-center gap-1.5 px-3.5 py-1.5 h-8.5 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-primary/10 text-foreground hover:border-primary/40 hover:text-primary transition-all shadow-xs shrink-0 whitespace-nowrap"
+                  >
+                    <Eye className="w-3.5 h-3.5 shrink-0" />
+                    <span className="whitespace-nowrap">View Image</span>
+                  </button>
+                  {onValidate && (
+                    <button
+                      onClick={onValidate}
+                      disabled={isValidating}
+                      aria-label={`Validate ${file.file_name}`}
+                      className="inline-flex flex-row items-center justify-center gap-1.5 px-3.5 py-1.5 h-8.5 text-xs font-semibold rounded-lg bg-primary text-white hover:bg-primary/90 transition-all shadow-xs disabled:opacity-50 shrink-0 whitespace-nowrap"
+                    >
+                      {isValidating ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0 text-white" />
+                      ) : (
+                        <Play className="w-3.5 h-3.5 shrink-0 text-white fill-white" />
+                      )}
+                      <span className="whitespace-nowrap text-white">{isValidating ? 'Validating…' : 'Validate'}</span>
+                    </button>
+                  )}
+                </>
               ) : (
                 <>
                   <button
@@ -305,16 +322,33 @@ export function XHTMLCard({
                 <span className="whitespace-nowrap">View Source</span>
               </Button>
             ) : isImage ? (
-              <Button
-                variant="outline"
-                size="sm"
-                className="flex-1 inline-flex items-center justify-center gap-1.5 h-8.5 text-xs font-semibold px-3 rounded-lg shadow-xs hover:border-primary/40 hover:text-primary shrink-0 whitespace-nowrap"
-                onClick={onPreview || onOpen}
-                aria-label={`View ${file.file_name}`}
-              >
-                <Eye className="w-3.5 h-3.5 shrink-0" />
-                <span className="whitespace-nowrap">View Image</span>
-              </Button>
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 h-8.5 text-xs font-semibold px-3 rounded-lg shadow-xs hover:border-primary/40 hover:text-primary shrink-0 whitespace-nowrap"
+                  onClick={onPreview || onOpen}
+                  aria-label={`View ${file.file_name}`}
+                >
+                  <Eye className="w-3.5 h-3.5 shrink-0" />
+                  <span className="whitespace-nowrap">View Image</span>
+                </Button>
+                {onValidate && (
+                  <button
+                    onClick={onValidate}
+                    disabled={isValidating}
+                    aria-label={`Validate ${file.file_name}`}
+                    className="flex-1 inline-flex flex-row items-center justify-center gap-1.5 h-8.5 text-xs font-semibold px-3 rounded-lg bg-primary text-white hover:bg-primary/90 transition-all shadow-xs disabled:opacity-50 shrink-0 whitespace-nowrap"
+                  >
+                    {isValidating ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0 text-white" />
+                    ) : (
+                      <Play className="w-3.5 h-3.5 shrink-0 text-white fill-white" />
+                    )}
+                    <span className="whitespace-nowrap text-white">{isValidating ? 'Validating…' : 'Validate'}</span>
+                  </button>
+                )}
+              </>
             ) : (
               <>
                 <Button

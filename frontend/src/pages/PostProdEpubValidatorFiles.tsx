@@ -1843,7 +1843,7 @@ export function PostProdEpubValidatorFiles() {
                                   isValidating={validatingFiles.has(file.file_name)}
                                   onValidate={() => handleValidateFile(file.file_name)}
                                   onOpen={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
-                                  onPreview={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
+                                  onPreview={() => { setModalAllowedTabs(undefined); setModalInitialTab('preview'); setSelectedFile(file); }}
                                   index={i}
                                 />
                               </motion.div>
@@ -1912,6 +1912,28 @@ export function PostProdEpubValidatorFiles() {
                           </h2>
                           <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleImageFiles.length})</span>
                         </div>
+                        {visibleImageFiles.length > 0 && (
+                          <button
+                            className="inline-flex flex-row items-center justify-center gap-1.5 px-3.5 py-1.5 h-8.5 text-xs font-semibold rounded-lg bg-primary text-white hover:bg-primary/90 transition-all shadow-xs disabled:opacity-50 shrink-0 whitespace-nowrap"
+                            onClick={() => {
+                              visibleImageFiles.forEach(f => {
+                                if (!validatingFiles.has(f.file_name)) {
+                                  handleValidateFile(f.file_name);
+                                }
+                              });
+                            }}
+                            disabled={visibleImageFiles.every(f => validatingFiles.has(f.file_name))}
+                          >
+                            {visibleImageFiles.some(f => validatingFiles.has(f.file_name)) ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0 text-white" />
+                            ) : (
+                              <Play className="w-3.5 h-3.5 shrink-0 text-white fill-white" />
+                            )}
+                            <span className="whitespace-nowrap text-white">
+                              {visibleImageFiles.some(f => validatingFiles.has(f.file_name)) ? 'Validating…' : 'Validate all'}
+                            </span>
+                          </button>
+                        )}
                       </div>
                       {visibleImageFiles.length === 0 ? (
                         <p className="text-xs text-muted-foreground italic py-1">No image files in this section.</p>
@@ -1937,6 +1959,8 @@ export function PostProdEpubValidatorFiles() {
                                 status={getFileStatus(file.file_name)}
                                 errors={agg.errors}
                                 warnings={agg.warnings}
+                                isValidating={validatingFiles.has(file.file_name)}
+                                onValidate={() => handleValidateFile(file.file_name)}
                                 onOpen={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
                                 onPreview={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
                                 index={i}
@@ -2041,8 +2065,18 @@ export function PostProdEpubValidatorFiles() {
                                   warnings={agg?.warnings ?? 0}
                                   isValidating={validatingFiles.has(file.file_name)}
                                   onValidate={canValidate ? () => handleValidateFile(file.file_name) : undefined}
-                                  onOpen={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
-                                  onPreview={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
+                                  onOpen={() => { 
+                                    const isNav = isNavFile(file.file_name, file.path);
+                                    setModalAllowedTabs(isNav ? undefined : ['result']); 
+                                    setModalInitialTab('result'); 
+                                    setSelectedFile(file); 
+                                  }}
+                                  onPreview={() => { 
+                                    const isNav = isNavFile(file.file_name, file.path);
+                                    setModalAllowedTabs(isNav ? undefined : ['result']); 
+                                    setModalInitialTab(isNav ? 'preview' : 'result'); 
+                                    setSelectedFile(file); 
+                                  }}
                                   index={i}
                                 />
                               </motion.div>
