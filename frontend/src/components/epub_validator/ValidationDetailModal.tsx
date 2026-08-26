@@ -10,6 +10,9 @@ import {
   Save,
   Image as ImageIcon,
   Edit2,
+  Info,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/utils/epubValidatorUtils';
@@ -21,6 +24,7 @@ interface Props {
   file: XHTMLFile;
   folderName: string;
   entries: ValidationFileEntry[];
+  summaryData?: any;
   isRevalidating?: boolean;
   validationProgress?: ValidationProgress;
   initialTab?: Tab;
@@ -30,7 +34,7 @@ interface Props {
   onRenameSuccess?: (newName: string) => void;
 }
 
-export type Tab = 'result' | 'preview' | 'pdf';
+export type Tab = 'result' | 'preview' | 'pdf' | 'analysis';
 
 type DisplayIssue = ValidationIssue & { _ruleName: string };
 
@@ -209,7 +213,7 @@ function IssueRow({ issue, onClick }: { issue: DisplayIssue; onClick?: () => voi
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-1.5 min-w-0 flex-1">
-              {issue.rule_id && (
+              {typeof issue.rule_id === 'string' && issue.rule_id && (
                 <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 shrink-0">
                   {issue.rule_id}
                 </span>
@@ -288,7 +292,7 @@ function resolveRelative(filePath: string, href: string): string {
 
 // ─── Modal ───────────────────────────────────────────────────────────────────
 
-export function ValidationDetailModal({ file, folderName, entries, isRevalidating = false, validationProgress, initialTab = 'result', allowedTabs, onClose, onRevalidate, onRenameSuccess }: Props) {
+export function ValidationDetailModal({ file, folderName, entries, summaryData, isRevalidating = false, validationProgress, initialTab = 'result', allowedTabs, onClose, onRevalidate, onRenameSuccess }: Props) {
   const isImageFile = useMemo(() => {
     const name = (file.file_name || '').toLowerCase();
     return /\.(png|jpe?g|gif|svg|webp|bmp|ico|tif?f)$/i.test(name);
@@ -298,6 +302,8 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
     ? ['result']
     : (allowedTabs ?? ['result', 'preview']);
   const [activeTab, setActiveTab]       = useState<Tab>(initialTab);
+  const [showAnalysisSidebar, setShowAnalysisSidebar] = useState(false);
+  const [showFilenamesInAnalysis, setShowFilenamesInAnalysis] = useState(false);
 
   useEffect(() => {
     if (!visibleTabs.includes(activeTab)) {
@@ -923,57 +929,180 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
                     <div className="flex-1 h-full flex flex-col min-w-0 bg-background">
                       <div className="px-4 py-2 border-b border-border bg-muted/20 flex items-center justify-between shrink-0 font-mono text-xs">
                         <span className="font-semibold text-foreground truncate">{filePath}</span>
-                        {!isImageFile && isDirty && <span className="text-[10px] font-bold text-amber-500 uppercase font-sans">Unsaved Changes</span>}
+                        <div className="flex items-center gap-3">
+                          {!isImageFile && isDirty && <span className="text-[10px] font-bold text-amber-500 uppercase font-sans">Unsaved Changes</span>}
+                          {!isImageFile && (
+                            <button
+                              onClick={() => setShowAnalysisSidebar(!showAnalysisSidebar)}
+                              className={cn(
+                                "flex items-center gap-1.5 px-2 py-1 rounded transition-colors font-sans font-semibold border border-transparent",
+                                showAnalysisSidebar 
+                                  ? "bg-primary/10 text-primary border-primary/20" 
+                                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                              )}
+                              title="Toggle Analysis Report"
+                            >
+                              <Info className="w-3.5 h-3.5" />
+                              <span className="hidden sm:inline">Analysis</span>
+                            </button>
+                          )}
+                        </div>
                       </div>
 
-                      <div className="flex-1 overflow-hidden relative">
-                        {isImageFile ? (
-                          <div className="h-full flex flex-col items-center justify-center p-6 bg-muted/10 overflow-auto">
-                            {imageUrl ? (
-                              <div className="flex flex-col items-center justify-center gap-3.5 max-w-full">
-                                <div className="p-3 rounded-2xl bg-card border border-border shadow-sm max-w-full overflow-hidden flex items-center justify-center bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] dark:bg-[radial-gradient(#1f2937_1px,transparent_1px)] [background-size:16px_16px]">
-                                  <img
-                                    src={imageUrl}
-                                    alt={file.file_name}
-                                    className="max-h-[60vh] max-w-full object-contain rounded-lg shadow-xs"
-                                    onError={(e) => {
-                                      (e.target as HTMLElement).style.display = 'none';
-                                    }}
-                                  />
+                      <div className="flex-1 overflow-hidden relative flex flex-row min-h-0">
+                        <div className="flex-1 overflow-hidden relative">
+                          {isImageFile ? (
+                            <div className="h-full flex flex-col items-center justify-center p-6 bg-muted/10 overflow-auto">
+                              {imageUrl ? (
+                                <div className="flex flex-col items-center justify-center gap-3.5 max-w-full">
+                                  <div className="p-3 rounded-2xl bg-card border border-border shadow-sm max-w-full overflow-hidden flex items-center justify-center bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] dark:bg-[radial-gradient(#1f2937_1px,transparent_1px)] [background-size:16px_16px]">
+                                    <img
+                                      src={imageUrl}
+                                      alt={file.file_name}
+                                      className="max-h-[60vh] max-w-full object-contain rounded-lg shadow-xs"
+                                      onError={(e) => {
+                                        (e.target as HTMLElement).style.display = 'none';
+                                      }}
+                                    />
+                                  </div>
+                                  <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground bg-card px-3 py-1.5 rounded-full border border-border/60 shadow-2xs">
+                                    <ImageIcon className="w-3.5 h-3.5 text-emerald-500" />
+                                    <span className="font-semibold text-foreground">{file.file_name}</span>
+                                  </div>
                                 </div>
-                                <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground bg-card px-3 py-1.5 rounded-full border border-border/60 shadow-2xs">
-                                  <ImageIcon className="w-3.5 h-3.5 text-emerald-500" />
-                                  <span className="font-semibold text-foreground">{file.file_name}</span>
+                              ) : (
+                                <div className="flex flex-col items-center justify-center gap-2 text-muted-foreground">
+                                  <ImageIcon className="w-10 h-10 text-muted-foreground/40" />
+                                  <p className="text-xs font-semibold">Image preview unavailable</p>
+                                </div>
+                              )}
+                            </div>
+                          ) : sourceLoading ? (
+                            <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground text-xs font-mono">
+                              <RotateCw className="w-5 h-5 animate-spin text-primary" />
+                              Loading source code…
+                            </div>
+                          ) : sourceError ? (
+                            <div className="p-6 text-red-500 text-xs font-mono">{sourceError}</div>
+                          ) : (
+                            <SourceEditor
+                              ref={sourceEditorRef}
+                              value={displayContent}
+                              onChange={(val) => setEditedContent(val)}
+                              className="h-full"
+                              onSave={handleSave}
+                              errors={displayedIssues.map((issue) => ({
+                                line: issue.line_number ?? 0,
+                                message: issue.message || 'Unknown error',
+                                extract: issue.extract,
+                              }))}
+                            />
+                          )}
+                        </div>
+
+                        {/* Analysis Report Sidebar */}
+                        <AnimatePresence>
+                          {!isImageFile && showAnalysisSidebar && (
+                            <motion.div
+                              initial={{ width: 0, opacity: 0 }}
+                              animate={{ width: 320, opacity: 1 }}
+                              exit={{ width: 0, opacity: 0 }}
+                              transition={{ duration: 0.2, ease: "easeOut" }}
+                              className="border-l border-border bg-muted/10 overflow-y-auto flex-shrink-0 flex flex-col font-sans"
+                            >
+                              <div className="p-4 w-[320px]">
+                                <div className="space-y-5">
+                                  <div className="bg-card p-3 rounded-lg border border-border shadow-xs">
+                                    <div className="flex justify-between items-center mb-2 border-b border-border pb-1.5">
+                                      <h3 className="text-xs font-bold text-foreground font-serif uppercase tracking-widest">
+                                        Chapters
+                                      </h3>
+                                      <button 
+                                        onClick={() => setShowFilenamesInAnalysis(!showFilenamesInAnalysis)} 
+                                        className="text-muted-foreground hover:text-foreground transition-colors p-0.5 rounded-sm hover:bg-muted"
+                                        title={showFilenamesInAnalysis ? "Hide filenames" : "Show filenames"}
+                                      >
+                                        {showFilenamesInAnalysis ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                      </button>
+                                    </div>
+                                    {(!summaryData?.chapter_labels || summaryData.chapter_labels.length === 0) ? (
+                                      <p className="text-[10px] text-muted-foreground italic">No chapters found.</p>
+                                    ) : (
+                                      <ul className="flex flex-col gap-1.5">
+                                        {summaryData.chapter_labels.map((label: string, i: number) => {
+                                          const displayLabel = showFilenamesInAnalysis ? label : label.replace(/^\[.*?\]\s*/, '');
+                                          return (
+                                            <li key={i} className="px-2.5 py-1.5 bg-primary/10 text-primary-700 dark:text-primary-300 rounded-md text-[10.5px] font-medium leading-relaxed">
+                                              <span className="break-words">{displayLabel}</span>
+                                            </li>
+                                          );
+                                        })}
+                                      </ul>
+                                    )}
+                                  </div>
+
+                                  <div className="bg-card p-3 rounded-lg border border-border shadow-xs">
+                                    <div className="flex justify-between items-center mb-2 border-b border-border pb-1.5">
+                                      <h3 className="text-xs font-bold text-foreground font-serif uppercase tracking-widest">
+                                        Figures
+                                      </h3>
+                                      <button 
+                                        onClick={() => setShowFilenamesInAnalysis(!showFilenamesInAnalysis)} 
+                                        className="text-muted-foreground hover:text-foreground transition-colors p-0.5 rounded-sm hover:bg-muted"
+                                        title={showFilenamesInAnalysis ? "Hide filenames" : "Show filenames"}
+                                      >
+                                        {showFilenamesInAnalysis ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                      </button>
+                                    </div>
+                                    {(!summaryData?.figure_labels || summaryData.figure_labels.length === 0) ? (
+                                      <p className="text-[10px] text-muted-foreground italic">No figures found.</p>
+                                    ) : (
+                                      <ul className="flex flex-col gap-1.5">
+                                        {summaryData.figure_labels.map((label: string, i: number) => {
+                                          const displayLabel = showFilenamesInAnalysis ? label : label.replace(/^\[.*?\]\s*/, '');
+                                          return (
+                                            <li key={i} className="px-2.5 py-1.5 bg-primary/10 text-primary-700 dark:text-primary-300 rounded-md text-[10.5px] font-medium leading-relaxed">
+                                              <span className="break-words">{displayLabel}</span>
+                                            </li>
+                                          );
+                                        })}
+                                      </ul>
+                                    )}
+                                  </div>
+
+                                  <div className="bg-card p-3 rounded-lg border border-border shadow-xs">
+                                    <div className="flex justify-between items-center mb-2 border-b border-border pb-1.5">
+                                      <h3 className="text-xs font-bold text-foreground font-serif uppercase tracking-widest">
+                                        Tables
+                                      </h3>
+                                      <button 
+                                        onClick={() => setShowFilenamesInAnalysis(!showFilenamesInAnalysis)} 
+                                        className="text-muted-foreground hover:text-foreground transition-colors p-0.5 rounded-sm hover:bg-muted"
+                                        title={showFilenamesInAnalysis ? "Hide filenames" : "Show filenames"}
+                                      >
+                                        {showFilenamesInAnalysis ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                      </button>
+                                    </div>
+                                    {(!summaryData?.table_labels || summaryData.table_labels.length === 0) ? (
+                                      <p className="text-[10px] text-muted-foreground italic">No tables found.</p>
+                                    ) : (
+                                      <ul className="flex flex-col gap-1.5">
+                                        {summaryData.table_labels.map((label: string, i: number) => {
+                                          const displayLabel = showFilenamesInAnalysis ? label : label.replace(/^\[.*?\]\s*/, '');
+                                          return (
+                                            <li key={i} className="px-2.5 py-1.5 bg-primary/10 text-primary-700 dark:text-primary-300 rounded-md text-[10.5px] font-medium leading-relaxed">
+                                              <span className="break-words">{displayLabel}</span>
+                                            </li>
+                                          );
+                                        })}
+                                      </ul>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
-                            ) : (
-                              <div className="flex flex-col items-center justify-center gap-2 text-muted-foreground">
-                                <ImageIcon className="w-10 h-10 text-muted-foreground/40" />
-                                <p className="text-xs font-semibold">Image preview unavailable</p>
-                              </div>
-                            )}
-                          </div>
-                        ) : sourceLoading ? (
-                          <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground text-xs font-mono">
-                            <RotateCw className="w-5 h-5 animate-spin text-primary" />
-                            Loading source code…
-                          </div>
-                        ) : sourceError ? (
-                          <div className="p-6 text-red-500 text-xs font-mono">{sourceError}</div>
-                        ) : (
-                          <SourceEditor
-                            ref={sourceEditorRef}
-                            value={displayContent}
-                            onChange={(val) => setEditedContent(val)}
-                            className="h-full"
-                            onSave={handleSave}
-                            errors={displayedIssues.map((issue) => ({
-                              line: issue.line_number ?? 0,
-                              message: issue.message || 'Unknown error',
-                              extract: issue.extract,
-                            }))}
-                          />
-                        )}
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </div>
                     </div>
                   </motion.div>

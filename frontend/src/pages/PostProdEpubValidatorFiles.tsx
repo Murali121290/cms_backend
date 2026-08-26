@@ -902,6 +902,7 @@ export function PostProdEpubValidatorFiles() {
             file={selectedFile}
             folderName={folderName}
             entries={selectedEntries}
+            summaryData={summaryData}
             isRevalidating={validatingFiles.has(selectedFile.file_name)}
             validationProgress={singleFileProgress[selectedFile.file_name]}
             initialTab={modalInitialTab}
