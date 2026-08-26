@@ -17,6 +17,7 @@ import {
   PanelLeftOpen,
   Monitor,
   PanelRightClose,
+  ArrowUpDown,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/utils/epubValidatorUtils';
@@ -373,6 +374,7 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
   const [showFilenamesInAnalysis, setShowFilenamesInAnalysis] = useState(false);
   const [showValidationFindings, setShowValidationFindings] = useState(true);
   const [showHtmlPreview, setShowHtmlPreview] = useState(false);
+  const [sortOrder, setSortOrder] = useState<'rule' | 'line'>('rule');
 
   useEffect(() => {
     if (!visibleTabs.includes(activeTab)) {
@@ -637,8 +639,17 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
     if (issueFilter === 'error')   issues = issues.filter(i => (i.category ?? '').toLowerCase() === 'error');
     if (issueFilter === 'warning') issues = issues.filter(i => (i.category ?? '').toLowerCase() !== 'error');
     if (ruleNameFilter)            issues = issues.filter(i => i.rule_name === ruleNameFilter);
+    
+    if (sortOrder === 'line') {
+      issues = [...issues].sort((a, b) => {
+        const lineA = a.line_number ?? 0;
+        const lineB = b.line_number ?? 0;
+        return lineA - lineB;
+      });
+    }
+    
     return issues;
-  }, [allIssues, issueFilter, ruleNameFilter]);
+  }, [allIssues, issueFilter, ruleNameFilter, sortOrder]);
 
   const errorCount   = useMemo(() => allIssues.filter(i => (i.category ?? '').toLowerCase() === 'error').length,   [allIssues]);
   const warningCount = useMemo(() => allIssues.filter(i => (i.category ?? '').toLowerCase() !== 'error').length, [allIssues]);
@@ -972,6 +983,19 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                               </button>
                             </div>
                         <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => setSortOrder(prev => prev === 'rule' ? 'line' : 'rule')}
+                            className={cn(
+                              'px-2 py-0.5 rounded text-[10px] font-bold border transition-all flex items-center gap-1',
+                              sortOrder === 'line'
+                                ? 'bg-primary text-primary-foreground border-primary'
+                                : 'bg-muted text-muted-foreground border-border hover:bg-muted/80'
+                            )}
+                            title="Toggle Sort Order"
+                          >
+                            <ArrowUpDown className="w-3 h-3" />
+                            {sortOrder === 'rule' ? 'Sort: Rule' : 'Sort: Line'}
+                          </button>
                           <button
                             onClick={() => toggleIssueFilter('error')}
                             className={cn(
