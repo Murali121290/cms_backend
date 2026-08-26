@@ -594,6 +594,22 @@ def validate_external_urls(file_details, rule_config=None):
                 invalid_reason = "comma (,)"
             elif raw_href.endswith("."):
                 invalid_reason = "dot (.)"
+            elif raw_href.endswith(":"):
+                invalid_reason = "colon (:)"
+            elif raw_href.endswith("?"):
+                invalid_reason = "question mark (?)"
+            elif raw_href.endswith("("):
+                invalid_reason = "opening parenthesis (()"
+            elif raw_href.endswith(")"):
+                invalid_reason = "closing parenthesis ())"
+            elif raw_href.endswith("["):
+                invalid_reason = "opening bracket ([)"
+            elif raw_href.endswith("]"):
+                invalid_reason = "closing bracket (])"
+            elif raw_href.endswith("{"):
+                invalid_reason = "opening brace ({)"
+            elif raw_href.endswith("}"):
+                invalid_reason = "closing brace (})"
                 
             if invalid_reason:
                 issues.append({
