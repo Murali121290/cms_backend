@@ -692,20 +692,81 @@ def _block_sdt_to_html(sdt_elem, doc, body_p_map=None, findings_by_para=None) ->
     return f'{open_tag}{"".join(inner_blocks)}</div>'
 
 
+def _is_user_visible_bookmark_name(name: str) -> bool:
+    """Filter Word bookmark names to those meaningful to a human editor.
+
+    Our own structural round-trip bookmarks (p_bm_*, r_bm_*, t_bm_*, c_bm_*,
+    fn_bm_*, en_bm_*) live in the same namespace but aren't user-created —
+    hiding them keeps the editor sidebar readable. Word's own `_GoBack` is
+    also noise. Everything else (bib_*, ref_*, Bookmark1, custom names)
+    is surfaced.
+    """
+    if not name:
+        return False
+    if name == "_GoBack":
+        return False
+    for prefix in ("p_bm_", "r_bm_", "tbl_bm_", "cell_bm_", "fnpara_bm_", "enpara_bm_"):
+        if name.startswith(prefix):
+            return False
+    return True
+
+
 def _paragraph_content_to_html(p_elem, para, doc, findings_by_para=None, para_idx=0) -> str:
     """
     Recursively renders the children of a paragraph element to HTML.
     Supports nested w:sdt, w:ins, w:del, w:hyperlink, and w:r elements, preserving hierarchy.
+
+    Pre-existing DOCX bookmarks (w:bookmarkStart/End) whose names pass
+    `_is_user_visible_bookmark_name` are emitted as
+    `<a data-bookmark="NAME" data-bookmark-role="existing">…</a>` so the
+    editor's Bookmark mark picks them up and renders the same blue anchor
+    style as manually-added bookmarks. Range bookmarks wrap the runs between
+    start and end; point bookmarks (start immediately followed by end) get a
+    zero-width space so the Tiptap mark has content to attach to.
     """
     from docx.text.run import Run
 
     para_findings = findings_by_para.get(para_idx, []) if findings_by_para else []
     parts = []
-    
+
+    # Track open user-visible bookmarks: bm_id -> (name, index_in_parts of the opening tag)
+    open_bms: dict = {}
+
+    def _close_bookmark(bm_id: str) -> None:
+        entry = open_bms.pop(bm_id, None)
+        if entry is None:
+            return
+        name, start_idx = entry
+        # Detect a point bookmark (nothing between the open tag and here).
+        has_content = any(str(p).strip() for p in parts[start_idx + 1:])
+        if has_content:
+            parts.append("</a>")
+        else:
+            # Point bookmark: give the Tiptap mark a zero-width space to hold onto.
+            parts.append("​</a>")
+
     for child in p_elem:
         qname = etree.QName(child.tag)
         tag_local = qname.localname
         ns_uri = qname.namespace
+
+        # Pre-existing Word bookmarks (bib_*, ref_*, user-authored) — round-trip
+        # through the editor as Bookmark marks with role="existing".
+        if tag_local == "bookmarkStart":
+            name = child.get(qn("w:name")) or ""
+            bm_id = child.get(qn("w:id")) or ""
+            if _is_user_visible_bookmark_name(name) and bm_id:
+                parts.append(
+                    f'<a data-bookmark="{html.escape(name, quote=True)}"'
+                    f' data-bookmark-role="existing">'
+                )
+                open_bms[bm_id] = (name, len(parts) - 1)
+            continue
+        if tag_local == "bookmarkEnd":
+            bm_id = child.get(qn("w:id")) or ""
+            if bm_id in open_bms:
+                _close_bookmark(bm_id)
+            continue
 
         # Office Math (OMML): m:oMath (inline) or m:oMathPara (block).
         # Serialize raw OMML for lossless round-trip; render MathML for display.
@@ -752,7 +813,12 @@ def _paragraph_content_to_html(p_elem, para, doc, findings_by_para=None, para_id
                 parts.append(f'<a href="{html.escape(url, quote=True)}">{inner_html}</a>')
             else:
                 parts.append(inner_html)
-                
+
+    # Close any bookmark whose end tag lives outside this paragraph — treat as
+    # a point marker so the HTML stays well-formed and Tiptap still records it.
+    for bm_id in list(open_bms):
+        _close_bookmark(bm_id)
+
     return "".join(parts)
 
 

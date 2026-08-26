@@ -2603,17 +2603,289 @@ def apply_apa_style_prep(doc):
                     else:
                         matched_all = False
                 if matched_all:
-                    apply_style_to_text(para, block_raw, None, "cite_bib")
+                    apply_style_to_text(para, block_raw, GREEN, "cite_bib")
                     doc._dirty = True
-            
+
             elif cite_type in ("parenthetical", "narrative"):
                 auth = cite["author"]
                 year = cite["year"]
                 mr = match_citation(auth, year, bibliography)
                 rk = mr.key
                 if rk and mr.match_type in ("exact", "smart", "org_abbrev"):
-                    apply_style_to_text(para, raw_text, None, "cite_bib")
+                    apply_style_to_text(para, raw_text, GREEN, "cite_bib")
                     doc._dirty = True
+
+
+# ── Reference bookmark scheme (PPH-compatible) ────────────────────────────────
+# Insert `ref_N` on each bibliography entry paragraph, `bib_N` on the first
+# in-text citation to entry N, and `bib_N_M` (M >= 2) on subsequent citations.
+# Existing bookmarks with the same name (or an existing bib_/ref_ bookmark
+# whose range overlaps the citation) are left untouched — this is a gap-fill
+# after the pre-press service.
+
+
+def _ref_bm_next_id(doc) -> int:
+    """Doc-unique bookmark id. Seeded from max existing id + 1."""
+    if not hasattr(doc, "_ref_bm_next_id"):
+        used = set()
+        for bm in doc.element.body.iter(qn("w:bookmarkStart")):
+            raw = bm.get(qn("w:id"))
+            try:
+                used.add(int(raw))
+            except (TypeError, ValueError):
+                pass
+        doc._ref_bm_next_id = (max(used) + 1) if used else 1
+    val = doc._ref_bm_next_id
+    doc._ref_bm_next_id += 1
+    return val
+
+
+def _ref_bm_existing_names(doc) -> Set[str]:
+    return {
+        bm.get(qn("w:name"))
+        for bm in doc.element.body.iter(qn("w:bookmarkStart"))
+        if bm.get(qn("w:name"))
+    }
+
+
+def _ref_bm_make_pair(name: str, bm_id: int) -> Tuple["OxmlElement", "OxmlElement"]:
+    bs = OxmlElement("w:bookmarkStart")
+    bs.set(qn("w:id"), str(bm_id))
+    bs.set(qn("w:name"), name)
+    be = OxmlElement("w:bookmarkEnd")
+    be.set(qn("w:id"), str(bm_id))
+    return bs, be
+
+
+def _ref_bm_insert_at_para(para, name: str, bm_id: int) -> None:
+    """Anchor a bookmark on an entire paragraph (used for bibliography entries)."""
+    bs, be = _ref_bm_make_pair(name, bm_id)
+    p = para._p
+    pPr = p.find(qn("w:pPr"))
+    if pPr is not None:
+        pPr.addnext(bs)
+    else:
+        p.insert(0, bs)
+    p.append(be)
+
+
+def _ref_bm_split_run_at(run, offset_in_run: int) -> Optional["OxmlElement"]:
+    """Split a run's text at `offset_in_run`. The original run keeps [:offset];
+    a new sibling run (returned) holds [offset:] with cloned rPr."""
+    from copy import deepcopy
+    text = run.text or ""
+    if offset_in_run <= 0 or offset_in_run >= len(text):
+        return None
+    new_r = deepcopy(run._r)
+    for child in list(new_r):
+        if child.tag in (qn("w:t"), qn("w:tab"), qn("w:br"), qn("w:cr")):
+            new_r.remove(child)
+    new_t = OxmlElement("w:t")
+    new_t.set(qn("xml:space"), "preserve")
+    new_t.text = text[offset_in_run:]
+    new_r.append(new_t)
+    run.text = text[:offset_in_run]
+    run._r.addnext(new_r)
+    return new_r
+
+
+def _ref_bm_ensure_boundary(para, target_char: int) -> None:
+    offset = 0
+    for run in list(para.runs):
+        rlen = len(run.text or "")
+        run_end = offset + rlen
+        if target_char == offset or target_char == run_end:
+            return
+        if offset < target_char < run_end:
+            _ref_bm_split_run_at(run, target_char - offset)
+            return
+        offset = run_end
+
+
+def _ref_bm_existing_ranges_in_para(para) -> List[Tuple[int, int, str]]:
+    """Return [(char_start, char_end, name)] for `bib_*` / `ref_*` bookmarks
+    in this paragraph. Uses w:t char lengths so offsets match para.text."""
+    ranges: List[Tuple[int, int, str]] = []
+    active: Dict[str, Tuple[str, int]] = {}
+    offset = 0
+    for child in para._p.iter():
+        tag = child.tag
+        if tag == qn("w:t"):
+            offset += len(child.text or "")
+        elif tag == qn("w:bookmarkStart"):
+            name = child.get(qn("w:name")) or ""
+            if name.startswith("bib_") or name.startswith("ref_"):
+                bid = child.get(qn("w:id"))
+                if bid is not None:
+                    active[bid] = (name, offset)
+        elif tag == qn("w:bookmarkEnd"):
+            bid = child.get(qn("w:id"))
+            if bid in active:
+                name, s = active.pop(bid)
+                ranges.append((s, offset, name))
+    for name, s in active.values():
+        ranges.append((s, offset, name))
+    return ranges
+
+
+def _ref_bm_wrap_span(para, char_start: int, char_end: int,
+                     name: str, bm_id: int) -> bool:
+    if char_start >= char_end:
+        return False
+    _ref_bm_ensure_boundary(para, char_start)
+    _ref_bm_ensure_boundary(para, char_end)
+    start_r = None
+    end_r = None
+    offset = 0
+    for run in list(para.runs):
+        rlen = len(run.text or "")
+        run_end = offset + rlen
+        if start_r is None and offset == char_start:
+            start_r = run._r
+        if start_r is not None:
+            end_r = run._r
+            if run_end == char_end:
+                break
+        offset = run_end
+    if start_r is None or end_r is None:
+        return False
+    bs, be = _ref_bm_make_pair(name, bm_id)
+    start_r.addprevious(bs)
+    end_r.addnext(be)
+    return True
+
+
+def _ref_bm_pick_name(bib_index: int, counter: Dict[int, int],
+                     existing: Set[str]) -> str:
+    """Advance the per-ref counter until we land on an unused name."""
+    while True:
+        counter[bib_index] = counter.get(bib_index, 0) + 1
+        m = counter[bib_index]
+        name = f"bib_{bib_index}" if m == 1 else f"bib_{bib_index}_{m}"
+        if name not in existing:
+            return name
+
+
+def apply_reference_bookmarks(doc, bib_entries: List[Dict]) -> None:
+    """Insert PPH-style `ref_N` and `bib_N` / `bib_N_M` bookmarks.
+
+    - `ref_N` wraps the Nth bibliography paragraph (N is 1-based over
+      `bib_entries` in the order given).
+    - `bib_N` marks the first in-text citation matched to entry N; further
+      occurrences get `bib_N_2`, `bib_N_3`, ...
+    - Any bookmark whose name already exists is skipped. Any in-text citation
+      whose character range is already covered by an existing `bib_*`/`ref_*`
+      bookmark is skipped (so pre-existing PPH bookmarks stay authoritative).
+    """
+    if not bib_entries:
+        return
+
+    existing_names = _ref_bm_existing_names(doc)
+
+    # 1) ref_N on each bib entry paragraph.
+    bibliography_lookup: Dict[str, Dict] = {}
+    for idx, entry in enumerate(bib_entries, start=1):
+        parsed = entry.get("parsed") or {}
+        entry_info = {
+            "display": parsed.get("display"),
+            "year": parsed.get("year"),
+            "full_author": parsed.get("full_author"),
+            "_bib_index": idx,
+        }
+        k_display = f"{_norm(parsed.get('display') or '')}|{parsed.get('year') or ''}"
+        k_full = f"{_norm(parsed.get('full_author') or '')}|{parsed.get('year') or ''}"
+        bibliography_lookup[k_display] = entry_info
+        bibliography_lookup[k_full] = entry_info
+
+        name = f"ref_{idx}"
+        if name in existing_names:
+            continue
+        para = entry.get("para")
+        if para is None:
+            continue
+        _ref_bm_insert_at_para(para, name, _ref_bm_next_id(doc))
+        existing_names.add(name)
+
+    # 2) bib_N / bib_N_M on in-text citations. Skip anything that looks like
+    # a bibliography paragraph — the parenthetical year inside an entry
+    # ("Aksoy, Ş. G. (2024).") would otherwise be misread as a citation.
+    # Some docs carry a duplicated bibliography outside the <ref-open>/<ref-close>
+    # markers, so we also skip REF-U-styled paragraphs (that's the style used
+    # for reference-list entries in this pipeline).
+    bib_para_elements = {
+        entry["para"]._p for entry in bib_entries if entry.get("para") is not None
+    }
+    occurrence: Dict[int, int] = {}
+    block_scan_from: Dict[Tuple[int, int], int] = {}
+
+    for para in doc.paragraphs:
+        if para._p in bib_para_elements:
+            continue
+        style_name = (para.style.name or "") if para.style else ""
+        if "REF-U" in style_name:
+            continue
+        txt = para.text
+        if "<ref-open>" in txt.lower() or "<ref-close>" in txt.lower():
+            continue
+        if not txt.strip():
+            continue
+        citations = CitationExtractor.extract(txt)
+        if not citations:
+            continue
+
+        existing_ranges = _ref_bm_existing_ranges_in_para(para)
+        citations.sort(key=lambda c: c["start"])
+
+        for cite in citations:
+            author = cite.get("author") or ""
+            year = cite.get("year")
+            if not year:
+                years = cite.get("years") or []
+                if not years:
+                    continue
+                year = years[0]
+
+            mr = match_citation(author, year, bibliography_lookup)
+            if not mr.key or mr.match_type not in ("exact", "smart", "org_abbrev"):
+                continue
+            bib_index = bibliography_lookup[mr.key]["_bib_index"]
+
+            # Resolve the actual character span. Block members share the outer
+            # paren offsets, so we locate each segment inside the block.
+            if cite.get("block_size", 1) > 1:
+                inner = (cite.get("raw") or "").strip("()").strip()
+                key = (id(para), cite["start"])
+                scan_from = block_scan_from.get(key, cite["start"])
+                pos = para.text.find(inner, scan_from, cite["end"]) if inner else -1
+                if pos < 0:
+                    seg_start, seg_end = cite["start"], cite["end"]
+                else:
+                    seg_start = pos
+                    seg_end = pos + len(inner)
+                    block_scan_from[key] = seg_end
+            else:
+                seg_start, seg_end = cite["start"], cite["end"]
+
+            # Skip if any existing bib_/ref_ bookmark already covers this span.
+            # Use inclusive comparison so PPH's zero-length "point" bookmarks
+            # (start == end) landing at either edge of the citation still count.
+            occurrence[bib_index] = occurrence.get(bib_index, 0) + 1
+            if any(rs <= seg_end and re_ >= seg_start
+                   for rs, re_, _ in existing_ranges):
+                continue
+            # We consumed a counter slot above for doc-order accounting; now
+            # advance again until we find an unused name.
+            occurrence[bib_index] -= 1
+            name = _ref_bm_pick_name(bib_index, occurrence, existing_names)
+
+            ok = _ref_bm_wrap_span(para, seg_start, seg_end,
+                                   name, _ref_bm_next_id(doc))
+            if ok:
+                existing_names.add(name)
+                existing_ranges.append((seg_start, seg_end, name))
+            else:
+                # Give back the counter slot if the wrap failed.
+                occurrence[bib_index] -= 1
 
 
 def process_document_apa(file_path):
@@ -2787,7 +3059,7 @@ def process_document_apa(file_path):
                     mapping[block_raw] = sorted_block_text
                     
                 # Style runs
-                apply_style_to_text(para, sorted_block_text, None, "cite_bib")
+                apply_style_to_text(para, sorted_block_text, GREEN, "cite_bib")
 
             elif cite_type in ("parenthetical", "narrative"):
                 auth = cite["author"]
@@ -2801,10 +3073,10 @@ def process_document_apa(file_path):
                         new_raw_text = raw_text.replace(year, new_y)
                         replace_text_in_para(para, raw_text, new_raw_text)
                         mapping[raw_text] = new_raw_text
-                        
-                        apply_style_to_text(para, new_raw_text, None, "cite_bib")
+
+                        apply_style_to_text(para, new_raw_text, GREEN, "cite_bib")
                     else:
-                        apply_style_to_text(para, raw_text, None, "cite_bib")
+                        apply_style_to_text(para, raw_text, GREEN, "cite_bib")
 
     # Reorder bibliography paragraphs physically
     if bib_entries:
@@ -2889,6 +3161,11 @@ def process_document_apa(file_path):
             new_year = entry["new_year"]
             if old_year != new_year:
                 replace_text_in_para(entry["para"], f"({old_year})", f"({new_year})")
+
+    # Apply PPH-style reference bookmarks (ref_N on bib entries; bib_N /
+    # bib_N_M on in-text citations). Runs on the finalized bib_entries and
+    # skips any name that already exists — safe to run after PPH.
+    apply_reference_bookmarks(doc, bib_entries)
 
     # Determine status message
     if merged_count > 0:
