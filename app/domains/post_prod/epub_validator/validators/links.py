@@ -286,7 +286,7 @@ def validate_page_citation_links(file_details, rule_config=None):
             
             if (is_table or is_figure) and parent and parent.name == "p" and m.start() < 10:
                 next_tag = parent.find_next_sibling()
-                valid_targets = ["table"]
+                valid_targets = ["table", "figure"]
                 
                 if next_tag and next_tag.name in valid_targets:
                     continue
