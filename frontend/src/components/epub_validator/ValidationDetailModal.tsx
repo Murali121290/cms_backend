@@ -13,6 +13,10 @@ import {
   Info,
   Eye,
   EyeOff,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Monitor,
+  PanelRightClose,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/utils/epubValidatorUtils';
@@ -290,6 +294,69 @@ function resolveRelative(filePath: string, href: string): string {
   }
 }
 
+const getInjectedHtml = (html: string, baseUrl: string) => {
+  if (!html) return '';
+  
+  // Fix XHTML self-closing tags that break HTML parsing
+  const fixedHtml = html.replace(/<(a|span|div|p|strong|em|h[1-6])\b([^>]*?)\/>/gi, '<$1$2></$1>');
+
+  const baseTag = `<base href="${baseUrl}" />`;
+  const style = `<style>a { pointer-events: none !important; cursor: text !important; }</style>`;
+  const script = `
+    <script>
+      document.addEventListener('click', function(e) {
+        let target = e.target;
+        
+        // Find nearest block or anchor
+        const blocks = ['P', 'DIV', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'TD', 'TH', 'FIGCAPTION', 'SECTION', 'A'];
+        while (target && target.tagName !== 'A' && !blocks.includes(target.tagName)) {
+          if (target.parentElement && target.parentElement.tagName !== 'BODY') {
+            target = target.parentElement;
+          } else {
+            break;
+          }
+        }
+        
+        if (target && target.tagName === 'A') {
+          e.preventDefault();
+        }
+
+        const text = (target || e.target).textContent.trim().replace(/\\s+/g, ' ').substring(0, 100);
+        if (text && text.length > 3) {
+           window.parent.postMessage({ type: 'sync-editor', text: text }, '*');
+        } else {
+           const tag = (target || e.target).outerHTML.split('>')[0] + '>';
+           window.parent.postMessage({ type: 'sync-editor', text: tag }, '*');
+        }
+      });
+      
+      window.addEventListener('message', function(e) {
+        if (e.data && e.data.type === 'sync-preview' && e.data.text) {
+          const textToFind = e.data.text;
+          const blocks = document.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, td, th, figcaption, div');
+          for (let i = 0; i < blocks.length; i++) {
+            let element = blocks[i];
+            const textContent = element.textContent || '';
+            if (textContent.includes(textToFind) || textToFind.includes(textContent.trim().substring(0, 30))) {
+              element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              const oldBg = element.style.backgroundColor;
+              element.style.transition = 'background-color 0.3s';
+              element.style.backgroundColor = '#fef08a';
+              setTimeout(() => { element.style.backgroundColor = oldBg; }, 1000);
+              break;
+            }
+          }
+        }
+      });
+    </script>
+  `;
+
+  if (fixedHtml.toLowerCase().includes('<head>')) {
+    return fixedHtml.replace(/<head>/i, `<head>\n${baseTag}\n${style}\n${script}\n`);
+  }
+  return `${baseTag}\n${style}\n${script}\n${fixedHtml}`;
+};
+
 // ─── Modal ───────────────────────────────────────────────────────────────────
 
 export function ValidationDetailModal({ file, folderName, entries, summaryData, isRevalidating = false, validationProgress, initialTab = 'result', allowedTabs, onClose, onRevalidate, onRenameSuccess }: Props) {
@@ -304,6 +371,8 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
   const [activeTab, setActiveTab]       = useState<Tab>(initialTab);
   const [showAnalysisSidebar, setShowAnalysisSidebar] = useState(false);
   const [showFilenamesInAnalysis, setShowFilenamesInAnalysis] = useState(false);
+  const [showValidationFindings, setShowValidationFindings] = useState(true);
+  const [showHtmlPreview, setShowHtmlPreview] = useState(false);
 
   useEffect(() => {
     if (!visibleTabs.includes(activeTab)) {
@@ -312,6 +381,7 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
   }, [visibleTabs, activeTab]);
   const [selectedRuleId, setSelectedRule] = useState<string | null>(null);
   const sourceEditorRef = useRef<{ scrollToLine: (lineNum: number) => void } | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   // ── Rename state ─────────────────────────────────────────────────────────────
   const [isRenaming, setIsRenaming] = useState(false);
@@ -392,6 +462,45 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
     // Fallback to the file itself
     return file.path ?? file.relative_path ?? file.file_name ?? '';
   }, [entries, file]);
+
+  const baseUrl = useMemo(() => {
+    const parts = filePath.replace(/\\/g, '/').split('/');
+    parts.pop(); // remove file name
+    const directoryPath = parts.map(encodeURIComponent).join('/');
+    return `/api/v2/post-prod/epub-validator/file-data/${encodeURIComponent(folderName)}/${directoryPath ? directoryPath + '/' : ''}`;
+  }, [filePath, folderName]);
+
+  useEffect(() => {
+    const handleMessage = (e: MessageEvent) => {
+      if (e.data && e.data.type === 'sync-editor' && e.data.text) {
+        const textToFind = e.data.text.trim().replace(/\s+/g, ' ');
+        if (!textToFind) return;
+
+        const lines = (displayContent || '').split('\n');
+        
+        let index = lines.findIndex(line => {
+           const noTags = line.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+           if (!noTags) return false;
+           // Basic decoding for entities
+           const textArea = document.createElement('textarea');
+           textArea.innerHTML = noTags;
+           const decodedLine = textArea.value;
+           return decodedLine.includes(textToFind) || textToFind.includes(decodedLine);
+        });
+
+        // Fallback: search raw HTML string if not found
+        if (index === -1) {
+           index = lines.findIndex(line => line.includes(textToFind));
+        }
+
+        if (index !== -1 && sourceEditorRef.current) {
+          sourceEditorRef.current.scrollToLine(index + 1);
+        }
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [displayContent]);
 
   const imageUrl = useMemo(() => {
     if (!isImageFile || !folderName || !filePath) return null;
@@ -846,12 +955,22 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                     transition={{ duration: 0.12 }}
                     className="h-full flex overflow-hidden font-sans"
                   >
-                    {/* Left Column: Validation Findings List for ALL files */}
-                    <div className="w-5/12 h-full border-r border-border flex flex-col min-w-[320px] max-w-[480px]">
-                      <div className="px-3.5 py-2.5 border-b border-border bg-muted/30 flex items-center justify-between shrink-0 font-sans">
-                        <span className="text-xs font-bold text-foreground font-serif uppercase tracking-wider">
-                          Validation Findings ({displayedIssues.length})
-                        </span>
+                      {/* Left Column: Validation Findings List for ALL files */}
+                      {showValidationFindings && (
+                        <div className="w-5/12 h-full border-r border-border flex flex-col min-w-[320px] max-w-[480px]">
+                          <div className="px-3.5 py-2.5 border-b border-border bg-muted/30 flex items-center justify-between shrink-0 font-sans">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold text-foreground font-serif uppercase tracking-wider">
+                                Validation Findings ({displayedIssues.length})
+                              </span>
+                              <button 
+                                onClick={() => setShowValidationFindings(false)}
+                                className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-sm hover:bg-muted"
+                                title="Hide Findings"
+                              >
+                                <PanelLeftClose className="w-4 h-4" />
+                              </button>
+                            </div>
                         <div className="flex items-center gap-1.5">
                           <button
                             onClick={() => toggleIssueFilter('error')}
@@ -923,14 +1042,41 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                           ))
                         )}
                       </div>
-                    </div>
+                      </div>
+                    )}
 
                     {/* Right Column: Image Preview if isImageFile ELSE Source Code Editor */}
                     <div className="flex-1 h-full flex flex-col min-w-0 bg-background">
                       <div className="px-4 py-2 border-b border-border bg-muted/20 flex items-center justify-between shrink-0 font-mono text-xs">
-                        <span className="font-semibold text-foreground truncate">{filePath}</span>
+                        <div className="flex items-center gap-2 overflow-hidden">
+                          {!showValidationFindings && (
+                            <button
+                              onClick={() => setShowValidationFindings(true)}
+                              className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-sm hover:bg-muted shrink-0"
+                              title="Show Validation Findings"
+                            >
+                              <PanelLeftOpen className="w-4 h-4" />
+                            </button>
+                          )}
+                          <span className="font-semibold text-foreground truncate">{filePath}</span>
+                        </div>
                         <div className="flex items-center gap-3">
                           {!isImageFile && isDirty && <span className="text-[10px] font-bold text-amber-500 uppercase font-sans">Unsaved Changes</span>}
+                          {!isImageFile && (
+                            <button
+                              onClick={() => setShowHtmlPreview(!showHtmlPreview)}
+                              className={cn(
+                                "flex items-center gap-1.5 px-2 py-1 rounded transition-colors font-sans font-semibold border border-transparent",
+                                showHtmlPreview 
+                                  ? "bg-primary/10 text-primary border-primary/20" 
+                                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                              )}
+                              title="Toggle HTML Preview"
+                            >
+                              <Monitor className="w-3.5 h-3.5" />
+                              <span className="hidden sm:inline">Preview</span>
+                            </button>
+                          )}
                           {!isImageFile && (
                             <button
                               onClick={() => setShowAnalysisSidebar(!showAnalysisSidebar)}
@@ -991,6 +1137,19 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                               onChange={(val) => setEditedContent(val)}
                               className="h-full"
                               onSave={handleSave}
+                              onLineClick={(lineNum, text) => {
+                                if (!showHtmlPreview || !iframeRef.current?.contentWindow) return;
+
+                                // Extract readable text without HTML tags and decode entities for the preview to find
+                                const noTags = text.replace(/<[^>]+>/g, '').replace(/\\s+/g, ' ').trim();
+                                const textArea = document.createElement('textarea');
+                                textArea.innerHTML = noTags;
+                                const strippedText = textArea.value.substring(0, 50);
+
+                                if (strippedText && strippedText.length > 3) {
+                                  iframeRef.current.contentWindow.postMessage({ type: 'sync-preview', text: strippedText }, '*');
+                                }
+                              }}
                               errors={displayedIssues.map((issue) => ({
                                 line: issue.line_number ?? 0,
                                 message: issue.message || 'Unknown error',
@@ -999,6 +1158,41 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                             />
                           )}
                         </div>
+
+                        {/* HTML Preview Sidebar */}
+                        <AnimatePresence>
+                          {showHtmlPreview && !isImageFile && (
+                            <motion.div
+                              initial={{ width: 0, opacity: 0 }}
+                              animate={{ width: "50%", opacity: 1 }}
+                              exit={{ width: 0, opacity: 0 }}
+                              transition={{ duration: 0.2, ease: "easeOut" }}
+                              className="border-l border-border flex flex-col bg-background overflow-hidden shrink-0"
+                            >
+                              <div className="px-3.5 py-2.5 border-b border-border bg-muted/30 flex items-center justify-between shrink-0 font-sans">
+                                <span className="text-xs font-bold text-foreground font-serif uppercase tracking-wider">
+                                  HTML Preview
+                                </span>
+                                <button 
+                                  onClick={() => setShowHtmlPreview(false)}
+                                  className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-sm hover:bg-muted"
+                                  title="Close Preview"
+                                >
+                                  <PanelRightClose className="w-4 h-4" />
+                                </button>
+                              </div>
+                              <div className="flex-1 bg-white dark:bg-zinc-100 overflow-hidden relative">
+                                <iframe 
+                                  ref={iframeRef}
+                                  srcDoc={getInjectedHtml(displayContent, baseUrl)} 
+                                  className="w-full h-full border-none absolute inset-0"
+                                  sandbox="allow-same-origin allow-scripts"
+                                  title="HTML Preview"
+                                />
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
 
                         {/* Analysis Report Sidebar */}
                         <AnimatePresence>
