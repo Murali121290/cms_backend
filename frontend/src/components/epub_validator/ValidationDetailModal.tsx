@@ -10,6 +10,14 @@ import {
   Save,
   Image as ImageIcon,
   Edit2,
+  Info,
+  Eye,
+  EyeOff,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Monitor,
+  PanelRightClose,
+  ArrowUpDown,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/utils/epubValidatorUtils';
@@ -21,6 +29,7 @@ interface Props {
   file: XHTMLFile;
   folderName: string;
   entries: ValidationFileEntry[];
+  summaryData?: any;
   isRevalidating?: boolean;
   validationProgress?: ValidationProgress;
   initialTab?: Tab;
@@ -30,7 +39,7 @@ interface Props {
   onRenameSuccess?: (newName: string) => void;
 }
 
-export type Tab = 'result' | 'preview' | 'pdf';
+export type Tab = 'result' | 'preview' | 'pdf' | 'analysis';
 
 type DisplayIssue = ValidationIssue & { _ruleName: string };
 
@@ -209,7 +218,7 @@ function IssueRow({ issue, onClick }: { issue: DisplayIssue; onClick?: () => voi
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-1.5 min-w-0 flex-1">
-              {issue.rule_id && (
+              {typeof issue.rule_id === 'string' && issue.rule_id && (
                 <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 shrink-0">
                   {issue.rule_id}
                 </span>
@@ -286,9 +295,72 @@ function resolveRelative(filePath: string, href: string): string {
   }
 }
 
+const getInjectedHtml = (html: string, baseUrl: string) => {
+  if (!html) return '';
+  
+  // Fix XHTML self-closing tags that break HTML parsing
+  const fixedHtml = html.replace(/<(a|span|div|p|strong|em|h[1-6])\b([^>]*?)\/>/gi, '<$1$2></$1>');
+
+  const baseTag = `<base href="${baseUrl}" />`;
+  const style = `<style>a { pointer-events: none !important; cursor: text !important; }</style>`;
+  const script = `
+    <script>
+      document.addEventListener('click', function(e) {
+        let target = e.target;
+        
+        // Find nearest block or anchor
+        const blocks = ['P', 'DIV', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'TD', 'TH', 'FIGCAPTION', 'SECTION', 'A'];
+        while (target && target.tagName !== 'A' && !blocks.includes(target.tagName)) {
+          if (target.parentElement && target.parentElement.tagName !== 'BODY') {
+            target = target.parentElement;
+          } else {
+            break;
+          }
+        }
+        
+        if (target && target.tagName === 'A') {
+          e.preventDefault();
+        }
+
+        const text = (target || e.target).textContent.trim().replace(/\\s+/g, ' ').substring(0, 100);
+        if (text && text.length > 3) {
+           window.parent.postMessage({ type: 'sync-editor', text: text }, '*');
+        } else {
+           const tag = (target || e.target).outerHTML.split('>')[0] + '>';
+           window.parent.postMessage({ type: 'sync-editor', text: tag }, '*');
+        }
+      });
+      
+      window.addEventListener('message', function(e) {
+        if (e.data && e.data.type === 'sync-preview' && e.data.text) {
+          const textToFind = e.data.text;
+          const blocks = document.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, td, th, figcaption, div');
+          for (let i = 0; i < blocks.length; i++) {
+            let element = blocks[i];
+            const textContent = element.textContent || '';
+            if (textContent.includes(textToFind) || textToFind.includes(textContent.trim().substring(0, 30))) {
+              element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              const oldBg = element.style.backgroundColor;
+              element.style.transition = 'background-color 0.3s';
+              element.style.backgroundColor = '#fef08a';
+              setTimeout(() => { element.style.backgroundColor = oldBg; }, 1000);
+              break;
+            }
+          }
+        }
+      });
+    </script>
+  `;
+
+  if (fixedHtml.toLowerCase().includes('<head>')) {
+    return fixedHtml.replace(/<head>/i, `<head>\n${baseTag}\n${style}\n${script}\n`);
+  }
+  return `${baseTag}\n${style}\n${script}\n${fixedHtml}`;
+};
+
 // ─── Modal ───────────────────────────────────────────────────────────────────
 
-export function ValidationDetailModal({ file, folderName, entries, isRevalidating = false, validationProgress, initialTab = 'result', allowedTabs, onClose, onRevalidate, onRenameSuccess }: Props) {
+export function ValidationDetailModal({ file, folderName, entries, summaryData, isRevalidating = false, validationProgress, initialTab = 'result', allowedTabs, onClose, onRevalidate, onRenameSuccess }: Props) {
   const isImageFile = useMemo(() => {
     const name = (file.file_name || '').toLowerCase();
     return /\.(png|jpe?g|gif|svg|webp|bmp|ico|tif?f)$/i.test(name);
@@ -298,6 +370,11 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
     ? ['result']
     : (allowedTabs ?? ['result', 'preview']);
   const [activeTab, setActiveTab]       = useState<Tab>(initialTab);
+  const [showAnalysisSidebar, setShowAnalysisSidebar] = useState(false);
+  const [showFilenamesInAnalysis, setShowFilenamesInAnalysis] = useState(false);
+  const [showValidationFindings, setShowValidationFindings] = useState(true);
+  const [showHtmlPreview, setShowHtmlPreview] = useState(false);
+  const [sortOrder, setSortOrder] = useState<'rule' | 'line'>('rule');
 
   useEffect(() => {
     if (!visibleTabs.includes(activeTab)) {
@@ -306,6 +383,7 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
   }, [visibleTabs, activeTab]);
   const [selectedRuleId, setSelectedRule] = useState<string | null>(null);
   const sourceEditorRef = useRef<{ scrollToLine: (lineNum: number) => void } | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   // ── Rename state ─────────────────────────────────────────────────────────────
   const [isRenaming, setIsRenaming] = useState(false);
@@ -386,6 +464,45 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
     // Fallback to the file itself
     return file.path ?? file.relative_path ?? file.file_name ?? '';
   }, [entries, file]);
+
+  const baseUrl = useMemo(() => {
+    const parts = filePath.replace(/\\/g, '/').split('/');
+    parts.pop(); // remove file name
+    const directoryPath = parts.map(encodeURIComponent).join('/');
+    return `/api/v2/post-prod/epub-validator/file-data/${encodeURIComponent(folderName)}/${directoryPath ? directoryPath + '/' : ''}`;
+  }, [filePath, folderName]);
+
+  useEffect(() => {
+    const handleMessage = (e: MessageEvent) => {
+      if (e.data && e.data.type === 'sync-editor' && e.data.text) {
+        const textToFind = e.data.text.trim().replace(/\s+/g, ' ');
+        if (!textToFind) return;
+
+        const lines = (displayContent || '').split('\n');
+        
+        let index = lines.findIndex(line => {
+           const noTags = line.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+           if (!noTags) return false;
+           // Basic decoding for entities
+           const textArea = document.createElement('textarea');
+           textArea.innerHTML = noTags;
+           const decodedLine = textArea.value;
+           return decodedLine.includes(textToFind) || textToFind.includes(decodedLine);
+        });
+
+        // Fallback: search raw HTML string if not found
+        if (index === -1) {
+           index = lines.findIndex(line => line.includes(textToFind));
+        }
+
+        if (index !== -1 && sourceEditorRef.current) {
+          sourceEditorRef.current.scrollToLine(index + 1);
+        }
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [displayContent]);
 
   const imageUrl = useMemo(() => {
     if (!isImageFile || !folderName || !filePath) return null;
@@ -522,8 +639,17 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
     if (issueFilter === 'error')   issues = issues.filter(i => (i.category ?? '').toLowerCase() === 'error');
     if (issueFilter === 'warning') issues = issues.filter(i => (i.category ?? '').toLowerCase() !== 'error');
     if (ruleNameFilter)            issues = issues.filter(i => i.rule_name === ruleNameFilter);
+    
+    if (sortOrder === 'line') {
+      issues = [...issues].sort((a, b) => {
+        const lineA = a.line_number ?? 0;
+        const lineB = b.line_number ?? 0;
+        return lineA - lineB;
+      });
+    }
+    
     return issues;
-  }, [allIssues, issueFilter, ruleNameFilter]);
+  }, [allIssues, issueFilter, ruleNameFilter, sortOrder]);
 
   const errorCount   = useMemo(() => allIssues.filter(i => (i.category ?? '').toLowerCase() === 'error').length,   [allIssues]);
   const warningCount = useMemo(() => allIssues.filter(i => (i.category ?? '').toLowerCase() !== 'error').length, [allIssues]);
@@ -840,13 +966,36 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
                     transition={{ duration: 0.12 }}
                     className="h-full flex overflow-hidden font-sans"
                   >
-                    {/* Left Column: Validation Findings List for ALL files */}
-                    <div className="w-5/12 h-full border-r border-border flex flex-col min-w-[320px] max-w-[480px]">
-                      <div className="px-3.5 py-2.5 border-b border-border bg-muted/30 flex items-center justify-between shrink-0 font-sans">
-                        <span className="text-xs font-bold text-foreground font-serif uppercase tracking-wider">
-                          Validation Findings ({displayedIssues.length})
-                        </span>
+                      {/* Left Column: Validation Findings List for ALL files */}
+                      {showValidationFindings && (
+                        <div className="w-5/12 h-full border-r border-border flex flex-col min-w-[320px] max-w-[480px]">
+                          <div className="px-3.5 py-2.5 border-b border-border bg-muted/30 flex items-center justify-between shrink-0 font-sans">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold text-foreground font-serif uppercase tracking-wider">
+                                Validation Findings ({displayedIssues.length})
+                              </span>
+                              <button 
+                                onClick={() => setShowValidationFindings(false)}
+                                className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-sm hover:bg-muted"
+                                title="Hide Findings"
+                              >
+                                <PanelLeftClose className="w-4 h-4" />
+                              </button>
+                            </div>
                         <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => setSortOrder(prev => prev === 'rule' ? 'line' : 'rule')}
+                            className={cn(
+                              'px-2 py-0.5 rounded text-[10px] font-bold border transition-all flex items-center gap-1',
+                              sortOrder === 'line'
+                                ? 'bg-primary text-primary-foreground border-primary'
+                                : 'bg-muted text-muted-foreground border-border hover:bg-muted/80'
+                            )}
+                            title="Toggle Sort Order"
+                          >
+                            <ArrowUpDown className="w-3 h-3" />
+                            {sortOrder === 'rule' ? 'Sort: Rule' : 'Sort: Line'}
+                          </button>
                           <button
                             onClick={() => toggleIssueFilter('error')}
                             className={cn(
@@ -917,63 +1066,261 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
                           ))
                         )}
                       </div>
-                    </div>
+                      </div>
+                    )}
 
                     {/* Right Column: Image Preview if isImageFile ELSE Source Code Editor */}
                     <div className="flex-1 h-full flex flex-col min-w-0 bg-background">
                       <div className="px-4 py-2 border-b border-border bg-muted/20 flex items-center justify-between shrink-0 font-mono text-xs">
-                        <span className="font-semibold text-foreground truncate">{filePath}</span>
-                        {!isImageFile && isDirty && <span className="text-[10px] font-bold text-amber-500 uppercase font-sans">Unsaved Changes</span>}
+                        <div className="flex items-center gap-2 overflow-hidden">
+                          {!showValidationFindings && (
+                            <button
+                              onClick={() => setShowValidationFindings(true)}
+                              className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-sm hover:bg-muted shrink-0"
+                              title="Show Validation Findings"
+                            >
+                              <PanelLeftOpen className="w-4 h-4" />
+                            </button>
+                          )}
+                          <span className="font-semibold text-foreground truncate">{filePath}</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          {!isImageFile && isDirty && <span className="text-[10px] font-bold text-amber-500 uppercase font-sans">Unsaved Changes</span>}
+                          {!isImageFile && (
+                            <button
+                              onClick={() => setShowHtmlPreview(!showHtmlPreview)}
+                              className={cn(
+                                "flex items-center gap-1.5 px-2 py-1 rounded transition-colors font-sans font-semibold border border-transparent",
+                                showHtmlPreview 
+                                  ? "bg-primary/10 text-primary border-primary/20" 
+                                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                              )}
+                              title="Toggle HTML Preview"
+                            >
+                              <Monitor className="w-3.5 h-3.5" />
+                              <span className="hidden sm:inline">Preview</span>
+                            </button>
+                          )}
+                          {!isImageFile && (
+                            <button
+                              onClick={() => setShowAnalysisSidebar(!showAnalysisSidebar)}
+                              className={cn(
+                                "flex items-center gap-1.5 px-2 py-1 rounded transition-colors font-sans font-semibold border border-transparent",
+                                showAnalysisSidebar 
+                                  ? "bg-primary/10 text-primary border-primary/20" 
+                                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                              )}
+                              title="Toggle Analysis Report"
+                            >
+                              <Info className="w-3.5 h-3.5" />
+                              <span className="hidden sm:inline">Analysis</span>
+                            </button>
+                          )}
+                        </div>
                       </div>
 
-                      <div className="flex-1 overflow-hidden relative">
-                        {isImageFile ? (
-                          <div className="h-full flex flex-col items-center justify-center p-6 bg-muted/10 overflow-auto">
-                            {imageUrl ? (
-                              <div className="flex flex-col items-center justify-center gap-3.5 max-w-full">
-                                <div className="p-3 rounded-2xl bg-card border border-border shadow-sm max-w-full overflow-hidden flex items-center justify-center bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] dark:bg-[radial-gradient(#1f2937_1px,transparent_1px)] [background-size:16px_16px]">
-                                  <img
-                                    src={imageUrl}
-                                    alt={file.file_name}
-                                    className="max-h-[60vh] max-w-full object-contain rounded-lg shadow-xs"
-                                    onError={(e) => {
-                                      (e.target as HTMLElement).style.display = 'none';
-                                    }}
-                                  />
+                      <div className="flex-1 overflow-hidden relative flex flex-row min-h-0">
+                        <div className="flex-1 overflow-hidden relative">
+                          {isImageFile ? (
+                            <div className="h-full flex flex-col items-center justify-center p-6 bg-muted/10 overflow-auto">
+                              {imageUrl ? (
+                                <div className="flex flex-col items-center justify-center gap-3.5 max-w-full">
+                                  <div className="p-3 rounded-2xl bg-card border border-border shadow-sm max-w-full overflow-hidden flex items-center justify-center bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] dark:bg-[radial-gradient(#1f2937_1px,transparent_1px)] [background-size:16px_16px]">
+                                    <img
+                                      src={imageUrl}
+                                      alt={file.file_name}
+                                      className="max-h-[60vh] max-w-full object-contain rounded-lg shadow-xs"
+                                      onError={(e) => {
+                                        (e.target as HTMLElement).style.display = 'none';
+                                      }}
+                                    />
+                                  </div>
+                                  <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground bg-card px-3 py-1.5 rounded-full border border-border/60 shadow-2xs">
+                                    <ImageIcon className="w-3.5 h-3.5 text-emerald-500" />
+                                    <span className="font-semibold text-foreground">{file.file_name}</span>
+                                  </div>
                                 </div>
-                                <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground bg-card px-3 py-1.5 rounded-full border border-border/60 shadow-2xs">
-                                  <ImageIcon className="w-3.5 h-3.5 text-emerald-500" />
-                                  <span className="font-semibold text-foreground">{file.file_name}</span>
+                              ) : (
+                                <div className="flex flex-col items-center justify-center gap-2 text-muted-foreground">
+                                  <ImageIcon className="w-10 h-10 text-muted-foreground/40" />
+                                  <p className="text-xs font-semibold">Image preview unavailable</p>
+                                </div>
+                              )}
+                            </div>
+                          ) : sourceLoading ? (
+                            <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground text-xs font-mono">
+                              <RotateCw className="w-5 h-5 animate-spin text-primary" />
+                              Loading source code…
+                            </div>
+                          ) : sourceError ? (
+                            <div className="p-6 text-red-500 text-xs font-mono">{sourceError}</div>
+                          ) : (
+                            <SourceEditor
+                              ref={sourceEditorRef}
+                              value={displayContent}
+                              onChange={(val) => setEditedContent(val)}
+                              className="h-full"
+                              onSave={handleSave}
+                              onLineClick={(lineNum, text) => {
+                                if (!showHtmlPreview || !iframeRef.current?.contentWindow) return;
+
+                                // Extract readable text without HTML tags and decode entities for the preview to find
+                                const noTags = text.replace(/<[^>]+>/g, '').replace(/\\s+/g, ' ').trim();
+                                const textArea = document.createElement('textarea');
+                                textArea.innerHTML = noTags;
+                                const strippedText = textArea.value.substring(0, 50);
+
+                                if (strippedText && strippedText.length > 3) {
+                                  iframeRef.current.contentWindow.postMessage({ type: 'sync-preview', text: strippedText }, '*');
+                                }
+                              }}
+                              errors={displayedIssues.map((issue) => ({
+                                line: issue.line_number ?? 0,
+                                message: issue.message || 'Unknown error',
+                                extract: issue.extract,
+                              }))}
+                            />
+                          )}
+                        </div>
+
+                        {/* HTML Preview Sidebar */}
+                        <AnimatePresence>
+                          {showHtmlPreview && !isImageFile && (
+                            <motion.div
+                              initial={{ width: 0, opacity: 0 }}
+                              animate={{ width: "50%", opacity: 1 }}
+                              exit={{ width: 0, opacity: 0 }}
+                              transition={{ duration: 0.2, ease: "easeOut" }}
+                              className="border-l border-border flex flex-col bg-background overflow-hidden shrink-0"
+                            >
+                              <div className="px-3.5 py-2.5 border-b border-border bg-muted/30 flex items-center justify-between shrink-0 font-sans">
+                                <span className="text-xs font-bold text-foreground font-serif uppercase tracking-wider">
+                                  HTML Preview
+                                </span>
+                                <button 
+                                  onClick={() => setShowHtmlPreview(false)}
+                                  className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-sm hover:bg-muted"
+                                  title="Close Preview"
+                                >
+                                  <PanelRightClose className="w-4 h-4" />
+                                </button>
+                              </div>
+                              <div className="flex-1 bg-white dark:bg-zinc-100 overflow-hidden relative">
+                                <iframe 
+                                  ref={iframeRef}
+                                  srcDoc={getInjectedHtml(displayContent, baseUrl)} 
+                                  className="w-full h-full border-none absolute inset-0"
+                                  sandbox="allow-same-origin allow-scripts"
+                                  title="HTML Preview"
+                                />
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+
+                        {/* Analysis Report Sidebar */}
+                        <AnimatePresence>
+                          {!isImageFile && showAnalysisSidebar && (
+                            <motion.div
+                              initial={{ width: 0, opacity: 0 }}
+                              animate={{ width: 320, opacity: 1 }}
+                              exit={{ width: 0, opacity: 0 }}
+                              transition={{ duration: 0.2, ease: "easeOut" }}
+                              className="border-l border-border bg-muted/10 overflow-y-auto flex-shrink-0 flex flex-col font-sans"
+                            >
+                              <div className="p-4 w-[320px]">
+                                <div className="space-y-5">
+                                  <div className="bg-card p-3 rounded-lg border border-border shadow-xs">
+                                    <div className="flex justify-between items-center mb-2 border-b border-border pb-1.5">
+                                      <h3 className="text-xs font-bold text-foreground font-serif uppercase tracking-widest">
+                                        Chapters
+                                      </h3>
+                                      <button 
+                                        onClick={() => setShowFilenamesInAnalysis(!showFilenamesInAnalysis)} 
+                                        className="text-muted-foreground hover:text-foreground transition-colors p-0.5 rounded-sm hover:bg-muted"
+                                        title={showFilenamesInAnalysis ? "Hide filenames" : "Show filenames"}
+                                      >
+                                        {showFilenamesInAnalysis ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                      </button>
+                                    </div>
+                                    {(!summaryData?.chapter_labels || summaryData.chapter_labels.length === 0) ? (
+                                      <p className="text-[10px] text-muted-foreground italic">No chapters found.</p>
+                                    ) : (
+                                      <ul className="flex flex-col gap-1.5">
+                                        {summaryData.chapter_labels.map((label: string, i: number) => {
+                                          const displayLabel = showFilenamesInAnalysis ? label : label.replace(/^\[.*?\]\s*/, '');
+                                          return (
+                                            <li key={i} className="px-2.5 py-1.5 bg-primary/10 text-primary-700 dark:text-primary-300 rounded-md text-[10.5px] font-medium leading-relaxed">
+                                              <span className="break-words">{displayLabel}</span>
+                                            </li>
+                                          );
+                                        })}
+                                      </ul>
+                                    )}
+                                  </div>
+
+                                  <div className="bg-card p-3 rounded-lg border border-border shadow-xs">
+                                    <div className="flex justify-between items-center mb-2 border-b border-border pb-1.5">
+                                      <h3 className="text-xs font-bold text-foreground font-serif uppercase tracking-widest">
+                                        Figures
+                                      </h3>
+                                      <button 
+                                        onClick={() => setShowFilenamesInAnalysis(!showFilenamesInAnalysis)} 
+                                        className="text-muted-foreground hover:text-foreground transition-colors p-0.5 rounded-sm hover:bg-muted"
+                                        title={showFilenamesInAnalysis ? "Hide filenames" : "Show filenames"}
+                                      >
+                                        {showFilenamesInAnalysis ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                      </button>
+                                    </div>
+                                    {(!summaryData?.figure_labels || summaryData.figure_labels.length === 0) ? (
+                                      <p className="text-[10px] text-muted-foreground italic">No figures found.</p>
+                                    ) : (
+                                      <ul className="flex flex-col gap-1.5">
+                                        {summaryData.figure_labels.map((label: string, i: number) => {
+                                          const displayLabel = showFilenamesInAnalysis ? label : label.replace(/^\[.*?\]\s*/, '');
+                                          return (
+                                            <li key={i} className="px-2.5 py-1.5 bg-primary/10 text-primary-700 dark:text-primary-300 rounded-md text-[10.5px] font-medium leading-relaxed">
+                                              <span className="break-words">{displayLabel}</span>
+                                            </li>
+                                          );
+                                        })}
+                                      </ul>
+                                    )}
+                                  </div>
+
+                                  <div className="bg-card p-3 rounded-lg border border-border shadow-xs">
+                                    <div className="flex justify-between items-center mb-2 border-b border-border pb-1.5">
+                                      <h3 className="text-xs font-bold text-foreground font-serif uppercase tracking-widest">
+                                        Tables
+                                      </h3>
+                                      <button 
+                                        onClick={() => setShowFilenamesInAnalysis(!showFilenamesInAnalysis)} 
+                                        className="text-muted-foreground hover:text-foreground transition-colors p-0.5 rounded-sm hover:bg-muted"
+                                        title={showFilenamesInAnalysis ? "Hide filenames" : "Show filenames"}
+                                      >
+                                        {showFilenamesInAnalysis ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                      </button>
+                                    </div>
+                                    {(!summaryData?.table_labels || summaryData.table_labels.length === 0) ? (
+                                      <p className="text-[10px] text-muted-foreground italic">No tables found.</p>
+                                    ) : (
+                                      <ul className="flex flex-col gap-1.5">
+                                        {summaryData.table_labels.map((label: string, i: number) => {
+                                          const displayLabel = showFilenamesInAnalysis ? label : label.replace(/^\[.*?\]\s*/, '');
+                                          return (
+                                            <li key={i} className="px-2.5 py-1.5 bg-primary/10 text-primary-700 dark:text-primary-300 rounded-md text-[10.5px] font-medium leading-relaxed">
+                                              <span className="break-words">{displayLabel}</span>
+                                            </li>
+                                          );
+                                        })}
+                                      </ul>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
-                            ) : (
-                              <div className="flex flex-col items-center justify-center gap-2 text-muted-foreground">
-                                <ImageIcon className="w-10 h-10 text-muted-foreground/40" />
-                                <p className="text-xs font-semibold">Image preview unavailable</p>
-                              </div>
-                            )}
-                          </div>
-                        ) : sourceLoading ? (
-                          <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground text-xs font-mono">
-                            <RotateCw className="w-5 h-5 animate-spin text-primary" />
-                            Loading source code…
-                          </div>
-                        ) : sourceError ? (
-                          <div className="p-6 text-red-500 text-xs font-mono">{sourceError}</div>
-                        ) : (
-                          <SourceEditor
-                            ref={sourceEditorRef}
-                            value={displayContent}
-                            onChange={(val) => setEditedContent(val)}
-                            className="h-full"
-                            onSave={handleSave}
-                            errors={displayedIssues.map((issue) => ({
-                              line: issue.line_number ?? 0,
-                              message: issue.message || 'Unknown error',
-                              extract: issue.extract,
-                            }))}
-                          />
-                        )}
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </div>
                     </div>
                   </motion.div>

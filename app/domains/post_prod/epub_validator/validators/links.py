@@ -14,8 +14,10 @@ import requests
 from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+import json
 
 from ..engine.registry import rule
+from ..services.upload_service import UPLOAD_DIR
 
 
 
@@ -227,6 +229,39 @@ def _epub_chapter_numbers(epub: str) -> set[str]:
     return nums
 
 
+_SUMMARY_CACHE: dict[str, dict[str, set[str]]] = {}
+
+def _get_summary_labels(folder_name: str) -> dict[str, set[str]]:
+    if not folder_name:
+        return {"figures": set(), "tables": set()}
+        
+    if folder_name in _SUMMARY_CACHE:
+        return _SUMMARY_CACHE[folder_name]
+
+    cache_path = os.path.join(UPLOAD_DIR, folder_name, "summary_cache.json")
+    labels = {"figures": set(), "tables": set()}
+    
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                
+            for label in data.get("figure_labels", []):
+                m = re.search(r'fig(?:ure)?\.?\s*(\d+(?:[\.\-–]\d+)*)', label, re.IGNORECASE)
+                if m:
+                    labels["figures"].add(m.group(1))
+                    
+            for label in data.get("table_labels", []):
+                m = re.search(r'tab(?:le)?\.?\s*(\d+(?:[\.\-–]\d+)*)', label, re.IGNORECASE)
+                if m:
+                    labels["tables"].add(m.group(1))
+        except Exception:
+            pass
+            
+    _SUMMARY_CACHE[folder_name] = labels
+    return labels
+
+
 @rule("COM-LINK-001")
 def validate_page_citation_links(file_details, rule_config=None):
     """Text like '(See page 23)' should be inside an <a href='...#page_23'>."""
@@ -244,6 +279,7 @@ def validate_page_citation_links(file_details, rule_config=None):
                 break
 
     page_ids = _epub_page_ids(epub) if epub else set()
+    summary_labels = _get_summary_labels(file_details.get("folder_name", ""))
 
     issues = []
     body = soup.find("body") or soup
@@ -286,7 +322,7 @@ def validate_page_citation_links(file_details, rule_config=None):
             
             if (is_table or is_figure) and parent and parent.name == "p" and m.start() < 10:
                 next_tag = parent.find_next_sibling()
-                valid_targets = ["table"]
+                valid_targets = ["table", "figure"]
                 
                 if next_tag and next_tag.name in valid_targets:
                     continue
@@ -306,12 +342,30 @@ def validate_page_citation_links(file_details, rule_config=None):
                 page_num = m.group(1).lstrip("0") or "0"
                 if page_ids and _page_id_for_number(page_num, page_ids) is None:
                     continue
+                    
+            # If it is a Figure citation, verify it exists
+            special_message = None
+            if is_figure and summary_labels["figures"]:
+                fig_num = m.group(3)
+                if fig_num and fig_num not in summary_labels["figures"]:
+                    special_message = f"Citation '{m.group(0)}' looks like a citation but is not found in this book."
+            
+            # If it is a Table citation, verify it exists
+            if is_table and summary_labels["tables"]:
+                table_num = m.group(4)
+                if table_num and table_num not in summary_labels["tables"]:
+                    special_message = f"Citation '{m.group(0)}' looks like a citation but is not found in this book."
+
+            msg = special_message or f"Citation '{m.group(0)}' is not wrapped in a link."
+            rule_name = "Citation Not In Book" if special_message else "Citation Not Linked"
+            issue_type = "citation_not_in_book" if special_message else "page_citation_not_linked"
+            category = "Warning" if special_message else "Error"
 
             issues.append({
-                "rule_name": "Citation Not Linked",
-                "type": "page_citation_not_linked",
-                "message": f"Citation '{m.group(0)}' is not wrapped in a link.",
-                "category": "Warning",
+                "rule_name": rule_name,
+                "type": issue_type,
+                "message": msg,
+                "category": category,
                 "snippet": str(text_node)[max(0, m.start() - 30): m.end() + 30].strip(),
                 "extract": m.group(0),
                 "line_number": line_num,
@@ -540,6 +594,22 @@ def validate_external_urls(file_details, rule_config=None):
                 invalid_reason = "comma (,)"
             elif raw_href.endswith("."):
                 invalid_reason = "dot (.)"
+            elif raw_href.endswith(":"):
+                invalid_reason = "colon (:)"
+            elif raw_href.endswith("?"):
+                invalid_reason = "question mark (?)"
+            elif raw_href.endswith("("):
+                invalid_reason = "opening parenthesis (()"
+            elif raw_href.endswith(")"):
+                invalid_reason = "closing parenthesis ())"
+            elif raw_href.endswith("["):
+                invalid_reason = "opening bracket ([)"
+            elif raw_href.endswith("]"):
+                invalid_reason = "closing bracket (])"
+            elif raw_href.endswith("{"):
+                invalid_reason = "opening brace ({)"
+            elif raw_href.endswith("}"):
+                invalid_reason = "closing brace (})"
                 
             if invalid_reason:
                 issues.append({

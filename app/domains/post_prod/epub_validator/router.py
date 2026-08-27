@@ -40,6 +40,7 @@ from .services.epubcheck_service import (
     run_epubcheck_report,
     get_cached_epubcheck_report,
 )
+from .services.summary_service import extract_epub_summary
 
 
 def _select_validate_epub():
@@ -212,6 +213,12 @@ def list_files(folder_name: str):
     return get_extract_files(folder_name)
 
 
+@router.get("/validate/{folder_name}/summary")
+def get_epub_summary(folder_name: str, refresh: bool = False):
+    """Return structural summary (tables, figures, chapters)."""
+    return extract_epub_summary(folder_name, refresh=refresh)
+
+
 @router.get("/file-data/{folder_name}/{file_path:path}")
 async def get_file_content(folder_name: str, file_path: str):
     base = (Path(UPLOAD_DIR) / folder_name / EXTRACT_DIR / "epub").resolve()
@@ -245,6 +252,14 @@ async def save_file_content(
         await asyncio.to_thread(repack_epub, folder_name)
     except Exception:
         pass
+
+    # Clear the summary cache so it regenerates on next read
+    cache_path = (Path(UPLOAD_DIR) / folder_name / "summary_cache.json").resolve()
+    if cache_path.exists():
+        try:
+            cache_path.unlink()
+        except Exception:
+            pass
 
     return {"status": True, "message": "File saved"}
 

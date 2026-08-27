@@ -25,6 +25,7 @@ interface Props {
   readOnly?: boolean;
   errors?: LintError[];
   onLogLineClick?: (lineNum: number) => void;
+  onLineClick?: (lineNum: number, lineText: string) => void;
   onSave?: () => void;
 }
 
@@ -92,7 +93,7 @@ export function formatXmlString(xmlStr: string): string {
  * the app's design system (see FindReplacePanel).
  */
 export const SourceEditor = forwardRef<SourceEditorRef, Props>(
-  ({ value, onChange, className, readOnly = false, errors, onLogLineClick, onSave }, ref) => {
+  ({ value, onChange, className, readOnly = false, errors, onLogLineClick, onLineClick, onSave }, ref) => {
     const cmRef = useRef<ReactCodeMirrorRef | null>(null);
     const [panelOpen, setPanelOpen] = useState(false);
     const [replaceMode, setReplaceMode] = useState(false);
@@ -258,21 +259,26 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
   }, [errors]);
 
   const clickExtension = useMemo(() => {
-    if (!onLogLineClick) return [];
     return EditorView.domEventHandlers({
       click(event, view) {
         const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
         if (pos === null) return;
         const line = view.state.doc.lineAt(pos);
-        const lineText = line.text;
-        const match = lineText.match(/:(\d+):/);
-        if (match) {
-          const targetLine = parseInt(match[1], 10);
-          onLogLineClick(targetLine);
+        
+        if (onLogLineClick) {
+          const match = line.text.match(/:(\d+):/);
+          if (match) {
+            const targetLine = parseInt(match[1], 10);
+            onLogLineClick(targetLine);
+          }
+        }
+
+        if (onLineClick) {
+          onLineClick(line.number, line.text);
         }
       }
     });
-  }, [onLogLineClick]);
+  }, [onLogLineClick, onLineClick]);
 
   const extensions = useMemo(
     () => [

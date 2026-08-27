@@ -129,6 +129,6 @@
       "target_path": "OEBPS/xhtml",
       "file_name_pattern": "*.xhtml",
       "enabled": true
-    },
+    }
   ]
 }

@@ -413,7 +413,7 @@
     },
     {
       "id": "COM-LINK-001",
-      "name": "Aspen: Page citations must be linked to the corresponding page ID",
+      "name": "Aspen: citations must be linked to the corresponding block",
       "target_path": "OEBPS/xhtml",
       "file_name_pattern": "*.xhtml",
       "enabled": true,

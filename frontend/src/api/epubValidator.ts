@@ -44,6 +44,26 @@ export async function validateFolder(folderName: string): Promise<ValidationApiR
   }
 }
 
+export interface EpubSummary {
+  total_chapters: number;
+  total_figures: number;
+  total_tables: number;
+  figure_labels: string[];
+  chapter_labels: string[];
+  table_labels: string[];
+  error?: string;
+}
+
+export async function getEpubSummary(folderName: string, refresh?: boolean): Promise<EpubSummary> {
+  try {
+    const params = refresh ? { refresh: true } : {};
+    const { data } = await api.get<EpubSummary>(`/post-prod/epub-validator/validate/${folderName}/summary`, { params });
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to get EPUB summary'));
+  }
+}
+
 // ─── Celery background validation ─────────────────────────────────────────────
 
 export interface ValidationProgress {

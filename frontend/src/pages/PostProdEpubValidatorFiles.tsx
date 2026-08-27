@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft,
@@ -24,6 +24,7 @@ import {
   BookMarked,
   X as XIcon,
   Type,
+  RefreshCcw,
 } from 'lucide-react';
 import { XHTMLCard, xhtmlCardVariants } from '@/components/epub_validator/XHTMLCard';
 import { ValidationDetailModal } from '@/components/epub_validator/ValidationDetailModal';
@@ -51,6 +52,8 @@ import {
   listProjects,
   getLatestValidation,
   type EvProject,
+  getEpubSummary,
+  type EpubSummary,
 } from '@/api/epubValidator';
 import { useEpubBookStore } from '@/hooks/useEpubBookStore';
 import { cn, formatDate, titleCase } from '@/utils/epubValidatorUtils';
@@ -174,8 +177,42 @@ export function PostProdEpubValidatorFiles() {
     retry: 1,
   });
 
+  const [showFilenames, setShowFilenames] = useState(false);
+
+  const { data: summaryData, isLoading: isLoadingSummary, refetch: refetchSummary, isFetching: isFetchingSummary } = useQuery({
+    queryKey: ['epub-summary', folderName],
+    queryFn: () => getEpubSummary(folderName),
+    enabled: !!folderName,
+    staleTime: 60_000,
+  });
+
+  const queryClient = useQueryClient();
+
+  const refreshSummaryMutation = useMutation({
+    mutationFn: () => getEpubSummary(folderName, true),
+    onSuccess: (data) => {
+      queryClient.setQueryData(['epub-summary', folderName], data);
+    },
+  });
+
+  const handleRefreshSummary = () => {
+    refreshSummaryMutation.mutate();
+  };
+
   const naturalSort = (a: string, b: string) =>
     a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+
+  const sortedChapterLabels = useMemo(() => {
+    return summaryData?.chapter_labels ? [...summaryData.chapter_labels].sort(naturalSort) : [];
+  }, [summaryData?.chapter_labels]);
+
+  const sortedFigureLabels = useMemo(() => {
+    return summaryData?.figure_labels ? [...summaryData.figure_labels].sort(naturalSort) : [];
+  }, [summaryData?.figure_labels]);
+
+  const sortedTableLabels = useMemo(() => {
+    return summaryData?.table_labels ? [...summaryData.table_labels].sort(naturalSort) : [];
+  }, [summaryData?.table_labels]);
 
   const allBackendFiles = useMemo(
     () => (filesData?.files ?? []).sort((a, b) => naturalSort(a.file_name, b.file_name)),
@@ -251,6 +288,7 @@ export function PostProdEpubValidatorFiles() {
 
   // ── Layout mode (grid vs list view) ──────────────────────────────────────────
   const [layoutMode, setLayoutMode] = useState<'grid' | 'list'>('list');
+  const [activeReportTab, setActiveReportTab] = useState<'chapters' | 'figures' | 'tables'>('figures');
 
   // ── Validation state (in-memory only, per session) ─────────────────────────
   // Not persisted: opening/reloading a book always starts on the Pending state
@@ -604,7 +642,7 @@ export function PostProdEpubValidatorFiles() {
   const hasValidated = validationData !== null;
 
   // ── Category Tab & Status & Rule filters ─────────────────────────────────────
-  const [activeCategoryTab, setActiveCategoryTab] = useState<'chapters' | 'css' | 'images' | 'fonts' | 'other' | 'all'>('chapters');
+  const [activeCategoryTab, setActiveCategoryTab] = useState<'summary' | 'chapters' | 'css' | 'images' | 'fonts' | 'other' | 'all'>('summary');
   const [activeFilter, setActiveFilter] = useState<XHTMLFileStatus | null>(null);
   const [selectedRuleFilter, setSelectedRuleFilter] = useState<string | null>(null);
 
@@ -864,6 +902,7 @@ export function PostProdEpubValidatorFiles() {
             file={selectedFile}
             folderName={folderName}
             entries={selectedEntries}
+            summaryData={summaryData}
             isRevalidating={validatingFiles.has(selectedFile.file_name)}
             validationProgress={singleFileProgress[selectedFile.file_name]}
             initialTab={modalInitialTab}
@@ -938,7 +977,7 @@ export function PostProdEpubValidatorFiles() {
       </AnimatePresence>
 
       <motion.div
-        className="space-y-6 max-w-7xl mx-auto p-6 text-text"
+        className="space-y-6 w-full p-4 md:p-6 lg:p-8 text-text"
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -8 }}
@@ -1600,7 +1639,7 @@ export function PostProdEpubValidatorFiles() {
                     value={stats.pending}
                     total={stats.total}
                     icon={Clock}
-                    barColor="bg-slate-400"
+                                    barColor="bg-slate-400"
                     valueColor={stats.pending > 0 ? 'text-slate-500' : 'text-foreground'}
                     isActive={activeFilter === 'pending'}
                     onClick={() => toggleFilter('pending')}
@@ -1638,6 +1677,19 @@ export function PostProdEpubValidatorFiles() {
                 </div>
                 {/* ── Top Horizontal Category Navigation Tabs ─────────────────────────────────── */}
                 <div className="flex items-center gap-2 border-b border-border/80 pb-px font-sans overflow-x-auto scrollbar-none">
+                  {/* Summary Tab */}
+                  <button
+                    onClick={() => setActiveCategoryTab('summary')}
+                    className={cn(
+                      'relative flex items-center justify-center gap-2 px-3 py-1.5 min-w-[100px] text-xs font-bold rounded-lg transition-all',
+                      activeCategoryTab === 'summary'
+                        ? 'bg-primary text-white shadow-xs'
+                        : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                    )}
+                  >
+                    <BookMarked className="w-4 h-4 shrink-0" />
+                    <span className="whitespace-nowrap">Analysis Report</span>
+                  </button>
                   <button
                     onClick={() => setActiveCategoryTab('chapters')}
                     className={cn(
@@ -1803,6 +1855,199 @@ export function PostProdEpubValidatorFiles() {
 
                 {/* ── Scrollable Files List Area ───────────────────────────────── */}
                 <div className="flex-1 overflow-y-auto max-h-[calc(100vh-17rem)] min-h-[350px] pr-2 space-y-6 scrollbar-thin scrollbar-thumb-border font-sans pb-4">
+                  
+                  {/* ── 0. Summary Tab View ────────────────────────────────────────── */}
+                  {activeCategoryTab === 'summary' && (
+                    <div className="space-y-6">
+                      <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                        <div className="flex items-center gap-2">
+                          <BookMarked className="w-4 h-4 text-primary" />
+                          <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
+                            Job Analysis Report
+                          </h2>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setShowFilenames(!showFilenames)}
+                            className={`flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-medium transition-colors ${showFilenames ? 'bg-primary/10 text-primary border border-primary/20' : 'bg-muted/50 text-muted-foreground border border-transparent hover:bg-muted'}`}
+                          >
+                            <Eye className="w-3 h-3 shrink-0" />
+                            <span className="whitespace-nowrap">{showFilenames ? 'Hide Filenames' : 'Show Filenames'}</span>
+                          </button>
+                          <button
+                            onClick={handleRefreshSummary}
+                            disabled={refreshSummaryMutation.isPending || isFetchingSummary || isLoadingSummary}
+                            className="flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-medium transition-colors bg-white text-primary border border-primary/20 hover:bg-primary/10 disabled:opacity-50"
+                          >
+                            <RefreshCcw className={`w-3 h-3 shrink-0 ${refreshSummaryMutation.isPending || isFetchingSummary || isLoadingSummary ? 'animate-spin' : ''}`} />
+                            <span className="whitespace-nowrap">{refreshSummaryMutation.isPending || isFetchingSummary || isLoadingSummary ? 'Refreshing...' : 'Refresh Report'}</span>
+                          </button>
+                        </div>
+                      </div>
+                      
+                      {isLoadingSummary ? (
+                        <div className="flex items-center justify-center p-12">
+                          <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                          <span className="ml-2 text-sm text-muted-foreground">Generating summary...</span>
+                        </div>
+                      ) : summaryData?.error ? (
+                        <div className="p-4 bg-red-50 text-red-600 rounded-lg text-sm border border-red-200">
+                          {summaryData.error}
+                        </div>
+                      ) : (
+                        <div className="space-y-6">
+                          {/* Top Metric Cards */}
+                          <div className="grid grid-cols-3 gap-3">
+                            <Card 
+                              className={`shadow-none cursor-pointer transition-all ${activeReportTab === 'chapters' ? 'border-primary bg-primary/10 ring-1 ring-primary/20' : 'border-primary/20 bg-primary/5 hover:bg-primary/10'}`}
+                              onClick={() => setActiveReportTab('chapters')}
+                            >
+                              <CardBody className="p-3 flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <BookOpen className="w-4 h-4 text-primary/70" />
+                                  <div className="text-[11px] font-bold text-primary/90 uppercase tracking-wider">Chapters</div>
+                                </div>
+                                <div className="text-lg font-black text-primary">{summaryData?.total_chapters || 0}</div>
+                              </CardBody>
+                            </Card>
+                            <Card 
+                              className={`shadow-none cursor-pointer transition-all ${activeReportTab === 'figures' ? 'border-emerald-500 bg-emerald-500/10 ring-1 ring-emerald-500/20' : 'border-emerald-500/20 bg-emerald-500/5 hover:bg-emerald-500/10'}`}
+                              onClick={() => setActiveReportTab('figures')}
+                            >
+                              <CardBody className="p-3 flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <ImageIcon className="w-4 h-4 text-emerald-500/70" />
+                                  <div className="text-[11px] font-bold text-emerald-600/90 uppercase tracking-wider">Figures</div>
+                                </div>
+                                <div className="text-lg font-black text-emerald-600">{summaryData?.total_figures || 0}</div>
+                              </CardBody>
+                            </Card>
+                            <Card 
+                              className={`shadow-none cursor-pointer transition-all ${activeReportTab === 'tables' ? 'border-blue-500 bg-blue-500/10 ring-1 ring-blue-500/20' : 'border-blue-500/20 bg-blue-500/5 hover:bg-blue-500/10'}`}
+                              onClick={() => setActiveReportTab('tables')}
+                            >
+                              <CardBody className="p-3 flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <LayoutGrid className="w-4 h-4 text-blue-500/70" />
+                                  <div className="text-[11px] font-bold text-blue-600/90 uppercase tracking-wider">Tables</div>
+                                </div>
+                                <div className="text-lg font-black text-blue-600">{summaryData?.total_tables || 0}</div>
+                              </CardBody>
+                            </Card>
+                          </div>
+
+                          {/* Figure Labels List */}
+                          {activeReportTab === 'figures' && (
+                            <Card className="shadow-sm border-border/50 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                              <div className="px-4 py-3 border-b border-border/50 bg-muted/20">
+                                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                                  <List className="w-4 h-4 text-emerald-500" />
+                                  Figure Label List
+                                </h3>
+                              </div>
+                              <CardBody className="p-0">
+                                {sortedFigureLabels.length > 0 ? (
+                                  <ul className="divide-y divide-border/50 max-h-[500px] overflow-y-auto">
+                                    {sortedFigureLabels.map((label, idx) => {
+                                      const match = label.match(/^\s*\[(.*?)\]\s*([\s\S]*)$/);
+                                      const filename = match ? match[1] : null;
+                                      const text = match ? match[2] : label;
+                                      
+                                      return (
+                                        <li key={idx} className="px-4 py-2.5 text-sm hover:bg-muted/30 transition-colors flex items-start gap-3">
+                                          <span className="text-muted-foreground font-mono text-xs w-6 text-right shrink-0">{idx + 1}.</span>
+                                          <span className="text-foreground leading-snug break-words">
+                                            {showFilenames && filename && (
+                                              <span className="text-muted-foreground mr-2 font-mono text-[10.5px] bg-muted/50 px-1 py-0.5 rounded border border-border/50">[{filename}]</span>
+                                            )}
+                                            {text}
+                                          </span>
+                                        </li>
+                                      );
+                                    })}
+                                  </ul>
+                                ) : (
+                                  <div className="p-8 text-center text-muted-foreground text-sm italic">
+                                    No figure labels found.
+                                  </div>
+                                )}
+                              </CardBody>
+                            </Card>
+                          )}
+
+                          {/* Chapter Labels List */}
+                          {activeReportTab === 'chapters' && (
+                            <Card className="shadow-sm border-border/50 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                              <div className="px-4 py-3 border-b border-border/50 bg-muted/20">
+                                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                                  <BookOpen className="w-4 h-4 text-primary" />
+                                  Chapter List
+                                </h3>
+                              </div>
+                              <CardBody className="p-0">
+                                {sortedChapterLabels.length > 0 ? (
+                                  <ul className="divide-y divide-border/50 max-h-[500px] overflow-y-auto">
+                                    {sortedChapterLabels.map((label, idx) => (
+                                      <li key={idx} className="px-4 py-2.5 text-sm hover:bg-muted/30 transition-colors flex items-start gap-3">
+                                        <span className="text-muted-foreground font-mono text-xs w-6 text-right shrink-0">{idx + 1}.</span>
+                                        <span className="text-foreground leading-snug break-words">
+                                          {showFilenames ? label : label.replace(/\.(xhtml|html)$/i, '')}
+                                        </span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : (
+                                  <div className="p-8 text-center text-muted-foreground text-sm italic">
+                                    No chapter labels found.
+                                  </div>
+                                )}
+                              </CardBody>
+                            </Card>
+                          )}
+
+                          {/* Table Labels List */}
+                          {activeReportTab === 'tables' && (
+                            <Card className="shadow-sm border-border/50 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                              <div className="px-4 py-3 border-b border-border/50 bg-muted/20">
+                                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                                  <LayoutGrid className="w-4 h-4 text-blue-500" />
+                                  Table Label List
+                                </h3>
+                              </div>
+                              <CardBody className="p-0">
+                                {sortedTableLabels.length > 0 ? (
+                                  <ul className="divide-y divide-border/50 max-h-[500px] overflow-y-auto">
+                                    {sortedTableLabels.map((label, idx) => {
+                                      const match = label.match(/^\s*\[(.*?)\]\s*([\s\S]*)$/);
+                                      const filename = match ? match[1] : null;
+                                      const text = match ? match[2] : label;
+                                      
+                                      return (
+                                        <li key={idx} className="px-4 py-2.5 text-sm hover:bg-muted/30 transition-colors flex items-start gap-3">
+                                          <span className="text-muted-foreground font-mono text-xs w-6 text-right shrink-0">{idx + 1}.</span>
+                                          <span className="text-foreground leading-snug break-words">
+                                            {showFilenames && filename && (
+                                              <span className="text-muted-foreground mr-2 font-mono text-[10.5px] bg-muted/50 px-1 py-0.5 rounded border border-border/50">[{filename}]</span>
+                                            )}
+                                            {text}
+                                          </span>
+                                        </li>
+                                      );
+                                    })}
+                                  </ul>
+                                ) : (
+                                  <div className="p-8 text-center text-muted-foreground text-sm italic">
+                                    No table labels found.
+                                  </div>
+                                )}
+                              </CardBody>
+                            </Card>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* ── 1. Chapters Tab View ────────────────────────────────── */}
                   {(activeCategoryTab === 'chapters' || activeCategoryTab === 'all') && (
                     <div className="space-y-3">
@@ -1843,7 +2088,7 @@ export function PostProdEpubValidatorFiles() {
                                   isValidating={validatingFiles.has(file.file_name)}
                                   onValidate={() => handleValidateFile(file.file_name)}
                                   onOpen={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
-                                  onPreview={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
+                                  onPreview={() => { setModalAllowedTabs(undefined); setModalInitialTab('preview'); setSelectedFile(file); }}
                                   index={i}
                                 />
                               </motion.div>
@@ -1912,6 +2157,28 @@ export function PostProdEpubValidatorFiles() {
                           </h2>
                           <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleImageFiles.length})</span>
                         </div>
+                        {visibleImageFiles.length > 0 && (
+                          <button
+                            className="inline-flex flex-row items-center justify-center gap-1.5 px-3.5 py-1.5 h-8.5 text-xs font-semibold rounded-lg bg-primary text-white hover:bg-primary/90 transition-all shadow-xs disabled:opacity-50 shrink-0 whitespace-nowrap"
+                            onClick={() => {
+                              visibleImageFiles.forEach(f => {
+                                if (!validatingFiles.has(f.file_name)) {
+                                  handleValidateFile(f.file_name);
+                                }
+                              });
+                            }}
+                            disabled={visibleImageFiles.every(f => validatingFiles.has(f.file_name))}
+                          >
+                            {visibleImageFiles.some(f => validatingFiles.has(f.file_name)) ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0 text-white" />
+                            ) : (
+                              <Play className="w-3.5 h-3.5 shrink-0 text-white fill-white" />
+                            )}
+                            <span className="whitespace-nowrap text-white">
+                              {visibleImageFiles.some(f => validatingFiles.has(f.file_name)) ? 'Validating…' : 'Validate all'}
+                            </span>
+                          </button>
+                        )}
                       </div>
                       {visibleImageFiles.length === 0 ? (
                         <p className="text-xs text-muted-foreground italic py-1">No image files in this section.</p>
@@ -1937,6 +2204,8 @@ export function PostProdEpubValidatorFiles() {
                                 status={getFileStatus(file.file_name)}
                                 errors={agg.errors}
                                 warnings={agg.warnings}
+                                isValidating={validatingFiles.has(file.file_name)}
+                                onValidate={() => handleValidateFile(file.file_name)}
                                 onOpen={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
                                 onPreview={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
                                 index={i}
@@ -2041,8 +2310,18 @@ export function PostProdEpubValidatorFiles() {
                                   warnings={agg?.warnings ?? 0}
                                   isValidating={validatingFiles.has(file.file_name)}
                                   onValidate={canValidate ? () => handleValidateFile(file.file_name) : undefined}
-                                  onOpen={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
-                                  onPreview={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
+                                  onOpen={() => { 
+                                    const isNav = isNavFile(file.file_name, file.path);
+                                    setModalAllowedTabs(isNav ? undefined : ['result']); 
+                                    setModalInitialTab('result'); 
+                                    setSelectedFile(file); 
+                                  }}
+                                  onPreview={() => { 
+                                    const isNav = isNavFile(file.file_name, file.path);
+                                    setModalAllowedTabs(isNav ? undefined : ['result']); 
+                                    setModalInitialTab(isNav ? 'preview' : 'result'); 
+                                    setSelectedFile(file); 
+                                  }}
                                   index={i}
                                 />
                               </motion.div>
