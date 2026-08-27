@@ -346,10 +346,23 @@ def background_processing_task(
 
             elif process_type == "structuring":
                 structuring_method = "ai"
-                tag_set = None
                 if options and isinstance(options, dict):
                     structuring_method = options.get("structuring_method", "ai")
                     tag_set = options.get("tag_set")
+
+                if not tag_set and file_record and file_record.chapter:
+                    ch = file_record.chapter
+                    c_name = getattr(ch, "client", None)
+                    if not c_name or not isinstance(c_name, str):
+                        proj = getattr(ch, "project_rel", None)
+                        if proj and proj.client:
+                            c_name = (
+                                getattr(proj.client, "company", None)
+                                or getattr(proj.client, "name_company", None)
+                                or getattr(proj.client, "division", None)
+                            )
+                    if c_name and ("springer" in str(c_name).lower() or "spr" in str(c_name).lower()):
+                        tag_set = "springer"
 
                 def on_progress_callback(step_name: str, pct: int):
                     update_job_status(db, job_id, "processing", step_name, pct)

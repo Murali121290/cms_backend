@@ -834,7 +834,7 @@ export function ChapterEditorPage() {
         font-size: 9px;
         font-weight: 700;
         letter-spacing: 0.05em;
-        text-transform: uppercase;
+        text-transform: none;
         padding: 2px 6px;
         border-radius: 4px;
         margin-top: -6px;

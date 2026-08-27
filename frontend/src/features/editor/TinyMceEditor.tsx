@@ -616,7 +616,6 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
                 schema: "html5",
                 forced_root_block: "",
                 allow_conditional_comments: true,
-                protect: [ /<!--[\s\S]*?-->/g ],
                 entity_encoding: "raw",
                 formats: {
                   bold: { inline: "span", classes: "bold", attributes: { "data-xml-tag": "bold" }, remove: "all" },

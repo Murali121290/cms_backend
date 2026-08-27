@@ -305,14 +305,7 @@ const CustomParagraph = Paragraph.extend({
       styleLabel: {
         default: "Normal",
         parseHTML: (element) => {
-          // 1. Always prioritize explicit prefix tags in text (e.g. "<CN>CHAPTER 2" -> "CN")
-          const text = (element.textContent || "").trim();
-          const match = text.match(/<([/A-Za-z0-9_.-]+)>/);
-          if (match && text.indexOf(match[0]) < 15) {
-            return match[1];
-          }
-
-          // 2. Fall back to existing data attributes or classes
+          // 1. Prioritize existing data attributes or classes (e.g. "Head1", "Head2", "Para-FL")
           const attrLabel =
             element.getAttribute("data-style-label") ||
             element.getAttribute("class");
@@ -350,16 +343,9 @@ const CustomHeading = Heading.extend({
   addAttributes() {
     return {
       styleLabel: {
-        default: "H1",
+        default: "Head1",
         parseHTML: (element) => {
-          // 1. Always prioritize explicit prefix tags in text
-          const text = (element.textContent || "").trim();
-          const match = text.match(/<([/A-Za-z0-9_.-]+)>/);
-          if (match && text.indexOf(match[0]) < 15) {
-            return match[1];
-          }
-
-          // 2. Fall back to existing attributes
+          // 1. Prioritize existing attributes or classes (e.g. "Head1", "Head2")
           const attrLabel =
             element.getAttribute("data-style-label") ||
             element.getAttribute("class");
@@ -369,10 +355,10 @@ const CustomHeading = Heading.extend({
 
           const tag = element.tagName.toLowerCase();
           const level = tag.substring(1);
-          return `H${level}`;
+          return `Head${level}`;
         },
         renderHTML: (attributes) => {
-          const label = attributes.styleLabel || "H1";
+          const label = attributes.styleLabel || "Head1";
           return {
             "data-style-label": label,
             class: label,
@@ -2464,19 +2450,20 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         .ProseMirror p::after {
           content: attr(data-style-label) !important;
           position: absolute !important;
-          left: -0.95in !important;
+          left: -1.25in !important;
           top: 0.35rem !important;
-          width: 0.85in !important;
+          min-width: 0.85in !important;
+          max-width: 1.15in !important;
           text-align: center !important;
           padding: 0.15rem 0.35rem !important;
-          font-size: 0.6rem !important;
-          font-weight: 700 !important;
+          font-size: 0.65rem !important;
+          font-weight: 600 !important;
           background-color: rgba(59, 130, 246, 0.07) !important;
           border: 1px solid rgba(59, 130, 246, 0.28) !important;
           color: #1d4ed8 !important;
           border-radius: 0.25rem !important;
-          text-transform: uppercase !important;
-          letter-spacing: 0.04em !important;
+          text-transform: none !important;
+          letter-spacing: 0.02em !important;
           white-space: nowrap !important;
           overflow: hidden !important;
           text-overflow: ellipsis !important;

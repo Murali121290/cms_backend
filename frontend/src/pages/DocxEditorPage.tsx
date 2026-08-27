@@ -21,7 +21,7 @@ export function DocxEditorPage() {
   const hasValidFile = Number.isInteger(numericFileId) && numericFileId > 0;
 
   const editorRef = useRef<WysiwygEditorHandle>(null);
-  const stylesQuery = useParagraphStyles();
+  const stylesQuery = useParagraphStyles(hasValidFile ? numericFileId : null);
   const [customStyles, setCustomStyles] = useState<string[]>([]);
 
   const query = useQuery({

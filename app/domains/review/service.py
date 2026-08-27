@@ -117,18 +117,26 @@ def build_review_page_state(
     # though the template does not currently consume the result directly.
     extract_document_structure_func(processed_path)
 
-    # Build styles list by starting with the static rules catalogue,
-    # and then adding any paragraph styles actually applied in the document.
-    styles = set()
-    try:
-        for rule in get_rules_loader_func().get_paragraphs():
-            if "style" in rule:
-                styles.add(rule["style"])
-    except Exception:
-        pass
-    styles.add("Normal")
-    styles.add("Body Text")
-    styles.update(ADDITIONAL_REVIEW_STYLES)
+    # Build styles list based on client (Springer vs. Other Clients)
+    from app.utils.client_styles import get_paragraph_styles_for_client
+    from app.models import File
+
+    file_record = db.query(File).filter(File.id == file_id).first()
+    client_name = None
+    if file_record and file_record.chapter:
+        ch = file_record.chapter
+        client_name = getattr(ch, "client", None)
+        if not client_name or not isinstance(client_name, str):
+            proj = getattr(ch, "project_rel", None)
+            if proj and proj.client:
+                client_name = (
+                    getattr(proj.client, "company", None)
+                    or getattr(proj.client, "name_company", None)
+                    or getattr(proj.client, "division", None)
+                )
+
+    client_styles = get_paragraph_styles_for_client(client_name)
+    styles = set(client_styles)
 
     try:
         from docx import Document

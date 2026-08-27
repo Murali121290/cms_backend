@@ -160,7 +160,7 @@ export function StructuringReviewPage() {
   const reviewQuery = useStructuringReviewQuery(normalizedFileId);
   const xhtmlQuery = useFileXhtmlRunsQuery(normalizedFileId);
   const editorSave = useEditorSaveRuns(normalizedFileId);
-  const stylesQuery = useParagraphStyles();
+  const stylesQuery = useParagraphStyles(normalizedFileId);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
@@ -338,9 +338,10 @@ export function StructuringReviewPage() {
 
   const review = reviewQuery.data;
 
-  // Synchronized styles state merging publisher styles, review styles, and custom styles
+  // Synchronized styles state using client-specific publisher styles (or fallback review styles) + custom styles
   const publisherStyles = stylesQuery.data || [];
-  const allStyles = Array.from(new Set([...publisherStyles, ...(review?.styles || []), ...customStyles])).sort();
+  const baseStyles = publisherStyles.length > 0 ? publisherStyles : (review?.styles || []);
+  const allStyles = Array.from(new Set([...baseStyles, ...customStyles])).sort();
 
   const handleAddStyle = (newStyleName: string) => {
     if (!customStyles.includes(newStyleName)) {

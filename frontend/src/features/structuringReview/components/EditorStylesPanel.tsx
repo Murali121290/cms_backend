@@ -1084,7 +1084,7 @@ export function StylesPanel({
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex-1">
-                        <span className="font-mono text-[10px] uppercase tracking-wide">
+                        <span className="font-mono text-[11px] font-semibold tracking-wide text-slate-800">
                           <HighlightedText text={style} highlight={searchQuery} />
                         </span>
                         <p className="text-[10px] text-muted mt-0.5">

@@ -6524,10 +6524,30 @@ def api_v2_add_citation_comment(
 
 
 @router.get("/paragraph-styles", response_model=list[str])
-def api_v2_get_paragraph_styles():
-    """Return the list of all publisher paragraph styles."""
-    from app.utils.inject_styles import PUBLISHER_STYLES
-    return sorted(PUBLISHER_STYLES)
+def api_v2_get_paragraph_styles(
+    client: Optional[str] = Query(None),
+    file_id: Optional[int] = Query(None),
+    db: Session = Depends(database.get_db),
+):
+    """Return the list of publisher paragraph styles based on client/file_id."""
+    from app.utils.client_styles import get_paragraph_styles_for_client
+
+    client_name = client
+    if not client_name and file_id:
+        file_obj = db.query(models.File).filter(models.File.id == file_id).first()
+        if file_obj and file_obj.chapter:
+            ch = file_obj.chapter
+            client_name = getattr(ch, "client", None)
+            if not client_name or not isinstance(client_name, str):
+                proj = getattr(ch, "project_rel", None)
+                if proj and proj.client:
+                    client_name = (
+                        getattr(proj.client, "company", None)
+                        or getattr(proj.client, "name_company", None)
+                        or getattr(proj.client, "division", None)
+                    )
+
+    return get_paragraph_styles_for_client(client_name)
 
 
 
