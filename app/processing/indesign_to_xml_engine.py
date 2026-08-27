@@ -134,8 +134,10 @@ class InDesignToXMLEngine:
 
             # 3. Save response content (expecting a ZIP file containing the generated XML file)
             import io
-            misc_dir = os.path.join(upload_dir, project.code, chapter.number, "Misc")
+            misc_dir = os.path.join(upload_dir, project.code, chapter.chapters, "Misc")
+            proof_dir = os.path.join(upload_dir, project.code, chapter.chapters, "Proof")
             os.makedirs(misc_dir, exist_ok=True)
+            os.makedirs(proof_dir, exist_ok=True)
 
             try:
                 with zipfile.ZipFile(io.BytesIO(response.content)) as z:
@@ -143,13 +145,24 @@ class InDesignToXMLEngine:
                     logger.info(f"Received files from Windows InDesign Conversion Server: {file_list}")
                     
                     saved_files = []
+                    extracted_paths = set()
                     for zname in file_list:
                         if zname.endswith("/") or zname.endswith("\\"):
                             continue
                         basename = os.path.basename(zname)
                         ext = os.path.splitext(basename)[1].lower()
-                        if ext in (".xml", ".epub", ".log", ".jpg", ".jpeg", ".docx"):
-                            out_path = os.path.join(misc_dir, basename)
+                        if ext in (".xml", ".epub", ".log", ".jpg", ".jpeg", ".docx", ".pdf", ".xhtml", ".css"):
+                            if ext in (".pdf", ".xhtml", ".css"):
+                                out_path = os.path.join(proof_dir, basename)
+                            else:
+                                out_path = os.path.join(misc_dir, basename)
+                            
+                            # Deduplicate by destination path
+                            if out_path in extracted_paths:
+                                logger.info(f"Skipping duplicate extraction of {zname} to {out_path}")
+                                continue
+                            
+                            extracted_paths.add(out_path)
                             with open(out_path, "wb") as out_f:
                                 out_f.write(z.read(zname))
                             logger.info(f"Saved generated InDesign output file: {out_path}")

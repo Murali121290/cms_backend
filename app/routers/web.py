@@ -352,6 +352,7 @@ async def download_backup_or_folder_file(
         filename=file_name,
         media_type='text/html; charset=utf-8' if ext in ('.html', '.htm') else None,
         content_disposition_type='inline' if ext in PREVIEWABLE_EXTS else 'attachment',
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"}
     )
 
 
@@ -412,7 +413,10 @@ async def get_folder_file_layout_preview(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate layout HTML: {str(e)}")
 
-    return HTMLResponse(content=html_str)
+    return HTMLResponse(
+        content=html_str,
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"}
+    )
 
 
 

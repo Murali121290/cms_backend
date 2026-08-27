@@ -91,3 +91,6 @@ export const startExtractDesignCss = (fileId: number) =>
 
 export const startStyleValidation = (fileId: number) =>
   startProcessingJob(fileId, "style_validation", "style");
+
+export const startViewProof = (fileId: number) =>
+  startProcessingJob(fileId, "view_proof", "inplace");

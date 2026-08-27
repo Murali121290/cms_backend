@@ -72,6 +72,7 @@ PROCESS_PERMISSIONS = {
     "indesign_to_xml": ["Admin", "XML Manager", "XML manager"],
     "extract_design_css": ["Admin", "XML Manager", "XML manager"],
     "style_validation": ["Admin", "XML Manager", "XML manager"],
+    "view_proof": ["Admin", "XML Manager", "XML manager", "Author", "Reviewer", "Editor", "XML Operator", "Technical Editor", "Pre Editor", "Language Editor"],
 }
 
 
@@ -427,6 +428,22 @@ def background_processing_task(
                 )
                 success_msg = "InDesign to XML conversion completed"
 
+            elif process_type == "view_proof":
+                update_job_status(db, job_id, "processing", "Running View Proof XML regeneration and typesetting...", 30)
+                from app.services.file_service import UPLOAD_DIR
+                from app.processing.view_proof_engine import ViewProofEngine
+                ViewProofEngine().process_document(
+                    db=db,
+                    file_path=file_path,
+                    file_record=file_record,
+                    user_id=user_id,
+                    upload_dir=UPLOAD_DIR,
+                    logger=logger,
+                    job_id=job_id
+                )
+                generated_files = []
+                success_msg = "View Proof layout regeneration completed"
+
             elif process_type == "extract_design_css":
                 update_job_status(db, job_id, "processing", "Extracting CSS from InDesign template...", 30)
                 from app.core.config import get_settings
@@ -661,9 +678,15 @@ def background_processing_task(
                             mime = "application/epub+zip"
                         elif processed_filename.endswith((".jpg", ".jpeg")):
                             mime = "image/jpeg"
+                        elif processed_filename.endswith(".pdf"):
+                            mime = "application/pdf"
+                        elif processed_filename.endswith(".xhtml"):
+                            mime = "application/xhtml+xml"
 
                         new_category = (
-                            "Misc" if process_type in ("indesign_to_xml", "extract_design_css")
+                            ("Proof" if processed_filename.lower().endswith((".pdf", ".xhtml", ".css")) else "Misc")
+                            if process_type == "indesign_to_xml"
+                            else "Misc" if process_type == "extract_design_css"
                             else "Manuscript" if process_type == "style_validation"
                             else "XML" if processed_filename.lower().endswith((".xml", ".log", ".html"))
                             else "InDesign" if process_type == "xml_to_indesign"
@@ -793,7 +816,11 @@ def start_process(
     if not file_record:
         raise HTTPException(status_code=404, detail="File not found")
 
-    file_path = os.path.abspath(file_record.path)
+    if os.path.isabs(file_record.path):
+        file_path = file_record.path
+    else:
+        file_path = os.path.abspath(os.path.join(upload_dir, file_record.path))
+
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail=f"Physical file missing: {file_path}")
 

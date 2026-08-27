@@ -317,42 +317,78 @@ function ChapterCard({ chapter, users, plannedDueDates, stageRolesMap, onAssigne
       </div>
 
       {/* File Pipeline Status Badges */}
-      <div className="px-4 py-2 border-t border-border flex flex-wrap gap-1.5">
-        {!chapter.xml_status && !chapter.indesign_status && !chapter.final_delivery_status ? (
-          <span className="text-[10px] italic text-muted">No pipeline assets generated yet.</span>
-        ) : (
-          <>
-            {/* XML Validation Status */}
-            {chapter.xml_status === 'valid' && (
-              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
-                <CheckCircle2 size={10} className="text-emerald-500" /> XML: Valid
-              </span>
-            )}
-            {chapter.xml_status === 'invalid' && (
-              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-red-50 text-red-700 border border-red-200">
-                <AlertCircle size={10} className="text-red-500" /> XML: Invalid
-              </span>
-            )}
-            {chapter.xml_status === 'pending' && (
-              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
-                <Clock size={10} className="text-amber-500 animate-spin" /> XML: Pending
-              </span>
-            )}
-            {/* InDesign File Status */}
-            {chapter.indesign_status === 'generated' && (
-              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200">
-                <Layers size={10} className="text-purple-500" /> InDesign
-              </span>
-            )}
-            {/* Final Delivery Status */}
-            {chapter.final_delivery_status === 'generated' && (
-              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-teal-50 text-teal-700 border border-teal-200">
-                <Bookmark size={10} className="text-teal-500" /> Final Delivery
-              </span>
-            )}
-          </>
-        )}
-      </div>
+      {!chapter.chapters?.toLowerCase().includes('art') && chapter.workflow !== 'WF-11 Art Process' && (
+        <div className="px-4 py-2 border-t border-border flex flex-wrap gap-1.5">
+          {!chapter.style_status && !chapter.xml_status && !chapter.indesign_status && !chapter.final_delivery_status && !chapter.structuring_status ? (
+            <span className="text-[10px] italic text-muted">No pipeline assets generated yet.</span>
+          ) : (
+            <>
+              {/* Style Validation Status */}
+              {chapter.style_status === 'valid' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <CheckCircle2 size={10} className="text-emerald-500" /> Style: Valid
+                </span>
+              )}
+              {chapter.style_status === 'invalid' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-red-50 text-red-700 border border-red-200">
+                  <AlertCircle size={10} className="text-red-500" /> Style: Invalid
+                </span>
+              )}
+              {chapter.style_status === 'pending' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                  <Clock size={10} className="text-amber-500 animate-spin" /> Style: Pending
+                </span>
+              )}
+
+              {/* Structuring Status */}
+              {chapter.structuring_status === 'completed' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200">
+                  <CheckCircle2 size={10} className="text-sky-500" /> Structuring: Complete
+                </span>
+              )}
+              {chapter.structuring_status === 'pending' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                  <Clock size={10} className="text-amber-500 animate-spin" /> Structuring: Pending
+                </span>
+              )}
+              {chapter.structuring_status === 'failed' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-red-50 text-red-700 border border-red-200">
+                  <AlertCircle size={10} className="text-red-500" /> Structuring: Failed
+                </span>
+              )}
+
+              {/* XML Validation Status */}
+              {chapter.xml_status === 'valid' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <CheckCircle2 size={10} className="text-emerald-500" /> XML: Valid
+                </span>
+              )}
+              {chapter.xml_status === 'invalid' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-red-50 text-red-700 border border-red-200">
+                  <AlertCircle size={10} className="text-red-500" /> XML: Invalid
+                </span>
+              )}
+              {chapter.xml_status === 'pending' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                  <Clock size={10} className="text-amber-500 animate-spin" /> XML: Pending
+                </span>
+              )}
+              {/* InDesign File Status */}
+              {chapter.indesign_status === 'generated' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200">
+                  <Layers size={10} className="text-purple-500" /> InDesign
+                </span>
+              )}
+              {/* Final Delivery Status */}
+              {chapter.final_delivery_status === 'generated' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-teal-50 text-teal-700 border border-teal-200">
+                  <Bookmark size={10} className="text-teal-500" /> Final Delivery
+                </span>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {/* Fields */}
       <div className="px-4 pb-3 space-y-1.5 text-xs flex-1">
@@ -393,6 +429,8 @@ export function ProjectWorkflow() {
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [wfStagesMap, setWfStagesMap] = useState<Record<string, WorkflowStage[]>>({})
   const [stageRolesMap, setStageRolesMap] = useState<Map<string, string[]>>(new Map())
+  const [combineConfirmOpen, setCombineConfirmOpen] = useState(false)
+  const [combining, setCombining] = useState(false)
   const [users, setUsers] = useState<AppUser[]>([])
   const [plannedDueDates, setPlannedDueDates] = useState<Map<string, StageInfo>>(new Map())
   // Maps WMS chapter number (e.g. "01") → CMS chapter DB id for correct navigation
@@ -441,7 +479,7 @@ export function ProjectWorkflow() {
   const [batchProcessing, setBatchProcessing] = useState(false)
   const [bulkAssignModalOpen, setBulkAssignModalOpen] = useState(false)
   const [selectedBulkChapterIds, setSelectedBulkChapterIds] = useState<Set<number>>(new Set())
-  const [batchModalType, setBatchModalType] = useState<'word_to_xml' | 'xml_to_indesign' | 'indesign_to_xml' | null>(null)
+  const [batchModalType, setBatchModalType] = useState<'word_to_xml' | 'style_validation' | 'structuring' | 'xml_to_indesign' | 'indesign_to_xml' | null>(null)
   const [batchSelectedChapterIds, setBatchSelectedChapterIds] = useState<Set<number>>(new Set())
   const [batchTemplateId, setBatchTemplateId] = useState<number | ''>('')
 
@@ -550,11 +588,18 @@ export function ProjectWorkflow() {
     .filter(c => c.chapters === 'Design')
     .sort((a, b) => a.chapters.localeCompare(b.chapters, undefined, { numeric: true })), [chapters])
   const manuscriptChapters = useMemo(() => chapters
-    .filter(c => /^\d+$/.test(c.chapters))
+    .filter(c => c.chapters !== 'Design' && !c.chapters.toLowerCase().includes('art'))
     .sort((a, b) => a.chapters.localeCompare(b.chapters, undefined, { numeric: true })), [chapters])
   const artChapters = useMemo(() => chapters
     .filter(c => c.chapters.toLowerCase().includes('art'))
     .sort((a, b) => a.chapters.localeCompare(b.chapters, undefined, { numeric: true })), [chapters])
+
+  const batchTargets = useMemo(() => {
+    if (filterStage) {
+      return manuscriptChapters.filter(c => c.stage_name === filterStage)
+    }
+    return manuscriptChapters
+  }, [manuscriptChapters, filterStage])
 
   // Select active track chapters
   const activeChapters = useMemo(() => {
@@ -726,12 +771,18 @@ export function ProjectWorkflow() {
         body: JSON.stringify({
           process_type: processType,
           chapter_ids: selectedBulkChapters.map(c => c.id),
-          mode: 'style'
+          mode: 'style',
+          options: processType === 'structuring' ? { structuring_method: 'manual' } : undefined
         })
       })
       const result = await response.json()
       if (response.ok && result.success) {
-        toast.success(`Triggered ${processType === 'word_to_xml' ? 'Word to XML' : 'XML to InDesign'} for ${result.triggered_count} chapters.`)
+        let label = 'Word to XML'
+        if (processType === 'style_validation') label = 'Style Validation'
+        else if (processType === 'structuring') label = 'Word Structuring'
+        else if (processType === 'xml_to_indesign') label = 'XML to InDesign'
+        else if (processType === 'indesign_to_xml') label = 'InDesign to Final'
+        toast.success(`Triggered ${label} for ${result.triggered_count} chapters.`)
         setBulkAssignModalOpen(false)
         
         // Refresh chapters list
@@ -765,6 +816,13 @@ export function ProjectWorkflow() {
     }
 
     try {
+      let batchOptions: Record<string, any> | undefined = undefined
+      if (templateFileId) {
+        batchOptions = { template_file_id: templateFileId }
+      } else if (batchModalType === 'structuring') {
+        batchOptions = { structuring_method: 'manual' }
+      }
+
       const response = await fetch(`/api/v2/projects/${project.id}/batch-jobs`, {
         method: 'POST',
         headers: {
@@ -774,7 +832,7 @@ export function ProjectWorkflow() {
           process_type: batchModalType,
           chapter_ids: selectedIds,
           mode: 'style',
-          options: templateFileId ? { template_file_id: templateFileId } : undefined
+          options: batchOptions
         })
       })
       const result = await response.json()
@@ -782,6 +840,8 @@ export function ProjectWorkflow() {
         let processLabel = 'Word to XML'
         if (batchModalType === 'xml_to_indesign') processLabel = 'XML to InDesign'
         if (batchModalType === 'indesign_to_xml') processLabel = 'InDesign to Final'
+        if (batchModalType === 'style_validation') processLabel = 'Style Validation'
+        if (batchModalType === 'structuring') processLabel = 'Word Structuring'
         
         toast.success(`Triggered ${processLabel} for ${result.triggered_count} chapters.`)
         setBatchModalType(null)
@@ -906,6 +966,33 @@ export function ProjectWorkflow() {
     const cmsId = cmsChapterIdMap.get(num) ?? cmsChapterIdMap.get(parseInt(num, 10).toString()) ?? cmsChapterIdMap.get(num.padStart(2, '0')) ?? null
     if (!cmsId) { toast.error(`Chapter "${num}" has no files yet.`); return }
     navigate(`${clientId ? `/clients/${clientId}/projects/${projectId}` : `/projects/${projectId}`}/chapters/${cmsId}`)
+  }
+
+  async function handleCombineBook() {
+    setCombining(true)
+    try {
+      const response = await fetch(`/api/v2/projects/${id}/combine-book`, {
+        method: 'POST',
+      })
+      if (!response.ok) {
+        const errorText = await response.text()
+        let errorMsg = 'Failed to combine book files.'
+        try {
+          const errJson = JSON.parse(errorText)
+          if (errJson.detail) errorMsg = errJson.detail
+        } catch { }
+        throw new Error(errorMsg)
+      }
+
+      toast.success('Book files combined and saved to Final files successfully!')
+      setCombineConfirmOpen(false)
+      window.location.reload()
+      
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to combine book files.')
+    } finally {
+      setCombining(false)
+    }
   }
 
   return (
@@ -1133,41 +1220,75 @@ export function ProjectWorkflow() {
             {bulkStage ? `Select chapters (${bulkTargets.length})` : 'Assign'}
           </button>
 
-          {showBatchButtons && (
+          {showBatchButtons && activeTab === 'manuscript' && (
             <>
               <span className="w-px h-5 bg-border mx-1" />
+              {filterStage?.toLowerCase() === 'manuscript analysis' && (
+                <button
+                  onClick={() => {
+                    setBatchSelectedChapterIds(new Set(batchTargets.map(c => c.id)))
+                    setBatchModalType('style_validation')
+                  }}
+                  className="text-xs font-medium px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white transition-colors"
+                >
+                  Batch Style Validation
+                </button>
+              )}
+              {filterStage?.toLowerCase() === 'pre-editing' && (
+                <button
+                  onClick={() => {
+                    setBatchSelectedChapterIds(new Set(batchTargets.map(c => c.id)))
+                    setBatchModalType('structuring')
+                  }}
+                  className="text-xs font-medium px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white transition-colors"
+                >
+                  Batch Structuring
+                </button>
+              )}
+              {filterStage?.toLowerCase() === 'xml conversion' && (
+                <>
+                  <button
+                    onClick={() => {
+                      setBatchSelectedChapterIds(new Set(batchTargets.map(c => c.id)))
+                      setBatchModalType('word_to_xml')
+                    }}
+                    className="text-xs font-medium px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white transition-colors"
+                  >
+                    Batch Word to XML
+                  </button>
+                  <button
+                    onClick={() => {
+                      setBatchSelectedChapterIds(new Set(batchTargets.map(c => c.id)))
+                      const templates = templatesQuery.data ?? []
+                      if (templates.length > 0) {
+                        setBatchTemplateId(templates[0].id)
+                      } else {
+                        setBatchTemplateId('')
+                      }
+                      setBatchModalType('xml_to_indesign')
+                    }}
+                    className="text-xs font-medium px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white transition-colors"
+                  >
+                    Batch XML to InDesign
+                  </button>
+                  <button
+                    onClick={() => {
+                      setBatchSelectedChapterIds(new Set(batchTargets.map(c => c.id)))
+                      setBatchModalType('indesign_to_xml')
+                    }}
+                    className="text-xs font-medium px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white transition-colors"
+                  >
+                    Batch InDesign to Final
+                  </button>
+                </>
+              )}
               <button
                 onClick={() => {
-                  setBatchSelectedChapterIds(new Set(manuscriptChapters.map(c => c.id)))
-                  setBatchModalType('word_to_xml')
+                  setCombineConfirmOpen(true)
                 }}
-                className="text-xs font-medium px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white transition-colors"
+                className="text-xs font-medium px-3 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white transition-colors"
               >
-                Batch Word to XML
-              </button>
-              <button
-                onClick={() => {
-                  setBatchSelectedChapterIds(new Set(manuscriptChapters.map(c => c.id)))
-                  const templates = templatesQuery.data ?? []
-                  if (templates.length > 0) {
-                    setBatchTemplateId(templates[0].id)
-                  } else {
-                    setBatchTemplateId('')
-                  }
-                  setBatchModalType('xml_to_indesign')
-                }}
-                className="text-xs font-medium px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white transition-colors"
-              >
-                Batch XML to InDesign
-              </button>
-              <button
-                onClick={() => {
-                  setBatchSelectedChapterIds(new Set(manuscriptChapters.map(c => c.id)))
-                  setBatchModalType('indesign_to_xml')
-                }}
-                className="text-xs font-medium px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white transition-colors"
-              >
-                Batch InDesign to Final
+                Combine Book
               </button>
             </>
           )}
@@ -1351,20 +1472,40 @@ export function ProjectWorkflow() {
         footer={
           <div className="flex gap-3 justify-end items-center">
             {bulkStage && bulkStage.toLowerCase().includes('manuscript') && (
+              <>
+                <button
+                  onClick={() => handleBatchProcess('style_validation')}
+                  disabled={batchProcessing || selectedBulkChapters.length === 0}
+                  className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+                >
+                  {batchProcessing && <Spinner size="sm" />}
+                  Batch Style Validation
+                </button>
+                <button
+                  onClick={() => handleBatchProcess('word_to_xml')}
+                  disabled={batchProcessing || selectedBulkChapters.length === 0}
+                  className="px-4 py-2 text-sm font-medium text-white bg-amber-600 hover:bg-amber-700 rounded-lg transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+                >
+                  {batchProcessing && <Spinner size="sm" />}
+                  Batch Word to XML
+                </button>
+              </>
+            )}
+            {bulkStage && bulkStage.toLowerCase() === 'pre-editing' && (
               <button
-                onClick={() => handleBatchProcess('word_to_xml')}
+                onClick={() => handleBatchProcess('structuring')}
                 disabled={batchProcessing || selectedBulkChapters.length === 0}
-                className="px-4 py-2 text-sm font-medium text-white bg-amber-600 hover:bg-amber-700 rounded-lg transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+                className="px-4 py-2 text-sm font-medium text-white bg-sky-600 hover:bg-sky-700 rounded-lg transition-colors disabled:opacity-50 inline-flex items-center gap-2"
               >
                 {batchProcessing && <Spinner size="sm" />}
-                Batch Word to XML
+                Batch Structuring
               </button>
             )}
             {bulkStage && bulkStage.toLowerCase().includes('xml') && (
               <button
                 onClick={() => handleBatchProcess('xml_to_indesign')}
                 disabled={batchProcessing || selectedBulkChapters.length === 0}
-                className="px-4 py-2 text-sm font-medium text-white bg-amber-600 hover:bg-amber-700 rounded-lg transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+                className="px-4 py-2 text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors disabled:opacity-50 inline-flex items-center gap-2"
               >
                 {batchProcessing && <Spinner size="sm" />}
                 Batch XML to InDesign
@@ -1374,7 +1515,7 @@ export function ProjectWorkflow() {
               <button
                 onClick={() => handleBatchProcess('indesign_to_xml')}
                 disabled={batchProcessing || selectedBulkChapters.length === 0}
-                className="px-4 py-2 text-sm font-medium text-white bg-amber-600 hover:bg-amber-700 rounded-lg transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+                className="px-4 py-2 text-sm font-medium text-white bg-rose-600 hover:bg-rose-700 rounded-lg transition-colors disabled:opacity-50 inline-flex items-center gap-2"
               >
                 {batchProcessing && <Spinner size="sm" />}
                 Batch InDesign to Word
@@ -1468,6 +1609,10 @@ export function ProjectWorkflow() {
         title={
           batchModalType === 'word_to_xml'
             ? 'Batch Word to XML'
+            : batchModalType === 'style_validation'
+            ? 'Batch Style Validation'
+            : batchModalType === 'structuring'
+            ? 'Batch Word Structuring'
             : batchModalType === 'xml_to_indesign'
             ? 'Batch XML to InDesign'
             : 'Batch InDesign to Final'
@@ -1475,6 +1620,10 @@ export function ProjectWorkflow() {
         description={
           batchModalType === 'word_to_xml'
             ? 'Select the chapters you want to run Word-to-XML conversion for in bulk. This will convert the docx manuscripts into JATS XML files.'
+            : batchModalType === 'style_validation'
+            ? 'Select the chapters you want to run Style Validation for in bulk. This will validate the docx manuscripts against project style guidelines.'
+            : batchModalType === 'structuring'
+            ? 'Select the chapters you want to run Word Structuring for in bulk. This will apply standard styles to the docx manuscripts using the rules-based structuring library.'
             : batchModalType === 'xml_to_indesign'
             ? 'Select the chapters you want to generate InDesign layouts for in bulk. This will dispatch layout generation tasks to the Windows InDesign Server.'
             : 'Select the chapters you want to convert from InDesign to final XML outputs. This will extract final packages (XML + Logs) from the InDesign layouts.'
@@ -1527,7 +1676,7 @@ export function ProjectWorkflow() {
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className="text-xs font-medium text-muted">
-                Chapters ({batchSelectedChapterIds.size}/{manuscriptChapters.length} selected)
+                Chapters ({batchSelectedChapterIds.size}/{batchTargets.length} selected)
               </label>
               <div className="flex items-center gap-2.5">
                 <button
@@ -1540,7 +1689,7 @@ export function ProjectWorkflow() {
                 <span className="text-border">|</span>
                 <button
                   type="button"
-                  onClick={() => setBatchSelectedChapterIds(new Set(manuscriptChapters.map(c => c.id)))}
+                  onClick={() => setBatchSelectedChapterIds(new Set(batchTargets.map(c => c.id)))}
                   className="text-[11px] text-primary hover:underline font-medium transition-colors"
                 >
                   Select all
@@ -1549,7 +1698,7 @@ export function ProjectWorkflow() {
             </div>
 
             <div className="max-h-64 overflow-y-auto border border-border rounded-lg divide-y divide-border">
-              {manuscriptChapters.map(ch => {
+              {batchTargets.map(ch => {
                 const isSelected = batchSelectedChapterIds.has(ch.id)
                 return (
                   <label
@@ -1730,6 +1879,42 @@ export function ProjectWorkflow() {
               <AlertCircle size={12} /> {addChapterError}
             </p>
           )}
+        </div>
+      </Modal>
+
+      {/* Combine Book Modal */}
+      <Modal
+        isOpen={combineConfirmOpen}
+        onClose={() => { if (!combining) setCombineConfirmOpen(false) }}
+        title="Combine Project Book"
+        description="This will gather all XML and ePUB files from the Final delivery folders of all chapters and merge them into a single book XML and ePUB. The combined files will be uploaded to a new 'Final files' chapter folder."
+        footer={
+          <div className="flex gap-3 justify-end items-center">
+            <button
+              onClick={() => setCombineConfirmOpen(false)}
+              disabled={combining}
+              className="text-xs font-semibold px-4 py-2.5 rounded-lg border border-border hover:bg-hover text-text transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleCombineBook}
+              disabled={combining}
+              className="text-xs font-semibold px-4 py-2.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white transition-colors flex items-center gap-1.5 disabled:opacity-50"
+            >
+              {combining && <Spinner size="sm" />}
+              {combining ? 'Combining Book...' : 'Start Combine Process'}
+            </button>
+          </div>
+        }
+      >
+        <div className="py-4 text-xs text-muted flex flex-col gap-2">
+          <p>The merge scripts will be executed on the Windows Conversion Server:</p>
+          <ul className="list-disc pl-5 space-y-1">
+            <li>XML Merge: <code className="bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 px-1.5 py-0.5 rounded font-mono border border-gray-200 dark:border-gray-700">book_xml.pl</code></li>
+            <li>ePUB Merge: <code className="bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 px-1.5 py-0.5 rounded font-mono border border-gray-200 dark:border-gray-700">book_epub.pl</code></li>
+          </ul>
+          <p className="mt-2 text-amber-600 font-medium">⚠️ Note: Make sure chapters have XML and ePUB files uploaded in their Final delivery folder before running the combine process.</p>
         </div>
       </Modal>
 

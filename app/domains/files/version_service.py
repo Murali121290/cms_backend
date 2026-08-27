@@ -25,8 +25,14 @@ def archive_existing_file(
     archived_name = f"{name_only}_v{old_version_num}.{old_ext}"
     archived_path = f"{archive_dir}/{archived_name}"
 
-    actual_source = source_path or existing_file.path
-    if os.path.exists(actual_source):
+    actual_source = source_path
+    if not actual_source and existing_file.path:
+        if os.path.isabs(existing_file.path):
+            actual_source = existing_file.path
+        else:
+            actual_source = os.path.join(base_path, os.path.basename(existing_file.path))
+
+    if actual_source and os.path.exists(actual_source):
         shutil.copy2(actual_source, archived_path)
 
     version_entry = models.FileVersion(

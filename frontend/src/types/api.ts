@@ -122,6 +122,11 @@ export interface ChapterSummary {
   has_indesign: boolean;
   has_proof: boolean;
   has_xml: boolean;
+  xml_status?: string | null;
+  indesign_status?: string | null;
+  final_delivery_status?: string | null;
+  style_status?: string | null;
+  structuring_status?: string | null;
 }
 
 export interface DashboardResponse {

@@ -285,6 +285,8 @@ def _serialize_chapter_summary(chapter: models.Chapter):
         xml_status=getattr(chapter, "xml_status", None),
         indesign_status=getattr(chapter, "indesign_status", None),
         final_delivery_status=getattr(chapter, "final_delivery_status", None),
+        style_status=getattr(chapter, "style_status", None),
+        structuring_status=getattr(chapter, "structuring_status", None),
     )
 
 
@@ -4270,6 +4272,12 @@ def api_v2_start_batch_jobs(
     elif payload.process_type == "indesign_to_xml":
         target_category = "InDesign"
         target_extensions = [".indd", ".zip"]
+    elif payload.process_type == "style_validation":
+        target_category = "Manuscript"
+        target_extensions = [".docx"]
+    elif payload.process_type == "structuring":
+        target_category = "Manuscript"
+        target_extensions = [".docx"]
     else:
         return _error_response(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -4345,6 +4353,195 @@ def api_v2_start_batch_jobs(
         "results": results,
         "errors": errors
     }
+
+
+@router.post("/projects/{project_id}/combine-book")
+def api_v2_combine_project_book(
+    project_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+
+    # Load the project
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+
+    # Gather chapter-wise XML and ePUB files from the "Misc" category
+    chapters = db.query(models.ChapterInfo).filter(models.ChapterInfo.project == project.project_code).all()
+    
+    files_to_package = []
+    for chapter in chapters:
+        # Avoid including files from "Final files" chapter itself to prevent infinite loop of merging merges
+        if chapter.chapters.lower() == "final files":
+            continue
+            
+        for f in chapter.files:
+            if f.category == "Misc" and f.path:
+                ext = os.path.splitext(f.filename)[1].lower()
+                if ext in (".xml", ".epub", ".css", ".otf", ".ttf", ".woff", ".woff2", ".svg", ".png", ".jpg", ".jpeg"):
+                    if not f.filename.endswith(".log"): # exclude log files
+                        files_to_package.append(f)
+
+    if not files_to_package:
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="NO_ASSETS_FOUND",
+            message="No XML, ePUB or associated assets found in the Final delivery folders of any chapters.",
+        )
+
+    # Create temporary zip archive of the files
+    import tempfile
+    import zipfile
+    import shutil
+    import requests
+    from app.services.file_service import UPLOAD_DIR
+    from app.core.config import get_settings
+    settings = get_settings()
+
+    temp_zip = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+    temp_zip_path = temp_zip.name
+    temp_zip.close()
+
+    try:
+        with zipfile.ZipFile(temp_zip_path, "w") as zf:
+            for f in files_to_package:
+                abs_path = os.path.join(UPLOAD_DIR, f.path) if not os.path.isabs(f.path) else f.path
+                if os.path.exists(abs_path):
+                    # Write to flat folder structure
+                    zf.write(abs_path, f.filename)
+                    
+        # Send to remote Windows Conversion Server
+        url = f"{settings.INDESIGN_SERVER_URL}/merge-book"
+        logger.info(f"Sending combine-book request to remote server: {url}")
+        
+        with open(temp_zip_path, "rb") as zf_in:
+            response = requests.post(
+                url,
+                files={"file": ("combine.zip", zf_in.read(), "application/octet-stream")},
+                timeout=(30.0, 900)
+            )
+            
+        if response.status_code != 200:
+            logger.error(f"Remote server failed to combine book: Status {response.status_code}, Response: {response.text}")
+            return _error_response(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                code="REMOTE_MERGE_FAILED",
+                message=f"Remote merge script failed: {response.text}",
+            )
+            
+        # Success! Save the merged ZIP content locally and register the output files.
+        # Find or automatically create the "Final files" chapter folder.
+        final_chap = db.query(models.ChapterInfo).filter(
+            models.ChapterInfo.project == project.project_code,
+            models.ChapterInfo.chapters.ilike("final files")
+        ).first()
+        
+        if not final_chap:
+            final_chap = models.ChapterInfo(
+                client=project.division_code or "",
+                project=project.project_code,
+                chapters="Final files",
+                chapter_title="Merged Book and Final Files",
+                status="complete",
+                stage_name="Delivery",
+                current_assignee_name=viewer.username,
+                workflow=project.workflow_name
+            )
+            db.add(final_chap)
+            db.commit()
+            db.refresh(final_chap)
+            logger.info(f"Automatically created 'Final files' chapter for project {project.project_code}")
+
+        # Extract the returned ZIP containing merged.xml and merged.epub
+        response_zip_path = tempfile.NamedTemporaryFile(suffix=".zip", delete=False).name
+        with open(response_zip_path, "wb") as f_out:
+            f_out.write(response.content)
+            
+        extract_dir = tempfile.mkdtemp()
+        with zipfile.ZipFile(response_zip_path, "r") as z_res:
+            z_res.extractall(extract_dir)
+
+        # Dest directory for the "Final files" chapter
+        dest_dir = os.path.join(UPLOAD_DIR, project.project_code, final_chap.chapters, "Misc")
+        os.makedirs(dest_dir, exist_ok=True)
+        
+        from app.domains.files import version_service
+        
+        for fname in ("merged.xml", "merged.epub"):
+            src_file_path = os.path.join(extract_dir, fname)
+            if os.path.exists(src_file_path):
+                dest_file_path = os.path.join(dest_dir, fname)
+                
+                # Check if it already exists in the database
+                existing_file = db.query(models.File).filter(
+                    models.File.project_id == project.id,
+                    models.File.chapter_id == final_chap.id,
+                    models.File.filename == fname,
+                    models.File.category == "Misc"
+                ).first()
+                
+                if existing_file:
+                    version_service.archive_existing_file(db, existing_file)
+                    shutil.copy2(src_file_path, dest_file_path)
+                    existing_file.version += 1
+                    existing_file.uploaded_at = datetime.utcnow()
+                    existing_file.uploaded_by_id = viewer.id
+                    db.commit()
+                    logger.info(f"Bumped version for {fname} in 'Final files' chapter.")
+                else:
+                    shutil.copy2(src_file_path, dest_file_path)
+                    db_file = models.File(
+                        project_id=project.id,
+                        chapter_id=final_chap.id,
+                        filename=fname,
+                        file_type="text/xml" if fname.endswith(".xml") else "application/epub+zip",
+                        category="Misc",
+                        path=dest_file_path,
+                        uploaded_by_id=viewer.id,
+                        version=1,
+                        is_original=False
+                    )
+                    db.add(db_file)
+                    db.commit()
+                    logger.info(f"Registered new file {fname} in 'Final files' chapter.")
+
+        # Clean up local temporary directories and files
+        try:
+            os.remove(temp_zip_path)
+            os.remove(response_zip_path)
+            shutil.rmtree(extract_dir)
+        except Exception as cleanup_err:
+            logger.warning(f"Failed to clean up temp merge folders: {cleanup_err}")
+
+        # Stream the ZIP back to frontend for browser download
+        from starlette.responses import StreamingResponse
+        import io
+        return StreamingResponse(
+            io.BytesIO(response.content),
+            media_type="application/x-zip-compressed",
+            headers={"Content-Disposition": "attachment; filename=merged_book_files.zip"}
+        )
+
+    except Exception as err:
+        logger.error(f"Error combining project book: {err}")
+        return _error_response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            code="COMBINE_BOOK_FAILED",
+            message=f"Failed to combine book: {str(err)}",
+        )
+
 
 
 @router.post("/files/{file_id}/processing-jobs", response_model=schemas_v2.ProcessingStartResponse)
@@ -4447,6 +4644,7 @@ def api_v2_processing_status(
         "xml_to_indesign",
         "style_validation",
         "extract_design_css",
+        "view_proof",
     )
     if process_type not in supported_types:
         return _error_response(

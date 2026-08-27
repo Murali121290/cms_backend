@@ -35,7 +35,7 @@ import { XmlToIndesignModal } from '@/components/XmlToIndesignModal'
 import {
   startLanguageEdit,
   startPpdGeneration, startPermissionsCheck, startCreditExtraction,
-  startBiasScan, startWordToXml, getProcessingStatus, startIndesignToXml, startExtractDesignCss, startStyleValidation,
+  startBiasScan, startWordToXml, getProcessingStatus, startIndesignToXml, startExtractDesignCss, startStyleValidation, startViewProof,
 } from '@/api/processing'
 import { deleteFile, downloadFile, generateFigureAssessment, generateFigurePdf } from '@/api/files'
 import { useChapterFilesQuery } from '@/features/projects/useChapterFilesQuery'
@@ -519,9 +519,9 @@ function ProcessingActionsMenu({
           <button
             disabled={!fid}
             className={btnCls}
-            onClick={() => fid && setConfirmStep({ actionName: 'InDesign to XML', jobFn: () => startIndesignToXml(fid), pollFileId: fid, pollProcessType: 'indesign_to_xml' })}
+            onClick={() => fid && setConfirmStep({ actionName: 'InDesign to Final', jobFn: () => startIndesignToXml(fid), pollFileId: fid, pollProcessType: 'indesign_to_xml' })}
           >
-            <FileCode size={12} /> InDesign to XML
+            <FileCode size={12} /> InDesign to Final
           </button>
         )}
 
@@ -538,6 +538,22 @@ function ProcessingActionsMenu({
             })}
           >
             <Wrench size={12} /> Extract Layout CSS
+          </button>
+        )}
+
+        {fname.endsWith('.xhtml') && row?.subfolder?.toLowerCase() === 'proof' && (
+          <button
+            disabled={!fid}
+            type="button"
+            className={btnCls}
+            onClick={() => fid && setConfirmStep({
+              actionName: 'View Proof',
+              jobFn: () => startViewProof(fid),
+              pollFileId: fid,
+              pollProcessType: 'view_proof'
+            })}
+          >
+            <FileCode size={12} /> View Proof
           </button>
         )}
       </div>
@@ -653,6 +669,7 @@ export function ChapterFilePage({
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [generatingFigurePdf, setGeneratingFigurePdf] = useState(false)
   const [generatingAssessment, setGeneratingAssessment] = useState(false)
+  const [batchBusy, setBatchBusy] = useState<string | null>(null)
   const [expandedSources, setExpandedSources] = useState<Record<number, boolean>>({})
   const queryClient = useQueryClient()
   const [xmlToIndesignFile, setXmlToIndesignFile] = useState<{ id: number; name: string } | null>(null)
@@ -1202,6 +1219,31 @@ export function ChapterFilePage({
     }
   }
 
+  async function handleBatchProcess(processType: 'word_to_xml' | 'style_validation') {
+    if (selectedCount === 0 || batchBusy) return
+    setBatchBusy(processType)
+    try {
+      const apiFn = processType === 'word_to_xml' ? startWordToXml : startStyleValidation
+      await Promise.all(
+        selectedRows
+          .filter(r => r.db_id)
+          .map(r => apiFn(r.db_id!))
+      )
+      toast.success(
+        `Successfully started ${processType === 'word_to_xml' ? 'Word to XML' : 'Style Validation'} for ${selectedCount} file(s)`
+      )
+      void filesQuery.refetch()
+    } catch (e: any) {
+      const msg = e?.response?.data?.message
+        || e?.response?.data?.error?.message
+        || e?.response?.data?.detail
+        || 'Failed to run batch processing'
+      toast.error(msg)
+    } finally {
+      setBatchBusy(null)
+    }
+  }
+
   // ── Loading / error states ───────────────────────────────────────────────
   if (filesQuery.isLoading && !chapterFolderData) {
     return (
@@ -1294,6 +1336,36 @@ export function ChapterFilePage({
                 {selectedCount}
               </span>
             )}
+          </button>
+        )}
+
+        {/* Batch Word to XML */}
+        {selectedCount > 0 && activeFolder === 'manuscript' && (
+          <button
+            onClick={() => void handleBatchProcess('word_to_xml')}
+            disabled={!!batchBusy}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors shadow-sm
+              ${!batchBusy
+                ? 'border-primary text-primary hover:bg-accent'
+                : 'border-border text-muted opacity-50 cursor-not-allowed'}`}
+          >
+            {batchBusy === 'word_to_xml' ? <Loader2 size={12} className="animate-spin" /> : <FileCode size={12} />}
+            {batchBusy === 'word_to_xml' ? 'Processing…' : 'Batch Word to XML'}
+          </button>
+        )}
+
+        {/* Batch Style Validation */}
+        {selectedCount > 0 && activeFolder === 'manuscript' && (
+          <button
+            onClick={() => void handleBatchProcess('style_validation')}
+            disabled={!!batchBusy}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors shadow-sm
+              ${!batchBusy
+                ? 'border-primary text-primary hover:bg-accent'
+                : 'border-border text-muted opacity-50 cursor-not-allowed'}`}
+          >
+            {batchBusy === 'style_validation' ? <Loader2 size={12} className="animate-spin" /> : <ShieldCheck size={12} />}
+            {batchBusy === 'style_validation' ? 'Processing…' : 'Batch Style Validation'}
           </button>
         )}
 

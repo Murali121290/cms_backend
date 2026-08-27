@@ -30,6 +30,14 @@ def generate_html_report(docx_path, json_config_path, output_html_path):
     used_styles = set()
     style_locations = {}
 
+    # Build style_id to name mapping from doc.styles
+    style_id_to_name = {}
+    for style in doc.styles:
+        sid = getattr(style, "style_id", None)
+        sname = getattr(style, "name", None)
+        if sid and sname:
+            style_id_to_name[sid] = sname
+
     def track_style_location(style_name, location_str):
         if style_name not in style_locations:
             style_locations[style_name] = []
@@ -54,18 +62,158 @@ def generate_html_report(docx_path, json_config_path, output_html_path):
                 used_styles.add(run_style_name)
                 track_style_location(run_style_name, f"Paragraph {i}, Run {r_idx}")
 
-    # 4. Scan ONLY Active Tables (Content in use word document)
-    for t_idx, table in enumerate(doc.tables, start=1):
+    # 4. Scan ONLY Active Tables (Content in use word document, including cells, runs, and nested tables)
+    def scan_table(table, location_prefix):
         table_style = get_style_name(table.style)
         used_styles.add(table_style)
-        track_style_location(table_style, f"Table {t_idx}")
+        track_style_location(table_style, location_prefix)
+
+        scanned_cells = set()
+        for r_idx, row in enumerate(table.rows, start=1):
+            for c_idx, cell in enumerate(row.cells, start=1):
+                if cell._tc in scanned_cells:
+                    continue
+                scanned_cells.add(cell._tc)
+
+                cell_loc = f"{location_prefix}, Row {r_idx}, Cell {c_idx}"
+                for p_idx, p in enumerate(cell.paragraphs, start=1):
+                    # Paragraph style
+                    p_style_name = get_style_name(p.style)
+                    used_styles.add(p_style_name)
+                    track_style_location(p_style_name, f"{cell_loc}, Paragraph {p_idx}")
+                    
+                    # Character styles inside runs
+                    for r_run_idx, run in enumerate(p.runs, start=1):
+                        if run.style and run.style.name and run.style.name != "Default Paragraph Font":
+                            run_style_name = run.style.name
+                            used_styles.add(run_style_name)
+                            track_style_location(run_style_name, f"{cell_loc}, Paragraph {p_idx}, Run {r_run_idx}")
+                
+                # Check for nested tables in this cell
+                for nt_idx, nested_table in enumerate(cell.tables, start=1):
+                    scan_table(nested_table, f"{cell_loc}, Nested Table {nt_idx}")
+
+    for t_idx, table in enumerate(doc.tables, start=1):
+        scan_table(table, f"Table {t_idx}")
+
+    # 5. Scan Footnotes and Endnotes XML from document package
+    import zipfile
+    import xml.etree.ElementTree as ET
+
+    def scan_xml_notes(docx_path, xml_name, note_type):
+        namespaces = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
+        try:
+            with zipfile.ZipFile(docx_path) as z:
+                if xml_name in z.namelist():
+                    xml_content = z.read(xml_name)
+                    root = ET.fromstring(xml_content)
+                    tag_name = f".//w:{note_type}"
+                    for note in root.findall(tag_name, namespaces):
+                        note_id = note.attrib.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}id') or note.attrib.get('id')
+                        note_type_attr = note.attrib.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}type') or note.attrib.get('type')
+                        if note_id in ('-1', '0') or note_type_attr in ('separator', 'continuationSeparator'):
+                            continue
+                        
+                        note_label = f"{note_type.capitalize()} {note_id}"
+                        # Scan paragraphs inside the note
+                        for p_idx, p in enumerate(note.findall('.//w:p', namespaces), start=1):
+                            p_style_elem = p.find('.//w:pPr/w:pStyle', namespaces)
+                            if p_style_elem is not None:
+                                p_style_id = p_style_elem.attrib.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val')
+                                if p_style_id:
+                                    style_name = style_id_to_name.get(p_style_id, p_style_id)
+                                    used_styles.add(style_name)
+                                    track_style_location(style_name, f"{note_label}, Paragraph {p_idx}")
+                            
+                            # Scan runs inside the paragraph
+                            for r_idx, r in enumerate(p.findall('.//w:r', namespaces), start=1):
+                                r_style_elem = r.find('.//w:rPr/w:rStyle', namespaces)
+                                if r_style_elem is not None:
+                                    r_style_id = r_style_elem.attrib.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val')
+                                    if r_style_id:
+                                        style_name = style_id_to_name.get(r_style_id, r_style_id)
+                                        if style_name and style_name != "Default Paragraph Font":
+                                            used_styles.add(style_name)
+                                            track_style_location(style_name, f"{note_label}, Paragraph {p_idx}, Run {r_idx}")
+        except Exception as note_err:
+            print(f"[WARNING] Failed to parse {xml_name}: {note_err}")
+
+    scan_xml_notes(docx_path, 'word/footnotes.xml', 'footnote')
+    scan_xml_notes(docx_path, 'word/endnotes.xml', 'endnote')
 
     # Deduplicate and separate unique style lists
     all_unique_styles = sorted(list(used_styles), key=lambda x: str(x))
-    unauthorized_styles = sorted([s for s in used_styles if s not in allowed_styles], key=lambda x: str(x))
-    allowed_used_styles = sorted([s for s in used_styles if s in allowed_styles], key=lambda x: str(x))
+    allowed_styles_lower = {s.lower(): s for s in allowed_styles}
+
+    unauthorized_styles = []
+    allowed_used_styles = []
+
+    for s in used_styles:
+        if s.lower() in allowed_styles_lower:
+            allowed_used_styles.append(s)
+        else:
+            unauthorized_styles.append(s)
+
+    unauthorized_styles = sorted(unauthorized_styles, key=lambda x: str(x))
+    allowed_used_styles = sorted(allowed_used_styles, key=lambda x: str(x))
 
     status_pass = len(unauthorized_styles) == 0
+    total_styles = len(all_unique_styles)
+    approved_count = len(allowed_used_styles)
+    compliance_rate = int((approved_count / total_styles) * 100) if total_styles > 0 else 100
+
+    if compliance_rate == 100:
+        gauge_color = "#10b981"  # Emerald
+        gauge_status = "PASS"
+        gauge_status_class = "tag-allowed"
+    elif compliance_rate >= 80:
+        gauge_color = "#f59e0b"  # Amber
+        gauge_status = "WARNING"
+        gauge_status_class = "tag-warning"
+    else:
+        gauge_color = "#f43f5e"  # Rose
+        gauge_status = "FAIL"
+        gauge_status_class = "tag-unauthorized"
+
+    # Build rows HTML
+    rows_html = ""
+    for style_name in all_unique_styles:
+        is_allowed = style_name in allowed_used_styles
+        status_text = "Approved" if is_allowed else "Unauthorized"
+        badge_class = "badge-allowed" if is_allowed else "badge-unauthorized"
+        tag_class = "tag-allowed" if is_allowed else "tag-unauthorized"
+        
+        locs = style_locations.get(style_name, [])
+        loc_count = len(locs)
+        
+        max_pills = 6
+        pills_html = ""
+        for idx, loc in enumerate(locs):
+            hidden_class = " pill-hidden" if idx >= max_pills else ""
+            hidden_style = " style='display: none;'" if idx >= max_pills else ""
+            pills_html += f'<span class="location-pill{hidden_class}"{hidden_style}>{html.escape(loc)}</span>'
+        
+        if loc_count > max_pills:
+            pills_html += f'<button class="expand-btn" data-expanded="false" onclick="togglePills(this)">+{loc_count - max_pills} more...</button>'
+        
+        rows_html += f"""
+                    <tr class="style-row" data-style="{html.escape(str(style_name))}" data-allowed="{'true' if is_allowed else 'false'}">
+                        <td style="vertical-align: middle;">
+                            <span class="status-tag {tag_class}">{status_text}</span>
+                        </td>
+                        <td style="vertical-align: middle;">
+                            <span class="style-name-badge {badge_class}">{html.escape(str(style_name))}</span>
+                        </td>
+                        <td style="vertical-align: middle; font-weight: 600;">
+                            {loc_count} {'time' if loc_count == 1 else 'times'}
+                        </td>
+                        <td>
+                            <div class="locations-wrapper">
+                                {pills_html}
+                            </div>
+                        </td>
+                    </tr>
+"""
 
     # 5. Build Responsive HTML Document
     html_doc = f"""<!DOCTYPE html>
@@ -74,228 +222,533 @@ def generate_html_report(docx_path, json_config_path, output_html_path):
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Word Document Style Validation Report</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {{
-            --bg-color: #f8fafc;
-            --card-bg: #ffffff;
-            --text-main: #1e293b;
-            --text-muted: #64748b;
-            --border-color: #e2e8f0;
+            --bg-color: #0f172a;
+            --surface-color: #1e293b;
+            --surface-hover: #334155;
+            --border-color: #475569;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent-color: #6366f1;
+            --accent-hover: #4f46e5;
             --pass-color: #10b981;
-            --pass-bg: #ecfdf5;
-            --fail-color: #ef4444;
-            --fail-bg: #fef2f2;
+            --pass-bg: rgba(16, 185, 129, 0.1);
+            --fail-color: #f43f5e;
+            --fail-bg: rgba(244, 63, 94, 0.1);
+            --warn-color: #f59e0b;
+            --warn-bg: rgba(245, 158, 11, 0.1);
         }}
+
         body {{
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             background-color: var(--bg-color);
             color: var(--text-main);
             margin: 0;
-            padding: 40px 20px;
+            padding: 30px 15px;
             line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
         }}
-        .container {{ max-width: 960px; margin: 0 auto; }}
-        .header {{
-            background: var(--card-bg);
+
+        .container {{
+            max-width: 1080px;
+            margin: 0 auto;
+        }}
+
+        /* Header Layout */
+        .dashboard-header {{
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
             border: 1px solid var(--border-color);
-            border-radius: 12px;
-            padding: 28px 32px;
-            margin-bottom: 24px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-        }}
-        .header h1 {{ margin: 0 0 12px 0; font-size: 24px; }}
-        .meta-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 12px;
-            margin-top: 16px;
-            font-size: 14px;
-        }}
-        .meta-item {{ background: #f1f5f9; padding: 10px 14px; border-radius: 8px; }}
-        .meta-label {{
-            color: var(--text-muted);
-            font-size: 12px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 4px;
-            font-weight: 600;
-        }}
-        .meta-val {{ font-weight: 600; word-break: break-all; }}
-        .status-banner {{
-            display: inline-block;
-            padding: 6px 16px;
-            border-radius: 20px;
-            font-weight: 700;
-            font-size: 14px;
-            margin-top: 8px;
-        }}
-        .status-pass {{ background-color: var(--pass-bg); color: var(--pass-color); border: 1px solid #a7f3d0; }}
-        .status-fail {{ background-color: var(--fail-bg); color: var(--fail-color); border: 1px solid #fecaca; }}
-        .card {{
-            background: var(--card-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
+            border-radius: 16px;
             padding: 24px 32px;
             margin-bottom: 24px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 20px;
         }}
-        .card-title {{
-            font-size: 18px;
+
+        .header-title-section h1 {{
+            margin: 0 0 8px 0;
+            font-size: 24px;
             font-weight: 700;
-            margin-top: 0;
-            margin-bottom: 16px;
+            letter-spacing: -0.025em;
+            background: linear-gradient(to right, #f8fafc, #94a3b8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }}
+
+        .document-name {{
+            font-size: 14px;
+            color: var(--text-muted);
             display: flex;
             align-items: center;
-            justify-content: space-between;
+            gap: 6px;
         }}
-        .badge {{ font-size: 12px; padding: 4px 10px; border-radius: 12px; font-weight: 600; }}
-        .badge-fail {{ background: var(--fail-bg); color: var(--fail-color); }}
-        .badge-pass {{ background: var(--pass-bg); color: var(--pass-color); }}
-        table {{ width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 14px; }}
-        th, td {{ text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--border-color); vertical-align: top; }}
-        th {{ background-color: #f8fafc; color: var(--text-muted); font-weight: 600; font-size: 13px; text-transform: uppercase; }}
-        tr:last-child td {{ border-bottom: none; }}
-        .style-tag {{ font-family: monospace; font-size: 13px; padding: 4px 8px; border-radius: 4px; font-weight: 600; display: inline-block; }}
-        .tag-unauthorized {{ background-color: #fef2f2; color: #dc2626; border: 1px solid #fca5a5; }}
-        .tag-authorized {{ background-color: #f0fdf4; color: #16a34a; border: 1px solid #86efac; }}
-        .location-pills {{ display: flex; flex-wrap: wrap; gap: 6px; }}
-        .pill {{ background-color: #f1f5f9; color: #475569; font-size: 12px; padding: 2px 8px; border-radius: 4px; border: 1px solid #e2e8f0; }}
+
+        /* Gauge section */
+        .gauge-container {{
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            background: rgba(15, 23, 42, 0.5);
+            padding: 12px 20px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }}
+
+        .radial-gauge {{
+            position: relative;
+            width: 70px;
+            height: 70px;
+        }}
+
+        .circular-chart {{
+            display: block;
+            width: 100%;
+            height: 100%;
+            transform: rotate(-90deg);
+        }}
+
+        .circle-bg {{
+            fill: none;
+            stroke: #334155;
+            stroke-width: 3.8;
+        }}
+
+        .circle {{
+            fill: none;
+            stroke-width: 3.8;
+            stroke-linecap: round;
+        }}
+
+        .gauge-percentage {{
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--text-main);
+        }}
+
+        .gauge-info {{
+            display: flex;
+            flex-direction: column;
+        }}
+
+        .gauge-label {{
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+        }}
+
+        .gauge-status {{
+            font-size: 15px;
+            font-weight: 700;
+            margin-top: 2px;
+        }}
+
+        /* Stats Grid */
+        .stats-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }}
+
+        .stat-card {{
+            background-color: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: 14px;
+            padding: 18px 24px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s, border-color 0.2s;
+        }}
+
+        .stat-card:hover {{
+            transform: translateY(-2px);
+            border-color: var(--surface-hover);
+        }}
+
+        .stat-label {{
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }}
+
+        .stat-value {{
+            font-size: 26px;
+            font-weight: 700;
+            line-height: 1.1;
+        }}
+
+        /* Controls Section */
+        .controls-card {{
+            background-color: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: 14px;
+            padding: 16px 24px;
+            margin-bottom: 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 16px;
+        }}
+
+        .tab-bar {{
+            display: flex;
+            gap: 8px;
+        }}
+
+        .tab-btn {{
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            padding: 8px 16px;
+            font-size: 13px;
+            font-weight: 600;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }}
+
+        .tab-btn:hover {{
+            color: var(--text-main);
+            background-color: var(--surface-hover);
+        }}
+
+        .tab-btn.active {{
+            color: var(--text-main);
+            background-color: var(--accent-color);
+        }}
+
+        .search-box {{
+            position: relative;
+            max-width: 320px;
+            width: 100%;
+        }}
+
+        .search-input {{
+            width: 100%;
+            background-color: var(--bg-color);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 8px 16px 8px 36px;
+            border-radius: 8px;
+            font-size: 13px;
+            outline: none;
+            box-sizing: border-box;
+            transition: border-color 0.2s;
+        }}
+
+        .search-input:focus {{
+            border-color: var(--accent-color);
+        }}
+
+        .search-icon {{
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 16px;
+            height: 16px;
+            color: var(--text-muted);
+            pointer-events: none;
+        }}
+
+        /* Styles List Card */
+        .list-card {{
+            background-color: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 24px 32px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }}
+
+        .list-title {{
+            font-size: 18px;
+            font-weight: 700;
+            margin: 0 0 20px 0;
+        }}
+
+        .styles-table {{
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }}
+
+        .styles-table th {{
+            text-align: left;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-muted);
+            font-weight: 600;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }}
+
+        .styles-table td {{
+            padding: 16px 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            vertical-align: top;
+        }}
+
+        .styles-table tr:hover td {{
+            background-color: rgba(255, 255, 255, 0.01);
+        }}
+
+        .style-name-badge {{
+            font-family: 'Courier New', Courier, monospace;
+            font-weight: 700;
+            font-size: 13px;
+            padding: 4px 8px;
+            border-radius: 6px;
+            display: inline-block;
+        }}
+
+        .badge-allowed {{
+            background-color: var(--pass-bg);
+            color: var(--pass-color);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }}
+
+        .badge-unauthorized {{
+            background-color: var(--fail-bg);
+            color: var(--fail-color);
+            border: 1px solid rgba(244, 63, 94, 0.2);
+        }}
+
+        .status-tag {{
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            padding: 4px 10px;
+            border-radius: 6px;
+            display: inline-block;
+        }}
+
+        .tag-allowed {{
+            background-color: var(--pass-bg);
+            color: var(--pass-color);
+        }}
+
+        .tag-unauthorized {{
+            background-color: var(--fail-bg);
+            color: var(--fail-color);
+        }}
+
+        .tag-warning {{
+            background-color: var(--warn-bg);
+            color: var(--warn-color);
+        }}
+
+        .locations-wrapper {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-items: center;
+        }}
+
+        .location-pill {{
+            background-color: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: var(--text-muted);
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 6px;
+            cursor: default;
+            transition: all 0.2s;
+        }}
+
+        .location-pill:hover {{
+            background-color: rgba(255, 255, 255, 0.1);
+            color: var(--text-main);
+        }}
+
+        .expand-btn {{
+            background: none;
+            border: none;
+            color: var(--accent-color);
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            padding: 2px 6px;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+        }}
+
+        .expand-btn:hover {{
+            background-color: rgba(99, 102, 241, 0.15);
+        }}
+
+        .no-records {{
+            text-align: center;
+            color: var(--text-muted);
+            padding: 40px 0;
+            font-size: 14px;
+        }}
     </style>
 </head>
 <body>
     <div class="container">
-        <!-- Header -->
-        <div class="header">
-            <h1>Word Style Validation Report (In-Use Only)</h1>
-            <div class="status-banner {"status-pass" if status_pass else "status-fail"}">
-                {"VALIDATION PASSED" if status_pass else "UNAUTHORIZED STYLES DETECTED"}
-            </div>
-            <div class="meta-grid">
-                <div class="meta-item">
-                    <div class="meta-label">Document Name</div>
-                    <div class="meta-val">{html.escape(os.path.basename(docx_path))}</div>
-                </div>
-                <div class="meta-item">
-                    <div class="meta-label">Config Rules</div>
-                    <div class="meta-val">{html.escape(os.path.basename(json_config_path))}</div>
-                </div>
-                <div class="meta-item">
-                    <div class="meta-label">Unique Styles In-Use</div>
-                    <div class="meta-val">{len(all_unique_styles)}</div>
-                </div>
-                <div class="meta-item">
-                    <div class="meta-label">Unauthorized Styles In-Use</div>
-                    <div class="meta-val" style="color: {"#ef4444" if len(unauthorized_styles)>0 else "#10b981"}">
-                        {len(unauthorized_styles)}
-                    </div>
+        <!-- Dashboard Header -->
+        <div class="dashboard-header">
+            <div class="header-title-section">
+                <h1>S4carlisle Word Style Validation Report</h1>
+                <div class="document-name">
+                    <svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+                    <span>{html.escape(os.path.basename(docx_path))}</span>
                 </div>
             </div>
-        </div>
-
-        <!-- Section 1: Unauthorized Unique Styles In-Use -->
-        <div class="card">
-            <div class="card-title">
-                <span>Unauthorized Unique Styles (Active in Content)</span>
-                <span class="badge badge-fail">{len(unauthorized_styles)} Issues</span>
-            </div>
-"""
-
-    if unauthorized_styles:
-        html_doc += """
-            <table>
-                <thead>
-                    <tr>
-                        <th style="width: 30%;">Unique Style Name</th>
-                        <th style="width: 15%;">Active Usage</th>
-                        <th style="width: 55%;">Locations Found</th>
-                    </tr>
-                </thead>
-                <tbody>
-"""
-        for style_name in unauthorized_styles:
-            locs = style_locations.get(style_name, [])
-            loc_count = len(locs)
             
-            max_pills = 15
-            pills_html = "".join([f'<span class="pill">{html.escape(loc)}</span>' for loc in locs[:max_pills]])
-            if loc_count > max_pills:
-                pills_html += f'<span class="pill" style="background:#e2e8f0; font-weight:600;">+{loc_count - max_pills} more...</span>'
-
-            html_doc += f"""
-                    <tr>
-                        <td>
-                            <span class="style-tag tag-unauthorized">{html.escape(str(style_name))}</span>
-                        </td>
-                        <td><strong>{loc_count}</strong> times</td>
-                        <td>
-                            <div class="location-pills">{pills_html}</div>
-                        </td>
-                    </tr>
-"""
-        html_doc += """
-                </tbody>
-            </table>
-"""
-    else:
-        html_doc += """
-            <p style="color: var(--pass-color); font-weight: 600; margin: 0;">
-                No unauthorized styles are actively used in this document!
-            </p>
-"""
-
-    html_doc += f"""
+            <!-- Radial Compliance Gauge -->
+            <div class="gauge-container">
+                <div class="radial-gauge">
+                    <svg viewBox="0 0 36 36" class="circular-chart">
+                        <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                        <path class="circle" stroke="{gauge_color}" stroke-dasharray="{compliance_rate}, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                    </svg>
+                    <div class="gauge-percentage">{compliance_rate}%</div>
+                </div>
+                <div class="gauge-info">
+                    <span class="gauge-label">Compliance</span>
+                    <span class="gauge-status {gauge_status_class}">{gauge_status}</span>
+                </div>
+            </div>
         </div>
 
-        <!-- Section 2: Approved Unique Styles In-Use -->
-        <div class="card">
-            <div class="card-title">
-                <span>Approved Unique Styles (Active in Content)</span>
-                <span class="badge badge-pass">{len(allowed_used_styles)} Valid Styles</span>
+        <!-- Stats Cards Grid -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Unique Styles Used</div>
+                <div class="stat-value">{total_styles}</div>
             </div>
-"""
+            <div class="stat-card">
+                <div class="stat-label">Approved Styles</div>
+                <div class="stat-value" style="color: var(--pass-color);">{approved_count}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Unauthorized Styles</div>
+                <div class="stat-value" style="color: {"var(--fail-color)" if len(unauthorized_styles) > 0 else "var(--pass-color)"};">
+                    {len(unauthorized_styles)}
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Configuration Rules</div>
+                <div class="stat-value" style="font-size: 14px; word-break: break-all; margin-top: 6px;">
+                    {html.escape(os.path.basename(json_config_path))}
+                </div>
+            </div>
+        </div>
 
-    if allowed_used_styles:
-        html_doc += """
-            <table>
+        <!-- Search and Filters Section -->
+        <div class="controls-card">
+            <div class="tab-bar">
+                <button class="tab-btn active" data-tab="all" onclick="switchTab(this)">All Styles</button>
+                <button class="tab-btn" data-tab="unauthorized" onclick="switchTab(this)" style="color: {"var(--fail-color)" if len(unauthorized_styles) > 0 else "var(--text-muted)"};">
+                    Unauthorized ({len(unauthorized_styles)})
+                </button>
+                <button class="tab-btn" data-tab="approved" onclick="switchTab(this)">Approved ({approved_count})</button>
+            </div>
+            
+            <div class="search-box">
+                <svg class="search-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                <input type="text" id="search-input" class="search-input" placeholder="Search style name..." oninput="filterStyles()">
+            </div>
+        </div>
+
+        <!-- Styles Table Card -->
+        <div class="list-card">
+            <div class="list-title">Style Analysis Details</div>
+            
+            <table class="styles-table">
                 <thead>
                     <tr>
-                        <th style="width: 35%;">Unique Style Name</th>
-                        <th style="width: 20%;">Active Usage</th>
-                        <th style="width: 45%;">Sample Occurrences</th>
+                        <th style="width: 15%;">Status</th>
+                        <th style="width: 30%;">Style Name</th>
+                        <th style="width: 15%;">Usage</th>
+                        <th style="width: 40%;">Locations Found</th>
                     </tr>
                 </thead>
-                <tbody>
-"""
-        for style_name in allowed_used_styles:
-            locs = style_locations.get(style_name, [])
-            loc_count = len(locs)
-            sample_pills = "".join([f'<span class="pill">{html.escape(loc)}</span>' for loc in locs[:5]])
-            if loc_count > 5:
-                sample_pills += f'<span class="pill" style="background:#e2e8f0;">+{loc_count - 5} more</span>'
-
-            html_doc += f"""
-                    <tr>
-                        <td>
-                            <span class="style-tag tag-authorized">{html.escape(str(style_name))}</span>
-                        </td>
-                        <td>{loc_count} times</td>
-                        <td>
-                            <div class="location-pills">{sample_pills}</div>
-                        </td>
-                    </tr>
-"""
-        html_doc += """
+                <tbody id="styles-tbody">
+                    {rows_html}
                 </tbody>
             </table>
-"""
-    else:
-        html_doc += """
-            <p style="color: var(--text-muted); margin: 0;">No allowed styles were actively matched in document content.</p>
-"""
-
-    html_doc += """
+            
+            <div id="no-records" class="no-records" style="display: none;">
+                No styles match the current filters.
+            </div>
         </div>
     </div>
+
+    <!-- Script for Dynamic Search & Filter -->
+    <script>
+        function filterStyles() {{
+            const query = document.getElementById('search-input').value.toLowerCase();
+            const activeTab = document.querySelector('.tab-btn.active').dataset.tab;
+            const rows = document.querySelectorAll('.style-row');
+            let visibleCount = 0;
+
+            rows.forEach(row => {{
+                const styleName = row.dataset.style.toLowerCase();
+                const isAllowed = row.dataset.allowed === 'true';
+                
+                let matchesSearch = styleName.includes(query);
+                let matchesTab = activeTab === 'all' || 
+                                 (activeTab === 'unauthorized' && !isAllowed) || 
+                                 (activeTab === 'approved' && isAllowed);
+
+                if (matchesSearch && matchesTab) {{
+                    row.style.display = '';
+                    visibleCount++;
+                }} else {{
+                    row.style.display = 'none';
+                }}
+            }});
+
+            const noRecords = document.getElementById('no-records');
+            if (visibleCount === 0) {{
+                noRecords.style.display = '';
+            }} else {{
+                noRecords.style.display = 'none';
+            }}
+        }}
+
+        function switchTab(btn) {{
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            filterStyles();
+        }}
+
+        function togglePills(btn) {{
+            const parent = btn.parentElement;
+            const hiddenPills = parent.querySelectorAll('.pill-hidden');
+            const isExpanded = btn.dataset.expanded === 'true';
+
+            hiddenPills.forEach(pill => {{
+                pill.style.display = isExpanded ? 'none' : 'inline-block';
+            }});
+
+            if (isExpanded) {{
+                btn.textContent = `+${{hiddenPills.length}} more...`;
+                btn.dataset.expanded = 'false';
+            }} else {{
+                btn.textContent = 'Show Less';
+                btn.dataset.expanded = 'true';
+            }}
+        }}
+    </script>
 </body>
 </html>
 """

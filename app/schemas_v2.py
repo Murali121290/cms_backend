@@ -154,6 +154,8 @@ class ChapterSummary(BaseModel):
     xml_status: str | None = None
     indesign_status: str | None = None
     final_delivery_status: str | None = None
+    style_status: str | None = None
+    structuring_status: str | None = None
 
 
 class FileRecord(BaseModel):

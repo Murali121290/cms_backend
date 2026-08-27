@@ -27,6 +27,8 @@ export interface Chapter {
   xml_status?: 'valid' | 'invalid' | 'pending' | null
   indesign_status?: 'generated' | null
   final_delivery_status?: 'generated' | null
+  style_status?: 'valid' | 'invalid' | 'pending' | null
+  structuring_status?: 'completed' | 'failed' | 'pending' | null
 }
 
 export interface ChapterUpdate {

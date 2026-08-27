@@ -259,3 +259,70 @@ class ChapterInfo(Base):
                         return "generated"
         return None
 
+    @property
+    def style_status(self) -> Optional[str]:
+        """Derive style validation status from uploaded files.
+        - None      → no style report file present
+        - 'valid'   → compliance is 100% (PASS)
+        - 'invalid' → compliance is < 100% (FAIL or WARNING)
+        """
+        import os
+        from app.services.file_service import UPLOAD_DIR
+        report_files = [f for f in self.files if f.category == "Manuscript" and f.filename.lower().endswith("_style_report.html")]
+        if not report_files:
+            return None
+        report_file = sorted(report_files, key=lambda f: f.uploaded_at)[-1]
+        if report_file.path:
+            full_path = os.path.join(UPLOAD_DIR, report_file.path) if not os.path.isabs(report_file.path) else report_file.path
+            if os.path.exists(full_path):
+                try:
+                    content = open(full_path, encoding="utf-8", errors="ignore").read()
+                    if 'gauge-status tag-allowed">PASS' in content:
+                        return "valid"
+                    else:
+                        return "invalid"
+                except Exception:
+                    pass
+        return "pending"
+
+    @property
+    def structuring_status(self) -> Optional[str]:
+        """Derive structuring status from processing jobs or files.
+        - None        → no structuring job or file present
+        - 'completed' → structuring completed successfully
+        - 'pending'   → structuring job is running/processing
+        - 'failed'    → structuring job failed
+        """
+        from app.models import ProcessingJob
+        from app.database import SessionLocal
+        
+        file_ids = [f.id for f in self.files if f.category == "Manuscript"]
+        if not file_ids:
+            return None
+            
+        db = SessionLocal()
+        try:
+            job = db.query(ProcessingJob).filter(
+                ProcessingJob.file_id.in_(file_ids),
+                ProcessingJob.process_type == "structuring"
+            ).order_by(ProcessingJob.created_at.desc()).first()
+            if job:
+                if job.status == "processing":
+                    return "pending"
+                elif job.status == "completed":
+                    return "completed"
+                elif job.status == "failed":
+                    return "failed"
+        except Exception:
+            pass
+        finally:
+            db.close()
+            
+        # Fallback to check file presence
+        for f in self.files:
+            if f.category == "Manuscript":
+                if "_processed.docx" in f.filename.lower() or "_structured.docx" in f.filename.lower():
+                    return "completed"
+                    
+        return None
+

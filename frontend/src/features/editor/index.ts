@@ -15,4 +15,5 @@ export { OnlyOfficeEditor } from "./OnlyOfficeEditor";
 export type { OnlyOfficeEditorHandle } from "./OnlyOfficeEditor";
 export { OnlyOfficeSidePanel } from "./OnlyOfficeSidePanel";
 export { CollaboraSidePanel } from "./CollaboraSidePanel";
-
+export { TinyMceEditor } from "./TinyMceEditor";
+export type { TinyMceEditorProps, TinyMceEditorHandle } from "./TinyMceEditor";

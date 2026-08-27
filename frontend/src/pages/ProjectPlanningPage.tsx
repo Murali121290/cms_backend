@@ -338,7 +338,7 @@ export function ProjectPlanningPage() {
 
   // Partition chapters into Design, Manuscripts, and Art tracks
   const designChapters = useMemo(() => chapters.filter(c => c.chapters === 'Design'), [chapters])
-  const manuscriptChapters = useMemo(() => chapters.filter(c => /^\d+$/.test(c.chapters)), [chapters])
+  const manuscriptChapters = useMemo(() => chapters.filter(c => c.chapters !== 'Design' && !c.chapters.toLowerCase().includes('art')), [chapters])
   const artChapters = useMemo(() => chapters.filter(c => c.chapters.toLowerCase().includes('art')), [chapters])
 
   // Select active track chapters
