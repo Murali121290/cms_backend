@@ -5779,6 +5779,103 @@ def api_v2_reference_export(
     )
 
 
+@router.get(
+    "/files/{file_id}/reference-review/search",
+    response_model=schemas_v2.ReferenceSearchResponse,
+)
+def api_v2_reference_search(
+    file_id: int,
+    db_source: str = Query(..., alias="db", pattern="^(pubmed|crossref)$"),
+    query: str = Query(..., min_length=2),
+    year: Optional[str] = Query(None),
+    max_results: int = Query(5, ge=1, le=20),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+    try:
+        # touching resolve_processed_target ensures the caller has access to the file
+        structuring_review_service.resolve_processed_target(db, file_id=file_id)
+    except HTTPException as exc:
+        return _error_response(status_code=exc.status_code, code="FILE_NOT_FOUND",
+                               message=str(exc.detail))
+
+    from app.domains.review import reference_search_service
+    results = reference_search_service.search(
+        db_source, query, year=year, max_results=max_results,
+    )
+    return schemas_v2.ReferenceSearchResponse(
+        db=db_source, query=query,
+        results=[schemas_v2.ReferenceSearchHit(**r) for r in results],
+    )
+
+
+@router.post(
+    "/files/{file_id}/reference-review/references/{ref_number}/edit",
+    response_model=schemas_v2.ReferenceEditResponse,
+)
+def api_v2_reference_edit(
+    file_id: int,
+    ref_number: int,
+    payload: schemas_v2.ReferenceEditRequest,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+
+    try:
+        resolved = structuring_review_service.resolve_processed_target(db, file_id=file_id)
+    except HTTPException as exc:
+        return _error_response(status_code=exc.status_code, code="FILE_NOT_FOUND",
+                               message=str(exc.detail))
+
+    from app.domains.review import reference_edit_service
+    try:
+        result = reference_edit_service.apply_reference_edit(
+            resolved["processed_path"],
+            ref_number=ref_number,
+            new_text=payload.new_text,
+            author=viewer.username or "reviewer",
+            track_changes=payload.track_changes,
+        )
+    except ValueError as exc:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="REFERENCE_NOT_FOUND",
+            message=str(exc),
+        )
+    except Exception as exc:
+        logger.exception("reference edit failed for file_id=%s ref=%s", file_id, ref_number)
+        return _error_response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            code="REFERENCE_EDIT_FAILED",
+            message=f"Failed to apply reference edit: {exc}",
+        )
+
+    structuring_review_service.invalidate_ref_review_cache(
+        resolved["processed_path"], logger=logger,
+    )
+    return schemas_v2.ReferenceEditResponse(
+        file_id=file_id,
+        ref_number=ref_number,
+        old_text=result["old_text"],
+        new_text=result["new_text"],
+        changed=result["changed"],
+    )
+
+
 @router.get("/files/{file_id}/reference-review/validate-only", response_model=schemas_v2.ReferenceValidateOnlyResponse)
 def api_v2_reference_validate_only(
     file_id: int,

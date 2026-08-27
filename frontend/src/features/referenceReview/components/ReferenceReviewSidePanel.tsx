@@ -30,6 +30,7 @@ import { useReferenceReviewQuery } from "../useReferenceReviewQuery";
 import { useReferenceSave } from "../useReferenceSave";
 import { useReferenceValidateOnly } from "../useReferenceValidateOnly";
 import { stampBookmarks } from "../stampBookmarks";
+import { ReferenceCard } from "./ReferenceCard";
 import {
   addManualBookmark,
   listBookmarks,
@@ -406,12 +407,18 @@ export function ReferenceReviewSidePanel({ fileId, editorRef }: Props) {
         ) : (
           <ul className="space-y-2">
             {filteredReferences.map((r, i) => (
-              <ItemCard
+              <ReferenceCard
                 key={i}
-                title={r.number != null ? `[${r.number}]` : `#${i + 1}`}
-                message={r.text}
-                status={r.is_cited ? "ok" : "unused"}
+                fileId={fileId}
+                index={i}
+                entry={{
+                  number: r.number,
+                  text: r.text,
+                  para_idx: r.para_idx,
+                  is_cited: r.is_cited,
+                }}
                 onLocate={() => locate(r.para_idx, r.number ?? undefined, r.text)}
+                onSaved={() => reviewQuery.refetch()}
               />
             ))}
           </ul>
