@@ -881,10 +881,127 @@ def swap_citation_punctuation_in_runs(doc):
                 run.text = text
 
 
+# ── Reference bookmark scheme (PPH-compatible, numeric flavor) ────────────────
+# Insert `ref_N` on each bibliography entry paragraph (N is the number carried
+# by the entry — e.g. `ref_5` on `5. Smith J...`), `bib_N` on the first in-text
+# citation to entry N, and `bib_N_M` (M >= 2) on subsequent citations. Numeric
+# citation groups like `[3-5]` or `[1, 3, 5]` receive one nested bookmark per
+# referenced ID wrapping the same run(s). Any bookmark name that already
+# exists in the document is skipped so we don't disturb PPH's coverage.
+
+
+def apply_reference_bookmarks(doc, ref_proc) -> None:
+    """Emit numeric-style ref_N / bib_N / bib_N_M bookmarks on an AMA doc.
+
+    `ref_proc` is a fully-configured ReferenceProcessor whose `is_citation_run`
+    already reflects the detected citation format. Skips any name that already
+    exists so pre-existing PPH bookmarks are preserved as-is.
+    """
+    from docx.oxml.ns import qn as _qn
+    from docx.oxml import OxmlElement as _Oxml
+
+    existing_names = {
+        bm.get(_qn("w:name"))
+        for bm in doc.element.body.iter(_qn("w:bookmarkStart"))
+        if bm.get(_qn("w:name"))
+    }
+
+    def _next_id() -> int:
+        if not hasattr(doc, "_ref_bm_next_id"):
+            used = set()
+            for bm in doc.element.body.iter(_qn("w:bookmarkStart")):
+                raw = bm.get(_qn("w:id"))
+                try:
+                    used.add(int(raw))
+                except (TypeError, ValueError):
+                    pass
+            doc._ref_bm_next_id = (max(used) + 1) if used else 1
+        v = doc._ref_bm_next_id
+        doc._ref_bm_next_id += 1
+        return v
+
+    def _make_pair(name: str, bm_id: int):
+        bs = _Oxml("w:bookmarkStart")
+        bs.set(_qn("w:id"), str(bm_id))
+        bs.set(_qn("w:name"), name)
+        be = _Oxml("w:bookmarkEnd")
+        be.set(_qn("w:id"), str(bm_id))
+        return bs, be
+
+    # 1) ref_N on each bibliography entry paragraph.
+    _, ref_objects = ref_proc.get_references_in_bibliography()
+    for obj in ref_objects:
+        ref_id = obj.get("id")
+        para = obj.get("para")
+        if ref_id is None or para is None:
+            continue
+        name = f"ref_{ref_id}"
+        if name in existing_names:
+            continue
+        bs, be = _make_pair(name, _next_id())
+        p = para._p
+        pPr = p.find(_qn("w:pPr"))
+        if pPr is not None:
+            pPr.addnext(bs)
+        else:
+            p.insert(0, bs)
+        p.append(be)
+        existing_names.add(name)
+
+    # 2) bib_N / bib_N_M on in-text citation groups. Reuses the same
+    # consecutive-citation-run grouping as get_citations_in_text().
+    occurrence: dict = {}
+
+    def _pick_name(ref_id: int) -> str:
+        while True:
+            occurrence[ref_id] = occurrence.get(ref_id, 0) + 1
+            m = occurrence[ref_id]
+            name = f"bib_{ref_id}" if m == 1 else f"bib_{ref_id}_{m}"
+            if name not in existing_names:
+                return name
+
+    for para in iter_document_paragraphs(doc):
+        if para.style and para.style.name == "REF-N":
+            continue
+
+        # Build consecutive citation-run groups, mirroring get_citations_in_text().
+        groups = []
+        current = []
+        for run in para.runs:
+            if ref_proc.is_citation_run(run):
+                current.append(run)
+            else:
+                if current:
+                    text = "".join(r.text or "" for r in current)
+                    nums = get_numbers(text)
+                    if nums:
+                        groups.append((list(current), nums))
+                    current = []
+        if current:
+            text = "".join(r.text or "" for r in current)
+            nums = get_numbers(text)
+            if nums:
+                groups.append((list(current), nums))
+
+        for runs, ref_ids in groups:
+            if not runs:
+                continue
+            first_r = runs[0]._r
+            last_r = runs[-1]._r
+            # One bookmark per distinct ref_id in the group. Multiple bookmarks
+            # around the same run stack cleanly as nested pairs in OOXML.
+            for ref_id in ref_ids:
+                name = _pick_name(ref_id)
+                bs, be = _make_pair(name, _next_id())
+                first_r.addprevious(bs)
+                last_r.addnext(be)
+                existing_names.add(name)
+
+
 def process_document(file, citation_format="auto"):
     doc = Document(file)
     swap_citation_punctuation_in_runs(doc)
-    
+
     # 1. Apply styles prep before validation check
     apply_styles_prep(doc, citation_format=citation_format)
     
@@ -895,14 +1012,17 @@ def process_document(file, citation_format="auto"):
     # DECISION:
     # 1. If Unused References exist -> ABORT renumbering.
     if before_stats["unused_references"]:
+        apply_reference_bookmarks(doc, processor1)
         return doc, before_stats, before_stats, {}, "Aborted: Document validation failed due to unused references."
 
     # 3. If Missing Refs -> Can't safely renumber usually
     if before_stats["missing_references"]:
+         apply_reference_bookmarks(doc, processor1)
          return doc, before_stats, before_stats, {}, "Aborted: Missing references detected."
 
     # 2. If Perfect -> No need.
     if before_stats["is_perfect"]:
+        apply_reference_bookmarks(doc, processor1)
         return doc, before_stats, before_stats, {}, "Validation completed."
 
     # ── PASS 1: Reorder Sequence (ignore duplicates) ───────────────────────
@@ -918,7 +1038,11 @@ def process_document(file, citation_format="auto"):
     
     # 3. Check AFTER final state
     after_stats = processor2.get_validation_stats()
-    
+
+    # Emit PPH-style ref_N / bib_N / bib_N_M bookmarks against the finalised
+    # numbering. Runs before returning so downstream consumers see them.
+    apply_reference_bookmarks(doc, processor2)
+
     # Composed mapping composition
     mapping = {}
     for old_id, intermediate_id in pass1_mapping.items():

@@ -590,25 +590,46 @@ class XhtmlToDocxDeltaEngine:
         from docx.opc.constants import RELATIONSHIP_TYPE
 
         # 1. Clear existing runs, ins, del, hyperlinks, math, and run-level
-        # bookmarks (r_bm_*). The math elements (m:oMath / m:oMathPara) live in
-        # a different XML namespace and would survive a plain localname-only
-        # match against the wordprocessing tag list — we match on localname here
-        # too because both namespaces use these tag names uniquely.
+        # bookmarks (r_bm_*). Also clear user-visible bookmarks (bib_*, ref_*,
+        # user-named) because their positions are anchored to run indices that
+        # we're about to rebuild — the DOCX→XHTML converter emitted them as
+        # `<a data-bookmark data-bookmark-role="existing">` in HTML, so the
+        # traversal below will re-emit them at the correct positions. We keep
+        # our own paragraph-level structural bookmarks (p_bm_*, tbl_bm_*, etc.)
+        # since those aren't inside the run stream. The math elements
+        # (m:oMath / m:oMathPara) live in a different XML namespace and would
+        # survive a plain localname-only match — we match on localname here
+        # because both namespaces use these tag names uniquely.
         p_elem = para._element
+        _run_stream_bm_prefixes = ("r_bm_",)
         for child in list(p_elem):
             tag_name = etree.QName(child.tag).localname
             if tag_name in ('r', 'ins', 'del', 'hyperlink', 'sdt', 'oMath', 'oMathPara'):
                 p_elem.remove(child)
             elif tag_name in ('bookmarkStart', 'bookmarkEnd'):
-                name = child.get(qn('w:name'), '')
-                if name.startswith('r_bm_'):
-                    p_elem.remove(child)
+                name = child.get(qn('w:name'), '') or ''
+                is_structural = any(
+                    name.startswith(p) for p in
+                    ("p_bm_", "tbl_bm_", "cell_bm_", "fnpara_bm_", "enpara_bm_")
+                )
+                is_ghost = name == "_GoBack"
+                if is_structural or is_ghost:
+                    continue
+                # Everything else — r_bm_*, bib_*, ref_*, Bookmark1, user
+                # names — gets stripped now and re-emitted by the traversal
+                # from the HTML's data-bookmark markers.
+                p_elem.remove(child)
 
         # ISO 8601 timestamp with UTC timezone
         timestamp = datetime.utcnow().isoformat() + "Z"
         
         # Track unique revision/bookmark IDs
         next_id = [_get_unique_bookmark_id(doc)]  # Use list to allow mutation
+        # Track user-authored bookmark names (data-bookmark-role set) already
+        # emitted in this traversal — a Reference Review REF{n} mark can
+        # render as multiple <a> chunks when the paragraph has mixed
+        # formatting, and Word bookmark names must be unique per document.
+        emitted_named_bookmarks: set = set()
 
         def parse_style(style_str):
             if not style_str:
@@ -1100,7 +1121,23 @@ class XhtmlToDocxDeltaEngine:
                         char_style=node_char_style, is_del=current_is_del
                     )
 
-            if bm_name and bm_name.startswith("r_bm_"):
+            # Wrap in <w:bookmarkStart/w:bookmarkEnd> for either
+            #   (a) auto-generated run identity bookmarks (r_bm_*), or
+            #   (b) explicit user/reference-review bookmarks that carry a
+            #       data-bookmark-role attribute (e.g. REF25 from the
+            #       Reference Review auto-bookmark flow, or bib_1/ref_5 that
+            #       the DOCX→XHTML converter surfaced with role="existing").
+            # For (b) we emit the Word bookmark only on the first occurrence
+            # of a given name so we don't produce duplicate bookmark names.
+            bm_role = el.get("data-bookmark-role")
+            is_named_user_bm = bool(bm_name) and bm_role in (
+                "target", "source", "manual", "existing"
+            )
+            if is_named_user_bm and bm_name in emitted_named_bookmarks:
+                process_text_and_children(current_xml_parent)
+            elif bm_name and (bm_name.startswith("r_bm_") or is_named_user_bm):
+                if is_named_user_bm:
+                    emitted_named_bookmarks.add(bm_name)
                 wrap_in_bookmark(current_xml_parent, bm_name, process_text_and_children)
             else:
                 process_text_and_children(current_xml_parent)
