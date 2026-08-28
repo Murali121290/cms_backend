@@ -1145,15 +1145,15 @@ def _run_validation_on_doc(
         doc_paragraphs = [docx.text.paragraph.Paragraph(p_elem, doc) for p_elem in doc.element.body.iter(qn("w:p"))]
         para_index_map = {p._element: idx for idx, p in enumerate(doc_paragraphs)}
 
-        # Build citation_pairs: one entry per unique cited number, in appearance order
+        # Pre-compute reference lookups once (was O(N²) via nested "for obj in ref_objects" scans).
         ref_text_map = {obj["id"]: _get_full_reference_text(obj["para"], doc_paragraphs, para_index_map) for obj in ref_objects}
+        ref_para_by_id = {obj["id"]: obj["para"] for obj in ref_objects}
+        ref_id_by_element = {obj["para"]._element: obj["id"] for obj in ref_objects}
+
+        # Build citation_pairs: one entry per unique cited number, in appearance order
         citation_pairs = []
         for num in appearance_order:
-            ref_para = None
-            for obj in ref_objects:
-                if obj["id"] == num:
-                    ref_para = obj["para"]
-                    break
+            ref_para = ref_para_by_id.get(num)
             citation_pairs.append({
                 "citation": str(num),
                 "ref_number": num,
@@ -1167,7 +1167,7 @@ def _run_validation_on_doc(
                 citation_pairs.append({
                     "citation": None,
                     "ref_number": obj["id"],
-                    "ref_text": _get_full_reference_text(obj["para"], doc_paragraphs, para_index_map),
+                    "ref_text": ref_text_map.get(obj["id"], ""),
                     "status": "unused",
                     "para_idx": para_index_map.get(obj["para"]._element, -1),
                 })
@@ -1177,16 +1177,11 @@ def _run_validation_on_doc(
         for p in doc_paragraphs:
             style_name = (p.style.name or "") if p.style else ""
             if "REF-N" in style_name:
-                ref_num = None
-                for obj in ref_objects:
-                    if obj["para"]._element == p._element:
-                        ref_num = obj["id"]
-                        break
-
+                ref_num = ref_id_by_element.get(p._element)
                 if ref_num is not None:
                     reference_entries.append({
                         "number": ref_num,
-                        "text": _get_full_reference_text(p, doc_paragraphs, para_index_map),
+                        "text": ref_text_map.get(ref_num, ""),
                         "style": "REF-N",
                         "is_cited": ref_num in cited_set,
                         "para_idx": para_index_map.get(p._element, -1),
@@ -1508,15 +1503,21 @@ def run_validation_only(db: Session, *, file_id: int, style: Optional[str] = Non
                 doc.save(processed_path)
                 db.commit()
 
-                # Regenerate validation logs using the updated/saved document state!
-                validation_logs = _run_validation_on_doc(
-                    doc,
-                    processed_path,
-                    style="AMA",
-                    citation_format=citation_format,
-                    logger=logger,
-                    et_al_threshold=et_al_threshold,
-                )
+                # Regenerate validation logs against the updated document — but
+                # only when renumbering actually changed something. When
+                # process_document reports "Validation completed." the doc was
+                # already perfect (only bookmarks were emitted), so the first
+                # validation_logs are still authoritative. Skipping this second
+                # pass avoids a redundant full doc walk + O(N²) duplicate scan.
+                if status_msg != "Validation completed.":
+                    validation_logs = _run_validation_on_doc(
+                        doc,
+                        processed_path,
+                        style="AMA",
+                        citation_format=citation_format,
+                        logger=logger,
+                        et_al_threshold=et_al_threshold,
+                    )
 
                 # Invalidate caches
                 invalidate_ref_review_cache(processed_path, logger=logger)
