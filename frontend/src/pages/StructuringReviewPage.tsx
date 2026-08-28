@@ -626,7 +626,7 @@ export function StructuringReviewPage() {
               hideSaveButton
               trackChangesEnabled={trackChangesEnabled}
               onTrackChangesToggle={setTrackChangesEnabled}
-              height={isFullscreen ? "calc(100vh - 20px)" : "calc(100vh - 260px)"}
+              height={isFullscreen ? "calc(100vh - 20px)" : "calc(100vh - 160px)"}
               styles={allStyles}
               onAddStyle={handleAddStyle}
               currentUser={currentUser}
@@ -743,7 +743,7 @@ export function StructuringReviewPage() {
             {!isFullscreen && showReferencePanel && (
               <div
                 className="w-[380px] shrink-0 flex flex-col bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden sticky top-3 self-start"
-                style={{ height: "calc(100vh - 260px)" }}
+                style={{ height: "calc(100vh - 160px)" }}
               >
                 <ReferenceReviewSidePanel fileId={normalizedFileId} editorRef={editorRef} />
               </div>

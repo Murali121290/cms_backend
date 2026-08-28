@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { Search, X, ExternalLink } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
@@ -106,9 +107,11 @@ export function EditReferenceModal({
 
   const dirty = editedText.trim() !== originalText.trim();
 
-  return (
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto"
+      className="fixed inset-0 z-[100] flex items-start justify-center bg-black/40 p-4 overflow-y-auto"
       onClick={onClose}
     >
       <div
@@ -246,6 +249,7 @@ export function EditReferenceModal({
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
