@@ -355,6 +355,7 @@ export function ChapterEditorPage() {
   const [pdfFileUrl, setPdfFileUrl] = useState<string | null>(null)
   const [pdfLoading, setPdfLoading] = useState(false)
   const [currentPdfPage, setCurrentPdfPage] = useState<number>(1)
+  const [leftPanelMode, setLeftPanelMode] = useState<'pdf' | 'xml'>('pdf')
   const [activeFileId, setActiveFileId] = useState<number | null>(null)
   const [customCssContent, setCustomCssContent] = useState<string | null>(null)
 
@@ -738,25 +739,64 @@ export function ChapterEditorPage() {
           console.warn("No PDF proof file found for this chapter")
         }
 
-        // Resolve matching InDesign CSS
-        const cssFile = filesData.files?.find(f => f.filename.toLowerCase().endsWith('.css'))
-        if (cssFile) {
+        // Resolve matching XML for preview
+        const xmlFile = filesData.files?.find(f => f.filename.toLowerCase().endsWith('.xml'))
+        if (xmlFile) {
           const chNo = chapter.chapters?.match(/\d+/)?.[0]
           let chFolder = `chapter-${chapterId}`
           if (project?.file_details && chNo) {
             const cf = (project.file_details as any).chapter_folders
             chFolder = cf?.chapters?.find((c: any) => c.chapter_name === `chapter-${chNo}`)?.chapter_name ?? `chapter-${chNo}`
           }
-          const folder = (cssFile as any).subfolder || cssFile.category || 'Proof'
-          const url = `/api/uploads/${projectId}/chapter/${chFolder}/${folder}/${encodeURIComponent(cssFile.filename)}/download?chapter_id=${chapterId}`
-          
-          fetch(url, { credentials: 'include' })
-            .then(res => {
-              if (!res.ok) throw new Error('CSS file not found')
-              return res.text()
+          const folder = (xmlFile as any).subfolder || xmlFile.category || 'Manuscript'
+          const xmlUrl = `/api/uploads/${projectId}/chapter/${chFolder}/${folder}/${encodeURIComponent(xmlFile.filename)}/download?chapter_id=${chapterId}`
+          fetch(xmlUrl, { credentials: 'include' })
+            .then(res => res.ok ? res.text() : null)
+            .then(text => { if (text) setXmlContent(text) })
+            .catch(err => console.error("Failed to load matching XML file:", err))
+        }
+
+        // Resolve matching InDesign CSS from the exact same subfolder or category
+        const baseName = decodedFilename.replace(/\.[^/.]+$/, '')
+        
+        // Priority 1: .css file in the exact same subfolder / category
+        let cssFile = filesData.files?.find(f => 
+          f.filename.toLowerCase().endsWith('.css') && 
+          ((f as any).subfolder?.toLowerCase() === decodedSubfolder.toLowerCase() || f.category?.toLowerCase() === decodedSubfolder.toLowerCase())
+        )
+
+        // Priority 2: baseName.css, idGeneratedStyles.css, or layout_design.css
+        if (!cssFile) {
+          cssFile = filesData.files?.find(f => 
+            f.filename.toLowerCase() === `${baseName.toLowerCase()}.css` ||
+            f.filename.toLowerCase() === 'idgeneratedstyles.css' ||
+            f.filename.toLowerCase() === 'layout_design.css'
+          )
+        }
+
+        // Priority 3: Any .css file in chapter
+        if (!cssFile) {
+          cssFile = filesData.files?.find(f => f.filename.toLowerCase().endsWith('.css'))
+        }
+
+        if (cssFile) {
+          const downloadUrl = (cssFile as any).download_url || `/api/v2/files/${cssFile.id}/download`
+          fetch(downloadUrl, { credentials: 'include' })
+            .then(res => res.ok ? res.text() : null)
+            .then(text => {
+              if (text) setCustomCssContent(text)
             })
-            .then(text => setCustomCssContent(text))
-            .catch(err => console.error("Failed to load custom CSS file:", err))
+            .catch(err => console.error("Failed to load CSS file via download URL:", err))
+        } else {
+          // Fallback path-based fetch
+          const chFolder = chapter.chapters || `chapter-${chapterId}`
+          const url = `/api/uploads/${projectId}/chapter/${chFolder}/${encodeURIComponent(decodedSubfolder)}/idGeneratedStyles.css/download?chapter_id=${chapterId}`
+          fetch(url, { credentials: 'include' })
+            .then(res => res.ok ? res.text() : null)
+            .then(text => {
+              if (text) setCustomCssContent(text)
+            })
+            .catch(err => console.error("Failed to load fallback CSS file:", err))
         }
       })
       .catch(err => {
@@ -766,7 +806,9 @@ export function ChapterEditorPage() {
   }, [ext, projectId, chapterId, chapter, project, decodedFilename])
 
   // CSS rule prefixing helper to prevent styles from bleeding out of the editor wrapper
+  // CSS rule prefixing helper to prevent styles from bleeding out of the editor wrapper
   const scopeCss = (cssText: string, prefix: string): string => {
+    const prefixes = prefix.split(',').map(p => p.trim())
     return cssText.replace(/([^\r\n,{}]+)(?=\s*\{)/g, (match) => {
       const trimmed = match.trim()
       if (trimmed.startsWith('@') || trimmed.startsWith('to') || trimmed.startsWith('from') || /^\d+%$/.test(trimmed)) {
@@ -776,7 +818,9 @@ export function ChapterEditorPage() {
         .split(',')
         .map((sel) => {
           const s = sel.trim()
-          return s === 'body' || s === 'html' ? `${prefix}` : `${prefix} ${s}`
+          return prefixes
+            .map(p => (s === 'body' || s === 'html' ? `${p}` : `${p} ${s}`))
+            .join(', ')
         })
         .join(', ')
     })
@@ -791,7 +835,7 @@ export function ChapterEditorPage() {
     
     const styleEl = document.createElement('style')
     styleEl.id = 'xhtml-chapter-styles'
-    styleEl.textContent = scopeCss(customCssContent, '.ProseMirror')
+    styleEl.textContent = scopeCss(customCssContent, '.mce-content-body, .ProseMirror, .tox-edit-area')
     document.head.appendChild(styleEl)
     
     return () => {
@@ -875,7 +919,9 @@ export function ChapterEditorPage() {
     }
   }, [ext])
 
-  // XHTML Save Handler
+  const [isConvertingXml, setIsConvertingXml] = useState(false)
+
+  // XHTML Save Handler (Fast Save)
   const handleXhtmlSave = async (explicitHtml?: string) => {
     let content = typeof explicitHtml === 'string' ? explicitHtml : xhtmlContent
     if (!explicitHtml && wysiwygEditorRef.current?.editor) {
@@ -900,6 +946,43 @@ export function ChapterEditorPage() {
     } finally {
       setXhtmlSaving(false)
     }
+  }
+
+  // Explicit XML Conversion Handler for "Show Updated XML" Button
+  const handleShowUpdatedXml = async () => {
+    setLeftPanelMode('xml')
+    let content = xhtmlContent
+    if (wysiwygEditorRef.current?.editor) {
+      content = wysiwygEditorRef.current.editor.getHTML()
+    }
+    const convertUrl = saveUrl?.replace(/\/save$/, '/convert-xml')
+    if (!convertUrl) return
+
+    setIsConvertingXml(true)
+    try {
+      const res = await fetch(convertUrl, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ content }),
+      })
+      if (!res.ok) throw new Error('XML conversion failed')
+      const data = await res.json()
+      if (data.xml_content) {
+        setXmlContent(data.xml_content)
+        toast.success('XML converted & updated successfully!')
+      }
+    } catch (err) {
+      toast.error('Failed to update XML')
+    } finally {
+      setIsConvertingXml(false)
+    }
+  }
+
+  const handleShowPdfProof = () => {
+    setLeftPanelMode('pdf')
   }
 
   // Synchronize editor cursor position to PDF page number
@@ -1117,9 +1200,24 @@ export function ChapterEditorPage() {
             </div>
           ) : (
             <div className="flex h-full w-full overflow-hidden">
-              {/* Left Panel: PDF Viewer */}
+              {/* Left Panel: PDF Viewer or XML Viewer */}
               <div className="w-1/2 h-full flex flex-col overflow-hidden bg-gray-50 border-r border-gray-200">
-                {pdfLoading ? (
+                {leftPanelMode === 'xml' ? (
+                  <div className="flex-1 flex flex-col min-h-0 bg-slate-950">
+                    <div className="px-4 py-2 bg-slate-900 border-b border-slate-800 text-xs font-semibold text-purple-300 flex items-center justify-between select-none">
+                      <span className="flex items-center gap-1.5 font-mono">
+                        <FileText size={14} className="text-purple-400" /> Updated Manuscript XML (Converted via Perl)
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-sans font-normal">Auto-converted from XHTML on Save</span>
+                    </div>
+                    <SourceEditor
+                      value={xmlContent ?? 'Loading XML content...'}
+                      onChange={() => {}}
+                      readOnly={true}
+                      className="flex-1 min-h-0"
+                    />
+                  </div>
+                ) : pdfLoading ? (
                   <div className="flex-1 flex items-center justify-center">
                     <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
                   </div>
@@ -1159,6 +1257,10 @@ export function ChapterEditorPage() {
                   trackChangesEnabled={true}
                   currentUser={chapter?.current_assignee_name || 'Compositor'}
                   customCss={customCssContent || ""}
+                  leftViewMode={leftPanelMode}
+                  onShowUpdatedXml={handleShowUpdatedXml}
+                  onShowPdfProof={handleShowPdfProof}
+                  isConvertingXml={isConvertingXml}
                 />
               </div>
             </div>

@@ -526,7 +526,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
       fileId,
       toolbarExtras,
       hideToolbar = false,
-      inlineSaveBar = false,
+      inlineSaveBar = true,
       hideSaveButton = false,
     }: WysiwygEditorProps,
     ref

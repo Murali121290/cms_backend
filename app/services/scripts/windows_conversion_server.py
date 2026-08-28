@@ -1086,12 +1086,17 @@ def convert_indesign_to_xml(file: UploadFile = File(...), client: str = None):
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as out_zf:
             for root, _, filenames in os.walk(temp_dir):
                 for fname in filenames:
+                    if fname.startswith("~$") or fname.startswith("."):
+                        continue
                     ext = os.path.splitext(fname)[1].lower()
-                    if ext in (".xml", ".epub", ".log", ".jpg", ".jpeg", ".docx") and not fname.endswith(".zip"):
+                    if ext in (".xml", ".epub", ".log", ".jpg", ".jpeg", ".docx", ".pdf", ".xhtml", ".css", ".indd", ".indt") and not fname.endswith(".zip"):
                         file_abs_path = os.path.join(root, fname)
                         rel_path = os.path.relpath(file_abs_path, temp_dir)
-                        out_zf.write(file_abs_path, rel_path)
-                        logger.info(f"[{session_id}] Zipped result file: {rel_path}")
+                        try:
+                            out_zf.write(file_abs_path, rel_path)
+                            logger.info(f"[{session_id}] Zipped result file: {rel_path}")
+                        except Exception as z_err:
+                            logger.warning(f"[{session_id}] Skipping transient/unreadable file {rel_path}: {z_err}")
             if log_path and os.path.exists(log_path):
                 out_zf.write(log_path, "finalxml_batch.log")
             if epub_log_path and os.path.exists(epub_log_path):
@@ -1236,10 +1241,399 @@ def extract_design_css(file: UploadFile = File(...)):
     finally:
         pythoncom.CoUninitialize()
 
+@app.post("/merge-book")
+def merge_book(file: UploadFile = File(...)):
+    start_time = time.time()
+    session_id = str(uuid.uuid4())
+    workflow_base_dir = r"C:\Users\muraliba\Documents\temp_conversions"
+    
+    temp_dir = os.path.join(workflow_base_dir, f"combine_{session_id}")
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    logger.info(f"[{session_id}] Received combine book request")
+    uploaded_file_path = os.path.join(temp_dir, file.filename)
+    
+    try:
+        with open(uploaded_file_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+        logger.info(f"[{session_id}] Saved zip to {uploaded_file_path}")
+    except Exception as e:
+        logger.error(f"[{session_id}] Failed to save uploaded file: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+
+    # Extract zip file
+    import zipfile
+    try:
+        with zipfile.ZipFile(uploaded_file_path, "r") as z:
+            z.extractall(temp_dir)
+        logger.info(f"[{session_id}] Unzipped combined package successfully")
+    except Exception as zip_ex:
+        logger.error(f"[{session_id}] ZIP extraction failed: {str(zip_ex)}")
+        raise HTTPException(status_code=400, detail=f"Failed to extract ZIP archive: {str(zip_ex)}")
+
+    # Run book_xml.pl
+    xml_script = r"C:\Users\muraliba\Documents\Merge\book_xml.pl"
+    output_xml = os.path.join(temp_dir, "merged.xml")
+    
+    logger.info(f"[{session_id}] Running book_xml.pl script...")
+    try:
+        import subprocess
+        # book_xml.pl <input_dir> <output_file>
+        result_xml = subprocess.run(
+            ["perl", xml_script, temp_dir, output_xml],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        logger.info(f"[{session_id}] book_xml.pl succeeded: {result_xml.stdout}")
+    except Exception as xml_err:
+        logger.error(f"[{session_id}] book_xml.pl failed: {str(xml_err)}")
+        err_msg = getattr(xml_err, "stderr", str(xml_err))
+        raise HTTPException(status_code=500, detail=f"XML merge failed: {err_msg}")
+
+    # Run book_epub.pl
+    epub_script = r"C:\Users\muraliba\Documents\Merge\book_epub.pl"
+    
+    # Locate or create a stylesheet.css in temp_dir
+    css_files = [f for f in os.listdir(temp_dir) if f.lower().endswith(".css") and f != "stylesheet.css"]
+    css_path = os.path.join(temp_dir, css_files[0]) if css_files else os.path.join(temp_dir, "stylesheet.css")
+    if not os.path.exists(css_path):
+        with open(css_path, "w") as f:
+            f.write("/* empty stylesheet */\n")
+            
+    logger.info(f"[{session_id}] Running book_epub.pl script...")
+    try:
+        # book_epub.pl <dir_path> <css_file> [book_title]
+        # It generates "combined_book.epub" in dir_path
+        result_epub = subprocess.run(
+            ["perl", epub_script, temp_dir, css_path, "Combined Book"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        logger.info(f"[{session_id}] book_epub.pl succeeded: {result_epub.stdout}")
+    except Exception as epub_err:
+        logger.error(f"[{session_id}] book_epub.pl failed: {str(epub_err)}")
+        err_msg = getattr(epub_err, "stderr", str(epub_err))
+        raise HTTPException(status_code=500, detail=f"EPUB merge failed: {err_msg}")
+
+    # Verify and rename combined_book.epub to merged.epub
+    generated_epub = os.path.join(temp_dir, "combined_book.epub")
+    output_epub = os.path.join(temp_dir, "merged.epub")
+    if os.path.exists(generated_epub):
+        shutil.move(generated_epub, output_epub)
+    else:
+        logger.error(f"[{session_id}] Expected EPUB output not found at {generated_epub}")
+        raise HTTPException(status_code=500, detail="Expected combined_book.epub output not found")
+
+    if not os.path.exists(output_xml) or not os.path.exists(output_epub):
+        raise HTTPException(status_code=500, detail="Merged outputs missing from temp directory")
+
+    # Zip output files
+    out_zip_path = os.path.join(temp_dir, f"merged_output_{session_id}.zip")
+    try:
+        with zipfile.ZipFile(out_zip_path, "w") as z_out:
+            z_out.write(output_xml, "merged.xml")
+            z_out.write(output_epub, "merged.epub")
+        logger.info(f"[{session_id}] Packaged merged outputs successfully into {out_zip_path}")
+    except Exception as zip_ex:
+        logger.error(f"[{session_id}] Packaging merged outputs failed: {str(zip_ex)}")
+        raise HTTPException(status_code=500, detail=f"Failed to package merged outputs: {str(zip_ex)}")
+
+    # Stream ZIP back to client
+    from starlette.responses import FileResponse
+    return FileResponse(out_zip_path, media_type="application/zip", filename="merged_output.zip")
+
+@app.post("/view-proof")
+def view_proof(file: UploadFile = File(...)):
+    start_time = time.time()
+    session_id = str(uuid.uuid4())
+    workflow_base_dir = r"C:\Users\muraliba\Documents\temp_conversions"
+    temp_dir = os.path.join(workflow_base_dir, f"view_proof_{session_id}")
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    logger.info(f"[{session_id}] Received view-proof request")
+    uploaded_file_path = os.path.join(temp_dir, file.filename)
+    
+    try:
+        with open(uploaded_file_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+        logger.info(f"[{session_id}] Saved zip to {uploaded_file_path}")
+    except Exception as e:
+        logger.error(f"[{session_id}] Failed to save uploaded file: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+        
+    # Extract zip file
+    import zipfile
+    try:
+        with zipfile.ZipFile(uploaded_file_path, "r") as z:
+            z.extractall(temp_dir)
+        logger.info(f"[{session_id}] Unzipped view-proof package successfully")
+    except Exception as zip_ex:
+        logger.error(f"[{session_id}] ZIP extraction failed: {str(zip_ex)}")
+        raise HTTPException(status_code=400, detail=f"Failed to extract ZIP archive: {str(zip_ex)}")
+
+    # Find the .xhtml and .indt files recursively
+    xhtml_path = None
+    indt_path = None
+    for root, _, filenames in os.walk(temp_dir):
+        for fname in filenames:
+            if fname.lower().endswith(".xhtml"):
+                xhtml_path = os.path.abspath(os.path.join(root, fname))
+            elif fname.lower().endswith(".indt"):
+                indt_path = os.path.abspath(os.path.join(root, fname))
+                
+    if not xhtml_path:
+        raise HTTPException(status_code=400, detail="No XHTML file (.xhtml) found in zip package")
+    if not indt_path:
+        raise HTTPException(status_code=400, detail="No InDesign template (.indt) found in zip package")
+
+    logger.info(f"[{session_id}] XHTML found: {xhtml_path}")
+    logger.info(f"[{session_id}] Template found: {indt_path}")
+
+    # Prepare paths
+    xml_basename = os.path.splitext(os.path.basename(xhtml_path))[0]
+    output_xml_path = os.path.join(temp_dir, f"{xml_basename}.xml")
+    
+    # Run universal_converter.pl in xhtml2xml mode
+    perl_script = r"C:\Users\muraliba\Documents\xhtml\universal_converter.pl"
+    mapping_config = r"C:\Users\muraliba\Documents\xhtml\mapping_config.json"
+    
+    if not os.path.exists(perl_script):
+        perl_script = os.path.abspath("app/services/scripts/universal_converter.pl")
+    if not os.path.exists(mapping_config):
+        mapping_config = os.path.abspath("app/services/scripts/mapping_config.json")
+        
+    logger.info(f"[{session_id}] Running universal_converter.pl (xhtml2xml)...")
+    import subprocess
+    cmd = [
+        "perl",
+        perl_script,
+        "xhtml2xml",
+        os.path.abspath(xhtml_path),
+        os.path.abspath(mapping_config),
+        os.path.abspath(output_xml_path)
+    ]
+    try:
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+        logger.info(f"[{session_id}] Perl conversion completed: {res.stdout.strip()}")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"[{session_id}] Perl conversion failed: {e.stderr}")
+        raise HTTPException(status_code=500, detail=f"Perl conversion failed: {e.stderr}")
+
+    if not os.path.exists(output_xml_path):
+        raise HTTPException(status_code=500, detail="Output XML file was not generated by Perl script")
+
+    # Run SpringerXMLProcessor.jsx (XML -> INDD/PDF)
+    local_jsx = r"C:\Users\muraliba\Documents\SpringerXMLProcessor.jsx"
+    if not os.path.exists(local_jsx):
+        local_jsx = os.path.abspath("app/services/scripts/SpringerXMLProcessor.jsx")
+    if not os.path.exists(local_jsx):
+        raise HTTPException(status_code=500, detail=f"Local InDesign processor script missing: {local_jsx}")
+
+    output_indd_path = os.path.join(temp_dir, f"{xml_basename}.indd")
+    output_pdf_path = os.path.join(temp_dir, f"{xml_basename}.pdf")
+    artwork_path = temp_dir
+
+    try:
+        import win32com.client
+        import pythoncom
+    except ImportError:
+        raise HTTPException(status_code=500, detail="pywin32 is not installed on this server")
+
+    pythoncom.CoInitialize()
+    try:
+        try:
+            subprocess.run(["taskkill", "/F", "/IM", "InDesign.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+        logger.info(f"[{session_id}] Dispatching InDesign.Application...")
+        indesign_app = win32com.client.Dispatch("InDesign.Application")
+        
+        try:
+            indesign_app.DoScript("app.scriptPreferences.userInteractionLevel = UserInteractionLevels.NEVER_INTERACT;", 1246973031)
+        except Exception as ui_ex:
+            logger.warning(f"[{session_id}] Could not set userInteractionLevel: {str(ui_ex)}")
+
+        logger.info(f"[{session_id}] Setting ScriptArgs for {local_jsx}...")
+        indesign_app.ScriptArgs.SetValue("template_path", os.path.abspath(indt_path))
+        indesign_app.ScriptArgs.SetValue("job_doc", os.path.abspath(output_indd_path))
+        indesign_app.ScriptArgs.SetValue("pdf_path", os.path.abspath(output_pdf_path))
+        indesign_app.ScriptArgs.SetValue("tokenid", session_id)
+        indesign_app.ScriptArgs.SetValue("xml_path", os.path.abspath(output_xml_path))
+        indesign_app.ScriptArgs.SetValue("artwork_path", os.path.abspath(artwork_path))
+
+        logger.info(f"[{session_id}] Running ExtendScript JSX script directly: {local_jsx}...")
+        indesign_app.DoScript(local_jsx, 1246973031)
+        logger.info(f"[{session_id}] SpringerXMLProcessor.jsx completed execution.")
+
+        try:
+            while indesign_app.Documents.Count > 0:
+                indesign_app.Documents.Item(1).Close(1852776783)
+        except Exception:
+            pass
+    except Exception as indesign_err:
+        logger.error(f"[{session_id}] InDesign processing failed: {str(indesign_err)}")
+        raise HTTPException(status_code=500, detail=f"InDesign processing failed: {str(indesign_err)}")
+    finally:
+        pythoncom.CoUninitialize()
+
+    # Run Springer_Finaxml.jsx on the newly generated INDD to extract final XML, XHTML, CSS, EPUB, and DOCX!
+    jsx_script_final = r"C:\Users\muraliba\Documents\Springer_Finaxml.jsx"
+    if not os.path.exists(jsx_script_final):
+        jsx_script_final = os.path.abspath("app/services/scripts/Springer_Finaxml.jsx")
+    if not os.path.exists(jsx_script_final):
+        raise HTTPException(status_code=500, detail=f"Local InDesign export script missing: {jsx_script_final}")
+
+    script_dir = os.path.dirname(jsx_script_final)
+    log_path = os.path.join(script_dir, "finalxml", "finalxml.log")
+    epub_log_path = os.path.join(script_dir, "epub", "epub.log")
+    docx_output_path = os.path.join(temp_dir, f"{xml_basename}_final.docx")
+
+    for p, name in [(log_path, "finalxml.log"), (epub_log_path, "epub.log"), (docx_output_path, f"{xml_basename}_final.docx")]:
+        if os.path.exists(p):
+            try:
+                os.remove(p)
+            except Exception as e:
+                logger.warning(f"[{session_id}] Could not remove old {name}: {e}")
+
+    pythoncom.CoInitialize()
+    try:
+        try:
+            subprocess.run(["taskkill", "/F", "/IM", "InDesign.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+        indesign_app = win32com.client.Dispatch("InDesign.Application")
+        try:
+            indesign_app.DoScript("app.scriptPreferences.userInteractionLevel = UserInteractionLevels.NEVER_INTERACT;", 1246973031)
+        except Exception:
+            pass
+
+        final_xml_path = os.path.join(temp_dir, f"{xml_basename}_final.xml")
+        indesign_app.ScriptArgs.SetValue("InputFile", os.path.abspath(output_indd_path))
+        indesign_app.ScriptArgs.SetValue("OutputFile", os.path.abspath(final_xml_path))
+
+        logger.info(f"[{session_id}] Running {jsx_script_final} on the updated INDD...")
+        args_final = [os.path.abspath(output_indd_path), os.path.abspath(final_xml_path)]
+        indesign_app.DoScript(jsx_script_final, 1246973031, args_final)
+
+        if log_path:
+            logger.info(f"[{session_id}] Waiting for finalxml.bat...")
+            start_wait = time.time()
+            while time.time() - start_wait < 45:
+                if os.path.exists(log_path):
+                    try:
+                        with open(log_path, "r") as lf:
+                            lf.read()
+                        break
+                    except Exception:
+                        pass
+                time.sleep(0.5)
+
+        if epub_log_path:
+            logger.info(f"[{session_id}] Waiting for epub.bat...")
+            start_wait = time.time()
+            while time.time() - start_wait < 45:
+                if os.path.exists(epub_log_path):
+                    try:
+                        with open(epub_log_path, "r") as lf:
+                            lf.read()
+                        break
+                    except Exception:
+                        pass
+                time.sleep(0.5)
+
+        if docx_output_path:
+            logger.info(f"[{session_id}] Waiting for docx conversion...")
+            start_wait = time.time()
+            while time.time() - start_wait < 45:
+                if os.path.exists(docx_output_path) and os.path.getsize(docx_output_path) > 0:
+                    try:
+                        with open(docx_output_path, "rb") as lf:
+                            lf.read(100)
+                        break
+                    except Exception:
+                        pass
+                time.sleep(0.5)
+
+        try:
+            while indesign_app.Documents.Count > 0:
+                indesign_app.Documents.Item(1).Close(1852776783)
+        except Exception:
+            pass
+    except Exception as indesign_err:
+        logger.error(f"[{session_id}] Final export run failed: {str(indesign_err)}")
+        raise HTTPException(status_code=500, detail=f"Final export failed: {str(indesign_err)}")
+    finally:
+        pythoncom.CoUninitialize()
+
+    expected_jsx_xml = os.path.join(temp_dir, f"{xml_basename}_finalxml.xml")
+    if os.path.exists(expected_jsx_xml):
+        try:
+            if os.path.exists(final_xml_path):
+                os.remove(final_xml_path)
+            os.rename(expected_jsx_xml, final_xml_path)
+        except Exception as rename_err:
+            logger.warning(f"[{session_id}] Failed to rename finalxml output: {str(rename_err)}")
+
+    out_zip_path = os.path.join(temp_dir, f"view_proof_output_{session_id}.zip")
+    
+    generated_pdf = None
+    generated_xhtml = None
+    generated_css = None
+    generated_xml = final_xml_path if os.path.exists(final_xml_path) else None
+    generated_epub = None
+    generated_docx = docx_output_path if os.path.exists(docx_output_path) else None
+
+    for root, _, filenames in os.walk(temp_dir):
+        for fname in filenames:
+            ext = os.path.splitext(fname)[1].lower()
+            f_abs = os.path.abspath(os.path.join(root, fname))
+            if ext == ".pdf":
+                generated_pdf = f_abs
+            elif ext == ".xhtml":
+                generated_xhtml = f_abs
+            elif ext == ".css":
+                generated_css = f_abs
+            elif ext == ".epub":
+                generated_epub = f_abs
+            elif ext == ".xml" and not generated_xml:
+                # Fallback: pick up any .xml in temp dir if final_xml_path wasn't found earlier
+                generated_xml = f_abs
+
+    if not generated_pdf or not os.path.exists(generated_pdf):
+        raise HTTPException(status_code=500, detail="Output PDF file was not created by InDesign.")
+        
+    try:
+        with zipfile.ZipFile(out_zip_path, "w", zipfile.ZIP_DEFLATED) as out_zf:
+            for root, _, filenames in os.walk(temp_dir):
+                for fname in filenames:
+                    if fname.startswith("~$") or fname.startswith(".") or fname.endswith(".zip"):
+                        continue
+                    ext = os.path.splitext(fname)[1].lower()
+                    if ext in (".xml", ".epub", ".log", ".jpg", ".jpeg", ".docx", ".pdf", ".css", ".indd"):
+                        f_abs = os.path.abspath(os.path.join(root, fname))
+                        rel_path = os.path.relpath(f_abs, temp_dir)
+                        try:
+                            out_zf.write(f_abs, rel_path)
+                            logger.info(f"[{session_id}] Zipped view_proof result file: {rel_path}")
+                        except Exception as z_err:
+                            logger.warning(f"[{session_id}] Skipping transient file {rel_path}: {z_err}")
+                
+        logger.info(f"[{session_id}] Packaged proof outputs successfully into {out_zip_path}")
+    except Exception as zip_ex:
+        logger.error(f"[{session_id}] Packaging proof outputs failed: {str(zip_ex)}")
+        raise HTTPException(status_code=500, detail=f"Failed to package proof outputs: {str(zip_ex)}")
+
+    from starlette.responses import FileResponse
+    return FileResponse(out_zip_path, media_type="application/zip", filename="view_proof_output.zip")
+
 @app.get("/health")
 def health_check():
-
     return {"status": "healthy", "service": "indesign-to-word-converter", "log_file": log_file}
+
 
 if __name__ == "__main__":
     logger.info(f"Starting InDesign Windows Conversion Server on port 5555...")

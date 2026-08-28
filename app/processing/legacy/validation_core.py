@@ -2560,10 +2560,10 @@ def apply_apa_style_prep(doc):
                 bibliography[k2] = e
 
     if not bibliography:
-        # Fallback to REF-U paragraphs if no tags
+        # Fallback to REF-U / Reference-Alphabetical paragraphs if no tags
         for idx, para in enumerate(doc.paragraphs):
             style_name = (para.style.name or "") if para.style else ""
-            if "REF-U" in style_name and para.text.strip():
+            if ("REF-U" in style_name or "Reference-Alphabetical" in style_name) and para.text.strip():
                 e = BibliographyParser.parse_entry(para.text)
                 if e:
                     k1 = f"{_norm(e['display'])}|{e['year']}"
@@ -2577,7 +2577,7 @@ def apply_apa_style_prep(doc):
         if "<ref-open>" in txt.lower():
             break
         style_name = (para.style.name or "") if para.style else ""
-        if "REF-U" in style_name:
+        if "REF-U" in style_name or "Reference-Alphabetical" in style_name:
             continue
             
         citations = CitationExtractor.extract(txt)
@@ -2822,7 +2822,7 @@ def apply_reference_bookmarks(doc, bib_entries: List[Dict]) -> None:
         if para._p in bib_para_elements:
             continue
         style_name = (para.style.name or "") if para.style else ""
-        if "REF-U" in style_name:
+        if "REF-U" in style_name or "Reference-Alphabetical" in style_name:
             continue
         txt = para.text
         if "<ref-open>" in txt.lower() or "<ref-close>" in txt.lower():
@@ -2924,7 +2924,7 @@ def process_document_apa(file_path):
         if not entries:
             for idx, para in enumerate(d.paragraphs):
                 style_name = (para.style.name or "") if para.style else ""
-                if "REF-U" in style_name and para.text.strip():
+                if ("REF-U" in style_name or "Reference-Alphabetical" in style_name) and para.text.strip():
                     parsed = BibliographyParser.parse_entry(para.text)
                     if parsed:
                         entries.append({

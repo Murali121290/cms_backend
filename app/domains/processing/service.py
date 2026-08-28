@@ -700,7 +700,7 @@ def background_processing_task(
                             ("Proof" if processed_filename.lower().endswith((".pdf", ".xhtml", ".css")) else "Misc")
                             if process_type == "indesign_to_xml"
                             else "Misc" if process_type == "extract_design_css"
-                            else "Manuscript" if process_type == "style_validation"
+                            else "Manuscript" if (process_type in ("style_validation", "ppd") or processed_filename.lower().endswith("_dashboard.html"))
                             else "XML" if processed_filename.lower().endswith((".xml", ".log", ".html"))
                             else "InDesign" if process_type == "xml_to_indesign"
                             else "XML" if process_type == "word_to_xml"

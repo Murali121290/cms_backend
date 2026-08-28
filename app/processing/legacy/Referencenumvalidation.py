@@ -176,6 +176,14 @@ _ROMAN_IN_BRACKET = re.compile(
 )
 
 
+NUMBERED_REF_STYLES = {"REF-N", "Reference-Numbered", "REF-N-FIRST", "REF-N-MID", "REF-N-LAST"}
+
+def is_numbered_ref_style(style_name):
+    if not style_name:
+        return False
+    return style_name in NUMBERED_REF_STYLES or style_name.startswith("REF-N")
+
+
 def extract_bib_number(text):
     """Extract bibliography number from text, handling all formats: 1., [1]., (1)., etc."""
     for pat in BIB_NUMBER_PATTERNS:
@@ -243,14 +251,14 @@ class ReferenceProcessor:
         
     def get_references_in_bibliography(self):
         """
-        Returns a Set of IDs found in the bibliography sections (REF-N style).
+        Returns a Set of IDs found in the bibliography sections (REF-N / Reference-Numbered style).
         Also returns a list of objects for reordering later.
         """
         refs_found = set()
         ref_objects = [] # list of dicts: {'id': int, 'para': p, 'run': r}
 
         for para in self.doc.paragraphs:
-            if para.style and para.style.name == "REF-N":
+            if para.style and is_numbered_ref_style(para.style.name):
                 found_id = None
                 bib_run = None
                 
@@ -289,7 +297,7 @@ class ReferenceProcessor:
         seen = set()
         
         for para in iter_document_paragraphs(self.doc):
-            if para.style and para.style.name == "REF-N":
+            if para.style and is_numbered_ref_style(para.style.name):
                 continue
             # 1. Process runs
             current_group = []
@@ -401,7 +409,7 @@ class ReferenceProcessor:
         """Scan citation-styled runs for broken range patterns like [1-3,5-] or [-4]."""
         results = []
         for para in iter_document_paragraphs(self.doc):
-            if para.style and para.style.name == "REF-N":
+            if para.style and is_numbered_ref_style(para.style.name):
                 continue
             current_group = []
             for run in para.runs:
@@ -445,7 +453,7 @@ class ReferenceProcessor:
         """Detect when both superscript and bracket/paren citation formats coexist in the document."""
         seen_styles = set()
         for para in iter_document_paragraphs(self.doc):
-            if para.style and para.style.name == "REF-N":
+            if para.style and is_numbered_ref_style(para.style.name):
                 continue
             for run in para.runs:
                 txt = run.text or ""
@@ -476,7 +484,7 @@ class ReferenceProcessor:
         """Detect unformatted references like 'see reference 5' or 'ref. 10' outside citation spans."""
         findings = []
         for para in iter_document_paragraphs(self.doc):
-            if para.style and para.style.name == "REF-N":
+            if para.style and is_numbered_ref_style(para.style.name):
                 continue
             for run in para.runs:
                 if self.is_citation_run(run):
@@ -500,7 +508,7 @@ class ReferenceProcessor:
         """Detect Roman numeral citations inside brackets/parens, e.g. [iv]."""
         findings = []
         for para in iter_document_paragraphs(self.doc):
-            if para.style and para.style.name == "REF-N":
+            if para.style and is_numbered_ref_style(para.style.name):
                 continue
             txt = para.text or ""
             for m in _ROMAN_IN_BRACKET.finditer(txt):
@@ -622,7 +630,7 @@ class ReferenceProcessor:
             mapping[old_id] = mapping[actual_old_id]
             
         for para in iter_document_paragraphs(self.doc):
-            if para.style and para.style.name == "REF-N":
+            if para.style and is_numbered_ref_style(para.style.name):
                 continue
             i = 0
             while i < len(para.runs):
@@ -849,13 +857,13 @@ def apply_styles_prep(doc, citation_format="auto"):
 
     # 1. Apply 'bib_number' style to references in bibliography
     for para in doc.paragraphs:
-        if para.style and para.style.name == "REF-N":
+        if para.style and is_numbered_ref_style(para.style.name):
             ensure_bib_number_style(para, doc)
 
     # 2. Apply 'cite_bib' style to body citations
     processor = ReferenceProcessor(doc, citation_format=citation_format)
     for para in iter_document_paragraphs(doc):
-        if para.style and para.style.name == "REF-N":
+        if para.style and is_numbered_ref_style(para.style.name):
             continue
         for run in para.runs:
             if processor.is_citation_run(run):
@@ -961,7 +969,7 @@ def apply_reference_bookmarks(doc, ref_proc) -> None:
                 return name
 
     for para in iter_document_paragraphs(doc):
-        if para.style and para.style.name == "REF-N":
+        if para.style and is_numbered_ref_style(para.style.name):
             continue
 
         # Build consecutive citation-run groups, mirroring get_citations_in_text().

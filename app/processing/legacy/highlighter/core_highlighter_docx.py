@@ -432,7 +432,7 @@ def process_docx(input_file, output_file, skip_validation=False, verbose=True):
         
         for para in doc.paragraphs:
             style_name = str(para.style.name)
-            if style_name in {'REF-N', 'REF-U'}:
+            if style_name in {'REF-N', 'REF-U', 'Reference-Numbered', 'Reference-Alphabetical'}:
                  continue
             highlight_paragraph(para, compiled, color)
             
@@ -728,7 +728,7 @@ def highlight_words_in_styles(doc):
         highlight_paragraph(para, [short_word_re], wdBrightGreen)
 
 def is_skip_style(para):
-    return para.style.name in {'REF-N', 'REF-U'}
+    return para.style.name in {'REF-N', 'REF-U', 'Reference-Numbered', 'Reference-Alphabetical'}
 
 if __name__ == "__main__":
     import argparse

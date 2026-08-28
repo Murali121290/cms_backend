@@ -1,4 +1,5 @@
-﻿#include "glue code.jsx"
+#include "glue code.jsx";
+#include "json2.jsx";
 
 var scriptFile = File($.fileName);
 var scriptDirectory = scriptFile.parent.fsName;
@@ -19,11 +20,23 @@ if (!inputFile && typeof arguments !== "undefined" && arguments.length >= 1) {
 }
 var inddFile = new File(inputFile);
 var doc = app.open(inddFile);
-
 //~ var doc = app.activeDocument;
 //~ var xmlpath = decodeURI(doc.fullName);
-xmlpath = inputFile.toString().replace(".indd", "_final.xml");
+
+//pdf generate
+var pdfpath = inddFile.toString().replace(".indd", ".pdf");
+pdfpath = pdfpath.replace(/\/d\//, "d:/");
+pdfPresetToUse = "[High Quality Print]";
+doc.exportFile(ExportFormat.pdfType, File(pdfpath));
+
+var xmlpath = inputFile.toString().replace(".indd", "_final.xml");
 xmlpath = xmlpath.replace(/\/d\//, "d:/");
+
+var htmlpath = inputFile.toString().replace(".indd", ".html");
+htmlpath = htmlpath.replace(/\/d\//, "d:/");
+
+var xhtmlpath = inputFile.toString().replace(".indd", ".xhtml");
+xhtmlpath = xhtmlpath.replace(/\/d\//, "d:/");
 
 doc.exportFile(
     ExportFormat.XML,
@@ -36,12 +49,14 @@ myFinalXMLBatchFile.writeln("echo on");
 myFinalXMLBatchFile.writeln("cls");
 myFinalXMLBatchFile.writeln("cd \"" + scriptDirectory + "\\finalxml\"");
 myFinalXMLBatchFile.writeln("\""+ scriptDirectory + "\\finalxml\\UTF8.exe\" \"" + xmlpath + "\"");
-myFinalXMLBatchFile.writeln("perl \"" + scriptDirectory + "\\finalxml\\springer_finalxml.pl\" \"" + xmlpath + "\"");
+myFinalXMLBatchFile.writeln("perl \"" + scriptDirectory + "\\finalxml\\springer_xmlcorr.pl\" \"" + xmlpath + "\"");
 myFinalXMLBatchFile.writeln("dir > \"" + scriptDirectory + "\\finalxml\\finalxml.log\"");
 //~         myFinalXMLBatchFile.writeln("pause");
 myFinalXMLBatchFile.writeln("echo off");
 myFinalXMLBatchFile.close();
 myFinalXMLBatchFile.execute();
+
+$.sleep (5000);
 
 var docFolder = doc.filePath;
 var myRuleSet = new Array (new FigElement);
@@ -79,17 +94,41 @@ function FigElement()
     }
 }
 
+doc.htmlExportPreferences.viewDocumentAfterExport = false;
+
+doc.exportFile(
+    ExportFormat.HTML,
+    File(htmlpath)
+);
+
+var csspath = inputFile.replace(".indd", "") + "-web-resources/css/idGeneratedStyles.css";
+csspath = csspath.toString().replace(/\/d\//, "d:/");
+
 var myepubBatchFile = new File(scriptDirectory + "/epub/epub.bat");
 myepubBatchFile.open("w");
 myepubBatchFile.writeln("echo on");
 myepubBatchFile.writeln("cls");
 myepubBatchFile.writeln("cd \"" + scriptDirectory + "\\epub\"");
-myepubBatchFile.writeln("perl \"" + scriptDirectory + "\\epub\\bits2epub.pl\" \"" + xmlpath + "\"");
+myepubBatchFile.writeln("perl \"" + scriptDirectory + "\\epub\\bits2epub.pl\" \"" + xmlpath + "\" \"" + csspath + "\"");
 myepubBatchFile.writeln("dir > \"" + scriptDirectory + "\\epub\\epub.log\"");
 //~         myepubBatchFile.writeln("pause");
 myepubBatchFile.writeln("echo off");
 myepubBatchFile.close();
 myepubBatchFile.execute();
+
+$.sleep (5000);
+
+//xhtml export
+var myxhtmlBatchFile = new File(scriptDirectory + "/xhtml/xhtml.bat");
+myxhtmlBatchFile.open("w");
+myxhtmlBatchFile.writeln("echo on");
+myxhtmlBatchFile.writeln("cls");
+myxhtmlBatchFile.writeln("cd \"" + scriptDirectory + "\\xhtml\"");
+myxhtmlBatchFile.writeln("perl \"" + scriptDirectory + "\\xhtml\\universal_converter.pl\" xml2xhtml \"" + xmlpath + "\" \"" + scriptDirectory + "\\xhtml\\mapping_config.json\" \""  + xhtmlpath + "\" \"" + csspath + "\"");
+myxhtmlBatchFile.writeln("dir > \"" + scriptDirectory + "\\xhtml\\xhtml.log\"");
+myxhtmlBatchFile.writeln("echo off");
+myxhtmlBatchFile.close();
+myxhtmlBatchFile.execute();
 
 //Text Extraction
 app.scriptPreferences.userInteractionLevel = UserInteractionLevels.neverInteract;
@@ -122,9 +161,9 @@ catch(e){}
 
 var rtfname = doc.name.replace(".indd", ".rtf");
 var docxname = doc.name.replace(".indd", "_final.docx");
-var docpath = doc.filePath.toString();
-docpath = docpath.replace(/\/d\//g, 'd:\/');
-docpath = docpath.replace(/\%20/g, ' ');
+var docpath = decodeURI(doc.filePath.fsName);
+//~ docpath = docpath.replace(/\/d\//g, 'd:\/');
+//~ docpath = docpath.replace(/\%20/g, ' ');
 
 app.scriptPreferences.measurementUnit = MeasurementUnits.POINTS;
 doc.viewPreferences.horizontalMeasurementUnits = MeasurementUnits.POINTS;

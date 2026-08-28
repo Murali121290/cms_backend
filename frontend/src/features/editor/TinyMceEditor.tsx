@@ -19,6 +19,11 @@ export interface TinyMceEditorProps {
   onAddStyle?: (newStyle: string) => void;
   onSelectionUpdate?: (props: { editor: any }) => void;
   customCss?: string;
+  leftViewMode?: 'pdf' | 'xml';
+  onToggleLeftViewMode?: () => void;
+  onShowUpdatedXml?: () => void;
+  onShowPdfProof?: () => void;
+  isConvertingXml?: boolean;
 }
 
 export interface TinyMceEditorHandle {
@@ -60,6 +65,11 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
       styles,
       currentUser = "Compositor",
       customCss = "",
+      leftViewMode,
+      onToggleLeftViewMode,
+      onShowUpdatedXml,
+      onShowPdfProof,
+      isConvertingXml = false,
     }: TinyMceEditorProps,
     ref
   ) {
@@ -69,7 +79,7 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
     const [savedAt, setSavedAt] = useState<Date | null>(null);
     const [comments, setComments] = useState<CommentItem[]>([]);
     const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
-    const [showCommentsSidebar, setShowCommentsSidebar] = useState(true);
+    const [showCommentsSidebar, setShowCommentsSidebar] = useState(false);
     const [isCommentModalOpen, setIsCommentModalOpen] = useState(false);
     const [pendingSelectedText, setPendingSelectedText] = useState("");
     const [commentInputText, setCommentInputText] = useState("");
@@ -80,6 +90,7 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
     const editorRef = useRef<any>(null);
     const tcEnabledRef = useRef(tcEnabled);
     const currentUserRef = useRef(currentUser);
+    const customCssRef = useRef(customCss);
 
     // Sync refs to prevent stale closure issues in TinyMCE event listeners
     useEffect(() => {
@@ -89,6 +100,28 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
     useEffect(() => {
       currentUserRef.current = currentUser;
     }, [currentUser]);
+
+    // Dynamically inject/update customCss inside TinyMCE iframe document whenever customCss changes
+    useEffect(() => {
+      customCssRef.current = customCss;
+      const editor = editorRef.current;
+      if (!editor || !editor.getDoc) return;
+
+      try {
+        const doc = editor.getDoc();
+        if (!doc || !doc.head) return;
+
+        let styleEl = doc.getElementById("indesign-custom-css");
+        if (!styleEl) {
+          styleEl = doc.createElement("style");
+          styleEl.id = "indesign-custom-css";
+          doc.head.appendChild(styleEl);
+        }
+        styleEl.textContent = customCss || "";
+      } catch (err) {
+        console.error("Failed to inject customCss into TinyMCE iframe:", err);
+      }
+    }, [customCss]);
 
     // Keep contentRef up to date for useImperativeHandle
     useEffect(() => {
@@ -339,23 +372,25 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
 
     // Combine custom CSS with A4 Word Document Styling
     const wordPageStyle = `
-      body {
+      html {
         background-color: #f1f5f9 !important;
-        display: flex !important;
-        justify-content: center !important;
-        padding: 24px 0 !important;
+        padding: 16px !important;
         margin: 0 !important;
-        font-family: 'Inter', -apple-system, sans-serif !important;
+        box-sizing: border-box !important;
       }
-      .mce-content-body {
+      body, body.mce-content-body {
         background-color: #ffffff !important;
-        width: 816px !important;
-        min-height: 1056px !important;
-        padding: 64px 72px !important;
+        display: block !important;
+        flex-direction: column !important;
+        max-width: 816px !important;
+        width: 100% !important;
+        min-height: calc(100vh - 32px) !important;
+        padding: 32px 40px !important;
         box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05) !important;
         border: 1px solid #cbd5e1 !important;
         box-sizing: border-box !important;
         margin: 0 auto !important;
+        font-family: 'Inter', -apple-system, sans-serif !important;
       }
       ins, ins.tc-insert, span.tc-insert, .tc-insert, [data-xml-tag="insert"], [data-xml-tag="tc-insert"] {
         background-color: #dcfce7 !important;
@@ -463,6 +498,32 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
         font-variant: small-caps !important;
       }
       ${customCss}
+
+      /* Force single-column block flow for all elements inside TinyMCE body */
+      body.mce-content-body,
+      body.mce-content-body * {
+        column-count: auto !important;
+        column-width: auto !important;
+        columns: auto !important;
+      }
+      body.mce-content-body div,
+      body.mce-content-body section,
+      body.mce-content-body article,
+      body.mce-content-body main,
+      body.mce-content-body p,
+      body.mce-content-body [class*="_idGen"],
+      body.mce-content-body [class*="Object"],
+      body.mce-content-body [class*="Basic-Text-Frame"] {
+        display: block !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        float: none !important;
+        position: static !important;
+        clear: both !important;
+        box-sizing: border-box !important;
+        margin-left: 0 !important;
+        margin-right: 0 !important;
+      }
     `;
 
     return (
@@ -553,6 +614,38 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
               {showCommentsSidebar ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
             </button>
 
+            {/* Separate Show Updated XML & Show PDF Proof Buttons */}
+            {onShowUpdatedXml && (
+              <button
+                onClick={onShowUpdatedXml}
+                disabled={isConvertingXml}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-semibold border transition-all ${
+                  leftViewMode === 'xml'
+                    ? "bg-purple-950/80 border-purple-500/50 text-purple-300 font-bold hover:bg-purple-900/80"
+                    : "bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800"
+                }`}
+                title="Convert XHTML and show updated manuscript XML"
+              >
+                {isConvertingXml ? <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-400" /> : <FileText className="w-3.5 h-3.5 text-purple-400" />}
+                <span>Show Updated XML</span>
+              </button>
+            )}
+
+            {onShowPdfProof && (
+              <button
+                onClick={onShowPdfProof}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-semibold border transition-all ${
+                  leftViewMode === 'pdf'
+                    ? "bg-blue-950/80 border-blue-500/50 text-blue-300 font-bold hover:bg-blue-900/80"
+                    : "bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800"
+                }`}
+                title="Switch left view to PDF proof"
+              >
+                <FileText className="w-3.5 h-3.5 text-blue-400" />
+                <span>Show PDF Proof</span>
+              </button>
+            )}
+
             {/* Save Button */}
             <Button
               onClick={handleSaveClick}
@@ -614,7 +707,7 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
                 custom_elements: "*",
                 verify_html: false,
                 schema: "html5",
-                forced_root_block: "",
+                forced_root_block: "p",
                 allow_conditional_comments: true,
                 entity_encoding: "raw",
                 formats: {
@@ -668,6 +761,24 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
                   },
                 ],
                 setup: (editor) => {
+                  // Inject customCss upon editor initialization
+                  editor.on("init", () => {
+                    try {
+                      const doc = editor.getDoc();
+                      if (doc && doc.head && customCssRef.current) {
+                        let styleEl = doc.getElementById("indesign-custom-css");
+                        if (!styleEl) {
+                          styleEl = doc.createElement("style");
+                          styleEl.id = "indesign-custom-css";
+                          doc.head.appendChild(styleEl);
+                        }
+                        styleEl.textContent = customCssRef.current;
+                      }
+                    } catch (e) {
+                      console.error("Failed to inject customCss on editor init:", e);
+                    }
+                  });
+
                   // Register custom toolbar & context menu Comment button
                   editor.ui.registry.addButton("addcomment", {
                     text: "Comment",

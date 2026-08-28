@@ -506,8 +506,22 @@ async def save_folder_file(
         except Exception as exc:
             pass
 
+    content_to_write = body.content
+    if file_name.lower().endswith((".xhtml", ".html")) and "<body" not in content_to_write.lower():
+        content_to_write = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:xlink="http://www.w3.org/1999/xlink">\n'
+            '  <head>\n'
+            '    <link rel="stylesheet" type="text/css" href="idGeneratedStyles.css"/>\n'
+            '  </head>\n'
+            '  <body>\n'
+            f'{content_to_write}\n'
+            '  </body>\n'
+            '</html>'
+        )
+
     with open(file_path, "w", encoding="utf-8") as f:
-        f.write(body.content)
+        f.write(content_to_write)
 
     if file_record:
         file_record.uploaded_at = datetime.utcnow()
@@ -620,8 +634,172 @@ async def save_folder_file(
                 db.commit()
         except Exception as layout_err:
             print(f"Failed to regenerate layout HTML file during save: {layout_err}")
-        
+            
     return {"status": True, "message": "File saved", "log_content": log_content}
+
+
+@router.post("/api/uploads/{project_id}/chapter/{chapter_name}/{subfolder:path}/{file_name}/convert-xml")
+async def convert_xhtml_to_xml_endpoint(
+    project_id: int,
+    chapter_name: str,
+    subfolder: str,
+    file_name: str,
+    body: Optional[SaveContentRequest] = None,
+    user=Depends(get_current_user_from_cookie),
+    db: Session = Depends(database.get_db)
+):
+    import os
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+        
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    chapter = _resolve_chapter(db, project=project, chapter_name=chapter_name)
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+
+    file_record = db.query(models.File).filter(
+        models.File.project_id == project_id,
+        models.File.chapter_id == chapter.id,
+        models.File.filename == file_name
+    ).first()
+
+    if file_record:
+        file_path = os.path.join(UPLOAD_DIR, file_record.path)
+    else:
+        resolved_subfolder = subfolder
+        chapter_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters)
+        if os.path.exists(chapter_dir):
+            for d in os.listdir(chapter_dir):
+                if d.lower() == subfolder.lower():
+                    resolved_subfolder = d
+                    break
+        file_path = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, resolved_subfolder, file_name)
+
+    # Save body content if provided
+    if body and body.content:
+        content_to_write = body.content
+        if file_name.lower().endswith((".xhtml", ".html")) and "<body" not in content_to_write.lower():
+            content_to_write = (
+                '<?xml version="1.0" encoding="UTF-8"?>\n'
+                '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:xlink="http://www.w3.org/1999/xlink">\n'
+                '  <head>\n'
+                '    <link rel="stylesheet" type="text/css" href="idGeneratedStyles.css"/>\n'
+                '  </head>\n'
+                '  <body>\n'
+                f'{content_to_write}\n'
+                '  </body>\n'
+                '</html>'
+            )
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(content_to_write)
+
+    xml_content = None
+    if file_name.lower().endswith((".xhtml", ".html")):
+        base_name = os.path.splitext(file_name)[0]
+
+        # Find all matching XML file records for this chapter
+        matching_xml_records = db.query(models.File).filter(
+            models.File.project_id == project_id,
+            models.File.chapter_id == chapter.id,
+            models.File.filename.ilike(f"{base_name}.xml")
+        ).filter(
+            ~models.File.filename.ilike("%_layout.html")
+        ).all()
+
+        xml_disk_paths = set()
+        for rec in matching_xml_records:
+            xml_disk_paths.add(os.path.abspath(os.path.join(UPLOAD_DIR, rec.path)))
+
+        for folder in ["XML", "xml", "Manuscript"]:
+            candidate_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, folder)
+            candidate_file = os.path.abspath(os.path.join(candidate_dir, f"{base_name}.xml"))
+            if os.path.exists(candidate_file) or os.path.exists(candidate_dir):
+                xml_disk_paths.add(candidate_file)
+
+        primary_target_xml_path = list(xml_disk_paths)[0] if xml_disk_paths else os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "XML", f"{base_name}.xml")
+
+        scripts_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "services", "scripts"))
+        converter_script = os.path.join(scripts_dir, "universal_converter.pl")
+        config_json = os.path.join(scripts_dir, "mapping_config.json")
+
+        if os.path.exists(converter_script) and os.path.exists(config_json) and os.path.exists(file_path):
+            try:
+                os.makedirs(os.path.dirname(primary_target_xml_path), exist_ok=True)
+                import subprocess
+                subprocess.run(
+                    ["perl", converter_script, "xhtml2xml", file_path, config_json, primary_target_xml_path],
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+            except Exception as pe:
+                print(f"Failed to convert XHTML to XML: {pe}")
+
+            if os.path.exists(primary_target_xml_path):
+                try:
+                    with open(primary_target_xml_path, "r", encoding="utf-8") as xf:
+                        xml_content = xf.read()
+                except Exception as read_err:
+                    print(f"Failed to read converted XML file: {read_err}")
+
+                # Sync converted XML content to ALL matching disk paths (XML/ and Manuscript/ folders)
+                for alt_path in xml_disk_paths:
+                    if alt_path != primary_target_xml_path:
+                        try:
+                            os.makedirs(os.path.dirname(alt_path), exist_ok=True)
+                            with open(alt_path, "w", encoding="utf-8") as out_alt:
+                                out_alt.write(xml_content)
+                        except Exception as sync_err:
+                            print(f"Failed to sync XML to {alt_path}: {sync_err}")
+
+                # Version archiving and DB record updating for all matching XML records
+                import shutil
+                if matching_xml_records:
+                    for rec in matching_xml_records:
+                        rec.uploaded_at = datetime.utcnow()
+                        if user:
+                            rec.uploaded_by_id = user.id
+
+                        rec_abs_path = os.path.abspath(os.path.join(UPLOAD_DIR, rec.path))
+                        if os.path.exists(rec_abs_path):
+                            try:
+                                version_num = (rec.version or 1) + 1
+                                backup_dir = os.path.abspath(os.path.join(os.path.dirname(rec_abs_path), "Archive"))
+                                os.makedirs(backup_dir, exist_ok=True)
+                                backup_filename = f"{base_name}_v{(rec.version or 1)}.xml"
+                                backup_path = os.path.join(backup_dir, backup_filename)
+                                shutil.copy2(rec_abs_path, backup_path)
+                                new_version = models.FileVersion(
+                                    file_id=rec.id,
+                                    version_num=(rec.version or 1),
+                                    path=backup_path,
+                                    uploaded_by_id=user.id if user else None,
+                                )
+                                db.add(new_version)
+                                rec.version = version_num
+                            except Exception as exc:
+                                print(f"Failed to create version archive for {rec.filename}: {exc}")
+                    db.commit()
+                else:
+                    rel_xml_path = os.path.relpath(primary_target_xml_path, UPLOAD_DIR).replace("\\", "/")
+                    new_xml_file = models.File(
+                        filename=os.path.basename(primary_target_xml_path),
+                        path=rel_xml_path,
+                        file_type="application/xml",
+                        project_id=project_id,
+                        chapter_id=chapter.id,
+                        category="XML",
+                        version=1,
+                        is_original=False
+                    )
+                    db.add(new_xml_file)
+                    db.commit()
+
+    return {"status": True, "message": "XML updated successfully", "xml_content": xml_content}
 
 
 @router.post("/admin/users/{user_id}/status")

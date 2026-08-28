@@ -441,7 +441,7 @@ function ProcessingActionsMenu({
             className={btnCls}
             onClick={() => fid && setConfirmStep({ actionName: 'Manuscript Analysis', jobFn: () => startPpdGeneration(fid), pollFileId: fid, pollProcessType: 'ppd' })}
           >
-            <FileOutput size={12} /> Manuscript
+            <FileOutput size={12} /> Manuscript Analysis
           </button>
         )}
 
@@ -1605,9 +1605,8 @@ export function ChapterFilePage({
                       return (
                         <tr
                           key={row.id}
-                          className={`hover:bg-accent/30 transition-colors cursor-default ${
-                            startsNewGroup ? 'border-t border-border' : ''
-                          }`}
+                          className={`hover:bg-accent/30 transition-colors cursor-default ${startsNewGroup ? 'border-t border-border' : ''
+                            }`}
                         >
                           {row.getVisibleCells().map(cell => (
                             <td key={cell.id} className="px-3 py-2.5 text-xs overflow-hidden">
