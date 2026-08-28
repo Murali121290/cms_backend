@@ -946,6 +946,42 @@ class ReferenceSaveResponse(BaseModel):
     target_filename: str
 
 
+class ReferenceSearchHit(BaseModel):
+    source: Literal["pubmed", "crossref"]
+    title: str
+    authors: str
+    year: str
+    journal: str
+    volume: str
+    issue: str
+    page: str
+    doi: str
+    url: str
+    formatted: str
+    pubmed_id: str | None = None
+
+
+class ReferenceSearchResponse(BaseModel):
+    status: Literal["ok"] = "ok"
+    db: Literal["pubmed", "crossref"]
+    query: str
+    results: list[ReferenceSearchHit]
+
+
+class ReferenceEditRequest(BaseModel):
+    new_text: str
+    track_changes: bool = True
+
+
+class ReferenceEditResponse(BaseModel):
+    status: Literal["ok"] = "ok"
+    file_id: int
+    ref_number: int
+    old_text: str
+    new_text: str
+    changed: bool
+
+
 class ProjectUpdateRequest(BaseModel):
     status: str | None = None
     workflow_name: str | None = None
