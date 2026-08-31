@@ -280,54 +280,14 @@ export function diffWordsToHTML(oldStr: string, newStr: string, currentUser: str
 }
 
 export function styledDiffHTML(oldStr: string, newStr: string, currentUser: string = "Editor"): string {
-  const oldWords = oldStr.split(/(\s+)/);
-  const newWords = newStr.split(/(\s+)/);
-
-  const dp: number[][] = Array(oldWords.length + 1).fill(0).map(() => Array(newWords.length + 1).fill(0));
-  for (let i = 1; i <= oldWords.length; i++) {
-    for (let j = 1; j <= newWords.length; j++) {
-      if (oldWords[i - 1] === newWords[j - 1]) {
-        dp[i][j] = dp[i - 1][j - 1] + 1;
-      } else {
-        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
-      }
-    }
-  }
-
-  let i = oldWords.length;
-  let j = newWords.length;
-  type Token = { type: "same" | "ins" | "del"; text: string };
-  const tokens: Token[] = [];
   const timestamp = new Date().toISOString().replace(/\.\d+Z$/, "Z");
 
-  while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && oldWords[i - 1] === newWords[j - 1]) {
-      tokens.push({ type: "same", text: oldWords[i - 1] });
-      i--; j--;
-    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-      tokens.push({ type: "ins", text: newWords[j - 1] });
-      j--;
-    } else {
-      tokens.push({ type: "del", text: oldWords[i - 1] });
-      i--;
-    }
-  }
-  tokens.reverse();
+  const styledOld = styleReferenceText(oldStr);
+  const styledNew = styleReferenceText(newStr);
 
-  const parts: string[] = [];
-  for (const tok of tokens) {
-    if (tok.text.trim() === "") {
-      parts.push(tok.text);
-      continue;
-    }
-    if (tok.type === "same") {
-      parts.push(escapeHTML(tok.text));
-    } else if (tok.type === "ins") {
-      parts.push(`<ins class="tc-insert" data-author="${currentUser}" data-date="${timestamp}">${escapeHTML(tok.text)}</ins>`);
-    } else {
-      parts.push(`<del class="tc-delete" data-author="${currentUser}" data-date="${timestamp}">${escapeHTML(tok.text)}</del>`);
-    }
+  if (!oldStr || !oldStr.trim()) {
+    return `<ins class="tc-insert" data-author="${currentUser}" data-date="${timestamp}">${styledNew}</ins>`;
   }
 
-  return parts.join("");
+  return `<del class="tc-delete" data-author="${currentUser}" data-date="${timestamp}">${styledOld}</del> <ins class="tc-insert" data-author="${currentUser}" data-date="${timestamp}">${styledNew}</ins>`;
 }

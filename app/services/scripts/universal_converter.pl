@@ -52,18 +52,18 @@ if ($css_file && -e $css_file) {
         $css_content =~ s{\n([A-Za-z0-9_-]+)\.}{\n.}g;
         $css_content =~ s{\#ffffff}{\#0d2950}g;
         $css_content .= "\n/* Color highlighting for bibliography & reference elements */\n"
-                      . ".string-name {\n    color: \#8b0000 !important; /* Dark Red */\n}\n\n"
+                      . ".surname {\n    color: \#8b0000 !important; /* Dark Red */\n}\n\n"
                       . ".given-names {\n    color: \#006400 !important; /* Dark Green */\n}\n\n"
-                      . ".year {\n    color: \#d97706 !important; /* Dark Amber / Gold */\n}\n\n"
+                      . ".bib_year {\n    color: \#d97706 !important; /* Dark Amber / Gold */\n}\n\n"
                       . ".article-title {\n    color: \#1e40af !important; /* Deep Royal Blue */\n}\n\n"
-                      . ".source {\n    color: \#6b21a8 !important; /* Dark Purple */\n}\n\n"
-                      . ".volume {\n    color: \#0d9488 !important; /* Teal */\n}\n\n"
-                      . ".issue {\n    color: \#be185d !important; /* Dark Pink / Crimson */\n}\n\n"
-                      . ".fpage {\n    color: \#4338ca !important; /* Indigo */\n}\n\n"
-                      . ".lpage {\n    color: \#c05621 !important; /* Dark Rust / Orange */\n}\n\n"
+                      . ".bib_journal {\n    color: \#6b21a8 !important; /* Dark Purple */\n}\n\n"
+                      . ".bib_volume {\n    color: \#0d9488 !important; /* Teal */\n}\n\n"
+                      . ".bib_issue {\n    color: \#be185d !important; /* Dark Pink / Crimson */\n}\n\n"
+                      . ".bib_fpage {\n    color: \#4338ca !important; /* Indigo */\n}\n\n"
+                      . ".bib_lpage {\n    color: \#c05621 !important; /* Dark Rust / Orange */\n}\n\n"
                       . ".ext-link {\n    color: \#2563eb !important; /* Bright Blue */\n    text-decoration: underline;\n}\n"
-                      . ".chapter-title {\n    color: \#047857 !important; /* Emerald Green */\n    font-weight: bold;\n}\n\n"
-                      . ".collab {\n    color: \#b45309 !important; /* Deep Ochre / Amber-Brown */\n}";
+                      . ".bib_chapter-title {\n    color: \#047857 !important; /* Emerald Green */\n    font-weight: bold;\n}\n\n"
+                      . ".bib_collab {\n    color: \#b45309 !important; /* Deep Ochre / Amber-Brown */\n}";
 
         open my $out_css, '>:raw', "$out_dir/$css_filename" or warn "Cannot write CSS: $!\n";
         print $out_css $css_content;
@@ -87,8 +87,17 @@ foreach my $full_path (@file_queue) {
         $target_out_path = "$out_dir/$file_name$new_ext";
     }
 
-    my $parser  = XML::LibXML->new();
-    my $dom     = $parser->parse_file($full_path);
+    open my $fh, '<:encoding(UTF-8)', $full_path or die "Cannot open $full_path: $!";
+    local $/;
+    my $content = <$fh>;
+    close $fh;
+
+    # Pre-clean duplicated attributes (e.g. data-xml-tag="fig" data-xml-tag="fig")
+    $content =~ s/\bdata-xml-tag="([^"]*)"(?:\s+data-xml-tag="[^"]*")+/data-xml-tag="$1"/gi;
+    $content =~ s/\bclass="([^"]*)"(?:\s+class="[^"]*")+/class="$1"/gi;
+
+    my $parser  = XML::LibXML->new(recover => 2);
+    my $dom = eval { $parser->parse_string($content) } || eval { $parser->parse_html_string($content) } || $parser->parse_file($full_path);
     my $out_dom = XML::LibXML::Document->new('1.0', 'UTF-8');
 
     if ($mode eq 'xml2xhtml') {
@@ -145,26 +154,62 @@ foreach my $full_path (@file_queue) {
         $xmlout =~ s{</head>(\s*)<body>}{</head>}gs;
         $xmlout =~ s{</body>(\s*)</book>}{</book>}gs;
         $xmlout =~ s{<head>((?:(?!</head>).)*?)</head>}{}gs;
-        $xmlout =~ s{<book>}{<\!DOCTYPE book PUBLIC "-//NLM//DTD BITS Book Interchange DTD v2.0 20130520//EN" "D:/s4c/wordtoxml/FirstXML/BITS-Book-1.0-DTD/BITS-book1.dtd">\n<book xmlns:mml="http://www.w3.org/1998/Math/MathML" xmlns:xi="http://www.w3.org/2001/XInclude" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" dtd-version="1.0" xml:lang="en">\n<book-body>}g;
-        $xmlout =~ s{</book>}{</book-body>\n</book>};
+        $xmlout =~ s{<\?xml[^>]*\?>}{}gi;
+        $xmlout =~ s{<\!--\s*\?xml[^>]*\?>\s*-->}{}gi;
+        $xmlout =~ s{<\!--\s*<\?xml[^>]*\?>\s*-->}{}gi;
+        $xmlout =~ s{<\!--\s*\?xml.*?\?>\s*-->}{}gi;
+
+        unless ($xmlout =~ /<book-part[\s>]/i) {
+            my $ch_id = "ch10";
+            if ($xmlout =~ /<label>(\d+)<\/label>/) {
+                $ch_id = "ch" . $1;
+            }
+
+            my $meta_html = "";
+            while ($xmlout =~ s{(<(?:title-group|contrib-group|abstract|kwd-group)[\s>][\s\S]*?<\/(?:title-group|contrib-group|abstract|kwd-group)>)}{}i) {
+                $meta_html .= $1 . "\n";
+            }
+
+            my $body_html = "";
+            while ($xmlout =~ s{(<(?:sec)[\s>][\s\S]*?<\/(?:sec)>)}{}i) {
+                $body_html .= $1 . "\n";
+            }
+
+            $xmlout =~ s{</?book[^>]*>}{}gi;
+            $xmlout =~ s{</?book-body[^>]*>}{}gi;
+
+            $xmlout = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                    . "<!DOCTYPE book PUBLIC \"-//NLM//DTD BITS Book Interchange DTD v2.0 20130520//EN\" \"D:/s4c/wordtoxml/FirstXML/BITS-Book-1.0-DTD/BITS-book1.dtd\">\n"
+                    . "<book xmlns:mml=\"http://www.w3.org/1998/Math/MathML\" xmlns:xi=\"http://www.w3.org/2001/XInclude\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:aid=\"http://ns.adobe.com/AdobeInDesign/4.0/\" dtd-version=\"1.0\" xml:lang=\"en\">\n"
+                    . "<book-body>\n"
+                    . "<book-part id=\"$ch_id\" book-part-type=\"chapter\">\n"
+                    . "<book-part-meta>\n" . $meta_html . "</book-part-meta>\n"
+                    . "<body>\n" . $body_html . $xmlout . "\n</body>\n"
+                    . "</book-part>\n"
+                    . "</book-body>\n"
+                    . "</book>\n";
+        }
         $xmlout =~ s{<strong>}{<bold>}g;
         $xmlout =~ s{</strong>}{</bold>}g;
         $xmlout =~ s{<em>}{<italic>}g;
         $xmlout =~ s{</em>}{</italic>}g;
+        $xmlout =~ s{</sup>}{</sup_script>}g;
         $xmlout =~ s{ class="([^\ ]+)(\s*)([a-z]*)"}{ class="$1"}g;
         $xmlout =~ s{<delete[^>]*>((?:(?!</delete>).)*?)</delete>}{}g;
-        #$xmlout =~ s{<span(.*?)data-xml-tag="delete"(.*?)>((?:(?!<\/span>).)*?)<\/span>}{}g;
+        $xmlout =~ s{<\!-- QUERY: <query>(\s*)}{<query>}gi;
+        $xmlout =~ s{</query> -->}{</query>}gi;
+        $xmlout =~ s{<\!--\s*<highlight>\s*-->}{<highlight>}gi;
+        $xmlout =~ s{<\!--\s*</highlight>\s*-->}{</highlight>}gi;
+        $xmlout =~ s{<\!--\s*<query[^>]*>\s*-->}{<query>}gi;
+        $xmlout =~ s{<\!--\s*</query>\s*-->}{</query>}gi;
+        $xmlout =~ s{\s+aid:(?:pstyle|cstyle)="[^"]*"}{}gi;
+        $xmlout =~ s{<\!--\s*aid:(?:pstyle|cstyle)="[^"]*"\s*-->}{}gi;
         $xmlout =~ s{<insert[^>]*>((?:(?!</insert>).)*?)</insert>}{$1}g;
-        #$xmlout =~ s{<span(.*?)data-xml-tag="insert"(.*?)>((?:(?!<\/span>).)*?)<\/span>}{$3}g;
-        $xmlout =~ s{<\!\-\- aid:pstyle="([^"]+)" \-\->}{}g;
-        $xmlout =~ s{<\!\-\- aid:cstyle="([^"]+)" \-\->}{}g;
-        $xmlout =~ s{<name><given-names>((?:(?!</given-names>).)*?)</given-names>(\s*)<surname>((?:(?!</given-names>).)*?)</surname></name>}{<name><surname>$3</surname><given-names>$1</given-names></name>}g;
         $xmlout =~ s{</col>}{}g;
         $xmlout =~ s{<col ([^>]*)>}{<col $1/>}g;
         $xmlout =~ s{<col ([^>]*)//>}{<col $1/>}g;
         $xmlout =~ s{<colgroup>((?:(?!</colgroup>).)*?)</colgroup>(\s*)<table ([^>]*)>}{$2<table $3>\n<colgroup>$1</colgroup>}gs;
         $xmlout =~ s{<p\/>}{}g;
-        $xmlout =~ s{ href="}{ xlink:href="}g;
         $xmlout =~ s{(\n+)}{\n}g;
         save_file($target_out_path, $xmlout);
     }
@@ -185,11 +230,13 @@ sub convert_xml_to_xhtml {
 
     my $tag = $node->nodeName;
 
-    #the query process. xml to comment.
+    # The query process: XML tag to HTML comment
     if ($tag eq 'query') {
-            # Store full query tag content inside an HTML comment
-            my $xml_str = $node->toString();
-            return $out_dom->createComment(" QUERY: $xml_str ");
+        my $xml_str = $node->toString();
+        $xml_str =~ s{^<query>\s*--\s*>}{<query>}gi;
+        $xml_str =~ s{<--\s*</query>}{</query>}gi;
+        $xml_str =~ s{--}{- -}g;
+        return $out_dom->createComment(" QUERY: $xml_str ");
     }
         
     my $rule_entry = $map_cfg->{$tag};

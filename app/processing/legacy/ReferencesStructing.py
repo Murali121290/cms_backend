@@ -281,7 +281,6 @@ def crossref_search(title: str, journal: Optional[str] = None, year: Optional[st
     k_year = f"({year})" if year else ""
     k_jnl = str(journal).strip().lower() if journal else "none"
     k_rows = str(rows)
-    # Key: (Year)|Title|Journal|Rows
     cache_key = f"{k_year}|{normalize_whitespace(title).lower()}|{k_jnl}|{k_rows}"
     
     if cache_key in REF_CACHE['crossref_search']:
@@ -298,6 +297,22 @@ def crossref_search(title: str, journal: Optional[str] = None, year: Optional[st
         msg = r.json().get('message', {})
         results = msg.get('items', []) or []
         
+        # Strategy 2: If no results, retry without strict journal/year filter
+        if not results and (journal or year):
+            fallback_params = {'query.title': title, 'rows': rows}
+            r2 = SESSION.get("https://api.crossref.org/works", params=fallback_params, timeout=CROSSREF_TIMEOUT)
+            if r2.status_code == 200:
+                results = r2.json().get('message', {}).get('items', []) or []
+
+        # Strategy 3: General query fallback
+        if not results:
+            clean_t = re.sub(r'[^\w\s-]', ' ', title).strip()
+            if clean_t:
+                fallback_params = {'query': clean_t, 'rows': rows}
+                r3 = SESSION.get("https://api.crossref.org/works", params=fallback_params, timeout=CROSSREF_TIMEOUT)
+                if r3.status_code == 200:
+                    results = r3.json().get('message', {}).get('items', []) or []
+
         # Update Cache
         with CACHE_LOCK:
             REF_CACHE['crossref_search'][cache_key] = results
@@ -323,8 +338,18 @@ def crossref_pick_best(title: str, candidates: List[Dict[str, Any]]) -> Tuple[Op
 # -------------------------
 # PubMed helpers
 # -------------------------
+PUBMED_STOP_WORDS = {
+    'a', 'about', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from',
+    'has', 'have', 'in', 'into', 'is', 'it', 'its', 'no', 'not', 'of', 'on',
+    'or', 'that', 'the', 'their', 'this', 'to', 'was', 'were', 'which', 'with', 'now'
+}
+
+def _clean_pubmed_query(t: str) -> str:
+    cleaned = re.sub(r'[^\w\s-]', ' ', t)
+    words = [w for w in cleaned.split() if len(w) >= 3 and w.lower() not in PUBMED_STOP_WORDS]
+    return ' '.join(words[:6])
+
 def pubmed_search_ids(title: str, journal: Optional[str] = None, year: Optional[str] = None, max_results: int = 5) -> List[str]:
-    # Cache Key
     k_year = f"({year})" if year else ""
     k_jnl = str(journal).strip().lower() if journal else "none"
     k_max = str(max_results)
@@ -334,87 +359,45 @@ def pubmed_search_ids(title: str, journal: Optional[str] = None, year: Optional[
         return REF_CACHE['pubmed_search'][cache_key]
 
     results = set()
-    def truncate_title(t: str, max_words: int = 10) -> str:
-        words = t.split()
-        if len(words) > max_words:
-            return ' '.join(words[:max_words])
-        return t
+    clean_t = _clean_pubmed_query(title)
+
+    def _esearch(term: str, limit: int = max_results):
+        params = {'db': 'pubmed', 'term': term, 'retmax': limit, 'retmode': 'json'}
+        try:
+            r = SESSION.get(f"{NCBI_BASE}/esearch.fcgi", params=params, timeout=PUBMED_TIMEOUT)
+            r.raise_for_status()
+            return r.json().get('esearchresult', {}).get('idlist', []) or []
+        except RequestException:
+            return []
 
     # Strategy 1: Full query with title, journal, year
     if journal and year:
-        q = f'{title}[ti] AND {journal}[ta] AND {year}[dp]'
-        params = {'db': 'pubmed', 'term': q, 'retmax': max_results, 'retmode': 'json'}
-        try:
-            r = SESSION.get(f"{NCBI_BASE}/esearch.fcgi", params=params, timeout=PUBMED_TIMEOUT)
-            r.raise_for_status()
-            ids = r.json().get('esearchresult', {}).get('idlist', []) or []
-            results.update(ids)
-        except RequestException:
-            logger.debug("PubMed esearch failed (journal+year) for: %s", title)
+        ids = _esearch(f'{title}[ti] AND {journal}[ta] AND {year}[dp]')
+        results.update(ids)
 
-    # Strategy 2: Title + year
-    if year and len(results) < max_results:
-        q = f'{title}[ti] AND {year}[dp]'
-        params = {'db': 'pubmed', 'term': q, 'retmax': max_results, 'retmode': 'json'}
-        try:
-            r = SESSION.get(f"{NCBI_BASE}/esearch.fcgi", params=params, timeout=PUBMED_TIMEOUT)
-            r.raise_for_status()
-            ids = r.json().get('esearchresult', {}).get('idlist', []) or []
-            results.update(ids)
-        except RequestException:
-            logger.debug("PubMed esearch failed (title+year) for: %s", title)
+    # Strategy 2: Cleaned title + year
+    if year and len(results) < max_results and clean_t:
+        ids = _esearch(f'{clean_t}[ti] AND {year}[dp]')
+        results.update(ids)
 
-    # Strategy 3: Just title
+    # Strategy 3: Cleaned title
+    if len(results) < max_results and clean_t:
+        ids = _esearch(f'{clean_t}[ti]')
+        results.update(ids)
+
+    # Strategy 4: Raw title
     if len(results) < max_results:
-        q = f'{title}[ti]'
-        params = {'db': 'pubmed', 'term': q, 'retmax': max_results * 2, 'retmode': 'json'}
-        try:
-            r = SESSION.get(f"{NCBI_BASE}/esearch.fcgi", params=params, timeout=PUBMED_TIMEOUT)
-            r.raise_for_status()
-            ids = r.json().get('esearchresult', {}).get('idlist', []) or []
-            results.update(ids)
-        except RequestException:
-            logger.debug("PubMed esearch failed (title only) for: %s", title)
+        ids = _esearch(f'{title}[ti]')
+        results.update(ids)
 
-    # Strategy 4: Truncated title if long (previously dead code — now active)
-    title_words = title.split()
-    if len(results) < max_results and len(title_words) > 15:
-        short_title = truncate_title(title, 10)
-        q = f'{short_title}[ti]'
+    # Strategy 5: Free-text keyword search without [ti] tag constraint
+    if len(results) < max_results and clean_t:
+        q = clean_t
         if year:
             q += f' AND {year}[dp]'
-        params = {'db': 'pubmed', 'term': q, 'retmax': max_results * 2, 'retmode': 'json'}
-        try:
-            r = SESSION.get(f"{NCBI_BASE}/esearch.fcgi", params=params, timeout=PUBMED_TIMEOUT)
-            r.raise_for_status()
-            ids = r.json().get('esearchresult', {}).get('idlist', []) or []
-            results.update(ids)
-        except RequestException:
-            logger.debug("PubMed esearch failed (truncated title) for: %s", short_title)
+        ids = _esearch(q)
+        results.update(ids)
 
-    # Strategy 5: keyword fallback (previously dead code — now active)
-    if len(results) < max_results:
-        significant_words = [
-            w for w in title.split()
-            if len(w) > 4 and w.lower() not in (
-                'that', 'with', 'from', 'have', 'this', 'their', 'which', 'viral', 'virus'
-            )
-        ]
-        if significant_words:
-            key_phrase = ' '.join(significant_words[:6])
-            q = f'{key_phrase}[ti]'
-            if year:
-                q += f' AND {year}[dp]'
-            params = {'db': 'pubmed', 'term': q, 'retmax': max_results * 2, 'retmode': 'json'}
-            try:
-                r = SESSION.get(f"{NCBI_BASE}/esearch.fcgi", params=params, timeout=PUBMED_TIMEOUT)
-                r.raise_for_status()
-                ids = r.json().get('esearchresult', {}).get('idlist', []) or []
-                results.update(ids)
-            except RequestException:
-                logger.debug("PubMed keyword fallback search failed for: %s", key_phrase)
-
-    # Cache and return — limit to max_results (not max_results*2 which was a bug)
     final_ids = list(results)[:max_results]
     with CACHE_LOCK:
         REF_CACHE['pubmed_search'][cache_key] = final_ids

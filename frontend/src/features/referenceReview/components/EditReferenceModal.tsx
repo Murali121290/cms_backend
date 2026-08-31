@@ -34,11 +34,21 @@ interface Props {
 }
 
 function extractTitleForQuery(text: string): string {
-  const trimmed = text.replace(/^\s*\d+\.\s*/, "");
-  const yearMatch = trimmed.match(/\((?:19|20)\d{2}\)\.?\s*/);
+  const trimmed = text.replace(/^\s*\[?\d+\]?[\.\s]+/, "");
+  const yearMatch = trimmed.match(/\((?:19|20)\d{2}[a-z]?\)\.?\s*/);
   const afterYear = yearMatch ? trimmed.slice((yearMatch.index ?? 0) + yearMatch[0].length) : trimmed;
   const firstStop = afterYear.search(/[.?!]\s/);
-  const candidate = firstStop > 20 ? afterYear.slice(0, firstStop) : afterYear.slice(0, 120);
+
+  let candidate = "";
+  if (firstStop > 10) {
+    candidate = afterYear.slice(0, firstStop);
+  } else {
+    candidate = afterYear.slice(0, 150);
+    const lastSpace = candidate.lastIndexOf(" ");
+    if (lastSpace > 20) {
+      candidate = candidate.slice(0, lastSpace);
+    }
+  }
   return candidate.trim();
 }
 
@@ -111,16 +121,25 @@ export function EditReferenceModal({
     const diffHtml = styledDiffHTML(originalText, editedText, currentUser);
 
     try {
+      let resultData: any = null;
+      if (fileId != null && refNumber != null) {
+        try {
+          const { data } = await apiClient.post(
+            `/files/${fileId}/reference-review/references/${refNumber}/edit`,
+            { new_text: editedText.trim(), track_changes: true },
+          );
+          resultData = data;
+        } catch (apiErr) {
+          console.warn("Backend edit reference API call warning:", apiErr);
+        }
+      }
+
       if (onSaveTrackChanges) {
         await onSaveTrackChanges(diffHtml, editedText.trim());
-      } else if (fileId != null && refNumber != null) {
-        const { data } = await apiClient.post(
-          `/files/${fileId}/reference-review/references/${refNumber}/edit`,
-          { new_text: editedText.trim(), track_changes: true },
-        );
-        onSaved?.(data as ReferenceEditResult);
-      } else {
-        onSaved?.({
+      }
+
+      if (onSaved) {
+        onSaved(resultData || {
           file_id: fileId ?? 0,
           ref_number: refNumber ?? 0,
           old_text: originalText,

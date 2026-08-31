@@ -475,7 +475,7 @@ function ProcessingActionsMenu({
           </button>
         )}
 
-        {showAction('wordToXml') && (
+        {showAction('wordToXml') && row?.subfolder?.toLowerCase() === 'manuscript' && (
           <button
             disabled={!fid}
             className={btnCls}
@@ -485,7 +485,7 @@ function ProcessingActionsMenu({
           </button>
         )}
 
-        {showAction('wordToXml') && (
+        {showAction('wordToXml') && row?.subfolder?.toLowerCase() === 'manuscript' && (
           <button
             disabled={!fid}
             type="button"
@@ -1339,8 +1339,8 @@ export function ChapterFilePage({
           </button>
         )}
 
-        {/* Batch Word to XML */}
-        {selectedCount > 0 && activeFolder === 'manuscript' && (
+        {/* Batch Word to XML - Manuscript folder only */}
+        {selectedCount > 0 && activeFolder.toLowerCase() === 'manuscript' && (
           <button
             onClick={() => void handleBatchProcess('word_to_xml')}
             disabled={!!batchBusy}
@@ -1351,21 +1351,6 @@ export function ChapterFilePage({
           >
             {batchBusy === 'word_to_xml' ? <Loader2 size={12} className="animate-spin" /> : <FileCode size={12} />}
             {batchBusy === 'word_to_xml' ? 'Processing…' : 'Batch Word to XML'}
-          </button>
-        )}
-
-        {/* Batch Style Validation */}
-        {selectedCount > 0 && activeFolder === 'manuscript' && (
-          <button
-            onClick={() => void handleBatchProcess('style_validation')}
-            disabled={!!batchBusy}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors shadow-sm
-              ${!batchBusy
-                ? 'border-primary text-primary hover:bg-accent'
-                : 'border-border text-muted opacity-50 cursor-not-allowed'}`}
-          >
-            {batchBusy === 'style_validation' ? <Loader2 size={12} className="animate-spin" /> : <ShieldCheck size={12} />}
-            {batchBusy === 'style_validation' ? 'Processing…' : 'Batch Style Validation'}
           </button>
         )}
 

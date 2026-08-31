@@ -69,23 +69,54 @@ class ViewProofEngine:
             with zipfile.ZipFile(temp_zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
                 # Add edited XHTML file
                 zf.write(file_path, os.path.basename(file_path))
-                # Add template (.indt/.indd)
-                zf.write(indt_path, os.path.basename(indt_path))
+
+                # Add template (.indt/.indd) under relative project path (e.g. Design/template/indesign/Degeneffe.indt)
+                project_dir = os.path.join(upload_dir, project.code)
+                if indt_path.startswith(project_dir):
+                    template_rel = os.path.relpath(indt_path, project_dir)
+                else:
+                    template_rel = os.path.join("Design", "template", "indesign", os.path.basename(indt_path))
+                zf.write(indt_path, template_rel)
+
+                # Add Design folders (Font, Common Art, Library) matching XML to InDesign process
+                design_folders = [
+                    "Design/template/Common Art",
+                    "Design/template/Font",
+                    "Design/template/Library",
+                    "Design/template/indesign",
+                    "Design/template"
+                ]
+                seen_design_files = {indt_path}
+                for folder in design_folders:
+                    folder_path = os.path.join(project_dir, folder)
+                    if os.path.exists(folder_path):
+                        for root, _, files in os.walk(folder_path):
+                            for file in files:
+                                full_file_path = os.path.join(root, file)
+                                if full_file_path in seen_design_files:
+                                    continue
+                                seen_design_files.add(full_file_path)
+                                rel_path = os.path.relpath(full_file_path, project_dir)
+                                zf.write(full_file_path, rel_path)
                 
                 # Include adjacent artfile or Links folder if present next to the original chapter files
                 chapter_dir = os.path.join(upload_dir, project.code, chapter.chapters)
+                seen_art_files = set()
                 for root, dirs, files in os.walk(chapter_dir):
                     for dname in dirs:
                         if dname.lower() in ["artfile", "links"]:
                             sub_path = os.path.join(root, dname)
-                            logger.info(f"Packaging adjacent art folder {dname} from: {sub_path}")
+                            target_subfolder = "artfile" if dname.lower() == "artfile" else "Links"
+                            logger.info(f"Packaging adjacent art folder {dname} from: {sub_path} into root {target_subfolder}/")
                             for r, _, sub_files in os.walk(sub_path):
                                 for f in sub_files:
                                     f_full = os.path.join(r, f)
-                                    rel_path = os.path.relpath(f_full, chapter_dir)
-                                    # Write relative path (e.g. InDesign/artfile/image.jpg)
-                                    # Normalize path components so they match what InDesign expects
-                                    zf.write(f_full, rel_path)
+                                    if f_full in seen_art_files:
+                                        continue
+                                    seen_art_files.add(f_full)
+                                    rel_within_art = os.path.relpath(f_full, sub_path)
+                                    zip_entry_path = os.path.join(target_subfolder, rel_within_art).replace("\\", "/")
+                                    zf.write(f_full, zip_entry_path)
 
             # 4. Call Windows InDesign Server using Redis Lock
             if not settings.INDESIGN_SERVER_URL:

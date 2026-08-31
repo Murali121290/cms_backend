@@ -592,6 +592,12 @@ export function ChapterEditorPage() {
     if (!projectId || !chapterId || !decodedFilename) return
     projectsApi.getChapterFiles(Number(projectId), Number(chapterId))
       .then(filesData => {
+        const matchingFile = filesData.files?.find(f => 
+          f.filename.toLowerCase() === decodedFilename.toLowerCase()
+        ) || filesData.files?.[0];
+        if (matchingFile) {
+          setActiveFileId(matchingFile.id)
+        }
         const docxFile = filesData.files?.find(f => {
           if (!f.filename.toLowerCase().endsWith('.docx')) return false
           let xmlBase = decodedFilename.replace(/\.xml$/i, '')

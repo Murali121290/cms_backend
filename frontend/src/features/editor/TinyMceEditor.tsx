@@ -50,6 +50,192 @@ export interface CommentItem {
   replies?: CommentReply[];
 }
 
+export function parseAuthorQueriesToEditorHtml(rawHtml: string, fileId?: string): string {
+  if (!rawHtml) return rawHtml;
+
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(rawHtml, "text/html");
+
+    // 1. Transform graphic tags into <img> tags
+    const graphicNodes = doc.querySelectorAll('[data-xml-tag="graphic"], graphic');
+    graphicNodes.forEach((node) => {
+      const origHref = node.getAttribute("href") || node.getAttribute("xlink:href") || node.getAttribute("data-original-href") || "";
+      const filename = origHref.split(/[/\\]/).pop() || "";
+      const effectiveFileId = fileId || "175";
+      const assetUrl = filename
+        ? `/api/v2/files/${effectiveFileId}/asset/${filename}`
+        : origHref;
+
+      const img = doc.createElement("img");
+      img.setAttribute("data-xml-tag", "graphic");
+      img.setAttribute("data-original-href", origHref);
+      img.setAttribute("src", assetUrl);
+      img.setAttribute("alt", "Figure");
+      img.className = "editor-figure-img";
+
+      if (node.parentNode) {
+        node.parentNode.insertBefore(img, node);
+        while (node.firstChild) {
+          node.parentNode.insertBefore(node.firstChild, node);
+        }
+        node.parentNode.removeChild(node);
+      }
+    });
+
+    // 2. Transform fig tags into <figure> elements
+    const figNodes = doc.querySelectorAll('[data-xml-tag="fig"], fig');
+    figNodes.forEach((node) => {
+      const figure = doc.createElement("figure");
+      figure.setAttribute("data-xml-tag", "fig");
+      figure.className = "figure-container " + (node.getAttribute("class") || "");
+
+      Array.from(node.attributes).forEach((attr) => {
+        if (attr.name !== "data-xml-tag" && attr.name !== "class") {
+          figure.setAttribute(attr.name, attr.value);
+        }
+      });
+
+      while (node.firstChild) {
+        figure.appendChild(node.firstChild);
+      }
+
+      if (node.parentNode) {
+        node.parentNode.replaceChild(figure, node);
+      }
+    });
+
+    let counter = 1;
+    let htmlStr = doc.body ? doc.body.innerHTML : rawHtml;
+
+    // Pattern 1: Highlight + Query pairs
+    htmlStr = htmlStr.replace(
+      /<!--\s*<highlight>\s*-->([\s\S]*?)<!--\s*<\/highlight>\s*-->\s*<!--\s*<query[^>]*>\s*-->([\s\S]*?)<!--\s*<\/query>\s*-->/gi,
+      (_, targetContent, queryContent) => {
+        const aqId = `aq_${counter++}`;
+        const cleanTarget = String(targetContent).trim();
+        const cleanQuery = String(queryContent).trim().replace(/^(?:--\s*>|<--\s*)/g, "").replace(/<--$/g, "").trim().replace(/"/g, "&quot;");
+        return `<mark class="doc-comment aq-target" data-comment-id="${aqId}" data-author="Author Query (AQ)" data-date="${new Date().toISOString()}" data-comment="${cleanQuery}">${cleanTarget}</mark>`;
+      }
+    );
+
+    // Pattern 2: Standalone Form 1 (<!-- QUERY: <query...>...</query> -->)
+    htmlStr = htmlStr.replace(
+      /<!--\s*QUERY:\s*(<query[^>]*>([\s\S]*?)<\/query>)\s*-->/gi,
+      (_, xmlStr, queryContent) => {
+        const aqId = `aq_${counter++}`;
+        const cleanQuery = String(queryContent).trim().replace(/"/g, "&quot;");
+        return `<mark class="doc-comment aq-target" data-comment-id="${aqId}" data-author="Author Query (AQ)" data-date="${new Date().toISOString()}" data-comment="${cleanQuery}">💬 AQ</mark>`;
+      }
+    );
+
+    // Pattern 3: Standalone Form 2 (<!--<query>-->...<!--</query>-->)
+    htmlStr = htmlStr.replace(
+      /<!--\s*<query[^>]*>\s*-->([\s\S]*?)<!--\s*<\/query>\s*-->/gi,
+      (_, queryContent) => {
+        const aqId = `aq_${counter++}`;
+        const cleanQuery = String(queryContent).trim().replace(/^(?:--\s*>|<--\s*)/g, "").replace(/<--$/g, "").trim().replace(/"/g, "&quot;");
+        return `<mark class="doc-comment aq-target" data-comment-id="${aqId}" data-author="Author Query (AQ)" data-date="${new Date().toISOString()}" data-comment="${cleanQuery}">💬 AQ</mark>`;
+      }
+    );
+
+    return htmlStr;
+  } catch (err) {
+    console.error("Error parsing editor HTML:", err);
+    return rawHtml;
+  }
+}
+
+export function serializeEditorHtmlToXhtml(editorHtml: string): string {
+  if (!editorHtml) return editorHtml;
+
+  let xhtml = editorHtml;
+
+  // Revert <figure> tags back to <span data-xml-tag="fig">
+  xhtml = xhtml.replace(
+    /<figure\b([^>]*)>([\s\S]*?)<\/figure>/gi,
+    (_, attrs, innerContent) => {
+      const cleanAttrs = attrs
+        .replace(/\bdata-xml-tag="[^"]*"/gi, "")
+        .replace(/class="([^"]*)"/gi, (m: string, cls: string) => {
+          const cleanedCls = cls.split(/\s+/).filter(c => c !== "figure-container").join(" ").trim();
+          return cleanedCls ? `class="${cleanedCls}"` : "";
+        })
+        .replace(/\s+/g, " ")
+        .trim();
+      return `<span data-xml-tag="fig"${cleanAttrs ? ' ' + cleanAttrs : ''}>${innerContent}</span>`;
+    }
+  );
+
+  // Revert <img> tags back to <span data-xml-tag="graphic" href="...">
+  xhtml = xhtml.replace(
+    /<img\b([^>]*\bdata-xml-tag="graphic"[^>]*)>/gi,
+    (_, attrs) => {
+      const origMatch = attrs.match(/data-original-href="([^"]+)"/i);
+      const srcMatch = attrs.match(/src="([^"]+)"/i);
+      let href = origMatch ? origMatch[1] : (srcMatch ? srcMatch[1] : "");
+      href = href.replace(/^.*?\/asset\//, "");
+      return `<span data-xml-tag="graphic" href="${href}"></span>`;
+    }
+  );
+
+  // 1. Remove MS Word Office namespace tags (<o:p></o:p>, <o:p/>)
+  xhtml = xhtml.replace(/<o:p\b[^>]*>[\s\S]*?<\/o:p>/gi, "");
+  xhtml = xhtml.replace(/<\/?o:p\b[^>]*>/gi, "");
+
+  // 2. Remove unstyled <span lang="..."> wrappers
+  xhtml = xhtml.replace(/<span\s+lang="[^"]*"\s*>(.*?)<\/span>/gi, "$1");
+
+  // 3. Remove Word inline mso- styles & unnecessary font/color styles from inserted paragraphs
+  xhtml = xhtml.replace(/style="[^"]*mso-[^"]*"/gi, (match) => {
+    const cleanedStyle = match
+      .replace(/mso-[^;"]+;?/gi, "")
+      .replace(/font-size:[^;"]+;?/gi, "")
+      .replace(/font-family:[^;"]+;?/gi, "")
+      .replace(/line-height:[^;"]+;?/gi, "")
+      .replace(/color:[^;"]+;?/gi, "")
+      .replace(/text-align:[^;"]+;?/gi, "")
+      .replace(/style="\s*"/gi, "");
+    return cleanedStyle === 'style=""' ? "" : cleanedStyle;
+  });
+
+  // 4. Clean MS Word table & cell attributes
+  xhtml = xhtml.replace(/\s+align="left"/gi, "");
+  xhtml = xhtml.replace(/\s+mso-[a-z-]+="[^"]*"/gi, "");
+  xhtml = xhtml.replace(/\s+cellspacing="[^"]*"/gi, "");
+  xhtml = xhtml.replace(/\s+cellpadding="[^"]*"/gi, "");
+
+  // 5. Ensure self-closing void elements in XHTML (<col/>, <img/>, <hr/>, <br/>)
+  xhtml = xhtml.replace(/<col(\s+[^>]*?)?(?<!\/)>/gi, "<col$1 />");
+  xhtml = xhtml.replace(/<img(\s+[^>]*?)?(?<!\/)>/gi, "<img$1 />");
+  xhtml = xhtml.replace(/<hr(\s+[^>]*?)?(?<!\/)>/gi, "<hr$1 />");
+  xhtml = xhtml.replace(/<br(\s+[^>]*?)?(?<!\/)>/gi, "<br$1 />");
+
+  // 6. Ensure every <p> tag without data-xml-tag gets data-xml-tag="p"
+  xhtml = xhtml.replace(/<p\b(?![^>]*\bdata-xml-tag=)([^>]*)>/gi, (match, attrs) => {
+    const cleanAttrs = attrs
+      .replace(/class="(?:LL-FIRST|MsoNormal|T\d*|Para-FL)"/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    return cleanAttrs ? `<p data-xml-tag="p" ${cleanAttrs}>` : `<p data-xml-tag="p">`;
+  });
+
+  // 7. Serialize AQ mark elements into XHTML comments
+  xhtml = xhtml.replace(
+    /<mark[^>]*class="[^"]*aq-target[^"]*"[^>]*data-comment="([^"]+)"[^>]*>([\s\S]*?)<\/mark>/gi,
+    (_, encodedComment, innerText) => {
+      const rawComment = String(encodedComment).replace(/&quot;/g, '"');
+      const cleanText = String(innerText).trim();
+      if (cleanText && cleanText !== '💬 AQ') {
+        return `<!--<highlight>-->${cleanText}<!--</highlight>--><!--<query>--> ${rawComment} <!--</query>-->`;
+      }
+      return `<!--<query>--> ${rawComment} <!--</query>-->`;
+    }
+  );
+
+  return xhtml;
+}
+
 export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>(
   function TinyMceEditor(
     {
@@ -73,7 +259,7 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
     }: TinyMceEditorProps,
     ref
   ) {
-    const [content, setContent] = useState(initialContent);
+    const [content, setContent] = useState(() => parseAuthorQueriesToEditorHtml(initialContent || ""));
     const [tcEnabled, setTcEnabled] = useState(trackChangesEnabled);
     const [isDirty, setIsDirty] = useState(false);
     const [savedAt, setSavedAt] = useState<Date | null>(null);
@@ -130,7 +316,8 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
 
     // Handle initialContent changes
     useEffect(() => {
-      setContent(initialContent);
+      const processed = parseAuthorQueriesToEditorHtml(initialContent || "");
+      setContent(processed);
       setIsDirty(false);
     }, [initialContent]);
 
@@ -138,8 +325,9 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
     useEffect(() => {
       if (!initialContent) return;
       try {
+        const processed = parseAuthorQueriesToEditorHtml(initialContent);
         const parser = new DOMParser();
-        const doc = parser.parseFromString(initialContent, "text/html");
+        const doc = parser.parseFromString(processed, "text/html");
         const commentMarks = doc.querySelectorAll("mark.doc-comment");
         const extracted: CommentItem[] = [];
 
@@ -166,10 +354,8 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
       () => ({
         editor: {
           getHTML: () => {
-            if (editorRef.current) {
-              return editorRef.current.getContent();
-            }
-            return contentRef.current;
+            const raw = editorRef.current ? editorRef.current.getContent() : contentRef.current;
+            return serializeEditorHtmlToXhtml(raw);
           },
         },
         triggerCommentDialog: () => {
@@ -180,8 +366,9 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
     );
 
     const handleSaveClick = async () => {
-      const currentHtml = editorRef.current ? editorRef.current.getContent() : content;
-      await onSave(currentHtml);
+      const rawHtml = editorRef.current ? editorRef.current.getContent() : content;
+      const cleanHtml = serializeEditorHtmlToXhtml(rawHtml);
+      await onSave(cleanHtml);
       setIsDirty(false);
       setSavedAt(new Date());
     };
@@ -454,6 +641,42 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
         box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3) !important;
         max-width: 400px !important;
       }
+      /* Author Queries (AQ) Proof Styling */
+      mark.aq-target {
+        background-color: #e0f2fe !important;
+        color: #0c4a6e !important;
+        border-bottom: 2px solid #0284c7 !important;
+        padding: 1px 4px !important;
+        border-radius: 3px !important;
+        cursor: pointer !important;
+        display: inline !important;
+      }
+      mark.aq-target::after {
+        content: " 💬 AQ" !important;
+        font-family: system-ui, -apple-system, sans-serif !important;
+        font-style: normal !important;
+        font-weight: 700 !important;
+        font-size: 10px !important;
+        background: #0284c7 !important;
+        color: #ffffff !important;
+        padding: 1px 6px !important;
+        border-radius: 10px !important;
+        margin-left: 4px !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        gap: 2px !important;
+        box-shadow: 0 1px 4px rgba(2, 132, 199, 0.25) !important;
+        vertical-align: middle !important;
+        border: 1px solid #0369a1 !important;
+        cursor: pointer !important;
+        user-select: none !important;
+      }
+      mark.aq-target:hover {
+        background-color: #bae6fd !important;
+      }
+      mark.aq-target:hover::after {
+        background-color: #0369a1 !important;
+      }
       /* Ensure inline XML citation sub-elements render inline according to Proof idGeneratedStyles.css */
       div[data-xml-tag="edition"],
       div[data-xml-tag="publisher-name"],
@@ -676,6 +899,20 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
               tinymceScriptSrc="https://cdn.jsdelivr.net/npm/tinymce@6/tinymce.min.js"
               onInit={(evt, editor) => {
                 editorRef.current = editor;
+                try {
+                  const doc = editor.getDoc();
+                  if (doc && doc.head && customCssRef.current) {
+                    let styleEl = doc.getElementById("indesign-custom-css");
+                    if (!styleEl) {
+                      styleEl = doc.createElement("style");
+                      styleEl.id = "indesign-custom-css";
+                      doc.head.appendChild(styleEl);
+                    }
+                    styleEl.textContent = customCssRef.current;
+                  }
+                } catch (err) {
+                  console.error("Failed to inject customCss onInit:", err);
+                }
               }}
               value={content}
               onEditorChange={(newVal) => {
@@ -685,7 +922,11 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
               }}
               init={{
                 height: height,
-                menubar: "file edit view insert format tools table help",
+                menubar: "file edit view insert format tools table comments help",
+                branding: false,
+                promotion: false,
+                statusbar: true,
+                resize: true,
                 plugins: [
                   "advlist", "autolink", "lists", "link", "image", "charmap", "preview",
                   "anchor", "searchreplace", "visualblocks", "code", "fullscreen",
@@ -694,7 +935,7 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
                 ],
                 toolbar: [
                   "undo redo | styles blocks fontfamily fontsize | bold italic underline strikethrough | forecolor backcolor | alignleft aligncenter alignright alignjustify",
-                  "subscript superscript | addcomment | bullist numlist outdent indent | table link image media emoticons charmap hr pagebreak nonbreaking anchor insertdatetime | code fullscreen preview searchreplace visualblocks wordcount"
+                  "subscript superscript | addcomment showcomments | bullist numlist outdent indent | table link image media emoticons charmap hr pagebreak nonbreaking anchor insertdatetime | code fullscreen preview searchreplace visualblocks wordcount"
                 ],
                 quickbars_selection_toolbar: "bold italic underline | addcomment quicklink h2 h3 blockquote",
                 quickbars_insert_toolbar: "quickimage quicktable media hr",
@@ -708,6 +949,26 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
                 verify_html: false,
                 schema: "html5",
                 forced_root_block: "p",
+                paste_postprocess: (_plugin: any, args: any) => {
+                  if (args && args.node) {
+                    try {
+                      // Remove MS Office o:p elements
+                      const oNodes = args.node.querySelectorAll("o\\:p, op, o");
+                      oNodes.forEach((n: any) => n.remove());
+
+                      // Ensure pasted <p> elements have data-xml-tag="p"
+                      const pNodes = args.node.querySelectorAll("p");
+                      pNodes.forEach((p: any) => {
+                        if (!p.getAttribute("data-xml-tag")) {
+                          p.setAttribute("data-xml-tag", "p");
+                        }
+                        p.removeAttribute("align");
+                      });
+                    } catch (err) {
+                      console.error("Error in paste_postprocess:", err);
+                    }
+                  }
+                },
                 allow_conditional_comments: true,
                 entity_encoding: "raw",
                 formats: {
@@ -779,13 +1040,37 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
                     }
                   });
 
-                  // Register custom toolbar & context menu Comment button
+                  // Register custom toolbar & context menu Comment buttons
                   editor.ui.registry.addButton("addcomment", {
                     text: "Comment",
                     icon: "comment",
                     tooltip: "Add Comment to Selection",
                     onAction: () => {
                       handleOpenCommentModal();
+                    },
+                  });
+
+                  editor.ui.registry.addButton("showcomments", {
+                    icon: "comment-add",
+                    tooltip: "Toggle Comments Panel",
+                    onAction: () => {
+                      setShowCommentsSidebar((prev) => !prev);
+                    },
+                  });
+
+                  editor.ui.registry.addMenuItem("addcomment", {
+                    text: "Add Comment to Selection",
+                    icon: "comment",
+                    onAction: () => {
+                      handleOpenCommentModal();
+                    },
+                  });
+
+                  editor.ui.registry.addMenuItem("showcomments", {
+                    text: "Toggle Comments Panel",
+                    icon: "comment-add",
+                    onAction: () => {
+                      setShowCommentsSidebar((prev) => !prev);
                     },
                   });
 
@@ -912,35 +1197,44 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
             />
           </div>
 
-          {/* Right Comments Sidebar */}
+          {/* Right Comments & AQ Callout Cards Side Panel */}
           {showCommentsSidebar && (
-            <div className="w-80 bg-slate-950 border-l border-slate-800 flex flex-col flex-shrink-0">
-              <div className="p-3 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
-                <div className="flex items-center gap-2 text-xs font-semibold text-slate-200">
-                  <MessageSquare size={14} className="text-blue-400" />
-                  <span>Comments</span>
-                  <span className="bg-blue-600/20 text-blue-400 px-1.5 py-0.5 rounded text-[10px]">
+            <div className="w-[360px] min-w-[360px] max-w-[360px] flex-shrink-0 bg-slate-50 border-l border-dashed border-slate-300 flex flex-col shadow-lg overflow-hidden">
+              <div className="p-3 border-b border-slate-200 flex items-center justify-between bg-white">
+                <div className="flex items-center gap-2 text-xs font-bold text-slate-800">
+                  <MessageSquare size={15} className="text-sky-600" />
+                  <span>Author Queries & Comments</span>
+                  <span className="bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full text-[11px] font-bold">
                     {comments.length}
                   </span>
                 </div>
-                <button
-                  onClick={handleOpenCommentModal}
-                  className="text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded transition-colors flex items-center gap-1"
-                >
-                  + Add Comment
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={handleOpenCommentModal}
+                    className="text-xs font-semibold bg-sky-600 hover:bg-sky-700 text-white px-2.5 py-1 rounded-md transition-colors flex items-center gap-1 shadow-xs"
+                  >
+                    + Add Comment
+                  </button>
+                  <button
+                    onClick={() => setShowCommentsSidebar(false)}
+                    className="text-slate-400 hover:text-slate-600 p-1 rounded-md hover:bg-slate-100 transition-colors"
+                    title="Close Comments Panel"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
               </div>
 
               {/* Filter Tabs */}
-              <div className="flex items-center border-b border-slate-800/80 px-3 py-1.5 gap-1 bg-slate-900/30">
+              <div className="flex items-center border-b border-slate-200 px-3 py-1.5 gap-1.5 bg-slate-100/60">
                 {(["all", "active", "resolved"] as const).map((filter) => (
                   <button
                     key={filter}
                     onClick={() => setCommentFilter(filter)}
-                    className={`px-2 py-0.5 rounded text-[11px] font-medium capitalize transition-all ${
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-semibold capitalize transition-all ${
                       commentFilter === filter
-                        ? "bg-blue-600/20 text-blue-400 border border-blue-500/30"
-                        : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+                        ? "bg-white text-sky-700 shadow-xs border border-slate-200"
+                        : "text-slate-500 hover:text-slate-800 hover:bg-slate-200/50"
                     }`}
                   >
                     {filter}
@@ -948,110 +1242,130 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
                 ))}
               </div>
 
-              <div className="flex-1 overflow-y-auto p-3 space-y-3">
+              <div className="flex-1 overflow-y-auto p-3 space-y-3.5 bg-slate-50">
                 {comments.filter(c => commentFilter === "all" ? true : commentFilter === "resolved" ? c.isResolved : !c.isResolved).length === 0 ? (
-                  <div className="text-center py-8 text-xs text-slate-500">
-                    No {commentFilter !== "all" ? commentFilter : ""} comments in this document. Select text and click <strong>+ Add Comment</strong>.
+                  <div className="text-center py-10 text-xs text-slate-500">
+                    No {commentFilter !== "all" ? commentFilter : ""} queries or comments found.
                   </div>
                 ) : (
                   comments
                     .filter(c => commentFilter === "all" ? true : commentFilter === "resolved" ? c.isResolved : !c.isResolved)
-                    .map((comment) => (
-                      <div
-                        key={comment.id}
-                        onClick={() => handleSelectComment(comment.id)}
-                        className={`p-3 rounded-lg border transition-all cursor-pointer text-xs ${
-                          comment.isResolved
-                            ? "bg-slate-900/30 border-slate-800/60 opacity-75"
-                            : activeCommentId === comment.id
-                            ? "bg-slate-900 border-blue-500/50 shadow-lg shadow-blue-500/10"
-                            : "bg-slate-900/60 border-slate-800 hover:border-slate-700"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between mb-1.5">
-                          <span className="font-semibold text-slate-300 flex items-center gap-1.5">
-                            <span className="w-4 h-4 rounded-full bg-blue-600 text-white text-[9px] flex items-center justify-center font-bold">
-                              {comment.author.substring(0, 2).toUpperCase()}
-                            </span>
-                            {comment.author}
-                          </span>
-                          <div className="flex items-center gap-1.5">
-                            {comment.isResolved && (
-                              <span className="text-[9px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1 rounded">
-                                Resolved
-                              </span>
-                            )}
-                            <span className="text-[10px] text-slate-500">
-                              {new Date(comment.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="text-slate-400 italic text-[11px] mb-2 pl-2 border-l-2 border-slate-700 truncate">
-                          "{comment.selectedText}"
-                        </div>
-                        <div className="text-slate-200 font-medium leading-relaxed mb-2">
-                          {comment.text}
-                        </div>
+                    .map((comment, index) => {
+                      const isAq = comment.author.includes("AQ") || comment.author.includes("Author Query") || comment.id.startsWith("aq_");
+                      const aqPillLabel = isAq ? `AQ${index + 1}` : `C${index + 1}`;
+                      const isActive = activeCommentId === comment.id;
 
-                        {/* Threaded Replies */}
-                        {comment.replies && comment.replies.length > 0 && (
-                          <div className="mt-2.5 pt-2 border-t border-slate-800/80 space-y-2">
-                            {comment.replies.map((reply) => (
-                              <div key={reply.id} className="bg-slate-950/60 p-2 rounded border border-slate-800/50 text-[11px]">
-                                <div className="flex items-center justify-between mb-0.5 text-slate-400">
-                                  <span className="font-semibold text-slate-300">{reply.author}</span>
-                                  <span className="text-[9px]">{new Date(reply.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      return (
+                        <div
+                          key={comment.id}
+                          onClick={() => handleSelectComment(comment.id)}
+                          className={`p-3.5 rounded-xl border transition-all cursor-pointer text-xs space-y-2.5 ${
+                            comment.isResolved
+                              ? "bg-white/60 border-slate-200 opacity-60"
+                              : isActive
+                              ? "bg-amber-50/90 border-amber-300 ring-2 ring-amber-400/30 shadow-md"
+                              : "bg-white border-slate-200 hover:border-sky-300 shadow-xs hover:shadow"
+                          }`}
+                        >
+                          {/* Card Header with Pill Badge / Avatar & Title */}
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              {isAq ? (
+                                <span className="bg-sky-600 text-white font-bold text-[10px] px-2 py-0.5 rounded-full shadow-xs">
+                                  {aqPillLabel}
+                                </span>
+                              ) : (
+                                <div className="w-6 h-6 rounded-full bg-amber-500 text-white font-bold text-[10px] flex items-center justify-center shadow-xs">
+                                  {comment.author.substring(0, 2).toUpperCase()}
                                 </div>
-                                <div className="text-slate-300">{reply.text}</div>
-                              </div>
-                            ))}
+                              )}
+                              <span className="font-bold text-slate-800 text-xs truncate max-w-[170px]">
+                                {isAq ? "Author Query" : comment.author}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              {comment.isResolved ? (
+                                <span className="text-[9px] bg-emerald-100 text-emerald-700 font-bold border border-emerald-200 px-1.5 py-0.5 rounded-md">
+                                  Resolved
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-slate-400">
+                                  {new Date(comment.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              )}
+                            </div>
                           </div>
-                        )}
 
-                        {/* Reply Input Box */}
-                        <div className="mt-2.5 flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-                          <input
-                            type="text"
-                            placeholder="Type a reply..."
-                            value={replyInputMap[comment.id] || ""}
-                            onChange={(e) => setReplyInputMap({ ...replyInputMap, [comment.id]: e.target.value })}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") handleAddCommentReply(comment.id);
-                            }}
-                            className="flex-1 bg-slate-950 border border-slate-800 rounded px-2 py-1 text-[11px] text-slate-200 focus:outline-none focus:border-blue-500"
-                          />
-                          <button
-                            onClick={() => handleAddCommentReply(comment.id)}
-                            className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-1 rounded font-medium transition-colors"
-                          >
-                            Reply
-                          </button>
-                        </div>
+                          {/* Selected Text Preview */}
+                          {comment.selectedText && comment.selectedText !== "💬 AQ" && (
+                            <div className={`text-[11px] px-2.5 py-1 rounded-md border font-medium italic truncate ${
+                              isActive ? "text-amber-900 bg-amber-100/70 border-amber-200" : "text-sky-900 bg-sky-50/80 border-sky-100"
+                            }`}>
+                              "{comment.selectedText}"
+                            </div>
+                          )}
 
-                        {/* Card Action Controls */}
-                        <div className="flex items-center justify-between pt-2 mt-2 border-t border-slate-800/60">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleToggleResolveComment(comment.id);
-                            }}
-                            className="text-[10px] text-emerald-400 hover:text-emerald-300 font-medium flex items-center gap-1"
-                          >
-                            <CheckCircle2 size={11} />
-                            {comment.isResolved ? "Unresolve" : "Resolve"}
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteComment(comment.id);
-                            }}
-                            className="text-[10px] text-rose-400 hover:text-rose-300 font-medium"
-                          >
-                            Delete
-                          </button>
+                          {/* Query Content Text */}
+                          <div className="text-slate-800 text-xs leading-relaxed font-normal">
+                            {comment.text}
+                          </div>
+
+                          {/* Threaded Replies */}
+                          {comment.replies && comment.replies.length > 0 && (
+                            <div className="pt-2 border-t border-slate-200/80 space-y-1.5">
+                              {comment.replies.map((reply) => (
+                                <div key={reply.id} className="bg-white/80 p-2 rounded-md border border-slate-200/80 text-[11px]">
+                                  <div className="flex items-center justify-between mb-0.5 text-slate-500">
+                                    <span className="font-semibold text-slate-700">{reply.author}</span>
+                                    <span className="text-[9px]">{new Date(reply.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                  </div>
+                                  <div className="text-slate-700">{reply.text}</div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Active State Response Area */}
+                          {isActive ? (
+                            <div className="pt-1 space-y-2" onClick={(e) => e.stopPropagation()}>
+                              <textarea
+                                placeholder={isAq ? "Follow the chapter title as given here..." : "Comment or mention with @"}
+                                value={replyInputMap[comment.id] || ""}
+                                onChange={(e) => setReplyInputMap({ ...replyInputMap, [comment.id]: e.target.value })}
+                                className="w-full bg-white border border-amber-300 focus:border-blue-500 rounded-lg p-2.5 text-xs text-slate-800 placeholder-slate-400 focus:ring-2 focus:ring-blue-500/20 outline-none resize-none shadow-xs"
+                                rows={2}
+                              />
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  onClick={() => handleAddCommentReply(comment.id)}
+                                  className="bg-sky-600 hover:bg-sky-700 text-white font-semibold text-[11px] px-3 py-1.5 rounded-md shadow-xs transition-colors"
+                                >
+                                  Save Response
+                                </button>
+                                <button
+                                  onClick={() => handleToggleResolveComment(comment.id)}
+                                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-[11px] px-3 py-1.5 rounded-md shadow-xs transition-colors"
+                                >
+                                  {comment.isResolved ? "Unresolve AQ" : "Resolve AQ"}
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="pt-1 flex items-center justify-between text-slate-400 text-[11px]" onClick={(e) => e.stopPropagation()}>
+                              <span className="bg-slate-100 px-2 py-0.5 rounded text-slate-600 font-medium">
+                                {comment.replies ? comment.replies.length : 0} replies
+                              </span>
+                              <span
+                                onClick={() => handleSelectComment(comment.id)}
+                                className="text-sky-600 font-semibold hover:underline cursor-pointer"
+                              >
+                                Reply
+                              </span>
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    ))
+                      );
+                    })
                 )}
               </div>
             </div>

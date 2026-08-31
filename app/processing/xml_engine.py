@@ -195,7 +195,16 @@ class XMLEngine:
             raise FileNotFoundError("XSLT style.xsl not found in server legacy directory")
             
         # Parse XML and transform
-        xml_tree = etree.fromstring(xml_content)
+        if b"aid:" in xml_content and b"xmlns:aid=" not in xml_content:
+            xml_content = re.sub(
+                rb'(<[A-Za-z0-9_-]+)',
+                rb'\1 xmlns:aid="http://ns.adobe.com/AdobeInDesign/4.0/"',
+                xml_content,
+                count=1
+            )
+
+        parser = etree.XMLParser(recover=True)
+        xml_tree = etree.fromstring(xml_content, parser=parser)
         xsl_tree = etree.parse(xsl_path)
         transform = etree.XSLT(xsl_tree)
         result_tree = transform(xml_tree)

@@ -5551,6 +5551,145 @@ def api_v2_save_file_xhtml_runs(
         raise
     except Exception as exc:
         logger.error(f"Unexpected error in delta save: {exc}", exc_info=True)
+
+@router.get("/files/{file_id}/asset/{asset_path:path}")
+def api_v2_get_file_asset(
+    file_id: int,
+    asset_path: str,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """
+    Stream an image asset associated with a file's chapter (artfile, Links, Proof).
+    Automatically resolves .eps files to matching .png/.jpg or converts EPS to PNG.
+    """
+    from fastapi.responses import FileResponse
+    import mimetypes
+    from app.services.file_service import UPLOAD_DIR
+    from app.domains.review.service import resolve_processed_target
+
+    clean_asset_name = os.path.basename(asset_path).strip()
+    if not clean_asset_name:
+        raise HTTPException(status_code=400, detail="Invalid asset name")
+
+    try:
+        file_record = db.query(models.File).filter(models.File.id == file_id).first()
+        if not file_record:
+            raise HTTPException(status_code=404, detail="File not found")
+
+        project = db.query(models.Project).filter(models.Project.id == file_record.project_id).first()
+        chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == file_record.chapter_id).first()
+        if not project or not chapter:
+            raise HTTPException(status_code=404, detail="Project or Chapter not found")
+
+        chapter_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters)
+        
+        candidate_folders = [
+            os.path.join(chapter_dir, "artfile"),
+            os.path.join(chapter_dir, "Links"),
+            os.path.join(chapter_dir, "Art"),
+            os.path.join(chapter_dir, "Proof"),
+            os.path.join(chapter_dir, "InDesign", "artfile"),
+            os.path.join(chapter_dir, "InDesign", "Links"),
+            chapter_dir,
+        ]
+
+        base_name_no_ext = os.path.splitext(clean_asset_name)[0]
+        target_disk_file = None
+
+        # Check exact match first
+        for folder in candidate_folders:
+            if os.path.exists(folder):
+                test_p = os.path.join(folder, clean_asset_name)
+                if os.path.exists(test_p) and os.path.isfile(test_p):
+                    target_disk_file = test_p
+                    break
+
+        # Check raster variants (.png, .jpg, .jpeg, .webp) if missing or if .eps
+        if not target_disk_file or clean_asset_name.lower().endswith(".eps"):
+            for ext_variant in [".png", ".jpg", ".jpeg", ".webp", ".svg"]:
+                variant_name = base_name_no_ext + ext_variant
+                for folder in candidate_folders:
+                    if os.path.exists(folder):
+                        test_p = os.path.join(folder, variant_name)
+                        if os.path.exists(test_p) and os.path.isfile(test_p):
+                            target_disk_file = test_p
+                            break
+                if target_disk_file:
+                    break
+
+        # Fallback 1: search project directory recursively for asset file or raster variants
+        if not target_disk_file or not os.path.exists(target_disk_file):
+            search_names = [clean_asset_name]
+            if clean_asset_name.lower().endswith(".eps"):
+                search_names.extend([base_name_no_ext + ext for ext in [".png", ".jpg", ".jpeg", ".webp", ".svg"]])
+            
+            project_dir = os.path.join(UPLOAD_DIR, project.code) if project else None
+            if project_dir and os.path.exists(project_dir):
+                for root, _, files in os.walk(project_dir):
+                    lower_files = {f.lower(): f for f in files}
+                    for sn in search_names:
+                        if sn.lower() in lower_files:
+                            target_disk_file = os.path.join(root, lower_files[sn.lower()])
+                            break
+                    if target_disk_file:
+                        break
+
+        # Fallback 2: search global UPLOAD_DIR recursively if file_id belong to another chapter/project
+        if not target_disk_file or not os.path.exists(target_disk_file):
+            search_names = [clean_asset_name]
+            if clean_asset_name.lower().endswith(".eps"):
+                search_names.extend([base_name_no_ext + ext for ext in [".png", ".jpg", ".jpeg", ".webp", ".svg"]])
+            if os.path.exists(UPLOAD_DIR):
+                for root, _, files in os.walk(UPLOAD_DIR):
+                    lower_files = {f.lower(): f for f in files}
+                    for sn in search_names:
+                        if sn.lower() in lower_files:
+                            target_disk_file = os.path.join(root, lower_files[sn.lower()])
+                            break
+                    if target_disk_file:
+                        break
+
+        # On-the-fly EPS to PNG conversion using PIL/PyMuPDF if no pre-converted image exists
+        if target_disk_file and target_disk_file.lower().endswith(".eps"):
+            png_cache_file = target_disk_file + ".converted.png"
+            if os.path.exists(png_cache_file):
+                return FileResponse(png_cache_file, media_type="image/png")
+            try:
+                from PIL import Image
+                im = Image.open(target_disk_file)
+                if hasattr(im, "load"):
+                    try:
+                        im.load()
+                    except Exception:
+                        pass
+                im.convert("RGB").save(png_cache_file, "PNG")
+                return FileResponse(png_cache_file, media_type="image/png")
+            except Exception as conv_err:
+                logger.warning(f"PIL EPS to PNG conversion failed for {target_disk_file}: {conv_err}")
+                try:
+                    import pymupdf
+                    doc = pymupdf.open(target_disk_file)
+                    page = doc[0]
+                    pix = page.get_pixmap(dpi=150)
+                    pix.save(png_cache_file)
+                    return FileResponse(png_cache_file, media_type="image/png")
+                except Exception as conv_err2:
+                    logger.warning(f"PyMuPDF EPS conversion fallback failed for {target_disk_file}: {conv_err2}")
+
+        if not target_disk_file or not os.path.exists(target_disk_file):
+            raise HTTPException(status_code=404, detail=f"Image asset '{clean_asset_name}' not found")
+
+        mime_type, _ = mimetypes.guess_type(target_disk_file)
+        if not mime_type:
+            mime_type = "image/png" if target_disk_file.lower().endswith(".png") else "application/octet-stream"
+
+        return FileResponse(target_disk_file, media_type=mime_type)
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Failed to serve asset {asset_path} for file {file_id}: {exc}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(exc))
 
 

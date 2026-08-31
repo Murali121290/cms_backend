@@ -9,15 +9,16 @@ export type SearchResultItem = {
 
 export function formatPubMedToStyle(doc: any, style: "AMA" | "APA" = "AMA"): string {
   const authorsList = doc.authors || [];
-  const title = (doc.title || "").replace(/\.$/, "");
-  const journal = doc.source || "";
+  let title = (doc.title || "").trim();
+  if (title.endsWith(".")) title = title.slice(0, -1);
+  const journal = (doc.source || "").trim();
   const pubdate = doc.pubdate || "";
   const yearMatch = pubdate.match(/\b(19|20)\d{2}\b/);
   const year = yearMatch ? yearMatch[0] : "";
   const volume = doc.volume || "";
   const issue = doc.issue || "";
   const pages = doc.pages || "";
-  
+
   let doi = "";
   if (doc.articleids) {
     const doiObj = doc.articleids.find((id: any) => id.idtype === "doi");
@@ -29,35 +30,39 @@ export function formatPubMedToStyle(doc: any, style: "AMA" | "APA" = "AMA"): str
   // Format authors
   let authorsFormatted = "";
   if (style === "AMA") {
-    if (authorsList.length > 6) {
-      authorsFormatted = authorsList.slice(0, 3).map((a: any) => a.name).join(", ") + ", et al";
-    } else if (authorsList.length > 0) {
-      authorsFormatted = authorsList.map((a: any) => a.name).join(", ");
+    // AMA 11th Edition: Surname Initials (e.g. Alvidrez J, Tabor DC)
+    const formatted = authorsList.map((a: any) => (a.name || "").trim()).filter(Boolean);
+    if (formatted.length > 6) {
+      authorsFormatted = formatted.slice(0, 3).join(", ") + ", et al";
+    } else if (formatted.length > 0) {
+      authorsFormatted = formatted.join(", ");
     }
   } else {
+    // APA 7th Edition: Surname, I. N. (e.g. Alvidrez, J., & Tabor, D. C.)
     const parseName = (name: string) => {
       const parts = name.trim().split(/\s+/);
       if (parts.length > 1) {
-        const last = parts[0];
-        const initials = parts.slice(1).join("").split("").map(c => `${c}.`).join(" ");
-        return `${last}, ${initials}`;
+        const surname = parts[0];
+        const initials = parts.slice(1).join("").split("").map((c) => `${c.toUpperCase()}.`).join(" ");
+        return `${surname}, ${initials}`;
       }
       return name;
     };
-    if (authorsList.length > 0) {
-      const parsedAuthors = authorsList.map((a: any) => parseName(a.name));
-      if (parsedAuthors.length > 1) {
-        authorsFormatted = parsedAuthors.slice(0, -1).join(", ") + ", & " + parsedAuthors[parsedAuthors.length - 1];
-      } else {
-        authorsFormatted = parsedAuthors[0];
-      }
+    const formatted = authorsList.map((a: any) => parseName(a.name || "")).filter(Boolean);
+    if (formatted.length > 20) {
+      authorsFormatted = formatted.slice(0, 19).join(", ") + ", ... " + formatted[formatted.length - 1];
+    } else if (formatted.length > 1) {
+      authorsFormatted = formatted.slice(0, -1).join(", ") + ", & " + formatted[formatted.length - 1];
+    } else if (formatted.length === 1) {
+      authorsFormatted = formatted[0];
     }
   }
 
   if (style === "AMA") {
+    // AMA 11th: Authors. Title. Journal. Year;Volume(Issue):Pages. doi:10.xxx
     let res = "";
     if (authorsFormatted) res += `${authorsFormatted}. `;
-    res += `${title}. `;
+    if (title) res += `${title}. `;
     if (journal) res += `${journal}. `;
     if (year) res += `${year}`;
     if (volume || issue || pages) {
@@ -68,14 +73,16 @@ export function formatPubMedToStyle(doc: any, style: "AMA" | "APA" = "AMA"): str
     }
     if (!res.endsWith(".")) res += ".";
     if (doi) {
-      res += ` doi:${doi}`;
+      const cleanDoi = doi.replace(/^doi:\s*/i, "").replace(/^https?:\/\/doi\.org\//i, "");
+      res += ` doi:${cleanDoi}`;
     }
     return res;
   } else {
+    // APA 7th: Authors (Year). Title. Journal, Volume(Issue), Pages. https://doi.org/10.xxx
     let res = "";
     if (authorsFormatted) res += `${authorsFormatted} `;
     if (year) res += `(${year}). `;
-    res += `${title}. `;
+    if (title) res += `${title}. `;
     if (journal) res += `${journal}`;
     if (volume || issue || pages) {
       if (journal) res += ", ";
@@ -88,7 +95,8 @@ export function formatPubMedToStyle(doc: any, style: "AMA" | "APA" = "AMA"): str
     }
     if (!res.endsWith(".")) res += ".";
     if (doi) {
-      res += ` https://doi.org/${doi}`;
+      const cleanDoi = doi.replace(/^doi:\s*/i, "").replace(/^https?:\/\/doi\.org\//i, "");
+      res += ` https://doi.org/${cleanDoi}`;
     }
     return res;
   }
@@ -96,9 +104,10 @@ export function formatPubMedToStyle(doc: any, style: "AMA" | "APA" = "AMA"): str
 
 export function formatCrossRefToStyle(item: any, style: "AMA" | "APA" = "AMA"): string {
   const authorList = item.author || [];
-  const title = (item.title && item.title[0] || "").replace(/\.$/, "");
-  const journal = item["container-title"] && item["container-title"][0] || "";
-  
+  let title = (item.title && item.title[0] || "").trim();
+  if (title.endsWith(".")) title = title.slice(0, -1);
+  const journal = (item["container-title"] && item["container-title"][0] || "").trim();
+
   let year = "";
   const dateParts = item["published-print"]?.["date-parts"]?.[0] || item["published"]?.["date-parts"]?.[0] || item["published-online"]?.["date-parts"]?.[0];
   if (dateParts && dateParts.length > 0) {
@@ -113,33 +122,40 @@ export function formatCrossRefToStyle(item: any, style: "AMA" | "APA" = "AMA"): 
   // Format authors
   let authorsFormatted = "";
   if (style === "AMA") {
+    // AMA 11th Edition: Surname Initials (e.g. Alvidrez J, Tabor DC)
     const formatted = authorList.map((a: any) => {
-      const initials = (a.given || "").split(/\s+/).map((p: string) => p[0] || "").join("");
+      const givenParts = (a.given || "").trim().split(/\s+/);
+      const initials = givenParts.map((p: string) => (p[0] ? p[0].toUpperCase() : "")).join("");
       return `${a.family || ""} ${initials}`.trim();
-    });
+    }).filter(Boolean);
+
     if (formatted.length > 6) {
       authorsFormatted = formatted.slice(0, 3).join(", ") + ", et al";
     } else if (formatted.length > 0) {
       authorsFormatted = formatted.join(", ");
     }
   } else {
+    // APA 7th Edition: Surname, I. N. (e.g. Alvidrez, J., & Tabor, D. C.)
     const formatted = authorList.map((a: any) => {
-      const initials = (a.given || "").split(/\s+/).map((p: string) => p[0] ? `${p[0]}.` : "").join(" ");
+      const givenParts = (a.given || "").trim().split(/\s+/);
+      const initials = givenParts.map((p: string) => (p[0] ? `${p[0].toUpperCase()}.` : "")).join(" ");
       return `${a.family || ""}, ${initials}`.trim();
-    });
-    if (formatted.length > 0) {
-      if (formatted.length > 1) {
-        authorsFormatted = formatted.slice(0, -1).join(", ") + ", & " + formatted[formatted.length - 1];
-      } else {
-        authorsFormatted = formatted[0];
-      }
+    }).filter(Boolean);
+
+    if (formatted.length > 20) {
+      authorsFormatted = formatted.slice(0, 19).join(", ") + ", ... " + formatted[formatted.length - 1];
+    } else if (formatted.length > 1) {
+      authorsFormatted = formatted.slice(0, -1).join(", ") + ", & " + formatted[formatted.length - 1];
+    } else if (formatted.length === 1) {
+      authorsFormatted = formatted[0];
     }
   }
 
   if (style === "AMA") {
+    // AMA 11th: Authors. Title. Journal. Year;Volume(Issue):Pages. doi:10.xxx
     let res = "";
     if (authorsFormatted) res += `${authorsFormatted}. `;
-    res += `${title}. `;
+    if (title) res += `${title}. `;
     if (journal) res += `${journal}. `;
     if (year) res += `${year}`;
     if (volume || issue || pages) {
@@ -150,14 +166,16 @@ export function formatCrossRefToStyle(item: any, style: "AMA" | "APA" = "AMA"): 
     }
     if (!res.endsWith(".")) res += ".";
     if (doi) {
-      res += ` doi:${doi}`;
+      const cleanDoi = doi.replace(/^doi:\s*/i, "").replace(/^https?:\/\/doi\.org\//i, "");
+      res += ` doi:${cleanDoi}`;
     }
     return res;
   } else {
+    // APA 7th: Authors (Year). Title. Journal, Volume(Issue), Pages. https://doi.org/10.xxx
     let res = "";
     if (authorsFormatted) res += `${authorsFormatted} `;
     if (year) res += `(${year}). `;
-    res += `${title}. `;
+    if (title) res += `${title}. `;
     if (journal) res += `${journal}`;
     if (volume || issue || pages) {
       if (journal) res += ", ";
@@ -170,7 +188,8 @@ export function formatCrossRefToStyle(item: any, style: "AMA" | "APA" = "AMA"): 
     }
     if (!res.endsWith(".")) res += ".";
     if (doi) {
-      res += ` https://doi.org/${doi}`;
+      const cleanDoi = doi.replace(/^doi:\s*/i, "").replace(/^https?:\/\/doi\.org\//i, "");
+      res += ` https://doi.org/${cleanDoi}`;
     }
     return res;
   }
@@ -236,11 +255,50 @@ export function formatGoogleBooksToStyle(volumeInfo: any, style: "AMA" | "APA" =
 
 export async function searchPubMed(query: string, style: "AMA" | "APA" = "AMA"): Promise<SearchResultItem[]> {
   if (!query.trim()) return [];
-  const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&retmode=json&retmax=3`;
-  const searchRes = await fetch(searchUrl);
-  const searchData = await searchRes.json();
-  const idList = searchData?.esearchresult?.idlist || [];
-  
+
+  const runQuery = async (qStr: string) => {
+    try {
+      const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(qStr)}&retmode=json&retmax=5`;
+      const searchRes = await fetch(searchUrl);
+      const searchData = await searchRes.json();
+      return (searchData?.esearchresult?.idlist as string[]) || [];
+    } catch {
+      return [];
+    }
+  };
+
+  // Attempt 1: Raw query
+  let idList = await runQuery(query.trim());
+
+  // Attempt 2: Cleaned query (remove stop-words & truncated words at end)
+  if (idList.length === 0) {
+    const stopWords = new Set([
+      "is", "the", "to", "of", "into", "and", "a", "an", "in", "on", "for",
+      "with", "by", "from", "at", "about", "now", "it", "that", "this", "or", "as", "be",
+    ]);
+    const words = query
+      .replace(/[^\w\s-]/g, "")
+      .split(/\s+/)
+      .filter((w) => w.length >= 3 && !stopWords.has(w.toLowerCase()));
+
+    if (words.length > 0) {
+      const cleanedQuery = words.slice(0, 5).join(" ");
+      idList = await runQuery(cleanedQuery);
+    }
+  }
+
+  // Attempt 3: Significant content keywords
+  if (idList.length === 0) {
+    const words = query
+      .replace(/[^\w\s]/g, "")
+      .split(/\s+/)
+      .filter((w) => w.length >= 4);
+    if (words.length > 1) {
+      const fallbackQuery = words.slice(0, 4).join(" ");
+      idList = await runQuery(fallbackQuery);
+    }
+  }
+
   if (idList.length === 0) return [];
 
   const fetchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=${idList.join(",")}&retmode=json`;
@@ -248,19 +306,21 @@ export async function searchPubMed(query: string, style: "AMA" | "APA" = "AMA"):
   const fetchData = await fetchRes.json();
   const results = fetchData?.result || {};
 
-  return idList.map((id: string) => {
-    const doc = results[id];
-    if (!doc) return null;
-    const formatted = formatPubMedToStyle(doc, style);
-    return {
-      id,
-      raw: doc,
-      formatted,
-      title: doc.title || "",
-      doi: doc.articleids?.find((i: any) => i.idtype === "doi")?.value || "",
-      url: `https://pubmed.ncbi.nlm.nih.gov/${id}/`,
-    };
-  }).filter((item): item is SearchResultItem => item !== null);
+  return idList
+    .map((id: string) => {
+      const doc = results[id];
+      if (!doc) return null;
+      const formatted = formatPubMedToStyle(doc, style);
+      return {
+        id,
+        raw: doc,
+        formatted,
+        title: doc.title || "",
+        doi: doc.articleids?.find((i: any) => i.idtype === "doi")?.value || "",
+        url: `https://pubmed.ncbi.nlm.nih.gov/${id}/`,
+      };
+    })
+    .filter((item): item is SearchResultItem => item !== null);
 }
 
 export async function searchCrossRef(query: string, style: "AMA" | "APA" = "AMA"): Promise<SearchResultItem[]> {

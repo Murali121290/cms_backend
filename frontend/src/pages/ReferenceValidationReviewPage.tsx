@@ -3110,7 +3110,7 @@ export function ReferenceValidationReviewPage() {
               setIsEditModalOpen(false);
               setEditingEntry(null);
             }}
-            onSaveTrackChanges={async (diffHtml) => {
+            onSaveTrackChanges={async (diffHtml, newText) => {
               updateParaText(editingEntry.paraIdx, diffHtml);
               setIsEditModalOpen(false);
               setEditingEntry(null);
@@ -3118,6 +3118,7 @@ export function ReferenceValidationReviewPage() {
               if (editorRef.current?.editor && reviewQuery.data?.save_endpoint) {
                 const html = editorRef.current.editor.getHTML();
                 await saveMutation.save(reviewQuery.data.save_endpoint, html);
+                await reviewQuery.refetch();
               }
             }}
           />
