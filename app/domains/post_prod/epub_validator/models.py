@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Integer, String, Text, JSON
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -40,6 +40,10 @@ class EvProject(Base):
     latest_validation_file = Column(String(255), nullable=True)
     # Assignee username (free string, mirrors WC pattern)
     assignee = Column(String(255), nullable=True)
+
+    # File mappings from the setup clarification screen
+    # e.g., {"chapter1.xhtml": "chapters", "titlepage.xhtml": "frontmatter"}
+    file_mappings = Column(JSON, nullable=True)
 
     # Audit
     uploaded_by_id = Column(

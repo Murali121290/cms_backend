@@ -190,16 +190,19 @@ def delete_project(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    removed = ev_projects_db.soft_delete_project(
-        db, project_id=project_id, user_id=user.id if user else None
+    removed = ev_projects_db.hard_delete_project(
+        db, project_id=project_id
     )
     if not removed:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # Optionally clean up disk (non-blocking)
+    # Clean up disk synchronously
     folder_path = Path(UPLOAD_DIR) / project["folder_name"]
     if folder_path.exists():
-        asyncio.get_event_loop().run_in_executor(None, shutil.rmtree, str(folder_path))
+        try:
+            shutil.rmtree(str(folder_path))
+        except Exception as e:
+            print(f"Failed to delete directory {folder_path}: {e}")
 
     return {"status": True, "message": "Project deleted"}
 
@@ -333,6 +336,63 @@ async def render_pdf_page_endpoint(folder_name: str, page: int = Query(1)):
         return Response(content=png_bytes, media_type="image/png")
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="PDF not found")
+
+
+class SaveMappingsRequest(BaseModel):
+    mappings: dict
+
+@router.get("/projects/{folder_name}/mappings")
+def get_file_mappings(folder_name: str, db: Session = Depends(get_db)):
+    project = ev_projects_db.get_project_by_folder(db, folder_name)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    if project.file_mappings:
+        return {"status": True, "mappings": project.file_mappings}
+        
+    import json
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    classification_path = os.path.join(current_dir, "rules", "general", "classification.json")
+    try:
+        with open(classification_path, "r", encoding="utf-8") as f:
+            classification = json.load(f)
+    except FileNotFoundError:
+        classification = {"heuristics": []}
+        
+    files = get_extract_files(folder_name)
+    mappings = {}
+    for f in files.get("files", []):
+        name = f.get("file_name", "").lower()
+        path = f.get("path", "").lower()
+        if not (name.endswith('.xhtml') or name.endswith('.html') or name.endswith('.htm')):
+            continue
+        if name == 'nav.xhtml' or name == 'nav.html' or name == 'nav.htm' or name == 'nav' or path.endswith('/nav.xhtml'):
+            continue
+            
+        matched_category = "Not found"
+        for heuristic in classification.get("heuristics", []):
+            if any(pattern in name for pattern in heuristic.get("patterns", [])):
+                matched_category = heuristic.get("category", "Not found")
+                break
+        mappings[f.get("file_name")] = matched_category
+        
+    return {"status": True, "mappings": mappings}
+
+
+@router.post("/projects/{folder_name}/mappings")
+def save_file_mappings(
+    folder_name: str, 
+    body: SaveMappingsRequest, 
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user_from_cookie)
+):
+    project = ev_projects_db.get_project_by_folder(db, folder_name)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    project.file_mappings = body.mappings
+    db.commit()
+    return {"status": True, "message": "Mappings saved successfully."}
 
 
 @router.get("/ace/{folder_name}")
