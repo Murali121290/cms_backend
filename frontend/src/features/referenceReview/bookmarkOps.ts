@@ -1,5 +1,7 @@
 import type { Editor } from "@tiptap/react";
 
+import type { ManualLink, ReferenceValidationReviewResponse } from "@/api/referenceReview";
+
 export type BookmarkRole = "target" | "source" | "manual";
 
 export interface BookmarkInfo {
@@ -153,6 +155,78 @@ export function removeBookmark(
   for (const r of ranges) tr.removeMark(r.from, r.to, r.mark);
   editor.view.dispatch(tr);
   return true;
+}
+
+type Logs = ReferenceValidationReviewResponse["validation_logs"];
+type CitationPair = NonNullable<Logs["citation_pairs"]>[number];
+type ReferenceEntry = NonNullable<Logs["reference_entries"]>[number];
+
+/**
+ * Identify bookmarks that have no citation/reference mapping — either manual
+ * bookmarks the user added without linking, or Word-native bookmarks that
+ * survived DOCX import but weren't recognized by the auto-linker.
+ *
+ * A bookmark is considered LINKED when any of the following holds:
+ *   - a `target` role sibling exists with the same name (auto-linked reference)
+ *   - a `source` role sibling exists with the same name (auto-linked citation)
+ *   - the name matches `REF{n}` where n appears in citation_pairs (numeric style)
+ *   - a persisted manual_link exists for that name
+ *
+ * Everything else is unlinked.
+ */
+export function getUnlinkedBookmarks(
+  editor: Editor | null | undefined,
+  citationPairs: CitationPair[],
+  referenceEntries: ReferenceEntry[],
+  manualLinks: ManualLink[],
+): BookmarkInfo[] {
+  const all = listBookmarks(editor);
+  if (all.length === 0) return [];
+
+  const linkedNames = new Set<string>();
+
+  // Auto-linked: any bookmark that has an auto-generated target or source
+  // sibling in the doc is linked.
+  const rolesByName = new Map<string, Set<BookmarkRole>>();
+  for (const bm of all) {
+    let roles = rolesByName.get(bm.name);
+    if (!roles) {
+      roles = new Set();
+      rolesByName.set(bm.name, roles);
+    }
+    roles.add(bm.role);
+  }
+  for (const [name, roles] of rolesByName) {
+    if (roles.has("target") || roles.has("source")) linkedNames.add(name);
+  }
+
+  // Validator-derived: any REF{n} whose n appears in citation_pairs with a
+  // non-null ref_number counts as resolvable.
+  for (const p of citationPairs) {
+    if (p.ref_number != null) linkedNames.add(`REF${p.ref_number}`);
+  }
+  for (const e of referenceEntries) {
+    if (e.number != null) linkedNames.add(`REF${e.number}`);
+  }
+
+  // Manually linked (persisted server-side).
+  for (const lnk of manualLinks) {
+    if (lnk.bookmark_name) linkedNames.add(lnk.bookmark_name);
+  }
+
+  // Emit at most one row per bookmark name so users see each unlinked
+  // bookmark once regardless of how many roles the mark carries. Prefer the
+  // "manual" role for display when both exist.
+  const seen = new Set<string>();
+  const out: BookmarkInfo[] = [];
+  const sorted = [...all].sort((a, b) => (a.role === "manual" ? -1 : b.role === "manual" ? 1 : 0));
+  for (const bm of sorted) {
+    if (linkedNames.has(bm.name)) continue;
+    if (seen.has(bm.name)) continue;
+    seen.add(bm.name);
+    out.push(bm);
+  }
+  return out;
 }
 
 /**

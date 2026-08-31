@@ -38,6 +38,7 @@ export function stampBookmarks(
   editor: Editor | null | undefined,
   referenceEntries: ReferenceEntry[],
   citationPairs: CitationPair[],
+  manualLinkNames: Iterable<string> = [],
 ): void {
   if (!editor) return;
   const bookmarkType = editor.schema.marks.bookmark;
@@ -49,7 +50,12 @@ export function stampBookmarks(
   const paraByIdx = new Map<number, ParaInfo>();
   for (const p of paras) paraByIdx.set(p.idx, p);
 
+  // Any name that is either owned by an in-doc manual bookmark or is
+  // persisted in a server-side manual link record is treated as user-claimed
+  // and left untouched by the auto-stamper. Prevents re-validate from
+  // overwriting a manual mapping.
   const manualNames = collectManualBookmarkNames(doc);
+  for (const name of manualLinkNames) manualNames.add(name);
 
   // Assign REF{n} names by document order. Entries with an explicit number
   // (Vancouver/AMA) use that; APA entries with number:null get positional
