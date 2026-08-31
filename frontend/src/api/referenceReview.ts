@@ -58,6 +58,7 @@ export interface ReferenceValidationReviewResponse {
       year?: string;
       para_idx?: number;
       match_score?: number;
+      manual_linked?: boolean;
     }>;
     reference_entries?: Array<{
       number: number | null;
@@ -65,7 +66,9 @@ export interface ReferenceValidationReviewResponse {
       style: string;
       is_cited: boolean;
       para_idx: number;
+      manual_linked?: boolean;
     }>;
+    manual_links?: ManualLink[];
     // AMA-specific additions
     broken_ranges?: Array<{ raw: string; match: string }>;
     invalid_numbers?: Array<{ number: number; message: string }>;
@@ -315,4 +318,53 @@ export async function addCitationComment(
     commentData
   );
   return response.data;
+}
+
+// ── Manual bookmark → citation → reference links ──────────────────────────────
+// Persists user-created mappings for bookmarks that the auto-linker couldn't
+// resolve. Stored server-side in a sidecar JSON next to the processed DOCX;
+// merged into validation_logs (citation_pairs / reference_entries) on GET.
+
+export interface ManualLink {
+  bookmark_name: string;
+  ref_number: number | null;
+  ref_text: string;
+  citation_text: string | null;
+  linked_by: string | null;
+  linked_at: string | null;
+}
+
+export interface ManualLinkUpsertRequest {
+  bookmark_name: string;
+  ref_number: number | null;
+  ref_text: string;
+  citation_text?: string | null;
+}
+
+export async function listManualLinks(fileId: number): Promise<ManualLink[]> {
+  const response = await apiClient.get<{ status: "ok"; version: number; links: ManualLink[] }>(
+    `/files/${fileId}/reference-review/manual-links`,
+  );
+  return response.data.links;
+}
+
+export async function upsertManualLink(
+  fileId: number,
+  data: ManualLinkUpsertRequest,
+): Promise<ManualLink> {
+  const response = await apiClient.post<{ status: "ok"; link: ManualLink }>(
+    `/files/${fileId}/reference-review/manual-links`,
+    data,
+  );
+  return response.data.link;
+}
+
+export async function deleteManualLink(
+  fileId: number,
+  bookmarkName: string,
+): Promise<boolean> {
+  const response = await apiClient.delete<{ status: "ok"; deleted: boolean }>(
+    `/files/${fileId}/reference-review/manual-links/${encodeURIComponent(bookmarkName)}`,
+  );
+  return response.data.deleted;
 }
