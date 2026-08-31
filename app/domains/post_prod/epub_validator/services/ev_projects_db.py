@@ -25,6 +25,7 @@ def _serialize(p: EvProject) -> dict[str, Any]:
         "uploaded_by_id": p.uploaded_by_id,
         "uploaded_at": p.uploaded_at.isoformat() if p.uploaded_at else None,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+        "file_mappings": getattr(p, "file_mappings", None),
     }
 
 
@@ -344,5 +345,14 @@ def soft_delete_project(db: Session, *, project_id: int, user_id: Optional[int])
     if p is None:
         return False
     p.is_deleted = True
+    db.commit()
+    return True
+
+def hard_delete_project(db: Session, *, project_id: int) -> bool:
+    p = db.query(EvProject).filter(EvProject.id == project_id).first()
+    if p is None:
+        return False
+    db.query(EvHistory).filter(EvHistory.project_id == project_id).delete()
+    db.delete(p)
     db.commit()
     return True

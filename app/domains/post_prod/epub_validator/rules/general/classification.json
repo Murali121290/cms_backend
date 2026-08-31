@@ -1,0 +1,53 @@
+{
+  "heuristics": [
+    {
+      "patterns": [
+        "titlepage",
+        "copyright",
+        "preface",
+        "contents",
+        "toc",
+        "halftitle",
+        "dedication",
+        "ack",
+        "foreword",
+        "intro",
+        "front",
+        "cover",
+        "title_page",
+        "about"
+      ],
+      "category": "Front Matter"
+    },
+    {
+      "patterns": [
+        "chapter",
+        "ch",
+        "sec",
+        "part",
+        "unit",
+        "lesson",
+        "body"
+      ],
+      "category": "Chapters"
+    },
+    {
+      "patterns": [
+        "appendix",
+        "glossary",
+        "index",
+        "biblio",
+        "ref",
+        "back",
+        "colophon",
+        "epilogue",
+        "afterword",
+        "table_of_cases",
+        "table_of_authorities",
+        "table_of_statutes",
+        "table_of_jurisdiction"
+      ],
+      "category": "Back Matter"
+    }
+  ]
+}

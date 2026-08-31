@@ -205,6 +205,7 @@ export interface EvProject {
   uploaded_by_id: number | null;
   uploaded_at: string;
   updated_at: string;
+  file_mappings?: Record<string, string> | null;
 }
 
 export async function listProjects(): Promise<EvProject[]> {
@@ -246,6 +247,25 @@ export async function deleteProject(projectId: number): Promise<void> {
     await api.delete(`/post-prod/epub-validator/projects/${projectId}`);
   } catch (err) {
     throw new Error(getApiErrorMessage(err, 'Failed to delete project'));
+  }
+}
+
+export async function getFileMappings(folderName: string): Promise<Record<string, string>> {
+  try {
+    const { data } = await api.get<{ status: boolean; mappings: Record<string, string> }>(
+      `/post-prod/epub-validator/projects/${folderName}/mappings`
+    );
+    return data.mappings;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to get file mappings'));
+  }
+}
+
+export async function saveFileMappings(folderName: string, mappings: Record<string, string>): Promise<void> {
+  try {
+    await api.post(`/post-prod/epub-validator/projects/${folderName}/mappings`, { mappings });
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to save file mappings'));
   }
 }
 

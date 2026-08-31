@@ -37,6 +37,8 @@ interface Props {
   onClose: () => void;
   onRevalidate?: () => void;
   onRenameSuccess?: (newName: string) => void;
+  isRefreshingAnalysis?: boolean;
+  onRefreshAnalysis?: () => void;
 }
 
 export type Tab = 'result' | 'preview' | 'pdf' | 'analysis';
@@ -360,7 +362,7 @@ const getInjectedHtml = (html: string, baseUrl: string) => {
 
 // ─── Modal ───────────────────────────────────────────────────────────────────
 
-export function ValidationDetailModal({ file, folderName, entries, summaryData, isRevalidating = false, validationProgress, initialTab = 'result', allowedTabs, onClose, onRevalidate, onRenameSuccess }: Props) {
+export function ValidationDetailModal({ file, folderName, entries, summaryData, isRevalidating = false, validationProgress, initialTab = 'result', allowedTabs, onClose, onRevalidate, onRenameSuccess, isRefreshingAnalysis, onRefreshAnalysis }: Props) {
   const isImageFile = useMemo(() => {
     const name = (file.file_name || '').toLowerCase();
     return /\.(png|jpe?g|gif|svg|webp|bmp|ico|tif?f)$/i.test(name);
@@ -1229,19 +1231,36 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                               className="border-l border-border bg-muted/10 overflow-y-auto flex-shrink-0 flex flex-col font-sans"
                             >
                               <div className="p-4 w-[320px]">
+                                <div className="flex items-center justify-between mb-4 px-1 border-b border-border/50 pb-2">
+                                  <h3 className="text-xs font-bold text-foreground font-serif uppercase tracking-widest">
+                                    Analysis
+                                  </h3>
+                                  <div className="flex items-center gap-1">
+                                    <button 
+                                      onClick={() => setShowFilenamesInAnalysis(!showFilenamesInAnalysis)} 
+                                      className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-sm hover:bg-muted"
+                                      title={showFilenamesInAnalysis ? "Hide filenames" : "Show filenames"}
+                                    >
+                                      {showFilenamesInAnalysis ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                    </button>
+                                    {onRefreshAnalysis && (
+                                      <button
+                                        onClick={onRefreshAnalysis}
+                                        disabled={isRefreshingAnalysis}
+                                        className="text-muted-foreground hover:text-primary transition-colors p-1 rounded-sm hover:bg-primary/10 disabled:opacity-50"
+                                        title="Refresh Analysis"
+                                      >
+                                        <RotateCw className={cn('w-3.5 h-3.5 shrink-0', isRefreshingAnalysis && 'animate-spin')} />
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
                                 <div className="space-y-5">
                                   <div className="bg-card p-3 rounded-lg border border-border shadow-xs">
                                     <div className="flex justify-between items-center mb-2 border-b border-border pb-1.5">
                                       <h3 className="text-xs font-bold text-foreground font-serif uppercase tracking-widest">
                                         Chapters
                                       </h3>
-                                      <button 
-                                        onClick={() => setShowFilenamesInAnalysis(!showFilenamesInAnalysis)} 
-                                        className="text-muted-foreground hover:text-foreground transition-colors p-0.5 rounded-sm hover:bg-muted"
-                                        title={showFilenamesInAnalysis ? "Hide filenames" : "Show filenames"}
-                                      >
-                                        {showFilenamesInAnalysis ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                                      </button>
                                     </div>
                                     {(!summaryData?.chapter_labels || summaryData.chapter_labels.length === 0) ? (
                                       <p className="text-[10px] text-muted-foreground italic">No chapters found.</p>
@@ -1264,13 +1283,6 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                                       <h3 className="text-xs font-bold text-foreground font-serif uppercase tracking-widest">
                                         Figures
                                       </h3>
-                                      <button 
-                                        onClick={() => setShowFilenamesInAnalysis(!showFilenamesInAnalysis)} 
-                                        className="text-muted-foreground hover:text-foreground transition-colors p-0.5 rounded-sm hover:bg-muted"
-                                        title={showFilenamesInAnalysis ? "Hide filenames" : "Show filenames"}
-                                      >
-                                        {showFilenamesInAnalysis ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                                      </button>
                                     </div>
                                     {(!summaryData?.figure_labels || summaryData.figure_labels.length === 0) ? (
                                       <p className="text-[10px] text-muted-foreground italic">No figures found.</p>
@@ -1293,13 +1305,6 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                                       <h3 className="text-xs font-bold text-foreground font-serif uppercase tracking-widest">
                                         Tables
                                       </h3>
-                                      <button 
-                                        onClick={() => setShowFilenamesInAnalysis(!showFilenamesInAnalysis)} 
-                                        className="text-muted-foreground hover:text-foreground transition-colors p-0.5 rounded-sm hover:bg-muted"
-                                        title={showFilenamesInAnalysis ? "Hide filenames" : "Show filenames"}
-                                      >
-                                        {showFilenamesInAnalysis ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                                      </button>
                                     </div>
                                     {(!summaryData?.table_labels || summaryData.table_labels.length === 0) ? (
                                       <p className="text-[10px] text-muted-foreground italic">No tables found.</p>
