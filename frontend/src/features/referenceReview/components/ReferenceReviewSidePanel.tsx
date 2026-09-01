@@ -39,6 +39,8 @@ import {
   addManualBookmark,
   getUnlinkedBookmarks,
   listBookmarks,
+  markBookmarkLinked,
+  markBookmarksLinked,
   removeBookmark,
   goToBookmark,
   type BookmarkInfo,
@@ -131,12 +133,11 @@ export function ReferenceReviewSidePanel({ fileId, editorRef }: Props) {
     if (!reviewQuery.data) return;
     const editor = editorRef.current?.editor;
     if (!editor) return;
-    stampBookmarks(
-      editor,
-      referenceEntries,
-      citationPairs,
-      (logs?.manual_links ?? []).map((lnk) => lnk.bookmark_name),
-    );
+    const manualLinkNames = (logs?.manual_links ?? []).map((lnk) => lnk.bookmark_name);
+    stampBookmarks(editor, referenceEntries, citationPairs, manualLinkNames);
+    // Rehydrate the linked visual state from persisted manual_links so the
+    // style survives reloads and any external refetch.
+    markBookmarksLinked(editor, manualLinkNames);
     setBookmarks(listBookmarks(editor));
   }, [reviewQuery.data, referenceEntries, citationPairs, editorRef, logs]);
 
@@ -210,6 +211,10 @@ export function ReferenceReviewSidePanel({ fileId, editorRef }: Props) {
         ref_text: values.ref_text,
         citation_text: values.citation_text,
       });
+      // Immediate visual feedback — flip the linked flag on the bookmark
+      // mark in the editor so the user sees the linked style right now,
+      // without waiting for the refetch to resolve.
+      markBookmarkLinked(editorRef.current?.editor, values.bookmark_name);
       // Close immediately — the mutation's onSuccess invalidates the
       // reference-review query, so React Query will refetch in the background
       // and recompute counts / statuses. Awaiting the refetch here made the
@@ -668,13 +673,41 @@ export function ReferenceReviewSidePanel({ fileId, editorRef }: Props) {
           100% { background-color: transparent; }
         }
         .rr-bookmark { cursor: pointer; text-decoration: none; color: inherit; }
-        .rr-bookmark[data-bookmark-role="source"] {
+        .rr-bookmark[data-bookmark-role="source"],
+        .rr-bookmark[data-bookmark-linked="true"] {
           color: rgb(2 132 199); /* sky-600 */
           text-decoration: underline dotted rgba(2, 132, 199, 0.4);
           text-underline-offset: 2px;
         }
-        .rr-bookmark[data-bookmark-role="source"]:hover {
+        .rr-bookmark[data-bookmark-role="source"]:hover,
+        .rr-bookmark[data-bookmark-linked="true"]:hover {
           text-decoration-color: rgb(2 132 199);
+        }
+        /* Bookmark start/end indicators — purely a visual affordance on the
+           existing <a class="rr-bookmark"> that the Bookmark mark already
+           renders. No new bookmark, no schema change. Applied to any linked
+           in-text citation (auto-linked source, or manual-linked bookmark);
+           skipped for target-role marks because those span whole reference
+           entries and brackets around a paragraph would be noise. */
+        .rr-bookmark[data-bookmark-role="source"]::before,
+        .rr-bookmark[data-bookmark-linked="true"]:not([data-bookmark-role="target"])::before {
+          content: "⌈";
+          color: rgb(2 132 199);
+          font-size: 0.9em;
+          margin-right: 1px;
+          text-decoration: none;
+          user-select: none;
+          opacity: 0.75;
+        }
+        .rr-bookmark[data-bookmark-role="source"]::after,
+        .rr-bookmark[data-bookmark-linked="true"]:not([data-bookmark-role="target"])::after {
+          content: "⌉";
+          color: rgb(2 132 199);
+          font-size: 0.9em;
+          margin-left: 1px;
+          text-decoration: none;
+          user-select: none;
+          opacity: 0.75;
         }
       `}</style>
 
