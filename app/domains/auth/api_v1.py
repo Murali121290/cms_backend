@@ -16,17 +16,19 @@ def create_user(data: UserCreate, db: Session = Depends(database.get_db)):
     user = user_service.create_user(db, data)
     return {"id": user.id, "username": user.username}
 
+from app.domains.auth.auth_service import authenticate_browser_user
+
 @router.post("/login")
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(database.get_db)):
-    user = user_service.get_user_by_username(db, form_data.username)
-    if not user or not verify_password(form_data.password, user.password_hash):
+    try:
+        auth_res = authenticate_browser_user(db, form_data.username, form_data.password)
+        return {"access_token": auth_res["access_token"], "token_type": "bearer"}
+    except ValueError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    access_token = create_access_token(data={"sub": user.username})
-    return {"access_token": access_token, "token_type": "bearer"}
 
 @router.get("/me")
 def read_users_me(current_user = Depends(get_current_user)):

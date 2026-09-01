@@ -154,27 +154,44 @@ def _serialize_admin_role(role: Any):
 
 
 def _serialize_admin_user(user: models.User):
+    from app.domains.auth.user_service import determine_access_level
+    raw_level = getattr(user, "access_level", None)
+    role_val = getattr(user, "role", None) or getattr(user, "designation", None) or (user.roles[0].name if getattr(user, "roles", None) else "")
+    if not raw_level or raw_level.lower() == "standard":
+        raw_level = determine_access_level(role_val)
     return schemas_v2.AdminUser(
         id=user.id,
         username=user.username,
         email=user.email,
+        first_name=getattr(user, "first_name", None),
+        last_name=getattr(user, "last_name", None),
         is_active=user.is_active,
         roles=[schemas_v2.AdminUserRole(id=role.id, name=role.name) for role in user.roles],
         team=user.team,
         customer_access=user.customer_access or [],
         designation=user.designation,
+        role=getattr(user, "role", None) or role_val,
+        access_level=raw_level,
     )
 
 
 def _serialize_viewer(user: models.User):
+    from app.domains.auth.user_service import determine_access_level
+    raw_level = getattr(user, "access_level", None)
+    role_val = getattr(user, "role", None) or getattr(user, "designation", None) or (user.roles[0].name if getattr(user, "roles", None) else "")
+    if not raw_level or raw_level.lower() == "standard":
+        raw_level = determine_access_level(role_val)
     return schemas_v2.Viewer(
         id=user.id,
         username=user.username,
         email=user.email,
+        first_name=getattr(user, "first_name", None),
+        last_name=getattr(user, "last_name", None),
         roles=[role.name for role in user.roles],
         is_active=user.is_active,
         team=user.team,
         designation=user.designation,
+        access_level=raw_level,
     )
 
 
@@ -6862,18 +6879,13 @@ def api_v2_create_user(
             message="Admin access required.",
         )
 
-    # Role Validation: Ensure role exists and is active
+    # Role Validation: Ensure role exists and is active (if in master)
     from app.domains.workflow.models import RolesMaster
+    from app.domains.auth.user_service import determine_access_level
     role_record = db.query(RolesMaster).filter(
         RolesMaster.role_name.ilike(payload.role)
     ).first()
-    if not role_record:
-        return _error_response(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            code="INVALID_ROLE",
-            message=f"Role '{payload.role}' does not exist"
-        )
-    if not role_record.active_status:
+    if role_record and not role_record.active_status:
         return _error_response(
             status_code=status.HTTP_400_BAD_REQUEST,
             code="INACTIVE_ROLE",
@@ -6898,13 +6910,15 @@ def api_v2_create_user(
         )
 
     from app.domains.auth.security import hash_password
+    assigned_role = role_record.role_name if role_record else payload.role
     db_user = models.User(
         username=payload.username,
         email=payload.email,
         password_hash=hash_password(payload.password),
-        designation=role_record.role_name,
-        role=role_record.role_name if role_record.role_name.lower() == "admin" else None,
-        team=role_record.team,
+        designation=payload.designation or None,
+        role=assigned_role,
+        access_level=determine_access_level(assigned_role),
+        team=role_record.team if role_record else (payload.team or "General"),
         customer_access=payload.customer_access,
         active_status=payload.active_status if payload.active_status is not None else True
     )
@@ -6947,21 +6961,18 @@ def api_v2_update_user(
     # Role updates and validation
     if payload.role:
         from app.domains.workflow.models import RolesMaster
+        from app.domains.auth.user_service import determine_access_level
         role_record = db.query(RolesMaster).filter(
             RolesMaster.role_name.ilike(payload.role)
         ).first()
-        if not role_record:
-            return _error_response(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                code="INVALID_ROLE",
-                message=f"Role '{payload.role}' does not exist"
-            )
-        if not role_record.active_status:
+        if role_record and not role_record.active_status:
             return _error_response(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 code="INACTIVE_ROLE",
                 message=f"Role '{payload.role}' is inactive"
             )
+
+        assigned_role = role_record.role_name if role_record else payload.role
 
         # Admin count check to protect the last admin
         from sqlalchemy import func
@@ -6969,7 +6980,7 @@ def api_v2_update_user(
             (db_user.role and db_user.role.lower() == "admin") or
             (db_user.designation and db_user.designation.lower() == "admin")
         )
-        is_new_admin = role_record.role_name.lower() == "admin"
+        is_new_admin = assigned_role.lower() == "admin"
         if was_admin and not is_new_admin:
             admin_count = db.query(models.User).filter(
                 func.coalesce(models.User.role, models.User.designation).ilike("admin")
@@ -6981,9 +6992,10 @@ def api_v2_update_user(
                     message="Cannot remove the last Admin role"
                 )
 
-        db_user.designation = role_record.role_name
-        db_user.role = role_record.role_name if role_record.role_name.lower() == "admin" else None
-        db_user.team = role_record.team
+        db_user.role = assigned_role
+        db_user.access_level = determine_access_level(assigned_role)
+        if role_record and role_record.team:
+            db_user.team = role_record.team
 
     # Other updates
     if payload.designation is not None:

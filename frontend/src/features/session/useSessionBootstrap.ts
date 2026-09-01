@@ -16,7 +16,8 @@ export function useSessionBootstrap() {
     queryKey: ["session"],
     queryFn: getSession,
     enabled: !handoffStarted,
-    staleTime: 60_000,
+    staleTime: 0,
+    refetchOnMount: true,
     retry: 1,
     refetchOnWindowFocus: false,
   });

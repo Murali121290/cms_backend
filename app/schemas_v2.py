@@ -18,10 +18,13 @@ class Viewer(BaseModel):
     id: int
     username: str
     email: str
+    first_name: str | None = None
+    last_name: str | None = None
     roles: list[str]
     is_active: bool
     team: str | None = None
     designation: str | None = None
+    access_level: str | None = "standard"
 
 
 class SessionAuth(BaseModel):
@@ -340,11 +343,15 @@ class AdminUser(BaseModel):
     id: int
     username: str
     email: str
+    first_name: str | None = None
+    last_name: str | None = None
     is_active: bool
     roles: list[AdminUserRole]
     team: str | None = None
     customer_access: list[str] = []
     designation: str | None = None
+    role: str | None = None
+    access_level: str | None = None
 
 
 class AdminUsersPagination(BaseModel):
