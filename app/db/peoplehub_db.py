@@ -14,28 +14,43 @@ def get_peoplehub_engine():
     global _peoplehub_engine
     if _peoplehub_engine is None:
         db_url = getattr(settings, "PEOPLEHUB_DATABASE_URL", None)
-        if not db_url:
-            db_url = "postgresql://postgres:vBr%402150@10.1.1.18:5435/peoplehub_db"
         
-        try:
-            engine = create_engine(
-                db_url,
-                pool_pre_ping=True,
-                execution_options={"read_only": True}
-            )
-            with engine.connect() as conn:
-                pass
-            _peoplehub_engine = engine
-        except Exception as exc:
-            logger.warning(f"Primary PeopleHub DB URL '{db_url}' failed ({exc}). Retrying with server IP '10.1.1.18:5435'...")
-            fallback_url = db_url.replace("@peoplehub_postgres:5432", "@10.1.1.18:5435").replace("@localhost:5435", "@10.1.1.18:5435")
-            if fallback_url == db_url:
-                fallback_url = "postgresql://postgres:vBr%402150@10.1.1.18:5435/peoplehub_db"
-            _peoplehub_engine = create_engine(
-                fallback_url,
-                pool_pre_ping=True,
-                execution_options={"read_only": True}
-            )
+        candidates = []
+        if db_url:
+            candidates.append(db_url)
+            if "vBr" in db_url and "%24" not in db_url:
+                candidates.append(db_url.replace("vBr", "%24vBr").replace("172.17.0.1", "10.1.1.18").replace("peoplehub_postgres:5432", "10.1.1.18:5435"))
+                candidates.append(db_url.replace("vBr", "%24%24vBr").replace("172.17.0.1", "10.1.1.18").replace("peoplehub_postgres:5432", "10.1.1.18:5435"))
+
+        candidates.extend([
+            "postgresql://postgres:%24vBr%402150@10.1.1.18:5435/peoplehub_db",
+            "postgresql://postgres:%24%24vBr%402150@10.1.1.18:5435/peoplehub_db",
+            "postgresql://postgres:vBr%402150@10.1.1.18:5435/peoplehub_db",
+            "postgresql://postgres:%24vBr%402150@peoplehub_postgres:5432/peoplehub_db",
+        ])
+
+        last_error = None
+        for candidate_url in candidates:
+            try:
+                engine = create_engine(
+                    candidate_url,
+                    pool_pre_ping=True,
+                    execution_options={"read_only": True}
+                )
+                with engine.connect() as conn:
+                    pass
+                _peoplehub_engine = engine
+                return _peoplehub_engine
+            except Exception as exc:
+                last_error = exc
+                continue
+
+        logger.error(f"Failed all candidate PeopleHub DB connections. Last error: {last_error}")
+        _peoplehub_engine = create_engine(
+            candidates[0],
+            pool_pre_ping=True,
+            execution_options={"read_only": True}
+        )
     return _peoplehub_engine
 
 def get_peoplehub_session():
