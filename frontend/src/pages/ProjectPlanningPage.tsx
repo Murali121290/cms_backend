@@ -560,7 +560,11 @@ export function ProjectPlanningPage() {
     }
 
     toast.success('Planning approved — project is now Active')
-    navigate(-1)
+    if (project.client_id) {
+      navigate(`/clients/${project.client_id}/projects/${project.id}`)
+    } else {
+      navigate(`/projects/${project.id}`)
+    }
     setApproving(false)
   }
 

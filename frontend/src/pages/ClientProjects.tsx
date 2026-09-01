@@ -347,7 +347,7 @@ function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo
 export function ClientProjects() {
   const { clientId } = useParams<{ clientId: string }>()
   const navigate = useNavigate()
-  const { canAccess } = useRBAC()
+  const { canAccess, viewer } = useRBAC()
   const id = Number(clientId)
 
   const [client, setClient] = useState<Client | null>(null)
@@ -566,7 +566,13 @@ export function ClientProjects() {
                     if (project.status === 'Planning') { toast.error('Planning not approved yet.'); return }
                     navigate(`/clients/${clientId}/projects/${project.id}`)
                   }}
-                  onOpenPlanning={() => navigate(`/projects/${project.id}/planning`)}
+                  onOpenPlanning={() => {
+                    if (project.project_manager !== viewer?.username && !canAccess(['admin'])) {
+                      toast.error('Only the assigned Project Manager can open planning.')
+                      return
+                    }
+                    navigate(`/projects/${project.id}/planning`)
+                  }}
                   onDelete={(id) => setProjectToDelete(id)}
                 />
               ))}
