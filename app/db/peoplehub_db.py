@@ -15,14 +15,27 @@ def get_peoplehub_engine():
     if _peoplehub_engine is None:
         db_url = getattr(settings, "PEOPLEHUB_DATABASE_URL", None)
         if not db_url:
-            db_url = "postgresql://postgres:password@localhost:5435/peoplehub_db"
+            db_url = "postgresql://postgres:vBr%402150@10.1.1.18:5435/peoplehub_db"
         
-        # Enforce read-only execution options where possible
-        _peoplehub_engine = create_engine(
-            db_url,
-            pool_pre_ping=True,
-            execution_options={"read_only": True}
-        )
+        try:
+            engine = create_engine(
+                db_url,
+                pool_pre_ping=True,
+                execution_options={"read_only": True}
+            )
+            with engine.connect() as conn:
+                pass
+            _peoplehub_engine = engine
+        except Exception as exc:
+            logger.warning(f"Primary PeopleHub DB URL '{db_url}' failed ({exc}). Retrying with server IP '10.1.1.18:5435'...")
+            fallback_url = db_url.replace("@peoplehub_postgres:5432", "@10.1.1.18:5435").replace("@localhost:5435", "@10.1.1.18:5435")
+            if fallback_url == db_url:
+                fallback_url = "postgresql://postgres:vBr%402150@10.1.1.18:5435/peoplehub_db"
+            _peoplehub_engine = create_engine(
+                fallback_url,
+                pool_pre_ping=True,
+                execution_options={"read_only": True}
+            )
     return _peoplehub_engine
 
 def get_peoplehub_session():
