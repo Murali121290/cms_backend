@@ -53,9 +53,13 @@ export function Topbar() {
     navigate('/login', { replace: true })
   }
 
-  const initials = viewer?.username
-    ? viewer.username.slice(0, 2).toUpperCase()
-    : 'A'
+  const fullName = (viewer?.first_name || viewer?.last_name)
+    ? `${viewer.first_name ?? ''} ${viewer.last_name ?? ''}`.trim()
+    : (viewer?.username ?? 'User')
+
+  const initials = (viewer?.first_name || viewer?.last_name)
+    ? `${viewer.first_name?.[0] ?? ''}${viewer.last_name?.[0] ?? ''}`.toUpperCase()
+    : viewer?.username ? viewer.username.slice(0, 2).toUpperCase() : 'A'
 
   // Normalize roles: convert {name: string} | string to string
   const getFirstRole = () => {
@@ -111,7 +115,7 @@ export function Topbar() {
             {/* Name + role */}
             <div className="hidden md:block text-left">
               <p className="text-xs font-semibold text-text leading-tight">
-                {viewer?.username ?? 'User'}
+                {fullName}
               </p>
               <p className="text-[10px] text-muted leading-tight capitalize">
                 {getFirstRole()}
@@ -138,7 +142,7 @@ export function Topbar() {
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-text truncate">
-                      {viewer?.username ?? 'User'}
+                      {fullName}
                     </p>
                     <p className="text-[11px] text-muted truncate">{viewer?.email ?? ''}</p>
                     <p className="text-[10px] text-muted capitalize mt-0.5">

@@ -4,43 +4,66 @@ export interface User {
   id: number
   user_name: string
   email: string
+  first_name?: string
+  last_name?: string
   active_status: boolean
   role: string
   designation: string
   team: string
   customer_access: string[]
+  access_level?: string
 }
 
 export interface CreateUserPayload {
   user_name: string
   email: string
+  first_name?: string
+  last_name?: string
   password: string
   role?: string
   designation?: string
   team: string
   customer_access: string[]
   active_status?: boolean
+  access_level?: string
 }
 
 export interface UpdateUserPayload {
   role?: string
   designation?: string
+  first_name?: string
+  last_name?: string
   password?: string
   customer_access?: string[]
   team?: string
   active_status?: boolean
+  access_level?: string
 }
 
-const mapUser = (u: any): User => ({
-  id: u.id,
-  user_name: u.username,
-  email: u.email,
-  active_status: u.is_active,
-  role: u.roles?.[0]?.name ?? '',
-  designation: u.designation ?? '',
-  team: u.team ?? '',
-  customer_access: u.customer_access ?? [],
-})
+const mapUser = (u: any): User => {
+  const roleVal = u.role || u.roles?.[0]?.name || u.designation || ''
+  let lvl = u.access_level
+  if (!lvl || lvl === 'standard') {
+    const l = roleVal.toLowerCase().replace(/[\s-]/g, '')
+    if (l.includes('admin')) lvl = 'Admin'
+    else if (l.includes('manager') || l.includes('gm')) lvl = 'Manager'
+    else if (l.includes('teamlead') || l.includes('lead')) lvl = 'TeamLead'
+    else lvl = 'Employee'
+  }
+  return {
+    id: u.id,
+    user_name: u.username,
+    email: u.email,
+    first_name: u.first_name ?? '',
+    last_name: u.last_name ?? '',
+    active_status: u.is_active,
+    role: roleVal,
+    designation: u.designation ?? '',
+    team: u.team ?? '',
+    customer_access: u.customer_access ?? [],
+    access_level: lvl,
+  }
+}
 
 export const usersApi = {
   list: (skip = 0, limit = 100) =>

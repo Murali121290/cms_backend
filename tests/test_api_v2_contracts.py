@@ -61,6 +61,8 @@ def test_api_v2_session_register_bootstraps_first_user_without_auth_cookie(clien
             "email": "founder@example.com",
             "roles": ["Admin"],
             "is_active": True,
+            "team": "Admin Team",
+            "designation": None,
         },
         "redirect_to": "/ui/login",
     }

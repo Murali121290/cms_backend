@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     HOST_PORT: int = 8085
     
     DATABASE_URL: str = "postgresql://user:password@localhost/cms_db"
+    PEOPLEHUB_DATABASE_URL: str = "postgresql://postgres:password@localhost:5435/peoplehub_db"
     UPLOAD_FOLDER: str = str(UPLOADS_DIR)
     REDIS_URL: str = "redis://localhost:6379/0"
     INDESIGN_SERVER_URL: str = "http://10.1.6.108:5555"

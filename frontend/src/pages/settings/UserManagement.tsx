@@ -33,15 +33,13 @@ function validateCreate(f: Partial<CreateUserPayload>, users: User[]) {
   else if (!/\S+@\S+\.\S+/.test(f.email)) e.email = 'Invalid email address'
   else if (users.some(u => u.email === f.email)) e.email = 'Email already exists'
   if (!f.password?.trim())     e.password  = 'Password is required'
-  if (!f.designation)          e.designation = 'Designation is required'
-  if (!f.team)                 e.team      = 'Team is required'
+  if (!f.role)                 e.role      = 'Role is required'
   return e
 }
 
 function validateEdit(f: Partial<UpdateUserPayload>) {
   const e: Record<string, string> = {}
-  if (!f.designation)  e.designation = 'Designation is required'
-  if (!f.team)         e.team = 'Team is required'
+  if (!f.role)                 e.role      = 'Role is required'
   return e
 }
 
@@ -57,7 +55,7 @@ interface CreateModalProps {
 }
 
 function CreateUserModal({ isOpen, onClose, onCreated, roles, users, teams, customerOptions }: CreateModalProps) {
-  const [form, setForm] = useState<Partial<CreateUserPayload>>({ customer_access: [], active_status: true })
+  const [form, setForm] = useState<Partial<CreateUserPayload>>({ customer_access: [], active_status: true, access_level: 'standard' })
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(false)
 
@@ -66,16 +64,22 @@ function CreateUserModal({ isOpen, onClose, onCreated, roles, users, teams, cust
     setErrors(e => { const n = { ...e }; delete n[key]; return n })
   }
 
-  // Unique designation names for dropdown
-  const designationOptions = useMemo(() =>
-    [...new Set(roles.map(r => r.role_name))].sort().map(n => ({ value: n, label: n }))
-    , [roles])
+  // Role options from roles master & defaults
+  const roleOptions = useMemo(() => {
+    const list = [...new Set([...roles.map(r => r.role_name), 'Admin', 'Manager', 'ProjectManager', 'Viewer'])].sort()
+    return list.map(n => ({ value: n, label: n }))
+  }, [roles])
 
-  function handleDesignationChange(desName: string) {
-    set('designation', desName)
-    const matched = roles.filter(r => r.role_name === desName)
+  function handleRoleChange(roleName: string) {
+    set('role', roleName)
+    const matched = roles.filter(r => r.role_name === roleName)
     if (matched.length >= 1) set('team', matched[0].team)
-    else set('team', '')
+    const val = roleName.toLowerCase().replace(/[\s-]/g, '')
+    let lvl = 'Employee'
+    if (val.includes('admin')) lvl = 'Admin'
+    else if (val.includes('manager') || val.includes('gm')) lvl = 'Manager'
+    else if (val.includes('teamlead') || val.includes('lead')) lvl = 'TeamLead'
+    set('access_level', lvl)
   }
 
   async function handleSubmit() {
@@ -87,7 +91,7 @@ function CreateUserModal({ isOpen, onClose, onCreated, roles, users, teams, cust
       toast.success(`User "${user.user_name}" created successfully`)
       onCreated(user)
       onClose()
-      setForm({ customer_access: [], active_status: true })
+      setForm({ customer_access: [], active_status: true, access_level: 'standard' })
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       toast.error(msg ?? 'Failed to create user')
@@ -109,12 +113,12 @@ function CreateUserModal({ isOpen, onClose, onCreated, roles, users, teams, cust
         <Input label="User Name" required value={form.user_name ?? ''} onChange={e => set('user_name', e.target.value)} error={errors.user_name} placeholder="e.g. john_doe" />
         <Input label="Email" type="email" required value={form.email ?? ''} onChange={e => set('email', e.target.value)} error={errors.email} placeholder="john@example.com" />
         <Input label="Password" type="password" required value={form.password ?? ''} onChange={e => set('password', e.target.value)} error={errors.password} placeholder="Min 8 characters" />
-        <Select label="Designation" required value={form.designation ?? ''} onChange={e => handleDesignationChange(e.target.value)} error={errors.designation}
-          options={designationOptions} placeholder="Select designation" />
-        <Select label="Role" value={form.role ?? ''} onChange={e => set('role', e.target.value)} error={errors.role}
-          options={SYSTEM_ROLES} placeholder="Select system role" />
+        <Select label="Role" required value={form.role ?? ''} onChange={e => handleRoleChange(e.target.value)} error={errors.role}
+          options={roleOptions} placeholder="Select role" />
         <Input label="Team" value={form.team ?? ''} disabled className="opacity-70 cursor-not-allowed"
-          placeholder="Auto-filled from designation" hint="Set automatically when a designation is selected" />
+          placeholder="Auto-filled from role" hint="Set automatically when a role is selected" />
+        <Input label="Access Level" value={form.access_level ?? 'standard'} disabled className="opacity-70 cursor-not-allowed font-mono text-xs"
+          placeholder="standard" hint="Access level for system permissions" />
         <div className="sm:col-span-2">
           <MultiSelect label="Customer Access" options={customerOptions} value={form.customer_access ?? []}
             onChange={v => set('customer_access', v)} placeholder="Select customers..." />
@@ -141,7 +145,7 @@ function EditUserModal({ isOpen, onClose, onUpdated, user, roles, teams, custome
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (user) setForm({ role: user.role, designation: user.designation, team: user.team, customer_access: user.customer_access, active_status: user.active_status, password: '' })
+    if (user) setForm({ role: user.role || user.designation, designation: user.designation, team: user.team, customer_access: user.customer_access, active_status: user.active_status, access_level: user.access_level ?? 'standard', password: '' })
   }, [user])
 
   function set<K extends keyof UpdateUserPayload>(key: K, value: UpdateUserPayload[K]) {
@@ -149,16 +153,22 @@ function EditUserModal({ isOpen, onClose, onUpdated, user, roles, teams, custome
     setErrors(e => { const n = { ...e }; delete n[key]; return n })
   }
 
-  // Unique designation names for dropdown
-  const designationOptions = useMemo(() =>
-    [...new Set(roles.map(r => r.role_name))].sort().map(n => ({ value: n, label: n }))
-    , [roles])
+  // Role options from roles master & defaults
+  const roleOptions = useMemo(() => {
+    const list = [...new Set([...roles.map(r => r.role_name), 'Admin', 'Manager', 'ProjectManager', 'Viewer'])].sort()
+    return list.map(n => ({ value: n, label: n }))
+  }, [roles])
 
-  function handleDesignationChange(desName: string) {
-    set('designation', desName)
-    const matched = roles.filter(r => r.role_name === desName)
+  function handleRoleChange(roleName: string) {
+    set('role', roleName)
+    const matched = roles.filter(r => r.role_name === roleName)
     if (matched.length >= 1) set('team', matched[0].team)
-    else set('team', '')
+    const val = roleName.toLowerCase().replace(/[\s-]/g, '')
+    let lvl = 'Employee'
+    if (val.includes('admin')) lvl = 'Admin'
+    else if (val.includes('manager') || val.includes('gm')) lvl = 'Manager'
+    else if (val.includes('teamlead') || val.includes('lead')) lvl = 'TeamLead'
+    set('access_level', lvl)
   }
 
   async function handleSubmit() {
@@ -195,12 +205,12 @@ function EditUserModal({ isOpen, onClose, onUpdated, user, roles, teams, custome
         <Input label="Email" value={user?.email ?? ''} disabled className="opacity-60" />
         <Input label="New Password" type="password" value={form.password ?? ''} onChange={e => set('password', e.target.value)}
           placeholder="Leave blank to keep current" hint="Leave blank to keep existing password" />
-        <Select label="Designation" required value={form.designation ?? ''} onChange={e => handleDesignationChange(e.target.value)} error={errors.designation}
-          options={designationOptions} placeholder="Select designation" />
-        <Select label="Role" value={form.role ?? ''} onChange={e => set('role', e.target.value)} error={errors.role}
-          options={SYSTEM_ROLES} placeholder="Select system role" />
+        <Select label="Role" required value={form.role ?? ''} onChange={e => handleRoleChange(e.target.value)} error={errors.role}
+          options={roleOptions} placeholder="Select role" />
         <Input label="Team" value={form.team ?? ''} disabled className="opacity-70 cursor-not-allowed"
-          placeholder="Auto-filled from designation" hint="Set automatically when a designation is selected" />
+          placeholder="Auto-filled from role" hint="Set automatically when a role is selected" />
+        <Input label="Access Level" value={form.access_level ?? 'standard'} disabled className="opacity-70 cursor-not-allowed font-mono text-xs"
+          placeholder="standard" hint="Access level for system permissions" />
         <div className="sm:col-span-2">
           <MultiSelect label="Customer Access" options={customerOptions} value={form.customer_access ?? []}
             onChange={v => set('customer_access', v)} placeholder="Select customers..." />
@@ -355,7 +365,7 @@ export function UserManagement() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-background">
-                  {['User', 'Email', 'Role', 'Designation', 'Team', 'Customer Access', 'Status', 'Actions'].map(h => (
+                  {['User', 'First Name', 'Last Name', 'Email', 'Role', 'Designation', 'Access Level', 'Team', 'Customer Access', 'Status', 'Actions'].map(h => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wide whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -363,9 +373,9 @@ export function UserManagement() {
               <tbody className="divide-y divide-border">
                 {pageData.length === 0 ? (
                   <>
-                    <tr><td colSpan={8} className="px-4 py-12 text-center text-muted text-sm">No users found</td></tr>
+                    <tr><td colSpan={11} className="px-4 py-12 text-center text-muted text-sm">No users found</td></tr>
                     {Array.from({ length: PAGE_SIZE - 1 }).map((_, i) => (
-                      <tr key={`pad-${i}`}><td colSpan={8} className="py-[22px]" /></tr>
+                      <tr key={`pad-${i}`}><td colSpan={11} className="py-[22px]" /></tr>
                     ))}
                   </>
                 ) : (
@@ -381,6 +391,10 @@ export function UserManagement() {
                             <span className="font-medium text-text">{user.user_name}</span>
                           </div>
                         </td>
+                        {/* First Name */}
+                        <td className="px-4 py-3 text-text">{user.first_name || '—'}</td>
+                        {/* Last Name */}
+                        <td className="px-4 py-3 text-text">{user.last_name || '—'}</td>
                         {/* Email */}
                         <td className="px-4 py-3 text-muted">{user.email}</td>
                         {/* Role */}
@@ -395,6 +409,17 @@ export function UserManagement() {
                         </td>
                         {/* Designation */}
                         <td className="px-4 py-3 text-text font-medium">{user.designation || '—'}</td>
+                        {/* Access Level */}
+                        <td className="px-4 py-3 font-medium">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${
+                            (user.access_level || 'Employee') === 'Admin' ? 'bg-red-100 text-red-700 border border-red-200' :
+                            (user.access_level || 'Employee') === 'Manager' ? 'bg-blue-100 text-blue-700 border border-blue-200' :
+                            (user.access_level || 'Employee') === 'TeamLead' ? 'bg-amber-100 text-amber-700 border border-amber-200' :
+                            'bg-gray-100 text-gray-700 border border-gray-200'
+                          }`}>
+                            {user.access_level || 'Employee'}
+                          </span>
+                        </td>
                         {/* Team */}
                         <td className="px-4 py-3 text-text">{user.team}</td>
                         {/* Customer Access */}
