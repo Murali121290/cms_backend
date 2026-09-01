@@ -419,7 +419,7 @@ export function ProjectWorkflow() {
   const navigate = useNavigate()
   const id = Number(projectId)
   
-  const { roles } = useRBAC()
+  const { roles, canAccess, viewer } = useRBAC()
   const showBatchButtons = roles.some(role => {
     const r = role.toLowerCase()
     return r === 'admin' || r === 'xml operator' || r === 'xml manager'
@@ -1043,7 +1043,13 @@ export function ProjectWorkflow() {
                 <Edit2 size={14} />
               </button>
               <button
-                onClick={() => navigate(`/projects/${id}/planning`)}
+                onClick={() => {
+                  if (project.project_manager !== viewer?.username && !canAccess(['admin'])) {
+                    toast.error('Only the assigned Project Manager can open planning.')
+                    return
+                  }
+                  navigate(`/projects/${id}/planning`)
+                }}
                 title="Project planning"
                 className="text-muted hover:text-primary transition-colors flex-shrink-0 ml-1.5"
               >
