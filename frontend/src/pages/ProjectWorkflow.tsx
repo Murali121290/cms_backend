@@ -33,6 +33,21 @@ import { ROLE_PERMISSIONS } from '@/config/rbacConfig'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
+function sortChapters(a: { chapters: string }, b: { chapters: string }) {
+  function getOrderValue(ch: string) {
+    if (ch === 'FM') return { type: 1, val: 0, str: '' }
+    if (/^\d+$/.test(ch)) return { type: 2, val: parseInt(ch, 10), str: '' }
+    if (ch === 'BM') return { type: 3, val: 0, str: '' }
+    if (/^[A-Za-z]$/.test(ch)) return { type: 4, val: 0, str: ch }
+    return { type: 5, val: 0, str: ch }
+  }
+  const orderA = getOrderValue(a.chapters)
+  const orderB = getOrderValue(b.chapters)
+  if (orderA.type !== orderB.type) return orderA.type - orderB.type
+  if (orderA.type === 2) return orderA.val - orderB.val
+  return orderA.str.localeCompare(orderB.str)
+}
+
 function orderStages(stages: WorkflowStage[]): WorkflowStage[] {
   const byName = new Map(stages.map(s => [s.stage_name, s]))
   const first = stages.find(s => !s.previous_stage)
@@ -586,13 +601,13 @@ export function ProjectWorkflow() {
   // Partition chapters into Design, Manuscripts, and Art tracks
   const designChapters = useMemo(() => chapters
     .filter(c => c.chapters === 'Design')
-    .sort((a, b) => a.chapters.localeCompare(b.chapters, undefined, { numeric: true })), [chapters])
+    .sort(sortChapters), [chapters])
   const manuscriptChapters = useMemo(() => chapters
     .filter(c => c.chapters !== 'Design' && !c.chapters.toLowerCase().includes('art'))
-    .sort((a, b) => a.chapters.localeCompare(b.chapters, undefined, { numeric: true })), [chapters])
+    .sort(sortChapters), [chapters])
   const artChapters = useMemo(() => chapters
     .filter(c => c.chapters.toLowerCase().includes('art'))
-    .sort((a, b) => a.chapters.localeCompare(b.chapters, undefined, { numeric: true })), [chapters])
+    .sort(sortChapters), [chapters])
 
   const batchTargets = useMemo(() => {
     if (filterStage) {
@@ -645,7 +660,7 @@ export function ProjectWorkflow() {
       if (filterStatus && filterStatus !== '__delayed__' && ch.status !== filterStatus) return false
       return true
     })
-    .sort((a, b) => a.chapters.localeCompare(b.chapters, undefined, { numeric: true }))
+    .sort(sortChapters)
     , [activeChapters, filterAssignee, filterStage, filterStatus, plannedDueDates])
 
   // Chapters currently sitting in the stage picked for bulk assignment, ascending by chapter number
@@ -653,7 +668,7 @@ export function ProjectWorkflow() {
     () => bulkStage
       ? activeChapters
         .filter(c => c.stage_name === bulkStage)
-        .sort((a, b) => a.chapters.localeCompare(b.chapters, undefined, { numeric: true }))
+        .sort(sortChapters)
       : [],
     [activeChapters, bulkStage]
   )
@@ -1048,7 +1063,12 @@ export function ProjectWorkflow() {
                     toast.error('Only the assigned Project Manager can open planning.')
                     return
                   }
-                  navigate(`/projects/${id}/planning`)
+                  const contentChapters = chapters.filter(c => c.chapters !== 'Design' && c.chapters !== 'CE support')
+                  if (contentChapters.length === 0) {
+                    navigate(`/projects/${id}/mapping`)
+                  } else {
+                    navigate(`/projects/${id}/planning`)
+                  }
                 }}
                 title="Project planning"
                 className="text-muted hover:text-primary transition-colors flex-shrink-0 ml-1.5"
