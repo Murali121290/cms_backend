@@ -120,83 +120,83 @@ const SHORTCUT_GROUPS: {
   accent: SectionAccent;
   items: { label: string; combo: string }[];
 }[] = [
-  {
-    title: "Text Formatting",
-    accent: {
-      icon: Bold,
-      iconWrap: "bg-indigo-50 border-indigo-100",
-      iconColor: "text-indigo-600",
-      ring: "hover:ring-indigo-100",
+    {
+      title: "Text Formatting",
+      accent: {
+        icon: Bold,
+        iconWrap: "bg-indigo-50 border-indigo-100",
+        iconColor: "text-indigo-600",
+        ring: "hover:ring-indigo-100",
+      },
+      items: [
+        { label: "Bold", combo: "Ctrl+B" },
+        { label: "Italic", combo: "Ctrl+I" },
+        { label: "Underline", combo: "Ctrl+U" },
+        { label: "Strikethrough", combo: "Ctrl+Shift+X" },
+        { label: "Superscript", combo: "Ctrl+Shift+=" },
+        { label: "Subscript", combo: "Ctrl+=" },
+      ],
     },
-    items: [
-      { label: "Bold", combo: "Ctrl+B" },
-      { label: "Italic", combo: "Ctrl+I" },
-      { label: "Underline", combo: "Ctrl+U" },
-      { label: "Strikethrough", combo: "Ctrl+Shift+X" },
-      { label: "Superscript", combo: "Ctrl+Shift+=" },
-      { label: "Subscript", combo: "Ctrl+=" },
-    ],
-  },
-  {
-    title: "Paragraph & Alignment",
-    accent: {
-      icon: AlignLeft,
-      iconWrap: "bg-emerald-50 border-emerald-100",
-      iconColor: "text-emerald-600",
-      ring: "hover:ring-emerald-100",
+    {
+      title: "Paragraph & Alignment",
+      accent: {
+        icon: AlignLeft,
+        iconWrap: "bg-emerald-50 border-emerald-100",
+        iconColor: "text-emerald-600",
+        ring: "hover:ring-emerald-100",
+      },
+      items: [
+        { label: "Align Left", combo: "Ctrl+L" },
+        { label: "Align Center", combo: "Ctrl+E" },
+        { label: "Align Right", combo: "Ctrl+R" },
+        { label: "Justify", combo: "Ctrl+J" },
+        { label: "Heading 1–6", combo: "Ctrl+Alt+1…6" },
+      ],
     },
-    items: [
-      { label: "Align Left", combo: "Ctrl+L" },
-      { label: "Align Center", combo: "Ctrl+E" },
-      { label: "Align Right", combo: "Ctrl+R" },
-      { label: "Justify", combo: "Ctrl+J" },
-      { label: "Heading 1–6", combo: "Ctrl+Alt+1…6" },
-    ],
-  },
-  {
-    title: "Lists",
-    accent: {
-      icon: List,
-      iconWrap: "bg-amber-50 border-amber-100",
-      iconColor: "text-amber-600",
-      ring: "hover:ring-amber-100",
+    {
+      title: "Lists",
+      accent: {
+        icon: List,
+        iconWrap: "bg-amber-50 border-amber-100",
+        iconColor: "text-amber-600",
+        ring: "hover:ring-amber-100",
+      },
+      items: [
+        { label: "Bullet List", combo: "Ctrl+Shift+L" },
+        { label: "Numbered List", combo: "Ctrl+Shift+O" },
+      ],
     },
-    items: [
-      { label: "Bullet List", combo: "Ctrl+Shift+L" },
-      { label: "Numbered List", combo: "Ctrl+Shift+O" },
-    ],
-  },
-  {
-    title: "Insert",
-    accent: {
-      icon: Plus,
-      iconWrap: "bg-violet-50 border-violet-100",
-      iconColor: "text-violet-600",
-      ring: "hover:ring-violet-100",
+    {
+      title: "Insert",
+      accent: {
+        icon: Plus,
+        iconWrap: "bg-violet-50 border-violet-100",
+        iconColor: "text-violet-600",
+        ring: "hover:ring-violet-100",
+      },
+      items: [
+        { label: "Insert / Edit Link", combo: "Ctrl+K" },
+        { label: "Insert Table 3×3", combo: "Ctrl+Alt+T" },
+        { label: "Insert Page Break", combo: "Ctrl+Enter" },
+        { label: "Insert Math Equation", combo: "Ctrl+Alt+E" },
+        { label: "Add Comment", combo: "Ctrl+Alt+M" },
+      ],
     },
-    items: [
-      { label: "Insert / Edit Link", combo: "Ctrl+K" },
-      { label: "Insert Table 3×3", combo: "Ctrl+Alt+T" },
-      { label: "Insert Page Break", combo: "Ctrl+Enter" },
-      { label: "Insert Math Equation", combo: "Ctrl+Alt+E" },
-      { label: "Add Comment", combo: "Ctrl+Alt+M" },
-    ],
-  },
-  {
-    title: "File & History",
-    accent: {
-      icon: HistoryIcon,
-      iconWrap: "bg-amber-50 border-amber-100",
-      iconColor: "text-amber-600",
-      ring: "hover:ring-amber-100",
+    {
+      title: "File & History",
+      accent: {
+        icon: HistoryIcon,
+        iconWrap: "bg-amber-50 border-amber-100",
+        iconColor: "text-amber-600",
+        ring: "hover:ring-amber-100",
+      },
+      items: [
+        { label: "Save & Convert to DOCX", combo: "Ctrl+S" },
+        { label: "Undo", combo: "Ctrl+Z" },
+        { label: "Redo", combo: "Ctrl+Y" },
+      ],
     },
-    items: [
-      { label: "Save & Convert to DOCX", combo: "Ctrl+S" },
-      { label: "Undo", combo: "Ctrl+Z" },
-      { label: "Redo", combo: "Ctrl+Y" },
-    ],
-  },
-];
+  ];
 
 const escapeHtml = (s: string) =>
   s
@@ -1200,6 +1200,11 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
               editor.chain().focus().insertContent({ type: "pageBreak" }).run()
             );
             case "Equal": return fire(() => editor.chain().focus().toggleSubscript().run());
+            // Ctrl+S / Cmd+S — persist current editor state via the same
+            // handleSave the Save button uses (no export, no download). Ref
+            // indirection keeps this closure fresh without re-binding the
+            // listener on every render.
+            case "KeyS": return fire(() => handleSaveRef.current());
           }
         }
 
@@ -1335,10 +1340,11 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
       }
     };
 
+    // Keep a live ref to handleSave so the Ctrl+S keydown listener (attached
+    // once per editor mount) always invokes the latest closure — otherwise it
+    // would capture the first render's onSave prop and go stale.
     const handleSaveRef = useRef(handleSave);
-    useEffect(() => {
-      handleSaveRef.current = handleSave;
-    }, [handleSave]);
+    handleSaveRef.current = handleSave;
 
     const lastEditTimeRef = useRef<number>(0);
 
@@ -1464,432 +1470,431 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
 
         {/* â”€â”€ Toolbar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         {!hideToolbar && (
-        <div className="sticky top-0 z-10 bg-[#090d16] border-b border-slate-800 px-3 py-2 flex items-center gap-1.5 overflow-x-auto shadow-md flex-wrap">
+          <div className="sticky top-0 z-10 bg-[#090d16] border-b border-slate-800 px-3 py-2 flex items-center gap-1.5 overflow-x-auto shadow-md flex-wrap">
 
-          {/* Font Family */}
-          <select
-            value={currentFontFamily}
-            onChange={(e) => {
-              const font = e.target.value;
-              if (patchSelectedMathNode({ wrapperFontFamily: font === "default" ? "" : font })) {
+            {/* Font Family */}
+            <select
+              value={currentFontFamily}
+              onChange={(e) => {
+                const font = e.target.value;
+                if (patchSelectedMathNode({ wrapperFontFamily: font === "default" ? "" : font })) {
+                  setCurrentFontFamily(font);
+                  return;
+                }
+                if (font === "default") {
+                  editor?.chain().focus().unsetFontFamily().run();
+                } else {
+                  editor?.chain().focus().setFontFamily(font).run();
+                }
                 setCurrentFontFamily(font);
-                return;
-              }
-              if (font === "default") {
-                editor?.chain().focus().unsetFontFamily().run();
-              } else {
-                editor?.chain().focus().setFontFamily(font).run();
-              }
-              setCurrentFontFamily(font);
-            }}
-            className="px-2 py-1 text-[11px] font-bold border border-slate-700 rounded-md bg-slate-900 text-slate-200 hover:bg-slate-800 focus:outline-none max-w-[110px] shrink-0"
-            title="Font Family"
-          >
-            <option value="default">Font</option>
-            {["Calibri", "Cambria", "Arial", "Times New Roman", "Georgia", "Garamond", "Verdana", "Tahoma", "Trebuchet MS", "Courier New", "Consolas", "Helvetica"].map(f => (
-              <option key={f} value={f}>{f}</option>
-            ))}
-          </select>
+              }}
+              className="px-2 py-1 text-[11px] font-bold border border-slate-700 rounded-md bg-slate-900 text-slate-200 hover:bg-slate-800 focus:outline-none max-w-[110px] shrink-0"
+              title="Font Family"
+            >
+              <option value="default">Font</option>
+              {["Calibri", "Cambria", "Arial", "Times New Roman", "Georgia", "Garamond", "Verdana", "Tahoma", "Trebuchet MS", "Courier New", "Consolas", "Helvetica"].map(f => (
+                <option key={f} value={f}>{f}</option>
+              ))}
+            </select>
 
-          {/* Font Size */}
-          <select
-            value={currentFontSize}
-            onChange={(e) => {
-              const size = e.target.value;
-              if (patchSelectedMathNode({ wrapperFontSize: size === "default" ? "" : size })) {
+            {/* Font Size */}
+            <select
+              value={currentFontSize}
+              onChange={(e) => {
+                const size = e.target.value;
+                if (patchSelectedMathNode({ wrapperFontSize: size === "default" ? "" : size })) {
+                  setCurrentFontSize(size);
+                  return;
+                }
+                if (size === "default") {
+                  editor?.chain().focus().unsetFontSize().run();
+                } else {
+                  editor?.chain().focus().setFontSize(`${size}pt`).run();
+                }
                 setCurrentFontSize(size);
-                return;
-              }
-              if (size === "default") {
-                editor?.chain().focus().unsetFontSize().run();
-              } else {
-                editor?.chain().focus().setFontSize(`${size}pt`).run();
-              }
-              setCurrentFontSize(size);
-            }}
-            className="px-2 py-1 text-[11px] font-bold border border-slate-700 rounded-md bg-slate-900 text-slate-200 hover:bg-slate-800 focus:outline-none w-16 shrink-0"
-            title="Font Size"
-          >
-            <option value="default">Size</option>
-            {[8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48].map(s => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
-
-          <ToolbarDivider />
-
-          {/* Text Formatting */}
-          <ToolbarButton
-            active={editor?.isActive("bold") || !!getSelectedMathNodeInfo()?.attrs.wrapperBold}
-            onClick={() => {
-              const info = getSelectedMathNodeInfo();
-              if (info) {
-                patchSelectedMathNode({ wrapperBold: !info.attrs.wrapperBold });
-                return;
-              }
-              editor?.chain().focus().toggleBold().run();
-            }}
-            title={`Bold (${kbd("Ctrl+B")})`}
-          >
-            <Bold className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton
-            active={editor?.isActive("italic") || !!getSelectedMathNodeInfo()?.attrs.wrapperItalic}
-            onClick={() => {
-              const info = getSelectedMathNodeInfo();
-              if (info) {
-                patchSelectedMathNode({ wrapperItalic: !info.attrs.wrapperItalic });
-                return;
-              }
-              editor?.chain().focus().toggleItalic().run();
-            }}
-            title={`Italic (${kbd("Ctrl+I")})`}
-          >
-            <Italic className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton active={editor?.isActive("underline")} onClick={() => editor?.chain().focus().toggleUnderline().run()} title={`Underline (${kbd("Ctrl+U")})`}>
-            <Type className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton active={editor?.isActive("strike")} onClick={() => editor?.chain().focus().toggleStrike().run()} title={`Strikethrough (${kbd("Ctrl+Shift+X")})`}>
-            <Strikethrough className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton active={editor?.isActive("superscript")} onClick={() => editor?.chain().focus().toggleSuperscript().run()} title={`Superscript (${kbd("Ctrl+Shift+=")})`}>
-            <SuperscriptIcon className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton active={editor?.isActive("subscript")} onClick={() => editor?.chain().focus().toggleSubscript().run()} title={`Subscript (${kbd("Ctrl+=")})`}>
-            <SubscriptIcon className="w-4 h-4" />
-          </ToolbarButton>
-
-          <ToolbarDivider />
-
-          {/* Color Controls */}
-          {/* Text Color */}
-          <div className="relative" title="Text Color">
-            <button
-              onClick={() => textColorRef.current?.click()}
-              className="p-1.5 rounded-md text-slate-400 hover:bg-slate-800/80 hover:text-slate-200 transition-all duration-150 cursor-pointer flex flex-col items-center gap-0.5"
-            >
-              <span className="text-[10px] font-bold leading-none">A</span>
-              <span
-                className="h-1 w-4 rounded-full"
-                style={{ backgroundColor: editor?.getAttributes("textStyle").color || "#ffffff" }}
-              />
-            </button>
-            <input
-              ref={textColorRef}
-              type="color"
-              defaultValue="#000000"
-              onChange={(e) => {
-                if (patchSelectedMathNode({ wrapperColor: e.target.value })) return;
-                editor?.chain().focus().setColor(e.target.value).run();
               }}
-              className="absolute inset-0 opacity-0 w-0 h-0 cursor-pointer"
-            />
-          </div>
-
-          {/* Highlight Color */}
-          <div className="relative" title="Highlight Color">
-            <button
-              onClick={() => highlightColorRef.current?.click()}
-              className="p-1.5 rounded-md text-slate-400 hover:bg-slate-800/80 hover:text-slate-200 transition-all duration-150 cursor-pointer"
+              className="px-2 py-1 text-[11px] font-bold border border-slate-700 rounded-md bg-slate-900 text-slate-200 hover:bg-slate-800 focus:outline-none w-16 shrink-0"
+              title="Font Size"
             >
-              <Highlighter className="w-4 h-4" />
-            </button>
-            <input
-              ref={highlightColorRef}
-              type="color"
-              defaultValue="#fef08a"
-              onChange={(e) => {
-                if (patchSelectedMathNode({ wrapperBgColor: e.target.value })) return;
-                editor?.chain().focus().toggleHighlight({ color: e.target.value }).run();
+              <option value="default">Size</option>
+              {[8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48].map(s => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+
+            <ToolbarDivider />
+
+            {/* Text Formatting */}
+            <ToolbarButton
+              active={editor?.isActive("bold") || !!getSelectedMathNodeInfo()?.attrs.wrapperBold}
+              onClick={() => {
+                const info = getSelectedMathNodeInfo();
+                if (info) {
+                  patchSelectedMathNode({ wrapperBold: !info.attrs.wrapperBold });
+                  return;
+                }
+                editor?.chain().focus().toggleBold().run();
               }}
-              className="absolute inset-0 opacity-0 w-0 h-0 cursor-pointer"
-            />
-          </div>
+              title={`Bold (${kbd("Ctrl+B")})`}
+            >
+              <Bold className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton
+              active={editor?.isActive("italic") || !!getSelectedMathNodeInfo()?.attrs.wrapperItalic}
+              onClick={() => {
+                const info = getSelectedMathNodeInfo();
+                if (info) {
+                  patchSelectedMathNode({ wrapperItalic: !info.attrs.wrapperItalic });
+                  return;
+                }
+                editor?.chain().focus().toggleItalic().run();
+              }}
+              title={`Italic (${kbd("Ctrl+I")})`}
+            >
+              <Italic className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton active={editor?.isActive("underline")} onClick={() => editor?.chain().focus().toggleUnderline().run()} title={`Underline (${kbd("Ctrl+U")})`}>
+              <Type className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton active={editor?.isActive("strike")} onClick={() => editor?.chain().focus().toggleStrike().run()} title={`Strikethrough (${kbd("Ctrl+Shift+X")})`}>
+              <Strikethrough className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton active={editor?.isActive("superscript")} onClick={() => editor?.chain().focus().toggleSuperscript().run()} title={`Superscript (${kbd("Ctrl+Shift+=")})`}>
+              <SuperscriptIcon className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton active={editor?.isActive("subscript")} onClick={() => editor?.chain().focus().toggleSubscript().run()} title={`Subscript (${kbd("Ctrl+=")})`}>
+              <SubscriptIcon className="w-4 h-4" />
+            </ToolbarButton>
 
-          <ToolbarDivider />
+            <ToolbarDivider />
 
-          {/* Alignment */}
-          <ToolbarButton active={editor?.isActive({ textAlign: "left" })} onClick={() => editor?.chain().focus().setTextAlign("left").run()} title={`Align Left (${kbd("Ctrl+L")})`}>
-            <AlignLeft className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton active={editor?.isActive({ textAlign: "center" })} onClick={() => editor?.chain().focus().setTextAlign("center").run()} title={`Align Center (${kbd("Ctrl+E")})`}>
-            <AlignCenter className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton active={editor?.isActive({ textAlign: "right" })} onClick={() => editor?.chain().focus().setTextAlign("right").run()} title={`Align Right (${kbd("Ctrl+R")})`}>
-            <AlignRight className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton active={editor?.isActive({ textAlign: "justify" })} onClick={() => editor?.chain().focus().setTextAlign("justify").run()} title={`Justify (${kbd("Ctrl+J")})`}>
-            <AlignJustify className="w-4 h-4" />
-          </ToolbarButton>
-
-          <ToolbarDivider />
-
-          {/* Lists */}
-          <ToolbarButton active={editor?.isActive("bulletList")} onClick={() => editor?.chain().focus().toggleBulletList().run()} title={`Bullet List (${kbd("Ctrl+Shift+L")})`}>
-            <List className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton active={editor?.isActive("orderedList")} onClick={() => editor?.chain().focus().toggleOrderedList().run()} title={`Numbered List (${kbd("Ctrl+Shift+O")})`}>
-            <ListOrdered className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton
-            onClick={() => {
-              if (editor?.isActive("bulletList") || editor?.isActive("orderedList")) {
-                editor.chain().focus().sinkListItem("listItem").run();
-              }
-            }}
-            disabled={!editor?.isActive("bulletList") && !editor?.isActive("orderedList")}
-            title="Indent (List Item)"
-          >
-            <Indent className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton
-            onClick={() => {
-              if (editor?.isActive("bulletList") || editor?.isActive("orderedList")) {
-                editor.chain().focus().liftListItem("listItem").run();
-              }
-            }}
-            disabled={!editor?.isActive("bulletList") && !editor?.isActive("orderedList")}
-            title="Outdent (List Item)"
-          >
-            <Outdent className="w-4 h-4" />
-          </ToolbarButton>
-
-          <ToolbarDivider />
-
-          {/* Insert Table */}
-          <ToolbarButton onClick={() => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} title={`Insert Table 3×3 (${kbd("Ctrl+Alt+T")})`}>
-            <Table2 className="w-4 h-4" />
-          </ToolbarButton>
-
-          {/* Insert Page Break */}
-          <ToolbarButton onClick={() => editor?.chain().focus().insertContent({ type: 'pageBreak' }).run()} title={`Insert Page Break (${kbd("Ctrl+Enter")})`}>
-            <SeparatorHorizontal className="w-4 h-4 text-emerald-400" />
-          </ToolbarButton>
-
-          {/* Table Tools (Only visible when cursor is inside a table) */}
-          {editor?.isActive("table") && (
-            <>
-              <ToolbarDivider />
-              <div className="flex items-center gap-1 bg-[#131b2e] border border-slate-700/60 rounded-md p-0.5" title="Table Tools">
-                <button onClick={() => editor.chain().focus().addRowBefore().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Row Above">+ Row Above</button>
-                <button onClick={() => editor.chain().focus().addRowAfter().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Row Below">+ Row Below</button>
-                <div className="w-px h-3.5 bg-slate-800" />
-                <button onClick={() => editor.chain().focus().addColumnBefore().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Column Left">+ Col Left</button>
-                <button onClick={() => editor.chain().focus().addColumnAfter().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Column Right">+ Col Right</button>
-                <div className="w-px h-3.5 bg-slate-800" />
-                <button onClick={() => editor.chain().focus().mergeCells().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Merge Cells">Merge</button>
-                <button onClick={() => editor.chain().focus().splitCell().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Split Cell">Split</button>
-                <div className="w-px h-3.5 bg-slate-800" />
-                <button onClick={() => editor.chain().focus().deleteRow().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-rose-400 rounded" title="Delete Row">Delete Row</button>
-                <button onClick={() => editor.chain().focus().deleteColumn().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-rose-400 rounded" title="Delete Column">Delete Col</button>
-                <button onClick={() => editor.chain().focus().deleteTable().run()} className="px-1.5 py-1 hover:bg-slate-850 text-[10px] font-bold text-rose-500 rounded" title="Delete Table">Delete Table</button>
-              </div>
-            </>
-          )}
-
-          {/* Insert Link */}
-          <ToolbarButton
-            active={editor?.isActive("link")}
-            onClick={() => {
-              if (editor?.isActive("link")) {
-                editor.chain().focus().unsetLink().run();
-              } else {
-                const url = editor?.getAttributes("link").href ?? "";
-                setLinkUrl(url);
-                setShowLinkDialog(true);
-              }
-            }}
-            title={`Insert / Remove Link (${kbd("Ctrl+K")})`}
-          >
-            <LinkIcon className="w-4 h-4" />
-          </ToolbarButton>
-
-          <ToolbarDivider />
-
-          {/* History */}
-          <ToolbarButton onClick={() => editor?.chain().focus().undo().run()} disabled={!editor?.can().undo()} title={`Undo (${kbd("Ctrl+Z")})`}>
-            <Undo className="w-4 h-4" />
-          </ToolbarButton>
-          <ToolbarButton onClick={() => editor?.chain().focus().redo().run()} disabled={!editor?.can().redo()} title={`Redo (${kbd("Ctrl+Y")})`}>
-            <Redo className="w-4 h-4" />
-          </ToolbarButton>
-
-          <ToolbarDivider />
-
-          {/* Character Style Dropdown (Gated) */}
-          {charStyles && charStyles.length > 0 && (
-            <>
-              <select
-                onChange={(e) => {
-                  const styleClass = e.target.value;
-                  if (!styleClass || styleClass === "CLEAR") {
-                    editor?.chain().focus().unsetMark("charStyle").run();
-                  } else {
-                    editor?.chain().focus().setMark("charStyle", { class: styleClass }).run();
-                  }
-                  e.target.value = "";
-                }}
-                className="px-2 py-1 text-[11px] font-bold border border-slate-700 rounded bg-slate-900 text-slate-200 hover:bg-slate-800 focus:outline-none shrink-0"
-                title="Character Style"
+            {/* Color Controls */}
+            {/* Text Color */}
+            <div className="relative" title="Text Color">
+              <button
+                onClick={() => textColorRef.current?.click()}
+                className="p-1.5 rounded-md text-slate-400 hover:bg-slate-800/80 hover:text-slate-200 transition-all duration-150 cursor-pointer flex flex-col items-center gap-0.5"
               >
-                <option value="">Character Style</option>
-                <option value="CLEAR">Clear Style</option>
-                <optgroup label="Bibliography Styles">
-                  {charStyles
-                    .filter((s) => s.startsWith("bib_"))
-                    .map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                </optgroup>
-                <optgroup label="Citation Styles">
-                  {charStyles
-                    .filter((s) => s.startsWith("cite_"))
-                    .map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                </optgroup>
-              </select>
-              <ToolbarDivider />
-            </>
-          )}
+                <span className="text-[10px] font-bold leading-none">A</span>
+                <span
+                  className="h-1 w-4 rounded-full"
+                  style={{ backgroundColor: editor?.getAttributes("textStyle").color || "#ffffff" }}
+                />
+              </button>
+              <input
+                ref={textColorRef}
+                type="color"
+                defaultValue="#000000"
+                onChange={(e) => {
+                  if (patchSelectedMathNode({ wrapperColor: e.target.value })) return;
+                  editor?.chain().focus().setColor(e.target.value).run();
+                }}
+                className="absolute inset-0 opacity-0 w-0 h-0 cursor-pointer"
+              />
+            </div>
 
-          {/* Add Comment Button — opens the dialog; the Tiptap mark and the
+            {/* Highlight Color */}
+            <div className="relative" title="Highlight Color">
+              <button
+                onClick={() => highlightColorRef.current?.click()}
+                className="p-1.5 rounded-md text-slate-400 hover:bg-slate-800/80 hover:text-slate-200 transition-all duration-150 cursor-pointer"
+              >
+                <Highlighter className="w-4 h-4" />
+              </button>
+              <input
+                ref={highlightColorRef}
+                type="color"
+                defaultValue="#fef08a"
+                onChange={(e) => {
+                  if (patchSelectedMathNode({ wrapperBgColor: e.target.value })) return;
+                  editor?.chain().focus().toggleHighlight({ color: e.target.value }).run();
+                }}
+                className="absolute inset-0 opacity-0 w-0 h-0 cursor-pointer"
+              />
+            </div>
+
+            <ToolbarDivider />
+
+            {/* Alignment */}
+            <ToolbarButton active={editor?.isActive({ textAlign: "left" })} onClick={() => editor?.chain().focus().setTextAlign("left").run()} title={`Align Left (${kbd("Ctrl+L")})`}>
+              <AlignLeft className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton active={editor?.isActive({ textAlign: "center" })} onClick={() => editor?.chain().focus().setTextAlign("center").run()} title={`Align Center (${kbd("Ctrl+E")})`}>
+              <AlignCenter className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton active={editor?.isActive({ textAlign: "right" })} onClick={() => editor?.chain().focus().setTextAlign("right").run()} title={`Align Right (${kbd("Ctrl+R")})`}>
+              <AlignRight className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton active={editor?.isActive({ textAlign: "justify" })} onClick={() => editor?.chain().focus().setTextAlign("justify").run()} title={`Justify (${kbd("Ctrl+J")})`}>
+              <AlignJustify className="w-4 h-4" />
+            </ToolbarButton>
+
+            <ToolbarDivider />
+
+            {/* Lists */}
+            <ToolbarButton active={editor?.isActive("bulletList")} onClick={() => editor?.chain().focus().toggleBulletList().run()} title={`Bullet List (${kbd("Ctrl+Shift+L")})`}>
+              <List className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton active={editor?.isActive("orderedList")} onClick={() => editor?.chain().focus().toggleOrderedList().run()} title={`Numbered List (${kbd("Ctrl+Shift+O")})`}>
+              <ListOrdered className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton
+              onClick={() => {
+                if (editor?.isActive("bulletList") || editor?.isActive("orderedList")) {
+                  editor.chain().focus().sinkListItem("listItem").run();
+                }
+              }}
+              disabled={!editor?.isActive("bulletList") && !editor?.isActive("orderedList")}
+              title="Indent (List Item)"
+            >
+              <Indent className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton
+              onClick={() => {
+                if (editor?.isActive("bulletList") || editor?.isActive("orderedList")) {
+                  editor.chain().focus().liftListItem("listItem").run();
+                }
+              }}
+              disabled={!editor?.isActive("bulletList") && !editor?.isActive("orderedList")}
+              title="Outdent (List Item)"
+            >
+              <Outdent className="w-4 h-4" />
+            </ToolbarButton>
+
+            <ToolbarDivider />
+
+            {/* Insert Table */}
+            <ToolbarButton onClick={() => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} title={`Insert Table 3×3 (${kbd("Ctrl+Alt+T")})`}>
+              <Table2 className="w-4 h-4" />
+            </ToolbarButton>
+
+            {/* Insert Page Break */}
+            <ToolbarButton onClick={() => editor?.chain().focus().insertContent({ type: 'pageBreak' }).run()} title={`Insert Page Break (${kbd("Ctrl+Enter")})`}>
+              <SeparatorHorizontal className="w-4 h-4 text-emerald-400" />
+            </ToolbarButton>
+
+            {/* Table Tools (Only visible when cursor is inside a table) */}
+            {editor?.isActive("table") && (
+              <>
+                <ToolbarDivider />
+                <div className="flex items-center gap-1 bg-[#131b2e] border border-slate-700/60 rounded-md p-0.5" title="Table Tools">
+                  <button onClick={() => editor.chain().focus().addRowBefore().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Row Above">+ Row Above</button>
+                  <button onClick={() => editor.chain().focus().addRowAfter().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Row Below">+ Row Below</button>
+                  <div className="w-px h-3.5 bg-slate-800" />
+                  <button onClick={() => editor.chain().focus().addColumnBefore().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Column Left">+ Col Left</button>
+                  <button onClick={() => editor.chain().focus().addColumnAfter().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Insert Column Right">+ Col Right</button>
+                  <div className="w-px h-3.5 bg-slate-800" />
+                  <button onClick={() => editor.chain().focus().mergeCells().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Merge Cells">Merge</button>
+                  <button onClick={() => editor.chain().focus().splitCell().run()} className="p-1 hover:bg-slate-800 text-[10px] font-bold text-slate-200 rounded" title="Split Cell">Split</button>
+                  <div className="w-px h-3.5 bg-slate-800" />
+                  <button onClick={() => editor.chain().focus().deleteRow().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-rose-400 rounded" title="Delete Row">Delete Row</button>
+                  <button onClick={() => editor.chain().focus().deleteColumn().run()} className="px-1.5 py-1 hover:bg-slate-800 text-[10px] font-bold text-rose-400 rounded" title="Delete Column">Delete Col</button>
+                  <button onClick={() => editor.chain().focus().deleteTable().run()} className="px-1.5 py-1 hover:bg-slate-850 text-[10px] font-bold text-rose-500 rounded" title="Delete Table">Delete Table</button>
+                </div>
+              </>
+            )}
+
+            {/* Insert Link */}
+            <ToolbarButton
+              active={editor?.isActive("link")}
+              onClick={() => {
+                if (editor?.isActive("link")) {
+                  editor.chain().focus().unsetLink().run();
+                } else {
+                  const url = editor?.getAttributes("link").href ?? "";
+                  setLinkUrl(url);
+                  setShowLinkDialog(true);
+                }
+              }}
+              title={`Insert / Remove Link (${kbd("Ctrl+K")})`}
+            >
+              <LinkIcon className="w-4 h-4" />
+            </ToolbarButton>
+
+            <ToolbarDivider />
+
+            {/* History */}
+            <ToolbarButton onClick={() => editor?.chain().focus().undo().run()} disabled={!editor?.can().undo()} title={`Undo (${kbd("Ctrl+Z")})`}>
+              <Undo className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton onClick={() => editor?.chain().focus().redo().run()} disabled={!editor?.can().redo()} title={`Redo (${kbd("Ctrl+Y")})`}>
+              <Redo className="w-4 h-4" />
+            </ToolbarButton>
+
+            <ToolbarDivider />
+
+            {/* Character Style Dropdown (Gated) */}
+            {charStyles && charStyles.length > 0 && (
+              <>
+                <select
+                  onChange={(e) => {
+                    const styleClass = e.target.value;
+                    if (!styleClass || styleClass === "CLEAR") {
+                      editor?.chain().focus().unsetMark("charStyle").run();
+                    } else {
+                      editor?.chain().focus().setMark("charStyle", { class: styleClass }).run();
+                    }
+                    e.target.value = "";
+                  }}
+                  className="px-2 py-1 text-[11px] font-bold border border-slate-700 rounded bg-slate-900 text-slate-200 hover:bg-slate-800 focus:outline-none shrink-0"
+                  title="Character Style"
+                >
+                  <option value="">Character Style</option>
+                  <option value="CLEAR">Clear Style</option>
+                  <optgroup label="Bibliography Styles">
+                    {charStyles
+                      .filter((s) => s.startsWith("bib_"))
+                      .map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                  </optgroup>
+                  <optgroup label="Citation Styles">
+                    {charStyles
+                      .filter((s) => s.startsWith("cite_"))
+                      .map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                  </optgroup>
+                </select>
+                <ToolbarDivider />
+              </>
+            )}
+
+            {/* Add Comment Button — opens the dialog; the Tiptap mark and the
               backend record are only created once the user submits text. */}
-          <ToolbarButton
-            onClick={openCommentDialog}
-            title={`Add Comment on selection (${kbd("Ctrl+Alt+M")})`}
-          >
-            <MessageSquare className="w-4 h-4 text-sky-400" />
-          </ToolbarButton>
+            <ToolbarButton
+              onClick={openCommentDialog}
+              title={`Add Comment on selection (${kbd("Ctrl+Alt+M")})`}
+            >
+              <MessageSquare className="w-4 h-4 text-sky-400" />
+            </ToolbarButton>
 
-          {/* Insert Equation Button */}
-          <ToolbarButton
-            onClick={() => {
-              if (!editor) return;
-              (editor.chain().focus() as any).insertMathNode({ openOnMount: true }).run();
-            }}
-            title={`Insert Math Equation (${kbd("Ctrl+Alt+E")})`}
-          >
-            <Sigma className="w-4 h-4 text-amber-500" />
-          </ToolbarButton>
+            {/* Insert Equation Button */}
+            <ToolbarButton
+              onClick={() => {
+                if (!editor) return;
+                (editor.chain().focus() as any).insertMathNode({ openOnMount: true }).run();
+              }}
+              title={`Insert Math Equation (${kbd("Ctrl+Alt+E")})`}
+            >
+              <Sigma className="w-4 h-4 text-amber-500" />
+            </ToolbarButton>
 
-          {/* Keyboard Shortcuts Reference */}
-          <ToolbarButton
-            onClick={() => setShowShortcuts(true)}
-            title="Keyboard Shortcuts"
-          >
-            <Keyboard className="w-4 h-4" />
-          </ToolbarButton>
+            {/* Keyboard Shortcuts Reference */}
+            <ToolbarButton
+              onClick={() => setShowShortcuts(true)}
+              title="Keyboard Shortcuts"
+            >
+              <Keyboard className="w-4 h-4" />
+            </ToolbarButton>
 
-          <ToolbarDivider />
+            <ToolbarDivider />
 
-          {/* Review-mode (compare with original) Toggle */}
-          <button
-            onClick={handleToggleReviewMode}
-            className={`p-1.5 rounded-md transition-all duration-150 border shrink-0 ${reviewMode
+            {/* Review-mode (compare with original) Toggle */}
+            <button
+              onClick={handleToggleReviewMode}
+              className={`p-1.5 rounded-md transition-all duration-150 border shrink-0 ${reviewMode
                 ? "bg-sky-950/40 text-sky-300 border-sky-800/80 shadow-sm"
                 : "bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800 hover:text-slate-200"
-              }`}
-            title={
-              reviewMode
-                ? "Reviewing changes vs. original — click to return to current view"
-                : "Show changes vs. original (review mode)"
-            }
-            aria-pressed={reviewMode}
-          >
-            {reviewMode ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-          </button>
+                }`}
+              title={
+                reviewMode
+                  ? "Reviewing changes vs. original — click to return to current view"
+                  : "Show changes vs. original (review mode)"
+              }
+              aria-pressed={reviewMode}
+            >
+              {reviewMode ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+            </button>
 
-          {/* Track Changes Toggle */}
-          <button
-            onClick={handleToggleTrackChanges}
-            disabled={reviewMode}
-            className={`px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all duration-150 border shrink-0 ${tcEnabled
-              ? "bg-emerald-950/40 text-emerald-400 border-emerald-800/80 shadow-sm"
-              : "bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800 hover:text-slate-200"
-              } ${reviewMode ? "opacity-40 cursor-not-allowed" : ""}`}
-            title={reviewMode ? "Track Changes is disabled in review mode" : "Toggle Track Changes"}
-          >
-            TC {tcEnabled ? "ON" : "OFF"}
-          </button>
+            {/* Track Changes Toggle */}
+            <button
+              onClick={handleToggleTrackChanges}
+              disabled={reviewMode}
+              className={`px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all duration-150 border shrink-0 ${tcEnabled
+                ? "bg-emerald-950/40 text-emerald-400 border-emerald-800/80 shadow-sm"
+                : "bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800 hover:text-slate-200"
+                } ${reviewMode ? "opacity-40 cursor-not-allowed" : ""}`}
+              title={reviewMode ? "Track Changes is disabled in review mode" : "Toggle Track Changes"}
+            >
+              TC {tcEnabled ? "ON" : "OFF"}
+            </button>
 
-          {/* Accept/Reject All Buttons (when TC is ON) */}
-          {tcEnabled && (
-            <div className="flex items-center gap-1 bg-[#0c1b30] border border-emerald-900/60 rounded-md p-0.5 shrink-0" title="Bulk Resolve Changes">
-              <button
-                onClick={() => {
-                  editor?.commands.acceptAllChanges();
-                  setTimeout(updateCommentPositions, 50);
-                }}
-                className="p-1 hover:bg-slate-800 text-[10px] font-bold text-emerald-400 rounded flex items-center gap-0.5 cursor-pointer border-none bg-transparent"
-                title="Accept All Changes"
-              >
-                <Check className="w-3 h-3" /> All
-              </button>
-              <div className="w-px h-3 bg-emerald-900/40" />
-              <button
-                onClick={() => {
-                  editor?.commands.rejectAllChanges();
-                  setTimeout(updateCommentPositions, 50);
-                }}
-                className="p-1 hover:bg-slate-800 text-[10px] font-bold text-rose-400 rounded flex items-center gap-0.5 cursor-pointer border-none bg-transparent"
-                title="Reject All Changes"
-              >
-                <X className="w-3.5 h-3.5" /> All
-              </button>
-            </div>
-          )}
+            {/* Accept/Reject All Buttons (when TC is ON) */}
+            {tcEnabled && (
+              <div className="flex items-center gap-1 bg-[#0c1b30] border border-emerald-900/60 rounded-md p-0.5 shrink-0" title="Bulk Resolve Changes">
+                <button
+                  onClick={() => {
+                    editor?.commands.acceptAllChanges();
+                    setTimeout(updateCommentPositions, 50);
+                  }}
+                  className="p-1 hover:bg-slate-800 text-[10px] font-bold text-emerald-400 rounded flex items-center gap-0.5 cursor-pointer border-none bg-transparent"
+                  title="Accept All Changes"
+                >
+                  <Check className="w-3 h-3" /> All
+                </button>
+                <div className="w-px h-3 bg-emerald-900/40" />
+                <button
+                  onClick={() => {
+                    editor?.commands.rejectAllChanges();
+                    setTimeout(updateCommentPositions, 50);
+                  }}
+                  className="p-1 hover:bg-slate-800 text-[10px] font-bold text-rose-400 rounded flex items-center gap-0.5 cursor-pointer border-none bg-transparent"
+                  title="Reject All Changes"
+                >
+                  <X className="w-3.5 h-3.5" /> All
+                </button>
+              </div>
+            )}
 
-          <ToolbarDivider />
+            <ToolbarDivider />
 
-          {/* Find & Replace Toggle */}
-          <ToolbarButton
-            active={showFindReplace}
-            onClick={() => setShowFindReplace(!showFindReplace)}
-            title="Find & Replace (Ctrl+F)"
-          >
-            <Search className="w-4 h-4" />
-          </ToolbarButton>
+            {/* Find & Replace Toggle */}
+            <ToolbarButton
+              active={showFindReplace}
+              onClick={() => setShowFindReplace(!showFindReplace)}
+              title="Find & Replace (Ctrl+F)"
+            >
+              <Search className="w-4 h-4" />
+            </ToolbarButton>
 
-          {/* Clear Formatting */}
-          <ToolbarButton
-            onClick={() => editor?.chain().focus().clearNodes().unsetAllMarks().run()}
-            title="Clear All Formatting"
-          >
-            <Maximize2 className="w-4 h-4" />
-          </ToolbarButton>
+            {/* Clear Formatting */}
+            <ToolbarButton
+              onClick={() => editor?.chain().focus().clearNodes().unsetAllMarks().run()}
+              title="Clear All Formatting"
+            >
+              <Maximize2 className="w-4 h-4" />
+            </ToolbarButton>
 
-          <ToolbarDivider />
+            <ToolbarDivider />
 
-          {/* Top Toolbar Save Button */}
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={isSaving}
-            title={`Save edits to DOCX (${kbd("Ctrl+S")})`}
-            className={`px-3 py-1 text-xs font-bold rounded-md transition-all duration-150 shrink-0 inline-flex items-center gap-1.5 cursor-pointer shadow-sm ${
-              isSaving
-                ? "bg-blue-900/60 text-blue-300 border border-blue-700/50 opacity-75 cursor-not-allowed"
-                : isDirty
-                ? "bg-amber-600 hover:bg-amber-500 text-white border border-amber-500 shadow-amber-900/30"
-                : "bg-blue-600 hover:bg-blue-500 text-white border border-blue-500 shadow-blue-900/30"
-            }`}
-          >
-            <Save className={`w-3.5 h-3.5 ${isSaving ? "animate-spin" : ""}`} />
-            <span>{isSaving ? "Saving..." : isDirty ? "Save *" : "Save"}</span>
-          </button>
+            {/* Top Toolbar Save Button */}
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={isSaving}
+              title={`Save edits to DOCX (${kbd("Ctrl+S")})`}
+              className={`px-3 py-1 text-xs font-bold rounded-md transition-all duration-150 shrink-0 inline-flex items-center gap-1.5 cursor-pointer shadow-sm ${isSaving
+                  ? "bg-blue-900/60 text-blue-300 border border-blue-700/50 opacity-75 cursor-not-allowed"
+                  : isDirty
+                    ? "bg-amber-600 hover:bg-amber-500 text-white border border-amber-500 shadow-amber-900/30"
+                    : "bg-blue-600 hover:bg-blue-500 text-white border border-blue-500 shadow-blue-900/30"
+                }`}
+            >
+              <Save className={`w-3.5 h-3.5 ${isSaving ? "animate-spin" : ""}`} />
+              <span>{isSaving ? "Saving..." : isDirty ? "Save *" : "Save"}</span>
+            </button>
 
-          {toolbarExtras && (
-            <div className="ml-auto flex items-center gap-1.5 shrink-0 pl-2">
-              {toolbarExtras}
-            </div>
-          )}
-        </div>
+            {toolbarExtras && (
+              <div className="ml-auto flex items-center gap-1.5 shrink-0 pl-2">
+                {toolbarExtras}
+              </div>
+            )}
+          </div>
         )}
 
         {/* â”€â”€ Find & Replace Bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
@@ -1999,10 +2004,10 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
               ...g,
               items: q
                 ? g.items.filter(
-                    (it) =>
-                      it.label.toLowerCase().includes(q) ||
-                      it.combo.toLowerCase().includes(q),
-                  )
+                  (it) =>
+                    it.label.toLowerCase().includes(q) ||
+                    it.combo.toLowerCase().includes(q),
+                )
                 : g.items,
             }))
             .filter((g) => g.items.length > 0);
@@ -2024,7 +2029,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
                 {/* Header */}
                 <div className="relative px-6 pt-5 pb-4 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
                   <div className="absolute inset-0 opacity-[0.07] pointer-events-none"
-                       style={{ backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)", backgroundSize: "16px 16px" }} />
+                    style={{ backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)", backgroundSize: "16px 16px" }} />
                   <div className="relative flex items-start justify-between gap-4">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-xl bg-white/10 border border-white/15 flex items-center justify-center backdrop-blur-sm">
@@ -2302,9 +2307,8 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           className={
             inlineSaveBar
               ? "border-t border-slate-200 bg-white px-4 py-2 flex items-center gap-3 flex-wrap shrink-0"
-              : `fixed bottom-0 right-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur-sm px-6 py-3 flex items-center gap-3 shadow-[0_-2px_12px_rgba(15,23,42,0.08)] ${
-                  sidebarCollapsed ? "left-16" : "left-60"
-                }`
+              : `fixed bottom-0 right-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur-sm px-6 py-3 flex items-center gap-3 shadow-[0_-2px_12px_rgba(15,23,42,0.08)] ${sidebarCollapsed ? "left-16" : "left-60"
+              }`
           }
         >
           {!hideSaveButton && (
