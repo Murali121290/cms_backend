@@ -37,6 +37,16 @@ export const Bookmark = Mark.create({
         renderHTML: (attrs) =>
           attrs.role ? { "data-bookmark-role": attrs.role } : {},
       },
+      // Flipped to true when a bookmark has been linked to a reference (either
+      // via the manual Link Reference flow or rehydrated from persisted
+      // manual_links). Purely a visual signal — the auto-linker and DOCX
+      // round-trip both ignore it; identity still lives in `name` + `role`.
+      linked: {
+        default: false,
+        parseHTML: (el) => el.getAttribute("data-bookmark-linked") === "true",
+        renderHTML: (attrs) =>
+          attrs.linked ? { "data-bookmark-linked": "true" } : {},
+      },
     };
   },
 

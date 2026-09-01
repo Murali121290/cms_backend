@@ -230,6 +230,105 @@ export function getUnlinkedBookmarks(
 }
 
 /**
+ * Flip the `linked` attribute to true on every Bookmark mark carrying `name`
+ * (any role). Preserves the mark's identity — same range, same name, same
+ * role — so the `id="bookmark-{name}"` / `data-bookmark` anchors and any
+ * auto-linker book-keeping are untouched. Returns true if any mark changed.
+ */
+export function markBookmarkLinked(
+  editor: Editor | null | undefined,
+  name: string,
+): boolean {
+  if (!editor) return false;
+  const bookmarkType = editor.schema.marks.bookmark;
+  if (!bookmarkType) return false;
+
+  const doc = editor.state.doc;
+  const targets: Array<{ from: number; to: number; role: BookmarkRole }> = [];
+  doc.descendants((node: any, pos: number) => {
+    if (!node.isText) return true;
+    for (const m of node.marks) {
+      if (
+        m.type.name === "bookmark" &&
+        m.attrs?.name === name &&
+        !m.attrs?.linked
+      ) {
+        targets.push({
+          from: pos,
+          to: pos + node.nodeSize,
+          role: m.attrs.role as BookmarkRole,
+        });
+      }
+    }
+    return true;
+  });
+  if (targets.length === 0) return false;
+
+  const tr = editor.state.tr;
+  for (const t of targets) {
+    tr.addMark(
+      t.from,
+      t.to,
+      bookmarkType.create({ name, role: t.role, linked: true }),
+    );
+  }
+  editor.view.dispatch(tr);
+  return true;
+}
+
+/**
+ * Batch variant — flips `linked=true` on every mark whose name appears in
+ * `names`. Used after each validate refetch so persisted manual_links stay
+ * visually linked across reloads.
+ */
+export function markBookmarksLinked(
+  editor: Editor | null | undefined,
+  names: Iterable<string>,
+): boolean {
+  if (!editor) return false;
+  const wanted = new Set<string>();
+  for (const n of names) if (n) wanted.add(n);
+  if (wanted.size === 0) return false;
+
+  const bookmarkType = editor.schema.marks.bookmark;
+  if (!bookmarkType) return false;
+
+  const doc = editor.state.doc;
+  const targets: Array<{ from: number; to: number; name: string; role: BookmarkRole }> = [];
+  doc.descendants((node: any, pos: number) => {
+    if (!node.isText) return true;
+    for (const m of node.marks) {
+      if (
+        m.type.name === "bookmark" &&
+        typeof m.attrs?.name === "string" &&
+        wanted.has(m.attrs.name) &&
+        !m.attrs?.linked
+      ) {
+        targets.push({
+          from: pos,
+          to: pos + node.nodeSize,
+          name: m.attrs.name,
+          role: m.attrs.role as BookmarkRole,
+        });
+      }
+    }
+    return true;
+  });
+  if (targets.length === 0) return false;
+
+  const tr = editor.state.tr;
+  for (const t of targets) {
+    tr.addMark(
+      t.from,
+      t.to,
+      bookmarkType.create({ name: t.name, role: t.role, linked: true }),
+    );
+  }
+  editor.view.dispatch(tr);
+  return true;
+}
+
+/**
  * Scroll to the first occurrence of a bookmark and flash it. Returns true
  * if we found something.
  */
