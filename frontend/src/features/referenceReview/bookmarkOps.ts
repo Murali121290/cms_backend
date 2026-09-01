@@ -2,7 +2,7 @@ import type { Editor } from "@tiptap/react";
 
 import type { ManualLink, ReferenceValidationReviewResponse } from "@/api/referenceReview";
 
-export type BookmarkRole = "target" | "source" | "manual";
+export type BookmarkRole = "target" | "source" | "manual" | "existing";
 
 export interface BookmarkInfo {
   name: string;
@@ -212,6 +212,37 @@ export function getUnlinkedBookmarks(
   // Manually linked (persisted server-side).
   for (const lnk of manualLinks) {
     if (lnk.bookmark_name) linkedNames.add(lnk.bookmark_name);
+  }
+
+  // Word-native reference anchors: role="existing" is emitted by the DOCX
+  // importer (docx_to_xhtml_runs.py) for every pre-existing w:bookmarkStart
+  // whose name passes _is_user_visible_bookmark_name. Word's own convention
+  // uses `bib_N` for bibliography destinations and `ref_N` for reference
+  // destinations (with cite-again variants like `bib_14_2`, `bib_15_10`
+  // that alias into the base reference).
+  //
+  // Trust one of these as already-linked only when its leading numeric
+  // suffix N maps to a real reference — either an entry with number=N or
+  // a citation citing N. That way orphan anchors like `bib_99` on a doc
+  // that only defines refs 1..50 stay in the Unlinked list so the user
+  // can still act on them. Non-numeric or non-bib/ref names (`Bookmark1`,
+  // custom Word names) also remain unlinked.
+  if (referenceEntries.length > 0) {
+    const validRefNumbers = new Set<number>();
+    for (const e of referenceEntries) {
+      if (e.number != null) validRefNumbers.add(e.number);
+    }
+    for (const p of citationPairs) {
+      if (p.ref_number != null) validRefNumbers.add(p.ref_number);
+    }
+    const bibRefPattern = /^(?:bib|ref)_(\d+)(?:_\d+)*$/;
+    for (const bm of all) {
+      if (bm.role !== "existing") continue;
+      const m = bibRefPattern.exec(bm.name);
+      if (!m) continue;
+      const n = Number.parseInt(m[1], 10);
+      if (validRefNumbers.has(n)) linkedNames.add(bm.name);
+    }
   }
 
   // Emit at most one row per bookmark name so users see each unlinked
