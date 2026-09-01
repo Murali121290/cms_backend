@@ -41,6 +41,21 @@ function fmt(d: Date): string {
   return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
+function sortChapters(a: { chapters: string }, b: { chapters: string }) {
+  function getOrderValue(ch: string) {
+    if (ch === 'FM') return { type: 1, val: 0, str: '' }
+    if (/^\d+$/.test(ch)) return { type: 2, val: parseInt(ch, 10), str: '' }
+    if (ch === 'BM') return { type: 3, val: 0, str: '' }
+    if (/^[A-Za-z]$/.test(ch)) return { type: 4, val: 0, str: ch }
+    return { type: 5, val: 0, str: ch }
+  }
+  const orderA = getOrderValue(a.chapters)
+  const orderB = getOrderValue(b.chapters)
+  if (orderA.type !== orderB.type) return orderA.type - orderB.type
+  if (orderA.type === 2) return orderA.val - orderB.val
+  return orderA.str.localeCompare(orderB.str)
+}
+
 function pickSla(stage: Stage, composition: string | null): number | null {
   if (composition === 'Low')  return stage.sla_level1
   if (composition === 'High') return stage.sla_level3
@@ -253,6 +268,12 @@ export function ProjectPlanningPage() {
           ? stageDetailsApi.listByProject(projectCode).catch(() => [])
           : Promise.resolve([]),
       ])
+
+      if (chsRaw.filter(c => c.chapters !== 'Design').length === 0) {
+        navigate(`/projects/${id}/mapping`, { replace: true })
+        return
+      }
+
       setChapters(chsRaw)
       setStageMasters(masters)
 
@@ -630,7 +651,7 @@ export function ProjectPlanningPage() {
         className="border-b border-border hover:bg-accent transition-colors group bg-card"
       >
         <td className="px-4 py-3 font-semibold text-text sticky left-0 z-10 whitespace-nowrap w-[144px] min-w-[144px] max-w-[144px] shadow-[inset_-1px_0_0_var(--color-border)] bg-card group-hover:bg-accent transition-colors">
-          {ch.chapters}
+          {ch.chapters === 'FM' ? 'Front matter' : ch.chapters === 'BM' ? 'Back matter' : /^[A-Za-z]$/.test(ch.chapters) ? `Appendix ${ch.chapters}` : /^\d+$/.test(ch.chapters) ? `Chapter ${ch.chapters}` : ch.chapters}
         </td>
         <td className={`px-4 py-3 text-xs text-muted sticky left-[144px] z-10 whitespace-nowrap w-[176px] min-w-[176px] max-w-[176px] truncate bg-card group-hover:bg-accent transition-colors ${
           activeTab === 'design' ? 'shadow-[inset_-2px_0_0_var(--color-border)]' : 'shadow-[inset_-1px_0_0_var(--color-border)]'
@@ -889,7 +910,7 @@ export function ProjectPlanningPage() {
               ) : (
                 [...activeChapters]
                   .filter(ch => !alreadyApproved || plannedChapterNumbers.has(ch.chapters))
-                  .sort((a, b) => a.chapters.localeCompare(b.chapters, undefined, { numeric: true }))
+                  .sort(sortChapters)
                   .map(ch => renderChapterRow(ch, !alreadyApproved))
               )}
             </tbody>
@@ -905,7 +926,7 @@ export function ProjectPlanningPage() {
                 <tbody>
                   {[...activeChapters]
                     .filter(ch => !plannedChapterNumbers.has(ch.chapters))
-                    .sort((a, b) => a.chapters.localeCompare(b.chapters, undefined, { numeric: true }))
+                    .sort(sortChapters)
                     .map(ch => renderChapterRow(ch, true))}
                 </tbody>
               </table>

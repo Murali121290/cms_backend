@@ -1032,6 +1032,26 @@ class UploadZipResponse(BaseModel):
     chapters_inserted: int
 
 
+class FileMappingEntry(BaseModel):
+    original_filename: str
+    category: str
+    chapter_number: str | None = None
+    file_type: str
+
+class PreviewZipResponse(BaseModel):
+    session_id: str
+    files: list[FileMappingEntry]
+
+class FinalizeMappingRequest(BaseModel):
+    session_id: str
+    mappings: list[FileMappingEntry]
+
+class FinalizeMappingResponse(BaseModel):
+    message: str
+    created_chapters: int
+
+
+
 class ChapterZipSkippedItem(BaseModel):
     filename: str
     reason: str

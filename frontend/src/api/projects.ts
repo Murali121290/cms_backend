@@ -14,6 +14,29 @@ import {
   FileRecord
 } from '@/types/api'
 
+export interface FileMappingEntry {
+  original_filename: string
+  category: string
+  chapter_number: string | null
+  file_type: string
+}
+
+export interface PreviewZipResponse {
+  session_id: string
+  files: FileMappingEntry[]
+}
+
+export interface FinalizeMappingRequest {
+  session_id: string
+  mappings: FileMappingEntry[]
+}
+
+export interface FinalizeMappingResponse {
+  message: string
+  created_chapters: number
+}
+
+
 export interface Project extends ProjectSummary {
   // WMS compatibility fields
   client_id: number | null
@@ -163,6 +186,25 @@ export const projectsApi = {
   // Cleanup placeholder for delete project
   deleteProject: (id: number) =>
     api.delete(`/projects/${id}`),
+
+  previewZip: async (projectId: number, file: File): Promise<PreviewZipResponse> => {
+    const formData = new FormData()
+    formData.append('file', file)
+    const r = await api.post<PreviewZipResponse>(`/projects/${projectId}/preview-zip`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    return r.data
+  },
+
+  resumeMapping: async (projectId: number): Promise<PreviewZipResponse> => {
+    const r = await api.get<PreviewZipResponse>(`/projects/${projectId}/resume-mapping`)
+    return r.data
+  },
+
+  finalizeMapping: async (projectId: number, data: FinalizeMappingRequest): Promise<FinalizeMappingResponse> => {
+    const r = await api.post<FinalizeMappingResponse>(`/projects/${projectId}/finalize-mapping`, data)
+    return r.data
+  },
 }
 
 // Named exports for WMS features
@@ -177,3 +219,6 @@ export const deleteProject = projectsApi.deleteProject
 export const createProject = projectsApi.create
 export const getProjects = projectsApi.list
 export const getProjectDetail = projectsApi.getById
+export const previewZip = projectsApi.previewZip
+export const resumeMapping = projectsApi.resumeMapping
+export const finalizeMapping = projectsApi.finalizeMapping

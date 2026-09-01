@@ -1,0 +1,40 @@
+{
+  "heuristics": [
+    {
+      "patterns": [
+        "fm"
+      ],
+      "category": "Front Matter"
+    },
+    {
+      "patterns": [
+        "chapter",
+        "ch",
+        "sec",
+        "part",
+        "unit",
+        "lesson",
+        "body"
+      ],
+      "category": "Chapters"
+    },
+    {
+      "patterns": [
+        "appendix",
+        "app"
+      ],
+      "category": "Appendix"
+    },
+    {
+      "patterns": [
+        "glossary",
+        "index",
+        "biblio",
+        "ref",
+        "back",
+        "bm"
+      ],
+      "category": "Back Matter"
+    }
+  ]
+}

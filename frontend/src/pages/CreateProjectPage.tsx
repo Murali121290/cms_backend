@@ -657,17 +657,18 @@ export function CreateProjectPage() {
 
       const response = await projectsApi.create(formData)
 
-      if (zipFile && response.project.code) {
-        const customerCode = form.division_code || form.client_name || 'unknown'
+      toast.success(`Project "${response.project.title ?? response.project.code}" created`)
+
+      if (zipFile && response.project.id) {
         try {
-          const result = await uploadsApi.uploadZip(customerCode, response.project.code, response.project.id, zipFile)
-          toast.success(`ZIP processed — ${result.total_chapters} chapter(s) detected`)
+          const previewData = await projectsApi.previewZip(response.project.id, zipFile)
+          toast.success(`ZIP extracted — please map the files`)
+          navigate(`/projects/${response.project.id}/mapping`, { state: { previewData } })
+          return // stop further navigation
         } catch {
-          toast.error('Project created but ZIP upload failed')
+          toast.error('Project created but ZIP preview failed')
         }
       }
-
-      toast.success(`Project "${response.project.title ?? response.project.code}" created`)
 
       if (response.redirect_to) {
         navigate(response.redirect_to)
