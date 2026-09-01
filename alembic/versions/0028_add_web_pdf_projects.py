@@ -13,8 +13,8 @@ from sqlalchemy.engine.reflection import Inspector
 
 
 # revision identifiers, used by Alembic.
-revision: str = "0027_add_web_pdf_projects"
-down_revision: Union[str, Sequence[str], None] = "0026_add_source_file_id_to_files"
+revision: str = "0028_add_web_pdf_projects"
+down_revision: Union[str, Sequence[str], None] = "0027_add_file_mappings_to_ev"
 branch_labels = None
 depends_on = None
 
