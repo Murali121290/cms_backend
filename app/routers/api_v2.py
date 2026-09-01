@@ -1654,32 +1654,33 @@ def api_v2_project_bootstrap(
 
     # 3. Update/Setup Art chapters
     if art_workflow_name:
-        num_art_chapters = art_chapter_count if art_chapter_count is not None else (project.chapter_count or 5)
-        for i in range(1, num_art_chapters + 1):
-            art_ch_num = f"Ch {i:02d} - Art"
-            if art_ch_num not in _existing_ci:
-                db.add(_ChapterInfo(
-                    client=project.division_code or "",
-                    project=project.code,
-                    chapters=art_ch_num,
-                    chapter_title=f"Chapter {i:02d} Art Pack",
-                    workflow=art_workflow_name,
-                    status="Received",
-                    complexity_level=getattr(project, "composition", None) or "Medium",
-                    stage_level=1,
-                    stage_name=get_first_stage(art_workflow_name),
-                    due_date=final_art_due,
-                    published_status="Draft",
-                    priority=getattr(project, "priority", None) or "Normal",
-                    project_manager_name=getattr(project, "project_manager", None) or None,
-                ))
-                _existing_ci.add(art_ch_num)
-            else:
-                db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code, _ChapterInfo.chapters == art_ch_num).update({
-                    _ChapterInfo.workflow: art_workflow_name,
-                    _ChapterInfo.stage_name: get_first_stage(art_workflow_name),
-                    _ChapterInfo.due_date: final_art_due
-                }, synchronize_session=False)
+        num_art_chapters = art_chapter_count if art_chapter_count is not None else project.chapter_count
+        if num_art_chapters:
+            for i in range(1, num_art_chapters + 1):
+                art_ch_num = f"Ch {i:02d} - Art"
+                if art_ch_num not in _existing_ci:
+                    db.add(_ChapterInfo(
+                        client=project.division_code or "",
+                        project=project.code,
+                        chapters=art_ch_num,
+                        chapter_title=f"Chapter {i:02d} Art Pack",
+                        workflow=art_workflow_name,
+                        status="Received",
+                        complexity_level=getattr(project, "composition", None) or "Medium",
+                        stage_level=1,
+                        stage_name=get_first_stage(art_workflow_name),
+                        due_date=final_art_due,
+                        published_status="Draft",
+                        priority=getattr(project, "priority", None) or "Normal",
+                        project_manager_name=getattr(project, "project_manager", None) or None,
+                    ))
+                    _existing_ci.add(art_ch_num)
+                else:
+                    db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code, _ChapterInfo.chapters == art_ch_num).update({
+                        _ChapterInfo.workflow: art_workflow_name,
+                        _ChapterInfo.stage_name: get_first_stage(art_workflow_name),
+                        _ChapterInfo.due_date: final_art_due
+                    }, synchronize_session=False)
     else:
         # Delete if any exist
         for row in db.query(_ChapterInfo).filter(

@@ -406,7 +406,6 @@ export function CreateProjectPage() {
   const [artWfEnabled, setArtWfEnabled] = useState(false)
   const [artWfName, setArtWfName] = useState('')
   const [artDueDate, setArtDueDate] = useState('')
-  const [artChapterCount, setArtChapterCount] = useState(5)
 
   // Reference data
   const [clients,           setClients]          = useState<Client[]>([])
@@ -630,7 +629,6 @@ export function CreateProjectPage() {
       }
       if (artWfEnabled && artWfName) {
         formData.append('art_workflow_name', artWfName)
-        formData.append('art_chapter_count', String(artChapterCount))
       }
 
       if (form.division_code)      formData.append('division_code',    form.division_code)
@@ -1040,13 +1038,6 @@ export function CreateProjectPage() {
                       onChange={e => setArtWfName(e.target.value)}
                       options={workflowNames.map(n => ({ value: n, label: n }))}
                       placeholder="Select Art Workflow"
-                    />
-                    <Input
-                      label="Number of Art Chapters"
-                      type="number"
-                      min={1}
-                      value={String(artChapterCount)}
-                      onChange={e => setArtChapterCount(Number(e.target.value) || 1)}
                     />
                   </div>
                 )}
