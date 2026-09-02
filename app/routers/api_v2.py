@@ -6417,6 +6417,115 @@ def api_v2_reference_edit(
     )
 
 
+@router.get(
+    "/files/{file_id}/reference-review/manual-links",
+    response_model=schemas_v2.ManualLinkListResponse,
+)
+def api_v2_reference_manual_links_list(
+    file_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+    try:
+        resolved = structuring_review_service.resolve_processed_target(db, file_id=file_id)
+    except HTTPException as exc:
+        return _error_response(status_code=exc.status_code, code="FILE_NOT_FOUND",
+                               message=str(exc.detail))
+    doc = structuring_review_service.read_manual_links(resolved["processed_path"], logger=logger)
+    return schemas_v2.ManualLinkListResponse(
+        version=doc.get("version", 1),
+        links=[schemas_v2.ManualLinkEntry(**lnk) for lnk in doc.get("links", [])],
+    )
+
+
+@router.post(
+    "/files/{file_id}/reference-review/manual-links",
+    response_model=schemas_v2.ManualLinkUpsertResponse,
+)
+def api_v2_reference_manual_links_upsert(
+    file_id: int,
+    payload: schemas_v2.ManualLinkUpsertRequest,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+    try:
+        resolved = structuring_review_service.resolve_processed_target(db, file_id=file_id)
+    except HTTPException as exc:
+        return _error_response(status_code=exc.status_code, code="FILE_NOT_FOUND",
+                               message=str(exc.detail))
+    try:
+        entry = structuring_review_service.upsert_manual_link(
+            resolved["processed_path"],
+            bookmark_name=payload.bookmark_name,
+            ref_number=payload.ref_number,
+            ref_text=payload.ref_text,
+            citation_text=payload.citation_text,
+            linked_by=viewer.username,
+            logger=logger,
+        )
+    except Exception as exc:
+        return _error_response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            code="MANUAL_LINK_WRITE_FAILED",
+            message=f"Failed to persist manual link: {exc}",
+        )
+    # Invalidate ref-review cache so next load reflects the new merged status
+    structuring_review_service.invalidate_ref_review_cache(
+        resolved["processed_path"], logger=logger,
+    )
+    return schemas_v2.ManualLinkUpsertResponse(link=schemas_v2.ManualLinkEntry(**entry))
+
+
+@router.delete(
+    "/files/{file_id}/reference-review/manual-links/{bookmark_name}",
+    response_model=schemas_v2.ManualLinkDeleteResponse,
+)
+def api_v2_reference_manual_links_delete(
+    file_id: int,
+    bookmark_name: str,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+    try:
+        resolved = structuring_review_service.resolve_processed_target(db, file_id=file_id)
+    except HTTPException as exc:
+        return _error_response(status_code=exc.status_code, code="FILE_NOT_FOUND",
+                               message=str(exc.detail))
+    deleted = structuring_review_service.delete_manual_link(
+        resolved["processed_path"],
+        bookmark_name=bookmark_name,
+        logger=logger,
+    )
+    structuring_review_service.invalidate_ref_review_cache(
+        resolved["processed_path"], logger=logger,
+    )
+    return schemas_v2.ManualLinkDeleteResponse(
+        bookmark_name=bookmark_name,
+        deleted=deleted,
+    )
+
+
 @router.get("/files/{file_id}/reference-review/validate-only", response_model=schemas_v2.ReferenceValidateOnlyResponse)
 def api_v2_reference_validate_only(
     file_id: int,

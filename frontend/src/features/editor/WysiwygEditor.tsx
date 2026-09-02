@@ -997,6 +997,11 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
               editor.chain().focus().insertContent({ type: "pageBreak" }).run()
             );
             case "Equal": return fire(() => editor.chain().focus().toggleSubscript().run());
+            // Ctrl+S / Cmd+S — persist current editor state via the same
+            // handleSave the Save button uses (no export, no download). Ref
+            // indirection keeps this closure fresh without re-binding the
+            // listener on every render.
+            case "KeyS": return fire(() => handleSaveRef.current());
           }
         }
 
@@ -1131,6 +1136,12 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         console.error("[Save] onSave rejected:", err);
       }
     };
+
+    // Keep a live ref to handleSave so the Ctrl+S keydown listener (attached
+    // once per editor mount) always invokes the latest closure — otherwise it
+    // would capture the first render's onSave prop and go stale.
+    const handleSaveRef = useRef(handleSave);
+    handleSaveRef.current = handleSave;
 
     const lastEditTimeRef = useRef<number>(0);
 

@@ -13,6 +13,7 @@ import {
   GitBranch,
   Hash,
   Inbox,
+  Link2,
   Minus,
   MinusCircle,
   Plus,
@@ -20,6 +21,7 @@ import {
   SearchX,
   Sparkles,
   Trash2,
+  Unlink,
   XCircle,
 } from "lucide-react";
 
@@ -30,10 +32,15 @@ import { useReferenceReviewQuery } from "../useReferenceReviewQuery";
 import { useReferenceSave } from "../useReferenceSave";
 import { useReferenceValidateOnly } from "../useReferenceValidateOnly";
 import { stampBookmarks } from "../stampBookmarks";
+import { useUpsertManualLink } from "../useManualLinks";
 import { ReferenceCard } from "./ReferenceCard";
+import { LinkBookmarkModal, type LinkBookmarkFormValues } from "./LinkBookmarkModal";
 import {
   addManualBookmark,
+  getUnlinkedBookmarks,
   listBookmarks,
+  markBookmarkLinked,
+  markBookmarksLinked,
   removeBookmark,
   goToBookmark,
   type BookmarkInfo,
@@ -60,6 +67,10 @@ export function ReferenceReviewSidePanel({ fileId, editorRef }: Props) {
     | { open: false }
     | { open: true; range: { from: number; to: number }; snippet: string; error?: string }
   >({ open: false });
+  const [linkModal, setLinkModal] = useState<
+    | { open: false }
+    | { open: true; bookmark: BookmarkInfo; error?: string }
+  >({ open: false });
 
   const reviewQuery = useReferenceReviewQuery(
     fileId,
@@ -78,12 +89,41 @@ export function ReferenceReviewSidePanel({ fileId, editorRef }: Props) {
   const missing = logs?.missing_references ?? [];
   const unused = logs?.unused_references ?? [];
 
+  const manualLinks = logs?.manual_links ?? [];
+
+  // Bookmarks the auto-linker (and any persisted manual link) can't resolve to a
+  // reference. Computed from the live editor state so newly-added bookmarks show
+  // up without a round-trip.
+  const unlinkedBookmarks = useMemo(
+    () =>
+      getUnlinkedBookmarks(
+        editorRef.current?.editor,
+        citationPairs,
+        referenceEntries,
+        manualLinks,
+      ),
+    // Depend on `bookmarks` (which is refreshed on every editor transaction) so
+    // the derived list stays in sync with editor edits without re-running on
+    // every render.
+    [bookmarks, citationPairs, referenceEntries, manualLinks, editorRef],
+  );
+
   const citationCount = citationPairs.length;
   const referenceCount = referenceEntries.length;
   const changesCount = 0;
   const issueCount = issues.length + duplicates.length + (logs?.sequence_issues?.length ?? 0);
-  const missingCount = missing.length + unused.length;
-  const matchedCount = citationPairs.filter((p) => p.status === "ok").length;
+  const missingCount = missing.length + unused.length + unlinkedBookmarks.length;
+  // Matched = auto-linked citations + every manually-linked bookmark. Exclude
+  // citation_pairs the merge already flipped (marked `manual_linked`) so they
+  // aren't counted twice — once from the pair, once from the manual link.
+  // Each user-created link contributes exactly +1 regardless of whether the
+  // target reference was previously unused, missing, or already cited.
+  const autoMatchedCount = citationPairs.filter(
+    (p) => p.status === "ok" && !p.manual_linked,
+  ).length;
+  const matchedCount = autoMatchedCount + manualLinks.length;
+
+  const upsertLinkMutation = useUpsertManualLink(fileId);
 
   // Auto-apply Bookmark marks after each validate/refetch so citations and
   // reference entries become clickable REF{n} anchors that also survive the
@@ -93,9 +133,13 @@ export function ReferenceReviewSidePanel({ fileId, editorRef }: Props) {
     if (!reviewQuery.data) return;
     const editor = editorRef.current?.editor;
     if (!editor) return;
-    stampBookmarks(editor, referenceEntries, citationPairs);
+    const manualLinkNames = (logs?.manual_links ?? []).map((lnk) => lnk.bookmark_name);
+    stampBookmarks(editor, referenceEntries, citationPairs, manualLinkNames);
+    // Rehydrate the linked visual state from persisted manual_links so the
+    // style survives reloads and any external refetch.
+    markBookmarksLinked(editor, manualLinkNames);
     setBookmarks(listBookmarks(editor));
-  }, [reviewQuery.data, referenceEntries, citationPairs, editorRef]);
+  }, [reviewQuery.data, referenceEntries, citationPairs, editorRef, logs]);
 
   // Keep the panel's bookmark list in sync with editor edits (manual add,
   // delete, or edits that split marks). Subscribes on mount and refreshes
@@ -152,6 +196,38 @@ export function ReferenceReviewSidePanel({ fileId, editorRef }: Props) {
 
   const handleGoToBookmark = (bm: BookmarkInfo) => {
     goToBookmark(editorRef.current?.editor, bm.name);
+  };
+
+  const openLinkModal = (bm: BookmarkInfo) => {
+    setLinkModal({ open: true, bookmark: bm });
+  };
+
+  const submitLinkBookmark = async (values: LinkBookmarkFormValues) => {
+    if (!linkModal.open) return;
+    try {
+      await upsertLinkMutation.mutateAsync({
+        bookmark_name: values.bookmark_name,
+        ref_number: values.ref_number,
+        ref_text: values.ref_text,
+        citation_text: values.citation_text,
+      });
+      // Immediate visual feedback — flip the linked flag on the bookmark
+      // mark in the editor so the user sees the linked style right now,
+      // without waiting for the refetch to resolve.
+      markBookmarkLinked(editorRef.current?.editor, values.bookmark_name);
+      // Close immediately — the mutation's onSuccess invalidates the
+      // reference-review query, so React Query will refetch in the background
+      // and recompute counts / statuses. Awaiting the refetch here made the
+      // modal appear to "do nothing" if the refetch itself hiccuped.
+      setLinkModal({ open: false });
+      reviewQuery.refetch().catch(() => {
+        /* invalidation already scheduled a refetch; a stray failure here is
+           non-fatal for the link itself */
+      });
+    } catch (err: any) {
+      const message = err?.response?.data?.detail || err?.message || "Failed to save link.";
+      setLinkModal({ ...linkModal, error: String(message) });
+    }
   };
 
   const flashBlock = (el: HTMLElement | null) => {
@@ -451,33 +527,64 @@ export function ReferenceReviewSidePanel({ fileId, editorRef }: Props) {
           </ul>
         );
       case "missing":
-        return missing.length === 0 && unused.length === 0 ? (
-          <EmptyState Icon={CheckCircle2} tone="success" message="No missing or unused references." />
+        return missing.length === 0 && unused.length === 0 && unlinkedBookmarks.length === 0 ? (
+          <EmptyState
+            Icon={CheckCircle2}
+            tone="success"
+            message="No missing references, unused references, or unlinked bookmarks."
+          />
         ) : (
-          <ul className="space-y-2">
-            {missing.map((m, i) => (
-              <ItemCard
-                key={`m-${i}`}
-                title={m.citation ?? "Missing citation"}
-                message={m.message}
-                status="missing"
-                onLocate={() =>
-                  locate(m.para_idx, refNumberFromCitation(m.citation), m.citation)
-                }
-              />
-            ))}
-            {unused.map((u, i) => (
-              <ItemCard
-                key={`u-${i}`}
-                title={u.citation ?? "Unused reference"}
-                message={u.message}
-                status="unused"
-                onLocate={() =>
-                  locate(u.para_idx, refNumberFromCitation(u.citation), u.citation)
-                }
-              />
-            ))}
-          </ul>
+          <div className="space-y-4">
+            {(missing.length > 0 || unused.length > 0) && (
+              <ul className="space-y-2">
+                {missing.map((m, i) => (
+                  <ItemCard
+                    key={`m-${i}`}
+                    title={m.citation ?? "Missing citation"}
+                    message={m.message}
+                    status="missing"
+                    onLocate={() =>
+                      locate(m.para_idx, refNumberFromCitation(m.citation), m.citation)
+                    }
+                  />
+                ))}
+                {unused.map((u, i) => (
+                  <ItemCard
+                    key={`u-${i}`}
+                    title={u.citation ?? "Unused reference"}
+                    message={u.message}
+                    status="unused"
+                    onLocate={() =>
+                      locate(u.para_idx, refNumberFromCitation(u.citation), u.citation)
+                    }
+                  />
+                ))}
+              </ul>
+            )}
+            {unlinkedBookmarks.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 pt-1">
+                  <Unlink className="w-3.5 h-3.5 text-sky-600" />
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-navy-600">
+                    Unlinked Bookmarks
+                  </span>
+                  <span className="inline-flex items-center justify-center min-w-[18px] h-4 px-1 rounded-full text-[9px] font-bold tabular-nums bg-sky-100 text-sky-700">
+                    {unlinkedBookmarks.length}
+                  </span>
+                </div>
+                <ul className="space-y-2">
+                  {unlinkedBookmarks.map((bm) => (
+                    <UnlinkedBookmarkCard
+                      key={`ub-${bm.name}`}
+                      bookmark={bm}
+                      onGoTo={() => handleGoToBookmark(bm)}
+                      onLink={() => openLinkModal(bm)}
+                    />
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
         );
       case "changes":
         return (
@@ -566,13 +673,41 @@ export function ReferenceReviewSidePanel({ fileId, editorRef }: Props) {
           100% { background-color: transparent; }
         }
         .rr-bookmark { cursor: pointer; text-decoration: none; color: inherit; }
-        .rr-bookmark[data-bookmark-role="source"] {
+        .rr-bookmark[data-bookmark-role="source"],
+        .rr-bookmark[data-bookmark-linked="true"] {
           color: rgb(2 132 199); /* sky-600 */
           text-decoration: underline dotted rgba(2, 132, 199, 0.4);
           text-underline-offset: 2px;
         }
-        .rr-bookmark[data-bookmark-role="source"]:hover {
+        .rr-bookmark[data-bookmark-role="source"]:hover,
+        .rr-bookmark[data-bookmark-linked="true"]:hover {
           text-decoration-color: rgb(2 132 199);
+        }
+        /* Bookmark start/end indicators — purely a visual affordance on the
+           existing <a class="rr-bookmark"> that the Bookmark mark already
+           renders. No new bookmark, no schema change. Applied to any linked
+           in-text citation (auto-linked source, or manual-linked bookmark);
+           skipped for target-role marks because those span whole reference
+           entries and brackets around a paragraph would be noise. */
+        .rr-bookmark[data-bookmark-role="source"]::before,
+        .rr-bookmark[data-bookmark-linked="true"]:not([data-bookmark-role="target"])::before {
+          content: "⌈";
+          color: rgb(2 132 199);
+          font-size: 0.9em;
+          margin-right: 1px;
+          text-decoration: none;
+          user-select: none;
+          opacity: 0.75;
+        }
+        .rr-bookmark[data-bookmark-role="source"]::after,
+        .rr-bookmark[data-bookmark-linked="true"]:not([data-bookmark-role="target"])::after {
+          content: "⌉";
+          color: rgb(2 132 199);
+          font-size: 0.9em;
+          margin-left: 1px;
+          text-decoration: none;
+          user-select: none;
+          opacity: 0.75;
         }
       `}</style>
 
@@ -792,7 +927,69 @@ export function ReferenceReviewSidePanel({ fileId, editorRef }: Props) {
           onCancel={() => setAddModal({ open: false })}
         />
       )}
+
+      {linkModal.open && (
+        <LinkBookmarkModal
+          bookmarkName={linkModal.bookmark.name}
+          bookmarkSnippet={linkModal.bookmark.snippet}
+          referenceEntries={referenceEntries}
+          isSubmitting={upsertLinkMutation.isPending}
+          error={linkModal.error}
+          onSubmit={submitLinkBookmark}
+          onCancel={() => {
+            if (upsertLinkMutation.isPending) return;
+            setLinkModal({ open: false });
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function UnlinkedBookmarkCard({
+  bookmark,
+  onGoTo,
+  onLink,
+}: {
+  bookmark: BookmarkInfo;
+  onGoTo: () => void;
+  onLink: () => void;
+}) {
+  return (
+    <li className="bg-white rounded-md border border-slate-200 border-l-[3px] border-l-sky-400 px-3 py-2 flex items-center gap-3 hover:shadow-sm transition-shadow">
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5">
+          <BookmarkIcon className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+          <span className="text-sm font-semibold text-navy-800 truncate font-mono">
+            {bookmark.name}
+          </span>
+          <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded border bg-sky-50 text-sky-700 border-sky-200">
+            {bookmark.role}
+          </span>
+        </div>
+        {bookmark.snippet && (
+          <div className="text-[11px] text-navy-500 mt-0.5 line-clamp-1 leading-snug">
+            {bookmark.snippet}
+          </div>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={onGoTo}
+        className="shrink-0 inline-flex items-center gap-1 text-[11px] font-semibold text-sky-600 hover:text-sky-700 hover:underline"
+      >
+        Go To
+        <ArrowUpRight className="w-3 h-3" />
+      </button>
+      <button
+        type="button"
+        onClick={onLink}
+        className="shrink-0 inline-flex items-center gap-1 h-6 px-2 text-[11px] font-semibold rounded-md bg-emerald-500 text-white hover:bg-emerald-600"
+      >
+        <Link2 className="w-3 h-3" />
+        Link Reference
+      </button>
+    </li>
   );
 }
 

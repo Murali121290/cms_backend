@@ -2540,9 +2540,15 @@ def apply_apa_style_prep(doc):
         except Exception:
             pass
 
-    # 2. Parse bibliography to build lookup mapping
+    # 2. Parse bibliography to build lookup mapping. Also record the exact
+    # paragraph elements that the bibliography detection identifies, so the
+    # cite_bib application pass below can skip them by identity rather than
+    # by style name. That way we don't gate on `REF-U` / `Reference-Alphabetical`
+    # (or any other stylistic label) — a paragraph is treated as a
+    # bibliography entry iff the detection logic says so.
     in_bib = False
     bibliography = {}
+    bib_para_elements: Set = set()
     for idx, para in enumerate(doc.paragraphs):
         txt = para.text.strip()
         if "<ref-open>" in txt.lower():
@@ -2552,6 +2558,7 @@ def apply_apa_style_prep(doc):
             in_bib = False
             continue
         if in_bib and txt:
+            bib_para_elements.add(para._p)
             e = BibliographyParser.parse_entry(txt)
             if e:
                 k1 = f"{_norm(e['display'])}|{e['year']}"
@@ -2560,10 +2567,15 @@ def apply_apa_style_prep(doc):
                 bibliography[k2] = e
 
     if not bibliography:
-        # Fallback to REF-U / Reference-Alphabetical paragraphs if no tags
+        # Fallback: no <ref-open>/<ref-close> markers, so the bibliography
+        # boundary is inferred from the REF-U style — this is bibliography
+        # DETECTION only. The style name never influences cite_bib
+        # application directly; it just feeds the set of paragraphs the
+        # detector considers to be bibliography entries.
         for idx, para in enumerate(doc.paragraphs):
             style_name = (para.style.name or "") if para.style else ""
-            if ("REF-U" in style_name or "Reference-Alphabetical" in style_name) and para.text.strip():
+            if "REF-U" in style_name and para.text.strip():
+                bib_para_elements.add(para._p)
                 e = BibliographyParser.parse_entry(para.text)
                 if e:
                     k1 = f"{_norm(e['display'])}|{e['year']}"
@@ -2571,15 +2583,19 @@ def apply_apa_style_prep(doc):
                     bibliography[k1] = e
                     bibliography[k2] = e
 
-    # 3. Apply style to runs for matched citations
+    # 3. Apply style to runs for matched citations.
+    # Skip paragraphs the bibliography detector already claimed — matches
+    # by paragraph identity, not by REF-U / Reference-Alphabetical style
+    # name. If a doc author uses either style for something other than a
+    # reference entry, we no longer accidentally exclude it from cite_bib
+    # tagging.
     for para in doc.paragraphs:
         txt = para.text
         if "<ref-open>" in txt.lower():
             break
-        style_name = (para.style.name or "") if para.style else ""
-        if "REF-U" in style_name or "Reference-Alphabetical" in style_name:
+        if para._p in bib_para_elements:
             continue
-            
+
         citations = CitationExtractor.extract(txt)
         if not citations:
             continue

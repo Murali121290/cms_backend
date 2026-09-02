@@ -1,6 +1,8 @@
 import type { Editor } from "@tiptap/react";
 
-export type BookmarkRole = "target" | "source" | "manual";
+import type { ManualLink, ReferenceValidationReviewResponse } from "@/api/referenceReview";
+
+export type BookmarkRole = "target" | "source" | "manual" | "existing";
 
 export interface BookmarkInfo {
   name: string;
@@ -151,6 +153,208 @@ export function removeBookmark(
   if (ranges.length === 0) return false;
   const tr = editor.state.tr;
   for (const r of ranges) tr.removeMark(r.from, r.to, r.mark);
+  editor.view.dispatch(tr);
+  return true;
+}
+
+type Logs = ReferenceValidationReviewResponse["validation_logs"];
+type CitationPair = NonNullable<Logs["citation_pairs"]>[number];
+type ReferenceEntry = NonNullable<Logs["reference_entries"]>[number];
+
+/**
+ * Identify bookmarks that have no citation/reference mapping — either manual
+ * bookmarks the user added without linking, or Word-native bookmarks that
+ * survived DOCX import but weren't recognized by the auto-linker.
+ *
+ * A bookmark is considered LINKED when any of the following holds:
+ *   - a `target` role sibling exists with the same name (auto-linked reference)
+ *   - a `source` role sibling exists with the same name (auto-linked citation)
+ *   - the name matches `REF{n}` where n appears in citation_pairs (numeric style)
+ *   - a persisted manual_link exists for that name
+ *
+ * Everything else is unlinked.
+ */
+export function getUnlinkedBookmarks(
+  editor: Editor | null | undefined,
+  citationPairs: CitationPair[],
+  referenceEntries: ReferenceEntry[],
+  manualLinks: ManualLink[],
+): BookmarkInfo[] {
+  const all = listBookmarks(editor);
+  if (all.length === 0) return [];
+
+  const linkedNames = new Set<string>();
+
+  // Auto-linked: any bookmark that has an auto-generated target or source
+  // sibling in the doc is linked.
+  const rolesByName = new Map<string, Set<BookmarkRole>>();
+  for (const bm of all) {
+    let roles = rolesByName.get(bm.name);
+    if (!roles) {
+      roles = new Set();
+      rolesByName.set(bm.name, roles);
+    }
+    roles.add(bm.role);
+  }
+  for (const [name, roles] of rolesByName) {
+    if (roles.has("target") || roles.has("source")) linkedNames.add(name);
+  }
+
+  // Validator-derived: any REF{n} whose n appears in citation_pairs with a
+  // non-null ref_number counts as resolvable.
+  for (const p of citationPairs) {
+    if (p.ref_number != null) linkedNames.add(`REF${p.ref_number}`);
+  }
+  for (const e of referenceEntries) {
+    if (e.number != null) linkedNames.add(`REF${e.number}`);
+  }
+
+  // Manually linked (persisted server-side).
+  for (const lnk of manualLinks) {
+    if (lnk.bookmark_name) linkedNames.add(lnk.bookmark_name);
+  }
+
+  // Word-native reference anchors: role="existing" is emitted by the DOCX
+  // importer (docx_to_xhtml_runs.py) for every pre-existing w:bookmarkStart
+  // whose name passes _is_user_visible_bookmark_name. Word's own convention
+  // uses `bib_N` for bibliography destinations and `ref_N` for reference
+  // destinations (with cite-again variants like `bib_14_2`, `bib_15_10`
+  // that alias into the base reference).
+  //
+  // Trust one of these as already-linked only when its leading numeric
+  // suffix N maps to a real reference — either an entry with number=N or
+  // a citation citing N. That way orphan anchors like `bib_99` on a doc
+  // that only defines refs 1..50 stay in the Unlinked list so the user
+  // can still act on them. Non-numeric or non-bib/ref names (`Bookmark1`,
+  // custom Word names) also remain unlinked.
+  if (referenceEntries.length > 0) {
+    const validRefNumbers = new Set<number>();
+    for (const e of referenceEntries) {
+      if (e.number != null) validRefNumbers.add(e.number);
+    }
+    for (const p of citationPairs) {
+      if (p.ref_number != null) validRefNumbers.add(p.ref_number);
+    }
+    const bibRefPattern = /^(?:bib|ref)_(\d+)(?:_\d+)*$/;
+    for (const bm of all) {
+      if (bm.role !== "existing") continue;
+      const m = bibRefPattern.exec(bm.name);
+      if (!m) continue;
+      const n = Number.parseInt(m[1], 10);
+      if (validRefNumbers.has(n)) linkedNames.add(bm.name);
+    }
+  }
+
+  // Emit at most one row per bookmark name so users see each unlinked
+  // bookmark once regardless of how many roles the mark carries. Prefer the
+  // "manual" role for display when both exist.
+  const seen = new Set<string>();
+  const out: BookmarkInfo[] = [];
+  const sorted = [...all].sort((a, b) => (a.role === "manual" ? -1 : b.role === "manual" ? 1 : 0));
+  for (const bm of sorted) {
+    if (linkedNames.has(bm.name)) continue;
+    if (seen.has(bm.name)) continue;
+    seen.add(bm.name);
+    out.push(bm);
+  }
+  return out;
+}
+
+/**
+ * Flip the `linked` attribute to true on every Bookmark mark carrying `name`
+ * (any role). Preserves the mark's identity — same range, same name, same
+ * role — so the `id="bookmark-{name}"` / `data-bookmark` anchors and any
+ * auto-linker book-keeping are untouched. Returns true if any mark changed.
+ */
+export function markBookmarkLinked(
+  editor: Editor | null | undefined,
+  name: string,
+): boolean {
+  if (!editor) return false;
+  const bookmarkType = editor.schema.marks.bookmark;
+  if (!bookmarkType) return false;
+
+  const doc = editor.state.doc;
+  const targets: Array<{ from: number; to: number; role: BookmarkRole }> = [];
+  doc.descendants((node: any, pos: number) => {
+    if (!node.isText) return true;
+    for (const m of node.marks) {
+      if (
+        m.type.name === "bookmark" &&
+        m.attrs?.name === name &&
+        !m.attrs?.linked
+      ) {
+        targets.push({
+          from: pos,
+          to: pos + node.nodeSize,
+          role: m.attrs.role as BookmarkRole,
+        });
+      }
+    }
+    return true;
+  });
+  if (targets.length === 0) return false;
+
+  const tr = editor.state.tr;
+  for (const t of targets) {
+    tr.addMark(
+      t.from,
+      t.to,
+      bookmarkType.create({ name, role: t.role, linked: true }),
+    );
+  }
+  editor.view.dispatch(tr);
+  return true;
+}
+
+/**
+ * Batch variant — flips `linked=true` on every mark whose name appears in
+ * `names`. Used after each validate refetch so persisted manual_links stay
+ * visually linked across reloads.
+ */
+export function markBookmarksLinked(
+  editor: Editor | null | undefined,
+  names: Iterable<string>,
+): boolean {
+  if (!editor) return false;
+  const wanted = new Set<string>();
+  for (const n of names) if (n) wanted.add(n);
+  if (wanted.size === 0) return false;
+
+  const bookmarkType = editor.schema.marks.bookmark;
+  if (!bookmarkType) return false;
+
+  const doc = editor.state.doc;
+  const targets: Array<{ from: number; to: number; name: string; role: BookmarkRole }> = [];
+  doc.descendants((node: any, pos: number) => {
+    if (!node.isText) return true;
+    for (const m of node.marks) {
+      if (
+        m.type.name === "bookmark" &&
+        typeof m.attrs?.name === "string" &&
+        wanted.has(m.attrs.name) &&
+        !m.attrs?.linked
+      ) {
+        targets.push({
+          from: pos,
+          to: pos + node.nodeSize,
+          name: m.attrs.name,
+          role: m.attrs.role as BookmarkRole,
+        });
+      }
+    }
+    return true;
+  });
+  if (targets.length === 0) return false;
+
+  const tr = editor.state.tr;
+  for (const t of targets) {
+    tr.addMark(
+      t.from,
+      t.to,
+      bookmarkType.create({ name: t.name, role: t.role, linked: true }),
+    );
+  }
   editor.view.dispatch(tr);
   return true;
 }

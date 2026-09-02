@@ -989,6 +989,39 @@ class ReferenceEditResponse(BaseModel):
     changed: bool
 
 
+class ManualLinkEntry(BaseModel):
+    bookmark_name: str
+    ref_number: int | None = None
+    ref_text: str
+    citation_text: str | None = None
+    linked_by: str | None = None
+    linked_at: str | None = None
+
+
+class ManualLinkListResponse(BaseModel):
+    status: Literal["ok"] = "ok"
+    version: int
+    links: list[ManualLinkEntry]
+
+
+class ManualLinkUpsertRequest(BaseModel):
+    bookmark_name: str
+    ref_number: int | None = None
+    ref_text: str
+    citation_text: str | None = None
+
+
+class ManualLinkUpsertResponse(BaseModel):
+    status: Literal["ok"] = "ok"
+    link: ManualLinkEntry
+
+
+class ManualLinkDeleteResponse(BaseModel):
+    status: Literal["ok"] = "ok"
+    bookmark_name: str
+    deleted: bool
+
+
 class ProjectUpdateRequest(BaseModel):
     status: str | None = None
     workflow_name: str | None = None
