@@ -598,7 +598,7 @@ def test_api_v2_project_bootstrap_zip_upload_multi_track(
     assert zip_derived_chapters[0].chapters == "01"
     assert zip_derived_chapters[0].chapter_title == "Chapter 01"
     assert zip_derived_chapters[1].chapters == "Ch 02 - Art"
-    assert zip_derived_chapters[1].chapter_title == "Chapter 02 Art Pack"
+    assert zip_derived_chapters[1].chapter_title == "Chapter 02 Art"
 
     # 5. Verify the files are correctly associated and stored
     stored_files = (
@@ -636,7 +636,7 @@ def test_api_v2_create_chapters_with_art_zip(
         client=project.division_code or "",
         project=project.project_code,
         chapters="Ch 01 - Art",
-        chapter_title="Chapter 01 Art Pack",
+        chapter_title="Chapter 01 Art",
     )
     db_session.add(existing_ci)
     db_session.commit()
@@ -666,9 +666,9 @@ def test_api_v2_create_chapters_with_art_zip(
     assert len(res_data["skipped"]) == 1
 
     assert res_data["created"][0]["chapters"] == "Ch 02 - Art"
-    assert res_data["created"][0]["chapter_title"] == "Chapter 02 Art Pack"
+    assert res_data["created"][0]["chapter_title"] == "Chapter 02 Art"
     assert res_data["created"][1]["chapters"] == "Ch 03 - Art"
-    assert res_data["created"][1]["chapter_title"] == "Chapter 03 Art Pack"
+    assert res_data["created"][1]["chapter_title"] == "Chapter 03 Art"
 
     assert res_data["skipped"][0]["filename"] == "fig_ignored.png"
     assert "already exists" in res_data["skipped"][0]["reason"]
