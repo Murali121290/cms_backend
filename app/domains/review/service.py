@@ -16,6 +16,48 @@ from app.processing.xhtml_to_docx_delta import XhtmlToDocxDeltaEngine
 from app.utils.utils.structuring_lib.annotator import normalize_structural_tag_case
 import re
 
+def _build_body_to_allp_translator(doc):
+    """Return `body_idx → all-w:p idx` translator for `doc`.
+
+    Two indexing schemes co-exist in this codebase:
+
+    - `enumerate(doc.paragraphs)` — body-level only, skips paragraphs inside
+      tables/cells. Used by `CitationProcessor` (APA validator).
+    - `doc.element.body.iter(w:p)` — every `<w:p>` in document order,
+      table-cell paragraphs included. Used by `docx_to_xhtml_runs`, and
+      therefore by every `data-para-idx` value the WYSIWYG editor sees.
+
+    When there's a table above the References section the two schemes
+    diverge (body-level index is smaller than all-w:p index by the number
+    of cell paragraphs). Reference entries reported with a body-level index
+    then map onto whatever table-cell paragraph happens to sit at the same
+    all-w:p position in the editor — which is why REF{n} bookmarks stamped
+    from that index land inside table cells.
+
+    The returned function accepts a body-level index and returns the
+    equivalent all-w:p index. `None`/negative inputs pass through as `-1`.
+    "Virtual" encoded indices produced by `CitationProcessor` for
+    table/textbox contexts (values >= len(doc.paragraphs)) are returned
+    unchanged — they were never meant to be looked up in the frontend.
+    """
+    from docx.oxml.ns import qn as _qn_body
+    body_paragraphs = list(doc.paragraphs)
+    all_p_map = {
+        p_elem: i
+        for i, p_elem in enumerate(doc.element.body.iter(_qn_body("w:p")))
+    }
+
+    def _translate(body_idx):
+        if body_idx is None:
+            return -1
+        if body_idx < 0 or body_idx >= len(body_paragraphs):
+            return body_idx
+        elem = body_paragraphs[body_idx]._element
+        return all_p_map.get(elem, body_idx)
+
+    return _translate
+
+
 def _get_full_reference_text(para, doc_paragraphs, para_index_map) -> str:
     idx = para_index_map.get(para._element)
     if idx is None:
@@ -1041,7 +1083,7 @@ def save_xhtml_delta_and_convert(
         raise HTTPException(status_code=500, detail=f"XHTML delta save/convert failed: {str(e)}")
 
 
-REF_REVIEW_CACHE_VERSION = 4
+REF_REVIEW_CACHE_VERSION = 5
 
 
 def _ref_review_cache_path(processed_path: str) -> str:
@@ -1196,6 +1238,8 @@ def _run_validation_on_doc(
         report = cite_proc.run()
         report_dict = report.to_dict()
 
+        _body_to_allp_idx = _build_body_to_allp_translator(cite_proc.doc)
+
         validation_logs["stats"] = dict(report.stats)
         validation_logs["total_refs"] = report.total_refs
         validation_logs["total_cites"] = report.total_cites
@@ -1239,7 +1283,7 @@ def _run_validation_on_doc(
                 "year": entry.get("year", ""),
                 "ref_text": entry.get("raw", ""),
                 "status": status,
-                "para_idx": entry.get("para_idx", -1),
+                "para_idx": _body_to_allp_idx(entry.get("para_idx", -1)),
             }
             score = score_by_raw.get(raw_cite)
             if score is not None:
@@ -1255,7 +1299,7 @@ def _run_validation_on_doc(
                     "year": "",
                     "ref_text": "",
                     "status": "missing",
-                    "para_idx": issue.get("para_idx", -1),
+                    "para_idx": _body_to_allp_idx(issue.get("para_idx", -1)),
                 })
 
         reference_entries = []
@@ -1265,7 +1309,7 @@ def _run_validation_on_doc(
                 "text": entry.get("raw", ""),
                 "style": "REF-U",
                 "is_cited": entry.get("cited", False),
-                "para_idx": entry.get("para_idx", -1),
+                "para_idx": _body_to_allp_idx(entry.get("para_idx", -1)),
             })
 
         validation_logs["citation_pairs"] = citation_pairs
