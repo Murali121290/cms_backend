@@ -131,3 +131,58 @@ def find_peoplehub_user(identifier: str) -> Optional[Dict[str, Any]]:
         return None
     finally:
         session.close()
+
+def get_all_peoplehub_users() -> list[dict]:
+    query = text("""
+        SELECT 
+            u.id AS user_id,
+            u.full_name,
+            u.email,
+            u.company_email,
+            u.password_hash,
+            u.status,
+            u.is_active,
+            r.name AS role_name,
+            e.employee_id,
+            e.department,
+            e.designation,
+            e.first_name,
+            e.last_name
+        FROM users u
+        LEFT JOIN roles r ON u.role_id = r.id
+        LEFT JOIN employees e ON e.user_id = u.id
+    """)
+    session = get_peoplehub_session()
+    try:
+        results = session.execute(query).fetchall()
+        users_list = []
+        for result in results:
+            row = dict(result._mapping)
+            emp_id = row.get("employee_id") or (str(row.get("user_id")) if row.get("user_id") else None)
+            if not emp_id:
+                continue
+            role_name = row.get("role_name") or "Employee"
+            email_val = row.get("company_email") or row.get("email") or f"{emp_id}@s4carlisle.com"
+            full_n = row.get("full_name") or ""
+            fn = row.get("first_name") or (full_n.split()[0] if full_n else "")
+            ln = row.get("last_name") or (" ".join(full_n.split()[1:]) if full_n and " " in full_n else "")
+            users_list.append({
+                "user_id": row.get("user_id"),
+                "employee_id": str(emp_id),
+                "full_name": full_n,
+                "first_name": fn,
+                "last_name": ln,
+                "email": email_val,
+                "company_email": row.get("company_email"),
+                "password_hash": row.get("password_hash"),
+                "role": role_name,
+                "department": row.get("department"),
+                "designation": row.get("designation"),
+                "is_active": bool(row.get("is_active", True) and row.get("status", "active") != "inactive")
+            })
+        return users_list
+    except Exception as exc:
+        logger.warning(f"Error querying all PeopleHub users: {exc}")
+        return []
+    finally:
+        session.close()

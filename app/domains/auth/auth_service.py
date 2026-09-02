@@ -8,10 +8,8 @@ from app.domains.auth.user_service import determine_access_level
 def sync_user_from_peoplehub(db: Session, ph_user: dict) -> User:
     emp_id = ph_user["employee_id"]
     email = ph_user.get("company_email") or ph_user.get("email") or f"{emp_id}@s4carlisle.com"
-    role = None  # Blank / null as requested
     dept = ph_user.get("department") or "General"
-    designation = ph_user.get("designation") or ph_user.get("role")
-    access_lvl = determine_access_level(designation)
+    designation = ph_user.get("designation")
     password_hash = ph_user["password_hash"]
 
     # Match by employee_id or company email
@@ -21,6 +19,9 @@ def sync_user_from_peoplehub(db: Session, ph_user: dict) -> User:
 
     fn = ph_user.get("first_name")
     ln = ph_user.get("last_name")
+
+    existing_role = user.role if user else None
+    access_lvl = determine_access_level(existing_role)
 
     if not user:
         user = User(
@@ -32,7 +33,7 @@ def sync_user_from_peoplehub(db: Session, ph_user: dict) -> User:
             role=None,
             designation=designation,
             team=dept,
-            access_level=access_lvl,
+            access_level=None,
             active_status=ph_user.get("is_active", True)
         )
         db.add(user)
@@ -42,7 +43,6 @@ def sync_user_from_peoplehub(db: Session, ph_user: dict) -> User:
         user.first_name = fn
         user.last_name = ln
         user.password_hash = password_hash
-        user.role = None
         user.designation = designation
         user.team = dept
         user.access_level = access_lvl
@@ -114,3 +114,12 @@ def register_browser_user(
     db.commit()
 
     return new_user
+
+def sync_all_peoplehub_users(db: Session) -> list[User]:
+    from app.db.peoplehub_db import get_all_peoplehub_users
+    ph_users = get_all_peoplehub_users()
+    synced_users = []
+    for ph_user in ph_users:
+        u = sync_user_from_peoplehub(db, ph_user)
+        synced_users.append(u)
+    return synced_users

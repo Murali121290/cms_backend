@@ -41,14 +41,16 @@ export interface UpdateUserPayload {
 }
 
 const mapUser = (u: any): User => {
-  const roleVal = u.role || u.roles?.[0]?.name || u.designation || ''
-  let lvl = u.access_level
-  if (!lvl || lvl === 'standard') {
+  const roleVal = u.role || ''
+  let lvl = u.access_level || ''
+  if (roleVal) {
     const l = roleVal.toLowerCase().replace(/[\s-]/g, '')
     if (l.includes('admin')) lvl = 'Admin'
     else if (l.includes('manager') || l.includes('gm')) lvl = 'Manager'
     else if (l.includes('teamlead') || l.includes('lead')) lvl = 'TeamLead'
     else lvl = 'Employee'
+  } else {
+    lvl = ''
   }
   return {
     id: u.id,

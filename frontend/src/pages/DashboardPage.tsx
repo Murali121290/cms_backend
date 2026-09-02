@@ -77,7 +77,7 @@ export function DashboardPage() {
               </span>
             </div>
             <h1 className="text-3xl font-serif font-medium text-[#FBF9F4] tracking-tight leading-none mb-2">
-              Good {timeOfDay}, {viewer.username}.
+              Good {timeOfDay}, {(viewer.first_name || viewer.username).trim()}.
             </h1>
             <p className="text-white/60 text-sm mt-1">
               You have <strong className="text-primary font-bold">{projects.length} active</strong> project{projects.length !== 1 ? "s" : ""} in progress.

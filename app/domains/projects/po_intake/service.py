@@ -11,7 +11,7 @@ import openpyxl
 import pdfplumber
 
 from app.domains.projects.po_intake import detect
-from app.domains.projects.po_intake.parsers import artech_house, kendall_hunt, wk_lww
+from app.domains.projects.po_intake.parsers import artech_house, kendall_hunt, springer, wk_lww
 
 _UNRECOGNIZED_WARNING = "Unrecognized PO template — please fill in the form manually."
 
@@ -65,4 +65,26 @@ def extract_po(file_path: str, filename: str) -> dict:
 
         return {**parsed, "template_detected": template}
 
-    return _empty_result(detect.UNKNOWN, [f"Unsupported file type '.{ext}' — please upload a .pdf or .xlsx PO file."])
+    if ext in ("docx", "doc"):
+        try:
+            import docx
+            doc = docx.Document(file_path)
+            full_text = "\n".join(p.text for p in doc.paragraphs)
+            for table in doc.tables:
+                for row in table.rows:
+                    full_text += "\n" + " ".join(c.text for c in row.cells)
+        except Exception as exc:
+            return _empty_result(detect.UNKNOWN, [f"Could not read Word document: {exc}"])
+
+        template = detect.detect_docx_template(full_text, filename)
+        if template != detect.SPRINGER:
+            return _empty_result(detect.UNKNOWN)
+
+        try:
+            parsed = springer.parse(file_path)
+        except Exception as exc:
+            return _empty_result(template, [f"Recognized as {detect.TEMPLATE_LABELS[template]} but failed to parse it: {exc}"])
+
+        return {**parsed, "template_detected": template}
+
+    return _empty_result(detect.UNKNOWN, [f"Unsupported file type '.{ext}' — please upload a .pdf, .xlsx, or .docx PO file."])

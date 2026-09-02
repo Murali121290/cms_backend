@@ -9,12 +9,14 @@ from __future__ import annotations
 WK_LWW = "wk_lww"
 KENDALL_HUNT = "kendall_hunt"
 ARTECH_HOUSE = "artech_house"
+SPRINGER = "springer"
 UNKNOWN = "unknown"
 
 TEMPLATE_LABELS = {
     WK_LWW: "Wolters Kluwer / LWW launch form",
     KENDALL_HUNT: "Kendall Hunt prepress RFQ",
     ARTECH_HOUSE: "Artech House transmittal",
+    SPRINGER: "Springer Publishing Assignment Memo",
     UNKNOWN: "Unrecognized template",
 }
 
@@ -30,4 +32,12 @@ def detect_pdf_template(pdf_text: str) -> str:
 def detect_xlsx_template(filename: str, sheet_names: list[str]) -> str:
     if "transmittal" in filename.casefold():
         return ARTECH_HOUSE
+    return UNKNOWN
+
+
+def detect_docx_template(docx_text: str, filename: str) -> str:
+    text_lower = docx_text.lower()
+    fn_lower = filename.lower()
+    if ("assignment memo" in text_lower or "assignment memo" in fn_lower) and ("springer" in text_lower or "springer" in fn_lower or "s4carlisle" in text_lower):
+        return SPRINGER
     return UNKNOWN

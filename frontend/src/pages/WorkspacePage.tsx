@@ -541,7 +541,7 @@ export function WorkspacePage() {
             My Workspace ({role})
           </div>
           <h1 className="text-2xl md:text-3xl font-serif font-medium text-[#FBF9F4] tracking-tight">
-            Welcome back, {viewer.username}.
+            Welcome back, {((viewer as any).first_name || viewer.username).trim()}.
           </h1>
           <p className="text-white/60 text-sm">
             {role === 'user' && 'Manage your active stages, track assignments, and view KRA compliance.'}

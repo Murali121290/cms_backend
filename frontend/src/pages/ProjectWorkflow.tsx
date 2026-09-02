@@ -148,6 +148,7 @@ function normalizeRole(role: string): string {
 // stage → role-name mapping fetched from stagesApi. Stages with no roles mapped
 // impose no restriction (fail open) so untouched stages keep working as before.
 function isRoleAllowedForStage(userRole: string, stageName: string | null | undefined, stageRolesMap: Map<string, string[]>): boolean {
+  if (!userRole) return false
   if (isPrivilegedRole(userRole)) return true
   if (!stageName) return true
   const stageRoles = stageRolesMap.get(stageName)
@@ -218,6 +219,18 @@ function WorkflowRail({ stages, chapters, filterStage, onStageClick, stageRolesM
 
 // ── Assignee Select ────────────────────────────────────────────────────────────
 
+function getUserDisplayName(user_name: string | null | undefined, users: AppUser[]): string {
+  if (!user_name) return 'Unassigned'
+  const u = users.find(x => x.user_name === user_name)
+  if (u) {
+    const fn = (u.first_name || '').trim()
+    const ln = (u.last_name || '').trim()
+    const full = `${fn} ${ln}`.trim()
+    if (full) return full
+  }
+  return user_name
+}
+
 function AssigneeSelect({ value, users, onChange, disabled, widthCls = 'w-28', className, onClick, updating, stageName, stageRolesMap }: {
   value: string | null
   users: AppUser[]
@@ -236,17 +249,19 @@ function AssigneeSelect({ value, users, onChange, disabled, widthCls = 'w-28', c
   const { canAccess } = useRBAC()
   const canEdit = canAccess(ROLE_PERMISSIONS.edit_assignee)
 
+  const currentDisplay = getUserDisplayName(value, users)
+
   if (!canEdit) {
     return (
-      <span className={`text-[11px] text-text font-medium px-2 py-0.5 border border-transparent truncate block ${widthCls} ${className ?? ''}`}>
-        {value || 'Unassigned'}
+      <span className={`text-[11px] text-text font-medium px-2 py-0.5 border border-transparent truncate block ${widthCls} ${className ?? ''}`} title={currentDisplay}>
+        {currentDisplay}
       </span>
     )
   }
 
   const active = users.filter(u => u.active_status)
   const assignable = stageRolesMap
-    ? active.filter(u => isRoleAllowedForStage(u.role || u.designation, stageName, stageRolesMap) || u.user_name === value)
+    ? active.filter(u => isRoleAllowedForStage(u.role || '', stageName, stageRolesMap) || u.user_name === value)
     : active
 
   return (
@@ -256,11 +271,18 @@ function AssigneeSelect({ value, users, onChange, disabled, widthCls = 'w-28', c
         onChange={e => onChange(e.target.value)}
         disabled={disabled || updating}
         className="text-[11px] bg-background border border-border rounded-md pl-2 pr-6 py-0.5 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-60 appearance-none cursor-pointer w-full truncate"
+        title={currentDisplay}
       >
         <option value="">— Unassigned —</option>
-        {assignable.map(u => (
-          <option key={u.id} value={u.user_name}>{u.user_name}</option>
-        ))}
+        {assignable.map(u => {
+          const fn = (u.first_name || '').trim()
+          const ln = (u.last_name || '').trim()
+          const fullName = `${fn} ${ln}`.trim()
+          const label = fullName ? `${fullName} (${u.user_name})` : u.user_name
+          return (
+            <option key={u.id} value={u.user_name}>{label}</option>
+          )
+        })}
       </select>
       {updating ? (
         <span className="absolute right-1.5 flex items-center justify-center pointer-events-none">
@@ -433,8 +455,8 @@ export function ProjectWorkflow() {
   const { projectId, clientId } = useParams<{ projectId: string; clientId?: string }>()
   const navigate = useNavigate()
   const id = Number(projectId)
-  
-  const { roles, canAccess, viewer } = useRBAC()
+
+  const { roles } = useRBAC()
   const showBatchButtons = roles.some(role => {
     const r = role.toLowerCase()
     return r === 'admin' || r === 'xml operator' || r === 'xml manager'
@@ -538,7 +560,7 @@ export function ProjectWorkflow() {
         const p = response.project as unknown as Project
         setProject(p)
         const projectCode = p.code || p.project_code || ''
-        
+
         const [chs, details, cmsChapters, allStages] = await Promise.all([
           chaptersApi.getByProject(projectCode).catch(() => [] as Chapter[]),
           projectCode
@@ -547,7 +569,7 @@ export function ProjectWorkflow() {
           projectsApi.getProjectChapters(id).catch(() => ({ project: null, chapters: [] })),
           stagesApi.list().catch(() => [] as Stage[]),
         ])
-        
+
         setChapters(chs)
         setStageRolesMap(new Map(allStages.map(s => [s.stage_name, s.roles])))
 
@@ -564,7 +586,7 @@ export function ProjectWorkflow() {
             .catch(() => ({ workflowName: wf, stages: [] as WorkflowStage[] }))
         )
         const wfsList = await Promise.all(wfPromises)
-        
+
         const wfMapObj: Record<string, WorkflowStage[]> = {}
         wfsList.forEach(({ workflowName, stages }) => {
           wfMapObj[workflowName] = orderStages(stages)
@@ -799,7 +821,7 @@ export function ProjectWorkflow() {
         else if (processType === 'indesign_to_xml') label = 'InDesign to Final'
         toast.success(`Triggered ${label} for ${result.triggered_count} chapters.`)
         setBulkAssignModalOpen(false)
-        
+
         // Refresh chapters list
         const chsRes = await chaptersApi.getByProject(project?.code || project?.project_code || '')
         setChapters(chsRes)
@@ -820,7 +842,7 @@ export function ProjectWorkflow() {
     if (!batchModalType || batchSelectedChapterIds.size === 0 || !project) return
     setBatchProcessing(true)
     const selectedIds = Array.from(batchSelectedChapterIds)
-    
+
     let templateFileId: number | undefined = undefined
     if (batchModalType === 'xml_to_indesign' && batchTemplateId) {
       const stylesheets = stylesheetsQuery.data?.stylesheets ?? []
@@ -857,11 +879,11 @@ export function ProjectWorkflow() {
         if (batchModalType === 'indesign_to_xml') processLabel = 'InDesign to Final'
         if (batchModalType === 'style_validation') processLabel = 'Style Validation'
         if (batchModalType === 'structuring') processLabel = 'Word Structuring'
-        
+
         toast.success(`Triggered ${processLabel} for ${result.triggered_count} chapters.`)
         setBatchModalType(null)
         setBatchSelectedChapterIds(new Set())
-        
+
         // Refresh chapters list
         const chsRes = await chaptersApi.getByProject(project?.code || project?.project_code || '')
         setChapters(chsRes)
@@ -978,7 +1000,7 @@ export function ProjectWorkflow() {
       toast.success('Book files combined and saved to Final files successfully!')
       setCombineConfirmOpen(false)
       window.location.reload()
-      
+
     } catch (err: any) {
       toast.error(err.message || 'Failed to combine book files.')
     } finally {
@@ -1110,11 +1132,10 @@ export function ProjectWorkflow() {
             setFilterStage('')
             setFilterStatus('')
           }}
-          className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
-            activeTab === 'manuscript'
+          className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${activeTab === 'manuscript'
               ? 'text-primary bg-accent border-primary/20 shadow-sm font-bold'
               : 'text-muted border-transparent hover:bg-accent/40'
-          }`}
+            }`}
         >
           📚 Manuscripts ({manuscriptChapters.length})
         </button>
@@ -1124,11 +1145,10 @@ export function ProjectWorkflow() {
             setFilterStage('')
             setFilterStatus('')
           }}
-          className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
-            activeTab === 'art'
+          className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${activeTab === 'art'
               ? 'text-primary bg-accent border-primary/20 shadow-sm font-bold'
               : 'text-muted border-transparent hover:bg-accent/40'
-          }`}
+            }`}
         >
           📐 Art Tracks ({artChapters.length})
         </button>
@@ -1138,11 +1158,10 @@ export function ProjectWorkflow() {
             setFilterStage('')
             setFilterStatus('')
           }}
-          className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
-            activeTab === 'design'
+          className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${activeTab === 'design'
               ? 'text-primary bg-accent border-primary/20 shadow-sm font-bold'
               : 'text-muted border-transparent hover:bg-accent/40'
-          }`}
+            }`}
         >
           🎨 Design ({designChapters.length})
         </button>
@@ -1183,7 +1202,7 @@ export function ProjectWorkflow() {
             className="text-xs bg-card border border-border rounded-lg px-2.5 py-1.5 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 appearance-none cursor-pointer"
           >
             <option value="">All Assignees</option>
-            {assigneeOptions.map(a => <option key={a} value={a}>{a}</option>)}
+            {assigneeOptions.map(a => <option key={a} value={a}>{getUserDisplayName(a, users)} ({a})</option>)}
           </select>
 
           {hasFilters && (
@@ -1612,23 +1631,23 @@ export function ProjectWorkflow() {
           batchModalType === 'word_to_xml'
             ? 'Batch Word to XML'
             : batchModalType === 'style_validation'
-            ? 'Batch Style Validation'
-            : batchModalType === 'structuring'
-            ? 'Batch Word Structuring'
-            : batchModalType === 'xml_to_indesign'
-            ? 'Batch XML to InDesign'
-            : 'Batch InDesign to Final'
+              ? 'Batch Style Validation'
+              : batchModalType === 'structuring'
+                ? 'Batch Word Structuring'
+                : batchModalType === 'xml_to_indesign'
+                  ? 'Batch XML to InDesign'
+                  : 'Batch InDesign to Final'
         }
         description={
           batchModalType === 'word_to_xml'
             ? 'Select the chapters you want to run Word-to-XML conversion for in bulk. This will convert the docx manuscripts into JATS XML files.'
             : batchModalType === 'style_validation'
-            ? 'Select the chapters you want to run Style Validation for in bulk. This will validate the docx manuscripts against project style guidelines.'
-            : batchModalType === 'structuring'
-            ? 'Select the chapters you want to run Word Structuring for in bulk. This will apply standard styles to the docx manuscripts using the rules-based structuring library.'
-            : batchModalType === 'xml_to_indesign'
-            ? 'Select the chapters you want to generate InDesign layouts for in bulk. This will dispatch layout generation tasks to the Windows InDesign Server.'
-            : 'Select the chapters you want to convert from InDesign to final XML outputs. This will extract final packages (XML + Logs) from the InDesign layouts.'
+              ? 'Select the chapters you want to run Style Validation for in bulk. This will validate the docx manuscripts against project style guidelines.'
+              : batchModalType === 'structuring'
+                ? 'Select the chapters you want to run Word Structuring for in bulk. This will apply standard styles to the docx manuscripts using the rules-based structuring library.'
+                : batchModalType === 'xml_to_indesign'
+                  ? 'Select the chapters you want to generate InDesign layouts for in bulk. This will dispatch layout generation tasks to the Windows InDesign Server.'
+                  : 'Select the chapters you want to convert from InDesign to final XML outputs. This will extract final packages (XML + Logs) from the InDesign layouts.'
         }
         footer={
           <div className="flex gap-3 justify-end items-center">
@@ -1705,9 +1724,8 @@ export function ProjectWorkflow() {
                 return (
                   <label
                     key={ch.id}
-                    className={`flex items-center gap-3 px-3 py-2 text-sm hover:bg-surface transition-colors cursor-pointer select-none ${
-                      isSelected ? 'bg-amber-50/20' : ''
-                    }`}
+                    className={`flex items-center gap-3 px-3 py-2 text-sm hover:bg-surface transition-colors cursor-pointer select-none ${isSelected ? 'bg-amber-50/20' : ''
+                      }`}
                   >
                     <input
                       type="checkbox"

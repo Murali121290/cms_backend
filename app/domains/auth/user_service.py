@@ -1,11 +1,14 @@
+import logging
 from sqlalchemy.orm import Session
 from app import models
 from app.domains.auth.schemas import UserCreate
 from app.domains.auth.security import hash_password
 
-def determine_access_level(role_name: str) -> str:
+logger = logging.getLogger(__name__)
+
+def determine_access_level(role_name: str | None) -> str | None:
     if not role_name:
-        return "Employee"
+        return None
     val = role_name.lower().replace(" ", "").replace("-", "")
     if "admin" in val:
         return "Admin"
@@ -52,6 +55,12 @@ def get_admin_dashboard_stats(db: Session):
 
 def get_admin_users_page_data(db: Session):
     from app.domains.workflow.models import RolesMaster
+    from app.domains.auth.auth_service import sync_all_peoplehub_users
+    try:
+        sync_all_peoplehub_users(db)
+    except Exception as exc:
+        logger.warning(f"Auto-sync PeopleHub users warning: {exc}")
+
     return {
         "users": db.query(models.User).all(),
         "all_roles": db.query(RolesMaster).all(),
