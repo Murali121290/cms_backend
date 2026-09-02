@@ -1675,7 +1675,7 @@ def api_v2_project_bootstrap(
                         client=project.division_code or "",
                         project=project.code,
                         chapters=art_ch_num,
-                        chapter_title=f"Chapter {_ch.number.zfill(2)} Art Pack",
+                        chapter_title=f"Chapter {_ch.number.zfill(2)} Art",
                         workflow=art_workflow_name,
                         status="Received",
                         complexity_level=getattr(project, "composition", None) or "Medium",
@@ -1915,7 +1915,7 @@ def api_v2_project_intake(
                 client=project.division_code or "",
                 project=project.code,
                 chapters=art_ch_num,
-                chapter_title=f"Chapter {start_idx + i:02d} Art Pack ({batch_name})",
+                chapter_title=f"Chapter {start_idx + i:02d} Art ({batch_name})",
                 workflow=workflow_name,
                 status="Received",
                 complexity_level=project.composition or "Medium",
@@ -3686,7 +3686,7 @@ def api_v2_upload_zip(
                         # Setup pretty title for Art pack track chapters
                         if "Art" in chapter_no_str:
                             digits_clean = chapter_no_str.replace("Ch ", "").replace(" - Art", "")
-                            chapter_title = f"Chapter {digits_clean} Art Pack"
+                            chapter_title = f"Chapter {digits_clean} Art"
                         elif chapter_no_str in ["Design", "CE support"]:
                             chapter_title = chapter_no_str
                         else:
@@ -7415,7 +7415,7 @@ def api_v2_create_chapter_with_art(
         db,
         project_id=project_id,
         number=art_chapter_name,
-        title=f"Chapter {number_padded} Art Pack",
+        title=f"Chapter {number_padded} Art",
         upload_dir=file_service.UPLOAD_DIR,
         # "Received" — matches the pending-planning status used elsewhere (e.g. sync-chapters)
         # until this chapter is planned and approved on the Planning page.
@@ -7675,7 +7675,7 @@ def api_v2_create_chapters_with_art_zip(
                 db,
                 project_id=project_id,
                 number=art_chapter_name,
-                title=f"Chapter {new_num:02d} Art Pack",
+                title=f"Chapter {new_num:02d} Art",
                 upload_dir=file_service.UPLOAD_DIR,
                 status="Received",
             )
@@ -8354,7 +8354,7 @@ def api_v2_finalize_mapping(
             ch_title = "Back matter"
         elif ch_num.endswith(" - Art"):
             digits = ch_num.replace("Ch ", "").replace(" - Art", "")
-            ch_title = f"Chapter {digits} Art Pack"
+            ch_title = f"Chapter {digits} Art"
         else:
             ch_title = os.path.splitext(mapping.original_filename)[0]
 
@@ -8388,6 +8388,84 @@ def api_v2_finalize_mapping(
         created_count += 1
         
     db.commit()
+
+    # Sync: ensure every CMS chapter has a matching WMS ChapterInfo record
+    from app.domains.workflow.models import ChapterInfo as _ChapterInfo
+    all_cms_chapters = db.query(models.Chapter).filter(models.Chapter.project == project.project_code).all()
+    existing_ci_nums = {
+        ci.chapters for ci in db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code).all()
+    }
+    for _ch in all_cms_chapters:
+        if _ch.chapters and _ch.chapters not in existing_ci_nums:
+            db.add(_ChapterInfo(
+                client=project.division_code or "",
+                project=project.code,
+                chapters=_ch.chapters,
+                chapter_title=_ch.chapter_title or f"Chapter {_ch.chapters}",
+                workflow=project.workflow_name or "",
+                status="Received",
+                complexity_level=getattr(project, "composition", None) or "Medium",
+                stage_level=1,
+                stage_name=first_stage,
+                published_status="Draft",
+                priority=getattr(project, "priority", None) or "Normal",
+                project_manager_name=getattr(project, "project_manager", None) or None,
+            ))
+            existing_ci_nums.add(_ch.chapters)
+    db.commit()
+
+    # Extract word count and manuscript pages from docx files
+    try:
+        import docx
+        from lxml import etree as ET
+        
+        chapter_docx_map = {}
+        for mapping in request.mappings:
+            if mapping.category == "Not Found" or not mapping.chapter_number:
+                continue
+            if mapping.file_type == "Manuscript" and mapping.original_filename.lower().endswith(".docx"):
+                ch_num = mapping.chapter_number
+                if ch_num not in chapter_docx_map:
+                    chapter_docx_map[ch_num] = []
+                dest_path = os.path.join(file_service.UPLOAD_DIR, project.code, ch_num, "Manuscript", os.path.basename(mapping.original_filename))
+                chapter_docx_map[ch_num].append(dest_path)
+        
+        if chapter_docx_map:
+            NS = "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"
+            ci_records = db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code).all()
+            ci_dict = {ci.chapters: ci for ci in ci_records if ci.chapters}
+            
+            for chapter_no_str, docx_paths in chapter_docx_map.items():
+                ci_record = ci_dict.get(chapter_no_str)
+                if ci_record:
+                    total_word_count = 0
+                    total_pages = 0
+                    for docx_path in docx_paths:
+                        if not os.path.exists(docx_path):
+                            continue
+                        try:
+                            doc = docx.Document(docx_path)
+                            total_word_count += sum(len(p.text.split()) for p in doc.paragraphs)
+                        except Exception as e:
+                            pass
+                        try:
+                            with zipfile.ZipFile(docx_path) as z:
+                                if "docProps/app.xml" in z.namelist():
+                                    with z.open("docProps/app.xml") as f:
+                                        tree = ET.parse(f)
+                                        pages_el = tree.find(f"{{{NS}}}Pages")
+                                        if pages_el is not None and pages_el.text:
+                                            total_pages += int(pages_el.text)
+                        except Exception as e:
+                            pass
+                    if total_word_count > 0:
+                        ci_record.word_count = (ci_record.word_count or 0) + total_word_count
+                    if total_pages > 0:
+                        ci_record.manuscript_pages = (ci_record.manuscript_pages or 0) + total_pages
+            db.commit()
+    except Exception as e:
+        pass
+
     shutil.rmtree(temp_dir, ignore_errors=True)
 
     # Count actual chapters created
