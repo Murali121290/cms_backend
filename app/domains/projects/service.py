@@ -283,19 +283,33 @@ def get_projects(db: Session, skip: int = 0, limit: int = 100):
     return db.query(Project).filter(Project.is_deleted != True).offset(skip).limit(limit).all()
 
 def delete_project(db, project_id: int):
+    from app.domains.files.service import UPLOAD_DIR
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         return None
-    project.is_deleted = True
+    project_path = f"{UPLOAD_DIR}/{project.code}"
+    if os.path.exists(project_path):
+        shutil.rmtree(project_path, ignore_errors=True)
+    from app.domains.workflow.models import StageDetail, ChapterInfo
+    db.query(StageDetail).filter(StageDetail.project == project.code).delete(synchronize_session=False)
+    db.query(ChapterInfo).filter(ChapterInfo.project == project.code).delete(synchronize_session=False)
+    db.delete(project)
     db.commit()
     return True
 
 
 def delete_project_v2(db, project_id: int):
+    from app.domains.files.service import UPLOAD_DIR
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         return None
-    project.is_deleted = True
+    project_path = f"{UPLOAD_DIR}/{project.code}"
+    if os.path.exists(project_path):
+        shutil.rmtree(project_path, ignore_errors=True)
+    from app.domains.workflow.models import StageDetail, ChapterInfo
+    db.query(StageDetail).filter(StageDetail.project == project.code).delete(synchronize_session=False)
+    db.query(ChapterInfo).filter(ChapterInfo.project == project.code).delete(synchronize_session=False)
+    db.delete(project)
     db.commit()
     return True
 
@@ -305,8 +319,13 @@ def delete_project_with_filesystem(db: Session, *, project_id: int, upload_dir: 
     if not project:
         raise ValueError(f"Project with ID {project_id} not found")
 
-    # Soft delete
-    project.is_deleted = True
+    # Hard delete associated decouple models
+    from app.domains.workflow.models import StageDetail, ChapterInfo
+    db.query(StageDetail).filter(StageDetail.project == project.code).delete(synchronize_session=False)
+    db.query(ChapterInfo).filter(ChapterInfo.project == project.code).delete(synchronize_session=False)
+
+    # Hard delete
+    db.delete(project)
     db.commit()
 
     project_path = f"{upload_dir}/{project.code}"
