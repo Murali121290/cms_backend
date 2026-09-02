@@ -512,7 +512,7 @@ export function ProjectWorkflow() {
   const [newChapterFile, setNewChapterFile] = useState<File | null>(null)
   const [addingChapter, setAddingChapter] = useState(false)
   const [addChapterError, setAddChapterError] = useState<string | null>(null)
-  const [uploadMode, setUploadMode] = useState<'single' | 'zip'>('single')
+
   const [newChapterCategory, setNewChapterCategory] = useState('indesign')
 
   const DESIGN_UPLOAD_CATEGORIES = [
@@ -879,7 +879,6 @@ export function ProjectWorkflow() {
     setNewChapterNumber(activeTab === 'art' ? nextArtChapterNumber : nextChapterNumber)
     setNewChapterFile(null)
     setAddChapterError(null)
-    setUploadMode('single')
     setNewChapterCategory('indesign')
     setIsAddChapterOpen(true)
   }
@@ -912,49 +911,26 @@ export function ProjectWorkflow() {
       }
 
       if (activeTab === 'art') {
-        if (uploadMode === 'zip') {
-          const result = await chaptersApi.createArtChaptersFromZip(id, newChapterFile)
-          setChapters(prev => [...prev, ...result.created])
-          setIsAddChapterOpen(false)
-          const skippedNote = result.skipped.length > 0 ? `, ${result.skipped.length} skipped` : ''
-          toast.success(`${result.created.length} Art chapter(s) created${skippedNote}`)
-          if (result.created.length > 0 && (project?.status === 'Active' || project?.status === 'Completed')) {
-            navigate(`/projects/${id}/planning`)
-          }
-          return
-        }
-
-        const created = await chaptersApi.createArtChapter(id, newChapterNumber, newChapterFile)
-        setChapters(prev => [...prev, created])
-        setIsAddChapterOpen(false)
-        toast.success(`${created.chapters} added — visit Planning to approve its schedule`)
-        if (project?.status === 'Active' || project?.status === 'Completed') {
-          navigate(`/projects/${id}/planning`)
-        }
-        return
-      }
-
-      if (uploadMode === 'zip') {
-        const result = await chaptersApi.createManuscriptChaptersFromZip(id, newChapterFile)
+        const result = await chaptersApi.createArtChaptersFromZip(id, newChapterFile)
         setChapters(prev => [...prev, ...result.created])
         setIsAddChapterOpen(false)
         const skippedNote = result.skipped.length > 0 ? `, ${result.skipped.length} skipped` : ''
-        toast.success(`${result.created.length} chapter(s) created${skippedNote}`)
+        toast.success(`${result.created.length} Art chapter(s) created${skippedNote}`)
         if (result.created.length > 0 && (project?.status === 'Active' || project?.status === 'Completed')) {
           navigate(`/projects/${id}/planning`)
         }
         return
       }
 
-      const created = await chaptersApi.createWithManuscript(id, newChapterNumber, newChapterFile)
-      setChapters(prev => [...prev, created])
+      const result = await chaptersApi.createManuscriptChaptersFromZip(id, newChapterFile)
+      setChapters(prev => [...prev, ...result.created])
       setIsAddChapterOpen(false)
-      if (project?.status === 'Active' || project?.status === 'Completed') {
-        toast.success(`Chapter ${created.chapters} added — visit Planning to approve its schedule`)
+      const skippedNote = result.skipped.length > 0 ? `, ${result.skipped.length} skipped` : ''
+      toast.success(`${result.created.length} chapter(s) created${skippedNote}`)
+      if (result.created.length > 0 && (project?.status === 'Active' || project?.status === 'Completed')) {
         navigate(`/projects/${id}/planning`)
-      } else {
-        toast.success(`Chapter ${created.chapters} added`)
       }
+      return
     } catch (err) {
       setAddChapterError(getApiErrorMessage(err, 'Failed to create chapter'))
     } finally {
@@ -1775,13 +1751,13 @@ export function ProjectWorkflow() {
       <Modal
         isOpen={isAddChapterOpen}
         onClose={() => { if (!addingChapter) setIsAddChapterOpen(false) }}
-        title={activeTab === 'art' ? 'New Art Chapter' : activeTab === 'design' ? 'New Design File' : 'New Chapter'}
+        title={activeTab === 'art' ? 'New Art Chapters' : activeTab === 'design' ? 'New Design File' : 'New Chapters'}
         description={
           activeTab === 'art'
-            ? (uploadMode === 'zip' ? 'Add multiple Art chapters from a zip file.' : 'Add the next Art chapter and its file.')
+            ? 'Add multiple Art chapters from a zip file.'
             : activeTab === 'design'
               ? 'Upload a file into the Design track.'
-              : (uploadMode === 'zip' ? 'Add multiple chapters at once from a zip file.' : 'Add the next chapter and its manuscript file.')
+              : 'Add multiple chapters at once from a zip file.'
         }
         footer={
           <div className="flex gap-3 justify-end">
@@ -1794,70 +1770,16 @@ export function ProjectWorkflow() {
             </button>
             <button
               onClick={handleCreateChapter}
-              disabled={addingChapter || !newChapterFile || (activeTab !== 'design' && uploadMode === 'single' && !newChapterNumber) || (activeTab === 'design' && !designChapters[0])}
+              disabled={addingChapter || !newChapterFile || (activeTab === 'design' && !designChapters[0])}
               className="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
             >
               {addingChapter && <Spinner size="sm" />}
-              {addingChapter ? 'Creating…' : activeTab === 'design' ? 'Upload File' : 'Create Chapter'}
+              {addingChapter ? 'Creating…' : activeTab === 'design' ? 'Upload File' : 'Create Chapters'}
             </button>
           </div>
         }
       >
         <div className="space-y-4">
-          {(activeTab === 'manuscript' || activeTab === 'art') && (
-            <div className="flex gap-2 p-1 bg-background border border-border rounded-lg w-fit">
-              <button
-                type="button"
-                onClick={() => { setUploadMode('single'); setNewChapterFile(null) }}
-                disabled={addingChapter}
-                className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${uploadMode === 'single' ? 'bg-primary text-white' : 'text-muted hover:text-text'}`}
-              >
-                Single Chapter
-              </button>
-              <button
-                type="button"
-                onClick={() => { setUploadMode('zip'); setNewChapterFile(null) }}
-                disabled={addingChapter}
-                className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${uploadMode === 'zip' ? 'bg-primary text-white' : 'text-muted hover:text-text'}`}
-              >
-                Multiple Chapters (ZIP)
-              </button>
-            </div>
-          )}
-
-          {activeTab === 'manuscript' && uploadMode === 'single' && (
-            <div>
-              <label className="block text-xs font-medium text-muted mb-1">Chapter No.</label>
-              <input
-                type="text"
-                value={newChapterNumber}
-                onChange={e => setNewChapterNumber(e.target.value.replace(/\D/g, ''))}
-                disabled={addingChapter}
-                className="w-full text-sm bg-background border border-border rounded-lg px-3 py-2 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-60"
-                placeholder={nextChapterNumber}
-              />
-              <p className="text-[11px] text-muted mt-1">
-                Next expected number is <span className="font-semibold">{nextChapterNumber}</span> — chapters must stay sequential with no gaps.
-              </p>
-            </div>
-          )}
-
-          {activeTab === 'art' && uploadMode === 'single' && (
-            <div>
-              <label className="block text-xs font-medium text-muted mb-1">Chapter No.</label>
-              <input
-                type="text"
-                value={newChapterNumber}
-                onChange={e => setNewChapterNumber(e.target.value.replace(/\D/g, ''))}
-                disabled={addingChapter}
-                className="w-full text-sm bg-background border border-border rounded-lg px-3 py-2 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-60"
-                placeholder={nextArtChapterNumber}
-              />
-              <p className="text-[11px] text-muted mt-1">
-                Next expected number is <span className="font-semibold">Ch {nextArtChapterNumber} - Art</span> — chapters must stay sequential with no gaps.
-              </p>
-            </div>
-          )}
 
           {activeTab === 'design' && (
             <div>
@@ -1882,17 +1804,15 @@ export function ProjectWorkflow() {
 
           <div>
             <label className="block text-xs font-medium text-muted mb-1">
-              {activeTab === 'art' ? (uploadMode === 'zip' ? 'Art files (.zip)' : 'Art file (single or .zip)') : activeTab === 'design' ? 'Design file (single or .zip)' : uploadMode === 'zip' ? 'Chapters (.zip)' : 'Manuscript file'}
+              {activeTab === 'art' ? 'Art files (.zip)' : activeTab === 'design' ? 'Design file (single or .zip)' : 'Chapters (.zip)'}
             </label>
             <UploadZone
               accept={
-                ((activeTab === 'art' && uploadMode === 'zip') || (activeTab === 'manuscript' && uploadMode === 'zip'))
+                (activeTab === 'art' || activeTab === 'manuscript')
                   ? '.zip'
-                  : activeTab === 'art'
-                    ? '.zip,.png,.jpg,.jpeg,.gif,.tiff,.webp,.bmp,.pdf'
-                    : activeTab === 'design'
-                      ? '.zip,.png,.jpg,.jpeg,.gif,.tiff,.webp,.bmp,.pdf,.docx,.doc,.xlsx,.xls,.txt,.indb,.indd'
-                      : '.docx'
+                  : activeTab === 'design'
+                    ? '.zip,.png,.jpg,.jpeg,.gif,.tiff,.webp,.bmp,.pdf,.docx,.doc,.xlsx,.xls,.txt,.indb,.indd'
+                    : '.docx'
               }
               onFiles={files => setNewChapterFile(files[0] ?? null)}
               isUploading={addingChapter}

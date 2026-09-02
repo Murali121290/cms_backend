@@ -1656,16 +1656,26 @@ def api_v2_project_bootstrap(
 
     # 3. Update/Setup Art chapters
     if art_workflow_name:
-        num_art_chapters = art_chapter_count if art_chapter_count is not None else project.chapter_count
-        if num_art_chapters:
-            for i in range(1, num_art_chapters + 1):
-                art_ch_num = f"Ch {i:02d} - Art"
+        # Update all existing Art chapters to the selected workflow
+        db.query(_ChapterInfo).filter(
+            _ChapterInfo.project == project.code,
+            _ChapterInfo.chapters.like("% - Art")
+        ).update({
+            _ChapterInfo.workflow: art_workflow_name,
+            _ChapterInfo.stage_name: get_first_stage(art_workflow_name),
+            _ChapterInfo.due_date: final_art_due
+        }, synchronize_session=False)
+
+        # Create an Art chapter for each manuscript chapter that exists
+        for _ch in chapters:
+            if _ch.number and _ch.number.isdigit():
+                art_ch_num = f"Ch {_ch.number.zfill(2)} - Art"
                 if art_ch_num not in _existing_ci:
                     db.add(_ChapterInfo(
                         client=project.division_code or "",
                         project=project.code,
                         chapters=art_ch_num,
-                        chapter_title=f"Chapter {i:02d} Art Pack",
+                        chapter_title=f"Chapter {_ch.number.zfill(2)} Art Pack",
                         workflow=art_workflow_name,
                         status="Received",
                         complexity_level=getattr(project, "composition", None) or "Medium",
@@ -1677,12 +1687,7 @@ def api_v2_project_bootstrap(
                         project_manager_name=getattr(project, "project_manager", None) or None,
                     ))
                     _existing_ci.add(art_ch_num)
-                else:
-                    db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code, _ChapterInfo.chapters == art_ch_num).update({
-                        _ChapterInfo.workflow: art_workflow_name,
-                        _ChapterInfo.stage_name: get_first_stage(art_workflow_name),
-                        _ChapterInfo.due_date: final_art_due
-                    }, synchronize_session=False)
+
     else:
         # Delete if any exist
         for row in db.query(_ChapterInfo).filter(
@@ -7281,11 +7286,13 @@ def api_v2_create_chapter_with_manuscript(
 
     number_padded = f"{new_number:02d}"
 
+    title = Path(os.path.basename(file.filename)).stem.strip() if file.filename else f"Chapter {number_padded}"
+
     result = chapter_service.create_chapter(
         db,
         project_id=project_id,
         number=number_padded,
-        title=f"Chapter {number_padded}",
+        title=title,
         upload_dir=file_service.UPLOAD_DIR,
         # "Received" — matches the pending-planning status used elsewhere (e.g. sync-chapters)
         # until this chapter is planned and approved on the Planning page.
@@ -7544,11 +7551,13 @@ def api_v2_create_chapters_with_manuscript_zip(
                     skipped.append({"filename": fname, "reason": f"Chapter {number_padded} already exists."})
                     continue
 
+                title = Path(os.path.basename(fname)).stem.strip() if fname else f"Chapter {number_padded}"
+
                 result = chapter_service.create_chapter(
                     db,
                     project_id=project_id,
                     number=number_padded,
-                    title=f"Chapter {number_padded}",
+                    title=title,
                     upload_dir=file_service.UPLOAD_DIR,
                     status="Received",
                 )
@@ -8097,27 +8106,52 @@ def api_v2_preview_zip(
 
     def classify_file(fname: str, rel_path: str):
         ext = fname.split(".")[-1].lower() if "." in fname else ""
-        if ext in ["xml", "html", "xhtml", "log"]: file_type = "XML"
-        elif ext in ["png", "jpg", "jpeg", "gif", "tiff", "tif", "svg", "eps"]: file_type = "Art"
+        if ext == "docx": file_type = "Manuscript"
+        elif ext in ["xml", "html", "xhtml"] and "art" not in fname.lower(): file_type = "XML"
         elif ext in ["indd"]: file_type = "InDesign"
-        elif ext in ["pdf"] and "proof" in fname.lower(): file_type = "Proof"
-        else: file_type = "Manuscript"
+        elif ext in ["pdf"] and "proof" in fname.lower() and "art" not in fname.lower(): file_type = "Proof"
+        else: file_type = "Art"
 
         stem = os.path.splitext(fname)[0].lower()
         matched_cat = "Not Found"
-        for rule in classification_rules:
-            for p in rule.get("patterns", []):
-                p_clean = p.lower()
-                if re.search(r'(?:^|[^a-z])' + re.escape(p_clean) + r'(?:[^a-z]|$)', stem) or p_clean in stem.split("_") or p_clean in stem.split("-"):
-                    matched_cat = rule.get("category", "")
+        
+        # Helper to check rules against a string
+        def get_cat(s: str) -> str:
+            for rule in classification_rules:
+                for p in rule.get("patterns", []):
+                    p_clean = p.lower()
+                    if re.search(r'(?:^|[^a-z])' + re.escape(p_clean) + r'(?:[^a-z]|$)', s) or p_clean in s.split("_") or p_clean in s.split("-"):
+                        return rule.get("category", "")
+            return "Not Found"
+            
+        matched_cat = get_cat(stem)
+        
+        # If not found in filename, try parent directories
+        if matched_cat == "Not Found":
+            path_parts = rel_path.replace("\\", "/").split("/")
+            for part in reversed(path_parts[:-1]):
+                cat = get_cat(part.lower())
+                if cat != "Not Found":
+                    matched_cat = cat
                     break
-            if matched_cat != "Not Found": break
 
         chapter_num = None
         if matched_cat == "Chapters":
-            chapter_num = file_service.extract_chapter_number_from_filename(fname)
+            path_parts = rel_path.replace("\\", "/").split("/")
+            
+            # 1. Try parent folders first for explicit 'ch' or 'chapter' match
+            for part in reversed(path_parts[:-1]):
+                m = re.search(r'(?:chapter|chap|ch)[_\s-]*(\d+)', part.lower())
+                if m:
+                    chapter_num = f"{int(m.group(1)):02d}"
+                    break
+            
+            # 2. If not found in folders explicitly, try the filename (which might be loose)
             if not chapter_num:
-                path_parts = rel_path.replace("\\", "/").split("/")
+                chapter_num = file_service.extract_chapter_number_from_filename(fname)
+            
+            # 3. If STILL not found, try folders with loose matching
+            if not chapter_num:
                 for part in reversed(path_parts[:-1]):
                     chapter_num = file_service.extract_chapter_number_from_filename(part)
                     if chapter_num: break
@@ -8136,7 +8170,7 @@ def api_v2_preview_zip(
     files_result = []
     for root, _, filenames in os.walk(temp_dir):
         for fname in filenames:
-            if fname == file.filename or "__MACOSX" in root or fname.startswith(".") or not fname.lower().endswith(".docx"): continue
+            if fname == file.filename or "__MACOSX" in root or fname.startswith("."): continue
             rel_path = os.path.relpath(os.path.join(root, fname), temp_dir)
             cat, num, ftype = classify_file(fname, rel_path)
             files_result.append({
@@ -8194,13 +8228,26 @@ def api_v2_resume_mapping(
 
         stem = os.path.splitext(fname)[0].lower()
         matched_cat = "Not Found"
-        for rule in classification_rules:
-            for p in rule.get("patterns", []):
-                p_clean = p.lower()
-                if re.search(r'(?:^|[^a-z])' + re.escape(p_clean) + r'(?:[^a-z]|$)', stem) or p_clean in stem.split("_") or p_clean in stem.split("-"):
-                    matched_cat = rule.get("category", "")
+        
+        # Helper to check rules against a string
+        def get_cat(s: str) -> str:
+            for rule in classification_rules:
+                for p in rule.get("patterns", []):
+                    p_clean = p.lower()
+                    if re.search(r'(?:^|[^a-z])' + re.escape(p_clean) + r'(?:[^a-z]|$)', s) or p_clean in s.split("_") or p_clean in s.split("-"):
+                        return rule.get("category", "")
+            return "Not Found"
+            
+        matched_cat = get_cat(stem)
+        
+        # If not found in filename, try parent directories
+        if matched_cat == "Not Found":
+            path_parts = rel_path.replace("\\", "/").split("/")
+            for part in reversed(path_parts[:-1]):
+                cat = get_cat(part.lower())
+                if cat != "Not Found":
+                    matched_cat = cat
                     break
-            if matched_cat != "Not Found": break
 
         chapter_num = None
         if matched_cat == "Chapters":
@@ -8225,7 +8272,7 @@ def api_v2_resume_mapping(
     files_result = []
     for root, _, filenames in os.walk(temp_dir):
         for fname in filenames:
-            if "__MACOSX" in root or fname.startswith(".") or not fname.lower().endswith(".docx"): continue
+            if "__MACOSX" in root or fname.startswith("."): continue
             rel_path = os.path.relpath(os.path.join(root, fname), temp_dir)
             cat, num, ftype = classify_file(fname, rel_path)
             files_result.append({
@@ -8298,10 +8345,16 @@ def api_v2_finalize_mapping(
             continue
 
         ch_num = mapping.chapter_number
+        if mapping.file_type == "Art" and ch_num and ch_num.isdigit():
+            ch_num = f"Ch {ch_num.zfill(2)} - Art"
+            
         if ch_num == "FM":
             ch_title = "Front matter"
         elif ch_num == "BM":
             ch_title = "Back matter"
+        elif ch_num.endswith(" - Art"):
+            digits = ch_num.replace("Ch ", "").replace(" - Art", "")
+            ch_title = f"Chapter {digits} Art Pack"
         else:
             ch_title = os.path.splitext(mapping.original_filename)[0]
 
