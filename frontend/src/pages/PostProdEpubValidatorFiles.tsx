@@ -45,6 +45,7 @@ import {
   pollTaskStatus,
   type ValidationProgress,
   exportEpub,
+  exportQaReport,
   getCachedAceReport,
   runAceReport,
   getCachedEpubCheckReport,
@@ -1149,7 +1150,6 @@ export function PostProdEpubValidatorFiles() {
                   onClick={async () => {
                     try {
                       setIsExporting(true);
-                      const { exportQaReport } = await import('@/api/epubValidator');
                       const result = await exportQaReport(folderName);
                       triggerDownload(result.blob, result.filename);
                       toast.success('QA Report downloaded');
