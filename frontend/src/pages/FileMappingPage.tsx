@@ -104,7 +104,7 @@ export function FileMappingPage() {
 
   const projectIdentifier = project?.project_code || project?.code
   const projectTitle = project?.project_title || project?.title
-  const unmappedCount = files.filter(f => f.category === 'Not Found').length
+  const unmappedCount = files.filter(f => f.file_type === 'Manuscript' && f.category === 'Not Found').length
   const isReadyToSave = unmappedCount === 0
 
   return (
@@ -196,6 +196,8 @@ export function FileMappingPage() {
                     </div>
                   ) : (
                     files.map((file, idx) => {
+                      if (file.file_type !== 'Manuscript') return null;
+
                       const isNotFound = file.category === 'Not Found';
                       
                       return (
