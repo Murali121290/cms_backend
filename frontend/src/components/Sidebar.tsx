@@ -66,21 +66,28 @@ export function Sidebar() {
     return typeof role === 'string' ? role : (role?.name ?? '')
   }
 
+  const isAccessibilityUser =
+    viewer?.team === 'Accessibility Team' ||
+    Boolean(viewer?.role && String(viewer.role).toLowerCase().includes('accessibility')) ||
+    Boolean(viewer?.roles && viewer.roles.some((r: any) => String(typeof r === 'string' ? r : r.name).toLowerCase().includes('accessibility')))
+
   const navItems = [
-    ...(viewer?.team !== 'Accessibility Team'
+    ...(!isAccessibilityUser
       ? [{ to: '/', icon: LayoutDashboard, label: 'Dashboard' }]
       : []),
-    ...(viewer?.team !== 'Accessibility Team'
+    ...(!isAccessibilityUser
       ? [{ to: '/workspace', icon: Briefcase, label: 'My Workspace' }]
       : []),
-    ...(viewer?.team !== 'Accessibility Team'
+    ...(!isAccessibilityUser
       ? [{ to: '/clients', icon: Users, label: 'Clients' }]
       : []),
-    ...((canAccess(ROLE_PERMISSIONS.access_post_production) || viewer?.team === 'Accessibility Team')
+    ...((canAccess(ROLE_PERMISSIONS.access_post_production) || isAccessibilityUser)
       ? [{ to: '/post-production', icon: Layers, label: 'Backlist' }]
       : []),
-    { to: '/reports', icon: BarChart3, label: 'Reports' },
-    ...(canAccess(ROLE_PERMISSIONS.access_settings)
+    ...(!isAccessibilityUser
+      ? [{ to: '/reports', icon: BarChart3, label: 'Reports' }]
+      : []),
+    ...(canAccess(ROLE_PERMISSIONS.access_settings) && !isAccessibilityUser
       ? [{ to: '/settings', icon: Settings, label: 'Settings' }]
       : []),
   ]

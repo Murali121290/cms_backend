@@ -129,8 +129,13 @@ export function LoginPage() {
   }
 
   if (sessionQuery.data?.authenticated) {
-    const isAccessTeam = sessionQuery.data.viewer?.team === 'Accessibility Team'
-    const destination = isAccessTeam && (from === '/' || from === '/dashboard') ? '/post-production' : from
+    const v = sessionQuery.data.viewer
+    const isAccessUser =
+      v?.team === 'Accessibility Team' ||
+      Boolean(v?.role && String(v.role).toLowerCase().includes('accessibility')) ||
+      Boolean(v?.roles && (v.roles as any[]).some((r: any) => String(typeof r === 'string' ? r : r.name).toLowerCase().includes('accessibility')))
+
+    const destination = isAccessUser && (from === '/' || from === '/dashboard') ? '/post-production' : from
     return <Navigate replace to={destination} />
   }
 
