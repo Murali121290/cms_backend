@@ -19,14 +19,23 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # 1. Rename column 'role' to 'designation' in 'users' table
-    op.alter_column('users', 'role', new_column_name='designation')
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    cols = {c['name'] for c in inspector.get_columns('users')}
 
-    # 2. Add new 'role' column as nullable String(50)
-    op.add_column('users', sa.Column('role', sa.String(length=50), nullable=True))
+    # 1. Rename column 'role' to 'designation' in 'users' table if 'role' exists and 'designation' doesn't
+    if 'role' in cols and 'designation' not in cols:
+        op.alter_column('users', 'role', new_column_name='designation')
+        cols.remove('role')
+        cols.add('designation')
+
+    # 2. Add new 'role' column as nullable String(50) if not exists
+    if 'role' not in cols:
+        op.add_column('users', sa.Column('role', sa.String(length=50), nullable=True))
 
     # 3. Copy existing 'admin' / 'Admin' roles to the new 'role' column
-    op.execute("UPDATE users SET role = designation WHERE designation ILIKE 'admin'")
+    if 'designation' in cols:
+        op.execute("UPDATE users SET role = designation WHERE designation ILIKE 'admin'")
 
 
 def downgrade() -> None:

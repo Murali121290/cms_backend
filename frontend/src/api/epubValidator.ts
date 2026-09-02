@@ -44,6 +44,26 @@ export async function validateFolder(folderName: string): Promise<ValidationApiR
   }
 }
 
+export interface EpubSummary {
+  total_chapters: number;
+  total_figures: number;
+  total_tables: number;
+  figure_labels: string[];
+  chapter_labels: string[];
+  table_labels: string[];
+  error?: string;
+}
+
+export async function getEpubSummary(folderName: string, refresh?: boolean): Promise<EpubSummary> {
+  try {
+    const params = refresh ? { refresh: true } : {};
+    const { data } = await api.get<EpubSummary>(`/post-prod/epub-validator/validate/${folderName}/summary`, { params });
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to get EPUB summary'));
+  }
+}
+
 // ─── Celery background validation ─────────────────────────────────────────────
 
 export interface ValidationProgress {
@@ -124,6 +144,19 @@ export async function saveFileContent(
   }
 }
 
+export async function renameEpubFile(
+  folderName: string,
+  filePath: string,
+  newName: string,
+): Promise<void> {
+  const encoded = filePath.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
+  try {
+    await api.post(`/post-prod/epub-validator/file-data/${folderName}/${encoded}/rename`, { new_name: newName });
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to rename file'));
+  }
+}
+
 export async function validateFile(
   folderName: string,
   fileName: string,
@@ -172,6 +205,7 @@ export interface EvProject {
   uploaded_by_id: number | null;
   uploaded_at: string;
   updated_at: string;
+  file_mappings?: Record<string, string> | null;
 }
 
 export async function listProjects(): Promise<EvProject[]> {
@@ -213,6 +247,25 @@ export async function deleteProject(projectId: number): Promise<void> {
     await api.delete(`/post-prod/epub-validator/projects/${projectId}`);
   } catch (err) {
     throw new Error(getApiErrorMessage(err, 'Failed to delete project'));
+  }
+}
+
+export async function getFileMappings(folderName: string): Promise<Record<string, string>> {
+  try {
+    const { data } = await api.get<{ status: boolean; mappings: Record<string, string> }>(
+      `/post-prod/epub-validator/projects/${folderName}/mappings`
+    );
+    return data.mappings;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to get file mappings'));
+  }
+}
+
+export async function saveFileMappings(folderName: string, mappings: Record<string, string>): Promise<void> {
+  try {
+    await api.post(`/post-prod/epub-validator/projects/${folderName}/mappings`, { mappings });
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to save file mappings'));
   }
 }
 
@@ -260,6 +313,35 @@ export async function exportEpub(
   }
 }
 
+export async function exportQaReport(folderName: string): Promise<{ blob: Blob; filename: string }> {
+  try {
+    const response = await api.get(
+      `/post-prod/epub-validator/export/${folderName}/qa-report`,
+      { responseType: 'blob', timeout: 60_000 },
+    );
+    
+    // Extract filename from Content-Disposition header
+    const contentDisposition = response.headers['content-disposition'] as string ?? '';
+    let filename = folderName + '_QA_Report.xlsx';
+    const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
+    if (filenameMatch && filenameMatch[1]) {
+      filename = filenameMatch[1];
+    }
+    
+    return { blob: response.data as Blob, filename };
+  } catch (err) {
+    if (axios.isAxiosError(err) && err.response?.data instanceof Blob) {
+      let parsed: { detail?: string; message?: string } | null = null;
+      try {
+        const text = await err.response.data.text();
+        parsed = JSON.parse(text);
+      } catch { /* not JSON */ }
+      if (parsed) throw new Error(parsed.detail ?? parsed.message ?? 'Failed to export QA report');
+    }
+    throw new Error(getApiErrorMessage(err, 'Failed to export QA report'));
+  }
+}
+
 export async function getCachedAceReport(folderName: string): Promise<AceReport | null> {
   try {
     const { data } = await api.get<{ status: boolean; report?: AceReport; message?: string }>(
@@ -289,6 +371,14 @@ export function getAceReportZipUrl(folderName: string): string {
   return `/api/v2/post-prod/epub-validator/ace/${encodeURIComponent(folderName)}/download-zip`;
 }
 
+export interface ValidationIssue {
+  type: string;
+  category?: string;
+  message: string;
+  line_number?: number;
+  snippet?: string;
+  extract?: string;
+}
 
 export interface EpubCheckMessage {
   id: string;

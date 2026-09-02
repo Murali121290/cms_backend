@@ -36,36 +36,33 @@ class CompatibilityRolesList(list):
 
 ROLE_MAP = {
     "admin": "Admin",
+    "manager": "Manager",
+    "employee": "Employee",
+    "hr": "HR",
     "viewer": "Viewer",
-    "manager": "ProjectManager",
-    "copyeditor": "CopyEditor",
-    "technical_copyeditor": "TechnicalCopyEditor",
-    "typesetter": "Typesetter",
-    "pereditor": "PreEditor",
-    "qa_reviewer": "QAReviewer",
-    "operations_manager": "OperationsManager",
-    "finance_analyst": "FinanceAnalyst",
-    "support": "Support",
-    "developer": "Developer",
-    "analyst": "Analyst",
-    "designer": "Designer"
 }
 
 def map_role_to_capitalized(role_name: str) -> str:
     if not role_name:
-        return "Viewer"
-    return ROLE_MAP.get(role_name.lower(), role_name.capitalize())
+        return "Employee"
+    role_lower = role_name.lower()
+    if role_lower in ROLE_MAP:
+        return ROLE_MAP[role_lower]
+    return role_name.capitalize()
 
 class User(Base):
     __tablename__ = "users"
     id              = Column(BigInteger, primary_key=True, autoincrement=True)
     username        = Column(String(150),  unique=True, nullable=False, index=True)
     email           = Column(String(255),  unique=True, nullable=False, index=True)
+    first_name      = Column(String(100),  nullable=True)
+    last_name       = Column(String(100),  nullable=True)
     password_hash   = Column(Text,         nullable=False)
     role            = Column(String(50),   nullable=True)
     designation     = Column(String(50),   nullable=True)
     team            = Column(String(50),   nullable=False)
     customer_access = Column(DialectJSONB,  nullable=False, default=list)
+    access_level    = Column(String(50),   nullable=True, default="standard")
     active_status   = Column(Boolean,      nullable=False, default=True)
     created_at      = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at      = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
@@ -74,14 +71,15 @@ class User(Base):
 
     @property
     def roles(self):
-        if not self.role:
+        effective_role = self.role or self.designation
+        if not effective_role:
             return CompatibilityRolesList()
-        cap_role = map_role_to_capitalized(self.role)
+        cap_role = map_role_to_capitalized(effective_role)
         role_id = 1
-        if self.role.lower() == "admin":
+        if effective_role.lower() == "admin":
             role_id = 4
-        elif self.role.lower() == "viewer":
+        elif effective_role.lower() == "viewer":
             role_id = 1
-        elif self.role.lower() == "manager":
+        elif effective_role.lower() == "manager":
             role_id = 3
         return CompatibilityRolesList([CompatibilityRoleItem(cap_role, role_id)])

@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reference Review & Validation Interactive Demo</title>
+  <style>
+    :root {
+      --navy-900: #0f172a;
+      --navy-800: #1e293b;
+      --navy-700: #334155;
+      --navy-500: #64748b;
+      --navy-100: #e2e8f0;
+      --surface-50: #f8fafc;
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    body { background-color: #f1f5f9; color: var(--navy-900); padding: 24px; }
+    
+    .container { max-w: 1100px; margin: 0 auto; background: #ffffff; border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05); border: 1px solid var(--navy-100); overflow: hidden; }
+    .header { padding: 20px 24px; border-bottom: 1px solid var(--navy-100); background: var(--surface-50); display: flex; align-items: center; justify-content: space-between; }
+    .header h1 { font-size: 18px; font-weight: 700; color: var(--navy-900); display: flex; align-items: center; gap: 8px; }
+    .badge { background: #dbeafe; color: #1e40af; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 12px; text-transform: uppercase; }
+
+    .main-grid { display: grid; grid-template-columns: 1fr 340px; gap: 0; min-height: 600px; }
+    .editor-section { padding: 32px; border-right: 1px solid var(--navy-100); line-height: 1.7; font-size: 15px; background: #fff; }
+    .editor-section h2 { font-size: 20px; font-weight: 700; margin-bottom: 16px; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px; }
+    .editor-section p { margin-bottom: 16px; }
+
+    /* Character Style Highlight Classes */
+    .cite_bib { background-color: #cffafe; color: #0891b2; font-weight: 600; padding: 1px 4px; border-radius: 4px; cursor: pointer; border-bottom: 1px solid #0891b2; }
+    .cite_bib:hover { background-color: #a5f3fc; }
+
+    .references-list { margin-top: 24px; padding-top: 16px; border-top: 2px dashed var(--navy-100); }
+    .ref-entry { margin-bottom: 14px; padding: 12px; border-radius: 8px; background: var(--surface-50); border: 1px solid var(--navy-100); font-size: 13.5px; position: relative; transition: all 0.2s ease; }
+    .ref-entry:hover { border-color: #cbd5e1; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+
+    .ref-actions { position: absolute; right: 10px; top: 10px; display: flex; gap: 6px; }
+    .btn-edit { background: #ffffff; border: 1px solid var(--navy-100); padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; color: var(--navy-700); cursor: pointer; display: flex; align-items: center; gap: 4px; }
+    .btn-edit:hover { background: #f8fafc; border-color: #cbd5e1; color: var(--primary); }
+
+    /* XML Tag Spans Styling Colors */
+    .bib_chapterno { background-color: #e5e7eb; padding: 0 4px; border-radius: 3px; font-weight: bold; }
+    .bib_surname { background-color: #bef264; padding: 0 3px; border-radius: 2px; }
+    .bib_fname { background-color: #fef9c3; padding: 0 3px; border-radius: 2px; }
+    .bib_etal { background-color: #bef264; font-style: italic; padding: 0 3px; }
+    .bib_title { background-color: #fbcfe8; padding: 0 3px; border-radius: 2px; }
+    .bib_journal { background-color: #ffedd5; font-style: italic; padding: 0 3px; border-radius: 2px; }
+    .bib_year { background-color: #e9d5ff; padding: 0 3px; border-radius: 2px; font-weight: 600; }
+    .bib_volume { background-color: #bae6fd; font-weight: bold; padding: 0 2px; }
+    .bib_issue { background-color: #bfdbfe; padding: 0 2px; }
+    .bib_fpage { background-color: #fef9c3; padding: 0 2px; }
+    .bib_lpage { background-color: #e5e7eb; padding: 0 2px; }
+    .bib_doi { background-color: #fef08a; padding: 0 4px; border-radius: 2px; font-family: monospace; font-size: 12px; }
+    .bib_medline { background-color: #bae6fd; padding: 0 4px; border-radius: 2px; font-family: monospace; font-size: 12px; }
+
+    /* Track Changes styling */
+    ins.tc-insert, ins { background-color: #dcfce7; color: #15803d; text-decoration: none; border-bottom: 2px solid #22c55e; padding: 0 2px; }
+    del.tc-delete, del { background-color: #fee2e2; color: #b91c1c; text-decoration: line-through; padding: 0 2px; }
+
+    /* Side Panel */
+    .sidebar { background: var(--surface-50); padding: 20px; font-size: 13px; }
+    .sidebar-card { background: #fff; border: 1px solid var(--navy-100); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+    .sidebar-card h3 { font-size: 13px; text-transform: uppercase; font-weight: 700; color: var(--navy-500); margin-bottom: 12px; letter-spacing: 0.5px; }
+    .legend-item { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; font-weight: 500; }
+    .color-box { width: 14px; height: 14px; border-radius: 3px; shrink: 0; }
+
+    /* Modal Styling */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(4px); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 16px; opacity: 0; pointer-events: none; transition: opacity 0.2s ease; }
+    .modal-overlay.active { opacity: 1; pointer-events: auto; }
+    .modal { background: #ffffff; width: 100%; max-width: 720px; border-radius: 12px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); border: 1px solid var(--navy-100); overflow: hidden; display: flex; flex-direction: column; max-height: 90vh; }
+    .modal-header { padding: 16px 20px; border-bottom: 1px solid var(--navy-100); display: flex; justify-content: space-between; align-items: center; background: var(--surface-50); }
+    .modal-header h3 { font-size: 14px; font-weight: 700; color: var(--navy-900); }
+    .modal-body { padding: 20px; overflow-y: auto; space-y: 16px; }
+    .modal-body label { display: block; font-size: 10px; uppercase font-weight: 700; color: var(--navy-500); letter-spacing: 0.5px; margin-bottom: 6px; }
+    .modal-body textarea { width: 100%; min-height: 90px; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 13px; line-height: 1.5; outline: none; margin-bottom: 16px; }
+    .modal-body textarea:focus { border-color: var(--primary); ring: 2px var(--primary); }
+    
+    .preview-box { padding: 12px; background: var(--surface-50); border: 1px solid var(--navy-100); border-radius: 8px; font-size: 13px; line-height: 1.6; margin-bottom: 16px; }
+
+    .search-group { border-top: 1px solid var(--navy-100); padding-top: 16px; }
+    .search-buttons { display: flex; gap: 8px; margin-bottom: 12px; }
+    .btn-db { padding: 6px 12px; background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 12px; font-weight: 600; color: var(--navy-700); cursor: pointer; }
+    .btn-db.active, .btn-db:hover { background: var(--navy-900); color: #fff; border-color: var(--navy-900); }
+
+    .search-input-wrap { display: flex; gap: 8px; margin-bottom: 12px; }
+    .search-input-wrap input { flex: 1; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 12.5px; outline: none; }
+    
+    .modal-footer { padding: 14px 20px; border-top: 1px solid var(--navy-100); background: var(--surface-50); display: flex; justify-content: flex-end; gap: 10px; }
+    .btn-cancel { padding: 8px 16px; background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; }
+    .btn-save { padding: 8px 16px; background: var(--primary); color: #fff; border: none; border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer; }
+    .btn-save:hover { background: var(--primary-hover); }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <div class="header">
+      <h1>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
+        Reference Review & Validation Module
+      </h1>
+      <span class="badge">AMA / APA Style System</span>
+    </div>
+
+    <div class="main-grid">
+      <!-- Left: Editor & References Page Content -->
+      <div class="editor-section">
+        <h2>Fetal Ultrasound Screening & Diagnostics</h2>
+        <p>
+          Ultrasound screening during early pregnancy allows for timely detection of non-chromosomal structural anomalies <span class="cite_bib" onclick="openModal(1)">[1]</span>. 
+          First-trimester structural evaluations systematically evaluate cranial anatomy and early organ development <span class="cite_bib" onclick="openModal(2)">[2]</span>.
+        </p>
+
+        <div class="references-list">
+          <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 16px;">References</h3>
+
+          <!-- Ref Entry 1 -->
+          <div class="ref-entry" id="ref-card-1">
+            <div class="ref-actions">
+              <button class="btn-edit" onclick="openModal(1)">✎ Edit</button>
+            </div>
+            <span class="bib_chapterno">1.</span> 
+            <span class="bib_surname">Syngelaki</span> <span class="bib_fname">A</span>, 
+            <span class="bib_surname">Chelemen</span> <span class="bib_fname">T</span>, 
+            <span class="bib_surname">Dagklis</span> <span class="bib_fname">T</span>, 
+            <span class="bib_surname">Allan</span> <span class="bib_fname">L</span>, 
+            <span class="bib_surname">Nicolaides</span> <span class="bib_fname">KH</span>. 
+            <span class="bib_title">Challenges in the diagnosis of fetal non-chromosomal abnormalities at 11-13 weeks</span>. 
+            <span class="bib_journal"><em>Prenat Diagn</em></span>. 
+            <span class="bib_year">2011</span>;<span class="bib_volume">31</span>(<span class="bib_issue">1</span>):<span class="bib_fpage">90</span>-<span class="bib_lpage">102</span>. 
+            <span class="bib_doi">doi:10.1002/pd.2642</span>
+          </div>
+
+          <!-- Ref Entry 2 -->
+          <div class="ref-entry" id="ref-card-2">
+            <div class="ref-actions">
+              <button class="btn-edit" onclick="openModal(2)">✎ Edit</button>
+            </div>
+            <span class="bib_chapterno">2.</span> 
+            <span class="bib_surname">Karim</span> <span class="bib_fname">JN</span>, 
+            <span class="bib_surname">Roberts</span> <span class="bib_fname">NW</span>, 
+            <span class="bib_surname">Salomon</span> <span class="bib_fname">LJ</span>, 
+            <span class="bib_surname">Papageorghiou</span> <span class="bib_fname">AT</span>. 
+            <span class="bib_title">Systematic review of first-trimester ultrasound screening for detection of fetal structural anomalies</span>. 
+            <span class="bib_journal"><em>Ultrasound Obstet Gynecol</em></span>. 
+            <span class="bib_year">2016</span>;<span class="bib_volume">50</span>(<span class="bib_issue">4</span>):<span class="bib_fpage">429</span>-<span class="bib_lpage">441</span>. 
+            <span class="bib_doi">doi:10.1002/uog.17246</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Sidebar: Style Color Legend & Info -->
+      <div class="sidebar">
+        <div class="sidebar-card">
+          <h3>XML Character Styles</h3>
+          <div class="legend-item"><div class="color-box" style="background:#bef264"></div> Author Surname (bib_surname)</div>
+          <div class="legend-item"><div class="color-box" style="background:#fef9c3"></div> Author Initials (bib_fname)</div>
+          <div class="legend-item"><div class="color-box" style="background:#fbcfe8"></div> Article Title (bib_title)</div>
+          <div class="legend-item"><div class="color-box" style="background:#ffedd5"></div> Journal Name (bib_journal)</div>
+          <div class="legend-item"><div class="color-box" style="background:#e9d5ff"></div> Publication Year (bib_year)</div>
+          <div class="legend-item"><div class="color-box" style="background:#bae6fd"></div> Volume (bib_volume)</div>
+          <div class="legend-item"><div class="color-box" style="background:#fef08a"></div> DOI (bib_doi)</div>
+        </div>
+
+        <div class="sidebar-card">
+          <h3>Track Changes Highlights</h3>
+          <div class="legend-item"><ins class="tc-insert">+ Inserted Text</ins></div>
+          <div class="legend-item" style="margin-top:6px;"><del class="tc-delete">- Deleted Text</del></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Reference Modal Popup -->
+  <div class="modal-overlay" id="editModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>✎ Edit Reference Text — <span id="modalRefLabel">ref_1</span></h3>
+        <button onclick="closeModal()" style="border:none; background:none; font-size:18px; cursor:pointer;">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <label>EDIT REFERENCE TEXT</label>
+        <textarea id="refTextarea" oninput="updateDiffPreview()"></textarea>
+
+        <label>LIVE PREVIEW (WITH CHARACTER STYLING HIGHLIGHTS)</label>
+        <div class="preview-box" id="livePreview"></div>
+
+        <label>AFTER SAVE (REAL-TIME TRACK CHANGES DIFF PREVIEW)</label>
+        <div class="preview-box" id="diffPreview"></div>
+
+        <!-- 4 Database Live Search Section -->
+        <div class="search-group">
+          <label>SEARCH DATABASE FOR CORRECT FORMATTING (AMA / APA STYLE)</label>
+          <div class="search-buttons">
+            <button class="btn-db active" onclick="runSearch('pubmed')">PubMed</button>
+            <button class="btn-db" onclick="runSearch('crossref')">CrossRef</button>
+            <button class="btn-db" onclick="runSearch('googlebooks')">Google Books</button>
+            <button class="btn-db" onclick="runSearch('wikipedia')">Wikipedia</button>
+          </div>
+          <div class="search-input-wrap">
+            <input type="text" id="searchInput" value="Challenges in the diagnosis of fetal non-chromosomal abnormalities">
+            <button class="btn-db active" onclick="runSearch('pubmed')">Search</button>
+          </div>
+          <div id="searchResultsBox" style="font-size:12px; padding:8px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; display:none;"></div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+        <button class="btn-save" onclick="saveChanges()">Save Changes (Track Changes)</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const sampleData = {
+      1: {
+        original: "1. Syngelaki A, Chelemen T, Dagklis T, Allan L, Nicolaides KH. Challenges in the diagnosis of fetal non-chromosomal abnormalities at 11-13 weeks. Prenat Diagn. 2011;31(1):90-102. doi:10.1002/pd.2642",
+        styled: '<span class="bib_chapterno">1.</span> <span class="bib_surname">Syngelaki</span> <span class="bib_fname">A</span>, <span class="bib_surname">Chelemen</span> <span class="bib_fname">T</span>, <span class="bib_surname">Dagklis</span> <span class="bib_fname">T</span>, <span class="bib_surname">Allan</span> <span class="bib_fname">L</span>, <span class="bib_surname">Nicolaides</span> <span class="bib_fname">KH</span>. <span class="bib_title">Challenges in the diagnosis of fetal non-chromosomal abnormalities at 11-13 weeks</span>. <span class="bib_journal"><em>Prenat Diagn</em></span>. <span class="bib_year">2011</span>;<span class="bib_volume">31</span>(<span class="bib_issue">1</span>):<span class="bib_fpage">90</span>-<span class="bib_lpage">102</span>. <span class="bib_doi">doi:10.1002/pd.2642</span>'
+      },
+      2: {
+        original: "2. Karim JN, Roberts NW, Salomon LJ, Papageorghiou AT. Systematic review of first-trimester ultrasound screening for detection of fetal structural anomalies. Ultrasound Obstet Gynecol. 2016;50(4):429-441. doi:10.1002/uog.17246",
+        styled: '<span class="bib_chapterno">2.</span> <span class="bib_surname">Karim</span> <span class="bib_fname">JN</span>, <span class="bib_surname">Roberts</span> <span class="bib_fname">NW</span>, <span class="bib_surname">Salomon</span> <span class="bib_fname">LJ</span>, <span class="bib_surname">Papageorghiou</span> <span class="bib_fname">AT</span>. <span class="bib_title">Systematic review of first-trimester ultrasound screening for detection of fetal structural anomalies</span>. <span class="bib_journal"><em>Ultrasound Obstet Gynecol</em></span>. <span class="bib_year">2016</span>;<span class="bib_volume">50</span>(<span class="bib_issue">4</span>):<span class="bib_fpage">429</span>-<span class="bib_lpage">441</span>. <span class="bib_doi">doi:10.1002/uog.17246</span>'
+      }
+    };
+
+    let activeRefId = 1;
+
+    function openModal(id) {
+      activeRefId = id;
+      document.getElementById('modalRefLabel').textContent = `ref_${id}`;
+      document.getElementById('refTextarea').value = sampleData[id].original;
+      document.getElementById('livePreview').innerHTML = sampleData[id].styled;
+      document.getElementById('editModal').classList.add('active');
+      updateDiffPreview();
+    }
+
+    function closeModal() {
+      document.getElementById('editModal').classList.remove('active');
+    }
+
+    function updateDiffPreview() {
+      const orig = sampleData[activeRefId].original;
+      const edited = document.getElementById('refTextarea').value;
+
+      if (orig === edited) {
+        document.getElementById('diffPreview').innerHTML = '<span style="color:#64748b; font-style:italic;">No changes made yet. Edit text above to see track changes diff.</span>';
+        return;
+      }
+
+      // Simple word diff generator for demonstration
+      const origWords = orig.split(' ');
+      const editedWords = edited.split(' ');
+      let diffHtml = '';
+      
+      let i = 0, j = 0;
+      while(i < origWords.length || j < editedWords.length) {
+        if (i < origWords.length && j < editedWords.length && origWords[i] === editedWords[j]) {
+          diffHtml += origWords[i] + ' ';
+          i++; j++;
+        } else if (j < editedWords.length && (i >= origWords.length || origWords[i] !== editedWords[j])) {
+          diffHtml += `<ins class="tc-insert" data-author="Editor">${editedWords[j]}</ins> `;
+          j++;
+        } else {
+          diffHtml += `<del class="tc-delete" data-author="Editor">${origWords[i]}</del> `;
+          i++;
+        }
+      }
+      document.getElementById('diffPreview').innerHTML = diffHtml;
+    }
+
+    function runSearch(db) {
+      const box = document.getElementById('searchResultsBox');
+      box.style.display = 'block';
+      box.innerHTML = `<strong>Search Result (${db.toUpperCase()}):</strong><br>1. Syngelaki A, Chelemen T, Dagklis T, Allan L, Nicolaides KH. Challenges in the diagnosis of fetal non-chromosomal abnormalities at 11-13 weeks. Prenat Diagn. 2011;31(1):90-102.<br><button style="margin-top:6px; padding:3px 8px; background:#2563eb; color:#fff; border:none; border-radius:4px; font-size:11px; cursor:pointer;" onclick="useSearchResult()">Use Result</button>`;
+    }
+
+    function useSearchResult() {
+      document.getElementById('refTextarea').value = "1. Syngelaki A, Chelemen T, Dagklis T, Allan L, Nicolaides KH. Challenges in the diagnosis of fetal non-chromosomal abnormalities at 11-13 weeks. Prenat Diagn. 2011;31(1):90-102.";
+      updateDiffPreview();
+    }
+
+    function saveChanges() {
+      const edited = document.getElementById('refTextarea').value;
+      const card = document.getElementById(`ref-card-${activeRefId}`);
+      if (card) {
+        card.querySelector('.bib_title').textContent = edited.includes('Challenges') ? 'Challenges in the diagnosis of fetal non-chromosomal abnormalities at 11-13 weeks' : edited;
+      }
+      closeModal();
+    }
+  </script>
+</body>
+</html>

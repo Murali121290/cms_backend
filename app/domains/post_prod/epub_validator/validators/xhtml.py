@@ -80,3 +80,975 @@ def validate_xhtml_well_formed(file_details, rule_config=None):
             break
 
     return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("XHTML002")
+def validate_epub_type_semantics(file_details, rule_config=None):
+    """Ensure proper use of epub:type for front matter, title page, part, chapter, etc.
+    Enforces that specific files contain these tags based on file name or type.
+    """
+    file_path = file_details["full_path"]
+    filename_lower = os.path.basename(file_path).lower()
+    issues = []
+    
+    try:
+        from bs4 import BeautifulSoup
+        with open(file_path, "r", encoding="utf-8") as f:
+            html_text = f.read()
+            soup = BeautifulSoup(html_text, "xml")
+    except Exception as e:
+        return {"issues_count": 0, "issues": []}
+
+    body = soup.find("body")
+    if not body:
+        return {"issues_count": 0, "issues": []}
+
+    body_epub_type = body.get("epub:type")
+
+    config = rule_config.get("rule_config") if rule_config else None
+    
+    if not config or "file_heuristics" not in config or "global_pairings" not in config:
+        return {
+            "issues_count": 1,
+            "issues": [{
+                "type": "configuration_error",
+                "message": "XHTML002 requires a 'rule_config' block with 'file_heuristics' and 'global_pairings' in customer.json.",
+                "category": "Error",
+                "file_path": file_details.get("relative_path"),
+            }]
+        }
+
+    file_heuristics = config["file_heuristics"]
+    global_pairings = config["global_pairings"]
+
+    # Determine expected semantics based on filename
+    expected_body = None
+    expected_tag = None
+    expected_epub_type = None
+    expected_role = None
+
+    for h in file_heuristics:
+        patterns = h.get("patterns", [])
+        if "pattern" in h and h["pattern"] not in patterns:
+            patterns = patterns + [h["pattern"]]
+
+        if any(p in filename_lower for p in patterns):
+            expected_body = h.get("expected_body")
+            expected_tag = h.get("expected_tag")
+            expected_epub_type = h.get("expected_epub_type")
+            expected_role = h.get("expected_role")
+            break
+
+    def get_element_info(el):
+        s = str(el)
+        end = s.find('>')
+        extract = s[:end+1] if end != -1 else s
+        
+        idx = html_text.find(extract)
+        if idx != -1:
+            line = html_text.count('\n', 0, idx) + 1
+        else:
+            # Fallback for when BeautifulSoup reorders attributes in extract
+            tag_name = el.name
+            etype = el.get("epub:type", "")
+            lines = html_text.split('\n')
+            line = getattr(el, "sourceline", None)
+            tag_start = f"<{tag_name}"
+            for i, l_text in enumerate(lines):
+                if tag_start in l_text and f"epub:type=\"{etype}\"" in l_text:
+                    line = i + 1
+                    start_idx = l_text.find(tag_start)
+                    end_idx = l_text.find('>', start_idx)
+                    if start_idx != -1 and end_idx != -1:
+                        extract = l_text[start_idx:end_idx+1]
+                    break
+            
+        return line, extract
+
+    if expected_body and body_epub_type != expected_body:
+        line, extract = get_element_info(body)
+        issue = {
+            "type": "invalid_body_epub_type",
+            "rule_name": "Invalid body epub:type",
+            "message": f"<body> epub:type should be '{expected_body}' for this file type.",
+            "category": "Error",
+            "file_path": file_details.get("relative_path"),
+            "extract": extract
+        }
+        if line: issue["line_number"] = line
+        issues.append(issue)
+
+    if expected_tag and expected_epub_type:
+        # Check if the exact tag with epub:type exists
+        element = soup.find(expected_tag, attrs={"epub:type": expected_epub_type})
+        if not element:
+            # Check if there's a tag with a partially matching or incorrect epub:type to give a better error
+            wrong_element = soup.find(expected_tag, attrs={"epub:type": lambda x: x and expected_epub_type in x.split()})
+            if not wrong_element:
+                wrong_element = soup.find(expected_tag, attrs={"epub:type": True})
+                
+            if wrong_element:
+                actual_epub_type = wrong_element.get("epub:type")
+                line, extract = get_element_info(wrong_element)
+                issue = {
+                    "type": "invalid_epub_type_value",
+                    "rule_name": "Invalid epub:type",
+                    "message": f"<{expected_tag}> has epub:type=\"{actual_epub_type}\", but it must be exactly \"{expected_epub_type}\".",
+                    "category": "Error",
+                    "file_path": file_details.get("relative_path"),
+                    "extract": extract
+                }
+                if line: issue["line_number"] = line
+                issues.append(issue)
+            else:
+                issues.append({
+                    "type": "missing_required_epub_type",
+                    "rule_name": "Missing epub:type",
+                    "message": f"File requires <{expected_tag} epub:type=\"{expected_epub_type}\">.",
+                    "category": "Error",
+                    "file_path": file_details.get("relative_path"),
+                })
+        elif expected_role and element.get("role") != expected_role:
+            line, extract = get_element_info(element)
+            actual_role = element.get("role")
+            msg = f"<{expected_tag} epub:type=\"{expected_epub_type}\"> has role=\"{actual_role}\", but must have role=\"{expected_role}\"." if actual_role else f"<{expected_tag} epub:type=\"{expected_epub_type}\"> is missing role=\"{expected_role}\"."
+            issue = {
+                "type": "invalid_epub_type_pairing",
+                "rule_name": "Invalid role pairing",
+                "message": msg,
+                "category": "Error",
+                "file_path": file_details.get("relative_path"),
+                "extract": extract
+            }
+            if line: issue["line_number"] = line
+            issues.append(issue)
+
+    # Generic check for all elements with epub:type to ensure proper roles
+    for el in soup.find_all(attrs={"epub:type": True}):
+        etype = el.get("epub:type")
+        tag_name = el.name
+        role = el.get("role")
+        
+        for pairing in global_pairings:
+            if etype == pairing["epub_type"]:
+                if "tag" in pairing and tag_name != pairing["tag"]:
+                    continue
+                req_role = pairing["required_role"]
+                if role != req_role:
+                    line, extract = get_element_info(el)
+                    msg = f"<{tag_name} epub:type=\"{etype}\"> has role=\"{role}\", but must have role=\"{req_role}\"." if role else f"<{tag_name} epub:type=\"{etype}\"> is missing role=\"{req_role}\"."
+                    issue = {
+                        "type": "invalid_epub_type_pairing",
+                        "rule_name": "Invalid role pairing",
+                        "message": msg,
+                        "category": "Error",
+                        "file_path": file_details.get("relative_path"),
+                        "extract": extract
+                    }
+                    if line: issue["line_number"] = line
+                    issues.append(issue)
+
+    # Deduplicate issues based on identical messages to prevent double-logging
+    unique_issues = list({issue["message"]: issue for issue in issues}.values())
+
+    return {"issues_count": len(unique_issues), "issues": unique_issues}
+
+@rule("XHTML003")
+def validate_html_language_declaration(file_details, rule_config=None):
+    """Ensure HTML tag declares language (lang and xml:lang)."""
+    file_path = file_details["full_path"]
+    issues = []
+    
+    try:
+        from bs4 import BeautifulSoup
+        with open(file_path, "r", encoding="utf-8") as f:
+            html_text = f.read()
+            soup = BeautifulSoup(html_text, "xml")
+    except Exception as e:
+        return {"issues_count": 0, "issues": []}
+
+    html_tag = soup.find("html")
+    if not html_tag:
+        return {"issues_count": 0, "issues": []}
+        
+    config = rule_config.get("rule_config") if rule_config else None
+    expected_lang = "en"
+    if config and "expected_lang" in config:
+        expected_lang = config["expected_lang"]
+
+    lang = html_tag.get("lang")
+    xml_lang = html_tag.get("xml:lang")
+    
+    def get_element_info(el):
+        s = str(el)
+        end = s.find('>')
+        extract = s[:end+1] if end != -1 else s
+        
+        idx = html_text.find(extract)
+        if idx != -1:
+            line = html_text.count('\n', 0, idx) + 1
+        else:
+            tag_name = el.name
+            lines = html_text.split('\n')
+            line = getattr(el, "sourceline", None)
+            tag_start = f"<{tag_name}"
+            for i, l_text in enumerate(lines):
+                if tag_start in l_text:
+                    line = i + 1
+                    start_idx = l_text.find(tag_start)
+                    end_idx = l_text.find('>', start_idx)
+                    if start_idx != -1 and end_idx != -1:
+                        extract = l_text[start_idx:end_idx+1]
+                    break
+        return line, extract
+
+    line, extract = get_element_info(html_tag)
+    
+    if not lang or not xml_lang:
+        issue = {
+            "type": "missing_language_declaration",
+            "message": f"<html> must declare both lang=\"{expected_lang}\" and xml:lang=\"{expected_lang}\".",
+            "category": "Error",
+            "file_path": file_details.get("relative_path"),
+            "extract": extract
+        }
+        if line: issue["line_number"] = line
+        issues.append(issue)
+    else:
+        if lang != expected_lang or xml_lang != expected_lang:
+            issue = {
+                "type": "invalid_language_declaration",
+                "message": f"<html> language must be \"{expected_lang}\". Found lang=\"{lang}\" and xml:lang=\"{xml_lang}\".",
+                "category": "Error",
+                "file_path": file_details.get("relative_path"),
+                "extract": extract
+            }
+            if line: issue["line_number"] = line
+            issues.append(issue)
+
+    return {"issues_count": len(issues), "issues": issues}
+
+@rule("XHTML004")
+def validate_title_element(book_details, rule_config=None):
+    """Ensure exactly one non-empty <title> element exists per XHTML file, and its text is unique across all pages."""
+    epub_path = book_details["epub_path"]
+    issues = []
+    
+    # Locate XHTML files
+    inner_config = rule_config.get("rule_config", {}) if rule_config else {}
+    xhtml_folder_name = inner_config.get("xhtml_folder", "Text")
+    
+    xhtml_dir = os.path.join(epub_path, "OEBPS", xhtml_folder_name)
+    if not os.path.isdir(xhtml_dir):
+        return {"issues_count": 0, "issues": []}
+        
+    xhtml_files = [f for f in os.listdir(xhtml_dir) if f.lower().endswith(".xhtml")]
+    xhtml_files.sort()
+    
+    seen_titles = {} # title_text -> relative_file_path
+    
+    def get_element_info(el, html_content):
+        s = str(el)
+        end = s.find('>')
+        extract = s[:end+1] if end != -1 else s
+        
+        idx = html_content.find(extract)
+        if idx != -1:
+            line = html_content.count('\n', 0, idx) + 1
+        else:
+            tag_name = el.name
+            lines = html_content.split('\n')
+            line = getattr(el, "sourceline", None)
+            tag_start = f"<{tag_name}"
+            for i, l_text in enumerate(lines):
+                if tag_start in l_text:
+                    line = i + 1
+                    start_idx = l_text.find(tag_start)
+                    end_idx = l_text.find('>', start_idx)
+                    if start_idx != -1 and end_idx != -1:
+                        extract = l_text[start_idx:end_idx+1]
+                    break
+        return line, extract
+
+    from bs4 import BeautifulSoup
+    for file_name in xhtml_files:
+        file_path = os.path.join(xhtml_dir, file_name)
+        rel_path = f"OEBPS/{xhtml_folder_name}/{file_name}"
+        
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                html_text = f.read()
+                soup = BeautifulSoup(html_text, "xml")
+        except Exception:
+            continue
+
+        head = soup.find("head")
+        if not head:
+            issues.append({
+                "type": "missing_head",
+                "message": "File is missing a <head> element.",
+                "category": "Error",
+                "file_path": rel_path,
+            })
+            continue
+
+        titles = head.find_all("title")
+        
+        if len(titles) == 0:
+            issues.append({
+                "type": "missing_title",
+                "message": "File requires exactly one <title> element inside <head>.",
+                "category": "Error",
+                "file_path": rel_path,
+            })
+        elif len(titles) > 1:
+            # Report only the extra titles to prevent duplicate error messages in the UI
+            for t in titles[1:]:
+                line, extract = get_element_info(t, html_text)
+                issue = {
+                    "type": "duplicate_title_element",
+                    "message": "File contains multiple <title> elements. Only one is allowed",
+                    "category": "Error",
+                    "file_path": rel_path,
+                    "extract": extract
+                }
+                if line: issue["line_number"] = line
+                issues.append(issue)
+        else:
+            title = titles[0]
+            title_text = title.text.strip() if title.text else ""
+            
+            if not title_text:
+                line, extract = get_element_info(title, html_text)
+                issue = {
+                    "type": "empty_title",
+                    "message": "<title> element cannot be empty.",
+                    "category": "Error",
+                    "file_path": rel_path,
+                    "extract": extract
+                }
+                if line: issue["line_number"] = line
+                issues.append(issue)
+            else:
+                if title_text in seen_titles:
+                    line, extract = get_element_info(title, html_text)
+                    issue = {
+                        "type": "duplicate_title_text",
+                        "message": f"Title text '{title_text}' is duplicated. It was already used in {seen_titles[title_text]}.",
+                        "category": "Error",
+                        "file_path": rel_path,
+                        "extract": extract
+                    }
+                    if line: issue["line_number"] = line
+                    issues.append(issue)
+                else:
+                    seen_titles[title_text] = rel_path
+                    
+    return {"issues_count": len(issues), "issues": issues}
+
+@rule("XHTML005")
+def validate_heading_line_breaks(file_details, rule_config=None):
+    """Ensure no line break tags (<br/>) are placed within HTML headings."""
+    file_path = file_details["full_path"]
+    issues = []
+    
+    try:
+        from bs4 import BeautifulSoup
+        with open(file_path, "r", encoding="utf-8") as f:
+            html_text = f.read()
+            soup = BeautifulSoup(html_text, "xml")
+    except Exception as e:
+        return {"issues_count": 0, "issues": []}
+
+    def get_element_info(el):
+        s = str(el)
+        end = s.find('>')
+        extract = s[:end+1] if end != -1 else s
+        
+        idx = html_text.find(extract)
+        if idx != -1:
+            line = html_text.count('\n', 0, idx) + 1
+        else:
+            tag_name = el.name
+            lines = html_text.split('\n')
+            line = getattr(el, "sourceline", None)
+            tag_start = f"<{tag_name}"
+            for i, l_text in enumerate(lines):
+                if tag_start in l_text:
+                    line = i + 1
+                    start_idx = l_text.find(tag_start)
+                    end_idx = l_text.find('>', start_idx)
+                    if start_idx != -1 and end_idx != -1:
+                        extract = l_text[start_idx:end_idx+1]
+                    break
+        return line, extract
+
+    headings = soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6"])
+    for heading in headings:
+        br_tags = heading.find_all("br")
+        if br_tags:
+            for br in br_tags:
+                line, extract = get_element_info(br)
+                issue = {
+                    "type": "heading_contains_br",
+                    "message": f"Do not place line break tags (<br/>) within <{heading.name}> headings to separate text. Use CSS to achieve the line break. Example:\nspan.O-ch-title::before{{\n  content: '\\A';\n  white-space: pre;\n}}",
+                    "category": "Error",
+                    "file_path": file_details.get("relative_path"),
+                    "extract": extract
+                }
+                if line: issue["line_number"] = line
+                issues.append(issue)
+
+    return {"issues_count": len(issues), "issues": issues}
+
+@rule("XHTML006")
+def validate_h1_count_and_adjacent_headings(file_details, rule_config=None):
+    """Ensure exactly 1 <h1> per file and no adjacent heading tags."""
+    file_path = file_details["full_path"]
+    issues = []
+    
+    try:
+        from bs4 import BeautifulSoup
+        with open(file_path, "r", encoding="utf-8") as f:
+            html_text = f.read()
+            soup = BeautifulSoup(html_text, "xml")
+    except Exception as e:
+        return {"issues_count": 0, "issues": []}
+
+    def get_element_info(el):
+        line = getattr(el, "sourceline", None)
+        s = str(el)
+        end = s.find('>')
+        extract = s[:end+1] if end != -1 else s
+        
+        if line is not None:
+            return line, extract
+            
+        # Fallback to robust index matching for identical or empty tags
+        all_same_tags = soup.find_all(el.name)
+        occurrence_index = -1
+        for i, tag in enumerate(all_same_tags):
+            if tag is el:
+                occurrence_index = i
+                break
+                
+        if occurrence_index != -1:
+            tag_start = f"<{el.name}"
+            current_pos = 0
+            for _ in range(occurrence_index + 1):
+                current_pos = html_text.find(tag_start, current_pos)
+                if current_pos == -1:
+                    break
+                current_pos += 1
+                
+            if current_pos != -1:
+                start_idx = current_pos - 1
+                line = html_text.count('\n', 0, start_idx) + 1
+                end_idx = html_text.find('>', start_idx)
+                if end_idx != -1:
+                    extract = html_text[start_idx:end_idx+1]
+                return line, extract
+
+        idx = html_text.find(s)
+        if idx != -1:
+            line = html_text.count('\n', 0, idx) + 1
+        else:
+            line = 1
+        return line, extract
+
+    # 1) Check for maximum one <h1>
+    h1_tags = soup.find_all("h1")
+    if len(h1_tags) > 1:
+        # Skip the first one because 1 is allowed
+        for i, h1 in enumerate(h1_tags[1:], start=2):
+            line, extract = get_element_info(h1)
+            issue = {
+                "type": "multiple_h1",
+                "rule_name": "Multiple <h1> tags",
+                "message": f"Use 1 <h1> per unit/chapter/lesson title. Found an extra <h1> tag (this is #{i}). Only one is allowed per page.",
+                "category": "Error",
+                "file_path": file_details.get("relative_path"),
+                "extract": extract
+            }
+            if line: issue["line_number"] = line
+            issues.append(issue)
+
+    # 2) Check for adjacent heading tags
+    headings = soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6"])
+    for heading in headings:
+        next_sib = heading.find_next_sibling()
+        if next_sib and next_sib.name in ["h1", "h2", "h3", "h4", "h5", "h6"]:
+            # Check if there is any non-whitespace text between them
+            has_text = False
+            for node in heading.next_siblings:
+                if node == next_sib:
+                    break
+                if node.name is None and str(node).strip():
+                    has_text = True
+                    break
+            
+            if not has_text:
+                # Highlight the SECOND heading so the UI points to the offending adjacent tag
+                line, extract = get_element_info(next_sib)
+                issue = {
+                    "type": "adjacent_headings",
+                    "rule_name": "Adjacent heading tags",
+                    "message": f"Do not place two heading tags immediately next to each other. Found <{next_sib.name}> immediately following <{heading.name}>.",
+                    "category": "Error",
+                    "file_path": file_details.get("relative_path"),
+                    "extract": extract
+                }
+                if line: issue["line_number"] = line
+                issues.append(issue)
+
+    return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("GWP-XHTML-001")
+def validate_gwp_introduction_role(file_details, rule_config=None):
+    """Ensure specific headings are wrapped in a <section> with a specific role."""
+    file_path = file_details["full_path"]
+    issues = []
+    
+    expected_heading = "introduction"
+    expected_role = "doc-introduction"
+    expected_heading_level = "h1"
+    expected_parent_tag = "section"
+    
+    if rule_config and "rule_config" in rule_config:
+        config = rule_config["rule_config"]
+        expected_heading = config.get("expected_heading", expected_heading).lower()
+        expected_role = config.get("expected_role", expected_role)
+        expected_heading_level = config.get("expected_heading_level", expected_heading_level).lower()
+        expected_parent_tag = config.get("expected_parent_tag", expected_parent_tag).lower()
+    
+    try:
+        from bs4 import BeautifulSoup
+        with open(file_path, "r", encoding="utf-8") as f:
+            html_text = f.read()
+            soup = BeautifulSoup(html_text, "xml")
+    except Exception:
+        return {"issues_count": 0, "issues": []}
+
+    def get_element_info(el):
+        line = getattr(el, 'sourceline', None)
+        s = str(el)
+        end = s.find('>')
+        extract = s[:end+1] if end != -1 else s
+        
+        if not line:
+            import re
+            masked_html = re.sub(r'<!--.*?-->', lambda m: ' ' * len(m.group(0)), html_text, flags=re.DOTALL)
+            all_tags = soup.find_all(el.name)
+            try:
+                tag_index = next(i for i, tag in enumerate(all_tags) if tag is el)
+                pattern = re.compile(rf"<{el.name}\b", re.IGNORECASE)
+                matches = list(pattern.finditer(masked_html))
+                if tag_index < len(matches):
+                    idx = matches[tag_index].start()
+                    line = masked_html.count('\n', 0, idx) + 1
+            except StopIteration:
+                pass
+                
+            if not line:
+                idx = masked_html.find(extract)
+                if idx != -1:
+                    line = masked_html.count('\n', 0, idx) + 1
+                        
+        if len(extract) > 150:
+            extract = extract[:150] + "..."
+        return line, extract
+
+    headings = soup.find_all(expected_heading_level)
+    for heading in headings:
+        if heading.get_text(strip=True).lower() == expected_heading:
+            parent = heading.find_parent(expected_parent_tag)
+            if parent:
+                roles = parent.get("role", "").split()
+                if expected_role not in roles:
+                    line, extract = get_element_info(parent)
+                    issue = {
+                        "type": "missing_expected_role",
+                        "rule_name": rule_config.get("name", "Heading Section Role Check") if rule_config else "Heading Section Role Check",
+                        "message": f"The <{expected_parent_tag}> tag containing the '{expected_heading.title()}' heading must have role='{expected_role}'.",
+                        "category": "Error",
+                        "file_path": file_details.get("relative_path"),
+                        "extract": extract
+                    }
+                    if line: issue["line_number"] = line
+                    issues.append(issue)
+
+    return {"issues_count": len(issues), "issues": issues}
+
+@rule("GWP-XHTML-005")
+def validate_gwp_pagebreak_placement(file_details, rule_config=None):
+    """GWP000: Ensure pagebreak spans are not inside heading tags and have up-to-date formatting."""
+    file_path = file_details["full_path"]
+    issues = []
+    
+    try:
+        from bs4 import BeautifulSoup
+        with open(file_path, "r", encoding="utf-8") as f:
+            html_text = f.read()
+            soup = BeautifulSoup(html_text, "xml")
+    except Exception:
+        return {"issues_count": 0, "issues": []}
+
+    def get_element_info(el):
+        line = getattr(el, 'sourceline', None)
+        s = str(el)
+        end = s.find('>')
+        extract = s[:end+1] if end != -1 else s
+        
+        if not line:
+            import re
+            masked_html = re.sub(r'<!--.*?-->', lambda m: ' ' * len(m.group(0)), html_text, flags=re.DOTALL)
+            all_tags = soup.find_all(el.name)
+            try:
+                tag_index = next(i for i, tag in enumerate(all_tags) if tag is el)
+                pattern = re.compile(rf"<{el.name}\b", re.IGNORECASE)
+                matches = list(pattern.finditer(masked_html))
+                if tag_index < len(matches):
+                    idx = matches[tag_index].start()
+                    line = masked_html.count('\n', 0, idx) + 1
+                    raw_end = html_text.find('>', idx)
+                    if raw_end != -1:
+                        extract = html_text[idx:raw_end+1]
+            except StopIteration:
+                pass
+                
+            if not line:
+                idx = masked_html.find(extract)
+                if idx != -1:
+                    line = masked_html.count('\n', 0, idx) + 1
+                        
+        if len(extract) > 150:
+            extract = extract[:150] + "..."
+        return line, extract
+
+    pagebreaks = soup.find_all(lambda tag: tag.name == "span" and (tag.get("role") == "doc-pagebreak" or tag.get("epub:type") == "pagebreak"))
+    
+    for pb in pagebreaks:
+        heading_parent = pb.find_parent(["h1", "h2", "h3", "h4", "h5", "h6"])
+        if heading_parent:
+            line, extract = get_element_info(pb)
+            issue = {
+                "type": "pagebreak_inside_heading",
+                "rule_name": "Pagebreak inside heading check",
+                "message": f"Pagebreak spans must not be placed inside heading tags (<{heading_parent.name}>).",
+                "category": "Error",
+                "file_path": file_details.get("relative_path"),
+                "extract": extract
+            }
+            if line: issue["line_number"] = line
+            issues.append(issue)
+            
+        # Check for up-to-date formatting attributes
+        missing_attrs = []
+        for attr in ["aria-labelledby", "id", "epub:type", "role"]:
+            if not pb.get(attr):
+                missing_attrs.append(attr)
+                
+        if missing_attrs or pb.get("epub:type") != "pagebreak" or pb.get("role") != "doc-pagebreak":
+            line, extract = get_element_info(pb)
+            issue = {
+                "type": "pagebreak_invalid_formatting",
+                "rule_name": "Pagebreak invalid formatting",
+                "message": "Pagebreak span is missing up-to-date formatting (requires aria-labelledby, id, epub:type=\"pagebreak\", and role=\"doc-pagebreak\").",
+                "category": "Error",
+                "file_path": file_details.get("relative_path"),
+                "extract": extract
+            }
+            if line: issue["line_number"] = line
+            issues.append(issue)
+
+    return {"issues_count": len(issues), "issues": issues}
+
+@rule("GLOS001")
+def validate_glossary_dl_tags(file_details, rule_config=None):
+    """Glossary page formatted using description list tags (dl, dt, dd)."""
+    file_path = file_details["full_path"]
+    issues = []
+    
+    try:
+        from bs4 import BeautifulSoup
+        with open(file_path, "r", encoding="utf-8") as f:
+            html_text = f.read()
+            soup = BeautifulSoup(html_text, "xml")
+    except Exception as e:
+        return {"issues_count": 0, "issues": []}
+
+    glossary_section = soup.find(lambda tag: tag.name == "section" and (tag.get("role") == "doc-glossary" or tag.get("epub:type") == "glossary"))
+    # Some files might not use the semantic wrapper; if the rule targets *glossary.xhtml, we check for dl anyway.
+    if not glossary_section:
+        glossary_section = soup.find("body")
+
+    if glossary_section:
+        dls = glossary_section.find_all("dl")
+        if not dls:
+            issues.append({
+                "type": "glossary_missing_dl",
+                "rule_name": "Glossary missing dl",
+                "message": "Glossary is missing <dl> tags. Terms must be formatted using description list tags (dl, dt, dd).",
+                "category": "Error",
+                "file_path": file_details.get("relative_path"),
+            })
+        else:
+            for dl in dls:
+                if not dl.find_all("dt") or not dl.find_all("dd"):
+                    issues.append({
+                        "type": "glossary_missing_dt_dd",
+                        "rule_name": "Glossary missing dt dd",
+                        "message": "Glossary <dl> is missing <dt> or <dd> tags. Terms must use dl, dt, dd.",
+                        "category": "Error",
+                        "file_path": file_details.get("relative_path"),
+                    })
+                    break
+
+        # Flag any <p> or <div> that are styled as terms/definitions instead of using dt/dd
+        invalid_terms = glossary_section.find_all(["p", "div", "span"], attrs={"role": ["term", "definition"]})
+        invalid_terms += glossary_section.find_all(["p", "div"], class_=lambda x: x and any(c.lower() in ["term", "definition", "def"] for c in x.split()))
+        
+        for invalid in invalid_terms:
+            s = str(invalid)
+            idx = html_text.find(s[:20])
+            line = html_text.count('\n', 0, idx) + 1 if idx != -1 else None
+            issue = {
+                "type": "invalid_glossary_term_tag",
+                "rule_name": "Glossary Format",
+                "message": f"Glossary terms must be formatted using description list tags (dl, dt, dd). Found <{invalid.name}> tag acting as a term or definition.",
+                "category": "Error",
+                "file_path": file_details.get("relative_path"),
+                "extract": str(invalid)[:150]
+            }
+            if line: issue["line_number"] = line
+            issues.append(issue)
+
+    return {"issues_count": len(issues), "issues": issues}
+
+@rule("GLOS002")
+def validate_glossary_term_backlinks(file_details, rule_config=None):
+    """Glossary term number links include meaningful text using the title attribute."""
+    file_path = file_details["full_path"]
+    issues = []
+    
+    try:
+        from bs4 import BeautifulSoup
+        with open(file_path, "r", encoding="utf-8") as f:
+            html_text = f.read()
+            soup = BeautifulSoup(html_text, "xml")
+    except Exception as e:
+        return {"issues_count": 0, "issues": []}
+
+    backlinks = soup.find_all("a", attrs={"role": "doc-backlink"})
+    for link in backlinks:
+        title = link.get("title", "").strip()
+        if not title:
+            s = str(link)
+            idx = html_text.find(s[:20])
+            line = html_text.count('\n', 0, idx) + 1 if idx != -1 else None
+            issue = {
+                "type": "glossary_backlink_missing_title",
+                "message": "Glossary term number links must include meaningful text using the title attribute (e.g., title=\"Back to Chapter 6 on the term 'ac generator'\").",
+                "category": "Error",
+                "file_path": file_details.get("relative_path"),
+                "extract": str(link)[:150]
+            }
+            if line: issue["line_number"] = line
+            issues.append(issue)
+
+    return {"issues_count": len(issues), "issues": issues}
+
+@rule("GWP-KT-001")
+def validate_key_term_tagging(file_details, rule_config=None):
+    """Key terms within content are properly using <b> and <i> tags (not <span>)."""
+    file_path = file_details["full_path"]
+    issues = []
+    
+    try:
+        from bs4 import BeautifulSoup
+        with open(file_path, "r", encoding="utf-8") as f:
+            html_text = f.read()
+            soup = BeautifulSoup(html_text, "xml")
+    except Exception as e:
+        return {"issues_count": 0, "issues": []}
+
+    kt_elements = soup.find_all(class_=lambda x: x and "KT" in x.split())
+    for el in kt_elements:
+        if el.name not in ["b", "i", "strong", "em"]:
+            text_val = el.get_text(strip=True)
+            idx = html_text.find(text_val[:20]) if text_val else html_text.find('KT')
+            if idx == -1:
+                s = str(el)
+                idx = html_text.find(s[:20])
+            line = html_text.count('\n', 0, idx) + 1 if idx != -1 else None
+            
+            raw_extract = str(el)[:150]
+            if idx != -1:
+                tag_start = html_text.rfind(f'<{el.name}', max(0, idx-150), idx+1)
+                if tag_start != -1:
+                    raw_extract = html_text[tag_start:tag_start+150]
+                else:
+                    raw_extract = html_text[idx:idx+150]
+                    
+            issue = {
+                "type": "invalid_kt_tag",
+                "message": f"Key terms must be properly using <b> and <i> tags. Found <{el.name} class=\"{el.get('class')}\">.",
+                "category": "Error",
+                "file_path": file_details.get("relative_path"),
+                "extract": raw_extract
+            }
+            if line: issue["line_number"] = line
+            issues.append(issue)
+
+    # Check glossary links since they also act as key terms
+    glossary_links = soup.find_all("a", href=lambda x: x and "_glossary.xhtml#" in x)
+    valid_tags = ["b", "i", "strong", "em"]
+    for a in glossary_links:
+        # Avoid duplicate errors if this link is already inside an element with class="KT"
+        if a.find_parent(class_=lambda x: x and "KT" in x.split()) or (a.get("class") and "KT" in a.get("class")):
+            continue
+            
+        is_valid = False
+        
+        # Check if the <a> tag is inside a <b>, <i>, <strong>, or <em>
+        if a.parent and a.parent.name in valid_tags:
+            is_valid = True
+            
+        # Check if the <a> tag's inner text is wrapped in a <b>, <i>, <strong>, or <em>
+        if not is_valid:
+            for child in a.find_all(valid_tags):
+                if child.get_text(strip=True) == a.get_text(strip=True):
+                    is_valid = True
+                    break
+                    
+        if not is_valid:
+            href_val = a.get("href", "")
+            idx = html_text.find(f'"{href_val}"')
+            if idx == -1:
+                idx = html_text.find(f"'{href_val}'")
+            if idx == -1:
+                text_val = a.get_text(strip=True)
+                if text_val:
+                    idx = html_text.find(text_val[:20])
+                    
+            line = html_text.count('\n', 0, idx) + 1 if idx != -1 else None
+            
+            raw_extract = str(a.parent)[:150] if a.parent else str(a)[:150]
+            if idx != -1:
+                a_start = html_text.rfind('<a', max(0, idx-100), idx+1)
+                if a_start != -1:
+                    span_start = html_text.rfind('<span', max(0, a_start-50), a_start)
+                    if span_start != -1 and 'c_term' in html_text[span_start:a_start]:
+                        raw_extract = html_text[span_start:span_start+150]
+                    else:
+                        raw_extract = html_text[a_start:a_start+150]
+                else:
+                    raw_extract = html_text[idx:idx+150]
+                    
+            issue = {
+                "type": "invalid_kt_tag_glossary_link",
+                "message": f"Glossary links must be formatted with <b> or <i> tags. Found link without bold/italic wrapping.",
+                "category": "Error",
+                "file_path": file_details.get("relative_path"),
+                "extract": raw_extract
+            }
+            if line: issue["line_number"] = line
+            issues.append(issue)
+
+    return {"issues_count": len(issues), "issues": issues}
+
+@rule("GWP-ED-001")
+def validate_extended_description_links(file_details, rule_config=None):
+    """Each link found on the Extended Description page should contain unique text."""
+    file_path = file_details["full_path"]
+    issues = []
+    
+    try:
+        from bs4 import BeautifulSoup
+        with open(file_path, "r", encoding="utf-8") as f:
+            html_text = f.read()
+            soup = BeautifulSoup(html_text, "xml")
+    except Exception as e:
+        return {"issues_count": 0, "issues": []}
+
+    backlinks = []
+    for a in soup.find_all("a"):
+        parent_class = a.parent.get("class", []) if a.parent and a.parent.name == "p" else []
+        if a.get("role") == "doc-backlink" or "araiaback" in parent_class:
+            backlinks.append(a)
+            
+    seen_texts = set()
+    for link in backlinks:
+        text = link.get_text(strip=True).lower()
+        if text == "back to main text":
+            s = str(link)
+            idx = html_text.find(s[:20])
+            line = html_text.count('\n', 0, idx) + 1 if idx != -1 else None
+            issue = {
+                "type": "generic_ed_link_text",
+                "rule_name": "Extended Description Links",
+                "message": "Extended Description link uses generic text 'Back to main text'. Must be unique (e.g. 'Back to Figure 1-1').",
+                "category": "Error",
+                "file_path": file_details.get("relative_path"),
+                "extract": str(link)[:150]
+            }
+            if line: issue["line_number"] = line
+            issues.append(issue)
+        elif text in seen_texts:
+            s = str(link)
+            idx = html_text.find(s[:20])
+            line = html_text.count('\n', 0, idx) + 1 if idx != -1 else None
+            issue = {
+                "type": "duplicate_ed_link_text",
+                "rule_name": "Extended Description Links",
+                "message": f"Extended Description link text '{link.get_text(strip=True)}' is used more than once. Each link should contain unique text.",
+                "category": "Error",
+                "file_path": file_details.get("relative_path"),
+                "extract": str(link)[:150]
+            }
+            if line: issue["line_number"] = line
+            issues.append(issue)
+        else:
+            seen_texts.add(text)
+
+    return {"issues_count": len(issues), "issues": issues}
+
+@rule("GWP-QUOTE-001")
+def validate_blockquote_q_tags(file_details, rule_config=None):
+    """Blockquotes should be identified using <blockquote> for long quotes, <q> for short."""
+    file_path = file_details["full_path"]
+    issues = []
+    
+    try:
+        from bs4 import BeautifulSoup
+        with open(file_path, "r", encoding="utf-8") as f:
+            html_text = f.read()
+            soup = BeautifulSoup(html_text, "xml")
+    except Exception as e:
+        return {"issues_count": 0, "issues": []}
+
+    for p in soup.find_all("p"):
+        if p.find_parent("blockquote"):
+            continue
+            
+        if p.find("q"):
+            continue
+            
+        text = p.get_text(strip=True)
+        if len(text) > 1:
+            if text[0] in ['"', '“', '‘'] and text[-1] in ['"', '”', '’']:
+                s = str(p)
+                idx = html_text.find(s[:20])
+                line = html_text.count('\n', 0, idx) + 1 if idx != -1 else None
+                issue = {
+                    "type": "missing_quote_markup",
+                    "message": "Blockquotes should be identified using <blockquote> element for long quotations. *use <q> for inline (short) quotations.",
+                    "category": "Warning",
+                    "file_path": file_details.get("relative_path"),
+                    "extract": str(p)[:150]
+                }
+                if line: issue["line_number"] = line
+                issues.append(issue)
+
+    return {"issues_count": len(issues), "issues": issues}

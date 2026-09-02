@@ -1,0 +1,35 @@
+{
+  "rules": [
+    {
+      "id": "IMG-001",
+      "name": "Image DPI Check",
+      "target_path": "OEBPS/Images",
+      "file_name_pattern": "*.*",
+      "enabled": true,
+      "rule_config": {
+        "expected_dpi": 300,
+        "exclude_files": [
+          "cover.jpg",
+          "cover.jpeg",
+          "cover.png"
+        ]
+      }
+    },
+    {
+      "id": "IMG-002",
+      "name": "Image Width Check",
+      "target_path": "OEBPS/Images",
+      "file_name_pattern": "*.*",
+      "enabled": true,
+      "rule_config": {
+        "min_width": 500,
+        "max_width": 1000,
+        "exclude_patterns": [
+          "icon",
+          "header",
+          "aside"
+        ]
+      }
+    }
+  ]
+}

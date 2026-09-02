@@ -35,7 +35,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install @daisy/ace and epubchecker globally
-RUN npm install -g @daisy/ace epubchecker
+RUN npm install -g @daisy/ace epubchecker && npm cache clean --force
 
 # ImageMagick's default policy blocks PS/EPS/PDF as a security default. We need
 # EPS decoding for the Image Review & Editor's preview + convert pipeline, so
@@ -55,7 +55,8 @@ RUN cpanm --notest \
     List::MoreUtils \
     String::Substitution \
     Try::Tiny \
-    XML::LibXML
+    XML::LibXML \
+    && rm -rf ~/.cpanm
 
 COPY requirements.txt ./
 RUN pip install --upgrade pip && pip install -r requirements.txt

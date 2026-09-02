@@ -259,5 +259,10 @@ class ChapterInfoResponse(ChapterInfoBase):
     created_at: datetime
     updated_at: datetime
     art_count: Optional[int] = None
+    xml_status: Optional[str] = None
+    indesign_status: Optional[str] = None
+    final_delivery_status: Optional[str] = None
+    style_status: Optional[str] = None
+    structuring_status: Optional[str] = None
 
     model_config = {"from_attributes": True}

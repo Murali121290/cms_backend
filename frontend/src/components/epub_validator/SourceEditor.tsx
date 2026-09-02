@@ -11,6 +11,7 @@ import type { Diagnostic } from '@codemirror/lint';
 export interface LintError {
   line: number;
   message: string;
+  extract?: string;
 }
 
 export interface SourceEditorRef {
@@ -24,6 +25,7 @@ interface Props {
   readOnly?: boolean;
   errors?: LintError[];
   onLogLineClick?: (lineNum: number) => void;
+  onLineClick?: (lineNum: number, lineText: string) => void;
   onSave?: () => void;
 }
 
@@ -91,7 +93,7 @@ export function formatXmlString(xmlStr: string): string {
  * the app's design system (see FindReplacePanel).
  */
 export const SourceEditor = forwardRef<SourceEditorRef, Props>(
-  ({ value, onChange, className, readOnly = false, errors, onLogLineClick, onSave }, ref) => {
+  ({ value, onChange, className, readOnly = false, errors, onLogLineClick, onLineClick, onSave }, ref) => {
     const cmRef = useRef<ReactCodeMirrorRef | null>(null);
     const [panelOpen, setPanelOpen] = useState(false);
     const [replaceMode, setReplaceMode] = useState(false);
@@ -139,12 +141,114 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
         if (err.line > 0 && err.line <= doc.lines) {
           try {
             const line = doc.line(err.line);
-            diagnostics.push({
-              from: line.from,
-              to: line.to,
-              severity: 'error',
-              message: err.message,
-            });
+            let from = line.from;
+            let to = line.to;
+
+            if (err.extract) {
+              // Robust fuzzy matching: map plain text characters back to source indices.
+              const plainToSource: number[] = [];
+              let plainText = '';
+              const raw = line.text;
+              
+              // Helper to decode a single HTML entity
+              const decodeEntity = (entity: string) => {
+                const txt = document.createElement('textarea');
+                txt.innerHTML = entity;
+                return txt.value;
+              };
+
+              let i = 0;
+              while (i < raw.length) {
+                if (raw[i] === '<') {
+                  // Skip HTML tag
+                  while (i < raw.length && raw[i] !== '>') i++;
+                  if (i < raw.length) i++; // skip '>'
+                } else if (raw[i] === '&') {
+                  // Parse HTML entity
+                  const start = i;
+                  while (i < raw.length && raw[i] !== ';' && raw[i] !== '<' && raw[i] !== ' ' && (i - start) < 10) i++;
+                  if (i < raw.length && raw[i] === ';') {
+                    i++; // include ';'
+                    const entity = raw.slice(start, i);
+                    const decoded = decodeEntity(entity);
+                    for (const char of decoded) {
+                      plainText += char;
+                      plainToSource.push(start); // map to the start of the entity
+                    }
+                  } else {
+                    // Not a valid entity, treat as literal '&'
+                    plainText += '&';
+                    plainToSource.push(start);
+                    i = start + 1;
+                  }
+                } else {
+                  // Normal character
+                  plainText += raw[i];
+                  plainToSource.push(i);
+                  i++;
+                }
+              }
+
+              // Since BeautifulSoup get_text(strip=True) might compress multiple spaces, 
+              // we can normalize whitespace in both plainText and err.extract for comparison,
+              // but we need to keep the mapping intact.
+              // To avoid complexity, we'll try an exact indexOf first, and if it fails, 
+              // we just fallback to the old simple indexOf on the raw line.
+              
+              let matchIdx = plainText.indexOf(err.extract);
+              
+              // If we didn't find it exactly, try ignoring multiple spaces
+              if (matchIdx === -1) {
+                const normExtract = err.extract.replace(/\s+/g, ' ').trim();
+                const normPlain = plainText.replace(/\s+/g, ' ');
+                let normIdx = normPlain.indexOf(normExtract);
+                
+                if (normIdx !== -1) {
+                  // Map normIdx back to plainText index by walking through plainText
+                  let plainIdx = 0;
+                  let nIdx = 0;
+                  while (plainIdx < plainText.length && nIdx < normIdx) {
+                    if (plainText[plainIdx] === ' ' && plainText[plainIdx - 1] === ' ') {
+                      plainIdx++;
+                      continue;
+                    }
+                    nIdx++;
+                    plainIdx++;
+                  }
+                  matchIdx = plainIdx;
+                }
+              }
+
+              if (matchIdx !== -1) {
+                let mappedStart = plainToSource[matchIdx];
+                // mappedEnd is the source index of the LAST matched character, plus its length (1, or more if it was an entity)
+                // We'll just grab the mapped index of the character AFTER the match, if it exists.
+                let endMatchIdx = matchIdx + err.extract.length;
+                
+                let mappedEnd = raw.length;
+                if (endMatchIdx < plainToSource.length) {
+                   mappedEnd = plainToSource[endMatchIdx];
+                }
+
+                diagnostics.push({
+                  from: line.from + mappedStart,
+                  to: line.from + mappedEnd,
+                  severity: 'error',
+                  message: err.message,
+                });
+              } else {
+                // Absolute fallback to simple indexOf on the raw string
+                const idx = raw.indexOf(err.extract);
+                if (idx !== -1) {
+                  diagnostics.push({
+                    from: line.from + idx,
+                    to: line.from + idx + err.extract.length,
+                    severity: 'error',
+                    message: err.message,
+                  });
+                }
+              }
+            }
           } catch (e) {
             console.error("Failed to add lint highlight:", e);
           }
@@ -155,21 +259,26 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
   }, [errors]);
 
   const clickExtension = useMemo(() => {
-    if (!onLogLineClick) return [];
     return EditorView.domEventHandlers({
       click(event, view) {
         const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
         if (pos === null) return;
         const line = view.state.doc.lineAt(pos);
-        const lineText = line.text;
-        const match = lineText.match(/:(\d+):/);
-        if (match) {
-          const targetLine = parseInt(match[1], 10);
-          onLogLineClick(targetLine);
+        
+        if (onLogLineClick) {
+          const match = line.text.match(/:(\d+):/);
+          if (match) {
+            const targetLine = parseInt(match[1], 10);
+            onLogLineClick(targetLine);
+          }
+        }
+
+        if (onLineClick) {
+          onLineClick(line.number, line.text);
         }
       }
     });
-  }, [onLogLineClick]);
+  }, [onLogLineClick, onLineClick]);
 
   const extensions = useMemo(
     () => [
@@ -252,6 +361,22 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
         '.cm-searchMatch-selected, .cm-searchMatch-selected span': {
           color: '#0f172a !important',
           fontWeight: '600',
+        },
+        '.cm-lintRange-error': {
+          backgroundColor: 'rgba(239, 68, 68, 0.2) !important', // Light red background (tailwind red-500 at 20%)
+          backgroundImage: 'none !important', // Remove the default red squiggly underline
+        },
+        '.cm-tooltip': {
+          maxWidth: '600px !important',
+        },
+        '.cm-tooltip-lint': {
+          whiteSpace: 'pre-wrap !important',
+          wordBreak: 'break-all !important',
+        },
+        '.cm-diagnostic': {
+          whiteSpace: 'pre-wrap !important',
+          wordBreak: 'break-all !important',
+          lineHeight: '1.4',
         },
       }),
     ],

@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft,
@@ -23,12 +23,15 @@ import {
   List,
   BookMarked,
   X as XIcon,
+  Type,
+  RefreshCcw,
 } from 'lucide-react';
 import { XHTMLCard, xhtmlCardVariants } from '@/components/epub_validator/XHTMLCard';
 import { ValidationDetailModal } from '@/components/epub_validator/ValidationDetailModal';
 import { AccessibilityReportModal } from '@/components/epub_validator/AccessibilityReportModal';
 import { EpubCheckReportModal } from '@/components/epub_validator/EpubCheckReportModal';
 import type { Tab as ModalTab } from '@/components/epub_validator/ValidationDetailModal';
+import { FileClassificationSetup } from '@/components/epub_validator/FileClassificationSetup';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Button } from '@/components/ui/Button';
 import { Card, CardBody } from '@/components/ui/Card';
@@ -50,6 +53,8 @@ import {
   listProjects,
   getLatestValidation,
   type EvProject,
+  getEpubSummary,
+  type EpubSummary,
 } from '@/api/epubValidator';
 import { useEpubBookStore } from '@/hooks/useEpubBookStore';
 import { cn, formatDate, titleCase } from '@/utils/epubValidatorUtils';
@@ -164,7 +169,7 @@ export function PostProdEpubValidatorFiles() {
   }, [project, projects, isLoadingProjects, isSessionLoading, viewer, navigate]);
 
   // ── Files from API ──────────────────────────────────────────────────────────
-  const { data: filesData, isLoading, isError } = useQuery({
+  const { data: filesData, isLoading, isError, refetch: refetchFiles } = useQuery({
     queryKey: ['epub-files', folderName],
     queryFn: () => getFiles(folderName),
     enabled: !!folderName,
@@ -173,8 +178,42 @@ export function PostProdEpubValidatorFiles() {
     retry: 1,
   });
 
+  const [showFilenames, setShowFilenames] = useState(false);
+
+  const { data: summaryData, isLoading: isLoadingSummary, refetch: refetchSummary, isFetching: isFetchingSummary } = useQuery({
+    queryKey: ['epub-summary', folderName],
+    queryFn: () => getEpubSummary(folderName),
+    enabled: !!folderName,
+    staleTime: 60_000,
+  });
+
+  const queryClient = useQueryClient();
+
+  const refreshSummaryMutation = useMutation({
+    mutationFn: () => getEpubSummary(folderName, true),
+    onSuccess: (data) => {
+      queryClient.setQueryData(['epub-summary', folderName], data);
+    },
+  });
+
+  const handleRefreshSummary = () => {
+    refreshSummaryMutation.mutate();
+  };
+
   const naturalSort = (a: string, b: string) =>
     a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+
+  const sortedChapterLabels = useMemo(() => {
+    return summaryData?.chapter_labels ? [...summaryData.chapter_labels].sort(naturalSort) : [];
+  }, [summaryData?.chapter_labels]);
+
+  const sortedFigureLabels = useMemo(() => {
+    return summaryData?.figure_labels ? [...summaryData.figure_labels].sort(naturalSort) : [];
+  }, [summaryData?.figure_labels]);
+
+  const sortedTableLabels = useMemo(() => {
+    return summaryData?.table_labels ? [...summaryData.table_labels].sort(naturalSort) : [];
+  }, [summaryData?.table_labels]);
 
   const allBackendFiles = useMemo(
     () => (filesData?.files ?? []).sort((a, b) => naturalSort(a.file_name, b.file_name)),
@@ -222,7 +261,18 @@ export function PostProdEpubValidatorFiles() {
     [filesData],
   );
 
-  // 4) Other files (nav, content.opf, toc.ncx, container.xml, mimetype, etc.)
+  // 4) Fonts
+  const fontFiles = useMemo(
+    () => (filesData?.files ?? [])
+      .filter((f) => {
+        const name = f.file_name.toLowerCase();
+        return name.endsWith('.ttf') || name.endsWith('.otf') || name.endsWith('.woff') || name.endsWith('.woff2');
+      })
+      .sort((a, b) => naturalSort(a.file_name, b.file_name)),
+    [filesData],
+  );
+
+  // 5) Other files (nav, content.opf, toc.ncx, container.xml, mimetype, etc.)
   const otherFiles = useMemo(
     () => (filesData?.files ?? [])
       .filter((f) => {
@@ -230,14 +280,21 @@ export function PostProdEpubValidatorFiles() {
         const isXhtmlChapter = (name.endsWith('.xhtml') || name.endsWith('.html') || name.endsWith('.htm')) && !isNavFile(f.file_name, f.path);
         const isCss = name.endsWith('.css');
         const isImg = isImageFile(f.file_name, f.path);
-        return !isXhtmlChapter && !isCss && !isImg;
+        const isFont = name.endsWith('.ttf') || name.endsWith('.otf') || name.endsWith('.woff') || name.endsWith('.woff2');
+        return !isXhtmlChapter && !isCss && !isImg && !isFont;
       })
       .sort((a, b) => naturalSort(a.file_name, b.file_name)),
     [filesData],
   );
 
+  const fileMappings = project?.file_mappings || {};
+  const frontMatterFiles = useMemo(() => xhtmlFiles.filter(f => fileMappings[f.file_name] === "Front Matter"), [xhtmlFiles, fileMappings]);
+  const chapterFiles = useMemo(() => xhtmlFiles.filter(f => fileMappings[f.file_name] === "Chapters"), [xhtmlFiles, fileMappings]);
+  const backMatterFiles = useMemo(() => xhtmlFiles.filter(f => fileMappings[f.file_name] === "Back Matter"), [xhtmlFiles, fileMappings]);
+
   // ── Layout mode (grid vs list view) ──────────────────────────────────────────
   const [layoutMode, setLayoutMode] = useState<'grid' | 'list'>('list');
+  const [activeReportTab, setActiveReportTab] = useState<'chapters' | 'figures' | 'tables'>('figures');
 
   // ── Validation state (in-memory only, per session) ─────────────────────────
   // Not persisted: opening/reloading a book always starts on the Pending state
@@ -591,7 +648,7 @@ export function PostProdEpubValidatorFiles() {
   const hasValidated = validationData !== null;
 
   // ── Category Tab & Status & Rule filters ─────────────────────────────────────
-  const [activeCategoryTab, setActiveCategoryTab] = useState<'chapters' | 'css' | 'images' | 'other' | 'all'>('chapters');
+  const [activeCategoryTab, setActiveCategoryTab] = useState<'summary' | 'front_matter' | 'chapters' | 'back_matter' | 'css' | 'images' | 'fonts' | 'other' | 'all'>('all');
   const [activeFilter, setActiveFilter] = useState<XHTMLFileStatus | null>(null);
   const [selectedRuleFilter, setSelectedRuleFilter] = useState<string | null>(null);
 
@@ -719,21 +776,39 @@ export function PostProdEpubValidatorFiles() {
     return xhtmlFiles;
   }, [xhtmlFiles, activeFilter, selectedRuleFilter, ruleMatchingFiles, fileIssues]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const visibleFrontMatterFiles = useMemo(() => visibleXhtmlFiles.filter(f => fileMappings[f.file_name] === "Front Matter"), [visibleXhtmlFiles, fileMappings]);
+  const visibleChapterFiles = useMemo(() => visibleXhtmlFiles.filter(f => fileMappings[f.file_name] === "Chapters"), [visibleXhtmlFiles, fileMappings]);
+  const visibleBackMatterFiles = useMemo(() => visibleXhtmlFiles.filter(f => fileMappings[f.file_name] === "Back Matter"), [visibleXhtmlFiles, fileMappings]);
+
   const visibleCssFiles = useMemo(() => {
-    if (selectedRuleFilter) return [];
+    if (selectedRuleFilter && ruleMatchingFiles) {
+      return cssFiles.filter((f) => ruleMatchingFiles.has(f.file_name));
+    }
     if (activeFilter) {
       return cssFiles.filter((f) => getFileStatus(f.file_name) === activeFilter);
     }
     return cssFiles;
-  }, [cssFiles, activeFilter, selectedRuleFilter]);
+  }, [cssFiles, activeFilter, selectedRuleFilter, ruleMatchingFiles]);
 
   const visibleImageFiles = useMemo(() => {
-    if (selectedRuleFilter) return [];
+    if (selectedRuleFilter && ruleMatchingFiles) {
+      return imageFiles.filter((f) => ruleMatchingFiles.has(f.file_name));
+    }
     if (activeFilter) {
       return imageFiles.filter((f) => getFileStatus(f.file_name) === activeFilter);
     }
     return imageFiles;
-  }, [imageFiles, activeFilter, selectedRuleFilter]);
+  }, [imageFiles, activeFilter, selectedRuleFilter, ruleMatchingFiles]);
+
+  const visibleFontFiles = useMemo(() => {
+    if (selectedRuleFilter && ruleMatchingFiles) {
+      return fontFiles.filter((f) => ruleMatchingFiles.has(f.file_name));
+    }
+    if (activeFilter) {
+      return fontFiles.filter((f) => getFileStatus(f.file_name) === activeFilter);
+    }
+    return fontFiles;
+  }, [fontFiles, activeFilter, selectedRuleFilter, ruleMatchingFiles]);
 
   const visibleOtherFiles = useMemo(() => {
     if (selectedRuleFilter && ruleMatchingFiles) {
@@ -745,7 +820,7 @@ export function PostProdEpubValidatorFiles() {
     return otherFiles;
   }, [otherFiles, activeFilter, selectedRuleFilter, ruleMatchingFiles, fileIssues]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const totalVisibleCount = visibleXhtmlFiles.length + visibleCssFiles.length + visibleImageFiles.length + visibleOtherFiles.length;
+  const totalVisibleCount = visibleXhtmlFiles.length + visibleCssFiles.length + visibleImageFiles.length + visibleFontFiles.length + visibleOtherFiles.length;
 
   // ── Export state ────────────────────────────────────────────────────────────
   const [isExporting, setIsExporting] = useState(false);
@@ -837,6 +912,7 @@ export function PostProdEpubValidatorFiles() {
             file={selectedFile}
             folderName={folderName}
             entries={selectedEntries}
+            summaryData={summaryData}
             isRevalidating={validatingFiles.has(selectedFile.file_name)}
             validationProgress={singleFileProgress[selectedFile.file_name]}
             initialTab={modalInitialTab}
@@ -847,6 +923,12 @@ export function PostProdEpubValidatorFiles() {
                 ? () => handleValidateFile(selectedFile.file_name)
                 : undefined
             }
+            onRenameSuccess={(newName) => {
+              refetchFiles();
+              setSelectedFile(prev => prev ? { ...prev, file_name: newName } : prev);
+            }}
+            onRefreshAnalysis={() => refreshSummaryMutation.mutate()}
+            isRefreshingAnalysis={refreshSummaryMutation.isPending || isFetchingSummary || isLoadingSummary}
           />
         )}
       </AnimatePresence>
@@ -907,7 +989,7 @@ export function PostProdEpubValidatorFiles() {
       </AnimatePresence>
 
       <motion.div
-        className="space-y-6 max-w-7xl mx-auto p-6 text-text"
+        className="space-y-6 w-full p-4 md:p-6 lg:p-8 text-text"
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -8 }}
@@ -992,6 +1074,19 @@ export function PostProdEpubValidatorFiles() {
             {/* Main top action buttons */}
             <div className="flex items-center gap-2 flex-wrap">
               <button
+                onClick={() => setActiveCategoryTab('summary')}
+                className={cn(
+                  "inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg border transition-all shadow-xs shrink-0 whitespace-nowrap",
+                  activeCategoryTab === 'summary' 
+                    ? "bg-primary text-white border-primary" 
+                    : "bg-card border-border hover:bg-primary/10 text-foreground hover:border-primary/40 hover:text-primary"
+                )}
+              >
+                <BookMarked className="w-4 h-4 shrink-0" />
+                <span className="whitespace-nowrap">Analysis Report</span>
+              </button>
+
+              <button
                 onClick={handleValidateAll}
                 disabled={isValidating || isLoading}
                 className="inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg bg-primary text-white hover:bg-primary/90 transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
@@ -1048,6 +1143,29 @@ export function PostProdEpubValidatorFiles() {
                 )}
                 <span className="whitespace-nowrap">{isExporting ? 'Exporting…' : 'Export EPUB'}</span>
               </button>
+
+              {validationData?.customer === 'GWP000' && (
+                <button
+                  onClick={async () => {
+                    try {
+                      setIsExporting(true);
+                      const { exportQaReport } = await import('@/api/epubValidator');
+                      const result = await exportQaReport(folderName);
+                      triggerDownload(result.blob, result.filename);
+                      toast.success('QA Report downloaded');
+                    } catch (err) {
+                      toast.error(err instanceof Error ? err.message : 'Failed to download report');
+                    } finally {
+                      setIsExporting(false);
+                    }
+                  }}
+                  disabled={isExporting || isLoading || isValidating}
+                  className="inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-green-500/10 text-green-700 hover:border-green-500/40 hover:text-green-600 transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
+                >
+                  <Download className="w-4 h-4 shrink-0" />
+                  <span className="whitespace-nowrap">Download QA Report</span>
+                </button>
+              )}
             </div>
 
 
@@ -1156,7 +1274,16 @@ export function PostProdEpubValidatorFiles() {
             </div>
           )}
 
-          {/* Accessibility check error banner */}
+          {/* ── File Classification Setup ───────────────────────────────────── */}
+          {!isLoading && xhtmlFiles.length > 0 && (!project?.file_mappings || Object.keys(project.file_mappings).length === 0) ? (
+            <FileClassificationSetup 
+              folderName={folderName} 
+              xhtmlFiles={xhtmlFiles} 
+              onComplete={() => queryClient.invalidateQueries({ queryKey: ['epub-projects'] })} 
+            />
+          ) : (
+            <>
+              {/* Accessibility check error banner */}
           {aceError && (
             <div className="flex items-start justify-between gap-3 px-4 py-3 rounded-lg bg-danger/10 border border-danger/20 text-xs text-danger font-sans">
               <div className="flex items-start gap-2">
@@ -1546,7 +1673,7 @@ export function PostProdEpubValidatorFiles() {
                     value={stats.pending}
                     total={stats.total}
                     icon={Clock}
-                    barColor="bg-slate-400"
+                                    barColor="bg-slate-400"
                     valueColor={stats.pending > 0 ? 'text-slate-500' : 'text-foreground'}
                     isActive={activeFilter === 'pending'}
                     onClick={() => toggleFilter('pending')}
@@ -1584,28 +1711,81 @@ export function PostProdEpubValidatorFiles() {
                 </div>
                 {/* ── Top Horizontal Category Navigation Tabs ─────────────────────────────────── */}
                 <div className="flex items-center gap-2 border-b border-border/80 pb-px font-sans overflow-x-auto scrollbar-none">
-                  <button
-                    onClick={() => setActiveCategoryTab('chapters')}
-                    className={cn(
-                      'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
-                      activeCategoryTab === 'chapters'
-                        ? 'border-primary text-primary bg-primary/10 shadow-xs'
-                        : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
-                    )}
-                  >
-                    <BookOpen className="w-4 h-4 text-primary shrink-0" />
-                    <span>Chapters</span>
-                    <span
+
+                  {frontMatterFiles.length > 0 && (
+                    <button
+                      onClick={() => setActiveCategoryTab('front_matter')}
                       className={cn(
-                        'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold transition-colors',
-                        activeCategoryTab === 'chapters'
-                          ? 'bg-primary/20 text-primary'
-                          : 'bg-primary/10 text-primary/80',
+                        'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
+                        activeCategoryTab === 'front_matter'
+                          ? 'border-orange-500 text-orange-600 dark:text-orange-400 bg-orange-500/10 shadow-xs'
+                          : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
                       )}
                     >
-                      {visibleXhtmlFiles.length}
-                    </span>
-                  </button>
+                      <BookOpen className="w-4 h-4 text-orange-500 shrink-0" />
+                      <span>Front Matter</span>
+                      <span
+                        className={cn(
+                          'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold transition-colors',
+                          activeCategoryTab === 'front_matter'
+                            ? 'bg-orange-500/20 text-orange-600 dark:text-orange-400'
+                            : 'bg-orange-500/10 text-orange-600/80 dark:text-orange-400/80',
+                        )}
+                      >
+                        {visibleFrontMatterFiles.length}
+                      </span>
+                    </button>
+                  )}
+
+                  {chapterFiles.length > 0 && (
+                    <button
+                      onClick={() => setActiveCategoryTab('chapters')}
+                      className={cn(
+                        'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
+                        activeCategoryTab === 'chapters'
+                          ? 'border-primary text-primary bg-primary/10 shadow-xs'
+                          : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                      )}
+                    >
+                      <BookOpen className="w-4 h-4 text-primary shrink-0" />
+                      <span>Chapters</span>
+                      <span
+                        className={cn(
+                          'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold transition-colors',
+                          activeCategoryTab === 'chapters'
+                            ? 'bg-primary/20 text-primary'
+                            : 'bg-primary/10 text-primary/80',
+                        )}
+                      >
+                        {visibleChapterFiles.length}
+                      </span>
+                    </button>
+                  )}
+
+                  {backMatterFiles.length > 0 && (
+                    <button
+                      onClick={() => setActiveCategoryTab('back_matter')}
+                      className={cn(
+                        'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
+                        activeCategoryTab === 'back_matter'
+                          ? 'border-rose-500 text-rose-600 dark:text-rose-400 bg-rose-500/10 shadow-xs'
+                          : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                      )}
+                    >
+                      <BookOpen className="w-4 h-4 text-rose-500 shrink-0" />
+                      <span>Back Matter</span>
+                      <span
+                        className={cn(
+                          'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold transition-colors',
+                          activeCategoryTab === 'back_matter'
+                            ? 'bg-rose-500/20 text-rose-600 dark:text-rose-400'
+                            : 'bg-rose-500/10 text-rose-600/80 dark:text-rose-400/80',
+                        )}
+                      >
+                        {visibleBackMatterFiles.length}
+                      </span>
+                    </button>
+                  )}
 
                   <button
                     onClick={() => setActiveCategoryTab('css')}
@@ -1652,6 +1832,31 @@ export function PostProdEpubValidatorFiles() {
                       {visibleImageFiles.length}
                     </span>
                   </button>
+
+                  {fontFiles.length > 0 && (
+                    <button
+                      onClick={() => setActiveCategoryTab('fonts')}
+                      className={cn(
+                        'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
+                        activeCategoryTab === 'fonts'
+                          ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 shadow-xs'
+                          : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                      )}
+                    >
+                      <Type className="w-4 h-4 text-indigo-500 shrink-0" />
+                      <span>Fonts</span>
+                      <span
+                        className={cn(
+                          'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold transition-colors',
+                          activeCategoryTab === 'fonts'
+                            ? 'bg-indigo-500/20 text-indigo-600 dark:text-indigo-400'
+                            : 'bg-indigo-500/10 text-indigo-600/80 dark:text-indigo-400/80',
+                        )}
+                      >
+                        {visibleFontFiles.length}
+                      </span>
+                    </button>
+                  )}
 
                   <button
                     onClick={() => setActiveCategoryTab('other')}
@@ -1724,8 +1929,248 @@ export function PostProdEpubValidatorFiles() {
 
                 {/* ── Scrollable Files List Area ───────────────────────────────── */}
                 <div className="flex-1 overflow-y-auto max-h-[calc(100vh-17rem)] min-h-[350px] pr-2 space-y-6 scrollbar-thin scrollbar-thumb-border font-sans pb-4">
-                  {/* ── 1. Chapters Tab View ────────────────────────────────── */}
-                  {(activeCategoryTab === 'chapters' || activeCategoryTab === 'all') && (
+                  
+                  {/* ── 0. Summary Tab View ────────────────────────────────────────── */}
+                  {activeCategoryTab === 'summary' && (
+                    <div className="space-y-6">
+                      <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                        <div className="flex items-center gap-2">
+                          <BookMarked className="w-4 h-4 text-primary" />
+                          <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
+                            Job Analysis Report
+                          </h2>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setShowFilenames(!showFilenames)}
+                            className={`flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-medium transition-colors ${showFilenames ? 'bg-primary/10 text-primary border border-primary/20' : 'bg-muted/50 text-muted-foreground border border-transparent hover:bg-muted'}`}
+                          >
+                            <Eye className="w-3 h-3 shrink-0" />
+                            <span className="whitespace-nowrap">{showFilenames ? 'Hide Filenames' : 'Show Filenames'}</span>
+                          </button>
+                          <button
+                            onClick={handleRefreshSummary}
+                            disabled={refreshSummaryMutation.isPending || isFetchingSummary || isLoadingSummary}
+                            className="flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-medium transition-colors bg-white text-primary border border-primary/20 hover:bg-primary/10 disabled:opacity-50"
+                          >
+                            <RefreshCcw className={`w-3 h-3 shrink-0 ${refreshSummaryMutation.isPending || isFetchingSummary || isLoadingSummary ? 'animate-spin' : ''}`} />
+                            <span className="whitespace-nowrap">{refreshSummaryMutation.isPending || isFetchingSummary || isLoadingSummary ? 'Refreshing...' : 'Refresh Report'}</span>
+                          </button>
+                        </div>
+                      </div>
+                      
+                      {isLoadingSummary ? (
+                        <div className="flex items-center justify-center p-12">
+                          <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                          <span className="ml-2 text-sm text-muted-foreground">Generating summary...</span>
+                        </div>
+                      ) : summaryData?.error ? (
+                        <div className="p-4 bg-red-50 text-red-600 rounded-lg text-sm border border-red-200">
+                          {summaryData.error}
+                        </div>
+                      ) : (
+                        <div className="space-y-6">
+                          {/* Top Metric Cards */}
+                          <div className="grid grid-cols-3 gap-3">
+                            <Card 
+                              className={`shadow-none cursor-pointer transition-all ${activeReportTab === 'chapters' ? 'border-primary bg-primary/10 ring-1 ring-primary/20' : 'border-primary/20 bg-primary/5 hover:bg-primary/10'}`}
+                              onClick={() => setActiveReportTab('chapters')}
+                            >
+                              <CardBody className="p-3 flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <BookOpen className="w-4 h-4 text-primary/70" />
+                                  <div className="text-[11px] font-bold text-primary/90 uppercase tracking-wider">Chapters</div>
+                                </div>
+                                <div className="text-lg font-black text-primary">{summaryData?.total_chapters || 0}</div>
+                              </CardBody>
+                            </Card>
+                            <Card 
+                              className={`shadow-none cursor-pointer transition-all ${activeReportTab === 'figures' ? 'border-emerald-500 bg-emerald-500/10 ring-1 ring-emerald-500/20' : 'border-emerald-500/20 bg-emerald-500/5 hover:bg-emerald-500/10'}`}
+                              onClick={() => setActiveReportTab('figures')}
+                            >
+                              <CardBody className="p-3 flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <ImageIcon className="w-4 h-4 text-emerald-500/70" />
+                                  <div className="text-[11px] font-bold text-emerald-600/90 uppercase tracking-wider">Figures</div>
+                                </div>
+                                <div className="text-lg font-black text-emerald-600">{summaryData?.total_figures || 0}</div>
+                              </CardBody>
+                            </Card>
+                            <Card 
+                              className={`shadow-none cursor-pointer transition-all ${activeReportTab === 'tables' ? 'border-blue-500 bg-blue-500/10 ring-1 ring-blue-500/20' : 'border-blue-500/20 bg-blue-500/5 hover:bg-blue-500/10'}`}
+                              onClick={() => setActiveReportTab('tables')}
+                            >
+                              <CardBody className="p-3 flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <LayoutGrid className="w-4 h-4 text-blue-500/70" />
+                                  <div className="text-[11px] font-bold text-blue-600/90 uppercase tracking-wider">Tables</div>
+                                </div>
+                                <div className="text-lg font-black text-blue-600">{summaryData?.total_tables || 0}</div>
+                              </CardBody>
+                            </Card>
+                          </div>
+
+                          {/* Figure Labels List */}
+                          {activeReportTab === 'figures' && (
+                            <Card className="shadow-sm border-border/50 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                              <div className="px-4 py-3 border-b border-border/50 bg-muted/20">
+                                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                                  <List className="w-4 h-4 text-emerald-500" />
+                                  Figure Label List
+                                </h3>
+                              </div>
+                              <CardBody className="p-0">
+                                {sortedFigureLabels.length > 0 ? (
+                                  <ul className="divide-y divide-border/50 max-h-[500px] overflow-y-auto">
+                                    {sortedFigureLabels.map((label, idx) => {
+                                      const match = label.match(/^\s*\[(.*?)\]\s*([\s\S]*)$/);
+                                      const filename = match ? match[1] : null;
+                                      const text = match ? match[2] : label;
+                                      
+                                      return (
+                                        <li key={idx} className="px-4 py-2.5 text-sm hover:bg-muted/30 transition-colors flex items-start gap-3">
+                                          <span className="text-muted-foreground font-mono text-xs w-6 text-right shrink-0">{idx + 1}.</span>
+                                          <span className="text-foreground leading-snug break-words">
+                                            {showFilenames && filename && (
+                                              <span className="text-muted-foreground mr-2 font-mono text-[10.5px] bg-muted/50 px-1 py-0.5 rounded border border-border/50">[{filename}]</span>
+                                            )}
+                                            {text}
+                                          </span>
+                                        </li>
+                                      );
+                                    })}
+                                  </ul>
+                                ) : (
+                                  <div className="p-8 text-center text-muted-foreground text-sm italic">
+                                    No figure labels found.
+                                  </div>
+                                )}
+                              </CardBody>
+                            </Card>
+                          )}
+
+                          {/* Chapter Labels List */}
+                          {activeReportTab === 'chapters' && (
+                            <Card className="shadow-sm border-border/50 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                              <div className="px-4 py-3 border-b border-border/50 bg-muted/20">
+                                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                                  <BookOpen className="w-4 h-4 text-primary" />
+                                  Chapter List
+                                </h3>
+                              </div>
+                              <CardBody className="p-0">
+                                {sortedChapterLabels.length > 0 ? (
+                                  <ul className="divide-y divide-border/50 max-h-[500px] overflow-y-auto">
+                                    {sortedChapterLabels.map((label, idx) => (
+                                      <li key={idx} className="px-4 py-2.5 text-sm hover:bg-muted/30 transition-colors flex items-start gap-3">
+                                        <span className="text-muted-foreground font-mono text-xs w-6 text-right shrink-0">{idx + 1}.</span>
+                                        <span className="text-foreground leading-snug break-words">
+                                          {showFilenames ? label : label.replace(/\.(xhtml|html)$/i, '')}
+                                        </span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : (
+                                  <div className="p-8 text-center text-muted-foreground text-sm italic">
+                                    No chapter labels found.
+                                  </div>
+                                )}
+                              </CardBody>
+                            </Card>
+                          )}
+
+                          {/* Table Labels List */}
+                          {activeReportTab === 'tables' && (
+                            <Card className="shadow-sm border-border/50 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                              <div className="px-4 py-3 border-b border-border/50 bg-muted/20">
+                                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                                  <LayoutGrid className="w-4 h-4 text-blue-500" />
+                                  Table Label List
+                                </h3>
+                              </div>
+                              <CardBody className="p-0">
+                                {sortedTableLabels.length > 0 ? (
+                                  <ul className="divide-y divide-border/50 max-h-[500px] overflow-y-auto">
+                                    {sortedTableLabels.map((label, idx) => {
+                                      const match = label.match(/^\s*\[(.*?)\]\s*([\s\S]*)$/);
+                                      const filename = match ? match[1] : null;
+                                      const text = match ? match[2] : label;
+                                      
+                                      return (
+                                        <li key={idx} className="px-4 py-2.5 text-sm hover:bg-muted/30 transition-colors flex items-start gap-3">
+                                          <span className="text-muted-foreground font-mono text-xs w-6 text-right shrink-0">{idx + 1}.</span>
+                                          <span className="text-foreground leading-snug break-words">
+                                            {showFilenames && filename && (
+                                              <span className="text-muted-foreground mr-2 font-mono text-[10.5px] bg-muted/50 px-1 py-0.5 rounded border border-border/50">[{filename}]</span>
+                                            )}
+                                            {text}
+                                          </span>
+                                        </li>
+                                      );
+                                    })}
+                                  </ul>
+                                ) : (
+                                  <div className="p-8 text-center text-muted-foreground text-sm italic">
+                                    No table labels found.
+                                  </div>
+                                )}
+                              </CardBody>
+                            </Card>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* ── Front Matter Tab View ────────────────────────────────── */}
+                  {(activeCategoryTab === 'front_matter' || activeCategoryTab === 'all') && visibleFrontMatterFiles.length > 0 && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                        <div className="flex items-center gap-2">
+                          <BookOpen className="w-4 h-4 text-orange-500" />
+                          <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
+                            Front Matter
+                          </h2>
+                          <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleFrontMatterFiles.length})</span>
+                        </div>
+                      </div>
+                      <motion.div
+                        className={cn(
+                          layoutMode === 'grid'
+                            ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
+                            : 'space-y-2.5',
+                        )}
+                        variants={containerVariants}
+                        initial="hidden"
+                        animate="show"
+                      >
+                        {visibleFrontMatterFiles.map((file, i) => {
+                          const status = getFileStatus(file.file_name);
+                          const agg = fileIssues.get(file.file_name);
+                          return (
+                            <motion.div key={`front-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
+                              <XHTMLCard
+                                file={file}
+                                variant="xhtml"
+                                layoutMode={layoutMode}
+                                status={status}
+                                errors={agg?.errors ?? 0}
+                                warnings={agg?.warnings ?? 0}
+                                isValidating={validatingFiles.has(file.file_name)}
+                                onValidate={() => handleValidateFile(file.file_name)}
+                                onOpen={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
+                                onPreview={() => { setModalAllowedTabs(undefined); setModalInitialTab('preview'); setSelectedFile(file); }}
+                                index={i}
+                              />
+                            </motion.div>
+                          );
+                        })}
+                      </motion.div>
+                    </div>
+                  )}
+
+                  {/* ── Chapters Tab View ────────────────────────────────── */}
+                  {(activeCategoryTab === 'chapters' || activeCategoryTab === 'all') && visibleChapterFiles.length > 0 && (
                     <div className="space-y-3">
                       <div className="flex items-center justify-between border-b border-border/60 pb-2">
                         <div className="flex items-center gap-2">
@@ -1733,45 +2178,88 @@ export function PostProdEpubValidatorFiles() {
                           <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
                             Chapters
                           </h2>
-                          <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleXhtmlFiles.length})</span>
+                          <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleChapterFiles.length})</span>
                         </div>
                       </div>
-                      {visibleXhtmlFiles.length === 0 ? (
-                        <p className="text-xs text-muted-foreground italic py-1">No chapter files in this section.</p>
-                      ) : (
-                        <motion.div
-                          className={cn(
-                            layoutMode === 'grid'
-                              ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
-                              : 'space-y-2.5',
-                          )}
-                          variants={containerVariants}
-                          initial="hidden"
-                          animate="show"
-                        >
-                          {visibleXhtmlFiles.map((file, i) => {
-                            const status = getFileStatus(file.file_name);
-                            const agg = fileIssues.get(file.file_name);
-                            return (
-                              <motion.div key={`chapter-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
-                                <XHTMLCard
-                                  file={file}
-                                  variant="xhtml"
-                                  layoutMode={layoutMode}
-                                  status={status}
-                                  errors={agg?.errors ?? 0}
-                                  warnings={agg?.warnings ?? 0}
-                                  isValidating={validatingFiles.has(file.file_name)}
-                                  onValidate={() => handleValidateFile(file.file_name)}
-                                  onOpen={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
-                                  onPreview={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
-                                  index={i}
-                                />
-                              </motion.div>
-                            );
-                          })}
-                        </motion.div>
-                      )}
+                      <motion.div
+                        className={cn(
+                          layoutMode === 'grid'
+                            ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
+                            : 'space-y-2.5',
+                        )}
+                        variants={containerVariants}
+                        initial="hidden"
+                        animate="show"
+                      >
+                        {visibleChapterFiles.map((file, i) => {
+                          const status = getFileStatus(file.file_name);
+                          const agg = fileIssues.get(file.file_name);
+                          return (
+                            <motion.div key={`chapter-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
+                              <XHTMLCard
+                                file={file}
+                                variant="xhtml"
+                                layoutMode={layoutMode}
+                                status={status}
+                                errors={agg?.errors ?? 0}
+                                warnings={agg?.warnings ?? 0}
+                                isValidating={validatingFiles.has(file.file_name)}
+                                onValidate={() => handleValidateFile(file.file_name)}
+                                onOpen={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
+                                onPreview={() => { setModalAllowedTabs(undefined); setModalInitialTab('preview'); setSelectedFile(file); }}
+                                index={i}
+                              />
+                            </motion.div>
+                          );
+                        })}
+                      </motion.div>
+                    </div>
+                  )}
+
+                  {/* ── Back Matter Tab View ────────────────────────────────── */}
+                  {(activeCategoryTab === 'back_matter' || activeCategoryTab === 'all') && visibleBackMatterFiles.length > 0 && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                        <div className="flex items-center gap-2">
+                          <BookOpen className="w-4 h-4 text-rose-500" />
+                          <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
+                            Back Matter
+                          </h2>
+                          <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleBackMatterFiles.length})</span>
+                        </div>
+                      </div>
+                      <motion.div
+                        className={cn(
+                          layoutMode === 'grid'
+                            ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
+                            : 'space-y-2.5',
+                        )}
+                        variants={containerVariants}
+                        initial="hidden"
+                        animate="show"
+                      >
+                        {visibleBackMatterFiles.map((file, i) => {
+                          const status = getFileStatus(file.file_name);
+                          const agg = fileIssues.get(file.file_name);
+                          return (
+                            <motion.div key={`back-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
+                              <XHTMLCard
+                                file={file}
+                                variant="xhtml"
+                                layoutMode={layoutMode}
+                                status={status}
+                                errors={agg?.errors ?? 0}
+                                warnings={agg?.warnings ?? 0}
+                                isValidating={validatingFiles.has(file.file_name)}
+                                onValidate={() => handleValidateFile(file.file_name)}
+                                onOpen={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
+                                onPreview={() => { setModalAllowedTabs(undefined); setModalInitialTab('preview'); setSelectedFile(file); }}
+                                index={i}
+                              />
+                            </motion.div>
+                          );
+                        })}
+                      </motion.div>
                     </div>
                   )}
 
@@ -1833,6 +2321,28 @@ export function PostProdEpubValidatorFiles() {
                           </h2>
                           <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleImageFiles.length})</span>
                         </div>
+                        {visibleImageFiles.length > 0 && (
+                          <button
+                            className="inline-flex flex-row items-center justify-center gap-1.5 px-3.5 py-1.5 h-8.5 text-xs font-semibold rounded-lg bg-primary text-white hover:bg-primary/90 transition-all shadow-xs disabled:opacity-50 shrink-0 whitespace-nowrap"
+                            onClick={() => {
+                              visibleImageFiles.forEach(f => {
+                                if (!validatingFiles.has(f.file_name)) {
+                                  handleValidateFile(f.file_name);
+                                }
+                              });
+                            }}
+                            disabled={visibleImageFiles.every(f => validatingFiles.has(f.file_name))}
+                          >
+                            {visibleImageFiles.some(f => validatingFiles.has(f.file_name)) ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0 text-white" />
+                            ) : (
+                              <Play className="w-3.5 h-3.5 shrink-0 text-white fill-white" />
+                            )}
+                            <span className="whitespace-nowrap text-white">
+                              {visibleImageFiles.some(f => validatingFiles.has(f.file_name)) ? 'Validating…' : 'Validate all'}
+                            </span>
+                          </button>
+                        )}
                       </div>
                       {visibleImageFiles.length === 0 ? (
                         <p className="text-xs text-muted-foreground italic py-1">No image files in this section.</p>
@@ -1858,6 +2368,8 @@ export function PostProdEpubValidatorFiles() {
                                 status={getFileStatus(file.file_name)}
                                 errors={agg.errors}
                                 warnings={agg.warnings}
+                                isValidating={validatingFiles.has(file.file_name)}
+                                onValidate={() => handleValidateFile(file.file_name)}
                                 onOpen={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
                                 onPreview={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
                                 index={i}
@@ -1870,7 +2382,59 @@ export function PostProdEpubValidatorFiles() {
                     </div>
                   )}
 
-                  {/* ── 4. Other files Tab View ────────────────────────────────── */}
+                  {/* ── 4. Fonts Tab View ────────────────────────────────── */}
+                  {(activeCategoryTab === 'fonts' || activeCategoryTab === 'all') && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Type className="w-4 h-4 text-indigo-500" />
+                          <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
+                            Fonts
+                          </h2>
+                          <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleFontFiles.length})</span>
+                        </div>
+                      </div>
+                      {visibleFontFiles.length === 0 ? (
+                        <p className="text-xs text-muted-foreground italic py-1">No font files in this section.</p>
+                      ) : (
+                        <motion.div
+                          className={cn(
+                            layoutMode === 'grid'
+                              ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
+                              : 'space-y-2.5',
+                          )}
+                          variants={containerVariants}
+                          initial="hidden"
+                          animate="show"
+                        >
+                          {visibleFontFiles.map((file, i) => {
+                            const status = getFileStatus(file.file_name);
+                            const agg = fileIssues.get(file.file_name);
+                            const canValidate = false; // Fonts typically aren't validated directly
+                            return (
+                              <motion.div key={`font-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
+                                <XHTMLCard
+                                  file={file}
+                                  variant="other"
+                                  layoutMode={layoutMode}
+                                  status={status}
+                                  errors={agg?.errors ?? 0}
+                                  warnings={agg?.warnings ?? 0}
+                                  isValidating={validatingFiles.has(file.file_name)}
+                                  onValidate={canValidate ? () => handleValidateFile(file.file_name) : undefined}
+                                  onOpen={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
+                                  onPreview={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
+                                  index={i}
+                                />
+                              </motion.div>
+                            );
+                          })}
+                        </motion.div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* ── 5. Other files Tab View ────────────────────────────────── */}
                   {(activeCategoryTab === 'other' || activeCategoryTab === 'all') && (
                     <div className="space-y-3">
                       <div className="flex items-center justify-between border-b border-border/60 pb-2">
@@ -1910,8 +2474,18 @@ export function PostProdEpubValidatorFiles() {
                                   warnings={agg?.warnings ?? 0}
                                   isValidating={validatingFiles.has(file.file_name)}
                                   onValidate={canValidate ? () => handleValidateFile(file.file_name) : undefined}
-                                  onOpen={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
-                                  onPreview={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
+                                  onOpen={() => { 
+                                    const isNav = isNavFile(file.file_name, file.path);
+                                    setModalAllowedTabs(isNav ? undefined : ['result']); 
+                                    setModalInitialTab('result'); 
+                                    setSelectedFile(file); 
+                                  }}
+                                  onPreview={() => { 
+                                    const isNav = isNavFile(file.file_name, file.path);
+                                    setModalAllowedTabs(isNav ? undefined : ['result']); 
+                                    setModalInitialTab(isNav ? 'preview' : 'result'); 
+                                    setSelectedFile(file); 
+                                  }}
                                   index={i}
                                 />
                               </motion.div>
@@ -1925,8 +2499,10 @@ export function PostProdEpubValidatorFiles() {
               </div>
             </div>
           )}
-        </div>
-      </motion.div>
-    </>
+          </>
+        )}
+      </div>
+    </motion.div>
+  </>
   );
 }

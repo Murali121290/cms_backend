@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, ChevronRight,
   Calendar, Clock, Zap, BookOpen, AlertCircle, CheckCircle2,
-  RotateCcw, Layers, User, BookMarked, Info, Edit2, Plus
+  RotateCcw, Layers, User, BookMarked, Info, Edit2, Plus, Bookmark
 } from 'lucide-react'
 import { ViewSwitcher } from '@/components/ui/ViewSwitcher'
 import { useViewMode } from '@/hooks/useViewMode'
@@ -31,6 +32,21 @@ import { useRBAC } from '@/hooks/useRBAC'
 import { ROLE_PERMISSIONS } from '@/config/rbacConfig'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
+
+function sortChapters(a: { chapters: string }, b: { chapters: string }) {
+  function getOrderValue(ch: string) {
+    if (ch === 'FM') return { type: 1, val: 0, str: '' }
+    if (/^\d+$/.test(ch)) return { type: 2, val: parseInt(ch, 10), str: '' }
+    if (ch === 'BM') return { type: 3, val: 0, str: '' }
+    if (/^[A-Za-z]$/.test(ch)) return { type: 4, val: 0, str: ch }
+    return { type: 5, val: 0, str: ch }
+  }
+  const orderA = getOrderValue(a.chapters)
+  const orderB = getOrderValue(b.chapters)
+  if (orderA.type !== orderB.type) return orderA.type - orderB.type
+  if (orderA.type === 2) return orderA.val - orderB.val
+  return orderA.str.localeCompare(orderB.str)
+}
 
 function orderStages(stages: WorkflowStage[]): WorkflowStage[] {
   const byName = new Map(stages.map(s => [s.stage_name, s]))
@@ -132,6 +148,7 @@ function normalizeRole(role: string): string {
 // stage → role-name mapping fetched from stagesApi. Stages with no roles mapped
 // impose no restriction (fail open) so untouched stages keep working as before.
 function isRoleAllowedForStage(userRole: string, stageName: string | null | undefined, stageRolesMap: Map<string, string[]>): boolean {
+  if (!userRole) return false
   if (isPrivilegedRole(userRole)) return true
   if (!stageName) return true
   const stageRoles = stageRolesMap.get(stageName)
@@ -202,6 +219,18 @@ function WorkflowRail({ stages, chapters, filterStage, onStageClick, stageRolesM
 
 // ── Assignee Select ────────────────────────────────────────────────────────────
 
+function getUserDisplayName(user_name: string | null | undefined, users: AppUser[]): string {
+  if (!user_name) return 'Unassigned'
+  const u = users.find(x => x.user_name === user_name)
+  if (u) {
+    const fn = (u.first_name || '').trim()
+    const ln = (u.last_name || '').trim()
+    const full = `${fn} ${ln}`.trim()
+    if (full) return full
+  }
+  return user_name
+}
+
 function AssigneeSelect({ value, users, onChange, disabled, widthCls = 'w-28', className, onClick, updating, stageName, stageRolesMap }: {
   value: string | null
   users: AppUser[]
@@ -220,17 +249,19 @@ function AssigneeSelect({ value, users, onChange, disabled, widthCls = 'w-28', c
   const { canAccess } = useRBAC()
   const canEdit = canAccess(ROLE_PERMISSIONS.edit_assignee)
 
+  const currentDisplay = getUserDisplayName(value, users)
+
   if (!canEdit) {
     return (
-      <span className={`text-[11px] text-text font-medium px-2 py-0.5 border border-transparent truncate block ${widthCls} ${className ?? ''}`}>
-        {value || 'Unassigned'}
+      <span className={`text-[11px] text-text font-medium px-2 py-0.5 border border-transparent truncate block ${widthCls} ${className ?? ''}`} title={currentDisplay}>
+        {currentDisplay}
       </span>
     )
   }
 
   const active = users.filter(u => u.active_status)
   const assignable = stageRolesMap
-    ? active.filter(u => isRoleAllowedForStage(u.role || u.designation, stageName, stageRolesMap) || u.user_name === value)
+    ? active.filter(u => isRoleAllowedForStage(u.role || '', stageName, stageRolesMap) || u.user_name === value)
     : active
 
   return (
@@ -240,11 +271,18 @@ function AssigneeSelect({ value, users, onChange, disabled, widthCls = 'w-28', c
         onChange={e => onChange(e.target.value)}
         disabled={disabled || updating}
         className="text-[11px] bg-background border border-border rounded-md pl-2 pr-6 py-0.5 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-60 appearance-none cursor-pointer w-full truncate"
+        title={currentDisplay}
       >
         <option value="">— Unassigned —</option>
-        {assignable.map(u => (
-          <option key={u.id} value={u.user_name}>{u.user_name}</option>
-        ))}
+        {assignable.map(u => {
+          const fn = (u.first_name || '').trim()
+          const ln = (u.last_name || '').trim()
+          const fullName = `${fn} ${ln}`.trim()
+          const label = fullName ? `${fullName} (${u.user_name})` : u.user_name
+          return (
+            <option key={u.id} value={u.user_name}>{label}</option>
+          )
+        })}
       </select>
       {updating ? (
         <span className="absolute right-1.5 flex items-center justify-center pointer-events-none">
@@ -315,6 +353,80 @@ function ChapterCard({ chapter, users, plannedDueDates, stageRolesMap, onAssigne
         </div>
       </div>
 
+      {/* File Pipeline Status Badges */}
+      {!chapter.chapters?.toLowerCase().includes('art') && chapter.workflow !== 'WF-11 Art Process' && (
+        <div className="px-4 py-2 border-t border-border flex flex-wrap gap-1.5">
+          {!chapter.style_status && !chapter.xml_status && !chapter.indesign_status && !chapter.final_delivery_status && !chapter.structuring_status ? (
+            <span className="text-[10px] italic text-muted">No pipeline assets generated yet.</span>
+          ) : (
+            <>
+              {/* Style Validation Status */}
+              {chapter.style_status === 'valid' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <CheckCircle2 size={10} className="text-emerald-500" /> Style: Valid
+                </span>
+              )}
+              {chapter.style_status === 'invalid' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-red-50 text-red-700 border border-red-200">
+                  <AlertCircle size={10} className="text-red-500" /> Style: Invalid
+                </span>
+              )}
+              {chapter.style_status === 'pending' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                  <Clock size={10} className="text-amber-500 animate-spin" /> Style: Pending
+                </span>
+              )}
+
+              {/* Structuring Status */}
+              {chapter.structuring_status === 'completed' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200">
+                  <CheckCircle2 size={10} className="text-sky-500" /> Structuring: Complete
+                </span>
+              )}
+              {chapter.structuring_status === 'pending' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                  <Clock size={10} className="text-amber-500 animate-spin" /> Structuring: Pending
+                </span>
+              )}
+              {chapter.structuring_status === 'failed' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-red-50 text-red-700 border border-red-200">
+                  <AlertCircle size={10} className="text-red-500" /> Structuring: Failed
+                </span>
+              )}
+
+              {/* XML Validation Status */}
+              {chapter.xml_status === 'valid' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <CheckCircle2 size={10} className="text-emerald-500" /> XML: Valid
+                </span>
+              )}
+              {chapter.xml_status === 'invalid' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-red-50 text-red-700 border border-red-200">
+                  <AlertCircle size={10} className="text-red-500" /> XML: Invalid
+                </span>
+              )}
+              {chapter.xml_status === 'pending' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                  <Clock size={10} className="text-amber-500 animate-spin" /> XML: Pending
+                </span>
+              )}
+              {/* InDesign File Status */}
+              {chapter.indesign_status === 'generated' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200">
+                  <Layers size={10} className="text-purple-500" /> InDesign
+                </span>
+              )}
+              {/* Final Delivery Status */}
+              {chapter.final_delivery_status === 'generated' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-teal-50 text-teal-700 border border-teal-200">
+                  <Bookmark size={10} className="text-teal-500" /> Final Delivery
+                </span>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
       {/* Fields */}
       <div className="px-4 pb-3 space-y-1.5 text-xs flex-1">
 
@@ -344,10 +456,18 @@ export function ProjectWorkflow() {
   const navigate = useNavigate()
   const id = Number(projectId)
 
+  const { roles } = useRBAC()
+  const showBatchButtons = roles.some(role => {
+    const r = role.toLowerCase()
+    return r === 'admin' || r === 'xml operator' || r === 'xml manager'
+  })
+
   const [project, setProject] = useState<Project | null>(null)
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [wfStagesMap, setWfStagesMap] = useState<Record<string, WorkflowStage[]>>({})
   const [stageRolesMap, setStageRolesMap] = useState<Map<string, string[]>>(new Map())
+  const [combineConfirmOpen, setCombineConfirmOpen] = useState(false)
+  const [combining, setCombining] = useState(false)
   const [users, setUsers] = useState<AppUser[]>([])
   const [plannedDueDates, setPlannedDueDates] = useState<Map<string, StageInfo>>(new Map())
   // Maps WMS chapter number (e.g. "01") → CMS chapter DB id for correct navigation
@@ -365,6 +485,27 @@ export function ProjectWorkflow() {
 
   const [viewMode, setViewMode] = useViewMode('view:chapters', 'large')
 
+  // Fetch InDesign templates for this project
+  const templatesQuery = useQuery<{
+    id: number
+    filename: string
+    category: string
+    file_size: string
+    uploaded_by: string
+    uploaded_on: string
+  }[]>({
+    queryKey: ["indesign-templates", project?.id],
+    queryFn: async () => {
+      if (!project?.id) return []
+      const response = await fetch(`/api/v2/projects/${project.id}/indesign-templates`)
+      if (!response.ok) {
+        throw new Error("Failed to fetch templates")
+      }
+      return response.json()
+    },
+    enabled: !!project?.id,
+  })
+
   const [filterAssignee, setFilterAssignee] = useState('')
   const [filterStage, setFilterStage] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
@@ -372,15 +513,28 @@ export function ProjectWorkflow() {
   const [bulkStage, setBulkStage] = useState('')
   const [bulkAssignee, setBulkAssignee] = useState('')
   const [bulkAssigning, setBulkAssigning] = useState(false)
+  const [batchProcessing, setBatchProcessing] = useState(false)
   const [bulkAssignModalOpen, setBulkAssignModalOpen] = useState(false)
   const [selectedBulkChapterIds, setSelectedBulkChapterIds] = useState<Set<number>>(new Set())
+  const [batchModalType, setBatchModalType] = useState<'word_to_xml' | 'style_validation' | 'structuring' | 'xml_to_indesign' | 'indesign_to_xml' | null>(null)
+  const [batchSelectedChapterIds, setBatchSelectedChapterIds] = useState<Set<number>>(new Set())
+  const [batchTemplateId, setBatchTemplateId] = useState<number | ''>('')
+
+  useEffect(() => {
+    if (batchModalType === 'xml_to_indesign' && !batchTemplateId) {
+      const templates = templatesQuery.data ?? []
+      if (templates.length > 0) {
+        setBatchTemplateId(templates[0].id)
+      }
+    }
+  }, [batchModalType, templatesQuery.data, batchTemplateId])
 
   const [isAddChapterOpen, setIsAddChapterOpen] = useState(false)
   const [newChapterNumber, setNewChapterNumber] = useState('')
   const [newChapterFile, setNewChapterFile] = useState<File | null>(null)
   const [addingChapter, setAddingChapter] = useState(false)
   const [addChapterError, setAddChapterError] = useState<string | null>(null)
-  const [uploadMode, setUploadMode] = useState<'single' | 'zip'>('single')
+
   const [newChapterCategory, setNewChapterCategory] = useState('indesign')
 
   const DESIGN_UPLOAD_CATEGORIES = [
@@ -391,6 +545,7 @@ export function ProjectWorkflow() {
     { key: 'library', label: 'Library' },
     { key: 'template', label: 'template' },
     { key: 'print_preset', label: 'Print Preset' },
+    { key: 'misc', label: 'Final delivery' },
   ]
 
   useEffect(() => {
@@ -405,7 +560,7 @@ export function ProjectWorkflow() {
         const p = response.project as unknown as Project
         setProject(p)
         const projectCode = p.code || p.project_code || ''
-        
+
         const [chs, details, cmsChapters, allStages] = await Promise.all([
           chaptersApi.getByProject(projectCode).catch(() => [] as Chapter[]),
           projectCode
@@ -414,7 +569,7 @@ export function ProjectWorkflow() {
           projectsApi.getProjectChapters(id).catch(() => ({ project: null, chapters: [] })),
           stagesApi.list().catch(() => [] as Stage[]),
         ])
-        
+
         setChapters(chs)
         setStageRolesMap(new Map(allStages.map(s => [s.stage_name, s.roles])))
 
@@ -431,7 +586,7 @@ export function ProjectWorkflow() {
             .catch(() => ({ workflowName: wf, stages: [] as WorkflowStage[] }))
         )
         const wfsList = await Promise.all(wfPromises)
-        
+
         const wfMapObj: Record<string, WorkflowStage[]> = {}
         wfsList.forEach(({ workflowName, stages }) => {
           wfMapObj[workflowName] = orderStages(stages)
@@ -466,9 +621,22 @@ export function ProjectWorkflow() {
   }, [id])
 
   // Partition chapters into Design, Manuscripts, and Art tracks
-  const designChapters = useMemo(() => chapters.filter(c => c.chapters === 'Design'), [chapters])
-  const manuscriptChapters = useMemo(() => chapters.filter(c => /^\d+$/.test(c.chapters)), [chapters])
-  const artChapters = useMemo(() => chapters.filter(c => c.chapters.toLowerCase().includes('art')), [chapters])
+  const designChapters = useMemo(() => chapters
+    .filter(c => c.chapters === 'Design')
+    .sort(sortChapters), [chapters])
+  const manuscriptChapters = useMemo(() => chapters
+    .filter(c => c.chapters !== 'Design' && !c.chapters.toLowerCase().includes('art'))
+    .sort(sortChapters), [chapters])
+  const artChapters = useMemo(() => chapters
+    .filter(c => c.chapters.toLowerCase().includes('art'))
+    .sort(sortChapters), [chapters])
+
+  const batchTargets = useMemo(() => {
+    if (filterStage) {
+      return manuscriptChapters.filter(c => c.stage_name === filterStage)
+    }
+    return manuscriptChapters
+  }, [manuscriptChapters, filterStage])
 
   // Select active track chapters
   const activeChapters = useMemo(() => {
@@ -514,7 +682,7 @@ export function ProjectWorkflow() {
       if (filterStatus && filterStatus !== '__delayed__' && ch.status !== filterStatus) return false
       return true
     })
-    .sort((a, b) => a.chapters.localeCompare(b.chapters, undefined, { numeric: true }))
+    .sort(sortChapters)
     , [activeChapters, filterAssignee, filterStage, filterStatus, plannedDueDates])
 
   // Chapters currently sitting in the stage picked for bulk assignment, ascending by chapter number
@@ -522,7 +690,7 @@ export function ProjectWorkflow() {
     () => bulkStage
       ? activeChapters
         .filter(c => c.stage_name === bulkStage)
-        .sort((a, b) => a.chapters.localeCompare(b.chapters, undefined, { numeric: true }))
+        .sort(sortChapters)
       : [],
     [activeChapters, bulkStage]
   )
@@ -628,11 +796,111 @@ export function ProjectWorkflow() {
     setSelectedBulkChapterIds(new Set())
   }
 
+  async function handleBatchProcess(processType: string) {
+    if (selectedBulkChapters.length === 0 || !project) return
+    setBatchProcessing(true)
+    try {
+      const response = await fetch(`/api/v2/projects/${project.id}/batch-jobs`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          process_type: processType,
+          chapter_ids: selectedBulkChapters.map(c => c.id),
+          mode: 'style',
+          options: processType === 'structuring' ? { structuring_method: 'manual' } : undefined
+        })
+      })
+      const result = await response.json()
+      if (response.ok && result.success) {
+        let label = 'Word to XML'
+        if (processType === 'style_validation') label = 'Style Validation'
+        else if (processType === 'structuring') label = 'Word Structuring'
+        else if (processType === 'xml_to_indesign') label = 'XML to InDesign'
+        else if (processType === 'indesign_to_xml') label = 'InDesign to Final'
+        toast.success(`Triggered ${label} for ${result.triggered_count} chapters.`)
+        setBulkAssignModalOpen(false)
+
+        // Refresh chapters list
+        const chsRes = await chaptersApi.getByProject(project?.code || project?.project_code || '')
+        setChapters(chsRes)
+      } else {
+        toast.error(result.message || 'Failed to trigger batch processing')
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'An error occurred during batch processing')
+    } finally {
+      setBatchProcessing(false)
+      setBulkStage('')
+      setBulkAssignee('')
+      setSelectedBulkChapterIds(new Set())
+    }
+  }
+
+  async function handleDedicatedBatchProcess() {
+    if (!batchModalType || batchSelectedChapterIds.size === 0 || !project) return
+    setBatchProcessing(true)
+    const selectedIds = Array.from(batchSelectedChapterIds)
+
+    let templateFileId: number | undefined = undefined
+    if (batchModalType === 'xml_to_indesign' && batchTemplateId) {
+      const stylesheets = stylesheetsQuery.data?.stylesheets ?? []
+      const selectedSs = stylesheets.find(s => s.id === batchTemplateId)
+      if (selectedSs && selectedSs.analyzed_file_ids && selectedSs.analyzed_file_ids.length > 0) {
+        templateFileId = selectedSs.analyzed_file_ids[0]
+      }
+    }
+
+    try {
+      let batchOptions: Record<string, any> | undefined = undefined
+      if (templateFileId) {
+        batchOptions = { template_file_id: templateFileId }
+      } else if (batchModalType === 'structuring') {
+        batchOptions = { structuring_method: 'manual' }
+      }
+
+      const response = await fetch(`/api/v2/projects/${project.id}/batch-jobs`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          process_type: batchModalType,
+          chapter_ids: selectedIds,
+          mode: 'style',
+          options: batchOptions
+        })
+      })
+      const result = await response.json()
+      if (response.ok && result.success) {
+        let processLabel = 'Word to XML'
+        if (batchModalType === 'xml_to_indesign') processLabel = 'XML to InDesign'
+        if (batchModalType === 'indesign_to_xml') processLabel = 'InDesign to Final'
+        if (batchModalType === 'style_validation') processLabel = 'Style Validation'
+        if (batchModalType === 'structuring') processLabel = 'Word Structuring'
+
+        toast.success(`Triggered ${processLabel} for ${result.triggered_count} chapters.`)
+        setBatchModalType(null)
+        setBatchSelectedChapterIds(new Set())
+
+        // Refresh chapters list
+        const chsRes = await chaptersApi.getByProject(project?.code || project?.project_code || '')
+        setChapters(chsRes)
+      } else {
+        toast.error(result.message || 'Failed to trigger batch processing')
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'An error occurred during batch processing')
+    } finally {
+      setBatchProcessing(false)
+    }
+  }
+
   function openAddChapter() {
     setNewChapterNumber(activeTab === 'art' ? nextArtChapterNumber : nextChapterNumber)
     setNewChapterFile(null)
     setAddChapterError(null)
-    setUploadMode('single')
     setNewChapterCategory('indesign')
     setIsAddChapterOpen(true)
   }
@@ -665,49 +933,26 @@ export function ProjectWorkflow() {
       }
 
       if (activeTab === 'art') {
-        if (uploadMode === 'zip') {
-          const result = await chaptersApi.createArtChaptersFromZip(id, newChapterFile)
-          setChapters(prev => [...prev, ...result.created])
-          setIsAddChapterOpen(false)
-          const skippedNote = result.skipped.length > 0 ? `, ${result.skipped.length} skipped` : ''
-          toast.success(`${result.created.length} Art chapter(s) created${skippedNote}`)
-          if (result.created.length > 0 && (project?.status === 'Active' || project?.status === 'Completed')) {
-            navigate(`/projects/${id}/planning`)
-          }
-          return
-        }
-
-        const created = await chaptersApi.createArtChapter(id, newChapterNumber, newChapterFile)
-        setChapters(prev => [...prev, created])
-        setIsAddChapterOpen(false)
-        toast.success(`${created.chapters} added — visit Planning to approve its schedule`)
-        if (project?.status === 'Active' || project?.status === 'Completed') {
-          navigate(`/projects/${id}/planning`)
-        }
-        return
-      }
-
-      if (uploadMode === 'zip') {
-        const result = await chaptersApi.createManuscriptChaptersFromZip(id, newChapterFile)
+        const result = await chaptersApi.createArtChaptersFromZip(id, newChapterFile)
         setChapters(prev => [...prev, ...result.created])
         setIsAddChapterOpen(false)
         const skippedNote = result.skipped.length > 0 ? `, ${result.skipped.length} skipped` : ''
-        toast.success(`${result.created.length} chapter(s) created${skippedNote}`)
+        toast.success(`${result.created.length} Art chapter(s) created${skippedNote}`)
         if (result.created.length > 0 && (project?.status === 'Active' || project?.status === 'Completed')) {
           navigate(`/projects/${id}/planning`)
         }
         return
       }
 
-      const created = await chaptersApi.createWithManuscript(id, newChapterNumber, newChapterFile)
-      setChapters(prev => [...prev, created])
+      const result = await chaptersApi.createManuscriptChaptersFromZip(id, newChapterFile)
+      setChapters(prev => [...prev, ...result.created])
       setIsAddChapterOpen(false)
-      if (project?.status === 'Active' || project?.status === 'Completed') {
-        toast.success(`Chapter ${created.chapters} added — visit Planning to approve its schedule`)
+      const skippedNote = result.skipped.length > 0 ? `, ${result.skipped.length} skipped` : ''
+      toast.success(`${result.created.length} chapter(s) created${skippedNote}`)
+      if (result.created.length > 0 && (project?.status === 'Active' || project?.status === 'Completed')) {
         navigate(`/projects/${id}/planning`)
-      } else {
-        toast.success(`Chapter ${created.chapters} added`)
       }
+      return
     } catch (err) {
       setAddChapterError(getApiErrorMessage(err, 'Failed to create chapter'))
     } finally {
@@ -734,6 +979,33 @@ export function ProjectWorkflow() {
     const cmsId = cmsChapterIdMap.get(num) ?? cmsChapterIdMap.get(parseInt(num, 10).toString()) ?? cmsChapterIdMap.get(num.padStart(2, '0')) ?? null
     if (!cmsId) { toast.error(`Chapter "${num}" has no files yet.`); return }
     navigate(`${clientId ? `/clients/${clientId}/projects/${projectId}` : `/projects/${projectId}`}/chapters/${cmsId}`)
+  }
+
+  async function handleCombineBook() {
+    setCombining(true)
+    try {
+      const response = await fetch(`/api/v2/projects/${id}/combine-book`, {
+        method: 'POST',
+      })
+      if (!response.ok) {
+        const errorText = await response.text()
+        let errorMsg = 'Failed to combine book files.'
+        try {
+          const errJson = JSON.parse(errorText)
+          if (errJson.detail) errorMsg = errJson.detail
+        } catch { }
+        throw new Error(errorMsg)
+      }
+
+      toast.success('Book files combined and saved to Final files successfully!')
+      setCombineConfirmOpen(false)
+      window.location.reload()
+
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to combine book files.')
+    } finally {
+      setCombining(false)
+    }
   }
 
   return (
@@ -784,7 +1056,18 @@ export function ProjectWorkflow() {
                 <Edit2 size={14} />
               </button>
               <button
-                onClick={() => navigate(`/projects/${id}/planning`)}
+                onClick={() => {
+                  if (project.project_manager !== viewer?.username && !canAccess(['admin'])) {
+                    toast.error('Only the assigned Project Manager can open planning.')
+                    return
+                  }
+                  const contentChapters = chapters.filter(c => c.chapters !== 'Design' && c.chapters !== 'CE support')
+                  if (contentChapters.length === 0) {
+                    navigate(`/projects/${id}/mapping`)
+                  } else {
+                    navigate(`/projects/${id}/planning`)
+                  }
+                }}
                 title="Project planning"
                 className="text-muted hover:text-primary transition-colors flex-shrink-0 ml-1.5"
               >
@@ -849,11 +1132,10 @@ export function ProjectWorkflow() {
             setFilterStage('')
             setFilterStatus('')
           }}
-          className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
-            activeTab === 'manuscript'
+          className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${activeTab === 'manuscript'
               ? 'text-primary bg-accent border-primary/20 shadow-sm font-bold'
               : 'text-muted border-transparent hover:bg-accent/40'
-          }`}
+            }`}
         >
           📚 Manuscripts ({manuscriptChapters.length})
         </button>
@@ -863,11 +1145,10 @@ export function ProjectWorkflow() {
             setFilterStage('')
             setFilterStatus('')
           }}
-          className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
-            activeTab === 'art'
+          className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${activeTab === 'art'
               ? 'text-primary bg-accent border-primary/20 shadow-sm font-bold'
               : 'text-muted border-transparent hover:bg-accent/40'
-          }`}
+            }`}
         >
           📐 Art Tracks ({artChapters.length})
         </button>
@@ -877,11 +1158,10 @@ export function ProjectWorkflow() {
             setFilterStage('')
             setFilterStatus('')
           }}
-          className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
-            activeTab === 'design'
+          className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${activeTab === 'design'
               ? 'text-primary bg-accent border-primary/20 shadow-sm font-bold'
               : 'text-muted border-transparent hover:bg-accent/40'
-          }`}
+            }`}
         >
           🎨 Design ({designChapters.length})
         </button>
@@ -922,7 +1202,7 @@ export function ProjectWorkflow() {
             className="text-xs bg-card border border-border rounded-lg px-2.5 py-1.5 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 appearance-none cursor-pointer"
           >
             <option value="">All Assignees</option>
-            {assigneeOptions.map(a => <option key={a} value={a}>{a}</option>)}
+            {assigneeOptions.map(a => <option key={a} value={a}>{getUserDisplayName(a, users)} ({a})</option>)}
           </select>
 
           {hasFilters && (
@@ -960,6 +1240,79 @@ export function ProjectWorkflow() {
           >
             {bulkStage ? `Select chapters (${bulkTargets.length})` : 'Assign'}
           </button>
+
+          {showBatchButtons && activeTab === 'manuscript' && (
+            <>
+              <span className="w-px h-5 bg-border mx-1" />
+              {filterStage?.toLowerCase() === 'manuscript analysis' && (
+                <button
+                  onClick={() => {
+                    setBatchSelectedChapterIds(new Set(batchTargets.map(c => c.id)))
+                    setBatchModalType('style_validation')
+                  }}
+                  className="text-xs font-medium px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white transition-colors"
+                >
+                  Batch Style Validation
+                </button>
+              )}
+              {filterStage?.toLowerCase() === 'pre-editing' && (
+                <button
+                  onClick={() => {
+                    setBatchSelectedChapterIds(new Set(batchTargets.map(c => c.id)))
+                    setBatchModalType('structuring')
+                  }}
+                  className="text-xs font-medium px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white transition-colors"
+                >
+                  Batch Structuring
+                </button>
+              )}
+              {filterStage?.toLowerCase() === 'xml conversion' && (
+                <>
+                  <button
+                    onClick={() => {
+                      setBatchSelectedChapterIds(new Set(batchTargets.map(c => c.id)))
+                      setBatchModalType('word_to_xml')
+                    }}
+                    className="text-xs font-medium px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white transition-colors"
+                  >
+                    Batch Word to XML
+                  </button>
+                  <button
+                    onClick={() => {
+                      setBatchSelectedChapterIds(new Set(batchTargets.map(c => c.id)))
+                      const templates = templatesQuery.data ?? []
+                      if (templates.length > 0) {
+                        setBatchTemplateId(templates[0].id)
+                      } else {
+                        setBatchTemplateId('')
+                      }
+                      setBatchModalType('xml_to_indesign')
+                    }}
+                    className="text-xs font-medium px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white transition-colors"
+                  >
+                    Batch XML to InDesign
+                  </button>
+                  <button
+                    onClick={() => {
+                      setBatchSelectedChapterIds(new Set(batchTargets.map(c => c.id)))
+                      setBatchModalType('indesign_to_xml')
+                    }}
+                    className="text-xs font-medium px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white transition-colors"
+                  >
+                    Batch InDesign to Final
+                  </button>
+                </>
+              )}
+              <button
+                onClick={() => {
+                  setCombineConfirmOpen(true)
+                }}
+                className="text-xs font-medium px-3 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white transition-colors"
+              >
+                Combine Book
+              </button>
+            </>
+          )}
 
           <span className="ml-auto text-xs text-muted">
             {filtered.length} of {summary.total} chapter{summary.total !== 1 ? 's' : ''}
@@ -1138,10 +1491,60 @@ export function ProjectWorkflow() {
         title="Group Assign Chapters"
         description={`Choose which chapters in "${bulkStage}" to assign. Each chapter's due date updates based on the stage SLA.`}
         footer={
-          <div className="flex gap-3 justify-end">
+          <div className="flex gap-3 justify-end items-center">
+            {bulkStage && bulkStage.toLowerCase().includes('manuscript') && (
+              <>
+                <button
+                  onClick={() => handleBatchProcess('style_validation')}
+                  disabled={batchProcessing || selectedBulkChapters.length === 0}
+                  className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+                >
+                  {batchProcessing && <Spinner size="sm" />}
+                  Batch Style Validation
+                </button>
+                <button
+                  onClick={() => handleBatchProcess('word_to_xml')}
+                  disabled={batchProcessing || selectedBulkChapters.length === 0}
+                  className="px-4 py-2 text-sm font-medium text-white bg-amber-600 hover:bg-amber-700 rounded-lg transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+                >
+                  {batchProcessing && <Spinner size="sm" />}
+                  Batch Word to XML
+                </button>
+              </>
+            )}
+            {bulkStage && bulkStage.toLowerCase() === 'pre-editing' && (
+              <button
+                onClick={() => handleBatchProcess('structuring')}
+                disabled={batchProcessing || selectedBulkChapters.length === 0}
+                className="px-4 py-2 text-sm font-medium text-white bg-sky-600 hover:bg-sky-700 rounded-lg transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+              >
+                {batchProcessing && <Spinner size="sm" />}
+                Batch Structuring
+              </button>
+            )}
+            {bulkStage && bulkStage.toLowerCase().includes('xml') && (
+              <button
+                onClick={() => handleBatchProcess('xml_to_indesign')}
+                disabled={batchProcessing || selectedBulkChapters.length === 0}
+                className="px-4 py-2 text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+              >
+                {batchProcessing && <Spinner size="sm" />}
+                Batch XML to InDesign
+              </button>
+            )}
+            {bulkStage && bulkStage.toLowerCase().includes('design') && (
+              <button
+                onClick={() => handleBatchProcess('indesign_to_xml')}
+                disabled={batchProcessing || selectedBulkChapters.length === 0}
+                className="px-4 py-2 text-sm font-medium text-white bg-rose-600 hover:bg-rose-700 rounded-lg transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+              >
+                {batchProcessing && <Spinner size="sm" />}
+                Batch InDesign to Word
+              </button>
+            )}
             <button
               onClick={() => setBulkAssignModalOpen(false)}
-              disabled={bulkAssigning}
+              disabled={bulkAssigning || batchProcessing}
               className="px-4 py-2 text-sm font-medium text-text bg-background border border-border rounded-lg hover:bg-surface transition-colors disabled:opacity-50"
             >
               Cancel
@@ -1220,17 +1623,159 @@ export function ProjectWorkflow() {
         </div>
       </Modal>
 
+      {/* Dedicated Batch Modal */}
+      <Modal
+        isOpen={batchModalType !== null}
+        onClose={() => { if (!batchProcessing) setBatchModalType(null) }}
+        title={
+          batchModalType === 'word_to_xml'
+            ? 'Batch Word to XML'
+            : batchModalType === 'style_validation'
+              ? 'Batch Style Validation'
+              : batchModalType === 'structuring'
+                ? 'Batch Word Structuring'
+                : batchModalType === 'xml_to_indesign'
+                  ? 'Batch XML to InDesign'
+                  : 'Batch InDesign to Final'
+        }
+        description={
+          batchModalType === 'word_to_xml'
+            ? 'Select the chapters you want to run Word-to-XML conversion for in bulk. This will convert the docx manuscripts into JATS XML files.'
+            : batchModalType === 'style_validation'
+              ? 'Select the chapters you want to run Style Validation for in bulk. This will validate the docx manuscripts against project style guidelines.'
+              : batchModalType === 'structuring'
+                ? 'Select the chapters you want to run Word Structuring for in bulk. This will apply standard styles to the docx manuscripts using the rules-based structuring library.'
+                : batchModalType === 'xml_to_indesign'
+                  ? 'Select the chapters you want to generate InDesign layouts for in bulk. This will dispatch layout generation tasks to the Windows InDesign Server.'
+                  : 'Select the chapters you want to convert from InDesign to final XML outputs. This will extract final packages (XML + Logs) from the InDesign layouts.'
+        }
+        footer={
+          <div className="flex gap-3 justify-end items-center">
+            <button
+              onClick={() => setBatchModalType(null)}
+              disabled={batchProcessing}
+              className="px-4 py-2 text-sm font-medium text-text bg-background border border-border rounded-lg hover:bg-surface transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleDedicatedBatchProcess}
+              disabled={batchProcessing || batchSelectedChapterIds.size === 0}
+              className="px-4 py-2 text-sm font-medium text-white bg-amber-600 hover:bg-amber-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
+            >
+              {batchProcessing && <Spinner size="sm" />}
+              {batchProcessing ? 'Running…' : `Start Batch Job`}
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          {batchModalType === 'xml_to_indesign' && (
+            <div className="bg-surface/50 border border-border/80 rounded-xl p-3.5 space-y-2">
+              <label className="block text-xs font-semibold text-text uppercase tracking-wider">
+                Select InDesign Template
+              </label>
+              <select
+                value={batchTemplateId}
+                onChange={e => setBatchTemplateId(e.target.value ? Number(e.target.value) : '')}
+                className="text-xs bg-card border border-border rounded-lg px-2.5 py-2 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 appearance-none cursor-pointer w-full"
+              >
+                <option value="">-- Choose template --</option>
+                {(templatesQuery.data ?? []).map(t => (
+                  <option key={t.id} value={t.id}>
+                    {t.filename} ({t.uploaded_on})
+                  </option>
+                ))}
+              </select>
+              {(!templatesQuery.data || templatesQuery.data.length === 0) && (
+                <p className="text-[10px] text-amber-500 font-medium mt-1">
+                  ⚠️ No templates found in this project. Please upload one in the Design folder.
+                </p>
+              )}
+            </div>
+          )}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-medium text-muted">
+                Chapters ({batchSelectedChapterIds.size}/{batchTargets.length} selected)
+              </label>
+              <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setBatchSelectedChapterIds(new Set())}
+                  className="text-[11px] text-primary hover:underline font-medium transition-colors"
+                >
+                  Deselect all
+                </button>
+                <span className="text-border">|</span>
+                <button
+                  type="button"
+                  onClick={() => setBatchSelectedChapterIds(new Set(batchTargets.map(c => c.id)))}
+                  className="text-[11px] text-primary hover:underline font-medium transition-colors"
+                >
+                  Select all
+                </button>
+              </div>
+            </div>
+
+            <div className="max-h-64 overflow-y-auto border border-border rounded-lg divide-y divide-border">
+              {batchTargets.map(ch => {
+                const isSelected = batchSelectedChapterIds.has(ch.id)
+                return (
+                  <label
+                    key={ch.id}
+                    className={`flex items-center gap-3 px-3 py-2 text-sm hover:bg-surface transition-colors cursor-pointer select-none ${isSelected ? 'bg-amber-50/20' : ''
+                      }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => {
+                        setBatchSelectedChapterIds(prev => {
+                          const next = new Set(prev)
+                          if (next.has(ch.id)) {
+                            next.delete(ch.id)
+                          } else {
+                            next.add(ch.id)
+                          }
+                          return next
+                        })
+                      }}
+                      className="rounded border-border text-primary focus:ring-primary/40 cursor-pointer"
+                    />
+                    <span className="font-semibold text-primary text-xs uppercase w-8 flex-shrink-0">
+                      {ch.chapters.padStart(2, '0')}
+                    </span>
+                    <span className="truncate text-text flex-1 min-w-0">
+                      {ch.chapter_title || `Chapter ${ch.chapters}`}
+                    </span>
+                    {(() => {
+                      const sm = statusMeta(ch.status)
+                      return (
+                        <span className={`ml-auto text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full ${sm.cls}`}>
+                          {sm.label}
+                        </span>
+                      )
+                    })()}
+                  </label>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      </Modal>
+
       {/* Add Chapter Modal */}
       <Modal
         isOpen={isAddChapterOpen}
         onClose={() => { if (!addingChapter) setIsAddChapterOpen(false) }}
-        title={activeTab === 'art' ? 'New Art Chapter' : activeTab === 'design' ? 'New Design File' : 'New Chapter'}
+        title={activeTab === 'art' ? 'New Art Chapters' : activeTab === 'design' ? 'New Design File' : 'New Chapters'}
         description={
           activeTab === 'art'
-            ? (uploadMode === 'zip' ? 'Add multiple Art chapters from a zip file.' : 'Add the next Art chapter and its file.')
+            ? 'Add multiple Art chapters from a zip file.'
             : activeTab === 'design'
               ? 'Upload a file into the Design track.'
-              : (uploadMode === 'zip' ? 'Add multiple chapters at once from a zip file.' : 'Add the next chapter and its manuscript file.')
+              : 'Add multiple chapters at once from a zip file.'
         }
         footer={
           <div className="flex gap-3 justify-end">
@@ -1243,70 +1788,16 @@ export function ProjectWorkflow() {
             </button>
             <button
               onClick={handleCreateChapter}
-              disabled={addingChapter || !newChapterFile || (activeTab !== 'design' && uploadMode === 'single' && !newChapterNumber) || (activeTab === 'design' && !designChapters[0])}
+              disabled={addingChapter || !newChapterFile || (activeTab === 'design' && !designChapters[0])}
               className="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
             >
               {addingChapter && <Spinner size="sm" />}
-              {addingChapter ? 'Creating…' : activeTab === 'design' ? 'Upload File' : 'Create Chapter'}
+              {addingChapter ? 'Creating…' : activeTab === 'design' ? 'Upload File' : 'Create Chapters'}
             </button>
           </div>
         }
       >
         <div className="space-y-4">
-          {(activeTab === 'manuscript' || activeTab === 'art') && (
-            <div className="flex gap-2 p-1 bg-background border border-border rounded-lg w-fit">
-              <button
-                type="button"
-                onClick={() => { setUploadMode('single'); setNewChapterFile(null) }}
-                disabled={addingChapter}
-                className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${uploadMode === 'single' ? 'bg-primary text-white' : 'text-muted hover:text-text'}`}
-              >
-                Single Chapter
-              </button>
-              <button
-                type="button"
-                onClick={() => { setUploadMode('zip'); setNewChapterFile(null) }}
-                disabled={addingChapter}
-                className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${uploadMode === 'zip' ? 'bg-primary text-white' : 'text-muted hover:text-text'}`}
-              >
-                Multiple Chapters (ZIP)
-              </button>
-            </div>
-          )}
-
-          {activeTab === 'manuscript' && uploadMode === 'single' && (
-            <div>
-              <label className="block text-xs font-medium text-muted mb-1">Chapter No.</label>
-              <input
-                type="text"
-                value={newChapterNumber}
-                onChange={e => setNewChapterNumber(e.target.value.replace(/\D/g, ''))}
-                disabled={addingChapter}
-                className="w-full text-sm bg-background border border-border rounded-lg px-3 py-2 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-60"
-                placeholder={nextChapterNumber}
-              />
-              <p className="text-[11px] text-muted mt-1">
-                Next expected number is <span className="font-semibold">{nextChapterNumber}</span> — chapters must stay sequential with no gaps.
-              </p>
-            </div>
-          )}
-
-          {activeTab === 'art' && uploadMode === 'single' && (
-            <div>
-              <label className="block text-xs font-medium text-muted mb-1">Chapter No.</label>
-              <input
-                type="text"
-                value={newChapterNumber}
-                onChange={e => setNewChapterNumber(e.target.value.replace(/\D/g, ''))}
-                disabled={addingChapter}
-                className="w-full text-sm bg-background border border-border rounded-lg px-3 py-2 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-60"
-                placeholder={nextArtChapterNumber}
-              />
-              <p className="text-[11px] text-muted mt-1">
-                Next expected number is <span className="font-semibold">Ch {nextArtChapterNumber} - Art</span> — chapters must stay sequential with no gaps.
-              </p>
-            </div>
-          )}
 
           {activeTab === 'design' && (
             <div>
@@ -1331,17 +1822,15 @@ export function ProjectWorkflow() {
 
           <div>
             <label className="block text-xs font-medium text-muted mb-1">
-              {activeTab === 'art' ? (uploadMode === 'zip' ? 'Art files (.zip)' : 'Art file (single or .zip)') : activeTab === 'design' ? 'Design file (single or .zip)' : uploadMode === 'zip' ? 'Chapters (.zip)' : 'Manuscript file'}
+              {activeTab === 'art' ? 'Art files (.zip)' : activeTab === 'design' ? 'Design file (single or .zip)' : 'Chapters (.zip)'}
             </label>
             <UploadZone
               accept={
-                ((activeTab === 'art' && uploadMode === 'zip') || (activeTab === 'manuscript' && uploadMode === 'zip'))
+                (activeTab === 'art' || activeTab === 'manuscript')
                   ? '.zip'
-                  : activeTab === 'art'
-                    ? '.zip,.png,.jpg,.jpeg,.gif,.tiff,.webp,.bmp,.pdf'
-                    : activeTab === 'design'
-                      ? '.zip,.png,.jpg,.jpeg,.gif,.tiff,.webp,.bmp,.pdf,.docx,.doc,.xlsx,.xls,.txt,.indb,.indd'
-                      : '.docx'
+                  : activeTab === 'design'
+                    ? '.zip,.png,.jpg,.jpeg,.gif,.tiff,.webp,.bmp,.pdf,.docx,.doc,.xlsx,.xls,.txt,.indb,.indd'
+                    : '.docx'
               }
               onFiles={files => setNewChapterFile(files[0] ?? null)}
               isUploading={addingChapter}
@@ -1354,6 +1843,42 @@ export function ProjectWorkflow() {
               <AlertCircle size={12} /> {addChapterError}
             </p>
           )}
+        </div>
+      </Modal>
+
+      {/* Combine Book Modal */}
+      <Modal
+        isOpen={combineConfirmOpen}
+        onClose={() => { if (!combining) setCombineConfirmOpen(false) }}
+        title="Combine Project Book"
+        description="This will gather all XML and ePUB files from the Final delivery folders of all chapters and merge them into a single book XML and ePUB. The combined files will be uploaded to a new 'Final files' chapter folder."
+        footer={
+          <div className="flex gap-3 justify-end items-center">
+            <button
+              onClick={() => setCombineConfirmOpen(false)}
+              disabled={combining}
+              className="text-xs font-semibold px-4 py-2.5 rounded-lg border border-border hover:bg-hover text-text transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleCombineBook}
+              disabled={combining}
+              className="text-xs font-semibold px-4 py-2.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white transition-colors flex items-center gap-1.5 disabled:opacity-50"
+            >
+              {combining && <Spinner size="sm" />}
+              {combining ? 'Combining Book...' : 'Start Combine Process'}
+            </button>
+          </div>
+        }
+      >
+        <div className="py-4 text-xs text-muted flex flex-col gap-2">
+          <p>The merge scripts will be executed on the Windows Conversion Server:</p>
+          <ul className="list-disc pl-5 space-y-1">
+            <li>XML Merge: <code className="bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 px-1.5 py-0.5 rounded font-mono border border-gray-200 dark:border-gray-700">book_xml.pl</code></li>
+            <li>ePUB Merge: <code className="bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 px-1.5 py-0.5 rounded font-mono border border-gray-200 dark:border-gray-700">book_epub.pl</code></li>
+          </ul>
+          <p className="mt-2 text-amber-600 font-medium">⚠️ Note: Make sure chapters have XML and ePUB files uploaded in their Final delivery folder before running the combine process.</p>
         </div>
       </Modal>
 

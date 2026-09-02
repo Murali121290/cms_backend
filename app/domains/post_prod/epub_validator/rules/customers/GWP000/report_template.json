@@ -1,0 +1,726 @@
+{
+  "title": "EPUB QA Checklist for Goodheart-Willcox Publisher",
+  "metadata_row": [
+    "Date file rec'd: {uploaded_date}",
+    "",
+    "Date file review complete: {date}",
+    "Production Specialist: {assignee name}"
+  ],
+  "headers": [
+    "",
+    "",
+    "",
+    ""
+  ],
+  "structure": [
+    {
+      "category_name": "Uncategorized",
+      "criteria": [
+        {
+          "name": "Criteria",
+          "default_status": "Pass/Fail",
+          "default_notes": "Notes",
+          "resources": "Resources for Testing / Reference / Examples",
+          "rule_ids": []
+        }
+      ]
+    },
+    {
+      "category_name": "Validity & Support",
+      "criteria": [
+        {
+          "name": "Written to EPUB 3.0 Specifications",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "Check OPF file in Chrome. Version=\"3.0\" should be at the top of the page within the package information.\nhttp://www.idpf.org/epub/30/spec/epub30-publications-20111011.html",
+          "rule_ids": [
+            "GWP-META-000"
+          ]
+        },
+        {
+          "name": "EPUB validates with EPUB-Checker",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "https://github.com/IDPF/epubcheck",
+          "rule_ids": [
+            "EPUBCHECK"
+          ]
+        },
+        {
+          "name": "CSS file validates on its own, outside of the EPUB",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "https://jigsaw.w3.org/css-validator/",
+          "rule_ids": [
+            "CSS002"
+          ]
+        },
+        {
+          "name": "ACE by DAISY epub validator",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "https://github.com/daisy/ace/releases",
+          "rule_ids": [
+            "ACE_CHECK"
+          ]
+        }
+      ]
+    },
+    {
+      "category_name": "Account for iOS font and CSS quirks (layout must work the same in iOS as other platforms)",
+      "criteria": []
+    },
+    {
+      "category_name": "Semantics & Accessiblity",
+      "criteria": [
+        {
+          "name": "EPUB folder structure matches the provided reference",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "Folder Structure\n- mimetype\n- META-INF (Folder)\n  container.xml\n- OEBPS (Folder)\n  content.opf\n  nav.xhtml\n  toc.ncx\n  - Fonts (Folder)\n    Contains font files\n  - Images (Folder)\n    Contains images\n  - Styles (Folder)\n    Contains stylesheet.css file\n  - Text (Folder)\n    Contains all xhtml files\n",
+          "rule_ids": [
+            "STRUCT001",
+            "STRUCT001",
+            "STRUCT001"
+          ]
+        },
+        {
+          "name": "XHTML file names are numbered in sequential order (01_xxxx.xhtml)",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": [
+            "STRUCT005"
+          ]
+        },
+        {
+          "name": "Proper use of epub:type for front matter, title page, part, chapter, section, index, bibliography, glossary, etc.",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "https://www.w3.org/TR/epub-overview/\n\nExamples:\n<body epub:type=\"frontmatter\">\n<nav epub:type=\"toc\" class=\"tocList\" id=\"toc\">\n\n<body epub:type=\"frontmatter\">\n<section epub:type=\"titlepage\">\n\n<body epub:type=\"frontmatter\">\n<section epub:type=\"copyright-page\">\n\n<body epub:type=\"frontmatter\">\n<section epub:type=\"preface\" role=\"doc-preface\">\n\n<body epub:type=\"frontmatter\">\n<section epub:type=\"toc\" role=\"doc-toc\">\n\n<body epub:type=\"bodymatter\">\n<section epub:type=\"chapter\" role=\"doc-chapter\">\n\n<body epub:type=\"backmatter\">\n<section epub:type=\"appendix\">\n\n<body epub:type=\"backmatter\">\n<section epub:type=\"glossary\">\n\n<body epub:type=\"backmatter\">\n<section epub:type=\"index\">",
+          "rule_ids": [
+            "XHTML002"
+          ]
+        },
+        {
+          "name": "Declare language on all content pages\ne.g.lang=\"en\" xml:lang=\"en\"",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": [
+            "XHTML003"
+          ]
+        },
+        {
+          "name": "Declare language shifts: All language shifts throughout product are marked correctly",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "Example:\n<i class=\"ital\" lang=\"el-Latn\" xml:lang=\"el-Latn\">ghalazio</i>\n",
+          "rule_ids": []
+        },
+        {
+          "name": "<title> element is unique per page",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "Example:\nnav.xhtml: <title>Navigational Table of Contents</title>\ntitle.xhtml: <title>Title Page</title>\ncopyright.xhtml: <title>Copyright Page</title>\npreface.xhtml: <title>Preface</title>\n\u2026\ncontents.xhtml: <title>Contents</title>\nCh01.xhtml: <title>Chapter 1 Geometric Dimensioning and Tolerancing Essentials</title>\n\u2026\nAppendixA.xhtml: <title>Appendix A: Symbol Specifications</title>\n\u2026\nindex.xhtml: <title>Index</title>\n",
+          "rule_ids": [
+            "XHTML004"
+          ]
+        },
+        {
+          "name": "Use HTML headings such as <h1>, <h2>, etcetera\nDo not place line break tags (<br/>) within headings to separate text, use CSS to achieve the line break.\nSee example.",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "Example of heading layout:\n<h1 class=\"O-ch-num\"><span class=\"ch-num\">CHAPTER</span> 1 <span class=\"O-ch-title\">CH-TITLE</span></h1>\n\nAdded CSS to O-ch-title attribute:\nspan.O-ch-title::before{\ncontent: '\\A';\nwhite-space: pre}\n",
+          "rule_ids": [
+            "XHTML005"
+          ]
+        },
+        {
+          "name": "Use 1 <h1> per unit/chapter/lesson title.\nDo not place two heading tags immediately next to each other.\nConfirm <h1> is in place on copyright page.\nSee example.\n",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "Example:\nCorrect:\n<div class=\"chap\">\n<h1 class=\"ch_title\"><span class=\"ch_no\">CHAPTER <span class=\"big\">1</span></span> CH-TITLE</h1>\n</div>\n\nIncorrect: \n<div class=\"chap\">\n<h1 class=\"ch_no\">CHAPTER<br/><span class=\"ch_no\">1</span></h1>\n<h1 class=\"ch_title\">CH-TITLE</h1>\n</div>",
+          "rule_ids": [
+            "XHTML006"
+          ]
+        },
+        {
+          "name": "Retain print pagination markers with most up-to-date formatting.\n*do not place these pagebreak spans inside of heading tags",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "Example:\n<span aria-labelledby=\"pg5\" id=\"page_5\" epub:type=\"pagebreak\" role=\"doc-pagebreak\"></span><span id=\"pg5\" hidden=\"hidden\">5</span>",
+          "rule_ids": [
+            "GWP-XHTML-005"
+          ]
+        },
+        {
+          "name": "Use role=\"doc-introduction\" within the Introduction <section> tag.",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "Example:\n<section role=\"doc-introduction\" aria-describedby=\"head3\">\n<h2 id=\"head3\">Introduction</h2>\n",
+          "rule_ids": [
+            "GWP-XHTML-001"
+          ]
+        },
+        {
+          "name": "Subtitles within features use the proper HTML heading element",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "Example:\n<h4 class=\"TRA-T\" id=\"fea-001\" aria-label=\"fea-001 TRA\">Trend Alert</h4>\n<h5 class=\"TRA-ST\">Community-Based Mental Healthcare</h5>\n",
+          "rule_ids": []
+        },
+        {
+          "name": "The role=\"doc-subtitle\" is implemented correctly for subtitles that directly supplement a main title (e.g., book or chapter title)\n*not for structural subheadings within content/feature boxes",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "Example:\n<h1 class=\"TIT\" id=\"tit01\">The Nursing Assistant</h1>\n<p class=\"STIT\" role=\"doc-subtitle\">Foundations of Holistic Caregiving</p>",
+          "rule_ids": []
+        },
+        {
+          "name": "Use <ul> and <ol> for lists; <li> for list items",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": []
+        },
+        {
+          "name": "Use <figure> and <figcaption> where appropriate, confirm figure ID is located within the opening figure tag.\nFigure captions properly uses the <b> tag around the figure text and figure number.",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "Example:\nCorrect:\n<figure id=\"fig1-2\">\n<p class=\"img1\"><img src=\"../Images/Ch01/fig1-2.jpg\" alt=\"ALT TEXT\"/></p>\n<p class=\"credit\" role=\"doc-credit\">CREDIT</p>\n<figcaption>\n<p class=\"FIGC\" role=\"doc-credit\"><b class=\"fgn\">Figure 1-2.</b> CONTENT</p>\n</figcaption>\n</figure>\n\nIncorrect:\n<figure>\n<p class=\"image\"><img src=\"images/01-01.jpg\" alt=\"image\" /></p>\n</figure>\n<p class=\"sco\">Credit</p>\n<p class=\"capt\"><span class=\"HelveticaLTStd-Bold\"><a id=\"fig1-1\" href=\"#fig-1-1\">Figure 1-1</a>.</span> Content.</p>",
+          "rule_ids": [
+            "GWP-XHTML-002"
+          ]
+        },
+        {
+          "name": "Use the HTML markup for tables using proper tags and attributes, including <caption>, <colgroup>, <col>, <thead>, <tbody>, <tr>, <th>, <td>, and scope=\"col/row/colgroup/rowgroup\",  where appropriate.\nSee example.",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "Example:\n<table id=\"table012\" class=\"table\">\n<caption class=\"T-title\">Diseases and Conditions of the Immune System</caption>\n<thead>\n    <tr>\n    <th class=\"T-column-H2\" scope=\"col\">Disease or Condition</th>\n    <th class=\"T-column-H2\" scope=\"col\">Cause</th>\n    </tr>\n</thead>\n<tbody>\n    <tr>\n    <th class=\"T-row-H1\" scope=\"row\">Acquired immune deficiency</th>\n    <td class=\"T-keep\">A disease that weakens the immune system</td>\n    </tr>\n    <tr>\n    <th class=\"T-row-H1\" scope=\"row\">Allergic reaction</th>\n    <td class=\"T-keep\">An overly active immune system</td>\n    </tr>\n    <tr>\n    <th class=\"T-row-H1\" scope=\"row\">Autoimmune disorder</th>\n    <td class=\"T-keep\">Immune system attacks itself</td>\n    </tr>\n</tbody>\n</table>",
+          "rule_ids": [
+            "GWP-XHTML-003"
+          ]
+        },
+        {
+          "name": "Tables exceeding five columns should be captured as an image and data captured as long alt text placed on the Extended Description page",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": [
+            "GWP-XHTML-004"
+          ]
+        },
+        {
+          "name": "Table summary (for complex tables): All complex tables have correct tables summaries ",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": []
+        },
+        {
+          "name": "Use <aside> for content in the source file's margins",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "Example:\n<aside class=\"GBOX1\">\n<h2 class=\"GH1A\">Student Tools</h2>\n<section>\n<h3 class=\"GH2\">Student Text</h3>\n\u2026\n</section>\n</aside>",
+          "rule_ids": []
+        }
+      ]
+    },
+    {
+      "category_name": "Style & Appearance",
+      "criteria": [
+        {
+          "name": "Correct reading order of content is retained",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "http://kb.daisy.org/publishing/docs/html/order.html",
+          "rule_ids": []
+        },
+        {
+          "name": "Content is readable from beginning to end, with and without CSS",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": []
+        },
+        {
+          "name": "CSS is in a separate file, not inline",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "http://kb.daisy.org/publishing/docs/html/separation.html",
+          "rule_ids": [
+            "GWP-CSS-001"
+          ]
+        },
+        {
+          "name": "Do not use tables to control layout",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": [
+            "GWP-XHTML-006"
+          ]
+        },
+        {
+          "name": "Do not use tables for presentational purposes that could be achieved with CSS.",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "Example:\nCorrect:\n<figure id=\"c2f9\">\n<figcaption><p class=\"TTS1\">Examples of Values</p></figcaption>\n<div class=\"container\">\n<div class=\"column\">\n<p>Ambition</p>\n<p>Charity</p>\n<p>Dependability</p>\n</div>\n<div class=\"column\">\n<p>Discipline</p>\n...\n\nIncorrect:\n<figure id=\"c2f9\">\n<table class=\"TOPBOTS2\">\n<caption><p class=\"TTS1\">Examples of Values</p></caption>\n<tbody>\n<tr>\n<td class=\"BG1S\"><p class=\"TB\">Ambition</p>\n<p class=\"TB\">Charity</p>\n<p class=\"TB\">Curiosity</p>\n<p class=\"TB\">Dependability</p></td>\n<td class=\"BG1S\"><p class=\"TB\">Discipline</p>\n...",
+          "rule_ids": [
+            "GWP-XHTML-006"
+          ]
+        },
+        {
+          "name": "Include meta viewport on all pages\n<meta content=\"width=device-width, initial-scale=1\" name=\"viewport\"/>",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": [
+            "GWP-CSS-002"
+          ]
+        },
+        {
+          "name": "Left align image credits, sources, and description link to long alt text",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": []
+        },
+        {
+          "name": "Font-size and line-height should be defined in relative units (em, %, or rem) for proper scaling.",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": [
+            "GWP-CSS-003"
+          ]
+        },
+        {
+          "name": "No font sizes smaller than 10px, 7.5pt, 0.625em, 62.5%",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": [
+            "GWP-CSS-004"
+          ]
+        },
+        {
+          "name": "All internal links have a 1:1 to backlink relationship",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": [
+            "GWP-LINK-001"
+          ]
+        },
+        {
+          "name": "Visual cues: Links are visually distinct by using a contrast ratio of 3:1 with surrounding text",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "Example:\na{\ntext-decoration:underline;\ncolor:inherit;\n}\na.link{\ntext-decoration:underline;\ncolor:inherit;\n}\n",
+          "rule_ids": []
+        },
+        {
+          "name": "Bold and italic use <b> and <i> not fonts or <span> tags.\nItalic and bolding in headers: If bold or italic styling is used in headings then CSS is used to style accordingly, no inline styling",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": []
+        },
+        {
+          "name": "Subscripts and superscripts done correctly with <sup> and <sub> markup",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": []
+        },
+        {
+          "name": "Use CSS Selectors to add visual styling to certain characters in a word. This ensures it will not affect assistive technology reading the entire word.\nSee example.",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "Example:\n<p class=\"drop-cap\">Although electricity and electrical energy was...</p>\n\np.drop-cap::first-letter {\ncolor: #A52A2A;\nfloat: left;\nfont-size: 5em;\nmargin: 0 .1em 0 0;\nline-height: 0.85;\n}",
+          "rule_ids": []
+        },
+        {
+          "name": "Use correct CSS styling used for all capitalized words. This should include any words that are entirely written in all caps.\nSee example.",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "Example:\n<h1 class=\"TOOL-T\" id=\"tool01\">Tools for Student and Instructor Success</h1>\n\n.TOOL-T{\nfont-size:150%;\nfont-family:MyriadPro-Bold_fnt;\nmargin:1em 0em 0.25em 0em;\ntext-indent:0em;\ntext-align:left;\nline-height:1.2em;\ncolor:#fffffe;\nbackground:#006aa6;\npadding:0.5em;\ntext-transform:uppercase;\n}\n\n<p class=\"TX\">When using a push-button ignition switch, the driver can enable the <i class=\"ital upper\">Accessory</i> function by pressing the button without depressing the brake pedal.</p>\n\n.upper{text-transform:uppercase}\n",
+          "rule_ids": []
+        },
+        {
+          "name": "MathML is consistent throughout the title. Each should contain proper MathML.\nNote: Any math that is not captured as MathML should match the same alignment. Typically, this is center aligned.",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": []
+        }
+      ]
+    },
+    {
+      "category_name": "Images",
+      "criteria": [
+        {
+          "name": "Images generated from provided source files using G-W provided process.",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": []
+        },
+        {
+          "name": "Image file name format: Chapter number and figure number should be separated by a dash. Do not use a period.\nAdditionally, using the page number the figure is located on is acceptable.",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "Examples of acceptable file name:\n01-01.jpg\n\u2026\n01-01-03.jpg\n\u2026\nfig2-36.jpg\n\u2026\nfig2-2-1.jpg\n\u2026\np0004.jpg\n\u2026\np0009-01.jpg",
+          "rule_ids": [
+            "GWP-IMG-001"
+          ]
+        },
+        {
+          "name": "Images at 150 dpi at a reasonable size and good quality for the EPUB file.",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": [
+            "IMG-001"
+          ]
+        },
+        {
+          "name": "Images throughout the EPUB file include consistent dimensions and quality.\nImages with a width dimension less than 500 pixels tend to be small and content appears unclear.\nImages with a width dimension more than 1000 pixels tend to be large and can lead to longer load times.\n*This excludes icons used in headers or asides",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": [
+            "IMG-002"
+          ]
+        },
+        {
+          "name": "Repeating opener images are reduced to a single image linked throughout the content.",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": []
+        },
+        {
+          "name": "Figures heavily stylized should be captured as an image. Any text or callouts should be captured as long alt text.",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": []
+        },
+        {
+          "name": "INDD-built content that must be included in EPUB as an image match the visual quality of other processed images.",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": []
+        },
+        {
+          "name": "All images are tagged in the OPF file.",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": [
+            "GWP-IMG-003"
+          ]
+        },
+        {
+          "name": "Include alt placeholder (alt=\"\") on all image tags",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": [
+            "GWP-IMG-002"
+          ]
+        },
+        {
+          "name": "Decorative image indicator: All decorative images were correctly identified and marked up correctly with alt=\"\" and role=\"presentation\"\n\nDecorative images must have alt text. Repeated feature box icons can still be left as decorative.",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": [
+            "GWP-IMG-002"
+          ]
+        }
+      ]
+    },
+    {
+      "category_name": "Functionality",
+      "criteria": [
+        {
+          "name": "Content is linked in the TOC (referencing toc.ncx file)",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": [
+            "COM-NCX-001",
+            "COM-NCX-002"
+          ]
+        },
+        {
+          "name": "Content is linked in the navigation (referencing nav.xhtml file)",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": [
+            "NAV001",
+            "NAV005"
+          ]
+        },
+        {
+          "name": "Figures are listed in the navigation. (referencing nav.xhtml file)",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": []
+        },
+        {
+          "name": "Content is linked in the index (referencing index.xhtml file)",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": [
+            "INDEX001"
+          ]
+        },
+        {
+          "name": "Internal cross-references are linked (\"Figure XX-XX\", \"unit X\", \"chapter X\", \"lesson XX-XX\", etc.)",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": [
+            "COM-LINK-001"
+          ]
+        },
+        {
+          "name": "Do notlink external references in \"Reference\" or \"Bibliography\" sections of the text (for security and to reduce the likelihood of a broken link inside of the EPUB)",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": []
+        },
+        {
+          "name": "Text remains legible with embedded fonts turned off",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": []
+        },
+        {
+          "name": "Text remains legible at magnification up to 200%.",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": []
+        }
+      ]
+    },
+    {
+      "category_name": "Metadata",
+      "criteria": [
+        {
+          "name": "The EPUB Metadata includes the correct:\ntitle, subtitle, source (print source ISBN), author (and any other creators as directed), edition, dc:identifier (EPUB ISBN), publisher, publication date, language, description, accessibility metadata, and rights",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": [
+            "COM-META-003",
+            "COM-NCX-003",
+            "COM-NCX-004"
+          ]
+        },
+        {
+          "name": "Required accessibility metadata",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "<meta property=\"pageBreakSource\">urn:isbn:TEXTBOOK ISBN</meta>\n<meta property=\"schema:accessMode\">textual</meta>\n<meta property=\"schema:accessMode\">visual</meta>\n<meta property=\"schema:accessibilityFeature\">MathML</meta>\n<meta property=\"schema:accessModeSufficient\">textual,visual</meta>\n<meta property=\"schema:accessModeSufficient\">textual</meta>\n<meta property=\"schema:accessibilityFeature\">readingOrder</meta>\n<meta property=\"schema:accessibilityFeature\">structuralNavigation</meta>\n<meta property=\"schema:accessibilityFeature\">ARIA</meta>\n<meta property=\"schema:accessibilityFeature\">tableOfContents</meta>\n<meta property=\"schema:accessibilityFeature\">pageBreakMarkers</meta>\n<meta property=\"schema:accessibilityFeature\">pageNavigation</meta>\n<meta property=\"schema:accessibilityFeature\">displayTransformability</meta>\n<meta property=\"schema:accessibilityFeature\">describedMath</meta>\n<meta property=\"schema:accessibilityFeature\">index</meta>\n<meta property=\"schema:accessibilitySummary\">A very complex book with a lot of images, tables, list items and complex formatting, which are defined with accessible structural markup. There are multiple linked references to various figures in this EPUB however there are no back links provided. There is a page list and embedded page-breaks within this EPUB to aid in the ability to go to a specific page. Additionally, blank pages have been removed from the EPUB while their page break labels have been left in, for reasons of structural flow.</meta> \n<meta property=\"schema:accessibilityHazard\">none</meta>\n<meta property=\"schema:accessibilityFeature\">alternativeText</meta>\n<meta property=\"schema:accessibilityFeature\">longDescription</meta>\n\nNote: If the product does not include MathML, remove any metadata related to MathML.",
+          "rule_ids": [
+            "COM-META-005",
+            "COM-META-006",
+            "COM-META-007",
+            "COM-META-008",
+            "COM-META-009",
+            "COM-META-010"
+          ]
+        },
+        {
+          "name": "Required accessibility conformance metadata",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "<meta property=\"dcterms:conformsTo\" id=\"conf\">EPUB Accessibility 1.1 - WCAG 2.2 Level AA</meta>\n<meta property=\"a11y:certifiedBy\" refines=\"#conf\" id=\"certifier\">Benetech</meta>\n<meta property=\"a11y:certifierCredential\" refines=\"#certifier\">https://bornaccessible.org/certification/gca-credential/</meta>",
+          "rule_ids": [
+            "COM-META-011",
+            "COM-META-012",
+            "COM-META-013"
+          ]
+        },
+        {
+          "name": "linear=\"no\" included on itemref for Alt.xhtml file",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": [
+            "COM-SPINE-001"
+          ]
+        },
+        {
+          "name": "epub:type=\"toc\" in the navigation",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": [
+            "COM-NAV-001"
+          ]
+        },
+        {
+          "name": "epub:type=\"page-list\" in the navigation",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": [
+            "COM-NAV-002"
+          ]
+        },
+        {
+          "name": "epub:type=\"landmarks\" in the navigation",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": [
+            "COM-NAV-003"
+          ]
+        },
+        {
+          "name": "Landmarks contain: Cover*, Front Matter (Title Page, Copyright, TOC, About Author, Acknowledgements, etc.), Start of Content, Back Matter (Glossary, Index, etc.)",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "Example:\n<ol class=\"nav_ol\">\n<li><a epub:type=\"titlepage\" href=\"Text/01_Title.xhtml\">Title Page</a></li>\n\u2026\n<li><a epub:type=\"toc\" href=\"Text/08_BContents.xhtml\">Brief Contents</a></li>\n<li><a epub:type=\"toc\" href=\"Text/09_Contents.xhtml\">Contents</a></li>\n<li><a epub:type=\"bodymatter\" href=\"Text/ch01.xhtml#chhead1\">Start of Content</a></li>\n<li><a epub:type=\"glossary\" href=\"Text/glossary.xhtml#chhead132\">Glossary</a></li>",
+          "rule_ids": []
+        }
+      ]
+    },
+    {
+      "category_name": "Other",
+      "criteria": [
+        {
+          "name": "Confirm cover.xhtml page has been removed from EPUB",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": [
+            "STRUCT006"
+          ]
+        },
+        {
+          "name": "Confirm title.xhtml page is built out and not an image",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": []
+        },
+        {
+          "name": "Copyright page includes the Hardcover and ePub ISBNs",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": " <p class=\"cpy\">ISBN 978-1-XXXXX-XXX-X (Hardcover)<br/> ISBN 978-1-XXXXX-XXX-X (ePub)</p>",
+          "rule_ids": []
+        },
+        {
+          "name": "EPUB includes alt text if set in application files",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": []
+        },
+        {
+          "name": "Any footnotes in tables are backlinked",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": []
+        },
+        {
+          "name": "Brief Content and Content page lists formatted using ordered list tags",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": []
+        },
+        {
+          "name": "Glossary page formatted using description list tags (dl, dt, dd)",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": [
+            "GLOS001"
+          ]
+        },
+        {
+          "name": "Glossary term number links include meaningful text using the title attribute",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "<a href=\"ch06.xhtml#i-trm1\" role=\"doc-backlink\" title=\"Back to Chapter 6 on the term 'ac generator'\">6</a>",
+          "rule_ids": [
+            "GLOS002"
+          ]
+        },
+        {
+          "name": "Index page formatted using unordered list tags",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": [
+            "INDEX002"
+          ]
+        },
+        {
+          "name": "Key Terms found in the chapter opener: Should not include links to the key terms found in the content and glossary.",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": []
+        },
+        {
+          "name": "Key terms found in the content: Should include links to the glossary; the glossary should link back to the key term in the content.\nIf the Glossary terms include page numbers, include the link back to the content term in the page number.\nIf the Glossary term does not include page numbers, include the link back to the content term in the Glossary term.",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": []
+        },
+        {
+          "name": "Key terms within content are properly using <b> and <i> tags.",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "Example:\nCorrect:\n<p class=\"TX\"><b class=\"KT\"><a href=\"27_Glossary.xhtml#trm534\" id=\"itrm534\">Well-being</a></b> can be described as the ability to function positively and feel a sense of satisfaction with one's life. \u2026</p>\n\nIncorrect:\n<p class=\"TX\"><span class=\"KT\"><a href=\"27_Glossary.xhtml#trm534\" id=\"itrm534\">Well-being</a></span> can be described as the ability to function positively and feel a sense of satisfaction with one's life. \u2026</p>",
+          "rule_ids": [
+            "GWP-KT-001"
+          ]
+        },
+        {
+          "name": "Extended Description is the page title of the extended descriptions file",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "",
+          "rule_ids": []
+        },
+        {
+          "name": "Each link found on the Extended Description page should contain unique text",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "Example:\nCorrect:\n<p class=\"araiaback\"><a role=\"doc-backlink\" href=\"ch01.xhtml#c1f1\">Back to Figure 1-1</a></p>\n\nIncorrect:\n<p class=\"araiaback\"><a role=\"doc-backlink\" href=\"ch01.xhtml#c1f1\">Back to main text</a></p>",
+          "rule_ids": []
+        },
+        {
+          "name": "Blockquotes should be identified using <blockquote> element for long quotations.\n*use <q> for inline (short) quotations",
+          "default_status": "Yet to check",
+          "default_notes": "",
+          "resources": "Example using <blockquote> element:\n<figure>\n<blockquote epub:type=\"epigraph\" role=\"doc-epigraph\">\n<p class=\"EPI\">\u201cIf you want to be happy, set a dream that commands your thoughts, liberates your energy, and inspires your hopes.\u201d</p>\n</blockquote>\n<figcaption><p class=\"EPIS\">&#8212;Andrew Carnegie</p></figcaption>\n</figure>\n\nExample using <q> tag:\n<p>The therapist occasionally responds with questions like <q>What do you think that means?</q> or <q>How did that make you feel?</q></p>",
+          "rule_ids": [
+            "GWP-QUOTE-001"
+          ]
+        }
+      ]
+    }
+  ]
+}

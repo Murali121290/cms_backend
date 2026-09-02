@@ -122,25 +122,45 @@ def _find_opf(epub: str) -> str | None:
 
 
 @rule("STRUCT003")
-def validate_oebps_contents(book_details):
-    """OEBPS/ must contain the exact expected artefacts:
-    - [ISBN].opf (e.g. 9798894107530.opf)
-    - toc.ncx
-    - nav.xhtml
-    - css/ folder and css/epub.css file
-    - xhtml/ folder
-    - images/ folder
-    """
+def validate_oebps_contents(book_details, rule_config=None):
+    """OEBPS/ must contain the configured artefacts based on rule_config."""
     epub = book_details["epub_path"]
     folder_name = book_details.get("folder_name", "")
     issues = []
+
+    # Enforce configuration
+    inner_config = rule_config.get("rule_config") if rule_config else None
+    if not inner_config:
+        return {"issues_count": 1, "issues": [{
+            "type": "rule_configuration_error",
+            "message": "STRUCT003 requires a 'rule_config' in customer.json.",
+            "category": "Error"
+        }]}
+
+    required_keys = ["opf_name", "css_folder", "css_file", "xhtml_folder", "images_folder", "nav_file", "toc_file"]
+    missing = [k for k in required_keys if k not in inner_config]
+    if missing:
+        return {"issues_count": 1, "issues": [{
+            "type": "rule_configuration_error",
+            "message": f"STRUCT003 rule_config is missing required keys: {', '.join(missing)}",
+            "category": "Error"
+        }]}
+
+    opf_name_config = inner_config["opf_name"]
+    css_folder_name = inner_config["css_folder"]
+    css_file_name = inner_config["css_file"]
+    xhtml_folder_name = inner_config["xhtml_folder"]
+    images_folder_name = inner_config["images_folder"]
+    nav_file_name = inner_config["nav_file"]
+    toc_file_name = inner_config["toc_file"]
+    fonts_folder_name = inner_config.get("fonts_folder")
 
     oebps = os.path.join(epub, "OEBPS")
     if not os.path.isdir(oebps):
         # Already reported by STRUCT001, but guard here
         return {"issues_count": 0, "issues": []}
 
-    # 1. Check OPF file & ISBN naming (e.g. OEBPS/9798894107530.opf or any 10-13 digit ISBN .opf)
+    # 1. Check OPF file
     opf_path = _find_opf(epub)
     if opf_path is None:
         issues.append({
@@ -151,74 +171,94 @@ def validate_oebps_contents(book_details):
         })
     else:
         opf_filename = os.path.basename(opf_path)
-        # Verify OPF filename matches 10/13-digit ISBN pattern or folder_name
-        isbn_pattern = re.compile(r"^\d{10,13}\.opf$", re.IGNORECASE)
-        if not isbn_pattern.match(opf_filename) and not (folder_name and opf_filename.lower() == f"{folder_name.lower()}.opf"):
-            issues.append({
-                "type": "opf_name_not_isbn",
-                "message": f"OPF file should be named '[ISBN].opf' (found '{opf_filename}').",
-                "category": "Warning",
-                "file_path": f"OEBPS/{opf_filename}",
-            })
+        if opf_name_config.lower() == "isbn":
+            # Verify OPF filename matches 10/13-digit ISBN pattern or folder_name
+            isbn_pattern = re.compile(r"^\d{10,13}\.opf$", re.IGNORECASE)
+            if not isbn_pattern.match(opf_filename) and not (folder_name and opf_filename.lower() == f"{folder_name.lower()}.opf"):
+                issues.append({
+                    "type": "opf_name_not_isbn",
+                    "message": f"OPF file should be named '[ISBN].opf' (found '{opf_filename}').",
+                    "category": "Warning",
+                    "file_path": f"OEBPS/{opf_filename}",
+                })
+        else:
+            if opf_filename.lower() != opf_name_config.lower():
+                issues.append({
+                    "type": "opf_name_mismatch",
+                    "message": f"OPF file should be named '{opf_name_config}' (found '{opf_filename}').",
+                    "category": "Error",
+                    "file_path": f"OEBPS/{opf_filename}",
+                })
 
-    # 2. Check OEBPS/toc.ncx
-    toc_ncx = os.path.join(oebps, "toc.ncx")
+    # 2. Check OEBPS/[toc_file]
+    toc_ncx = os.path.join(oebps, toc_file_name)
     if not os.path.isfile(toc_ncx):
         issues.append({
             "type": "missing_ncx",
-            "message": "Required file 'OEBPS/toc.ncx' is missing.",
+            "message": f"Required file 'OEBPS/{toc_file_name}' is missing.",
             "category": "Warning",
-            "file_path": "OEBPS/toc.ncx",
+            "file_path": f"OEBPS/{toc_file_name}",
         })
 
-    # 3. Check OEBPS/nav.xhtml
-    nav_xhtml = os.path.join(oebps, "nav.xhtml")
+    # 3. Check OEBPS/[nav_file]
+    nav_xhtml = os.path.join(oebps, nav_file_name)
     if not os.path.isfile(nav_xhtml):
         issues.append({
             "type": "missing_nav",
-            "message": "Required file 'OEBPS/nav.xhtml' is missing.",
+            "message": f"Required file 'OEBPS/{nav_file_name}' is missing.",
             "category": "Error",
-            "file_path": "OEBPS/nav.xhtml",
+            "file_path": f"OEBPS/{nav_file_name}",
         })
 
-    # 4. Check OEBPS/css folder & OEBPS/css/epub.css
-    css_dir = os.path.join(oebps, "css")
+    # 4. Check CSS folder & file
+    css_dir = os.path.join(oebps, css_folder_name)
     if not os.path.isdir(css_dir):
         issues.append({
             "type": "missing_css_folder",
-            "message": "Required folder 'OEBPS/css/' is missing.",
+            "message": f"Required folder 'OEBPS/{css_folder_name}/' is missing.",
             "category": "Error",
-            "file_path": "OEBPS/css",
+            "file_path": f"OEBPS/{css_folder_name}",
         })
     else:
-        epub_css = os.path.join(css_dir, "epub.css")
+        epub_css = os.path.join(css_dir, css_file_name)
         if not os.path.isfile(epub_css):
             issues.append({
                 "type": "missing_epub_css",
-                "message": "Required stylesheet 'OEBPS/css/epub.css' is missing.",
+                "message": f"Required stylesheet 'OEBPS/{css_folder_name}/{css_file_name}' is missing.",
                 "category": "Error",
-                "file_path": "OEBPS/css/epub.css",
+                "file_path": f"OEBPS/{css_folder_name}/{css_file_name}",
             })
 
-    # 5. Check OEBPS/xhtml folder
-    xhtml_dir = os.path.join(oebps, "xhtml")
+    # 5. Check XHTML folder
+    xhtml_dir = os.path.join(oebps, xhtml_folder_name)
     if not os.path.isdir(xhtml_dir):
         issues.append({
             "type": "missing_xhtml_folder",
-            "message": "Required folder 'OEBPS/xhtml/' is missing.",
+            "message": f"Required folder 'OEBPS/{xhtml_folder_name}/' is missing.",
             "category": "Error",
-            "file_path": "OEBPS/xhtml",
+            "file_path": f"OEBPS/{xhtml_folder_name}",
         })
 
-    # 6. Check OEBPS/images folder
-    images_dir = os.path.join(oebps, "images")
+    # 6. Check Images folder
+    images_dir = os.path.join(oebps, images_folder_name)
     if not os.path.isdir(images_dir):
         issues.append({
             "type": "missing_images_folder",
-            "message": "Required folder 'OEBPS/images/' is missing.",
+            "message": f"Required folder 'OEBPS/{images_folder_name}/' is missing.",
             "category": "Warning",
-            "file_path": "OEBPS/images",
+            "file_path": f"OEBPS/{images_folder_name}",
         })
+
+    # 7. Check Fonts folder (optional)
+    if fonts_folder_name:
+        fonts_dir = os.path.join(oebps, fonts_folder_name)
+        if not os.path.isdir(fonts_dir):
+            issues.append({
+                "type": "missing_fonts_folder",
+                "message": f"Required folder 'OEBPS/{fonts_folder_name}/' is missing.",
+                "category": "Warning",
+                "file_path": f"OEBPS/{fonts_folder_name}",
+            })
 
     return {"issues_count": len(issues), "issues": issues}
 
@@ -258,3 +298,57 @@ def validate_epub_extension_case(book_details):
         }]}
 
     return {"issues_count": 0, "issues": []}
+
+
+@rule("STRUCT005")
+def validate_sequential_xhtml_names(book_details, rule_config=None):
+    """Ensure all XHTML files are numbered sequentially starting at 01_"""
+    epub = book_details["epub_path"]
+    inner_config = rule_config.get("rule_config", {}) if rule_config else {}
+    xhtml_folder_name = inner_config.get("xhtml_folder", "Text")
+    
+    xhtml_dir = os.path.join(epub, "OEBPS", xhtml_folder_name)
+    if not os.path.isdir(xhtml_dir):
+        return {"issues_count": 0, "issues": []}
+        
+    issues = []
+    
+    # Get all .xhtml files in the folder
+    xhtml_files = [f for f in os.listdir(xhtml_dir) if f.lower().endswith(".xhtml")]
+    
+    # Sort them alphabetically
+    xhtml_files.sort()
+    
+    expected_num = inner_config.get("start_number", 1)
+    for file_name in xhtml_files:
+        expected_prefix = f"{expected_num:02d}_"
+        if not file_name.startswith(expected_prefix):
+            issues.append({
+                "type": "non_sequential_xhtml",
+                "message": f"XHTML file '{file_name}' does not match expected sequential prefix '{expected_prefix}'.",
+                "category": "Error",
+                "file_path": f"OEBPS/{xhtml_folder_name}/{file_name}",
+            })
+        expected_num += 1
+
+    return {"issues_count": len(issues), "issues": issues}
+
+@rule("STRUCT006")
+def validate_no_cover_xhtml(book_details, rule_config=None):
+    """Ensure cover.xhtml is removed from EPUB."""
+    epub = book_details["epub_path"]
+    issues = []
+    
+    for root, _dirs, files in os.walk(epub):
+        for f in files:
+            if f.lower() == "cover.xhtml":
+                rel_path = os.path.relpath(os.path.join(root, f), epub)
+                issues.append({
+                    "rule_name": "Cover XHTML Check",
+                    "type": "cover_xhtml_present",
+                    "message": f"File 'cover.xhtml' found at '{rel_path}', but it should be removed.",
+                    "category": "Error",
+                    "file_path": rel_path,
+                })
+                
+    return {"issues_count": len(issues), "issues": issues}

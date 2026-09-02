@@ -788,11 +788,13 @@ export function FileContextMenu({
                   label="Bias Scan"
                   onClick={() => setConfirmStep({ processType: "bias_scan", mode: "style", actionName: "Bias Scan" })}
                 />
-                <MenuItem
-                  icon={FileCode}
-                  label="Word to XML"
-                  onClick={() => setConfirmStep({ processType: "word_to_xml", mode: "style", actionName: "Word to XML" })}
-                />
+                {file.category?.toLowerCase() === 'manuscript' && (
+                  <MenuItem
+                    icon={FileCode}
+                    label="Word to XML"
+                    onClick={() => setConfirmStep({ processType: "word_to_xml", mode: "style", actionName: "Word to XML" })}
+                  />
+                )}
               </>
             )}
 

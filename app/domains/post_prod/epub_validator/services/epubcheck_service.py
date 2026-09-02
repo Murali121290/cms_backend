@@ -62,6 +62,12 @@ def run_epubcheck_report(folder_name: str) -> dict[str, Any]:
     duration = round(time.monotonic() - started, 2)
 
     if err:
+        cache_path = _cache_path(folder_name)
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(json.dumps({
+            "status": "fatal",
+            "message": f"EPUBCheck failed: {err}"
+        }), encoding="utf-8")
         raise HTTPException(status_code=500, detail=f"EPUBCheck failed: {err}")
 
     errors = 0

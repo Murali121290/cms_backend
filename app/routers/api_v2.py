@@ -3,6 +3,8 @@ import os
 import shutil
 import tempfile
 import zipfile
+import uuid
+import re
 from datetime import datetime, timedelta
 import logging
 from typing import Any, List, Optional
@@ -154,27 +156,40 @@ def _serialize_admin_role(role: Any):
 
 
 def _serialize_admin_user(user: models.User):
+    from app.domains.auth.user_service import determine_access_level
+    role_val = getattr(user, "role", None) or ""
+    raw_level = determine_access_level(role_val) if role_val else None
     return schemas_v2.AdminUser(
         id=user.id,
         username=user.username,
         email=user.email,
+        first_name=getattr(user, "first_name", None),
+        last_name=getattr(user, "last_name", None),
         is_active=user.is_active,
-        roles=[schemas_v2.AdminUserRole(id=role.id, name=role.name) for role in user.roles],
+        roles=[schemas_v2.AdminUserRole(id=role.id, name=role.name) for role in user.roles] if role_val else [],
         team=user.team,
         customer_access=user.customer_access or [],
         designation=user.designation,
+        role=role_val or None,
+        access_level=raw_level,
     )
 
 
 def _serialize_viewer(user: models.User):
+    from app.domains.auth.user_service import determine_access_level
+    role_val = getattr(user, "role", None) or ""
+    raw_level = determine_access_level(role_val) if role_val else None
     return schemas_v2.Viewer(
         id=user.id,
         username=user.username,
         email=user.email,
-        roles=[role.name for role in user.roles],
+        first_name=getattr(user, "first_name", None),
+        last_name=getattr(user, "last_name", None),
+        roles=[role.name for role in user.roles] if role_val else [],
         is_active=user.is_active,
         team=user.team,
         designation=user.designation,
+        access_level=raw_level,
     )
 
 
@@ -197,9 +212,23 @@ def _get_user_assigned_project_codes(db: Session, user: models.User) -> list[str
 
 def _get_filtered_projects_query(db: Session, user: models.User):
     from app.domains.projects.models import Project
+    from app.domains.clients.models import Client
     from app.domains.auth.rbac_config import has_permission
 
     query = db.query(Project)
+
+    # Filter projects based on user.customer_access for non-Admin users
+    if not _has_admin_role(user) and getattr(user, "customer_access", None):
+        allowed = [c.strip() for c in user.customer_access if c and isinstance(c, str) and c.strip()]
+        if allowed:
+            query = query.outerjoin(Client, Project.client_id == Client.id).filter(
+                (Project.client_name.in_(allowed)) |
+                (Project.division_code.in_(allowed)) |
+                (Client.company.in_(allowed)) |
+                (Client.division.in_(allowed)) |
+                (Client.name_company.in_(allowed))
+            )
+
     if has_permission(user, "view_all_projects"):
         return query
 
@@ -282,6 +311,11 @@ def _serialize_chapter_summary(chapter: models.Chapter):
         has_indesign=has_ind,
         has_proof=has_proof,
         has_xml=has_xml,
+        xml_status=getattr(chapter, "xml_status", None),
+        indesign_status=getattr(chapter, "indesign_status", None),
+        final_delivery_status=getattr(chapter, "final_delivery_status", None),
+        style_status=getattr(chapter, "style_status", None),
+        structuring_status=getattr(chapter, "structuring_status", None),
     )
 
 
@@ -399,7 +433,10 @@ def _serialize_file_record(file_record: models.File, *, viewer: models.User, db:
                 pass
         elif ext == ".pdf":
             try:
-                import fitz as _fitz
+                try:
+                    import pymupdf as _fitz
+                except ImportError:
+                    import fitz as _fitz
                 with _fitz.open(file_record.path) as _doc:
                     if len(_doc) > 0:
                         r = _doc[0].rect
@@ -1097,10 +1134,14 @@ def api_v2_project_indesign_templates(
     if not design_chapter:
         return []
         
+    from sqlalchemy import or_
     template_files = db.query(models.File).filter(
         models.File.chapter_id == design_chapter.id,
         models.File.category == "template/indesign",
-        models.File.filename.ilike("%.indt")
+        or_(
+            models.File.filename.ilike("%.indt"),
+            models.File.filename.ilike("%.indd")
+        )
     ).all()
     
     return [_serialize_file_record(file_record, viewer=viewer, db=db) for file_record in template_files]
@@ -1642,32 +1683,38 @@ def api_v2_project_bootstrap(
 
     # 3. Update/Setup Art chapters
     if art_workflow_name:
-        num_art_chapters = art_chapter_count if art_chapter_count is not None else (project.chapter_count or 5)
-        for i in range(1, num_art_chapters + 1):
-            art_ch_num = f"Ch {i:02d} - Art"
-            if art_ch_num not in _existing_ci:
-                db.add(_ChapterInfo(
-                    client=project.division_code or "",
-                    project=project.code,
-                    chapters=art_ch_num,
-                    chapter_title=f"Chapter {i:02d} Art Pack",
-                    workflow=art_workflow_name,
-                    status="Received",
-                    complexity_level=getattr(project, "composition", None) or "Medium",
-                    stage_level=1,
-                    stage_name=get_first_stage(art_workflow_name),
-                    due_date=final_art_due,
-                    published_status="Draft",
-                    priority=getattr(project, "priority", None) or "Normal",
-                    project_manager_name=getattr(project, "project_manager", None) or None,
-                ))
-                _existing_ci.add(art_ch_num)
-            else:
-                db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code, _ChapterInfo.chapters == art_ch_num).update({
-                    _ChapterInfo.workflow: art_workflow_name,
-                    _ChapterInfo.stage_name: get_first_stage(art_workflow_name),
-                    _ChapterInfo.due_date: final_art_due
-                }, synchronize_session=False)
+        # Update all existing Art chapters to the selected workflow
+        db.query(_ChapterInfo).filter(
+            _ChapterInfo.project == project.code,
+            _ChapterInfo.chapters.like("% - Art")
+        ).update({
+            _ChapterInfo.workflow: art_workflow_name,
+            _ChapterInfo.stage_name: get_first_stage(art_workflow_name),
+            _ChapterInfo.due_date: final_art_due
+        }, synchronize_session=False)
+
+        # Create an Art chapter for each manuscript chapter that exists
+        for _ch in chapters:
+            if _ch.number and _ch.number.isdigit():
+                art_ch_num = f"Ch {_ch.number.zfill(2)} - Art"
+                if art_ch_num not in _existing_ci:
+                    db.add(_ChapterInfo(
+                        client=project.division_code or "",
+                        project=project.code,
+                        chapters=art_ch_num,
+                        chapter_title=f"Chapter {_ch.number.zfill(2)} Art",
+                        workflow=art_workflow_name,
+                        status="Received",
+                        complexity_level=getattr(project, "composition", None) or "Medium",
+                        stage_level=1,
+                        stage_name=get_first_stage(art_workflow_name),
+                        due_date=final_art_due,
+                        published_status="Draft",
+                        priority=getattr(project, "priority", None) or "Normal",
+                        project_manager_name=getattr(project, "project_manager", None) or None,
+                    ))
+                    _existing_ci.add(art_ch_num)
+
     else:
         # Delete if any exist
         for row in db.query(_ChapterInfo).filter(
@@ -1895,7 +1942,7 @@ def api_v2_project_intake(
                 client=project.division_code or "",
                 project=project.code,
                 chapters=art_ch_num,
-                chapter_title=f"Chapter {start_idx + i:02d} Art Pack ({batch_name})",
+                chapter_title=f"Chapter {start_idx + i:02d} Art ({batch_name})",
                 workflow=workflow_name,
                 status="Received",
                 complexity_level=project.composition or "Medium",
@@ -3666,7 +3713,7 @@ def api_v2_upload_zip(
                         # Setup pretty title for Art pack track chapters
                         if "Art" in chapter_no_str:
                             digits_clean = chapter_no_str.replace("Ch ", "").replace(" - Art", "")
-                            chapter_title = f"Chapter {digits_clean} Art Pack"
+                            chapter_title = f"Chapter {digits_clean} Art"
                         elif chapter_no_str in ["Design", "CE support"]:
                             chapter_title = chapter_no_str
                         else:
@@ -4180,6 +4227,358 @@ def api_v2_download_file_version(
     )
 
 
+from pydantic import BaseModel
+class BatchJobStartRequest(BaseModel):
+    process_type: str
+    chapter_ids: list[int]
+    mode: str = "style"
+    options: Optional[dict] = None
+
+
+@router.post("/projects/{project_id}/batch-jobs")
+def api_v2_start_batch_jobs(
+    project_id: int,
+    payload: BatchJobStartRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+
+    results = []
+    errors = []
+    
+    # Resolve batch options dictionary
+    batch_options = payload.options or {}
+    if payload.process_type == "xml_to_indesign" and "template_file_id" not in batch_options:
+        try:
+            from app.services import stylesheet_service
+            active_ss = stylesheet_service.get_active_stylesheet_for_project(db, project_id=project.id)
+            if active_ss:
+                file_ids = stylesheet_service._deserialize_file_ids(active_ss.analyzed_file_ids)
+                if file_ids:
+                    batch_options["template_file_id"] = file_ids[0]
+                    logger.info(f"Resolved default template_file_id={file_ids[0]} from active stylesheet for batch XML to InDesign.")
+        except Exception as ss_err:
+            logger.warning(f"Failed to resolve stylesheet template: {ss_err}")
+            
+        if "template_file_id" not in batch_options:
+            fallback_template = db.query(models.File).filter(
+                models.File.project_id == project.id,
+                models.File.category.in_(["template/indesign", "InDesign"]),
+                models.File.filename.like("%.indt")
+            ).order_by(models.File.uploaded_at.desc()).first()
+            
+            if not fallback_template:
+                fallback_template = db.query(models.File).filter(
+                    models.File.project_id == project.id,
+                    models.File.category.in_(["template/indesign", "InDesign"]),
+                    models.File.filename.like("%.indd")
+                ).order_by(models.File.uploaded_at.desc()).first()
+
+            if fallback_template:
+                batch_options["template_file_id"] = fallback_template.id
+                logger.info(f"Resolved fallback template_file_id={fallback_template.id} from templates.")
+
+    # Determine target category and extension based on process_type
+    target_category = None
+    target_extensions = []
+    
+    if payload.process_type == "word_to_xml":
+        target_category = "Manuscript"
+        target_extensions = [".docx"]
+    elif payload.process_type == "xml_to_indesign":
+        target_category = "XML"
+        target_extensions = [".xml"]
+    elif payload.process_type == "indesign_to_xml":
+        target_category = "InDesign"
+        target_extensions = [".indd", ".zip"]
+    elif payload.process_type == "style_validation":
+        target_category = "Manuscript"
+        target_extensions = [".docx"]
+    elif payload.process_type == "structuring":
+        target_category = "Manuscript"
+        target_extensions = [".docx"]
+    else:
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="INVALID_PROCESS_TYPE",
+            message=f"Batch processing not supported for type: {payload.process_type}",
+        )
+
+    for ch_id in payload.chapter_ids:
+        # Load the chapter
+        chapter = db.query(models.ChapterInfo).filter(
+            models.ChapterInfo.id == ch_id,
+            models.ChapterInfo.project == project.project_code
+        ).first()
+        if not chapter:
+            errors.append({"chapter_id": ch_id, "error": "Chapter not found"})
+            continue
+            
+        # Find the latest eligible file in this chapter matching the target extensions
+        file_query = db.query(models.File).filter(
+            models.File.project_id == project.id,
+            models.File.chapter_id == chapter.id,
+            models.File.category == target_category
+        )
+        
+        if target_extensions:
+            eligible_files = [
+                f for f in file_query.all()
+                if os.path.splitext(f.filename)[1].lower() in target_extensions
+            ]
+            eligible_files.sort(key=lambda x: x.uploaded_at or datetime.min, reverse=True)
+            file_record = eligible_files[0] if eligible_files else None
+        else:
+            file_record = file_query.order_by(models.File.uploaded_at.desc()).first()
+        
+        if not file_record:
+            errors.append({
+                "chapter_id": ch_id, 
+                "error": f"No eligible file found in category {target_category} with extensions {target_extensions}"
+            })
+            continue
+
+        try:
+            resp = processing_service.start_process(
+                db,
+                file_id=file_record.id,
+                process_type=payload.process_type,
+                background_tasks=background_tasks,
+                mode=payload.mode,
+                user=viewer,
+                upload_dir=file_service.UPLOAD_DIR,
+                logger=logger,
+                background_task_callable=_api_v2_background_processing_task,
+                options=batch_options,
+            )
+            results.append({
+                "chapter_id": ch_id,
+                "chapter_name": chapter.chapters,
+                "file_id": file_record.id,
+                "filename": file_record.filename,
+                "job_id": resp.get("job_id"),
+                "success": True
+            })
+        except Exception as e:
+            errors.append({
+                "chapter_id": ch_id,
+                "chapter_name": chapter.chapters,
+                "error": str(e)
+            })
+
+    return {
+        "success": len(results) > 0,
+        "triggered_count": len(results),
+        "results": results,
+        "errors": errors
+    }
+
+
+@router.post("/projects/{project_id}/combine-book")
+def api_v2_combine_project_book(
+    project_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+
+    # Load the project
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+
+    # Gather chapter-wise XML and ePUB files from the "Misc" category
+    chapters = db.query(models.ChapterInfo).filter(models.ChapterInfo.project == project.project_code).all()
+    
+    files_to_package = []
+    for chapter in chapters:
+        # Avoid including files from "Final files" chapter itself to prevent infinite loop of merging merges
+        if chapter.chapters.lower() == "final files":
+            continue
+            
+        for f in chapter.files:
+            if f.category == "Misc" and f.path:
+                ext = os.path.splitext(f.filename)[1].lower()
+                if ext in (".xml", ".epub", ".css", ".otf", ".ttf", ".woff", ".woff2", ".svg", ".png", ".jpg", ".jpeg"):
+                    if not f.filename.endswith(".log"): # exclude log files
+                        files_to_package.append(f)
+
+    if not files_to_package:
+        return _error_response(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="NO_ASSETS_FOUND",
+            message="No XML, ePUB or associated assets found in the Final delivery folders of any chapters.",
+        )
+
+    # Create temporary zip archive of the files
+    import tempfile
+    import zipfile
+    import shutil
+    import requests
+    from app.services.file_service import UPLOAD_DIR
+    from app.core.config import get_settings
+    settings = get_settings()
+
+    temp_zip = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+    temp_zip_path = temp_zip.name
+    temp_zip.close()
+
+    try:
+        with zipfile.ZipFile(temp_zip_path, "w") as zf:
+            for f in files_to_package:
+                abs_path = os.path.join(UPLOAD_DIR, f.path) if not os.path.isabs(f.path) else f.path
+                if os.path.exists(abs_path):
+                    # Write to flat folder structure
+                    zf.write(abs_path, f.filename)
+                    
+        # Send to remote Windows Conversion Server
+        url = f"{settings.INDESIGN_SERVER_URL}/merge-book"
+        logger.info(f"Sending combine-book request to remote server: {url}")
+        
+        with open(temp_zip_path, "rb") as zf_in:
+            response = requests.post(
+                url,
+                files={"file": ("combine.zip", zf_in.read(), "application/octet-stream")},
+                timeout=(30.0, 900)
+            )
+            
+        if response.status_code != 200:
+            logger.error(f"Remote server failed to combine book: Status {response.status_code}, Response: {response.text}")
+            return _error_response(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                code="REMOTE_MERGE_FAILED",
+                message=f"Remote merge script failed: {response.text}",
+            )
+            
+        # Success! Save the merged ZIP content locally and register the output files.
+        # Find or automatically create the "Final files" chapter folder.
+        final_chap = db.query(models.ChapterInfo).filter(
+            models.ChapterInfo.project == project.project_code,
+            models.ChapterInfo.chapters.ilike("final files")
+        ).first()
+        
+        if not final_chap:
+            final_chap = models.ChapterInfo(
+                client=project.division_code or "",
+                project=project.project_code,
+                chapters="Final files",
+                chapter_title="Merged Book and Final Files",
+                status="complete",
+                stage_name="Delivery",
+                current_assignee_name=viewer.username,
+                workflow=project.workflow_name
+            )
+            db.add(final_chap)
+            db.commit()
+            db.refresh(final_chap)
+            logger.info(f"Automatically created 'Final files' chapter for project {project.project_code}")
+
+        # Extract the returned ZIP containing merged.xml and merged.epub
+        response_zip_path = tempfile.NamedTemporaryFile(suffix=".zip", delete=False).name
+        with open(response_zip_path, "wb") as f_out:
+            f_out.write(response.content)
+            
+        extract_dir = tempfile.mkdtemp()
+        with zipfile.ZipFile(response_zip_path, "r") as z_res:
+            z_res.extractall(extract_dir)
+
+        # Dest directory for the "Final files" chapter
+        dest_dir = os.path.join(UPLOAD_DIR, project.project_code, final_chap.chapters, "Misc")
+        os.makedirs(dest_dir, exist_ok=True)
+        
+        from app.domains.files import version_service
+        
+        for fname in ("merged.xml", "merged.epub"):
+            src_file_path = os.path.join(extract_dir, fname)
+            if os.path.exists(src_file_path):
+                dest_file_path = os.path.join(dest_dir, fname)
+                
+                # Check if it already exists in the database
+                existing_file = db.query(models.File).filter(
+                    models.File.project_id == project.id,
+                    models.File.chapter_id == final_chap.id,
+                    models.File.filename == fname,
+                    models.File.category == "Misc"
+                ).first()
+                
+                if existing_file:
+                    version_service.archive_existing_file(db, existing_file)
+                    shutil.copy2(src_file_path, dest_file_path)
+                    existing_file.version += 1
+                    existing_file.uploaded_at = datetime.utcnow()
+                    existing_file.uploaded_by_id = viewer.id
+                    db.commit()
+                    logger.info(f"Bumped version for {fname} in 'Final files' chapter.")
+                else:
+                    shutil.copy2(src_file_path, dest_file_path)
+                    db_file = models.File(
+                        project_id=project.id,
+                        chapter_id=final_chap.id,
+                        filename=fname,
+                        file_type="text/xml" if fname.endswith(".xml") else "application/epub+zip",
+                        category="Misc",
+                        path=dest_file_path,
+                        uploaded_by_id=viewer.id,
+                        version=1,
+                        is_original=False
+                    )
+                    db.add(db_file)
+                    db.commit()
+                    logger.info(f"Registered new file {fname} in 'Final files' chapter.")
+
+        # Clean up local temporary directories and files
+        try:
+            os.remove(temp_zip_path)
+            os.remove(response_zip_path)
+            shutil.rmtree(extract_dir)
+        except Exception as cleanup_err:
+            logger.warning(f"Failed to clean up temp merge folders: {cleanup_err}")
+
+        # Stream the ZIP back to frontend for browser download
+        from starlette.responses import StreamingResponse
+        import io
+        return StreamingResponse(
+            io.BytesIO(response.content),
+            media_type="application/x-zip-compressed",
+            headers={"Content-Disposition": "attachment; filename=merged_book_files.zip"}
+        )
+
+    except Exception as err:
+        logger.error(f"Error combining project book: {err}")
+        return _error_response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            code="COMBINE_BOOK_FAILED",
+            message=f"Failed to combine book: {str(err)}",
+        )
+
+
+
 @router.post("/files/{file_id}/processing-jobs", response_model=schemas_v2.ProcessingStartResponse)
 def api_v2_start_processing(
     file_id: int,
@@ -4278,6 +4677,9 @@ def api_v2_processing_status(
         "word_to_xml",
         "indesign_to_xml",
         "xml_to_indesign",
+        "style_validation",
+        "extract_design_css",
+        "view_proof",
     )
     if process_type not in supported_types:
         return _error_response(
@@ -5184,6 +5586,145 @@ def api_v2_save_file_xhtml_runs(
         raise
     except Exception as exc:
         logger.error(f"Unexpected error in delta save: {exc}", exc_info=True)
+
+@router.get("/files/{file_id}/asset/{asset_path:path}")
+def api_v2_get_file_asset(
+    file_id: int,
+    asset_path: str,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """
+    Stream an image asset associated with a file's chapter (artfile, Links, Proof).
+    Automatically resolves .eps files to matching .png/.jpg or converts EPS to PNG.
+    """
+    from fastapi.responses import FileResponse
+    import mimetypes
+    from app.services.file_service import UPLOAD_DIR
+    from app.domains.review.service import resolve_processed_target
+
+    clean_asset_name = os.path.basename(asset_path).strip()
+    if not clean_asset_name:
+        raise HTTPException(status_code=400, detail="Invalid asset name")
+
+    try:
+        file_record = db.query(models.File).filter(models.File.id == file_id).first()
+        if not file_record:
+            raise HTTPException(status_code=404, detail="File not found")
+
+        project = db.query(models.Project).filter(models.Project.id == file_record.project_id).first()
+        chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == file_record.chapter_id).first()
+        if not project or not chapter:
+            raise HTTPException(status_code=404, detail="Project or Chapter not found")
+
+        chapter_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters)
+        
+        candidate_folders = [
+            os.path.join(chapter_dir, "artfile"),
+            os.path.join(chapter_dir, "Links"),
+            os.path.join(chapter_dir, "Art"),
+            os.path.join(chapter_dir, "Proof"),
+            os.path.join(chapter_dir, "InDesign", "artfile"),
+            os.path.join(chapter_dir, "InDesign", "Links"),
+            chapter_dir,
+        ]
+
+        base_name_no_ext = os.path.splitext(clean_asset_name)[0]
+        target_disk_file = None
+
+        # Check exact match first
+        for folder in candidate_folders:
+            if os.path.exists(folder):
+                test_p = os.path.join(folder, clean_asset_name)
+                if os.path.exists(test_p) and os.path.isfile(test_p):
+                    target_disk_file = test_p
+                    break
+
+        # Check raster variants (.png, .jpg, .jpeg, .webp) if missing or if .eps
+        if not target_disk_file or clean_asset_name.lower().endswith(".eps"):
+            for ext_variant in [".png", ".jpg", ".jpeg", ".webp", ".svg"]:
+                variant_name = base_name_no_ext + ext_variant
+                for folder in candidate_folders:
+                    if os.path.exists(folder):
+                        test_p = os.path.join(folder, variant_name)
+                        if os.path.exists(test_p) and os.path.isfile(test_p):
+                            target_disk_file = test_p
+                            break
+                if target_disk_file:
+                    break
+
+        # Fallback 1: search project directory recursively for asset file or raster variants
+        if not target_disk_file or not os.path.exists(target_disk_file):
+            search_names = [clean_asset_name]
+            if clean_asset_name.lower().endswith(".eps"):
+                search_names.extend([base_name_no_ext + ext for ext in [".png", ".jpg", ".jpeg", ".webp", ".svg"]])
+            
+            project_dir = os.path.join(UPLOAD_DIR, project.code) if project else None
+            if project_dir and os.path.exists(project_dir):
+                for root, _, files in os.walk(project_dir):
+                    lower_files = {f.lower(): f for f in files}
+                    for sn in search_names:
+                        if sn.lower() in lower_files:
+                            target_disk_file = os.path.join(root, lower_files[sn.lower()])
+                            break
+                    if target_disk_file:
+                        break
+
+        # Fallback 2: search global UPLOAD_DIR recursively if file_id belong to another chapter/project
+        if not target_disk_file or not os.path.exists(target_disk_file):
+            search_names = [clean_asset_name]
+            if clean_asset_name.lower().endswith(".eps"):
+                search_names.extend([base_name_no_ext + ext for ext in [".png", ".jpg", ".jpeg", ".webp", ".svg"]])
+            if os.path.exists(UPLOAD_DIR):
+                for root, _, files in os.walk(UPLOAD_DIR):
+                    lower_files = {f.lower(): f for f in files}
+                    for sn in search_names:
+                        if sn.lower() in lower_files:
+                            target_disk_file = os.path.join(root, lower_files[sn.lower()])
+                            break
+                    if target_disk_file:
+                        break
+
+        # On-the-fly EPS to PNG conversion using PIL/PyMuPDF if no pre-converted image exists
+        if target_disk_file and target_disk_file.lower().endswith(".eps"):
+            png_cache_file = target_disk_file + ".converted.png"
+            if os.path.exists(png_cache_file):
+                return FileResponse(png_cache_file, media_type="image/png")
+            try:
+                from PIL import Image
+                im = Image.open(target_disk_file)
+                if hasattr(im, "load"):
+                    try:
+                        im.load()
+                    except Exception:
+                        pass
+                im.convert("RGB").save(png_cache_file, "PNG")
+                return FileResponse(png_cache_file, media_type="image/png")
+            except Exception as conv_err:
+                logger.warning(f"PIL EPS to PNG conversion failed for {target_disk_file}: {conv_err}")
+                try:
+                    import pymupdf
+                    doc = pymupdf.open(target_disk_file)
+                    page = doc[0]
+                    pix = page.get_pixmap(dpi=150)
+                    pix.save(png_cache_file)
+                    return FileResponse(png_cache_file, media_type="image/png")
+                except Exception as conv_err2:
+                    logger.warning(f"PyMuPDF EPS conversion fallback failed for {target_disk_file}: {conv_err2}")
+
+        if not target_disk_file or not os.path.exists(target_disk_file):
+            raise HTTPException(status_code=404, detail=f"Image asset '{clean_asset_name}' not found")
+
+        mime_type, _ = mimetypes.guess_type(target_disk_file)
+        if not mime_type:
+            mime_type = "image/png" if target_disk_file.lower().endswith(".png") else "application/octet-stream"
+
+        return FileResponse(target_disk_file, media_type=mime_type)
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Failed to serve asset {asset_path} for file {file_id}: {exc}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -6363,10 +6904,30 @@ def api_v2_add_citation_comment(
 
 
 @router.get("/paragraph-styles", response_model=list[str])
-def api_v2_get_paragraph_styles():
-    """Return the list of all publisher paragraph styles."""
-    from app.utils.inject_styles import PUBLISHER_STYLES
-    return sorted(PUBLISHER_STYLES)
+def api_v2_get_paragraph_styles(
+    client: Optional[str] = Query(None),
+    file_id: Optional[int] = Query(None),
+    db: Session = Depends(database.get_db),
+):
+    """Return the list of publisher paragraph styles based on client/file_id."""
+    from app.utils.client_styles import get_paragraph_styles_for_client
+
+    client_name = client
+    if not client_name and file_id:
+        file_obj = db.query(models.File).filter(models.File.id == file_id).first()
+        if file_obj and file_obj.chapter:
+            ch = file_obj.chapter
+            client_name = getattr(ch, "client", None)
+            if not client_name or not isinstance(client_name, str):
+                proj = getattr(ch, "project_rel", None)
+                if proj and proj.client:
+                    client_name = (
+                        getattr(proj.client, "company", None)
+                        or getattr(proj.client, "name_company", None)
+                        or getattr(proj.client, "division", None)
+                    )
+
+    return get_paragraph_styles_for_client(client_name)
 
 
 
@@ -6445,18 +7006,13 @@ def api_v2_create_user(
             message="Admin access required.",
         )
 
-    # Role Validation: Ensure role exists and is active
+    # Role Validation: Ensure role exists and is active (if in master)
     from app.domains.workflow.models import RolesMaster
+    from app.domains.auth.user_service import determine_access_level
     role_record = db.query(RolesMaster).filter(
         RolesMaster.role_name.ilike(payload.role)
     ).first()
-    if not role_record:
-        return _error_response(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            code="INVALID_ROLE",
-            message=f"Role '{payload.role}' does not exist"
-        )
-    if not role_record.active_status:
+    if role_record and not role_record.active_status:
         return _error_response(
             status_code=status.HTTP_400_BAD_REQUEST,
             code="INACTIVE_ROLE",
@@ -6481,13 +7037,15 @@ def api_v2_create_user(
         )
 
     from app.domains.auth.security import hash_password
+    assigned_role = role_record.role_name if role_record else payload.role
     db_user = models.User(
         username=payload.username,
         email=payload.email,
         password_hash=hash_password(payload.password),
-        designation=role_record.role_name,
-        role=role_record.role_name if role_record.role_name.lower() == "admin" else None,
-        team=role_record.team,
+        designation=payload.designation or None,
+        role=assigned_role,
+        access_level=determine_access_level(assigned_role),
+        team=role_record.team if role_record else (payload.team or "General"),
         customer_access=payload.customer_access,
         active_status=payload.active_status if payload.active_status is not None else True
     )
@@ -6530,21 +7088,18 @@ def api_v2_update_user(
     # Role updates and validation
     if payload.role:
         from app.domains.workflow.models import RolesMaster
+        from app.domains.auth.user_service import determine_access_level
         role_record = db.query(RolesMaster).filter(
             RolesMaster.role_name.ilike(payload.role)
         ).first()
-        if not role_record:
-            return _error_response(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                code="INVALID_ROLE",
-                message=f"Role '{payload.role}' does not exist"
-            )
-        if not role_record.active_status:
+        if role_record and not role_record.active_status:
             return _error_response(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 code="INACTIVE_ROLE",
                 message=f"Role '{payload.role}' is inactive"
             )
+
+        assigned_role = role_record.role_name if role_record else payload.role
 
         # Admin count check to protect the last admin
         from sqlalchemy import func
@@ -6552,7 +7107,7 @@ def api_v2_update_user(
             (db_user.role and db_user.role.lower() == "admin") or
             (db_user.designation and db_user.designation.lower() == "admin")
         )
-        is_new_admin = role_record.role_name.lower() == "admin"
+        is_new_admin = assigned_role.lower() == "admin"
         if was_admin and not is_new_admin:
             admin_count = db.query(models.User).filter(
                 func.coalesce(models.User.role, models.User.designation).ilike("admin")
@@ -6564,9 +7119,10 @@ def api_v2_update_user(
                     message="Cannot remove the last Admin role"
                 )
 
-        db_user.designation = role_record.role_name
-        db_user.role = role_record.role_name if role_record.role_name.lower() == "admin" else None
-        db_user.team = role_record.team
+        db_user.role = assigned_role
+        db_user.access_level = determine_access_level(assigned_role)
+        if role_record and role_record.team:
+            db_user.team = role_record.team
 
     # Other updates
     if payload.designation is not None:
@@ -6861,11 +7417,13 @@ def api_v2_create_chapter_with_manuscript(
 
     number_padded = f"{new_number:02d}"
 
+    title = Path(os.path.basename(file.filename)).stem.strip() if file.filename else f"Chapter {number_padded}"
+
     result = chapter_service.create_chapter(
         db,
         project_id=project_id,
         number=number_padded,
-        title=f"Chapter {number_padded}",
+        title=title,
         upload_dir=file_service.UPLOAD_DIR,
         # "Received" — matches the pending-planning status used elsewhere (e.g. sync-chapters)
         # until this chapter is planned and approved on the Planning page.
@@ -6988,7 +7546,7 @@ def api_v2_create_chapter_with_art(
         db,
         project_id=project_id,
         number=art_chapter_name,
-        title=f"Chapter {number_padded} Art Pack",
+        title=f"Chapter {number_padded} Art",
         upload_dir=file_service.UPLOAD_DIR,
         # "Received" — matches the pending-planning status used elsewhere (e.g. sync-chapters)
         # until this chapter is planned and approved on the Planning page.
@@ -7124,11 +7682,13 @@ def api_v2_create_chapters_with_manuscript_zip(
                     skipped.append({"filename": fname, "reason": f"Chapter {number_padded} already exists."})
                     continue
 
+                title = Path(os.path.basename(fname)).stem.strip() if fname else f"Chapter {number_padded}"
+
                 result = chapter_service.create_chapter(
                     db,
                     project_id=project_id,
                     number=number_padded,
-                    title=f"Chapter {number_padded}",
+                    title=title,
                     upload_dir=file_service.UPLOAD_DIR,
                     status="Received",
                 )
@@ -7246,7 +7806,7 @@ def api_v2_create_chapters_with_art_zip(
                 db,
                 project_id=project_id,
                 number=art_chapter_name,
-                title=f"Chapter {new_num:02d} Art Pack",
+                title=f"Chapter {new_num:02d} Art",
                 upload_dir=file_service.UPLOAD_DIR,
                 status="Received",
             )
@@ -7631,3 +8191,415 @@ def api_v2_chapter_transition_email(
     }}
 
 
+
+@router.post("/projects/{project_id}/preview-zip", response_model=schemas_v2.PreviewZipResponse)
+def api_v2_preview_zip(
+    project_id: int,
+    file: UploadFile = FastAPIFile(...),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(status_code=status.HTTP_401_UNAUTHORIZED, code="AUTH_REQUIRED", message="Authentication required.")
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="PROJECT_NOT_FOUND", message="Project not found.")
+
+    if not file.filename or not file.filename.lower().endswith(".zip"):
+        return _error_response(status_code=status.HTTP_400_BAD_REQUEST, code="INVALID_FILE_TYPE", message="Only .zip files are supported.")
+
+    session_id = str(uuid.uuid4())
+    temp_dir = os.path.join(file_service.UPLOAD_DIR, "staging", session_id)
+    os.makedirs(temp_dir, exist_ok=True)
+
+    zip_path = os.path.join(temp_dir, file.filename)
+    with open(zip_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    # Save permanently for resuming
+    project_code = project.project_code or f"PRJ-{project.id}"
+    client_name = project.client_name or "unknown"
+    project_dir = os.path.join(file_service.UPLOAD_DIR, client_name, project_code)
+    os.makedirs(project_dir, exist_ok=True)
+    saved_zip_path = os.path.join(project_dir, f"{project_code}_mapping.zip")
+    shutil.copyfile(zip_path, saved_zip_path)
+
+    with zipfile.ZipFile(zip_path, "r") as z:
+        z.extractall(temp_dir)
+
+    class_path = os.path.join(os.path.dirname(__file__), "..", "domains", "projects", "classification.json")
+    classification_rules = []
+    if os.path.exists(class_path):
+        with open(class_path, "r") as f:
+            classification_rules = json.load(f).get("heuristics", [])
+
+    def classify_file(fname: str, rel_path: str):
+        ext = fname.split(".")[-1].lower() if "." in fname else ""
+        if ext == "docx": file_type = "Manuscript"
+        elif ext in ["xml", "html", "xhtml"] and "art" not in fname.lower(): file_type = "XML"
+        elif ext in ["indd"]: file_type = "InDesign"
+        elif ext in ["pdf"] and "proof" in fname.lower() and "art" not in fname.lower(): file_type = "Proof"
+        else: file_type = "Art"
+
+        stem = os.path.splitext(fname)[0].lower()
+        matched_cat = "Not Found"
+        
+        # Helper to check rules against a string
+        def get_cat(s: str) -> str:
+            for rule in classification_rules:
+                for p in rule.get("patterns", []):
+                    p_clean = p.lower()
+                    if re.search(r'(?:^|[^a-z])' + re.escape(p_clean) + r'(?:[^a-z]|$)', s) or p_clean in s.split("_") or p_clean in s.split("-"):
+                        return rule.get("category", "")
+            return "Not Found"
+            
+        matched_cat = get_cat(stem)
+        
+        # If not found in filename, try parent directories
+        if matched_cat == "Not Found":
+            path_parts = rel_path.replace("\\", "/").split("/")
+            for part in reversed(path_parts[:-1]):
+                cat = get_cat(part.lower())
+                if cat != "Not Found":
+                    matched_cat = cat
+                    break
+
+        chapter_num = None
+        if matched_cat == "Chapters":
+            path_parts = rel_path.replace("\\", "/").split("/")
+            
+            # 1. Try parent folders first for explicit 'ch' or 'chapter' match
+            for part in reversed(path_parts[:-1]):
+                m = re.search(r'(?:chapter|chap|ch)[_\s-]*(\d+)', part.lower())
+                if m:
+                    chapter_num = f"{int(m.group(1)):02d}"
+                    break
+            
+            # 2. If not found in folders explicitly, try the filename (which might be loose)
+            if not chapter_num:
+                chapter_num = file_service.extract_chapter_number_from_filename(fname)
+            
+            # 3. If STILL not found, try folders with loose matching
+            if not chapter_num:
+                for part in reversed(path_parts[:-1]):
+                    chapter_num = file_service.extract_chapter_number_from_filename(part)
+                    if chapter_num: break
+        elif matched_cat == "Appendix":
+            m = re.search(r'app(?:endix)?(?:_|\s|-)*([a-z0-9]+)\b', stem)
+            if m:
+                chapter_num = m.group(1).upper()
+            else:
+                chapter_num = file_service.extract_chapter_number_from_filename(fname)
+
+        if matched_cat == "Front Matter": chapter_num = "FM"
+        if matched_cat == "Back Matter": chapter_num = "BM"
+
+        return matched_cat, chapter_num, file_type
+
+    files_result = []
+    for root, _, filenames in os.walk(temp_dir):
+        for fname in filenames:
+            if fname == file.filename or "__MACOSX" in root or fname.startswith("."): continue
+            rel_path = os.path.relpath(os.path.join(root, fname), temp_dir)
+            cat, num, ftype = classify_file(fname, rel_path)
+            files_result.append({
+                "original_filename": rel_path,
+                "category": cat,
+                "chapter_number": str(num) if num else None,
+                "file_type": ftype
+            })
+
+    return {"session_id": session_id, "files": files_result}
+
+
+@router.get("/projects/{project_id}/resume-mapping", response_model=schemas_v2.PreviewZipResponse)
+def api_v2_resume_mapping(
+    project_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(status_code=status.HTTP_401_UNAUTHORIZED, code="AUTH_REQUIRED", message="Authentication required.")
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="PROJECT_NOT_FOUND", message="Project not found.")
+
+    project_code = project.project_code or f"PRJ-{project.id}"
+    client_name = project.client_name or "unknown"
+    project_dir = os.path.join(file_service.UPLOAD_DIR, client_name, project_code)
+    saved_zip_path = os.path.join(project_dir, f"{project_code}_mapping.zip")
+
+    if not os.path.exists(saved_zip_path):
+        return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="ZIP_NOT_FOUND", message="No saved mapping ZIP found for this project.")
+
+    session_id = str(uuid.uuid4())
+    temp_dir = os.path.join(file_service.UPLOAD_DIR, "staging", session_id)
+    os.makedirs(temp_dir, exist_ok=True)
+
+    with zipfile.ZipFile(saved_zip_path, "r") as z:
+        z.extractall(temp_dir)
+
+    class_path = os.path.join(os.path.dirname(__file__), "..", "domains", "projects", "classification.json")
+    classification_rules = []
+    if os.path.exists(class_path):
+        with open(class_path, "r") as f:
+            classification_rules = json.load(f).get("heuristics", [])
+
+    def classify_file(fname: str, rel_path: str):
+        ext = fname.split(".")[-1].lower() if "." in fname else ""
+        if ext in ["xml", "html", "xhtml", "log"]: file_type = "XML"
+        elif ext in ["png", "jpg", "jpeg", "gif", "tiff", "tif", "svg", "eps"]: file_type = "Art"
+        elif ext in ["indd"]: file_type = "InDesign"
+        elif ext in ["pdf"] and "proof" in fname.lower(): file_type = "Proof"
+        else: file_type = "Manuscript"
+
+        stem = os.path.splitext(fname)[0].lower()
+        matched_cat = "Not Found"
+        
+        # Helper to check rules against a string
+        def get_cat(s: str) -> str:
+            for rule in classification_rules:
+                for p in rule.get("patterns", []):
+                    p_clean = p.lower()
+                    if re.search(r'(?:^|[^a-z])' + re.escape(p_clean) + r'(?:[^a-z]|$)', s) or p_clean in s.split("_") or p_clean in s.split("-"):
+                        return rule.get("category", "")
+            return "Not Found"
+            
+        matched_cat = get_cat(stem)
+        
+        # If not found in filename, try parent directories
+        if matched_cat == "Not Found":
+            path_parts = rel_path.replace("\\", "/").split("/")
+            for part in reversed(path_parts[:-1]):
+                cat = get_cat(part.lower())
+                if cat != "Not Found":
+                    matched_cat = cat
+                    break
+
+        chapter_num = None
+        if matched_cat == "Chapters":
+            chapter_num = file_service.extract_chapter_number_from_filename(fname)
+            if not chapter_num:
+                path_parts = rel_path.replace("\\", "/").split("/")
+                for part in reversed(path_parts[:-1]):
+                    chapter_num = file_service.extract_chapter_number_from_filename(part)
+                    if chapter_num: break
+        elif matched_cat == "Appendix":
+            m = re.search(r'app(?:endix)?(?:_|\s|-)*([a-z0-9]+)\b', stem)
+            if m:
+                chapter_num = m.group(1).upper()
+            else:
+                chapter_num = file_service.extract_chapter_number_from_filename(fname)
+
+        if matched_cat == "Front Matter": chapter_num = "FM"
+        if matched_cat == "Back Matter": chapter_num = "BM"
+
+        return matched_cat, chapter_num, file_type
+
+    files_result = []
+    for root, _, filenames in os.walk(temp_dir):
+        for fname in filenames:
+            if "__MACOSX" in root or fname.startswith("."): continue
+            rel_path = os.path.relpath(os.path.join(root, fname), temp_dir)
+            cat, num, ftype = classify_file(fname, rel_path)
+            files_result.append({
+                "original_filename": rel_path,
+                "category": cat,
+                "chapter_number": str(num) if num else None,
+                "file_type": ftype
+            })
+
+    return {"session_id": session_id, "files": files_result}
+
+
+@router.post("/projects/{project_id}/finalize-mapping", response_model=schemas_v2.FinalizeMappingResponse)
+def api_v2_finalize_mapping(
+    project_id: int,
+    request: schemas_v2.FinalizeMappingRequest,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(status_code=status.HTTP_401_UNAUTHORIZED, code="AUTH_REQUIRED", message="Authentication required.")
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="PROJECT_NOT_FOUND", message="Project not found.")
+
+    temp_dir = os.path.join(file_service.UPLOAD_DIR, "staging", request.session_id)
+    if not os.path.exists(temp_dir):
+        return _error_response(status_code=status.HTTP_400_BAD_REQUEST, code="SESSION_EXPIRED", message="Session expired or not found.")
+
+    from app.domains.workflow.models import WorkflowMaster as _WorkflowMaster
+    from sqlalchemy import or_ as _or
+    first_stage = None
+    if project.workflow_name:
+        first_stage_row = db.query(_WorkflowMaster).filter(
+            _WorkflowMaster.workflow_name == project.workflow_name,
+            _or(_WorkflowMaster.previous_stage.is_(None), _WorkflowMaster.previous_stage == "")
+        ).first()
+        if first_stage_row:
+            first_stage = first_stage_row.stage_name
+
+    def get_or_create_chapter(ch_num: str, ch_title: str):
+        chapter = db.query(models.Chapter).filter(
+            models.Chapter.project == project.project_code,
+            models.Chapter.chapters == ch_num,
+        ).first()
+        if not chapter:
+            chapter = models.Chapter(
+                client=project.division_code or "",
+                project=project.project_code,
+                chapters=ch_num,
+                chapter_title=ch_title,
+                workflow=project.workflow_name or "",
+                status="Received",
+                complexity_level=getattr(project, "composition", None) or "Medium",
+                stage_level=1,
+                stage_name=first_stage,
+                published_status="Draft",
+                priority=getattr(project, "priority", None) or "Normal",
+            )
+            db.add(chapter)
+            db.commit()
+            db.refresh(chapter)
+        return chapter
+
+    created_count = 0
+    for mapping in request.mappings:
+        if mapping.category == "Not Found" or not mapping.chapter_number:
+            continue
+
+        ch_num = mapping.chapter_number
+        if mapping.file_type == "Art" and ch_num and ch_num.isdigit():
+            ch_num = f"Ch {ch_num.zfill(2)} - Art"
+            
+        if ch_num == "FM":
+            ch_title = "Front matter"
+        elif ch_num == "BM":
+            ch_title = "Back matter"
+        elif ch_num.endswith(" - Art"):
+            digits = ch_num.replace("Ch ", "").replace(" - Art", "")
+            ch_title = f"Chapter {digits} Art"
+        else:
+            ch_title = os.path.splitext(mapping.original_filename)[0]
+
+        chapter = get_or_create_chapter(ch_num, ch_title)
+        
+        # move file
+        src_path = os.path.join(temp_dir, mapping.original_filename)
+        if not os.path.exists(src_path):
+            continue
+            
+        file_cat = "Manuscript"
+        if mapping.file_type == "Art": file_cat = "Art"
+        elif mapping.file_type == "XML": file_cat = "XML"
+        elif mapping.file_type == "InDesign": file_cat = "Design"
+        
+        dest_dir = os.path.join(file_service.UPLOAD_DIR, project.code, ch_num, file_cat)
+        os.makedirs(dest_dir, exist_ok=True)
+        fname = os.path.basename(mapping.original_filename)
+        dest_path = os.path.join(dest_dir, fname)
+        shutil.copy2(src_path, dest_path)
+        
+        db_file = models.File(
+            project_id=project.id,
+            chapter_id=chapter.id,
+            filename=fname,
+            file_type=mapping.file_type.lower(),
+            category=file_cat,
+            path=dest_path,
+        )
+        db.add(db_file)
+        created_count += 1
+        
+    db.commit()
+
+    # Sync: ensure every CMS chapter has a matching WMS ChapterInfo record
+    from app.domains.workflow.models import ChapterInfo as _ChapterInfo
+    all_cms_chapters = db.query(models.Chapter).filter(models.Chapter.project == project.project_code).all()
+    existing_ci_nums = {
+        ci.chapters for ci in db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code).all()
+    }
+    for _ch in all_cms_chapters:
+        if _ch.chapters and _ch.chapters not in existing_ci_nums:
+            db.add(_ChapterInfo(
+                client=project.division_code or "",
+                project=project.code,
+                chapters=_ch.chapters,
+                chapter_title=_ch.chapter_title or f"Chapter {_ch.chapters}",
+                workflow=project.workflow_name or "",
+                status="Received",
+                complexity_level=getattr(project, "composition", None) or "Medium",
+                stage_level=1,
+                stage_name=first_stage,
+                published_status="Draft",
+                priority=getattr(project, "priority", None) or "Normal",
+                project_manager_name=getattr(project, "project_manager", None) or None,
+            ))
+            existing_ci_nums.add(_ch.chapters)
+    db.commit()
+
+    # Extract word count and manuscript pages from docx files
+    try:
+        import docx
+        from lxml import etree as ET
+        
+        chapter_docx_map = {}
+        for mapping in request.mappings:
+            if mapping.category == "Not Found" or not mapping.chapter_number:
+                continue
+            if mapping.file_type == "Manuscript" and mapping.original_filename.lower().endswith(".docx"):
+                ch_num = mapping.chapter_number
+                if ch_num not in chapter_docx_map:
+                    chapter_docx_map[ch_num] = []
+                dest_path = os.path.join(file_service.UPLOAD_DIR, project.code, ch_num, "Manuscript", os.path.basename(mapping.original_filename))
+                chapter_docx_map[ch_num].append(dest_path)
+        
+        if chapter_docx_map:
+            NS = "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"
+            ci_records = db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code).all()
+            ci_dict = {ci.chapters: ci for ci in ci_records if ci.chapters}
+            
+            for chapter_no_str, docx_paths in chapter_docx_map.items():
+                ci_record = ci_dict.get(chapter_no_str)
+                if ci_record:
+                    total_word_count = 0
+                    total_pages = 0
+                    for docx_path in docx_paths:
+                        if not os.path.exists(docx_path):
+                            continue
+                        try:
+                            doc = docx.Document(docx_path)
+                            total_word_count += sum(len(p.text.split()) for p in doc.paragraphs)
+                        except Exception as e:
+                            pass
+                        try:
+                            with zipfile.ZipFile(docx_path) as z:
+                                if "docProps/app.xml" in z.namelist():
+                                    with z.open("docProps/app.xml") as f:
+                                        tree = ET.parse(f)
+                                        pages_el = tree.find(f"{{{NS}}}Pages")
+                                        if pages_el is not None and pages_el.text:
+                                            total_pages += int(pages_el.text)
+                        except Exception as e:
+                            pass
+                    if total_word_count > 0:
+                        ci_record.word_count = (ci_record.word_count or 0) + total_word_count
+                    if total_pages > 0:
+                        ci_record.manuscript_pages = (ci_record.manuscript_pages or 0) + total_pages
+            db.commit()
+    except Exception as e:
+        pass
+
+    shutil.rmtree(temp_dir, ignore_errors=True)
+
+    # Count actual chapters created
+    total_chapters = db.query(models.Chapter).filter(models.Chapter.project == project.project_code).count()
+
+    return {"message": "Files mapped and chapters created.", "created_chapters": total_chapters}

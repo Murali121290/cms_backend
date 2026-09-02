@@ -50,8 +50,13 @@ def validate_epub(
     def _count_active(rules: list[dict]) -> int:
         return len([r for r in rules if r.get("enabled", True) and registry.get(r["id"])])
 
-    general_rules = loader.load_general()
     customer_rules = loader.load_customer(resolved_customer) if resolved_customer else []
+    
+    if customer_rules:
+        general_rules = []
+    else:
+        general_rules = loader.load_general()
+        
     grand_total = _count_active(general_rules) + _count_active(customer_rules)
     global_index = [0]  # mutable counter shared across both _run calls
 
@@ -59,6 +64,12 @@ def validate_epub(
         for rule in rules:
             if not rule.get("enabled", True):
                 continue
+
+            # Skip the rule entirely if the target_file is in the rule's exclude_files
+            exclude_files = rule.get("exclude_files", [])
+            if target_file and target_file in exclude_files:
+                continue
+
             function = registry.get(rule["id"])
             if function is None:
                 continue
@@ -101,7 +112,12 @@ def validate_epub(
             "chapter_filter": target_file,  # Pass chapter filter if validating single chapter
         }
         try:
-            result = function(book_details)
+            import inspect
+            sig = inspect.signature(function)
+            if "rule_config" in sig.parameters:
+                result = function(book_details, rule_config=rule)
+            else:
+                result = function(book_details)
         except Exception as e:  # noqa: BLE001
             result = {
                 "issues_count": 1,
@@ -111,16 +127,26 @@ def validate_epub(
                     "category": "Error",
                 }],
             }
-        report["files"].append(_entry(
-            rule, function, "", "[book-scope]",
-            {
-                "file_name": "[book-level]",
-                "full_path": epub_folder,
-                "relative_path": "",
-                "folder_name": folder_name,
-            },
-            result, origin, customer_tag,
-        ))
+        if not target_file:
+            from ..services.validate_service import _chapters_for_issue
+            unmapped_issues = [
+                i for i in result.get("issues", [])
+                if not _chapters_for_issue(i, asset_index)
+            ]
+            book_level_result = {
+                "issues_count": len(unmapped_issues),
+                "issues": unmapped_issues,
+            }
+            report["files"].append(_entry(
+                rule, function, "", "[book-scope]",
+                {
+                    "file_name": "[book-level]",
+                    "full_path": epub_folder,
+                    "relative_path": "",
+                    "folder_name": folder_name,
+                },
+                book_level_result, origin, customer_tag,
+            ))
 
         for rel_path, chapter_issues in _group_chapter_issues(
             result.get("issues", []), asset_index
@@ -166,14 +192,22 @@ def validate_epub(
                     "epub_root": epub_folder,
                     "file_path": relative_path,
                 }
-                result = function(file_details, rule_config=rule)
+                
+                import inspect
+                sig = inspect.signature(function)
+                if "rule_config" in sig.parameters:
+                    result = function(file_details, rule_config=rule)
+                else:
+                    result = function(file_details)
+                    
                 report["files"].append(_entry(
                     rule, function, target_path, file_pattern,
                     file_details, result, origin, customer_tag,
                 ))
 
-    _run(general_rules, origin="general", customer_tag=None)
-    if resolved_customer:
+    if customer_rules:
         _run(customer_rules, origin="customer", customer_tag=resolved_customer)
+    else:
+        _run(general_rules, origin="general", customer_tag=None)
 
     return report

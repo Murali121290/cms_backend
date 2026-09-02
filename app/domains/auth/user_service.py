@@ -1,7 +1,24 @@
+import logging
 from sqlalchemy.orm import Session
 from app import models
 from app.domains.auth.schemas import UserCreate
 from app.domains.auth.security import hash_password
+
+logger = logging.getLogger(__name__)
+
+def determine_access_level(role_name: str | None) -> str | None:
+    if not role_name:
+        return None
+    val = role_name.lower().replace(" ", "").replace("-", "")
+    if "admin" in val:
+        return "Admin"
+    elif "manager" in val or "gm" in val:
+        return "Manager"
+    elif "teamlead" in val or "lead" in val:
+        return "TeamLead"
+    else:
+        return "Employee"
+
 
 def get_user_by_username(db: Session, username: str):
     return db.query(models.User).filter(models.User.username == username).first()
@@ -38,6 +55,12 @@ def get_admin_dashboard_stats(db: Session):
 
 def get_admin_users_page_data(db: Session):
     from app.domains.workflow.models import RolesMaster
+    from app.domains.auth.auth_service import sync_all_peoplehub_users
+    try:
+        sync_all_peoplehub_users(db)
+    except Exception as exc:
+        logger.warning(f"Auto-sync PeopleHub users warning: {exc}")
+
     return {
         "users": db.query(models.User).all(),
         "all_roles": db.query(RolesMaster).all(),
@@ -70,11 +93,13 @@ def create_admin_user(db: Session, *, username: str, email: str, password: str, 
     if target_role:
         role_name = target_role.role_name
         new_user.designation = role_name
-        new_user.role = role_name if role_name.lower() == "admin" else None
+        new_user.role = role_name
+        new_user.access_level = determine_access_level(role_name)
         new_user.team = target_role.team
     else:
-        new_user.designation = "viewer"
-        new_user.role = None
+        new_user.designation = "Viewer"
+        new_user.role = "Viewer"
+        new_user.access_level = "Employee"
         new_user.team = team_name or "General"
 
     db.add(new_user)
@@ -104,8 +129,8 @@ def replace_user_role(db: Session, *, user_id: int, role_id: int, team_name: str
         if admin_count <= 1:
             return {"status": "last_admin_blocked"}
 
-    target_user.designation = new_role.role_name
-    target_user.role = new_role.role_name if new_role.role_name.lower() == "admin" else None
+    target_user.role = new_role.role_name
+    target_user.access_level = determine_access_level(new_role.role_name)
     target_user.team = new_role.team
     
     db.commit()

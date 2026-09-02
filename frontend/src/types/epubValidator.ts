@@ -64,6 +64,7 @@ export interface ValidationIssue {
   line_number?: number | null;
   snippet?: string | null;
   file_path?: string | null;
+  extract?: string;
   [key: string]: unknown;
 }
 

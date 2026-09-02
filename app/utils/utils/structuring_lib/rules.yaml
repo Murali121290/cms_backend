@@ -212,7 +212,7 @@ tables:
   header_threshold: 0.7
   
   # Styles
-  header_style: TBCH
+  header_style: T2
   body_style: TB
   bullet_style: TBL-MID
   number_style: TNL-MID

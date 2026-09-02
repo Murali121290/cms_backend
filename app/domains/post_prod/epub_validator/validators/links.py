@@ -14,22 +14,13 @@ import requests
 from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+import json
 
 from ..engine.registry import rule
+from ..services.upload_service import UPLOAD_DIR
 
 
-# Matches citations: pages, chapters, figures, tables
-# Examples: "page 23", "pp. 12-14", "Chapter 9", "Ch. 9", "Ch. 9.E.1", "Fig. 1.1", "Table 1-1"
-_PAGE_CITATION_RE = re.compile(
-    r"\b(?:see\s+)?"
-    r"(?:"
-    r"p(?:age|p)\.?\s*(\d{1,4})(?:\s*[\-–]\s*\d{1,4})?"  # page/pp: "page 23", "pp. 12-14"
-    r"|ch(?:apter)?\.?\s*(\d+(?:[a-zA-Z]?\.?\d+)*(?:\.\w+)*)(?:\s*[\-–]\s*\d+(?:[a-zA-Z]?\.?\d+)*(?:\.\w+)*)?"  # chapter: "Ch. 9", "Ch. 9-10"
-    r"|fig(?:ure)?\.?\s*(\d+(?:[\.\-–]\d+)*)"  # figure: "Fig. 1.1", "Fig. 1-1"
-    r"|table\.?\s*(\d+(?:[\.\-–]\d+)*)"  # table: "Table 1-1", "Table 1"
-    r")[a-zA-Z]*(?![0-9\-–])",  # capture mashed letters; negative lookahead for digits/dashes
-    re.IGNORECASE,
-)
+
 
 
 _PAGE_IDS_CACHE: dict[str, set[str]] = {}
@@ -238,7 +229,40 @@ def _epub_chapter_numbers(epub: str) -> set[str]:
     return nums
 
 
-@rule("ASP-LINK-001")
+_SUMMARY_CACHE: dict[str, dict[str, set[str]]] = {}
+
+def _get_summary_labels(folder_name: str) -> dict[str, set[str]]:
+    if not folder_name:
+        return {"figures": set(), "tables": set()}
+        
+    if folder_name in _SUMMARY_CACHE:
+        return _SUMMARY_CACHE[folder_name]
+
+    cache_path = os.path.join(UPLOAD_DIR, folder_name, "summary_cache.json")
+    labels = {"figures": set(), "tables": set()}
+    
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                
+            for label in data.get("figure_labels", []):
+                m = re.search(r'fig(?:ure)?\.?\s*(\d+(?:[\.\-–]\d+)*)', label, re.IGNORECASE)
+                if m:
+                    labels["figures"].add(m.group(1))
+                    
+            for label in data.get("table_labels", []):
+                m = re.search(r'tab(?:le)?\.?\s*(\d+(?:[\.\-–]\d+)*)', label, re.IGNORECASE)
+                if m:
+                    labels["tables"].add(m.group(1))
+        except Exception:
+            pass
+            
+    _SUMMARY_CACHE[folder_name] = labels
+    return labels
+
+
+@rule("COM-LINK-001")
 def validate_page_citation_links(file_details, rule_config=None):
     """Text like '(See page 23)' should be inside an <a href='...#page_23'>."""
     with open(file_details["full_path"], "r", encoding="utf-8") as f:
@@ -255,6 +279,7 @@ def validate_page_citation_links(file_details, rule_config=None):
                 break
 
     page_ids = _epub_page_ids(epub) if epub else set()
+    summary_labels = _get_summary_labels(file_details.get("folder_name", ""))
 
     issues = []
     body = soup.find("body") or soup
@@ -265,17 +290,42 @@ def validate_page_citation_links(file_details, rule_config=None):
     if hasattr(body, 'smooth'):
         body.smooth()
 
+    config_dict = (rule_config or {}).get("rule_config", {})
+    custom_regex = config_dict.get("citation_regex")
+    if not custom_regex:
+        issues.append({
+            "type": "config_error",
+            "message": "Missing 'citation_regex' in rule config",
+            "category": "Error"
+        })
+        return {"issues_count": len(issues), "issues": issues}
+        
+    regex = re.compile(custom_regex, re.IGNORECASE)
+
     for text_node in body.find_all(string=True):
         parent = text_node.parent
-        if parent is None or text_node.find_parent(["a", "h1", "h2", "h3", "h4", "h5", "h6", "figure", "figcaption"]):
+        if parent is None or text_node.find_parent(["a", "h1", "h2", "h3", "h4", "h5", "h6", "figure", "figcaption", "header", "title"]):
             continue
         line_num = getattr(parent, "sourceline", None)
 
-        for m in _PAGE_CITATION_RE.finditer(str(text_node)):
+        for m in regex.finditer(str(text_node)):
             # Extract first non-None group (pages, chapters, figures, or tables)
             num = next((g for g in m.groups() if g), None)
             if num is None:
                 continue
+
+            # Ignore table/figure captions at the start of a <p> tag right before or after a table/image
+            is_figure = m.group(3) is not None if len(m.groups()) >= 3 else False
+            is_table = m.group(4) is not None if len(m.groups()) >= 4 else False
+            is_unit = m.group(5) is not None if len(m.groups()) >= 5 else False
+            is_lesson = m.group(6) is not None if len(m.groups()) >= 6 else False
+            
+            if (is_table or is_figure) and parent and parent.name == "p" and m.start() < 10:
+                next_tag = parent.find_next_sibling()
+                valid_targets = ["table", "figure"]
+                
+                if next_tag and next_tag.name in valid_targets:
+                    continue
 
             # If it is a chapter citation, only validate if the base chapter exists in this book
             if m.group(2) is not None and epub:
@@ -287,12 +337,37 @@ def validate_page_citation_links(file_details, rule_config=None):
                 if available_chapters and base_chapter not in available_chapters:
                     continue
 
+            # If it is a page citation, only validate if the page exists in this book
+            if m.group(1) is not None and epub:
+                page_num = m.group(1).lstrip("0") or "0"
+                if page_ids and _page_id_for_number(page_num, page_ids) is None:
+                    continue
+                    
+            # If it is a Figure citation, verify it exists
+            special_message = None
+            if is_figure and summary_labels["figures"]:
+                fig_num = m.group(3)
+                if fig_num and fig_num not in summary_labels["figures"]:
+                    special_message = f"Citation '{m.group(0)}' looks like a citation but is not found in this book."
+            
+            # If it is a Table citation, verify it exists
+            if is_table and summary_labels["tables"]:
+                table_num = m.group(4)
+                if table_num and table_num not in summary_labels["tables"]:
+                    special_message = f"Citation '{m.group(0)}' looks like a citation but is not found in this book."
+
+            msg = special_message or f"Citation '{m.group(0)}' is not wrapped in a link."
+            rule_name = "Citation Not In Book" if special_message else "Citation Not Linked"
+            issue_type = "citation_not_in_book" if special_message else "page_citation_not_linked"
+            category = "Warning" if special_message else "Error"
+
             issues.append({
-                "rule_name": "Citation Not Linked",
-                "type": "page_citation_not_linked",
-                "message": f"Citation '{m.group(0)}' is not wrapped in a link.",
-                "category": "Warning",
+                "rule_name": rule_name,
+                "type": issue_type,
+                "message": msg,
+                "category": category,
                 "snippet": str(text_node)[max(0, m.start() - 30): m.end() + 30].strip(),
+                "extract": m.group(0),
                 "line_number": line_num,
             })
             if len(issues) >= 25:
@@ -466,6 +541,7 @@ def validate_internal_xhtml_links(file_details, rule_config=None):
                 "message": f"{f'Line {line_num}: ' if line_num else ''}Referenced XHTML file not found",
                 "category": "Error",
                 "line_number": line_num,
+                "extract": href,
             })
             continue
 
@@ -481,6 +557,7 @@ def validate_internal_xhtml_links(file_details, rule_config=None):
                     "message": f"{f'Line {line_num}: ' if line_num else ''}Referenced anchor not found in target file",
                     "category": "Error",
                     "line_number": line_num,
+                    "extract": href,
                 })
 
     return {"issues_count": len(issues), "issues": issues}
@@ -492,6 +569,7 @@ def validate_external_urls(file_details, rule_config=None):
     with open(file_path, "r", encoding="utf-8") as f:
         soup = BeautifulSoup(f.read(), "html.parser")
 
+    issues = []
     hrefs = []
     mailto_links = []
 
@@ -501,45 +579,83 @@ def validate_external_urls(file_details, rule_config=None):
 
         # Check mailto: links
         if href.startswith("mailto:"):
-            mailto_links.append((href, line_num))
+            mailto_links.append((href, line_num, href))
             continue
 
         # Check external links: http://, https://, //, www., or ftp://
         if href.startswith(("http://", "https://", "//", "www.", "ftp://")):
-            hrefs.append((href, line_num))
+            raw_href = link["href"]
+            invalid_reason = None
+            if " " in raw_href:
+                invalid_reason = "space"
+            elif raw_href.endswith(";"):
+                invalid_reason = "semicolon (;)"
+            elif raw_href.endswith(","):
+                invalid_reason = "comma (,)"
+            elif raw_href.endswith("."):
+                invalid_reason = "dot (.)"
+            elif raw_href.endswith(":"):
+                invalid_reason = "colon (:)"
+            elif raw_href.endswith("?"):
+                invalid_reason = "question mark (?)"
+            elif raw_href.endswith("("):
+                invalid_reason = "opening parenthesis (()"
+            elif raw_href.endswith(")"):
+                invalid_reason = "closing parenthesis ())"
+            elif raw_href.endswith("["):
+                invalid_reason = "opening bracket ([)"
+            elif raw_href.endswith("]"):
+                invalid_reason = "closing bracket (])"
+            elif raw_href.endswith("{"):
+                invalid_reason = "opening brace ({)"
+            elif raw_href.endswith("}"):
+                invalid_reason = "closing brace (})"
+                
+            if invalid_reason:
+                issues.append({
+                    "rule_name": "Invalid URL Formatting",
+                    "type": "invalid_url_formatting",
+                    "message": f"URL '{raw_href}' contains an invalid {invalid_reason}. Accidental characters should be removed.",
+                    "category": "Error",
+                    "href": raw_href,
+                    "line_number": line_num,
+                    "extract": raw_href,
+                })
+                continue
+            hrefs.append((href, line_num, href))
         # Skip internal: relative paths (xhtml, #anchor, /)
         elif href.startswith(("#", "/")):
             continue
 
-    issues = []
-
     # Validate mailto: links (synchronous)
-    for href, line_num in mailto_links:
+    for href, line_num, extract_text in mailto_links:
         result = _check_mailto(href)
         if result:
             result["line_number"] = line_num
+            result["extract"] = extract_text
             issues.append(result)
 
     # Validate external URLs (parallel), skipping already-cached URLs
     if hrefs:
-        unchecked = [(href, ln) for href, ln in hrefs if href not in _URL_RESULT_CACHE]
+        unchecked = [(href, ln, ext) for href, ln, ext in hrefs if href not in _URL_RESULT_CACHE]
         session = _make_session()
 
         # Fetch only URLs we haven't seen before
         if unchecked:
             with ThreadPoolExecutor(max_workers=10) as pool:
-                futures = {pool.submit(_check_single_url, href, session): (href, ln)
-                           for href, ln in unchecked}
+                futures = {pool.submit(_check_single_url, href, session): (href, ln, ext)
+                           for href, ln, ext in unchecked}
                 for future in as_completed(futures):
-                    href, ln = futures[future]
+                    href, ln, ext = futures[future]
                     _URL_RESULT_CACHE[href] = future.result()  # store result (None = OK)
 
         # Apply cached results for all hrefs in this file
-        for href, line_num in hrefs:
+        for href, line_num, extract_text in hrefs:
             result = _URL_RESULT_CACHE.get(href)
             if result:
                 result = dict(result)  # copy so we don't mutate the cache
                 result["line_number"] = line_num
+                result["extract"] = extract_text
                 issues.append(result)
 
     return {"issues_count": len(issues), "issues": issues}
@@ -551,21 +667,30 @@ def validate_url_text_match(file_details, rule_config=None):
     issues = []
     with open(file_path, "r", encoding="utf-8") as f:
         soup = BeautifulSoup(f.read(), "html.parser")
-    links = soup.find_all("a", href=True, class_="url")
+    # Remove class_="url" requirement
+    links = soup.find_all("a", href=True)
     for link in links:
         href = link["href"].strip()
         text = link.get_text(strip=True)
         line_num = getattr(link, "sourceline", None)
-        if href != text:
-            issues.append({
-                "type": "url_text_mismatch",
-                "href": href,
-                "expected_text": href,
-                "actual_text": text,
-                "message": f"{f'Line {line_num}: ' if line_num else ''}Displayed URL text does not match href",
-                "category": "warning",
-                "line_number": line_num,
-            })
+        
+        # Only validate if both href and text look like URLs (start with http, https, or www)
+        if href.startswith(("http://", "https://", "www.")) and text.lower().startswith(("http://", "https://", "www.")):
+            # Normalize by stripping http:// and https:// for the comparison
+            norm_href = href.replace("http://", "").replace("https://", "")
+            norm_text = text.replace("http://", "").replace("https://", "")
+            
+            if norm_href != norm_text:
+                issues.append({
+                    "type": "url_text_mismatch",
+                    "href": href,
+                    "expected_text": href,
+                    "actual_text": text,
+                    "message": "Displayed URL text does not match href",
+                    "category": "warning",
+                    "line_number": line_num,
+                    "extract": href,
+                })
     return {"issues_count": len(issues), "issues": issues}
 
 
@@ -704,5 +829,76 @@ def validate_internal_references(file_details, rule_config=None):
                 "category": "Error",
                 "line_number": line_num,
             })
+
+    return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("GWP-LINK-001")
+def validate_1_to_1_backlinks(book_details, rule_config=None):
+    """
+    GWP000: All internal links must have a 1:1 backlink relationship.
+    This rule checks that for every internal link from File A to File B, 
+    there is a corresponding link from File B back to File A.
+    """
+    epub_path = book_details.get("epub_path")
+    if not epub_path:
+        return {"issues_count": 0, "issues": []}
+
+    xhtml_files = glob.glob(os.path.join(epub_path, "**", "*.xhtml"), recursive=True)
+    html_files = glob.glob(os.path.join(epub_path, "**", "*.html"), recursive=True)
+    all_files = xhtml_files + html_files
+    
+    issues = []
+    
+    # Map: source_file -> set of target_files
+    links_from_to = {}
+    
+    for filepath in all_files:
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                soup = BeautifulSoup(f.read(), "html.parser")
+        except Exception:
+            continue
+            
+        current_dir = os.path.dirname(filepath)
+        for a in soup.find_all("a", href=True):
+            href = a["href"].strip()
+            # Ignore external links and self-anchor links
+            if href.startswith(("http://", "https://", "mailto:", "//", "#")):
+                continue
+                
+            parts = href.split("#")
+            target_rel = parts[0]
+            if not target_rel:
+                continue
+                
+            target_file = os.path.normpath(os.path.join(current_dir, target_rel))
+            # Only consider links to other xhtml/html files in the book
+            if target_file != filepath and os.path.exists(target_file):
+                if filepath not in links_from_to:
+                    links_from_to[filepath] = set()
+                links_from_to[filepath].add(target_file)
+                
+    # Verify the 1:1 relationship
+    for source_file, target_files in links_from_to.items():
+        filename = os.path.basename(source_file).lower()
+        # Skip typical navigational files that are not expected to have backlinks
+        if filename in ("toc.xhtml", "nav.xhtml", "cover.xhtml", "title.xhtml", "titlepage.xhtml", "contents.xhtml"):
+            continue
+            
+        for target_file in target_files:
+            target_filename = os.path.basename(target_file).lower()
+            if target_filename in ("toc.xhtml", "nav.xhtml", "cover.xhtml", "title.xhtml", "titlepage.xhtml", "contents.xhtml"):
+                continue
+                
+            target_links = links_from_to.get(target_file, set())
+            if source_file not in target_links:
+                issues.append({
+                    "rule_name": "Missing Backlink",
+                    "type": "missing_1_to_1_backlink",
+                    "message": f"File links to '{os.path.basename(target_file)}' but no backlink exists.",
+                    "category": "Error",
+                    "file_path": os.path.relpath(source_file, epub_path),
+                })
 
     return {"issues_count": len(issues), "issues": issues}

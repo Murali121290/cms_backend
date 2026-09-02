@@ -3,7 +3,10 @@ import shutil
 import json
 import re
 import time
-import fitz  # PyMuPDF
+try:
+    import pymupdf as fitz
+except ImportError:
+    import fitz  # PyMuPDF
 from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Cookie, Header, Depends

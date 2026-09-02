@@ -36,514 +36,22 @@ import { SkeletonCard } from "@/components/ui/SkeletonLoader";
 import { uiPaths } from "@/utils/appPaths";
 import { WysiwygEditor, type WysiwygEditorHandle, ChangesReviewPanel } from "@/features/editor";
 import { useSessionStore } from "@/stores/sessionStore";
-import { useReferenceReviewQuery } from "@/features/referenceReview/useReferenceReviewQuery";
-import { useReferenceSave } from "@/features/referenceReview/useReferenceSave";
-import { useReferenceValidateOnly } from "@/features/referenceReview/useReferenceValidateOnly";
+import {
+  EditReferenceModal,
+  CHAR_STYLE_COLOURS,
+  styleReferenceText,
+  styledDiffHTML,
+  diffWordsToHTML,
+  getPlainTextFromHTML,
+  escapeHTML,
+  useReferenceReviewQuery,
+  useReferenceSave,
+  useReferenceValidateOnly,
+} from "@/features/referenceReview";
 import { LinkingPanel, type LinkingSource, MissingReferencesTab } from "@/features/citationLinking";
 import { getApiErrorMessage } from "@/api/client";
 
-const CHAR_STYLE_COLOURS: Record<string, string> = {
-  bib_alt_year: "#d8b4fe", bib_article: "#bae6fd", bib_base: "#e5e7eb",
-  bib_book: "#93c5fd", bib_chapterno: "#e5e7eb", bib_chaptertitle: "#fdba74",
-  bib_comment: "#c7d2fe", bib_confacronym: "#f472b6", bib_confdate: "#2dd4bf",
-  bib_conference: "#60a5fa", bib_conflocation: "#f87171", bib_confpaper: "#86efac",
-  bib_confproceedings: "#fbbf24", bib_day: "#fef08a", bib_deg: "#e5e7eb",
-  bib_doi: "#fef08a", bib_ed_etal: "#22d3ee", bib_ed_fname: "#fef08a",
-  bib_editionno: "#facc15", bib_ed_organization: "#fbcfe8", bib_ed_suffix: "#a7f3d0",
-  bib_ed_surname: "#facc15", bib_etal: "#bef264", bib_extlink: "#5eead4",
-  bib_fname: "#fef9c3", bib_fpage: "#fef9c3", bib_institution: "#d1fae5",
-  bib_isbn: "#f3f4f6", bib_issue: "#bfdbfe", bib_journal: "#ffedd5",
-  bib_location: "#fecdd3", bib_lpage: "#e5e7eb", bib_medline: "#bae6fd",
-  bib_month: "#bef264", bib_number: "#c084fc", bib_organization: "#d1fae5",
-  bib_pagecount: "#22c55e", bib_papernumber: "#fef08a", bib_patent: "#38bdf8",
-  bib_publisher: "#f472b6", bib_reportnum: "#818cf8", bib_school: "#fb923c",
-  bib_season: "#ea580c", bib_series: "#ffedd5", bib_seriesno: "#fef08a",
-  bib_suffix: "#e5e7eb", bib_suppl: "#fef9c3", bib_surname: "#bef264",
-  bib_title: "#fbcfe8", bib_trans: "#bef264", bib_unpubl: "#e5e7eb",
-  bib_url: "#d9f99d", bib_volcount: "#22c55e", bib_volume: "#bae6fd",
-  bib_year: "#e9d5ff",
-  cite_app: "#bef264", cite_base: "#e5e7eb", cite_bib: "#cffafe",
-  cite_box: "#e5e7eb", cite_eq: "#fdba74", cite_fig: "#bbf7d0",
-  cite_fn: "#fbcfe8", cite_sec: "#fecdd3", cite_tbl: "#fca5a5",
-  cite_tfn: "#fed7aa",
-};
 
-function formatPubMedToStyle(doc: any, style: "AMA" | "APA"): string {
-  const authorsList = doc.authors || [];
-  const title = (doc.title || "").replace(/\.$/, "");
-  const journal = doc.source || "";
-  const pubdate = doc.pubdate || "";
-  const yearMatch = pubdate.match(/\b(19|20)\d{2}\b/);
-  const year = yearMatch ? yearMatch[0] : "";
-  const volume = doc.volume || "";
-  const issue = doc.issue || "";
-  const pages = doc.pages || "";
-  
-  let doi = "";
-  if (doc.articleids) {
-    const doiObj = doc.articleids.find((id: any) => id.idtype === "doi");
-    if (doiObj) {
-      doi = doiObj.value;
-    }
-  }
-
-  // Format authors
-  let authorsFormatted = "";
-  if (style === "AMA") {
-    if (authorsList.length > 6) {
-      authorsFormatted = authorsList.slice(0, 3).map((a: any) => a.name).join(", ") + ", et al";
-    } else if (authorsList.length > 0) {
-      authorsFormatted = authorsList.map((a: any) => a.name).join(", ");
-    }
-  } else {
-    const parseName = (name: string) => {
-      const parts = name.trim().split(/\s+/);
-      if (parts.length > 1) {
-        const last = parts[0];
-        const initials = parts.slice(1).join("").split("").map(c => `${c}.`).join(" ");
-        return `${last}, ${initials}`;
-      }
-      return name;
-    };
-    if (authorsList.length > 0) {
-      const parsedAuthors = authorsList.map((a: any) => parseName(a.name));
-      if (parsedAuthors.length > 1) {
-        authorsFormatted = parsedAuthors.slice(0, -1).join(", ") + ", & " + parsedAuthors[parsedAuthors.length - 1];
-      } else {
-        authorsFormatted = parsedAuthors[0];
-      }
-    }
-  }
-
-  if (style === "AMA") {
-    let res = "";
-    if (authorsFormatted) res += `${authorsFormatted}. `;
-    res += `${title}. `;
-    if (journal) res += `${journal}. `;
-    if (year) res += `${year}`;
-    if (volume || issue || pages) {
-      res += ";";
-      if (volume) res += volume;
-      if (issue) res += `(${issue})`;
-      if (pages) res += `:${pages}`;
-    }
-    if (!res.endsWith(".")) res += ".";
-    if (doi) {
-      res += ` doi:${doi}`;
-    }
-    return res;
-  } else {
-    let res = "";
-    if (authorsFormatted) res += `${authorsFormatted} `;
-    if (year) res += `(${year}). `;
-    res += `${title}. `;
-    if (journal) res += `${journal}`;
-    if (volume || issue || pages) {
-      if (journal) res += ", ";
-      if (volume) res += volume;
-      if (issue) res += `(${issue})`;
-      if (pages) {
-        if (volume || issue) res += ", ";
-        res += pages;
-      }
-    }
-    if (!res.endsWith(".")) res += ".";
-    if (doi) {
-      res += ` https://doi.org/${doi}`;
-    }
-    return res;
-  }
-}
-
-function formatCrossRefToStyle(item: any, style: "AMA" | "APA"): string {
-  const authorList = item.author || [];
-  const title = (item.title && item.title[0] || "").replace(/\.$/, "");
-  const journal = item["container-title"] && item["container-title"][0] || "";
-  
-  let year = "";
-  const dateParts = item["published-print"]?.["date-parts"]?.[0] || item["published"]?.["date-parts"]?.[0] || item["published-online"]?.["date-parts"]?.[0];
-  if (dateParts && dateParts.length > 0) {
-    year = dateParts[0].toString();
-  }
-
-  const volume = item.volume || "";
-  const issue = item.issue || "";
-  const pages = item.page || "";
-  const doi = item.DOI || "";
-
-  // Format authors
-  let authorsFormatted = "";
-  if (style === "AMA") {
-    const formatted = authorList.map((a: any) => {
-      const initials = (a.given || "").split(/\s+/).map((p: string) => p[0] || "").join("");
-      return `${a.family || ""} ${initials}`.trim();
-    });
-    if (formatted.length > 6) {
-      authorsFormatted = formatted.slice(0, 3).join(", ") + ", et al";
-    } else if (formatted.length > 0) {
-      authorsFormatted = formatted.join(", ");
-    }
-  } else {
-    const formatted = authorList.map((a: any) => {
-      const initials = (a.given || "").split(/\s+/).map((p: string) => p[0] ? `${p[0]}.` : "").join(" ");
-      return `${a.family || ""}, ${initials}`.trim();
-    });
-    if (formatted.length > 0) {
-      if (formatted.length > 1) {
-        authorsFormatted = formatted.slice(0, -1).join(", ") + ", & " + formatted[formatted.length - 1];
-      } else {
-        authorsFormatted = formatted[0];
-      }
-    }
-  }
-
-  if (style === "AMA") {
-    let res = "";
-    if (authorsFormatted) res += `${authorsFormatted}. `;
-    res += `${title}. `;
-    if (journal) res += `${journal}. `;
-    if (year) res += `${year}`;
-    if (volume || issue || pages) {
-      res += ";";
-      if (volume) res += volume;
-      if (issue) res += `(${issue})`;
-      if (pages) res += `:${pages}`;
-    }
-    if (!res.endsWith(".")) res += ".";
-    if (doi) {
-      res += ` doi:${doi}`;
-    }
-    return res;
-  } else {
-    let res = "";
-    if (authorsFormatted) res += `${authorsFormatted} `;
-    if (year) res += `(${year}). `;
-    res += `${title}. `;
-    if (journal) res += `${journal}`;
-    if (volume || issue || pages) {
-      if (journal) res += ", ";
-      if (volume) res += volume;
-      if (issue) res += `(${issue})`;
-      if (pages) {
-        if (volume || issue) res += ", ";
-        res += pages;
-      }
-    }
-    if (!res.endsWith(".")) res += ".";
-    if (doi) {
-      res += ` https://doi.org/${doi}`;
-    }
-    return res;
-  }
-}
-
-function diffWordsToHTML(oldStr: string, newStr: string, currentUser: string = "Editor"): string {
-  const oldWords = oldStr.split(/(\s+)/);
-  const newWords = newStr.split(/(\s+)/);
-
-  const dp: number[][] = Array(oldWords.length + 1).fill(0).map(() => Array(newWords.length + 1).fill(0));
-  for (let i = 1; i <= oldWords.length; i++) {
-    for (let j = 1; j <= newWords.length; j++) {
-      if (oldWords[i - 1] === newWords[j - 1]) {
-        dp[i][j] = dp[i - 1][j - 1] + 1;
-      } else {
-        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
-      }
-    }
-  }
-
-  let i = oldWords.length;
-  let j = newWords.length;
-  const result: string[] = [];
-  const timestamp = new Date().toISOString().replace(/\.\d+Z$/, "Z");
-
-  while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && oldWords[i - 1] === newWords[j - 1]) {
-      result.push(escapeHTML(oldWords[i - 1]));
-      i--;
-      j--;
-    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-      const text = newWords[j - 1];
-      if (text.trim() !== "") {
-        result.push(`<ins data-author="${currentUser}" data-date="${timestamp}">${escapeHTML(text)}</ins>`);
-      } else {
-        result.push(text);
-      }
-      j--;
-    } else {
-      const text = oldWords[i - 1];
-      if (text.trim() !== "") {
-        result.push(`<del data-author="${currentUser}" data-date="${timestamp}">${escapeHTML(text)}</del>`);
-      } else {
-        result.push(text);
-      }
-      i--;
-    }
-  }
-
-  const diffHtml = result.reverse().join("");
-  const doiRegex = /(doi:\s*10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+|https?:\/\/doi\.org\/10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)/gi;
-  return diffHtml.replace(doiRegex, (match) => {
-    return `<span class="bib_doi">${match}</span>`;
-  });
-}
-
-function styledDiffHTML(oldStr: string, newStr: string, currentUser: string = "Editor"): string {
-  const oldWords = oldStr.split(/(\s+)/);
-  const newWords = newStr.split(/(\s+)/);
-
-  const dp: number[][] = Array(oldWords.length + 1).fill(0).map(() => Array(newWords.length + 1).fill(0));
-  for (let i = 1; i <= oldWords.length; i++) {
-    for (let j = 1; j <= newWords.length; j++) {
-      if (oldWords[i - 1] === newWords[j - 1]) {
-        dp[i][j] = dp[i - 1][j - 1] + 1;
-      } else {
-        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
-      }
-    }
-  }
-
-  let i = oldWords.length;
-  let j = newWords.length;
-  type Token = { type: "same" | "ins" | "del"; text: string };
-  const tokens: Token[] = [];
-  const timestamp = new Date().toISOString().replace(/\.\d+Z$/, "Z");
-
-  while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && oldWords[i - 1] === newWords[j - 1]) {
-      tokens.push({ type: "same", text: oldWords[i - 1] });
-      i--; j--;
-    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-      tokens.push({ type: "ins", text: newWords[j - 1] });
-      j--;
-    } else {
-      tokens.push({ type: "del", text: oldWords[i - 1] });
-      i--;
-    }
-  }
-  tokens.reverse();
-
-  const parts: string[] = [];
-  for (const tok of tokens) {
-    if (tok.text.trim() === "") {
-      parts.push(tok.text);
-      continue;
-    }
-    if (tok.type === "same") {
-      parts.push(escapeHTML(tok.text));
-    } else if (tok.type === "ins") {
-      parts.push(`<ins class="tc-insert" data-author="${currentUser}" data-date="${timestamp}">${escapeHTML(tok.text)}</ins>`);
-    } else {
-      parts.push(`<del class="tc-delete" data-author="${currentUser}" data-date="${timestamp}">${escapeHTML(tok.text)}</del>`);
-    }
-  }
-
-  return parts.join("");
-}
-
-function escapeHTML(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
-function styleReferenceText(text: string): string {
-  if (!text) return "";
-  
-  let rawText = text.trim();
-  
-  // 1. Identify and extract DOI
-  const doiRegex = /(doi:\s*10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+|https?:\/\/doi\.org\/10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)/i;
-  const doiMatch = rawText.match(doiRegex);
-  let doiText = "";
-  if (doiMatch) {
-    doiText = doiMatch[0];
-    rawText = rawText.replace(doiRegex, "").trim();
-  }
-
-  // 1b. Identify and extract PubMed/Medline IDs
-  const pubmedRegex = /(pubmed:\s*\d+|pmid:\s*\d+)/i;
-  const pubmedMatch = rawText.match(pubmedRegex);
-  let pubmedText = "";
-  if (pubmedMatch) {
-    pubmedText = pubmedMatch[0];
-    rawText = rawText.replace(pubmedRegex, "").trim();
-  }
-  
-  // 2. Extract leading number (AMA style)
-  const numRegex = /^(\[?\d+\]?[\.\s]+)/;
-  const numMatch = rawText.match(numRegex);
-  let numText = "";
-  if (numMatch) {
-    numText = numMatch[0];
-    rawText = rawText.substring(numText.length).trim();
-  }
-  
-  // 3. Determine if APA or AMA
-  const apaYearRegex = /\s+\(((?:19|20)\d{2}[a-z]?|n\.d\.|in\s+press)\)/i;
-  const isAPA = apaYearRegex.test(rawText);
-  
-  let authors = "";
-  let year = "";
-  let rest = "";
-  
-  if (isAPA) {
-    const yearMatch = rawText.match(apaYearRegex);
-    if (yearMatch && yearMatch.index !== undefined) {
-      authors = rawText.substring(0, yearMatch.index).trim();
-      year = yearMatch[1];
-      rest = rawText.substring(yearMatch.index + yearMatch[0].length).trim();
-      if (rest.startsWith(".")) rest = rest.substring(1).trim();
-    }
-  } else {
-    // AMA Style - split by first period to isolate authors
-    const firstPeriodIndex = rawText.indexOf(".");
-    if (firstPeriodIndex !== -1) {
-      authors = rawText.substring(0, firstPeriodIndex).trim();
-      rest = rawText.substring(firstPeriodIndex + 1).trim();
-    } else {
-      authors = rawText;
-    }
-  }
-  
-  // Parse and style Authors
-  let styledAuthors = "";
-  if (authors) {
-    const authorList = authors.split(/,|\b&\b/);
-    styledAuthors = authorList.map((authStr) => {
-      const trimmed = authStr.trim();
-      if (!trimmed) return "";
-      
-      if (trimmed.toLowerCase().includes("et al")) {
-        return `<span class="bib_etal">${escapeHTML(trimmed)}</span>`;
-      }
-      
-      const parts = trimmed.split(/\s+/);
-      if (parts.length > 1) {
-        const isInitials = /^[A-Z]\.?(\s*[A-Z]\.?)*$/.test(parts[0]);
-        if (isInitials) {
-          return `<span class="bib_fname">${escapeHTML(trimmed)}</span>`;
-        } else {
-          const lastPart = parts[parts.length - 1];
-          if (/^[A-Z]\.?([A-Z]\.?)*$/.test(lastPart)) {
-            const surname = parts.slice(0, -1).join(" ");
-            return `<span class="bib_surname">${escapeHTML(surname)}</span> <span class="bib_fname">${escapeHTML(lastPart)}</span>`;
-          }
-          return `<span class="bib_surname">${escapeHTML(trimmed)}</span>`;
-        }
-      }
-      return `<span class="bib_surname">${escapeHTML(trimmed)}</span>`;
-    }).join(", ");
-  }
-  
-  // Parse rest of elements (Title, Journal, Volume, Issue, Pages)
-  let styledRest = "";
-  if (rest) {
-    if (isAPA) {
-      const parts = rest.split(".");
-      const title = parts[0] || "";
-      const journalAndMore = parts.slice(1).join(".").trim();
-      
-      styledRest += ` <span class="bib_title">${escapeHTML(title)}</span>.`;
-      
-      if (journalAndMore) {
-        let styledJournal = escapeHTML(journalAndMore);
-        const volIssuePages = /(\d+)\((\d+)\),\s*(\d+)([-–—])(\d+)/;
-        const volPages = /(\d+),\s*(\d+)([-–—])(\d+)/;
-        
-        const commaIndex = journalAndMore.indexOf(",");
-        if (commaIndex !== -1) {
-          const journalName = journalAndMore.substring(0, commaIndex).trim();
-          const journalRest = journalAndMore.substring(commaIndex).trim();
-          let styledJRest = escapeHTML(journalRest);
-          if (volIssuePages.test(styledJRest)) {
-            styledJRest = styledJRest.replace(volIssuePages, '<span class="bib_volume">$1</span>(<span class="bib_issue">$2</span>), <span class="bib_fpage">$3</span>$4<span class="bib_lpage">$5</span>');
-          } else if (volPages.test(styledJRest)) {
-            styledJRest = styledJRest.replace(volPages, '<span class="bib_volume">$1</span>, <span class="bib_fpage">$2</span>$3<span class="bib_lpage">$4</span>');
-          }
-          styledRest += ` <span class="bib_journal"><em>${escapeHTML(journalName)}</em></span>${styledJRest}`;
-        } else {
-          styledRest += ` <span class="bib_journal"><em>${styledJournal}</em></span>`;
-        }
-      }
-    } else {
-      // AMA Style rest: Title, Journal, Year;Volume(Issue):Pages
-      const yearVolRegex = /\b((?:19|20)\d{2})\b/;
-      const yearMatch = rest.match(yearVolRegex);
-      
-      if (yearMatch && yearMatch.index !== undefined) {
-        const titleAndJournal = rest.substring(0, yearMatch.index).trim();
-        const yearVolPages = rest.substring(yearMatch.index).trim();
-        
-        const tjParts = titleAndJournal.split(".");
-        let title = "";
-        let journal = "";
-        if (tjParts.length > 2) {
-          title = tjParts.slice(0, -2).join(".").trim();
-          journal = tjParts[tjParts.length - 2].trim();
-        } else if (tjParts.length === 2) {
-          title = tjParts[0].trim();
-          journal = tjParts[1].trim();
-        } else {
-          journal = titleAndJournal;
-        }
-        
-        if (title) styledRest += ` <span class="bib_title">${escapeHTML(title)}</span>.`;
-        if (journal) styledRest += ` <span class="bib_journal"><em>${escapeHTML(journal)}</em></span>.`;
-        
-        let styledYVP = escapeHTML(yearVolPages);
-        const yvpRegex = /\b(\d{4})\b;(\d+)\((\d+)\):(\d+)([-–—])(\d+)/;
-        const yvpNoIssueRegex = /\b(\d{4})\b;(\d+):(\d+)([-–—])(\d+)/;
-        const yvpNoPagesRegex = /\b(\d{4})\b;(\d+)\((\d+)\):(\d+)/;
-        
-        if (yvpRegex.test(styledYVP)) {
-          styledYVP = styledYVP.replace(yvpRegex, '<span class="bib_year">$1</span>;<span class="bib_volume">$2</span>(<span class="bib_issue">$3</span>):<span class="bib_fpage">$4</span>$5<span class="bib_lpage">$6</span>');
-        } else if (yvpNoIssueRegex.test(styledYVP)) {
-          styledYVP = styledYVP.replace(yvpNoIssueRegex, '<span class="bib_year">$1</span>;<span class="bib_volume">$2</span>:<span class="bib_fpage">$3</span>$4<span class="bib_lpage">$5</span>');
-        } else if (yvpNoPagesRegex.test(styledYVP)) {
-          styledYVP = styledYVP.replace(yvpNoPagesRegex, '<span class="bib_year">$1</span>;<span class="bib_volume">$2</span>(<span class="bib_issue">$3</span>):<span class="bib_fpage">$4</span>');
-        } else {
-          const justYearRegex = /\b(\d{4})\b/g;
-          styledYVP = styledYVP.replace(justYearRegex, '<span class="bib_year">$1</span>');
-        }
-        
-        styledRest += ` ${styledYVP}`;
-      } else {
-        styledRest += ` ${escapeHTML(rest)}`;
-      }
-    }
-  }
-  
-  let result = "";
-  if (numText) result += `<span class="bib_chapterno">${escapeHTML(numText)}</span>`;
-  if (styledAuthors) result += styledAuthors + (isAPA ? "" : ".");
-  if (isAPA && year) result += ` (<span class="bib_year">${escapeHTML(year)}</span>).`;
-  if (styledRest) result += styledRest;
-  if (doiText) {
-    result += `, <span class="bib_doi">${escapeHTML(doiText)}</span>`;
-  }
-  if (pubmedText) {
-    result += `, <span class="bib_medline">${escapeHTML(pubmedText)}</span>`;
-  }
-  
-  return result;
-}
-
-function getPlainTextFromHTML(html: string): string {
-  if (!html) return "";
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(html, "text/html");
-  
-  // Remove all <del> elements (rejected track changes deletions)
-  const dels = doc.querySelectorAll("del");
-  dels.forEach((del) => del.remove());
-  
-  // Get plain text content
-  return doc.body.textContent || "";
-}
 
 export function ReferenceValidationReviewPage() {
   const navigate = useNavigate();
@@ -638,7 +146,7 @@ export function ReferenceValidationReviewPage() {
         const text = curr.textContent?.trim() || "";
         const styleLabel = curr.getAttribute("data-style-label") || curr.className || "";
         
-        if (styleLabel.includes("REF-N") || styleLabel.includes("REF-U")) {
+        if (styleLabel.includes("REF-N") || styleLabel.includes("REF-U") || styleLabel.includes("Reference-Numbered") || styleLabel.includes("Reference-Alphabetical")) {
           break;
         } else if (
           text.toLowerCase().startsWith("doi:") ||
@@ -661,7 +169,7 @@ export function ReferenceValidationReviewPage() {
       const text = curr.textContent?.trim() || "";
       const styleLabel = curr.getAttribute("data-style-label") || curr.className || "";
       
-      if (styleLabel.includes("REF-N") || styleLabel.includes("REF-U")) {
+      if (styleLabel.includes("REF-N") || styleLabel.includes("REF-U") || styleLabel.includes("Reference-Numbered") || styleLabel.includes("Reference-Alphabetical")) {
         break;
       } else if (
         text.toLowerCase().startsWith("doi:") ||
@@ -701,223 +209,9 @@ export function ReferenceValidationReviewPage() {
       await saveMutation.save(reviewQuery.data.save_endpoint, editorRef.current.editor.getHTML());
   };
 
-  const searchPubMed = async (query: string) => {
-    if (!query.trim()) return;
-    setSearchLoading(true);
-    setSearchSource("pubmed");
-    setSearchResults([]);
-    try {
-      const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&retmode=json&retmax=3`;
-      const searchRes = await fetch(searchUrl);
-      const searchData = await searchRes.json();
-      const idList = searchData?.esearchresult?.idlist || [];
-      
-      if (idList.length === 0) {
-        setSearchResults([]);
-        setSearchLoading(false);
-        return;
-      }
-
-      const fetchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=${idList.join(",")}&retmode=json`;
-      const fetchRes = await fetch(fetchUrl);
-      const fetchData = await fetchRes.json();
-      const results = fetchData?.result || {};
-
-      const formattedResults = idList.map((id: string) => {
-        const doc = results[id];
-        if (!doc) return null;
-        const formatted = formatPubMedToStyle(doc, detectedStyle);
-        return {
-          id,
-          raw: doc,
-          formatted,
-          title: doc.title,
-          doi: doc.articleids?.find((i: any) => i.idtype === "doi")?.value || ""
-        };
-      }).filter(Boolean);
-
-      setSearchResults(formattedResults);
-    } catch (err) {
-      console.error("PubMed search failed:", err);
-    } finally {
-      setSearchLoading(false);
-    }
-  };
-
-  const searchCrossRef = async (query: string) => {
-    if (!query.trim()) return;
-    setSearchLoading(true);
-    setSearchSource("crossref");
-    setSearchResults([]);
-    try {
-      const searchUrl = `https://api.crossref.org/works?query=${encodeURIComponent(query)}&rows=3`;
-      const res = await fetch(searchUrl);
-      const data = await res.json();
-      const items = data?.message?.items || [];
-
-      const formattedResults = items.map((item: any) => {
-        const formatted = formatCrossRefToStyle(item, detectedStyle);
-        return {
-          id: item.DOI || "",
-          raw: item,
-          formatted,
-          title: item.title?.[0] || "",
-          doi: item.DOI || ""
-        };
-      });
-
-      setSearchResults(formattedResults);
-    } catch (err) {
-      console.error("CrossRef search failed:", err);
-    } finally {
-      setSearchLoading(false);
-    }
-  };
-
-  const formatGoogleBooksToStyle = (volumeInfo: any, style: "AMA" | "APA"): string => {
-    const title = volumeInfo.title || "No Title";
-    const publisher = volumeInfo.publisher || "";
-    const publishedDate = volumeInfo.publishedDate || "";
-    const year = publishedDate ? publishedDate.split("-")[0] : "";
-    const authorsList = volumeInfo.authors || [];
-
-    let authorsFormatted = "";
-    if (style === "AMA") {
-      const formatted = authorsList.map((a: string) => {
-        const parts = a.trim().split(/\s+/);
-        if (parts.length > 1) {
-          const initials = parts.slice(0, -1).map(p => p[0] || "").join("");
-          return `${parts[parts.length - 1]} ${initials}`;
-        }
-        return a;
-      });
-      if (formatted.length > 6) {
-        authorsFormatted = formatted.slice(0, 3).join(", ") + ", et al";
-      } else if (formatted.length > 0) {
-        authorsFormatted = formatted.join(", ");
-      }
-    } else {
-      const formatted = authorsList.map((a: string) => {
-        const parts = a.trim().split(/\s+/);
-        if (parts.length > 1) {
-          const last = parts[parts.length - 1];
-          const initials = parts.slice(0, -1).map(p => `${p[0] || ""}.`).join(" ");
-          return `${last}, ${initials}`;
-        }
-        return a;
-      });
-      if (formatted.length > 0) {
-        if (formatted.length > 1) {
-          authorsFormatted = formatted.slice(0, -1).join(", ") + ", & " + formatted[formatted.length - 1];
-        } else {
-          authorsFormatted = formatted[0];
-        }
-      }
-    }
-
-    if (style === "AMA") {
-      let res = "";
-      if (authorsFormatted) res += `${authorsFormatted}. `;
-      res += `${title}. `;
-      if (publisher) res += `${publisher}; `;
-      if (year) res += `${year}.`;
-      return res;
-    } else {
-      let res = "";
-      if (authorsFormatted) res += `${authorsFormatted} `;
-      if (year) res += `(${year}). `;
-      res += `${title}. `;
-      if (publisher) res += `${publisher}.`;
-      return res;
-    }
-  };
-
-  const searchGoogleBooks = async (query: string) => {
-    if (!query.trim()) return;
-    setSearchLoading(true);
-    setSearchSource("googlebooks");
-    setSearchResults([]);
-    try {
-      const searchUrl = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=3`;
-      const res = await fetch(searchUrl);
-      const data = await res.json();
-      const items = data?.items || [];
-
-      const formattedResults = items.map((item: any) => {
-        const volumeInfo = item.volumeInfo || {};
-        const formatted = formatGoogleBooksToStyle(volumeInfo, detectedStyle);
-        return {
-          id: item.id || "",
-          raw: item,
-          formatted,
-          title: volumeInfo.title || "",
-          doi: ""
-        };
-      });
-
-      setSearchResults(formattedResults);
-    } catch (err) {
-      console.error("Google Books search failed:", err);
-    } finally {
-      setSearchLoading(false);
-    }
-  };
-
-  const searchWikipedia = async (query: string) => {
-    if (!query.trim()) return;
-    setSearchLoading(true);
-    setSearchSource("wikipedia");
-    setSearchResults([]);
-    try {
-      const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&origin=*&srlimit=3`;
-      const res = await fetch(searchUrl);
-      const data = await res.json();
-      const items = data?.query?.search || [];
-
-      const formattedResults = items.map((item: any) => {
-        const formatted = `${item.title}. Wikipedia, The Free Encyclopedia. Retrieved ${new Date().getFullYear()}. https://en.wikipedia.org/wiki/${encodeURIComponent(item.title)}`;
-        return {
-          id: item.pageid || "",
-          raw: item,
-          formatted,
-          title: item.title,
-          doi: ""
-        };
-      });
-
-      setSearchResults(formattedResults);
-    } catch (err) {
-      console.error("Wikipedia search failed:", err);
-    } finally {
-      setSearchLoading(false);
-    }
-  };
-
-  const handleSaveEditedReference = async () => {
-    if (!editingEntry) return;
-    const original = editingEntry.originalText;
-    const edited = editingText;
-
-    if (original.trim() === edited.trim()) {
-      setIsEditModalOpen(false);
-      setEditingEntry(null);
-      return;
-    }
-
-    const diffHtml = diffWordsToHTML(original, edited, viewer?.username || "Editor");
-
-    updateParaText(editingEntry.paraIdx, diffHtml);
-    setIsEditModalOpen(false);
-    setEditingEntry(null);
-
-    if (editorRef.current?.editor && reviewQuery.data?.save_endpoint) {
-      const html = editorRef.current.editor.getHTML();
-      await saveMutation.save(reviewQuery.data.save_endpoint, html);
-    }
-  };
-
   // Tab 3 — Logs
   const [logViewMode, setLogViewMode] = useState<"dashboard" | "raw">("dashboard");
+
 
   // Phase 2 — Citation Linking
   const [linkingSource, setLinkingSource] = useState<LinkingSource | null>(null);
@@ -1215,7 +509,7 @@ export function ReferenceValidationReviewPage() {
           const text = nextNode.textContent.trim();
           const nextStyleLabel = nextNode.attrs?.styleLabel || "";
           
-          if (nextStyleLabel === "REF-N") {
+          if (nextStyleLabel === "REF-N" || nextStyleLabel === "Reference-Numbered" || nextStyleLabel.startsWith("REF-N")) {
             done = true;
           } else if (
             text.toLowerCase().startsWith("doi:") ||
@@ -1865,46 +1159,112 @@ export function ReferenceValidationReviewPage() {
     setResolvedDups((prev) => new Set([...prev, key]));
   };
 
-  // Apply all queued merges to the editor (replace citations + strikethrough bib entries)
-  const applyPendingMerges = () => {
+  // Apply all queued merges to the editor (replace citations + remove duplicate bib entries + renumber + auto-save)
+  const applyPendingMerges = async () => {
     const editor = editorRef.current?.editor;
     if (!editor || pendingMerges.length === 0) return;
 
     let htmlContent = editor.getHTML();
     const parser = new DOMParser();
+    const doc = parser.parseFromString(htmlContent, "text/html");
 
     for (const merge of pendingMerges) {
       const { canonical, duplicate } = merge;
+      const dupStr = String(duplicate);
+      const canStr = String(canonical);
 
-      // 1. Replace in-text citations: cite_bib spans containing duplicate number
-      const patterns = [
-        `<span class="cite_bib">${duplicate}</span>`,
-        `<span class="cite_bib">[${duplicate}]</span>`,
-        `<span class="cite_bib">(${duplicate})</span>`,
-      ];
-      for (const pattern of patterns) {
-        const replacement = pattern.replace(String(duplicate), String(canonical));
-        htmlContent = htmlContent.replaceAll(pattern, replacement);
-      }
+      // 1. Replace in-text citations in cite_bib elements or matching text nodes
+      const citeSpans = doc.querySelectorAll("span.cite_bib, [class*='cite_bib']");
+      citeSpans.forEach((span) => {
+        const t = span.textContent?.trim() || "";
+        if (t === dupStr || t === `[${dupStr}]` || t === `(${dupStr})`) {
+          span.textContent = span.textContent?.replace(dupStr, canStr) || "";
+        }
+      });
 
-      // 2. Remove duplicate bibliography paragraph
-      const doc = parser.parseFromString(htmlContent, "text/html");
-      const paragraphs = Array.from(doc.querySelectorAll("p"));
+      // 2. Remove duplicate bibliography entry paragraph
+      const paragraphs = Array.from(doc.querySelectorAll("p, h1, h2, h3, h4, h5, h6, li"));
       paragraphs.forEach((p) => {
+        const styleLabel = p.getAttribute("data-style-label") || p.className || "";
         const text = p.textContent?.trim() || "";
         if (
           text.startsWith(`[${duplicate}]`) ||
           text.startsWith(`${duplicate}.`) ||
-          text.match(new RegExp(`^\\s*${duplicate}[\\s\\.]`))
+          text.match(new RegExp(`^\\s*\\[?${duplicate}\\]?[\\.\\s]`))
         ) {
           p.remove();
         }
       });
-      htmlContent = doc.body.innerHTML;
     }
 
-    editor.commands.setContent(htmlContent);
+    // 3. Renumber remaining AMA-style reference entries sequentially in document order
+    if (detectedStyle === "AMA") {
+      const paragraphs = Array.from(doc.querySelectorAll("p, h1, h2, h3, h4, h5, h6, li"));
+      let refCounter = 1;
+      const renumberMap: Record<number, number> = {};
+
+      paragraphs.forEach((p) => {
+        const text = p.textContent?.trim() || "";
+        const styleLabel = p.getAttribute("data-style-label") || p.className || "";
+        const isRef =
+          styleLabel.includes("REF-N") ||
+          styleLabel.includes("Reference-Numbered") ||
+          /^\d+\.\s+/.test(text) ||
+          /^\[\d+\]\s+/.test(text);
+
+        if (isRef && text) {
+          const oldNumMatch = text.match(/^\[?(\d+)\]?[\.\s]+/);
+          if (oldNumMatch) {
+            const oldNum = parseInt(oldNumMatch[1], 10);
+            const newNum = refCounter;
+            renumberMap[oldNum] = newNum;
+
+            // Replace leading number text inside element
+            const firstNode = p.firstChild;
+            if (firstNode && firstNode.nodeType === Node.TEXT_NODE) {
+              firstNode.textContent = firstNode.textContent?.replace(/^\[?\d+\]?[\.\s]+/, `${newNum}. `) || "";
+            } else if (p.querySelector(".bib_chapterno")) {
+              const chapNo = p.querySelector(".bib_chapterno");
+              if (chapNo) chapNo.textContent = `${newNum}. `;
+            } else {
+              p.textContent = p.textContent?.replace(/^\[?\d+\]?[\.\s]+/, `${newNum}. `) || "";
+            }
+            refCounter++;
+          }
+        }
+      });
+
+      // Update remaining in-text citations according to renumberMap
+      if (Object.keys(renumberMap).length > 0) {
+        const citeSpans = doc.querySelectorAll("span.cite_bib, [class*='cite_bib']");
+        citeSpans.forEach((span) => {
+          const t = span.textContent?.trim() || "";
+          const numMatch = t.match(/\d+/);
+          if (numMatch) {
+            const oldNum = parseInt(numMatch[0], 10);
+            if (renumberMap[oldNum] !== undefined) {
+              const newNum = renumberMap[oldNum];
+              span.textContent = t.replace(String(oldNum), String(newNum));
+            }
+          }
+        });
+      }
+    }
+
+    const updatedHtml = doc.body.innerHTML;
+    editor.commands.setContent(updatedHtml);
     setPendingMerges([]);
+
+    // Save and re-validate automatically
+    if (reviewQuery.data?.save_endpoint) {
+      await saveMutation.save(reviewQuery.data.save_endpoint, updatedHtml);
+      if (normalizedFileId) {
+        const valRes = await validateOnlyMutation.mutateAsync();
+        if (valRes?.validation_logs) {
+          setLocalValidationLogs(valRes.validation_logs);
+        }
+      }
+    }
   };
 
   // Legacy direct-merge kept for backward compat (used nowhere now)
@@ -2157,6 +1517,7 @@ export function ReferenceValidationReviewPage() {
                 }}
                 isSaving={saveMutation.isPending}
                 saveLabel="Save Reference Changes"
+                inlineSaveBar={true}
                 documentTitle={review.file.filename}
                 exportHref={review.export_href}
                 trackChangesEnabled={trackChangesEnabled}
@@ -3738,184 +3099,29 @@ export function ReferenceValidationReviewPage() {
 
         {/* Edit Reference Modal Popup */}
         {isEditModalOpen && editingEntry && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-            <div className="bg-white rounded-xl shadow-2xl border border-navy-100 max-w-3xl w-full flex flex-col overflow-hidden max-h-[90vh] transition-all duration-200">
-              {/* Header */}
-              <div className="px-5 py-4 border-b border-navy-50 flex items-center justify-between bg-surface-50">
-                <h3 className="text-sm font-bold text-navy-900 flex items-center gap-2">
-                  <Edit2 className="w-4 h-4 text-navy-600" />
-                  Edit Reference Text
-                </h3>
-                <button
-                  onClick={() => {
-                    setIsEditModalOpen(false);
-                    setEditingEntry(null);
-                  }}
-                  className="text-navy-400 hover:text-navy-600 transition-colors p-1 rounded-md hover:bg-navy-50 cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
+          <EditReferenceModal
+            fileId={normalizedFileId}
+            refNumber={editingEntry.idx + 1}
+            originalText={editingEntry.originalText}
+            originalHtml={editingEntryHtml}
+            detectedStyle={detectedStyle}
+            currentUser={viewer?.username || "Editor"}
+            onClose={() => {
+              setIsEditModalOpen(false);
+              setEditingEntry(null);
+            }}
+            onSaveTrackChanges={async (diffHtml, newText) => {
+              updateParaText(editingEntry.paraIdx, diffHtml);
+              setIsEditModalOpen(false);
+              setEditingEntry(null);
 
-              {/* Body */}
-              <div className="p-5 space-y-4 flex-1 overflow-y-auto min-h-0">
-                <div className="space-y-1">
-                  <label className="text-[9px] uppercase font-bold text-navy-400 tracking-wider">Edited Reference</label>
-                  <textarea
-                    className="w-full text-xs p-3 border border-navy-200 rounded-lg text-navy-800 bg-white focus:outline-none focus:ring-2 focus:ring-navy-400 focus:border-navy-500 font-medium leading-relaxed"
-                    value={editingText}
-                    onChange={(e) => setEditingText(e.target.value)}
-                    rows={3}
-                    placeholder="Modify reference text here..."
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[9px] uppercase font-bold text-navy-400 tracking-wider">Live Preview (with styling highlights)</label>
-                  {/* Current editor state — exact same rendering as the document editor */}
-                  {editingEntryHtml && (
-                    <div
-                      className="p-3 bg-surface-50/50 rounded-lg border border-navy-100/30 text-xs leading-relaxed font-medium select-text ProseMirror"
-                      style={{ whiteSpace: "pre-wrap" }}
-                      dangerouslySetInnerHTML={{ __html: editingEntryHtml }}
-                    />
-                  )}
-                  {/* Track changes diff — shown when textarea text differs from original */}
-                  {editingText.trim() !== editingEntry.originalText.trim() && (
-                    <div className="space-y-1 mt-1">
-                      <div className="text-[9px] uppercase font-bold text-navy-400 tracking-wider">After save (track changes)</div>
-                      <div
-                        className="p-3 bg-white rounded-lg border border-navy-100/30 text-xs leading-relaxed font-medium select-text ProseMirror"
-                        style={{ whiteSpace: "pre-wrap" }}
-                        dangerouslySetInnerHTML={{
-                          __html: styledDiffHTML(
-                            editingEntry.originalText,
-                            editingText,
-                            viewer?.username || "Editor"
-                          )
-                        }}
-                      />
-                    </div>
-                  )}
-                </div>
-
-                {/* PubMed/CrossRef/GoogleBooks/Wikipedia Live Search */}
-                <div className="border-t border-navy-50 pt-4 space-y-3">
-                  <div className="text-[9px] uppercase font-bold text-navy-400 tracking-wider">Search Database for correct formatting ({detectedStyle} Style)</div>
-                  <div className="flex flex-wrap gap-2">
-                    <div className="relative flex-1 min-w-[200px]">
-                      <Search className="w-3.5 h-3.5 text-navy-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                      <input
-                        type="text"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full pl-8 pr-3 py-1.5 bg-surface-50 text-xs rounded-lg border border-navy-200 focus:outline-none focus:ring-1 focus:ring-navy-400 font-medium"
-                        placeholder="Enter article title or keywords..."
-                      />
-                    </div>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => searchPubMed(searchQuery)}
-                      disabled={searchLoading}
-                      className="cursor-pointer"
-                    >
-                      PubMed
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => searchCrossRef(searchQuery)}
-                      disabled={searchLoading}
-                      className="cursor-pointer"
-                    >
-                      CrossRef
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => searchGoogleBooks(searchQuery)}
-                      disabled={searchLoading}
-                      className="cursor-pointer"
-                    >
-                      Google Books
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => searchWikipedia(searchQuery)}
-                      disabled={searchLoading}
-                      className="cursor-pointer"
-                    >
-                      Wikipedia
-                    </Button>
-                  </div>
-
-                  {searchLoading && (
-                    <div className="flex items-center justify-center py-6 text-xs text-navy-500 font-semibold gap-2">
-                      <RefreshCw className="w-4 h-4 animate-spin text-navy-600" />
-                      Searching {searchSource === "pubmed" ? "PubMed" : searchSource === "crossref" ? "CrossRef" : searchSource === "googlebooks" ? "Google Books" : "Wikipedia"}...
-                    </div>
-                  )}
-
-                  {!searchLoading && searchResults.length > 0 && (
-                    <div className="space-y-2.5 max-h-[200px] overflow-y-auto border border-navy-100 rounded-lg p-3 bg-surface-50/20">
-                      <div className="text-[9px] uppercase font-bold text-navy-400 tracking-wider mb-2">Search Results ({searchSource === "pubmed" ? "PubMed" : searchSource === "crossref" ? "CrossRef" : searchSource === "googlebooks" ? "Google Books" : "Wikipedia"})</div>
-                      {searchResults.map((result: any, index: number) => (
-                        <div key={index} className="p-2.5 bg-white border border-navy-100 rounded-lg shadow-sm flex items-start justify-between gap-4 hover:border-navy-300 transition-colors">
-                          <div className="text-xs text-navy-800 leading-relaxed font-medium flex-1">
-                            {result.formatted}
-                          </div>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => {
-                              setEditingText(result.formatted);
-                            }}
-                            className="shrink-0 text-[10px] font-bold px-2 py-1 h-auto cursor-pointer"
-                          >
-                            Use Result
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {!searchLoading && searchSource && searchResults.length === 0 && (
-                    <div className="text-center py-6 text-navy-400 text-xs font-semibold bg-surface-50/50 rounded-lg border border-navy-100/50">
-                      No matches found on {searchSource === "pubmed" ? "PubMed" : searchSource === "crossref" ? "CrossRef" : searchSource === "googlebooks" ? "Google Books" : "Wikipedia"}. Try refining the query keywords.
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Footer */}
-              <div className="px-5 py-3.5 border-t border-navy-50 flex justify-end gap-3 bg-surface-50/50">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => {
-                    setIsEditModalOpen(false);
-                    setEditingEntry(null);
-                  }}
-                  className="cursor-pointer"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onClick={async () => {
-                    await handleSaveEditedReference();
-                  }}
-                  disabled={saveMutation.isPending}
-                  className="cursor-pointer font-bold"
-                >
-                  {saveMutation.isPending ? "Saving..." : "Save Changes"}
-                </Button>
-              </div>
-            </div>
-          </div>
+              if (editorRef.current?.editor && reviewQuery.data?.save_endpoint) {
+                const html = editorRef.current.editor.getHTML();
+                await saveMutation.save(reviewQuery.data.save_endpoint, html);
+                await reviewQuery.refetch();
+              }
+            }}
+          />
         )}
       </div>
     </main>

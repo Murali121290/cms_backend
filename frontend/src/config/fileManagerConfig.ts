@@ -87,7 +87,7 @@ export const FOLDER_CONFIG: Record<string, FolderConfig> = {
   indesign:   { label:'Indesign',   icon:'Layers',        allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','packageStatus','size','uploadedBy','uploadedOn'] },
   proof:      { label:'Proof',      icon:'ClipboardCheck',allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','reviewer','reviewStatus','size','uploadedBy','uploadedOn'] },
   xml:        { label:'XML',        icon:'Code2',         allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','xmlType','validationStatus','size','uploadedBy','uploadedOn'] },
-  misc:       { label:'Misc',       icon:'FolderOpen',    allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
+  misc:       { label:'Final delivery', icon:'FolderOpen',    allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
   backup:     { label:'Backup',     icon:'Archive',       allowUpload:false, allowDownload:true,  columns:['fileName','fileType','size','uploadedOn'] },
 }
 
@@ -101,6 +101,7 @@ export const DESIGN_FOLDER_CONFIG: Record<string, FolderConfig> = {
   template_font:       { label:'Font',       icon:'Type',    allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'], parent: 'template' },
   template_library:    { label:'Library',    icon:'FolderArchive', allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'], parent: 'template' },
   print_preset: { label:'Print Preset',icon:'Printer',     allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
+  misc:         FOLDER_CONFIG.misc,
 }
 
 export const CE_SUPPORT_FOLDER_CONFIG: Record<string, FolderConfig> = {
@@ -116,10 +117,9 @@ export const ART_FOLDER_CONFIG: Record<string, FolderConfig> = {
 
 export const MANUSCRIPT_FOLDER_CONFIG: Record<string, FolderConfig> = {
   manuscript: FOLDER_CONFIG.manuscript,
-  indesign:   FOLDER_CONFIG.indesign,
-  converted:  FOLDER_CONFIG.converted,
-  proof:      FOLDER_CONFIG.proof,
   xml:        FOLDER_CONFIG.xml,
+  indesign:   FOLDER_CONFIG.indesign,
+  proof:      FOLDER_CONFIG.proof,
   misc:       FOLDER_CONFIG.misc,
   backup:     FOLDER_CONFIG.backup,
 }
@@ -198,7 +198,7 @@ export const FILE_TYPE_ICONS: Record<string, FileTypeIcon> = {
   png:{ icon:'Image',color:'#059669' },    tif:{ icon:'Image',color:'#7C3AED' },
   tiff:{ icon:'Image',color:'#7C3AED' },   eps:{ icon:'Image',color:'#DB2777' },
   svg:{ icon:'Image',color:'#EA580C' },    bmp:{ icon:'Image',color:'#6B7280' },
-  indd:{ icon:'Layers',color:'#FF3366' },  idml:{ icon:'Layers',color:'#FF3366' },
+  indd:{ icon:'Layers',color:'#FF3366' },  idml:{ icon:'Layers',color:'#FF3366' },  indt:{ icon:'Layers',color:'#FF3366' },
   xml:{ icon:'Code2',color:'#059669' },    zip:{ icon:'Archive',color:'#78716C' },
   epub:{ icon:'BookOpen',color:'#A855F7' },
   default:{ icon:'File',color:'#9CA3AF' },

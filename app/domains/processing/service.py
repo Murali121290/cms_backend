@@ -70,6 +70,9 @@ PROCESS_PERMISSIONS = {
     "word_to_xml": ["Admin", "XML Manager", "XML manager"],
     "xml_to_indesign": ["Admin", "XML Manager", "XML manager"],
     "indesign_to_xml": ["Admin", "XML Manager", "XML manager"],
+    "extract_design_css": ["Admin", "XML Manager", "XML manager"],
+    "style_validation": ["Admin", "XML Manager", "XML manager"],
+    "view_proof": ["Admin", "XML Manager", "XML manager", "Author", "Reviewer", "Editor", "XML Operator", "Technical Editor", "Pre Editor", "Language Editor"],
 }
 
 
@@ -343,10 +346,23 @@ def background_processing_task(
 
             elif process_type == "structuring":
                 structuring_method = "ai"
-                tag_set = None
                 if options and isinstance(options, dict):
                     structuring_method = options.get("structuring_method", "ai")
                     tag_set = options.get("tag_set")
+
+                if not tag_set and file_record and file_record.chapter:
+                    ch = file_record.chapter
+                    c_name = getattr(ch, "client", None)
+                    if not c_name or not isinstance(c_name, str):
+                        proj = getattr(ch, "project_rel", None)
+                        if proj and proj.client:
+                            c_name = (
+                                getattr(proj.client, "company", None)
+                                or getattr(proj.client, "name_company", None)
+                                or getattr(proj.client, "division", None)
+                            )
+                    if c_name and ("springer" in str(c_name).lower() or "spr" in str(c_name).lower()):
+                        tag_set = "springer"
 
                 def on_progress_callback(step_name: str, pct: int):
                     update_job_status(db, job_id, "processing", step_name, pct)
@@ -424,6 +440,115 @@ def background_processing_task(
                     job_id=job_id
                 )
                 success_msg = "InDesign to XML conversion completed"
+
+            elif process_type == "view_proof":
+                update_job_status(db, job_id, "processing", "Running View Proof XML regeneration and typesetting...", 30)
+                from app.services.file_service import UPLOAD_DIR
+                from app.processing.view_proof_engine import ViewProofEngine
+                ViewProofEngine().process_document(
+                    db=db,
+                    file_path=file_path,
+                    file_record=file_record,
+                    user_id=user_id,
+                    upload_dir=UPLOAD_DIR,
+                    logger=logger,
+                    job_id=job_id
+                )
+                generated_files = []
+                success_msg = "View Proof layout regeneration completed"
+
+            elif process_type == "extract_design_css":
+                update_job_status(db, job_id, "processing", "Extracting CSS from InDesign template...", 30)
+                from app.core.config import get_settings
+                import redis
+                import requests
+                
+                settings = get_settings()
+                if not settings.INDESIGN_SERVER_URL:
+                    raise ValueError("Windows InDesign Conversion Server is not configured. Please set INDESIGN_SERVER_URL.")
+                
+                url = f"{settings.INDESIGN_SERVER_URL.rstrip('/')}/extract-design-css"
+                redis_client = redis.from_url(settings.REDIS_URL)
+                lock = redis_client.lock("indesign_conversion_lock", timeout=600)
+                
+                logger.info(f"[{job_id}] Acquiring InDesign lock for CSS extraction...")
+                lock.acquire(blocking=True)
+                try:
+                    logger.info(f"[{job_id}] Lock acquired. Sending CSS extraction request to: {url}")
+                    with open(file_path, "rb") as f_in:
+                        response = requests.post(
+                            url,
+                            files={"file": (os.path.basename(file_path), f_in.read(), "application/octet-stream")},
+                            timeout=(30.0, 300)
+                        )
+                    if response.status_code != 200:
+                        raise RuntimeError(f"Remote InDesign server returned status code {response.status_code}. Response: {response.text}")
+                finally:
+                    try:
+                        lock.release()
+                    except Exception:
+                        pass
+                
+                from app.domains.projects.models import Project
+                from app.services.file_service import UPLOAD_DIR
+                project = db.query(Project).filter(Project.id == file_record.project_id).first()
+                chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == file_record.chapter_id).first()
+                
+                misc_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "Misc")
+                os.makedirs(misc_dir, exist_ok=True)
+                
+                css_output_path = os.path.join(misc_dir, "layout_design.css")
+                with open(css_output_path, "wb") as f_out:
+                    f_out.write(response.content)
+                logger.info(f"[{job_id}] Saved extracted CSS: {css_output_path}")
+                
+                generated_files = [css_output_path]
+                success_msg = "InDesign CSS extraction completed successfully"
+
+            elif process_type == "style_validation":
+                update_job_status(db, job_id, "processing", "Running Word document style validation...", 30)
+                import sys
+                import subprocess
+                from app.domains.projects.models import Project
+                from app.services.file_service import UPLOAD_DIR
+                
+                project = db.query(Project).filter(Project.id == file_record.project_id).first()
+                chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == file_record.chapter_id).first()
+                
+                manuscript_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "Manuscript")
+                os.makedirs(manuscript_dir, exist_ok=True)
+                
+                base_name = os.path.splitext(os.path.basename(file_path))[0]
+                output_report_path = os.path.join(manuscript_dir, f"{base_name}_style_report.html")
+                
+                script_path = os.path.abspath("app/services/scripts/springerstylevalidation.py")
+                config_path = os.path.abspath("app/services/scripts/springerstyles.json")
+                
+                if not os.path.exists(script_path):
+                    raise FileNotFoundError(f"Style validation script not found: {script_path}")
+                if not os.path.exists(config_path):
+                    raise FileNotFoundError(f"Style validation configuration not found: {config_path}")
+                    
+                logger.info(f"[{job_id}] Executing style validation script: {script_path}")
+                try:
+                    result = subprocess.run(
+                        [sys.executable, script_path, "-d", file_path, "-c", config_path, "-o", output_report_path],
+                        capture_output=True,
+                        text=True,
+                        check=False
+                    )
+                    logger.info(f"[{job_id}] Style validation output: {result.stdout}")
+                    if result.stderr:
+                        logger.warning(f"[{job_id}] Style validation stderr: {result.stderr}")
+                except Exception as run_err:
+                    logger.error(f"[{job_id}] Failed to run style validation subprocess: {str(run_err)}")
+                    raise RuntimeError(f"Failed to execute style validation: {str(run_err)}")
+                    
+                if not os.path.exists(output_report_path) or os.path.getsize(output_report_path) == 0:
+                    raise FileNotFoundError("Style validation report was not successfully generated.")
+                    
+                generated_files = [output_report_path]
+                success_msg = "Word document style validation completed"
 
             else:
                 raise HTTPException(
@@ -538,7 +663,6 @@ def background_processing_task(
                         file_record.uploaded_at = now_ist_naive()
                         logger.info(f"In-place overwrite: {file_record.filename} (v{file_record.version})")
                     else:
-                        # All other types (references logs/reports, bias, xml, etc.) create new records
                         mime = "application/octet-stream"
                         if processed_filename.endswith(".html"):
                             mime = "text/html"
@@ -557,6 +681,8 @@ def background_processing_task(
                                 )
                         elif processed_filename.endswith(".txt") or processed_filename.endswith(".log"):
                             mime = "text/plain"
+                        elif processed_filename.endswith(".css"):
+                            mime = "text/css"
                         elif processed_filename.endswith(".zip"):
                             mime = "application/zip"
                         elif processed_filename.endswith(".xml"):
@@ -565,29 +691,87 @@ def background_processing_task(
                             mime = "application/epub+zip"
                         elif processed_filename.endswith((".jpg", ".jpeg")):
                             mime = "image/jpeg"
+                        elif processed_filename.endswith(".pdf"):
+                            mime = "application/pdf"
+                        elif processed_filename.endswith(".xhtml"):
+                            mime = "application/xhtml+xml"
 
-                        new_record = models.File(
-                            filename=processed_filename,
-                            path=processed_path,
-                            file_type=mime,
-                            project_id=file_record.project_id,
-                            chapter_id=file_record.chapter_id,
-                            version=1,
-                            category=(
-                                "Misc" if process_type == "indesign_to_xml"
-                                else "XML" if processed_filename.lower().endswith((".xml", ".log"))
-                                else "InDesign" if process_type == "xml_to_indesign"
-                                else "XML" if process_type == "word_to_xml"
-                                else file_record.category
-                            ),
-                            # Pipeline output is a derived artifact, not an
-                            # uploaded source.
-                            is_original=False,
+                        new_category = (
+                            ("Proof" if processed_filename.lower().endswith((".pdf", ".xhtml", ".css")) else "Misc")
+                            if process_type == "indesign_to_xml"
+                            else "Misc" if process_type == "extract_design_css"
+                            else "Manuscript" if (process_type in ("style_validation", "ppd") or processed_filename.lower().endswith("_dashboard.html"))
+                            else "XML" if processed_filename.lower().endswith((".xml", ".log", ".html"))
+                            else "InDesign" if process_type == "xml_to_indesign"
+                            else "XML" if process_type == "word_to_xml"
+                            else file_record.category
                         )
-                        db.add(new_record)
-                        logger.info(
-                            f"Registered result file: {processed_filename} to category {new_record.category}"
-                        )
+
+                        existing_file = db.query(models.File).filter(
+                            models.File.project_id == file_record.project_id,
+                            models.File.chapter_id == file_record.chapter_id,
+                            models.File.category == new_category,
+                            models.File.filename == processed_filename
+                        ).first()
+
+                        if existing_file:
+                            try:
+                                from app.domains.files.version_service import archive_existing_file
+                                from app.domains.projects.models import Project
+                                from app.services.file_service import UPLOAD_DIR
+                                project = db.query(Project).filter(Project.id == file_record.project_id).first()
+                                chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == file_record.chapter_id).first()
+                                
+                                if project and chapter:
+                                    backup_dir = os.path.abspath(
+                                        f"{UPLOAD_DIR}/{project.code}/{chapter.number}/{new_category}"
+                                    )
+                                else:
+                                    backup_dir = os.path.dirname(existing_file.path)
+
+                                # Create archive record
+                                archive_existing_file(
+                                    db,
+                                    existing_file=existing_file,
+                                    base_path=backup_dir,
+                                    uploaded_by_id=user_id,
+                                )
+                                # Overwrite existing physical file
+                                target_path = existing_file.path
+                                if target_path and target_path != processed_path:
+                                    if os.path.exists(target_path):
+                                        try:
+                                            os.remove(target_path)
+                                        except Exception:
+                                            pass
+                                    shutil.move(processed_path, target_path)
+                                else:
+                                    existing_file.path = processed_path
+
+                                # Increment version and update details
+                                existing_file.version = (existing_file.version or 1) + 1
+                                existing_file.uploaded_by_id = user_id
+                                existing_file.uploaded_at = now_ist_naive()
+                                existing_file.file_type = mime
+                                logger.info(f"Updated existing file version: {existing_file.filename} (v{existing_file.version})")
+                            except Exception as backup_err:
+                                logger.error(f"Backup/version bump failed for existing file: {backup_err}")
+                        else:
+                            new_record = models.File(
+                                filename=processed_filename,
+                                path=processed_path,
+                                file_type=mime,
+                                project_id=file_record.project_id,
+                                chapter_id=file_record.chapter_id,
+                                version=1,
+                                category=new_category,
+                                is_original=False,
+                                uploaded_by_id=user_id,
+                            )
+                            db.add(new_record)
+                            logger.info(
+                                f"Registered result file: {processed_filename} to category {new_record.category}"
+                            )
             else:
                 logger.warning(f"No generated files returned from {process_type} processing")
 
@@ -645,7 +829,11 @@ def start_process(
     if not file_record:
         raise HTTPException(status_code=404, detail="File not found")
 
-    file_path = os.path.abspath(file_record.path)
+    if os.path.isabs(file_record.path):
+        file_path = file_record.path
+    else:
+        file_path = os.path.abspath(os.path.join(upload_dir, file_record.path))
+
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail=f"Physical file missing: {file_path}")
 

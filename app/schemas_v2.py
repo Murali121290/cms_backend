@@ -18,10 +18,13 @@ class Viewer(BaseModel):
     id: int
     username: str
     email: str
+    first_name: str | None = None
+    last_name: str | None = None
     roles: list[str]
     is_active: bool
     team: str | None = None
     designation: str | None = None
+    access_level: str | None = "standard"
 
 
 class SessionAuth(BaseModel):
@@ -151,6 +154,11 @@ class ChapterSummary(BaseModel):
     has_indesign: bool
     has_proof: bool
     has_xml: bool
+    xml_status: str | None = None
+    indesign_status: str | None = None
+    final_delivery_status: str | None = None
+    style_status: str | None = None
+    structuring_status: str | None = None
 
 
 class FileRecord(BaseModel):
@@ -335,11 +343,15 @@ class AdminUser(BaseModel):
     id: int
     username: str
     email: str
+    first_name: str | None = None
+    last_name: str | None = None
     is_active: bool
     roles: list[AdminUserRole]
     team: str | None = None
     customer_access: list[str] = []
     designation: str | None = None
+    role: str | None = None
+    access_level: str | None = None
 
 
 class AdminUsersPagination(BaseModel):
@@ -1051,6 +1063,26 @@ class UploadZipResponse(BaseModel):
     xml: list[UploadZipFileEntry]
     docs: list[UploadZipFileEntry]
     chapters_inserted: int
+
+
+class FileMappingEntry(BaseModel):
+    original_filename: str
+    category: str
+    chapter_number: str | None = None
+    file_type: str
+
+class PreviewZipResponse(BaseModel):
+    session_id: str
+    files: list[FileMappingEntry]
+
+class FinalizeMappingRequest(BaseModel):
+    session_id: str
+    mappings: list[FileMappingEntry]
+
+class FinalizeMappingResponse(BaseModel):
+    message: str
+    created_chapters: int
+
 
 
 class ChapterZipSkippedItem(BaseModel):

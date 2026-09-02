@@ -15,7 +15,8 @@ import { projectsApi } from '@/api/projects'
 import { chaptersApi } from '@/api/chapters'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import { toast } from '@/store/useToastStore'
-import { OnlyOfficeEditor } from '@/features/editor'
+import { OnlyOfficeEditor, TinyMceEditor, type TinyMceEditorHandle } from '@/features/editor'
+import { useParagraphStyles } from '@/features/editor/useParagraphStyles'
 
 interface LintError {
   line: number;
@@ -346,6 +347,18 @@ export function ChapterEditorPage() {
   const [xmlSaving, setXmlSaving] = useState(false)
   const [isXmlDirty, setIsXmlDirty] = useState(false)
 
+  // XHTML states
+  const [xhtmlContent, setXhtmlContent] = useState<string | null>(null)
+  const [xhtmlLoading, setXhtmlLoading] = useState(false)
+  const [xhtmlSaving, setXhtmlSaving] = useState(false)
+  const [isXhtmlDirty, setIsXhtmlDirty] = useState(false)
+  const [pdfFileUrl, setPdfFileUrl] = useState<string | null>(null)
+  const [pdfLoading, setPdfLoading] = useState(false)
+  const [currentPdfPage, setCurrentPdfPage] = useState<number>(1)
+  const [leftPanelMode, setLeftPanelMode] = useState<'pdf' | 'xml'>('pdf')
+  const [activeFileId, setActiveFileId] = useState<number | null>(null)
+  const [customCssContent, setCustomCssContent] = useState<string | null>(null)
+
   const [showOutline, setShowOutline] = useState(true)
   const [showLog, setShowLog] = useState(true)
   const [activeRightTab, setActiveRightTab] = useState<'log' | 'xpath' | 'shortcuts' | 'design' | 'manuscript' | 'layout_preview'>('log')
@@ -361,6 +374,19 @@ export function ChapterEditorPage() {
   const [xpathError, setXpathError] = useState<string | null>(null)
   
   const xmlEditorRef = useRef<SourceEditorRef | null>(null)
+  const wysiwygEditorRef = useRef<TinyMceEditorHandle>(null)
+  const pdfjsViewerRef = useRef<any>(null)
+
+  // Styles for XHTML WYSIWYG Editor
+  const stylesQuery = useParagraphStyles()
+  const [customStyles, setCustomStyles] = useState<string[]>([])
+  const publisherStyles = stylesQuery.data || []
+  const allStyles = [...publisherStyles, ...customStyles].sort()
+  const handleAddStyle = (style: string) => {
+    if (!customStyles.includes(style)) {
+      setCustomStyles((prev) => [...prev, style].sort())
+    }
+  }
   
   // XML metrics (Well-formedness check + tags count + words count)
   const xmlMetrics = useMemo(() => {
@@ -566,6 +592,12 @@ export function ChapterEditorPage() {
     if (!projectId || !chapterId || !decodedFilename) return
     projectsApi.getChapterFiles(Number(projectId), Number(chapterId))
       .then(filesData => {
+        const matchingFile = filesData.files?.find(f => 
+          f.filename.toLowerCase() === decodedFilename.toLowerCase()
+        ) || filesData.files?.[0];
+        if (matchingFile) {
+          setActiveFileId(matchingFile.id)
+        }
         const docxFile = filesData.files?.find(f => {
           if (!f.filename.toLowerCase().endsWith('.docx')) return false
           let xmlBase = decodedFilename.replace(/\.xml$/i, '')
@@ -606,14 +638,14 @@ export function ChapterEditorPage() {
 
   // Warning for unsaved changes before leaving browser tab
   useEffect(() => {
-    if (!isXmlDirty) return
+    if (!isXmlDirty && !isXhtmlDirty) return
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault()
       e.returnValue = ''
     }
     window.addEventListener('beforeunload', handleBeforeUnload)
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-  }, [isXmlDirty])
+  }, [isXmlDirty, isXhtmlDirty])
 
 
   // Fetch XML and Log files if file is XML
@@ -621,7 +653,7 @@ export function ChapterEditorPage() {
     if (ext !== 'xml' || !fileUrl || !logFileUrl || loading || !chapter) return
     setXmlLoading(true)
     
-    fetch(fileUrl, { credentials: 'include' })
+    fetch(`${fileUrl}${fileUrl.includes('?') ? '&' : '?'}t=${Date.now()}`, { credentials: 'include' })
       .then(res => {
         if (!res.ok) throw new Error('XML file not found')
         return res.text()
@@ -635,7 +667,7 @@ export function ChapterEditorPage() {
       })
       .finally(() => setXmlLoading(false))
 
-    fetch(logFileUrl, { credentials: 'include' })
+    fetch(`${logFileUrl}${logFileUrl.includes('?') ? '&' : '?'}t=${Date.now()}`, { credentials: 'include' })
       .then(res => {
         if (!res.ok) return 'No log file found.'
         return res.text()
@@ -646,7 +678,354 @@ export function ChapterEditorPage() {
       .catch(() => {
         setLogContent('No log file found.')
       })
-  }, [ext, fileUrl, logFileUrl])
+  }, [ext, fileUrl, logFileUrl, loading, chapter])
+
+  // Fetch XHTML content
+  useEffect(() => {
+    if (ext !== 'xhtml' || !fileUrl || loading || !chapter) return
+    setXhtmlLoading(true)
+    
+    fetch(`${fileUrl}${fileUrl.includes('?') ? '&' : '?'}t=${Date.now()}`, { credentials: 'include' })
+      .then(res => {
+        if (!res.ok) throw new Error('XHTML file not found')
+        return res.text()
+      })
+      .then(text => {
+        // Preprocess inline XML citation tags from <div> to <span> so TinyMCE does not split paragraphs
+        const inlineTags = "edition|publisher-name|publisher-loc|month|year|surname|given-names|collab|comment|volume|issue|fpage|lpage|ext-link|uri|xref|named-content|label|string-name|person-group|mixed-citation|bold|italic|sub|sup";
+        const divInlineRegex = new RegExp(`<div(\\s+[^>]*)data-xml-tag="(${inlineTags})"([^>]*)>(.*?)<\\/div>`, "gi");
+        let cleaned = text.replace(divInlineRegex, '<span$1data-xml-tag="$2"$3>$4</span>');
+        
+        // Merge adjacent consecutive track changes insertion spans into a single span
+        let prevCleaned = "";
+        while (prevCleaned !== cleaned) {
+          prevCleaned = cleaned;
+          cleaned = cleaned.replace(/(<(?:span|ins)[^>]*class="[^"]*tc-insert[^"]*"[^>]*>)(.*?)<\/(?:span|ins)>\s*<(?:span|ins)[^>]*class="[^"]*tc-insert[^"]*"[^>]*>(.*?)<\/(?:span|ins)>/gi, '$1$2$3</span>');
+        }
+
+        setXhtmlContent(cleaned)
+      })
+      .catch(err => {
+        console.error(err)
+        toast.error('Failed to load XHTML content')
+      })
+      .finally(() => setXhtmlLoading(false))
+  }, [ext, fileUrl, loading, chapter])
+
+  // Fetch Matching Chapter PDF
+  // Fetch Matching Chapter PDF, Active File ID & Generated CSS
+  useEffect(() => {
+    if (!projectId || !chapterId) return
+    setPdfLoading(true)
+    projectsApi.getChapterFiles(Number(projectId), Number(chapterId))
+      .then(filesData => {
+        // Resolve active file ID
+        if (decodedFilename) {
+          const fileRec = filesData.files?.find(f => f.filename === decodedFilename)
+          if (fileRec) {
+            setActiveFileId(fileRec.id)
+          }
+        }
+
+        if (ext !== 'xhtml' || !chapter) return
+
+        // Resolve matching PDF
+        const pdfFile = filesData.files?.find(f => f.filename.toLowerCase().endsWith('.pdf'))
+        if (pdfFile) {
+          const chNo = chapter.chapters?.match(/\d+/)?.[0]
+          let chFolder = `chapter-${chapterId}`
+          if (project?.file_details && chNo) {
+            const cf = (project.file_details as any).chapter_folders
+            chFolder = cf?.chapters?.find((c: any) => c.chapter_name === `chapter-${chNo}`)?.chapter_name ?? `chapter-${chNo}`
+          }
+          const folder = (pdfFile as any).subfolder || pdfFile.category || 'Proof'
+          const url = `/api/uploads/${projectId}/chapter/${chFolder}/${folder}/${encodeURIComponent(pdfFile.filename)}/download?chapter_id=${chapterId}`
+          setPdfFileUrl(url)
+        } else {
+          console.warn("No PDF proof file found for this chapter")
+        }
+
+        // Resolve matching XML for preview
+        const xmlFile = filesData.files?.find(f => f.filename.toLowerCase().endsWith('.xml'))
+        if (xmlFile) {
+          const chNo = chapter.chapters?.match(/\d+/)?.[0]
+          let chFolder = `chapter-${chapterId}`
+          if (project?.file_details && chNo) {
+            const cf = (project.file_details as any).chapter_folders
+            chFolder = cf?.chapters?.find((c: any) => c.chapter_name === `chapter-${chNo}`)?.chapter_name ?? `chapter-${chNo}`
+          }
+          const folder = (xmlFile as any).subfolder || xmlFile.category || 'Manuscript'
+          const xmlUrl = `/api/uploads/${projectId}/chapter/${chFolder}/${folder}/${encodeURIComponent(xmlFile.filename)}/download?chapter_id=${chapterId}`
+          fetch(xmlUrl, { credentials: 'include' })
+            .then(res => res.ok ? res.text() : null)
+            .then(text => { if (text) setXmlContent(text) })
+            .catch(err => console.error("Failed to load matching XML file:", err))
+        }
+
+        // Resolve matching InDesign CSS from the exact same subfolder or category
+        const baseName = decodedFilename.replace(/\.[^/.]+$/, '')
+        
+        // Priority 1: .css file in the exact same subfolder / category
+        let cssFile = filesData.files?.find(f => 
+          f.filename.toLowerCase().endsWith('.css') && 
+          ((f as any).subfolder?.toLowerCase() === decodedSubfolder.toLowerCase() || f.category?.toLowerCase() === decodedSubfolder.toLowerCase())
+        )
+
+        // Priority 2: baseName.css, idGeneratedStyles.css, or layout_design.css
+        if (!cssFile) {
+          cssFile = filesData.files?.find(f => 
+            f.filename.toLowerCase() === `${baseName.toLowerCase()}.css` ||
+            f.filename.toLowerCase() === 'idgeneratedstyles.css' ||
+            f.filename.toLowerCase() === 'layout_design.css'
+          )
+        }
+
+        // Priority 3: Any .css file in chapter
+        if (!cssFile) {
+          cssFile = filesData.files?.find(f => f.filename.toLowerCase().endsWith('.css'))
+        }
+
+        if (cssFile) {
+          const downloadUrl = (cssFile as any).download_url || `/api/v2/files/${cssFile.id}/download`
+          fetch(downloadUrl, { credentials: 'include' })
+            .then(res => res.ok ? res.text() : null)
+            .then(text => {
+              if (text) setCustomCssContent(text)
+            })
+            .catch(err => console.error("Failed to load CSS file via download URL:", err))
+        } else {
+          // Fallback path-based fetch
+          const chFolder = chapter.chapters || `chapter-${chapterId}`
+          const url = `/api/uploads/${projectId}/chapter/${chFolder}/${encodeURIComponent(decodedSubfolder)}/idGeneratedStyles.css/download?chapter_id=${chapterId}`
+          fetch(url, { credentials: 'include' })
+            .then(res => res.ok ? res.text() : null)
+            .then(text => {
+              if (text) setCustomCssContent(text)
+            })
+            .catch(err => console.error("Failed to load fallback CSS file:", err))
+        }
+      })
+      .catch(err => {
+        console.error("Failed to load chapter files:", err)
+      })
+      .finally(() => setPdfLoading(false))
+  }, [ext, projectId, chapterId, chapter, project, decodedFilename])
+
+  // CSS rule prefixing helper to prevent styles from bleeding out of the editor wrapper
+  // CSS rule prefixing helper to prevent styles from bleeding out of the editor wrapper
+  const scopeCss = (cssText: string, prefix: string): string => {
+    const prefixes = prefix.split(',').map(p => p.trim())
+    return cssText.replace(/([^\r\n,{}]+)(?=\s*\{)/g, (match) => {
+      const trimmed = match.trim()
+      if (trimmed.startsWith('@') || trimmed.startsWith('to') || trimmed.startsWith('from') || /^\d+%$/.test(trimmed)) {
+        return match
+      }
+      return trimmed
+        .split(',')
+        .map((sel) => {
+          const s = sel.trim()
+          return prefixes
+            .map(p => (s === 'body' || s === 'html' ? `${p}` : `${p} ${s}`))
+            .join(', ')
+        })
+        .join(', ')
+    })
+  }
+
+  // Inject/cleanup custom CSS styles in the document head
+  useEffect(() => {
+    if (!customCssContent) return
+    
+    const existing = document.getElementById('xhtml-chapter-styles')
+    if (existing) existing.remove()
+    
+    const styleEl = document.createElement('style')
+    styleEl.id = 'xhtml-chapter-styles'
+    styleEl.textContent = scopeCss(customCssContent, '.mce-content-body, .ProseMirror, .tox-edit-area')
+    document.head.appendChild(styleEl)
+    
+    return () => {
+      const el = document.getElementById('xhtml-chapter-styles')
+      if (el) el.remove()
+    }
+  }, [customCssContent])
+
+  // Inject custom XHTML block highlighting (boxed-text and LearnObject) in document head
+  useEffect(() => {
+    if (ext !== 'xhtml') return
+    
+    const existing = document.getElementById('xhtml-block-highlights')
+    if (existing) existing.remove()
+    
+    const styleEl = document.createElement('style')
+    styleEl.id = 'xhtml-block-highlights'
+    styleEl.textContent = `
+      /* Generic highlighting wrapper styles */
+      .ProseMirror div[data-xml-tag="boxed-text"],
+      .ProseMirror div[data-xml-tag="sec"][disp-level="LearnObject"] {
+        position: relative;
+        border-radius: 6px;
+        padding: 16px;
+        margin: 20px 0;
+        transition: all 0.2s ease;
+        box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.02);
+      }
+      
+      .ProseMirror div[data-xml-tag="boxed-text"]:hover,
+      .ProseMirror div[data-xml-tag="sec"][disp-level="LearnObject"]:hover {
+        box-shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.05);
+      }
+      
+      /* Badge label formatting */
+      .ProseMirror div[data-xml-tag="boxed-text"]::before,
+      .ProseMirror div[data-xml-tag="sec"][disp-level="LearnObject"]::before {
+        display: inline-block;
+        float: right;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: none;
+        padding: 2px 6px;
+        border-radius: 4px;
+        margin-top: -6px;
+        margin-right: -6px;
+        pointer-events: none;
+        user-select: none;
+      }
+      
+      /* 1. Boxed Text Highlights */
+      .ProseMirror div[data-xml-tag="boxed-text"] {
+        border: 1px dashed #f59e0b !important;
+        border-left: 4px solid #f59e0b !important;
+        background-color: #fffbeb !important;
+      }
+      .ProseMirror div[data-xml-tag="boxed-text"]::before {
+        content: "Boxed Text";
+        color: #d97706;
+        background-color: #fef3c7;
+      }
+      
+      /* 2. Learning Objectives Highlights */
+      .ProseMirror div[data-xml-tag="sec"][disp-level="LearnObject"] {
+        border: 1px dashed #10b981 !important;
+        border-left: 4px solid #10b981 !important;
+        background-color: #f0fdf4 !important;
+      }
+      .ProseMirror div[data-xml-tag="sec"][disp-level="LearnObject"]::before {
+        content: "Learning Objectives";
+        color: #059669;
+        background-color: #d1fae5;
+      }
+    `
+    document.head.appendChild(styleEl)
+    
+    return () => {
+      const el = document.getElementById('xhtml-block-highlights')
+      if (el) el.remove()
+    }
+  }, [ext])
+
+  const [isConvertingXml, setIsConvertingXml] = useState(false)
+
+  // XHTML Save Handler (Fast Save)
+  const handleXhtmlSave = async (explicitHtml?: string) => {
+    let content = typeof explicitHtml === 'string' ? explicitHtml : xhtmlContent
+    if (!explicitHtml && wysiwygEditorRef.current?.editor) {
+      content = wysiwygEditorRef.current.editor.getHTML()
+    }
+    if (!saveUrl || !content || xhtmlSaving) return
+    setXhtmlSaving(true)
+    try {
+      const res = await fetch(saveUrl, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ content }),
+      })
+      if (!res.ok) throw new Error('Save failed')
+      setIsXhtmlDirty(false)
+      toast.success('XHTML saved successfully')
+    } catch (err) {
+      toast.error('Failed to save XHTML')
+    } finally {
+      setXhtmlSaving(false)
+    }
+  }
+
+  // Explicit XML Conversion Handler for "Show Updated XML" Button
+  const handleShowUpdatedXml = async () => {
+    setLeftPanelMode('xml')
+    let content = xhtmlContent
+    if (wysiwygEditorRef.current?.editor) {
+      content = wysiwygEditorRef.current.editor.getHTML()
+    }
+    const convertUrl = saveUrl?.replace(/\/save$/, '/convert-xml')
+    if (!convertUrl) return
+
+    setIsConvertingXml(true)
+    try {
+      const res = await fetch(convertUrl, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ content }),
+      })
+      if (!res.ok) throw new Error('XML conversion failed')
+      const data = await res.json()
+      if (data.xml_content) {
+        setXmlContent(data.xml_content)
+        toast.success('XML converted & updated successfully!')
+      }
+    } catch (err) {
+      toast.error('Failed to update XML')
+    } finally {
+      setIsConvertingXml(false)
+    }
+  }
+
+  const handleShowPdfProof = () => {
+    setLeftPanelMode('pdf')
+  }
+
+  // Synchronize editor cursor position to PDF page number
+  const handleSelectionUpdate = ({ editor }: { editor: any }) => {
+    const selection = window.getSelection()
+    if (selection && selection.rangeCount > 0) {
+      let node: Node | null = selection.getRangeAt(0).startContainer
+      while (node && node !== editor.view.dom) {
+        let sibling: Node | null = node
+        while (sibling) {
+          if (sibling.nodeType === Node.ELEMENT_NODE) {
+            const el = sibling as HTMLElement
+            const isPageElement = el.classList.contains('page') || 
+                                  el.classList.contains('page-break') || 
+                                  el.classList.contains('pb') || 
+                                  el.id?.toLowerCase().startsWith('page-') ||
+                                  el.id?.toLowerCase().startsWith('page_') ||
+                                  el.getAttribute('data-page')
+             
+            if (isPageElement) {
+              const pageStr = el.getAttribute('data-page') || 
+                              el.id?.replace(/page[-_]/i, '') || 
+                              el.textContent?.replace(/\D/g, '') || 
+                              el.getAttribute('id')
+              const pageNum = parseInt(pageStr || '', 10)
+              if (pageNum && !isNaN(pageNum)) {
+                setCurrentPdfPage(pageNum)
+                return
+              }
+            }
+          }
+          sibling = sibling.previousSibling
+        }
+        node = node.parentNode
+      }
+    }
+  }
 
   const loadLayoutPreview = () => {
     if (!projectId || !chapterId || !decodedFilename) return
@@ -690,12 +1069,16 @@ export function ChapterEditorPage() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault()
-        void handleXmlSave()
+        if (ext === 'xml') {
+          void handleXmlSave()
+        } else if (ext === 'xhtml') {
+          void handleXhtmlSave()
+        }
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [handleXmlSave])
+  }, [ext, handleXmlSave, handleXhtmlSave])
 
   const loadDesignPdf = async () => {
     if (designPdfUrl || designLoading) return
@@ -752,7 +1135,7 @@ export function ChapterEditorPage() {
   }
 
   const handleBack = () => {
-    if (isXmlDirty) {
+    if (isXmlDirty || isXhtmlDirty) {
       if (!window.confirm('You have unsaved changes. Do you really want to leave?')) {
         return
       }
@@ -798,11 +1181,11 @@ export function ChapterEditorPage() {
         {/* Save */}
         {isEditable && (
           <button
-            onClick={ext === 'xml' ? handleXmlSave : () => toast.success('Auto-saved')}
-            disabled={ext === 'xml' && xmlSaving}
+            onClick={ext === 'xml' ? handleXmlSave : ext === 'xhtml' ? () => handleXhtmlSave() : () => toast.success('Auto-saved')}
+            disabled={(ext === 'xml' && xmlSaving) || (ext === 'xhtml' && xhtmlSaving)}
             className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors shadow-sm disabled:opacity-50">
-            {xmlSaving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13}/>}
-            {ext === 'xml' && isXmlDirty ? 'Save*' : 'Save'}
+            {(xmlSaving || xhtmlSaving) ? <Loader2 size={13} className="animate-spin" /> : <Save size={13}/>}
+            {ext === 'xml' && isXmlDirty ? 'Save*' : ext === 'xhtml' && isXhtmlDirty ? 'Save*' : 'Save'}
           </button>
         )}
       </header>
@@ -816,6 +1199,78 @@ export function ChapterEditorPage() {
               <p className="text-sm">File not found</p>
             </div>
           </div>
+        ) : ext === 'xhtml' ? (
+          xhtmlLoading ? (
+            <div className="h-full flex items-center justify-center">
+              <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+            </div>
+          ) : (
+            <div className="flex h-full w-full overflow-hidden">
+              {/* Left Panel: PDF Viewer or XML Viewer */}
+              <div className="w-1/2 h-full flex flex-col overflow-hidden bg-gray-50 border-r border-gray-200">
+                {leftPanelMode === 'xml' ? (
+                  <div className="flex-1 flex flex-col min-h-0 bg-slate-950">
+                    <div className="px-4 py-2 bg-slate-900 border-b border-slate-800 text-xs font-semibold text-purple-300 flex items-center justify-between select-none">
+                      <span className="flex items-center gap-1.5 font-mono">
+                        <FileText size={14} className="text-purple-400" /> Updated Manuscript XML (Converted via Perl)
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-sans font-normal">Auto-converted from XHTML on Save</span>
+                    </div>
+                    <SourceEditor
+                      value={xmlContent ?? 'Loading XML content...'}
+                      onChange={() => {}}
+                      readOnly={true}
+                      className="flex-1 min-h-0"
+                    />
+                  </div>
+                ) : pdfLoading ? (
+                  <div className="flex-1 flex items-center justify-center">
+                    <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+                  </div>
+                ) : pdfFileUrl ? (
+                  // @ts-ignore
+                  <pdfjs-viewer-element src={pdfFileUrl} key={pdfFileUrl} page={currentPdfPage} ref={pdfjsViewerRef} style={{ width: '100%', height: '100%', display: 'block', border: '0' }} />
+                ) : (
+                  <div className="flex-1 flex items-center justify-center text-gray-400 p-8 text-center">
+                    <div>
+                      <FileText size={48} className="mx-auto mb-3 opacity-20"/>
+                      <p className="text-sm font-medium">No matching PDF proof file found</p>
+                      <p className="text-xs mt-1 max-w-xs text-gray-400">
+                        Please make sure a .pdf file is uploaded in the chapter's Proof folder to enable split view linking.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+              {/* Right Panel: XHTML Editor (WYSIWYG) */}
+              <div className="w-1/2 h-full border-l border-gray-200 flex flex-col overflow-hidden bg-slate-900">
+                <TinyMceEditor
+                  ref={wysiwygEditorRef}
+                  key={fileUrl || 'xhtml'}
+                  initialContent={xhtmlContent ?? ""}
+                  onSave={async (html) => {
+                    await handleXhtmlSave(html)
+                  }}
+                  isSaving={xhtmlSaving}
+                  saveLabel="Save XHTML"
+                  documentTitle={decodedFilename}
+                  height="calc(100vh - 48px)"
+                  styles={allStyles}
+                  onAddStyle={handleAddStyle}
+                  onContentChange={() => setIsXhtmlDirty(true)}
+                  onSelectionUpdate={handleSelectionUpdate}
+                  fileId={activeFileId ? String(activeFileId) : undefined}
+                  trackChangesEnabled={true}
+                  currentUser={chapter?.current_assignee_name || 'Compositor'}
+                  customCss={customCssContent || ""}
+                  leftViewMode={leftPanelMode}
+                  onShowUpdatedXml={handleShowUpdatedXml}
+                  onShowPdfProof={handleShowPdfProof}
+                  isConvertingXml={isConvertingXml}
+                />
+              </div>
+            </div>
+          )
         ) : ext === 'pdf' ? (
           // @ts-ignore
           <pdfjs-viewer-element

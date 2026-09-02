@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, Form, Query, UploadFile, File, HTTPExcep
 from fastapi.responses import FileResponse, Response
 from pathlib import Path
 from typing import Optional
+from datetime import datetime
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -39,6 +40,7 @@ from .services.epubcheck_service import (
     run_epubcheck_report,
     get_cached_epubcheck_report,
 )
+from .services.summary_service import extract_epub_summary
 
 
 def _select_validate_epub():
@@ -75,6 +77,10 @@ class ExportRequest(BaseModel):
 
 class SaveFileRequest(BaseModel):
     content: str
+
+
+class RenameFileRequest(BaseModel):
+    new_name: str
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -184,16 +190,19 @@ def delete_project(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    removed = ev_projects_db.soft_delete_project(
-        db, project_id=project_id, user_id=user.id if user else None
+    removed = ev_projects_db.hard_delete_project(
+        db, project_id=project_id
     )
     if not removed:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # Optionally clean up disk (non-blocking)
+    # Clean up disk synchronously
     folder_path = Path(UPLOAD_DIR) / project["folder_name"]
     if folder_path.exists():
-        asyncio.get_event_loop().run_in_executor(None, shutil.rmtree, str(folder_path))
+        try:
+            shutil.rmtree(str(folder_path))
+        except Exception as e:
+            print(f"Failed to delete directory {folder_path}: {e}")
 
     return {"status": True, "message": "Project deleted"}
 
@@ -205,6 +214,12 @@ def delete_project(
 @router.get("/file-data/{folder_name}")
 def list_files(folder_name: str):
     return get_extract_files(folder_name)
+
+
+@router.get("/validate/{folder_name}/summary")
+def get_epub_summary(folder_name: str, refresh: bool = False):
+    """Return structural summary (tables, figures, chapters)."""
+    return extract_epub_summary(folder_name, refresh=refresh)
 
 
 @router.get("/file-data/{folder_name}/{file_path:path}")
@@ -241,7 +256,51 @@ async def save_file_content(
     except Exception:
         pass
 
+    # Clear the summary cache so it regenerates on next read
+    cache_path = (Path(UPLOAD_DIR) / folder_name / "summary_cache.json").resolve()
+    if cache_path.exists():
+        try:
+            cache_path.unlink()
+        except Exception:
+            pass
+
     return {"status": True, "message": "File saved"}
+
+
+@router.post("/file-data/{folder_name}/{file_path:path}/rename")
+async def rename_file_content(
+    folder_name: str,
+    file_path: str,
+    body: RenameFileRequest,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    base = (Path(UPLOAD_DIR) / folder_name / EXTRACT_DIR / "epub").resolve()
+    target = (base / file_path).resolve()
+    
+    if not str(target).startswith(str(base)):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+        
+    new_target = (target.parent / body.new_name).resolve()
+    
+    if not str(new_target).startswith(str(target.parent)):
+        raise HTTPException(status_code=403, detail="Invalid new name")
+        
+    if new_target.exists() and str(new_target) != str(target):
+         raise HTTPException(status_code=409, detail="A file with the new name already exists")
+         
+    target.rename(new_target)
+
+    # Repack extracted files into .epub zip and save to output directory
+    try:
+        from .services.repack_service import repack_epub
+        await asyncio.to_thread(repack_epub, folder_name)
+    except Exception:
+        pass
+
+    return {"status": True, "message": "File renamed successfully"}
 
 
 
@@ -277,6 +336,63 @@ async def render_pdf_page_endpoint(folder_name: str, page: int = Query(1)):
         return Response(content=png_bytes, media_type="image/png")
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="PDF not found")
+
+
+class SaveMappingsRequest(BaseModel):
+    mappings: dict
+
+@router.get("/projects/{folder_name}/mappings")
+def get_file_mappings(folder_name: str, db: Session = Depends(get_db)):
+    project = ev_projects_db.get_project_by_folder(db, folder_name)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    if project.file_mappings:
+        return {"status": True, "mappings": project.file_mappings}
+        
+    import json
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    classification_path = os.path.join(current_dir, "rules", "general", "classification.json")
+    try:
+        with open(classification_path, "r", encoding="utf-8") as f:
+            classification = json.load(f)
+    except FileNotFoundError:
+        classification = {"heuristics": []}
+        
+    files = get_extract_files(folder_name)
+    mappings = {}
+    for f in files.get("files", []):
+        name = f.get("file_name", "").lower()
+        path = f.get("path", "").lower()
+        if not (name.endswith('.xhtml') or name.endswith('.html') or name.endswith('.htm')):
+            continue
+        if name == 'nav.xhtml' or name == 'nav.html' or name == 'nav.htm' or name == 'nav' or path.endswith('/nav.xhtml'):
+            continue
+            
+        matched_category = "Not found"
+        for heuristic in classification.get("heuristics", []):
+            if any(pattern in name for pattern in heuristic.get("patterns", [])):
+                matched_category = heuristic.get("category", "Not found")
+                break
+        mappings[f.get("file_name")] = matched_category
+        
+    return {"status": True, "mappings": mappings}
+
+
+@router.post("/projects/{folder_name}/mappings")
+def save_file_mappings(
+    folder_name: str, 
+    body: SaveMappingsRequest, 
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user_from_cookie)
+):
+    project = ev_projects_db.get_project_by_folder(db, folder_name)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    project.file_mappings = body.mappings
+    db.commit()
+    return {"status": True, "message": "Mappings saved successfully."}
 
 
 @router.get("/ace/{folder_name}")
@@ -547,4 +663,113 @@ async def export_epub(
         content=zip_bytes,
         media_type="application/epub+zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+import tempfile
+import re
+from app.domains.post_prod.epub_validator.engine.excel_reporter import generate_gwp_report
+
+def sanitize_for_excel(text: str) -> str:
+    """Removes ANSI escape codes and unprintable control characters that break openpyxl."""
+    if not text:
+        return text
+    text = re.sub(r'\x1b\[[0-9;]*m', '', text)
+    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', text)
+    return text
+
+@router.get("/export/{folder_name}/qa-report")
+def export_qa_report(
+    folder_name: str,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    """Generates and downloads a custom Excel QA report for GWP000."""
+    run = ev_projects_db.get_latest_validation_run(db, folder_name)
+    if not run or not run.get("files"):
+        raise HTTPException(status_code=404, detail="No validation results found for this project.")
+        
+    validation_result = run
+    customer = validation_result.get("customer")
+    
+    if customer != "GWP000":
+        # Fallback or allow other customers later, for now we only support GWP000 template
+        raise HTTPException(status_code=400, detail="QA Report is only available for GWP000 projects.")
+        
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    template_path = os.path.join(current_dir, f"rules/customers/{customer}/report_template.json")
+    if not os.path.exists(template_path):
+        raise HTTPException(status_code=404, detail=f"Report template not found for this customer. Path checked: {template_path}")
+        
+    # Make a temporary file for the Excel report
+    import tempfile
+    from app.domains.post_prod.epub_validator.engine.excel_reporter import generate_gwp_report
+    
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".xlsx")
+    os.close(tmp_fd)
+    
+    # Get project to retrieve assignee name and uploaded date
+    project = ev_projects_db.get_project_by_folder(db, folder_name)
+    assignee_name = project.assignee if project and project.assignee else ""
+    uploaded_date = project.uploaded_at.strftime('%m/%d/%y') if project and project.uploaded_at else datetime.now().strftime('%m/%d/%y')
+    
+    # Evaluate EPUBCheck
+    epubcheck_status = "Yet to check"
+    epubcheck_notes = ""
+    epubcheck_report = get_cached_epubcheck_report(folder_name)
+    if epubcheck_report:
+        if epubcheck_report.get("status") == "fatal":
+            epubcheck_status = "Fail"
+            epubcheck_notes = epubcheck_report.get("message", "EPUBCheck failed catastrophically.")
+        else:
+            messages = epubcheck_report.get("messages", [])
+            errors = [m for m in messages if str(m.get("severity")).lower() in ["error", "fatal"]]
+            if errors:
+                epubcheck_status = "Fail"
+                epubcheck_notes = "\n".join([f"[{m.get('severity')}] {m.get('message')}" for m in errors[:10]])
+                if len(errors) > 10:
+                    epubcheck_notes += f"\n...and {len(errors) - 10} more."
+            else:
+                epubcheck_status = "Pass"
+
+    # Evaluate ACE
+    ace_status = "Yet to check"
+    ace_notes = ""
+    ace_report = get_cached_ace_report(folder_name)
+    if ace_report:
+        if ace_report.get("status") == "fatal":
+            ace_status = "Fail"
+            ace_notes = ace_report.get("message", "ACE failed catastrophically.")
+        else:
+            violations = ace_report.get("violations", [])
+            if violations:
+                ace_status = "Fail"
+                ace_notes = "\n".join([f"[{v.get('impact')}] {v.get('rule_title')}: {v.get('message')}" for v in violations[:10]])
+                if len(violations) > 10:
+                    ace_notes += f"\n...and {len(violations) - 10} more."
+            else:
+                ace_status = "Pass"
+                
+    epubcheck_notes = sanitize_for_excel(epubcheck_notes)
+    ace_notes = sanitize_for_excel(ace_notes)
+            
+    try:
+        generate_gwp_report(
+            validation_result,
+            template_path,
+            tmp_path,
+            assignee_name,
+            uploaded_date,
+            epubcheck_result={"status": epubcheck_status, "notes": epubcheck_notes},
+            ace_result={"status": ace_status, "notes": ace_notes}
+        )
+        with open(tmp_path, "rb") as f:
+            xlsx_bytes = f.read()
+    finally:
+        os.remove(tmp_path)
+        
+    return Response(
+        content=xlsx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{folder_name}_QA_Report.xlsx"'},
     )

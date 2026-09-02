@@ -10,6 +10,8 @@ export interface Viewer {
   id: number;
   username: string;
   email: string;
+  first_name?: string;
+  last_name?: string;
   roles: string[];
   is_active: boolean;
   team?: string;
@@ -122,6 +124,11 @@ export interface ChapterSummary {
   has_indesign: boolean;
   has_proof: boolean;
   has_xml: boolean;
+  xml_status?: string | null;
+  indesign_status?: string | null;
+  final_delivery_status?: string | null;
+  style_status?: string | null;
+  structuring_status?: string | null;
 }
 
 export interface DashboardResponse {

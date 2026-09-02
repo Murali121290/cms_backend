@@ -17,11 +17,36 @@ import bcrypt
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/users/login")
 
+from werkzeug.security import check_password_hash as check_werkzeug_hash
+
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+    if not plain_password or not hashed_password:
+        return False
+    # Handle Werkzeug hash format (scrypt, pbkdf2, sha256, argon2)
+    if any(hashed_password.startswith(prefix) for prefix in ("scrypt:", "pbkdf2:", "sha256:", "argon2:")):
+        try:
+            return check_werkzeug_hash(hashed_password, plain_password)
+        except Exception:
+            return False
+    # Handle Bcrypt hash format
+    if hashed_password.startswith(("$2a$", "$2b$", "$2y$", "$2$")):
+        try:
+            return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+        except Exception:
+            return False
+    # Fallback try both
+    try:
+        if check_werkzeug_hash(hashed_password, plain_password):
+            return True
+    except Exception:
+        pass
+    try:
+        return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+    except Exception:
+        return False
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None):
     to_encode = data.copy()

@@ -1,9 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { Search, X, ExternalLink } from "lucide-react";
+import { Search, X, RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { apiClient, getApiErrorMessage } from "@/api/client";
+import {
+  searchPubMed,
+  searchCrossRef,
+  searchGoogleBooks,
+  searchWikipedia,
+  type SearchResultItem,
+} from "../services/externalReferenceSearch";
+import { styleReferenceText, styledDiffHTML } from "../utils/referenceStyling";
 
 export type ReferenceEditResult = {
   file_id: number;
@@ -13,46 +21,53 @@ export type ReferenceEditResult = {
   changed: boolean;
 };
 
-type SearchHit = {
-  source: "pubmed" | "crossref";
-  title: string;
-  authors: string;
-  year: string;
-  journal: string;
-  volume: string;
-  issue: string;
-  page: string;
-  doi: string;
-  url: string;
-  formatted: string;
-  pubmed_id?: string | null;
-};
-
 interface Props {
-  fileId: number;
-  refNumber: number;
+  fileId?: number | null;
+  refNumber?: number;
   originalText: string;
+  originalHtml?: string;
+  detectedStyle?: "AMA" | "APA";
+  currentUser?: string;
   onClose: () => void;
-  onSaved: (result: ReferenceEditResult) => void;
+  onSaved?: (result: ReferenceEditResult) => void;
+  onSaveTrackChanges?: (diffHtml: string, newText: string) => Promise<void> | void;
 }
 
 function extractTitleForQuery(text: string): string {
-  const trimmed = text.replace(/^\s*\d+\.\s*/, "");
-  const yearMatch = trimmed.match(/\((?:19|20)\d{2}\)\.?\s*/);
+  const trimmed = text.replace(/^\s*\[?\d+\]?[\.\s]+/, "");
+  const yearMatch = trimmed.match(/\((?:19|20)\d{2}[a-z]?\)\.?\s*/);
   const afterYear = yearMatch ? trimmed.slice((yearMatch.index ?? 0) + yearMatch[0].length) : trimmed;
   const firstStop = afterYear.search(/[.?!]\s/);
-  const candidate = firstStop > 20 ? afterYear.slice(0, firstStop) : afterYear.slice(0, 120);
+
+  let candidate = "";
+  if (firstStop > 10) {
+    candidate = afterYear.slice(0, firstStop);
+  } else {
+    candidate = afterYear.slice(0, 150);
+    const lastSpace = candidate.lastIndexOf(" ");
+    if (lastSpace > 20) {
+      candidate = candidate.slice(0, lastSpace);
+    }
+  }
   return candidate.trim();
 }
 
 export function EditReferenceModal({
-  fileId, refNumber, originalText, onClose, onSaved,
+  fileId,
+  refNumber,
+  originalText,
+  originalHtml,
+  detectedStyle = "AMA",
+  currentUser = "Editor",
+  onClose,
+  onSaved,
+  onSaveTrackChanges,
 }: Props) {
   const initialQuery = useMemo(() => extractTitleForQuery(originalText), [originalText]);
   const [editedText, setEditedText] = useState(originalText);
-  const [query, setQuery] = useState(initialQuery);
-  const [activeDb, setActiveDb] = useState<"pubmed" | "crossref" | null>(null);
-  const [results, setResults] = useState<SearchHit[]>([]);
+  const [searchQuery, setSearchQuery] = useState(initialQuery);
+  const [searchSource, setSearchSource] = useState<"pubmed" | "crossref" | "googlebooks" | "wikipedia" | null>(null);
+  const [searchResults, setSearchResults] = useState<SearchResultItem[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -66,38 +81,73 @@ export function EditReferenceModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const runSearch = async (db: "pubmed" | "crossref") => {
-    if (!query.trim()) return;
-    setActiveDb(db);
+  const handleSearch = async (source: "pubmed" | "crossref" | "googlebooks" | "wikipedia") => {
+    if (!searchQuery.trim()) return;
+    setSearchSource(source);
     setSearchLoading(true);
     setSearchError(null);
-    setResults([]);
+    setSearchResults([]);
+
     try {
-      const { data } = await apiClient.get(
-        `/files/${fileId}/reference-review/search`,
-        { params: { db, query, max_results: 5 } },
-      );
-      setResults(data?.results ?? []);
-    } catch (e) {
-      setSearchError(getApiErrorMessage(e, "Search failed"));
+      let results: SearchResultItem[] = [];
+      if (source === "pubmed") {
+        results = await searchPubMed(searchQuery, detectedStyle);
+      } else if (source === "crossref") {
+        results = await searchCrossRef(searchQuery, detectedStyle);
+      } else if (source === "googlebooks") {
+        results = await searchGoogleBooks(searchQuery, detectedStyle);
+      } else if (source === "wikipedia") {
+        results = await searchWikipedia(searchQuery);
+      }
+      setSearchResults(results);
+    } catch (err) {
+      setSearchError(getApiErrorMessage(err, `${source} search failed`));
     } finally {
       setSearchLoading(false);
     }
   };
 
-  const useResult = (hit: SearchHit) => {
-    setEditedText(hit.formatted);
-  };
-
-  const save = async () => {
+  const handleSave = async () => {
+    if (!editedText.trim()) return;
     setSaving(true);
     setSaveError(null);
+
+    const dirty = editedText.trim() !== originalText.trim();
+    if (!dirty) {
+      onClose();
+      return;
+    }
+
+    const diffHtml = styledDiffHTML(originalText, editedText, currentUser);
+
     try {
-      const { data } = await apiClient.post(
-        `/files/${fileId}/reference-review/references/${refNumber}/edit`,
-        { new_text: editedText.trim(), track_changes: true },
-      );
-      onSaved(data as ReferenceEditResult);
+      let resultData: any = null;
+      if (fileId != null && refNumber != null) {
+        try {
+          const { data } = await apiClient.post(
+            `/files/${fileId}/reference-review/references/${refNumber}/edit`,
+            { new_text: editedText.trim(), track_changes: true },
+          );
+          resultData = data;
+        } catch (apiErr) {
+          console.warn("Backend edit reference API call warning:", apiErr);
+        }
+      }
+
+      if (onSaveTrackChanges) {
+        await onSaveTrackChanges(diffHtml, editedText.trim());
+      }
+
+      if (onSaved) {
+        onSaved(resultData || {
+          file_id: fileId ?? 0,
+          ref_number: refNumber ?? 0,
+          old_text: originalText,
+          new_text: editedText.trim(),
+          changed: true,
+        });
+      }
+      onClose();
     } catch (e) {
       setSaveError(getApiErrorMessage(e, "Save failed"));
     } finally {
@@ -106,146 +156,219 @@ export function EditReferenceModal({
   };
 
   const dirty = editedText.trim() !== originalText.trim();
+  const livePreviewHtml = originalHtml || styleReferenceText(editedText);
 
   if (typeof document === "undefined") return null;
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[100] flex items-start justify-center bg-black/40 p-4 overflow-y-auto"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 overflow-y-auto"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-3xl my-8 bg-white rounded-lg shadow-xl flex flex-col"
+        className="bg-white rounded-xl shadow-2xl border border-navy-100 max-w-3xl w-full flex flex-col overflow-hidden max-h-[90vh] transition-all duration-200"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 sticky top-0 bg-white rounded-t-lg z-10">
-          <div className="flex items-center gap-2 text-navy-900 font-semibold">
-            <span className="text-slate-500">✎</span>
+        {/* Header */}
+        <div className="px-5 py-4 border-b border-navy-50 flex items-center justify-between bg-surface-50">
+          <h3 className="text-sm font-bold text-navy-900 flex items-center gap-2">
+            <span className="text-navy-600">✎</span>
             Edit Reference Text
-            <span className="text-slate-400 text-xs font-normal">— ref_{refNumber}</span>
-          </div>
-          <button type="button" onClick={onClose} className="text-slate-500 hover:text-slate-800">
-            <X className="w-5 h-5" />
+            {refNumber != null && (
+              <span className="text-navy-400 text-xs font-normal">— ref_{refNumber}</span>
+            )}
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-navy-400 hover:text-navy-600 transition-colors p-1 rounded-md hover:bg-navy-50 cursor-pointer"
+          >
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="p-5 space-y-5">
-          <section>
-            <div className="text-[11px] font-semibold text-navy-500 uppercase tracking-wide mb-1">
-              Original Reference
-            </div>
-            <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] leading-snug whitespace-pre-wrap">
-              {originalText}
-            </div>
-          </section>
-
-          <section>
-            <div className="text-[11px] font-semibold text-navy-500 uppercase tracking-wide mb-1">
-              Edited Reference (with track changes on save)
-            </div>
+        {/* Body */}
+        <div className="p-5 space-y-4 flex-1 overflow-y-auto min-h-0">
+          <div className="space-y-1">
+            <label className="text-[9px] uppercase font-bold text-navy-400 tracking-wider">
+              Edited Reference
+            </label>
             <textarea
+              className="w-full text-xs p-3 border border-navy-200 rounded-lg text-navy-800 bg-white focus:outline-none focus:ring-2 focus:ring-navy-400 focus:border-navy-500 font-medium leading-relaxed min-h-[90px]"
               value={editedText}
               onChange={(e) => setEditedText(e.target.value)}
-              className="w-full min-h-[120px] rounded border border-slate-300 focus:border-sky-500 focus:ring-1 focus:ring-sky-500 outline-none px-3 py-2 text-[13px] leading-snug"
+              rows={3}
+              placeholder="Modify reference text here..."
             />
-          </section>
+          </div>
 
-          <div className="border-t border-slate-200 pt-4 space-y-3">
-            <div className="text-[11px] font-semibold text-navy-500 uppercase tracking-wide">
-              Search database for correct formatting (AMA style)
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="relative flex-1">
-                <Search className="w-4 h-4 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") runSearch(activeDb ?? "pubmed");
-                  }}
-                  placeholder="Article title or keywords…"
-                  className="w-full rounded border border-slate-300 focus:border-sky-500 focus:ring-1 focus:ring-sky-500 outline-none pl-8 pr-3 py-2 text-[13px]"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={() => runSearch("pubmed")}
-                disabled={searchLoading || !query.trim()}
-                className="px-3 py-2 text-[12px] font-semibold rounded border border-slate-300 hover:bg-slate-50 disabled:opacity-40"
-              >
-                PubMed
-              </button>
-              <button
-                type="button"
-                onClick={() => runSearch("crossref")}
-                disabled={searchLoading || !query.trim()}
-                className="px-3 py-2 text-[12px] font-semibold rounded border border-slate-300 hover:bg-slate-50 disabled:opacity-40"
-              >
-                CrossRef
-              </button>
-            </div>
-            {searchError && (
-              <div className="text-[12px] text-rose-600">{searchError}</div>
+          <div className="space-y-1">
+            <label className="text-[9px] uppercase font-bold text-navy-400 tracking-wider">
+              Live Preview (with styling highlights)
+            </label>
+            {livePreviewHtml && (
+              <div
+                className="p-3 bg-surface-50/50 rounded-lg border border-navy-100/30 text-xs leading-relaxed font-medium select-text ProseMirror"
+                style={{ whiteSpace: "pre-wrap" }}
+                dangerouslySetInnerHTML={{ __html: livePreviewHtml }}
+              />
             )}
-            {(searchLoading || results.length > 0) && (
-              <div className="rounded border border-slate-200">
-                <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-navy-500 bg-slate-50 border-b border-slate-200">
-                  Search Results {activeDb ? `(${activeDb})` : ""}
+            {/* Track changes diff preview — shown when textarea text differs from original */}
+            {dirty && (
+              <div className="space-y-1 mt-2">
+                <div className="text-[9px] uppercase font-bold text-navy-400 tracking-wider">
+                  After save (track changes)
                 </div>
-                {searchLoading ? (
-                  <div className="px-3 py-4 text-[12px] text-slate-500">Searching…</div>
-                ) : (
-                  <ul>
-                    {results.map((hit, i) => (
-                      <li
-                        key={`${hit.source}-${i}`}
-                        className="px-3 py-2.5 border-b border-slate-100 last:border-b-0 flex items-start gap-3"
-                      >
-                        <div className="flex-1 min-w-0">
-                          <div className="text-[12.5px] leading-snug text-navy-800">
-                            {hit.formatted}
-                          </div>
-                          {hit.url && (
-                            <a
-                              href={hit.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="mt-1 inline-flex items-center gap-1 text-[11px] text-indigo-600 hover:underline"
-                            >
-                              Open <ExternalLink className="w-3 h-3" />
-                            </a>
-                          )}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => useResult(hit)}
-                          className="shrink-0 px-2.5 py-1 rounded border border-slate-300 text-[11px] font-semibold hover:bg-slate-50"
-                        >
-                          Use Result
-                        </button>
-                      </li>
-                    ))}
-                    {results.length === 0 && (
-                      <li className="px-3 py-4 text-[12px] text-slate-500">No results.</li>
-                    )}
-                  </ul>
-                )}
+                <div
+                  className="p-3 bg-white rounded-lg border border-navy-100/30 text-xs leading-relaxed font-medium select-text ProseMirror"
+                  style={{ whiteSpace: "pre-wrap" }}
+                  dangerouslySetInnerHTML={{
+                    __html: styledDiffHTML(originalText, editedText, currentUser),
+                  }}
+                />
               </div>
             )}
           </div>
 
-          {saveError && (
-            <div className="text-[12px] text-rose-600">{saveError}</div>
-          )}
+          {/* Database Search Section */}
+          <div className="border-t border-navy-50 pt-4 space-y-3">
+            <div className="text-[9px] uppercase font-bold text-navy-400 tracking-wider">
+              Search Database for correct formatting ({detectedStyle} Style)
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <div className="relative flex-1 min-w-[200px]">
+                <Search className="w-3.5 h-3.5 text-navy-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSearch(searchSource || "pubmed");
+                  }}
+                  className="w-full pl-8 pr-3 py-1.5 bg-surface-50 text-xs rounded-lg border border-navy-200 focus:outline-none focus:ring-1 focus:ring-navy-400 font-medium"
+                  placeholder="Enter article title or keywords..."
+                />
+              </div>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => handleSearch("pubmed")}
+                disabled={searchLoading || !searchQuery.trim()}
+                className="cursor-pointer"
+              >
+                PubMed
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => handleSearch("crossref")}
+                disabled={searchLoading || !searchQuery.trim()}
+                className="cursor-pointer"
+              >
+                CrossRef
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => handleSearch("googlebooks")}
+                disabled={searchLoading || !searchQuery.trim()}
+                className="cursor-pointer"
+              >
+                Google Books
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => handleSearch("wikipedia")}
+                disabled={searchLoading || !searchQuery.trim()}
+                className="cursor-pointer"
+              >
+                Wikipedia
+              </Button>
+            </div>
+
+            {searchError && <div className="text-[12px] text-rose-600">{searchError}</div>}
+
+            {searchLoading && (
+              <div className="flex items-center justify-center py-6 text-xs text-navy-500 font-semibold gap-2">
+                <RefreshCw className="w-4 h-4 animate-spin text-navy-600" />
+                Searching{" "}
+                {searchSource === "pubmed"
+                  ? "PubMed"
+                  : searchSource === "crossref"
+                  ? "CrossRef"
+                  : searchSource === "googlebooks"
+                  ? "Google Books"
+                  : "Wikipedia"}
+                ...
+              </div>
+            )}
+
+            {!searchLoading && searchResults.length > 0 && (
+              <div className="space-y-2.5 max-h-[200px] overflow-y-auto border border-navy-100 rounded-lg p-3 bg-surface-50/20">
+                <div className="text-[9px] uppercase font-bold text-navy-400 tracking-wider mb-2">
+                  Search Results (
+                  {searchSource === "pubmed"
+                    ? "PubMed"
+                    : searchSource === "crossref"
+                    ? "CrossRef"
+                    : searchSource === "googlebooks"
+                    ? "Google Books"
+                    : "Wikipedia"}
+                  )
+                </div>
+                {searchResults.map((result, index) => (
+                  <div
+                    key={`${result.id}-${index}`}
+                    className="p-2.5 bg-white border border-navy-100 rounded-lg shadow-sm flex items-start justify-between gap-4 hover:border-navy-300 transition-colors"
+                  >
+                    <div className="text-xs text-navy-800 leading-relaxed font-medium flex-1">
+                      {result.formatted}
+                    </div>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setEditedText(result.formatted)}
+                      className="shrink-0 text-[10px] font-bold px-2 py-1 h-auto cursor-pointer"
+                    >
+                      Use Result
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {!searchLoading && searchSource && searchResults.length === 0 && !searchError && (
+              <div className="text-center py-6 text-navy-400 text-xs font-semibold bg-surface-50/50 rounded-lg border border-navy-100/50">
+                No matches found on{" "}
+                {searchSource === "pubmed"
+                  ? "PubMed"
+                  : searchSource === "crossref"
+                  ? "CrossRef"
+                  : searchSource === "googlebooks"
+                  ? "Google Books"
+                  : "Wikipedia"}
+                . Try refining the query keywords.
+              </div>
+            )}
+          </div>
+
+          {saveError && <div className="text-[12px] text-rose-600">{saveError}</div>}
         </div>
 
-        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-slate-200 bg-slate-50 rounded-b-lg sticky bottom-0">
-          <Button variant="secondary" onClick={onClose} disabled={saving}>
+        {/* Footer */}
+        <div className="px-5 py-3.5 border-t border-navy-50 flex justify-end gap-3 bg-surface-50/50">
+          <Button variant="secondary" size="sm" onClick={onClose} disabled={saving} className="cursor-pointer">
             Cancel
           </Button>
-          <Button onClick={save} disabled={saving || !dirty || !editedText.trim()}>
-            {saving ? "Saving…" : "Save Changes"}
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleSave}
+            disabled={saving || !dirty || !editedText.trim()}
+            className="cursor-pointer font-bold"
+          >
+            {saving ? "Saving..." : "Save Changes"}
           </Button>
         </div>
       </div>

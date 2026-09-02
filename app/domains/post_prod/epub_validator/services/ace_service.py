@@ -190,7 +190,16 @@ def run_ace(folder_name: str) -> dict[str, Any]:
         stderr_tail = (proc.stderr or "").strip().splitlines()[-5:]
         detail = "ACE did not produce a report."
         if stderr_tail:
-            detail += " " + " | ".join(stderr_tail)
+            detail += " | " + " | ".join(stderr_tail)
+            
+        # Write failure cache so Excel reporter knows it failed
+        cache_path = _cache_path(folder_name)
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(json.dumps({
+            "status": "fatal",
+            "message": detail
+        }), encoding="utf-8")
+        
         raise HTTPException(status_code=500, detail=detail)
 
     raw = json.loads(report_file.read_text(encoding="utf-8"))

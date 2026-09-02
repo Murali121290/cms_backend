@@ -1,0 +1,172 @@
+{
+  "xml_to_xhtml": {
+    "sec": {
+      "target_tag": "div"
+    },
+    "section": {
+      "target_tag": "div"
+    },
+    "title-group": {
+      "target_tag": "div"
+    },
+    "title": {
+      "target_tag": "h2",
+      "class": "title"
+    },
+    "p": {
+      "target_tag": "p"
+    },
+    "contrib-group": {
+      "target_tag": "div"
+    },
+    "abstract": {
+      "target_tag": "div"
+    },
+    "kwd-group": {
+      "target_tag": "div"
+    },
+    "boxed-text": {
+      "target_tag": "div"
+    },
+    "ref-list": {
+      "target_tag": "div"
+    },
+    "table-wrap": {
+      "target_tag": "div"
+    },
+    "para": {
+      "target_tag": "p"
+    },
+    "list": [
+      {
+        "xpath": "@list-type='bullet'",
+        "target_tag": "ul"
+      },
+      {
+        "xpath": "@list-type='order'",
+        "target_tag": "ol"
+      },
+      {
+        "default": true,
+        "target_tag": "ul"
+      }
+    ],
+    "list-item": {
+      "target_tag": "li"
+    },
+    "ref": {
+      "target_tag": "p",
+      "class": "ref"
+    },
+    "mixed-citation": {
+      "target_tag": "span",
+      "class": "mixed-citation"
+    },
+    "person-group": {
+      "target_tag": "span",
+      "class": "person-group"
+    },
+    "chapter-title": {
+      "target_tag": "span",
+      "class": "chapter-title"
+    },
+    "collab": {
+      "target_tag": "span",
+      "class": "collab"
+    },
+    "string-name": {
+      "target_tag": "span",
+      "class": "string-name"
+    },
+    "surname": {
+      "target_tag": "span",
+      "class": "surname"
+    },
+    "given-names": {
+      "target_tag": "span",
+      "class": "given-names"
+    },
+    "year": {
+      "target_tag": "span",
+      "class": "year"
+    },
+    "article-title": {
+      "target_tag": "span",
+      "class": "article-title"
+    },
+    "source": {
+      "target_tag": "span",
+      "class": "source"
+    },
+    "month": {
+      "target_tag": "span",
+      "class": "source"
+    },
+    "day": {
+      "target_tag": "span",
+      "class": "source"
+    },
+    "publisher-name": {
+      "target_tag": "span",
+      "class": "source"
+    },
+    "edition": {
+      "target_tag": "span",
+      "class": "source"
+    },
+    "institution": {
+      "target_tag": "span",
+      "class": "source"
+    },
+    "volume": {
+      "target_tag": "span",
+      "class": "volume"
+    },
+    "issue": {
+      "target_tag": "span",
+      "class": "issue"
+    },
+    "fpage": {
+      "target_tag": "span",
+      "class": "fpage"
+    },
+    "lpage": {
+      "target_tag": "span",
+      "class": "lpage"
+    },
+    "uri": {
+      "target_tag": "a",
+      "class": "ext-link"
+    },
+    "ext-link": {
+      "target_tag": "a",
+      "class": "ext-link"
+    }
+  },
+  "xhtml_to_xml": {
+    "section": {
+      "target_tag": "sec"
+    },
+    "div": {
+      "target_tag": "sec"
+    },
+    "h2": {
+      "target_tag": "title"
+    },
+    "p": {
+      "target_tag": "p"
+    },
+    "ul": {
+      "target_tag": "list"
+    },
+    "ol": {
+      "target_tag": "list"
+    },
+    "li": {
+      "target_tag": "list-item"
+    },
+    "a": {
+      "target_tag": "ext-link"
+    }
+  }
+}

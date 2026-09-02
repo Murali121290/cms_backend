@@ -306,12 +306,46 @@ def upgrade() -> None:
     op.create_index(op.f('ix_project_stylesheets_project_id'), 'project_stylesheets', ['project_id'], unique=False)
     op.create_index(op.f('ix_project_stylesheets_created_by_id'), 'project_stylesheets', ['created_by_id'], unique=False)
 
+    # ── 13. post_prod_projects ───────────────────────────────────────────────
+    op.create_table(
+        'post_prod_projects',
+        sa.Column('id', sa.Integer(), nullable=False),
+        sa.Column('customer_name', sa.String(255), nullable=True),
+        sa.Column('project_name', sa.String(255), nullable=False),
+        sa.Column('status', sa.String(50), nullable=True, server_default='Active'),
+        sa.Column('assignee', sa.String(255), nullable=True),
+        sa.Column('created_at', sa.DateTime(), nullable=True, server_default=sa.func.now()),
+        sa.PrimaryKeyConstraint('id'),
+    )
+
+    # ── 14. post_prod_chapters ───────────────────────────────────────────────
+    op.create_table(
+        'post_prod_chapters',
+        sa.Column('id', sa.Integer(), nullable=False),
+        sa.Column('project_id', sa.Integer(), nullable=True),
+        sa.Column('chapter_no', sa.String(50), nullable=False),
+        sa.Column('status', sa.String(50), nullable=True, server_default='YTS'),
+        sa.Column('source_filename', sa.String(), nullable=True),
+        sa.Column('source_file_path', sa.String(), nullable=True),
+        sa.Column('converted_file_path', sa.String(), nullable=True),
+        sa.Column('error_message', sa.String(), nullable=True),
+        sa.Column('created_at', sa.DateTime(), nullable=True, server_default=sa.func.now()),
+        sa.Column('completed_at', sa.DateTime(), nullable=True),
+        sa.Column('attempts', sa.Integer(), nullable=True, server_default='0'),
+        sa.ForeignKeyConstraint(['project_id'], ['post_prod_projects.id'], name='post_prod_chapters_project_id_fkey', ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('id'),
+    )
+
 
 def downgrade() -> None:
+    op.drop_table('post_prod_chapters')
+    op.drop_table('post_prod_projects')
+
     op.drop_index(op.f('ix_project_stylesheets_created_by_id'), table_name='project_stylesheets')
     op.drop_index(op.f('ix_project_stylesheets_project_id'), table_name='project_stylesheets')
     op.drop_index(op.f('ix_project_stylesheets_id'), table_name='project_stylesheets')
     op.drop_table('project_stylesheets')
+
 
     op.drop_index(op.f('ix_file_versions_uploaded_by_id'), table_name='file_versions')
     op.drop_index(op.f('ix_file_versions_file_id'), table_name='file_versions')

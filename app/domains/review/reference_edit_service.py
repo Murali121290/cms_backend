@@ -1,10 +1,10 @@
 """Per-reference edit for the Reference Review UI.
 
-Locates a reference paragraph by its `ref_N` bookmark and swaps its text with
-tracked-changes markup (`w:del` for the old runs, `w:ins` for the new runs), so
-Word shows the edit as a review-tracked change and the reviewer can accept/reject
-it later. The bookmark itself is preserved so downstream bib_/ref_ mapping and
-Locate keep working.
+Locates a reference paragraph by its `ref_N` bookmark (or via multi-tiered
+paragraph fallback) and swaps its text with tracked-changes markup (`w:del` for
+old runs, `w:ins` for new runs), so Word shows the edit as a review-tracked
+change. If the bookmark was missing, it is automatically restored/created so
+downstream bib_/ref_ mapping keeps working.
 """
 from __future__ import annotations
 
@@ -36,39 +36,116 @@ def _next_revision_id(root) -> int:
     return max_id + 1
 
 
-def _find_ref_paragraph(root, ref_number: int):
-    """Return (paragraph, bookmark_start, bookmark_end) for `ref_{ref_number}`."""
-    body = root.find(W + "body")
-    name = f"ref_{ref_number}"
-    bookmark_start = None
-    for bs in body.iter(W + "bookmarkStart"):
-        if bs.get(W + "name") == name:
-            bookmark_start = bs
-            break
-    if bookmark_start is None:
-        return None, None, None
-    # walk up to <w:p>
-    p = bookmark_start
-    while p is not None and p.tag != W + "p":
-        p = p.getparent()
-    if p is None:
-        return None, None, None
-    bid = bookmark_start.get(W + "id")
-    bookmark_end = None
-    for be in body.iter(W + "bookmarkEnd"):
-        if be.get(W + "id") == bid:
-            bookmark_end = be
-            break
-    return p, bookmark_start, bookmark_end
-
-
 def _paragraph_plain_text(p) -> str:
     return "".join(t.text or "" for t in p.iter(W + "t"))
 
 
+def _ensure_bookmark_around_paragraph(p, root, ref_number: int):
+    """Ensure paragraph `p` is wrapped with bookmark `ref_{ref_number}`."""
+    name = f"ref_{ref_number}"
+    body = root.find(W + "body")
+    if body is not None:
+        for bs in body.iter(W + "bookmarkStart"):
+            if bs.get(W + "name") == name:
+                return bs
+
+    max_id = 0
+    for el in root.iter():
+        v = el.get(W + "id")
+        if v and v.isdigit():
+            max_id = max(max_id, int(v))
+    new_id = str(max_id + 1)
+
+    bmk_start = etree.Element(W + "bookmarkStart")
+    bmk_start.set(W + "id", new_id)
+    bmk_start.set(W + "name", name)
+
+    bmk_end = etree.Element(W + "bookmarkEnd")
+    bmk_end.set(W + "id", new_id)
+
+    p.insert(0, bmk_start)
+    p.append(bmk_end)
+    return bmk_start
+
+
+def _find_ref_paragraph(root, ref_number: int):
+    """Return (paragraph, bookmark_start, bookmark_end) for `ref_{ref_number}` with multi-tier fallback."""
+    body = root.find(W + "body")
+    if body is None:
+        return None, None, None
+
+    target_names = {
+        f"ref_{ref_number}",
+        f"ref_{ref_number:02d}",
+        f"ref_{ref_number:03d}",
+        f"ref{ref_number}",
+        f"ref-{ref_number}",
+        f"REF_{ref_number}",
+        f"REF_{ref_number:02d}",
+    }
+
+    bookmark_start = None
+    for bs in body.iter(W + "bookmarkStart"):
+        bname = (bs.get(W + "name") or "").strip()
+        if bname in target_names or bname.lower() in {t.lower() for t in target_names}:
+            bookmark_start = bs
+            break
+
+    if bookmark_start is not None:
+        p = bookmark_start
+        while p is not None and p.tag != W + "p":
+            p = p.getparent()
+        if p is not None:
+            bid = bookmark_start.get(W + "id")
+            bookmark_end = None
+            for be in body.iter(W + "bookmarkEnd"):
+                if be.get(W + "id") == bid:
+                    bookmark_end = be
+                    break
+            return p, bookmark_start, bookmark_end
+
+    num_patterns = [
+        f"[{ref_number}]",
+        f"{ref_number}.",
+        f"{ref_number} ",
+    ]
+    ref_paragraphs = []
+    for p in body.findall(W + "p"):
+        style = ""
+        pPr = p.find(W + "pPr")
+        if pPr is not None:
+            pStyle = pPr.find(W + "pStyle")
+            if pStyle is not None:
+                style = (pStyle.get(W + "val") or "").upper()
+
+        text = _paragraph_plain_text(p).strip()
+        is_ref_style = "REF" in style or "REFERENCE" in style or style.startswith("BIB_")
+        starts_with_num = any(text.startswith(pat) for pat in num_patterns)
+
+        if is_ref_style or starts_with_num:
+            ref_paragraphs.append((p, starts_with_num))
+
+    for p, starts_with_num in ref_paragraphs:
+        if starts_with_num:
+            bmk_start = _ensure_bookmark_around_paragraph(p, root, ref_number)
+            return p, bmk_start, None
+
+    if 1 <= ref_number <= len(ref_paragraphs):
+        p = ref_paragraphs[ref_number - 1][0]
+        bmk_start = _ensure_bookmark_around_paragraph(p, root, ref_number)
+        return p, bmk_start, None
+
+    all_paras = [p for p in body.findall(W + "p") if _paragraph_plain_text(p).strip()]
+    if 1 <= ref_number <= len(all_paras):
+        p = all_paras[ref_number - 1]
+        bmk_start = _ensure_bookmark_around_paragraph(p, root, ref_number)
+        return p, bmk_start, None
+
+    return None, None, None
+
+
 def _wrap_runs_as_deletion(runs, author: str, date: str, rev_id: int) -> etree._Element:
-    """Wrap a list of runs into a single `w:del` element with `w:delText` children.
-    Returns the new `<w:del>` element (parent still needs to insert it)."""
+    """Wrap a list of runs into a single `w:del` element with `w:delText` children."""
     del_el = etree.SubElement(etree.Element(W + "tmp"), W + "del")
     del_el.set(W + "id", str(rev_id))
     del_el.set(W + "author", author)
@@ -79,18 +156,18 @@ def _wrap_runs_as_deletion(runs, author: str, date: str, rev_id: int) -> etree._
             del_t = etree.SubElement(r_copy, W + "delText")
             del_t.text = t.text or ""
             if t.get("{http://www.w3.org/XML/1998/namespace}space"):
-                del_t.set("{http://www.w3.org/XML/1998/namespace}space",
-                          t.get("{http://www.w3.org/XML/1998/namespace}space"))
+                del_t.set(
+                    "{http://www.w3.org/XML/1998/namespace}space",
+                    t.get("{http://www.w3.org/XML/1998/namespace}space"),
+                )
             r_copy.remove(t)
-            # w:delText must appear where w:t was — put at end for simplicity
             r_copy.append(del_t)
         del_el.append(r_copy)
     return del_el
 
 
 def _make_ins_run(text: str, sample_run, author: str, date: str, rev_id: int) -> etree._Element:
-    """Build a `w:ins` element containing a single new `w:r`/`w:t` with formatting
-    copied from `sample_run` (if given)."""
+    """Build a `w:ins` element containing a single new `w:r`/`w:t` with formatting copied from `sample_run`."""
     ins_el = etree.Element(W + "ins")
     ins_el.set(W + "id", str(rev_id))
     ins_el.set(W + "author", author)
@@ -115,21 +192,7 @@ def apply_reference_edit(
     author: str = "reviewer",
     track_changes: bool = True,
 ) -> dict:
-    """Edit the paragraph carrying bookmark `ref_{ref_number}`.
-
-    * `track_changes=True` (default): wrap the existing runs in `w:del` and add a
-      `w:ins` with the new text — Word will render as a tracked edit.
-    * `track_changes=False`: replace the runs outright (no tracking).
-
-    Bookmarks are preserved. Returns::
-
-        {
-          "ref_number": int,
-          "old_text":   str,
-          "new_text":   str,
-          "changed":    bool,
-        }
-    """
+    """Edit the paragraph carrying bookmark `ref_{ref_number}` (with multi-tier fallback)."""
     docx_path = Path(docx_path)
     new_text = (new_text or "").strip()
 
@@ -143,11 +206,13 @@ def apply_reference_edit(
 
     old_text = _paragraph_plain_text(p).strip()
     if old_text == new_text:
-        return {"ref_number": ref_number, "old_text": old_text,
-                "new_text": new_text, "changed": False}
+        return {
+            "ref_number": ref_number,
+            "old_text": old_text,
+            "new_text": new_text,
+            "changed": False,
+        }
 
-    # Collect the run(s) inside this paragraph (excluding pPr, bookmarks, and any
-    # pre-existing revision markup — we replace the visible content wholesale).
     runs = list(p.findall(W + "r"))
     sample_run = runs[0] if runs else None
     now = _iso_now()
@@ -155,7 +220,6 @@ def apply_reference_edit(
 
     if track_changes and runs:
         del_el = _wrap_runs_as_deletion(runs, author, now, rev_id)
-        # Remove old runs, insert w:del in their place, then w:ins with new text.
         first_run_idx = list(p).index(runs[0])
         for r in runs:
             p.remove(r)
@@ -163,7 +227,6 @@ def apply_reference_edit(
         p.insert(first_run_idx, del_el)
         p.insert(first_run_idx + 1, ins_el)
     else:
-        # Untracked: replace runs with a single new run keeping the first run's formatting.
         first_run_idx = list(p).index(runs[0]) if runs else None
         for r in runs:
             p.remove(r)
@@ -180,7 +243,6 @@ def apply_reference_edit(
         else:
             p.append(new_r)
 
-    # Rewrite docx (only document.xml changes; everything else copied verbatim).
     new_doc = etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
     tmp_path = docx_path.with_suffix(docx_path.suffix + ".tmp")
     with zipfile.ZipFile(docx_path, "r") as zin, \
@@ -192,7 +254,13 @@ def apply_reference_edit(
 
     logger.info(
         "Applied reference edit to %s: ref_%d (%s tracking)",
-        docx_path.name, ref_number, "with" if track_changes else "without",
+        docx_path.name,
+        ref_number,
+        "with" if track_changes else "without",
     )
-    return {"ref_number": ref_number, "old_text": old_text,
-            "new_text": new_text, "changed": True}
+    return {
+        "ref_number": ref_number,
+        "old_text": old_text,
+        "new_text": new_text,
+        "changed": True,
+    }

@@ -344,18 +344,10 @@ def detect_list_kind(text: str, style_name: str = "", is_word_list: bool = False
 def parse_leading_style_hint(text: str) -> tuple[Optional[str], Optional[str], str]:
     """
     Parse a leading explicit tag or [STYLE:] hint.
-
-    Returns:
-        Tuple of (full_match, token, stripped_text)
+    Explicit <Tag> style hint auto-tagging is completely disabled across all tags.
     """
     text = text or ""
-    match = EXPLICIT_STYLE_RE.match(text.strip())
-    if not match:
-        return None, None, text.strip()
-
-    token = match.group(1) or match.group(2)
-    stripped = text.strip()[len(match.group(0)):].strip()
-    return match.group(0), token, stripped
+    return None, None, text.strip()
 
 
 def _resolve_box_keyword(token: Optional[str]) -> Optional[str]:
@@ -411,19 +403,11 @@ def _is_recognized_structural_tag(token: str) -> bool:
 
 def normalize_structural_tag_case(style_name: Optional[str]) -> Optional[str]:
     """Case-insensitively match *style_name* against the structural_tags
-    registry (rules.yaml) and return its canonical uppercase form if
-    recognized (e.g. "h1" -> "H1", "bl-first" -> "BL-FIRST"); otherwise
-    return it unchanged. Built-in Word styles ("Normal", "Table Grid", ...)
-    and unrelated custom publisher styles are never in the registry, so
-    they pass through untouched. Intended for the docx/xhtml round-trip
-    save paths, where a style name read back from an existing document or
-    HTML attribute may have drifted in case from however it was originally
-    authored."""
+    registry (rules.yaml) and return it stripped, preserving original casing
+    (e.g. "ChapterNumber", "ChapterTitle", "Head1", "Para-FL")."""
     if not style_name:
         return style_name
-    if _is_recognized_structural_tag(style_name):
-        return style_name.strip().upper()
-    return style_name
+    return style_name.strip()
 
 
 def _is_known_token(token: str, context_kind: Optional[str] = None) -> bool:

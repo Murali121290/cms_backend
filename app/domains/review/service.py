@@ -159,18 +159,26 @@ def build_review_page_state(
     # though the template does not currently consume the result directly.
     extract_document_structure_func(processed_path)
 
-    # Build styles list by starting with the static rules catalogue,
-    # and then adding any paragraph styles actually applied in the document.
-    styles = set()
-    try:
-        for rule in get_rules_loader_func().get_paragraphs():
-            if "style" in rule:
-                styles.add(rule["style"])
-    except Exception:
-        pass
-    styles.add("Normal")
-    styles.add("Body Text")
-    styles.update(ADDITIONAL_REVIEW_STYLES)
+    # Build styles list based on client (Springer vs. Other Clients)
+    from app.utils.client_styles import get_paragraph_styles_for_client
+    from app.models import File
+
+    file_record = db.query(File).filter(File.id == file_id).first()
+    client_name = None
+    if file_record and file_record.chapter:
+        ch = file_record.chapter
+        client_name = getattr(ch, "client", None)
+        if not client_name or not isinstance(client_name, str):
+            proj = getattr(ch, "project_rel", None)
+            if proj and proj.client:
+                client_name = (
+                    getattr(proj.client, "company", None)
+                    or getattr(proj.client, "name_company", None)
+                    or getattr(proj.client, "division", None)
+                )
+
+    client_styles = get_paragraph_styles_for_client(client_name)
+    styles = set(client_styles)
 
     try:
         from docx import Document
@@ -873,8 +881,73 @@ def save_xhtml_and_convert(
     try:
         # 2. Write XHTML to disk
         os.makedirs(os.path.dirname(xhtml_path), exist_ok=True)
+
+        # Strip existing XML declarations, DOCTYPEs, head, html, and body wrappers
+        cleaned_content = re.sub(r'<!--\?xml.*?\?-->', '', html_content, flags=re.DOTALL)
+        cleaned_content = re.sub(r'<\?xml.*?\?>', '', cleaned_content, flags=re.DOTALL)
+        cleaned_content = re.sub(r'<!DOCTYPE.*?>', '', cleaned_content, flags=re.DOTALL | re.IGNORECASE)
+
+        m_body = re.search(r'<body[^>]*>(.*?)</body>', cleaned_content, flags=re.DOTALL | re.IGNORECASE)
+        if m_body:
+            inner_body = m_body.group(1).strip()
+        else:
+            m_html = re.search(r'<html[^>]*>(.*?)</html>', cleaned_content, flags=re.DOTALL | re.IGNORECASE)
+            inner_body = m_html.group(1).strip() if m_html else cleaned_content.strip()
+
+        # Remove stray head/html tags if left over
+        inner_body = re.sub(r'<head[^>]*>.*?</head>', '', inner_body, flags=re.DOTALL | re.IGNORECASE)
+        inner_body = re.sub(r'</?(?:html|head|body)[^>]*>', '', inner_body, flags=re.IGNORECASE)
+
+        # Convert inline XML citation tags from <div> to <span> to prevent paragraph breaking in browsers/editors
+        inline_tags = (
+            "edition|publisher-name|publisher-loc|month|year|surname|given-names|collab|"
+            "comment|volume|issue|fpage|lpage|ext-link|uri|xref|named-content|label|"
+            "string-name|person-group|mixed-citation|bold|italic|sub|sup"
+        )
+        div_inline_pattern = re.compile(rf'<div(\s+[^>]*)data-xml-tag="({inline_tags})"([^>]*)>(.*?)</div>', re.DOTALL | re.IGNORECASE)
+        inner_body = div_inline_pattern.sub(r'<span\1data-xml-tag="\2"\3>\4</span>', inner_body)
+
+        # Merge adjacent consecutive track changes insertion spans into a single span
+        prev_body = ""
+        merge_pattern = re.compile(r'(<(?:span|ins)[^>]*class="[^"]*tc-insert[^"]*"[^>]*>)(.*?)</(?:span|ins)>\s*<(?:span|ins)[^>]*class="[^"]*tc-insert[^"]*"[^>]*>(.*?)</(?:span|ins)>', re.DOTALL | re.IGNORECASE)
+        while prev_body != inner_body:
+            prev_body = inner_body
+            inner_body = merge_pattern.sub(r'\1\2\3</span>', inner_body)
+
+        # Escape non-standard named HTML entities for strict XML validation in web browsers
+        entity_map = {
+            "&nbsp;": "&#160;",
+            "&rdquo;": "&#8221;",
+            "&ldquo;": "&#8220;",
+            "&rsquo;": "&#8217;",
+            "&lsquo;": "&#8216;",
+            "&ndash;": "&#8211;",
+            "&mdash;": "&#8212;",
+            "&hellip;": "&#8230;",
+            "&thinsp;": "&#8201;",
+            "&ensp;": "&#8194;",
+            "&emsp;": "&#8195;",
+        }
+        for ent, num in entity_map.items():
+            inner_body = inner_body.replace(ent, num)
+
+        content_to_save = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">\n'
+            '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:xlink="http://www.w3.org/1999/xlink">\n'
+            '  <head>\n'
+            '    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>\n'
+            '    <title>XHTML Document</title>\n'
+            '    <link rel="stylesheet" type="text/css" href="idGeneratedStyles.css"/>\n'
+            '  </head>\n'
+            '  <body>\n'
+            f'    {inner_body}\n'
+            '  </body>\n'
+            '</html>'
+        )
+            
         with open(xhtml_path, "w", encoding="utf-8") as f:
-            f.write(html_content)
+            f.write(content_to_save)
         logger.info(f"Saved XHTML: {xhtml_path}")
 
         # 3. Patch in-place directly on the existing file path!
