@@ -33,12 +33,14 @@ const PO_TEMPLATE_LABELS: Record<string, string> = {
   wk_lww: 'WK / LWW launch form',
   kendall_hunt: 'Kendall Hunt RFQ',
   artech_house: 'Artech House transmittal',
+  springer: 'Springer Publishing Assignment Memo',
 }
 
 const PO_VENDOR_HINTS: Record<string, string> = {
   wk_lww: 'Wolters Kluwer',
   kendall_hunt: 'Kendall Hunt',
   artech_house: 'Artech House',
+  springer: 'Springer Publishing',
 }
 
 function humanizeKey(key: string): string {
@@ -110,9 +112,9 @@ function PoUpload({ onExtracted, onRemove }: PoUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null)
 
   async function processFile(file: File) {
-    const isSupported = /\.(pdf|xlsx)$/i.test(file.name)
+    const isSupported = /\.(pdf|xlsx|docx)$/i.test(file.name)
     if (!isSupported) {
-      toast.error('Only .pdf or .xlsx files are allowed')
+      toast.error('Only .pdf, .xlsx, or .docx files are allowed')
       return
     }
     setPoFile(file)
@@ -219,7 +221,7 @@ function PoUpload({ onExtracted, onRemove }: PoUploadProps) {
       <input
         ref={inputRef}
         type="file"
-        accept=".pdf,.xlsx"
+        accept=".pdf,.xlsx,.docx"
         className="hidden"
         onChange={e => { const f = e.target.files?.[0]; if (f) processFile(f) }}
       />
@@ -228,7 +230,7 @@ function PoUpload({ onExtracted, onRemove }: PoUploadProps) {
           <Upload size={20} className={isDragging ? 'text-primary' : 'text-muted'} />
         </div>
         <p className="text-sm font-medium text-text">Drag &amp; drop a customer PO here</p>
-        <p className="text-xs text-muted">or click to browse — <strong>.pdf or .xlsx</strong></p>
+        <p className="text-xs text-muted">or click to browse — <strong>.pdf, .xlsx or .docx</strong></p>
         <p className="text-[11px] text-muted mt-1">We'll try to pre-fill the form below from it</p>
       </div>
     </div>
@@ -486,9 +488,9 @@ export function CreateProjectPage() {
       }
       return next as Partial<ProjectCreate>
     })
-    const authorsRaw = result.extras['author_names']
-    if (Array.isArray(authorsRaw) && authorsRaw.length > 0) {
-      const joined = authorsRaw.map(String).join('; ')
+    const authorsRaw = result.fields['author_names'] ?? result.extras['author_names']
+    if (authorsRaw) {
+      const joined = Array.isArray(authorsRaw) ? authorsRaw.map(String).join('; ') : String(authorsRaw)
       setAuthorName(current => {
         if (current.trim()) return current
         filled.__author_name = joined
@@ -534,8 +536,17 @@ export function CreateProjectPage() {
     setPoFilledValues({})
   }
 
-  const pmUsers    = useMemo(() => users.filter(u => u.active_status && (u.role || u.designation).toLowerCase().replace(" ","").includes('projectmanager')), [users])
-  const salesUsers = useMemo(() => users.filter(u => u.active_status && (u.role || u.designation).toLowerCase().replace(" ","").includes('sales')), [users])
+  const pmUsers = useMemo(() => users.filter(u => {
+    if (!u.active_status || !u.role) return false
+    const r = u.role.toLowerCase().replace(/[\s-]/g, '')
+    return r.includes('projectmanager') || r.includes('manager') || r.includes('pm') || r.includes('admin')
+  }), [users])
+
+  const salesUsers = useMemo(() => users.filter(u => {
+    if (!u.active_status || !u.role) return false
+    const r = u.role.toLowerCase().replace(/[\s-]/g, '')
+    return r.includes('sales')
+  }), [users])
 
   // Build workflow map + ordered stage lists
   const workflowMap = useMemo(() => {
@@ -736,20 +747,33 @@ export function CreateProjectPage() {
             </p>
             <PoUpload onExtracted={handlePoExtracted} onRemove={handlePoRemove} />
 
-            {poResult && Object.keys(poResult.extras).some(k => formatExtraValue(poResult.extras[k]) !== null) && (
+            {poResult && (
+              Object.keys(poResult.fields).some(k => formatExtraValue(poResult.fields[k]) !== null) ||
+              Object.keys(poResult.extras).some(k => formatExtraValue(poResult.extras[k]) !== null)
+            ) && (
               <details className="col-span-2 rounded-xl border border-border overflow-hidden" open>
                 <summary className="list-none cursor-pointer px-4 py-3 bg-surface flex items-center justify-between text-sm font-semibold text-text">
                   <span>Extracted PO Details</span>
                   <ChevronDown size={14} className="text-muted" />
                 </summary>
                 <div className="px-4 py-3 flex flex-col gap-2">
+                  {Object.entries(poResult.fields).map(([key, value]) => {
+                    const formatted = formatExtraValue(value)
+                    if (formatted === null) return null
+                    return (
+                      <div key={key} className="flex gap-3 text-xs py-1.5 border-b border-border/50 last:border-b-0">
+                        <span className="w-44 flex-shrink-0 font-medium text-muted">{humanizeKey(key)}</span>
+                        <span className="text-text font-semibold">{formatted}</span>
+                      </div>
+                    )
+                  })}
                   {Object.entries(poResult.extras).map(([key, value]) => {
                     const formatted = formatExtraValue(value)
                     if (formatted === null) return null
                     return (
-                      <div key={key} className="flex gap-3 text-xs py-1.5 border-b border-border last:border-b-0">
+                      <div key={`extra-${key}`} className="flex gap-3 text-xs py-1.5 border-b border-border/50 last:border-b-0">
                         <span className="w-44 flex-shrink-0 font-medium text-muted">{humanizeKey(key)}</span>
-                        <span className="text-text">{formatted}</span>
+                        <span className="text-text font-semibold">{formatted}</span>
                       </div>
                     )
                   })}

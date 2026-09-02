@@ -38,7 +38,12 @@ def generate_html_report(docx_path, json_config_path, output_html_path):
         if sid and sname:
             style_id_to_name[sid] = sname
 
-    def track_style_location(style_name, location_str):
+    IGNORED_STYLES = {"normal", "default paragraph font", "hyperlink"}
+
+    def record_used_style(style_name, location_str):
+        if not style_name or style_name.strip().lower() in IGNORED_STYLES:
+            return
+        used_styles.add(style_name)
         if style_name not in style_locations:
             style_locations[style_name] = []
         style_locations[style_name].append(location_str)
@@ -52,21 +57,17 @@ def generate_html_report(docx_path, json_config_path, output_html_path):
     for i, p in enumerate(doc.paragraphs, start=1):
         # Paragraph style actually applied in text
         style_name = get_style_name(p.style)
-        used_styles.add(style_name)
-        track_style_location(style_name, f"Paragraph {i}")
+        record_used_style(style_name, f"Paragraph {i}")
 
         # Character styles actively applied to text runs
         for r_idx, run in enumerate(p.runs, start=1):
-            if run.style and run.style.name and run.style.name != "Default Paragraph Font":
-                run_style_name = run.style.name
-                used_styles.add(run_style_name)
-                track_style_location(run_style_name, f"Paragraph {i}, Run {r_idx}")
+            if run.style and run.style.name:
+                record_used_style(run.style.name, f"Paragraph {i}, Run {r_idx}")
 
     # 4. Scan ONLY Active Tables (Content in use word document, including cells, runs, and nested tables)
     def scan_table(table, location_prefix):
         table_style = get_style_name(table.style)
-        used_styles.add(table_style)
-        track_style_location(table_style, location_prefix)
+        record_used_style(table_style, location_prefix)
 
         scanned_cells = set()
         for r_idx, row in enumerate(table.rows, start=1):
@@ -79,15 +80,12 @@ def generate_html_report(docx_path, json_config_path, output_html_path):
                 for p_idx, p in enumerate(cell.paragraphs, start=1):
                     # Paragraph style
                     p_style_name = get_style_name(p.style)
-                    used_styles.add(p_style_name)
-                    track_style_location(p_style_name, f"{cell_loc}, Paragraph {p_idx}")
+                    record_used_style(p_style_name, f"{cell_loc}, Paragraph {p_idx}")
                     
                     # Character styles inside runs
                     for r_run_idx, run in enumerate(p.runs, start=1):
-                        if run.style and run.style.name and run.style.name != "Default Paragraph Font":
-                            run_style_name = run.style.name
-                            used_styles.add(run_style_name)
-                            track_style_location(run_style_name, f"{cell_loc}, Paragraph {p_idx}, Run {r_run_idx}")
+                        if run.style and run.style.name:
+                            record_used_style(run.style.name, f"{cell_loc}, Paragraph {p_idx}, Run {r_run_idx}")
                 
                 # Check for nested tables in this cell
                 for nt_idx, nested_table in enumerate(cell.tables, start=1):
@@ -122,8 +120,7 @@ def generate_html_report(docx_path, json_config_path, output_html_path):
                                 p_style_id = p_style_elem.attrib.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val')
                                 if p_style_id:
                                     style_name = style_id_to_name.get(p_style_id, p_style_id)
-                                    used_styles.add(style_name)
-                                    track_style_location(style_name, f"{note_label}, Paragraph {p_idx}")
+                                    record_used_style(style_name, f"{note_label}, Paragraph {p_idx}")
                             
                             # Scan runs inside the paragraph
                             for r_idx, r in enumerate(p.findall('.//w:r', namespaces), start=1):
@@ -131,17 +128,16 @@ def generate_html_report(docx_path, json_config_path, output_html_path):
                                 if r_style_elem is not None:
                                     r_style_id = r_style_elem.attrib.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val')
                                     if r_style_id:
-                                        style_name = style_id_to_name.get(r_style_id, r_style_id)
-                                        if style_name and style_name != "Default Paragraph Font":
-                                            used_styles.add(style_name)
-                                            track_style_location(style_name, f"{note_label}, Paragraph {p_idx}, Run {r_idx}")
+                                        style_name = style_id_to_name.get(r_style_id, p_style_id)
+                                        record_used_style(style_name, f"{note_label}, Paragraph {p_idx}, Run {r_idx}")
         except Exception as note_err:
             print(f"[WARNING] Failed to parse {xml_name}: {note_err}")
 
     scan_xml_notes(docx_path, 'word/footnotes.xml', 'footnote')
     scan_xml_notes(docx_path, 'word/endnotes.xml', 'endnote')
 
-    # Deduplicate and separate unique style lists
+    # Filter out any ignored styles as failsafe
+    used_styles = {s for s in used_styles if s and s.strip().lower() not in IGNORED_STYLES}
     all_unique_styles = sorted(list(used_styles), key=lambda x: str(x))
     allowed_styles_lower = {s.lower(): s for s in allowed_styles}
 

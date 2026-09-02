@@ -33,6 +33,18 @@ function projectLabel(p: Project): string {
   return p.project_title || p.project_code || `Project #${p.id}`
 }
 
+function getUserDisplayName(user_name: string | null | undefined, users: User[]): string {
+  if (!user_name) return '— Unassigned —'
+  const u = users.find(x => x.user_name === user_name || x.email === user_name)
+  if (u) {
+    const fn = (u.first_name || '').trim()
+    const ln = (u.last_name || '').trim()
+    const full = `${fn} ${ln}`.trim()
+    if (full) return full
+  }
+  return user_name
+}
+
 // ── Summary Widget ────────────────────────────────────────────────────────────
 
 function SummaryWidget({ icon: Icon, label, value, iconCls, onClick, active }: {
@@ -254,7 +266,7 @@ function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo
             <span className="text-xs text-muted font-medium flex-shrink-0">PM:</span>
             {!canAccess(ROLE_PERMISSIONS.edit_assignee) ? (
               <span className="text-xs text-text font-medium truncate">
-                {project.project_manager || '— Unassigned —'}
+                {getUserDisplayName(project.project_manager, pmUsers)}
               </span>
             ) : (
               <div className="relative flex items-center">
@@ -267,7 +279,7 @@ function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo
                 >
                   <option value="">— Unassigned —</option>
                   {pmUsers.map(u => (
-                    <option key={u.id} value={u.user_name}>{u.user_name}</option>
+                    <option key={u.id} value={u.user_name}>{getUserDisplayName(u.user_name, pmUsers)}</option>
                   ))}
                 </select>
                 {pmLoading
@@ -391,9 +403,11 @@ export function ClientProjects() {
       .then(([c, ps, users]) => {
         setClient(c)
         setProjects(ps)
-        setPmUsers((users || []).filter(u =>
-          u.active_status && (u.role || u.designation).toLowerCase().replace(" ", "").includes('projectmanager')
-        ))
+        setPmUsers((users || []).filter(u => {
+          if (!u.active_status || !u.role) return false
+          const r = u.role.toLowerCase().replace(/[\s-]/g, '')
+          return r.includes('projectmanager') || r.includes('manager') || r.includes('pm') || r.includes('admin')
+        }))
       })
       .catch(() => toast.error('Failed to load projects'))
       .finally(() => setLoading(false))

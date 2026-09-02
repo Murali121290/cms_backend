@@ -157,10 +157,8 @@ def _serialize_admin_role(role: Any):
 
 def _serialize_admin_user(user: models.User):
     from app.domains.auth.user_service import determine_access_level
-    raw_level = getattr(user, "access_level", None)
-    role_val = getattr(user, "role", None) or getattr(user, "designation", None) or (user.roles[0].name if getattr(user, "roles", None) else "")
-    if not raw_level or raw_level.lower() == "standard":
-        raw_level = determine_access_level(role_val)
+    role_val = getattr(user, "role", None) or ""
+    raw_level = determine_access_level(role_val) if role_val else None
     return schemas_v2.AdminUser(
         id=user.id,
         username=user.username,
@@ -168,28 +166,26 @@ def _serialize_admin_user(user: models.User):
         first_name=getattr(user, "first_name", None),
         last_name=getattr(user, "last_name", None),
         is_active=user.is_active,
-        roles=[schemas_v2.AdminUserRole(id=role.id, name=role.name) for role in user.roles],
+        roles=[schemas_v2.AdminUserRole(id=role.id, name=role.name) for role in user.roles] if role_val else [],
         team=user.team,
         customer_access=user.customer_access or [],
         designation=user.designation,
-        role=getattr(user, "role", None) or role_val,
+        role=role_val or None,
         access_level=raw_level,
     )
 
 
 def _serialize_viewer(user: models.User):
     from app.domains.auth.user_service import determine_access_level
-    raw_level = getattr(user, "access_level", None)
-    role_val = getattr(user, "role", None) or getattr(user, "designation", None) or (user.roles[0].name if getattr(user, "roles", None) else "")
-    if not raw_level or raw_level.lower() == "standard":
-        raw_level = determine_access_level(role_val)
+    role_val = getattr(user, "role", None) or ""
+    raw_level = determine_access_level(role_val) if role_val else None
     return schemas_v2.Viewer(
         id=user.id,
         username=user.username,
         email=user.email,
         first_name=getattr(user, "first_name", None),
         last_name=getattr(user, "last_name", None),
-        roles=[role.name for role in user.roles],
+        roles=[role.name for role in user.roles] if role_val else [],
         is_active=user.is_active,
         team=user.team,
         designation=user.designation,
@@ -216,9 +212,23 @@ def _get_user_assigned_project_codes(db: Session, user: models.User) -> list[str
 
 def _get_filtered_projects_query(db: Session, user: models.User):
     from app.domains.projects.models import Project
+    from app.domains.clients.models import Client
     from app.domains.auth.rbac_config import has_permission
 
     query = db.query(Project)
+
+    # Filter projects based on user.customer_access for non-Admin users
+    if not _has_admin_role(user) and getattr(user, "customer_access", None):
+        allowed = [c.strip() for c in user.customer_access if c and isinstance(c, str) and c.strip()]
+        if allowed:
+            query = query.outerjoin(Client, Project.client_id == Client.id).filter(
+                (Project.client_name.in_(allowed)) |
+                (Project.division_code.in_(allowed)) |
+                (Client.company.in_(allowed)) |
+                (Client.division.in_(allowed)) |
+                (Client.name_company.in_(allowed))
+            )
+
     if has_permission(user, "view_all_projects"):
         return query
 
