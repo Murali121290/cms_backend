@@ -406,7 +406,6 @@ export function CreateProjectPage() {
   const [artWfEnabled, setArtWfEnabled] = useState(false)
   const [artWfName, setArtWfName] = useState('')
   const [artDueDate, setArtDueDate] = useState('')
-  const [artChapterCount, setArtChapterCount] = useState(5)
 
   // Reference data
   const [clients,           setClients]          = useState<Client[]>([])
@@ -630,7 +629,6 @@ export function CreateProjectPage() {
       }
       if (artWfEnabled && artWfName) {
         formData.append('art_workflow_name', artWfName)
-        formData.append('art_chapter_count', String(artChapterCount))
       }
 
       if (form.division_code)      formData.append('division_code',    form.division_code)
@@ -659,17 +657,18 @@ export function CreateProjectPage() {
 
       const response = await projectsApi.create(formData)
 
-      if (zipFile && response.project.code) {
-        const customerCode = form.division_code || form.client_name || 'unknown'
+      toast.success(`Project "${response.project.title ?? response.project.code}" created`)
+
+      if (zipFile && response.project.id) {
         try {
-          const result = await uploadsApi.uploadZip(customerCode, response.project.code, response.project.id, zipFile)
-          toast.success(`ZIP processed — ${result.total_chapters} chapter(s) detected`)
+          const previewData = await projectsApi.previewZip(response.project.id, zipFile)
+          toast.success(`ZIP extracted — please map the files`)
+          navigate(`/projects/${response.project.id}/mapping`, { state: { previewData } })
+          return // stop further navigation
         } catch {
-          toast.error('Project created but ZIP upload failed')
+          toast.error('Project created but ZIP preview failed')
         }
       }
-
-      toast.success(`Project "${response.project.title ?? response.project.code}" created`)
 
       if (response.redirect_to) {
         navigate(response.redirect_to)
@@ -1040,13 +1039,6 @@ export function CreateProjectPage() {
                       onChange={e => setArtWfName(e.target.value)}
                       options={workflowNames.map(n => ({ value: n, label: n }))}
                       placeholder="Select Art Workflow"
-                    />
-                    <Input
-                      label="Number of Art Chapters"
-                      type="number"
-                      min={1}
-                      value={String(artChapterCount)}
-                      onChange={e => setArtChapterCount(Number(e.target.value) || 1)}
                     />
                   </div>
                 )}

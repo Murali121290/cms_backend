@@ -3,6 +3,8 @@ import os
 import shutil
 import tempfile
 import zipfile
+import uuid
+import re
 from datetime import datetime, timedelta
 import logging
 from typing import Any, List, Optional
@@ -1671,32 +1673,38 @@ def api_v2_project_bootstrap(
 
     # 3. Update/Setup Art chapters
     if art_workflow_name:
-        num_art_chapters = art_chapter_count if art_chapter_count is not None else (project.chapter_count or 5)
-        for i in range(1, num_art_chapters + 1):
-            art_ch_num = f"Ch {i:02d} - Art"
-            if art_ch_num not in _existing_ci:
-                db.add(_ChapterInfo(
-                    client=project.division_code or "",
-                    project=project.code,
-                    chapters=art_ch_num,
-                    chapter_title=f"Chapter {i:02d} Art Pack",
-                    workflow=art_workflow_name,
-                    status="Received",
-                    complexity_level=getattr(project, "composition", None) or "Medium",
-                    stage_level=1,
-                    stage_name=get_first_stage(art_workflow_name),
-                    due_date=final_art_due,
-                    published_status="Draft",
-                    priority=getattr(project, "priority", None) or "Normal",
-                    project_manager_name=getattr(project, "project_manager", None) or None,
-                ))
-                _existing_ci.add(art_ch_num)
-            else:
-                db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code, _ChapterInfo.chapters == art_ch_num).update({
-                    _ChapterInfo.workflow: art_workflow_name,
-                    _ChapterInfo.stage_name: get_first_stage(art_workflow_name),
-                    _ChapterInfo.due_date: final_art_due
-                }, synchronize_session=False)
+        # Update all existing Art chapters to the selected workflow
+        db.query(_ChapterInfo).filter(
+            _ChapterInfo.project == project.code,
+            _ChapterInfo.chapters.like("% - Art")
+        ).update({
+            _ChapterInfo.workflow: art_workflow_name,
+            _ChapterInfo.stage_name: get_first_stage(art_workflow_name),
+            _ChapterInfo.due_date: final_art_due
+        }, synchronize_session=False)
+
+        # Create an Art chapter for each manuscript chapter that exists
+        for _ch in chapters:
+            if _ch.number and _ch.number.isdigit():
+                art_ch_num = f"Ch {_ch.number.zfill(2)} - Art"
+                if art_ch_num not in _existing_ci:
+                    db.add(_ChapterInfo(
+                        client=project.division_code or "",
+                        project=project.code,
+                        chapters=art_ch_num,
+                        chapter_title=f"Chapter {_ch.number.zfill(2)} Art",
+                        workflow=art_workflow_name,
+                        status="Received",
+                        complexity_level=getattr(project, "composition", None) or "Medium",
+                        stage_level=1,
+                        stage_name=get_first_stage(art_workflow_name),
+                        due_date=final_art_due,
+                        published_status="Draft",
+                        priority=getattr(project, "priority", None) or "Normal",
+                        project_manager_name=getattr(project, "project_manager", None) or None,
+                    ))
+                    _existing_ci.add(art_ch_num)
+
     else:
         # Delete if any exist
         for row in db.query(_ChapterInfo).filter(
@@ -1924,7 +1932,7 @@ def api_v2_project_intake(
                 client=project.division_code or "",
                 project=project.code,
                 chapters=art_ch_num,
-                chapter_title=f"Chapter {start_idx + i:02d} Art Pack ({batch_name})",
+                chapter_title=f"Chapter {start_idx + i:02d} Art ({batch_name})",
                 workflow=workflow_name,
                 status="Received",
                 complexity_level=project.composition or "Medium",
@@ -3695,7 +3703,7 @@ def api_v2_upload_zip(
                         # Setup pretty title for Art pack track chapters
                         if "Art" in chapter_no_str:
                             digits_clean = chapter_no_str.replace("Ch ", "").replace(" - Art", "")
-                            chapter_title = f"Chapter {digits_clean} Art Pack"
+                            chapter_title = f"Chapter {digits_clean} Art"
                         elif chapter_no_str in ["Design", "CE support"]:
                             chapter_title = chapter_no_str
                         else:
@@ -7290,11 +7298,13 @@ def api_v2_create_chapter_with_manuscript(
 
     number_padded = f"{new_number:02d}"
 
+    title = Path(os.path.basename(file.filename)).stem.strip() if file.filename else f"Chapter {number_padded}"
+
     result = chapter_service.create_chapter(
         db,
         project_id=project_id,
         number=number_padded,
-        title=f"Chapter {number_padded}",
+        title=title,
         upload_dir=file_service.UPLOAD_DIR,
         # "Received" — matches the pending-planning status used elsewhere (e.g. sync-chapters)
         # until this chapter is planned and approved on the Planning page.
@@ -7417,7 +7427,7 @@ def api_v2_create_chapter_with_art(
         db,
         project_id=project_id,
         number=art_chapter_name,
-        title=f"Chapter {number_padded} Art Pack",
+        title=f"Chapter {number_padded} Art",
         upload_dir=file_service.UPLOAD_DIR,
         # "Received" — matches the pending-planning status used elsewhere (e.g. sync-chapters)
         # until this chapter is planned and approved on the Planning page.
@@ -7553,11 +7563,13 @@ def api_v2_create_chapters_with_manuscript_zip(
                     skipped.append({"filename": fname, "reason": f"Chapter {number_padded} already exists."})
                     continue
 
+                title = Path(os.path.basename(fname)).stem.strip() if fname else f"Chapter {number_padded}"
+
                 result = chapter_service.create_chapter(
                     db,
                     project_id=project_id,
                     number=number_padded,
-                    title=f"Chapter {number_padded}",
+                    title=title,
                     upload_dir=file_service.UPLOAD_DIR,
                     status="Received",
                 )
@@ -7675,7 +7687,7 @@ def api_v2_create_chapters_with_art_zip(
                 db,
                 project_id=project_id,
                 number=art_chapter_name,
-                title=f"Chapter {new_num:02d} Art Pack",
+                title=f"Chapter {new_num:02d} Art",
                 upload_dir=file_service.UPLOAD_DIR,
                 status="Received",
             )
@@ -8060,3 +8072,415 @@ def api_v2_chapter_transition_email(
     }}
 
 
+
+@router.post("/projects/{project_id}/preview-zip", response_model=schemas_v2.PreviewZipResponse)
+def api_v2_preview_zip(
+    project_id: int,
+    file: UploadFile = FastAPIFile(...),
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(status_code=status.HTTP_401_UNAUTHORIZED, code="AUTH_REQUIRED", message="Authentication required.")
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="PROJECT_NOT_FOUND", message="Project not found.")
+
+    if not file.filename or not file.filename.lower().endswith(".zip"):
+        return _error_response(status_code=status.HTTP_400_BAD_REQUEST, code="INVALID_FILE_TYPE", message="Only .zip files are supported.")
+
+    session_id = str(uuid.uuid4())
+    temp_dir = os.path.join(file_service.UPLOAD_DIR, "staging", session_id)
+    os.makedirs(temp_dir, exist_ok=True)
+
+    zip_path = os.path.join(temp_dir, file.filename)
+    with open(zip_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    # Save permanently for resuming
+    project_code = project.project_code or f"PRJ-{project.id}"
+    client_name = project.client_name or "unknown"
+    project_dir = os.path.join(file_service.UPLOAD_DIR, client_name, project_code)
+    os.makedirs(project_dir, exist_ok=True)
+    saved_zip_path = os.path.join(project_dir, f"{project_code}_mapping.zip")
+    shutil.copyfile(zip_path, saved_zip_path)
+
+    with zipfile.ZipFile(zip_path, "r") as z:
+        z.extractall(temp_dir)
+
+    class_path = os.path.join(os.path.dirname(__file__), "..", "domains", "projects", "classification.json")
+    classification_rules = []
+    if os.path.exists(class_path):
+        with open(class_path, "r") as f:
+            classification_rules = json.load(f).get("heuristics", [])
+
+    def classify_file(fname: str, rel_path: str):
+        ext = fname.split(".")[-1].lower() if "." in fname else ""
+        if ext == "docx": file_type = "Manuscript"
+        elif ext in ["xml", "html", "xhtml"] and "art" not in fname.lower(): file_type = "XML"
+        elif ext in ["indd"]: file_type = "InDesign"
+        elif ext in ["pdf"] and "proof" in fname.lower() and "art" not in fname.lower(): file_type = "Proof"
+        else: file_type = "Art"
+
+        stem = os.path.splitext(fname)[0].lower()
+        matched_cat = "Not Found"
+        
+        # Helper to check rules against a string
+        def get_cat(s: str) -> str:
+            for rule in classification_rules:
+                for p in rule.get("patterns", []):
+                    p_clean = p.lower()
+                    if re.search(r'(?:^|[^a-z])' + re.escape(p_clean) + r'(?:[^a-z]|$)', s) or p_clean in s.split("_") or p_clean in s.split("-"):
+                        return rule.get("category", "")
+            return "Not Found"
+            
+        matched_cat = get_cat(stem)
+        
+        # If not found in filename, try parent directories
+        if matched_cat == "Not Found":
+            path_parts = rel_path.replace("\\", "/").split("/")
+            for part in reversed(path_parts[:-1]):
+                cat = get_cat(part.lower())
+                if cat != "Not Found":
+                    matched_cat = cat
+                    break
+
+        chapter_num = None
+        if matched_cat == "Chapters":
+            path_parts = rel_path.replace("\\", "/").split("/")
+            
+            # 1. Try parent folders first for explicit 'ch' or 'chapter' match
+            for part in reversed(path_parts[:-1]):
+                m = re.search(r'(?:chapter|chap|ch)[_\s-]*(\d+)', part.lower())
+                if m:
+                    chapter_num = f"{int(m.group(1)):02d}"
+                    break
+            
+            # 2. If not found in folders explicitly, try the filename (which might be loose)
+            if not chapter_num:
+                chapter_num = file_service.extract_chapter_number_from_filename(fname)
+            
+            # 3. If STILL not found, try folders with loose matching
+            if not chapter_num:
+                for part in reversed(path_parts[:-1]):
+                    chapter_num = file_service.extract_chapter_number_from_filename(part)
+                    if chapter_num: break
+        elif matched_cat == "Appendix":
+            m = re.search(r'app(?:endix)?(?:_|\s|-)*([a-z0-9]+)\b', stem)
+            if m:
+                chapter_num = m.group(1).upper()
+            else:
+                chapter_num = file_service.extract_chapter_number_from_filename(fname)
+
+        if matched_cat == "Front Matter": chapter_num = "FM"
+        if matched_cat == "Back Matter": chapter_num = "BM"
+
+        return matched_cat, chapter_num, file_type
+
+    files_result = []
+    for root, _, filenames in os.walk(temp_dir):
+        for fname in filenames:
+            if fname == file.filename or "__MACOSX" in root or fname.startswith("."): continue
+            rel_path = os.path.relpath(os.path.join(root, fname), temp_dir)
+            cat, num, ftype = classify_file(fname, rel_path)
+            files_result.append({
+                "original_filename": rel_path,
+                "category": cat,
+                "chapter_number": str(num) if num else None,
+                "file_type": ftype
+            })
+
+    return {"session_id": session_id, "files": files_result}
+
+
+@router.get("/projects/{project_id}/resume-mapping", response_model=schemas_v2.PreviewZipResponse)
+def api_v2_resume_mapping(
+    project_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(status_code=status.HTTP_401_UNAUTHORIZED, code="AUTH_REQUIRED", message="Authentication required.")
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="PROJECT_NOT_FOUND", message="Project not found.")
+
+    project_code = project.project_code or f"PRJ-{project.id}"
+    client_name = project.client_name or "unknown"
+    project_dir = os.path.join(file_service.UPLOAD_DIR, client_name, project_code)
+    saved_zip_path = os.path.join(project_dir, f"{project_code}_mapping.zip")
+
+    if not os.path.exists(saved_zip_path):
+        return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="ZIP_NOT_FOUND", message="No saved mapping ZIP found for this project.")
+
+    session_id = str(uuid.uuid4())
+    temp_dir = os.path.join(file_service.UPLOAD_DIR, "staging", session_id)
+    os.makedirs(temp_dir, exist_ok=True)
+
+    with zipfile.ZipFile(saved_zip_path, "r") as z:
+        z.extractall(temp_dir)
+
+    class_path = os.path.join(os.path.dirname(__file__), "..", "domains", "projects", "classification.json")
+    classification_rules = []
+    if os.path.exists(class_path):
+        with open(class_path, "r") as f:
+            classification_rules = json.load(f).get("heuristics", [])
+
+    def classify_file(fname: str, rel_path: str):
+        ext = fname.split(".")[-1].lower() if "." in fname else ""
+        if ext in ["xml", "html", "xhtml", "log"]: file_type = "XML"
+        elif ext in ["png", "jpg", "jpeg", "gif", "tiff", "tif", "svg", "eps"]: file_type = "Art"
+        elif ext in ["indd"]: file_type = "InDesign"
+        elif ext in ["pdf"] and "proof" in fname.lower(): file_type = "Proof"
+        else: file_type = "Manuscript"
+
+        stem = os.path.splitext(fname)[0].lower()
+        matched_cat = "Not Found"
+        
+        # Helper to check rules against a string
+        def get_cat(s: str) -> str:
+            for rule in classification_rules:
+                for p in rule.get("patterns", []):
+                    p_clean = p.lower()
+                    if re.search(r'(?:^|[^a-z])' + re.escape(p_clean) + r'(?:[^a-z]|$)', s) or p_clean in s.split("_") or p_clean in s.split("-"):
+                        return rule.get("category", "")
+            return "Not Found"
+            
+        matched_cat = get_cat(stem)
+        
+        # If not found in filename, try parent directories
+        if matched_cat == "Not Found":
+            path_parts = rel_path.replace("\\", "/").split("/")
+            for part in reversed(path_parts[:-1]):
+                cat = get_cat(part.lower())
+                if cat != "Not Found":
+                    matched_cat = cat
+                    break
+
+        chapter_num = None
+        if matched_cat == "Chapters":
+            chapter_num = file_service.extract_chapter_number_from_filename(fname)
+            if not chapter_num:
+                path_parts = rel_path.replace("\\", "/").split("/")
+                for part in reversed(path_parts[:-1]):
+                    chapter_num = file_service.extract_chapter_number_from_filename(part)
+                    if chapter_num: break
+        elif matched_cat == "Appendix":
+            m = re.search(r'app(?:endix)?(?:_|\s|-)*([a-z0-9]+)\b', stem)
+            if m:
+                chapter_num = m.group(1).upper()
+            else:
+                chapter_num = file_service.extract_chapter_number_from_filename(fname)
+
+        if matched_cat == "Front Matter": chapter_num = "FM"
+        if matched_cat == "Back Matter": chapter_num = "BM"
+
+        return matched_cat, chapter_num, file_type
+
+    files_result = []
+    for root, _, filenames in os.walk(temp_dir):
+        for fname in filenames:
+            if "__MACOSX" in root or fname.startswith("."): continue
+            rel_path = os.path.relpath(os.path.join(root, fname), temp_dir)
+            cat, num, ftype = classify_file(fname, rel_path)
+            files_result.append({
+                "original_filename": rel_path,
+                "category": cat,
+                "chapter_number": str(num) if num else None,
+                "file_type": ftype
+            })
+
+    return {"session_id": session_id, "files": files_result}
+
+
+@router.post("/projects/{project_id}/finalize-mapping", response_model=schemas_v2.FinalizeMappingResponse)
+def api_v2_finalize_mapping(
+    project_id: int,
+    request: schemas_v2.FinalizeMappingRequest,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(status_code=status.HTTP_401_UNAUTHORIZED, code="AUTH_REQUIRED", message="Authentication required.")
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="PROJECT_NOT_FOUND", message="Project not found.")
+
+    temp_dir = os.path.join(file_service.UPLOAD_DIR, "staging", request.session_id)
+    if not os.path.exists(temp_dir):
+        return _error_response(status_code=status.HTTP_400_BAD_REQUEST, code="SESSION_EXPIRED", message="Session expired or not found.")
+
+    from app.domains.workflow.models import WorkflowMaster as _WorkflowMaster
+    from sqlalchemy import or_ as _or
+    first_stage = None
+    if project.workflow_name:
+        first_stage_row = db.query(_WorkflowMaster).filter(
+            _WorkflowMaster.workflow_name == project.workflow_name,
+            _or(_WorkflowMaster.previous_stage.is_(None), _WorkflowMaster.previous_stage == "")
+        ).first()
+        if first_stage_row:
+            first_stage = first_stage_row.stage_name
+
+    def get_or_create_chapter(ch_num: str, ch_title: str):
+        chapter = db.query(models.Chapter).filter(
+            models.Chapter.project == project.project_code,
+            models.Chapter.chapters == ch_num,
+        ).first()
+        if not chapter:
+            chapter = models.Chapter(
+                client=project.division_code or "",
+                project=project.project_code,
+                chapters=ch_num,
+                chapter_title=ch_title,
+                workflow=project.workflow_name or "",
+                status="Received",
+                complexity_level=getattr(project, "composition", None) or "Medium",
+                stage_level=1,
+                stage_name=first_stage,
+                published_status="Draft",
+                priority=getattr(project, "priority", None) or "Normal",
+            )
+            db.add(chapter)
+            db.commit()
+            db.refresh(chapter)
+        return chapter
+
+    created_count = 0
+    for mapping in request.mappings:
+        if mapping.category == "Not Found" or not mapping.chapter_number:
+            continue
+
+        ch_num = mapping.chapter_number
+        if mapping.file_type == "Art" and ch_num and ch_num.isdigit():
+            ch_num = f"Ch {ch_num.zfill(2)} - Art"
+            
+        if ch_num == "FM":
+            ch_title = "Front matter"
+        elif ch_num == "BM":
+            ch_title = "Back matter"
+        elif ch_num.endswith(" - Art"):
+            digits = ch_num.replace("Ch ", "").replace(" - Art", "")
+            ch_title = f"Chapter {digits} Art"
+        else:
+            ch_title = os.path.splitext(mapping.original_filename)[0]
+
+        chapter = get_or_create_chapter(ch_num, ch_title)
+        
+        # move file
+        src_path = os.path.join(temp_dir, mapping.original_filename)
+        if not os.path.exists(src_path):
+            continue
+            
+        file_cat = "Manuscript"
+        if mapping.file_type == "Art": file_cat = "Art"
+        elif mapping.file_type == "XML": file_cat = "XML"
+        elif mapping.file_type == "InDesign": file_cat = "Design"
+        
+        dest_dir = os.path.join(file_service.UPLOAD_DIR, project.code, ch_num, file_cat)
+        os.makedirs(dest_dir, exist_ok=True)
+        fname = os.path.basename(mapping.original_filename)
+        dest_path = os.path.join(dest_dir, fname)
+        shutil.copy2(src_path, dest_path)
+        
+        db_file = models.File(
+            project_id=project.id,
+            chapter_id=chapter.id,
+            filename=fname,
+            file_type=mapping.file_type.lower(),
+            category=file_cat,
+            path=dest_path,
+        )
+        db.add(db_file)
+        created_count += 1
+        
+    db.commit()
+
+    # Sync: ensure every CMS chapter has a matching WMS ChapterInfo record
+    from app.domains.workflow.models import ChapterInfo as _ChapterInfo
+    all_cms_chapters = db.query(models.Chapter).filter(models.Chapter.project == project.project_code).all()
+    existing_ci_nums = {
+        ci.chapters for ci in db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code).all()
+    }
+    for _ch in all_cms_chapters:
+        if _ch.chapters and _ch.chapters not in existing_ci_nums:
+            db.add(_ChapterInfo(
+                client=project.division_code or "",
+                project=project.code,
+                chapters=_ch.chapters,
+                chapter_title=_ch.chapter_title or f"Chapter {_ch.chapters}",
+                workflow=project.workflow_name or "",
+                status="Received",
+                complexity_level=getattr(project, "composition", None) or "Medium",
+                stage_level=1,
+                stage_name=first_stage,
+                published_status="Draft",
+                priority=getattr(project, "priority", None) or "Normal",
+                project_manager_name=getattr(project, "project_manager", None) or None,
+            ))
+            existing_ci_nums.add(_ch.chapters)
+    db.commit()
+
+    # Extract word count and manuscript pages from docx files
+    try:
+        import docx
+        from lxml import etree as ET
+        
+        chapter_docx_map = {}
+        for mapping in request.mappings:
+            if mapping.category == "Not Found" or not mapping.chapter_number:
+                continue
+            if mapping.file_type == "Manuscript" and mapping.original_filename.lower().endswith(".docx"):
+                ch_num = mapping.chapter_number
+                if ch_num not in chapter_docx_map:
+                    chapter_docx_map[ch_num] = []
+                dest_path = os.path.join(file_service.UPLOAD_DIR, project.code, ch_num, "Manuscript", os.path.basename(mapping.original_filename))
+                chapter_docx_map[ch_num].append(dest_path)
+        
+        if chapter_docx_map:
+            NS = "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"
+            ci_records = db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code).all()
+            ci_dict = {ci.chapters: ci for ci in ci_records if ci.chapters}
+            
+            for chapter_no_str, docx_paths in chapter_docx_map.items():
+                ci_record = ci_dict.get(chapter_no_str)
+                if ci_record:
+                    total_word_count = 0
+                    total_pages = 0
+                    for docx_path in docx_paths:
+                        if not os.path.exists(docx_path):
+                            continue
+                        try:
+                            doc = docx.Document(docx_path)
+                            total_word_count += sum(len(p.text.split()) for p in doc.paragraphs)
+                        except Exception as e:
+                            pass
+                        try:
+                            with zipfile.ZipFile(docx_path) as z:
+                                if "docProps/app.xml" in z.namelist():
+                                    with z.open("docProps/app.xml") as f:
+                                        tree = ET.parse(f)
+                                        pages_el = tree.find(f"{{{NS}}}Pages")
+                                        if pages_el is not None and pages_el.text:
+                                            total_pages += int(pages_el.text)
+                        except Exception as e:
+                            pass
+                    if total_word_count > 0:
+                        ci_record.word_count = (ci_record.word_count or 0) + total_word_count
+                    if total_pages > 0:
+                        ci_record.manuscript_pages = (ci_record.manuscript_pages or 0) + total_pages
+            db.commit()
+    except Exception as e:
+        pass
+
+    shutil.rmtree(temp_dir, ignore_errors=True)
+
+    # Count actual chapters created
+    total_chapters = db.query(models.Chapter).filter(models.Chapter.project == project.project_code).count()
+
+    return {"message": "Files mapped and chapters created.", "created_chapters": total_chapters}

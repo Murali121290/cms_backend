@@ -20,6 +20,7 @@ import { ClientProjects } from '@/pages/ClientProjects'
 import { CreateProjectPage } from '@/pages/CreateProjectPage'
 import { ProjectWorkflow } from '@/pages/ProjectWorkflow'
 import { ProjectPlanningPage } from '@/pages/ProjectPlanningPage'
+import { FileMappingPage } from '@/pages/FileMappingPage'
 import { ChapterEditorPage } from '@/pages/ChapterEditorPage'
 import { Placeholder } from '@/pages/Placeholder'
 import { ProjectsPage } from '@/pages/ProjectsPage'
@@ -126,6 +127,7 @@ const router = createBrowserRouter([
       },
 
       { path: 'projects/:projectId', element: <ProjectWorkflow /> },
+      { path: 'projects/:id/mapping', element: <FileMappingPage /> },
       { path: 'projects/:projectId/planning', element: <ProjectPlanningPage /> },
       { path: 'projects/:projectId/chapters/:chapterId', element: <ChapterDetailPage /> },
       { path: 'projects/:projectId/chapters/:chapterId/files', element: <ChapterDetailPage /> },
