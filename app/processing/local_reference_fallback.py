@@ -17,6 +17,7 @@ clusters and match each cluster to a reference by surname and year.
 """
 from __future__ import annotations
 
+import copy
 import logging
 import re
 import shutil
@@ -310,45 +311,7 @@ def apply_local_bookmarks(input_path: str | Path, output_path: str | Path) -> di
     body = root.find(W + "body")
     paragraphs = body.findall(W + "p")
 
-    ref_heading_idx = None
-    key_ref_idx = None
-    for i, p in enumerate(paragraphs):
-        style = _paragraph_style(p) or ""
-        if "referencesheading" not in style.lower():
-            continue
-        text = "".join(t.text or "" for t in p.iter(W + "t")).strip().lower()
-        if "key" in text and key_ref_idx is None:
-            key_ref_idx = i
-        elif ref_heading_idx is None:
-            ref_heading_idx = i
-
-    ref_para_indices: list[int] = []
-    if ref_heading_idx is not None:
-        # Preferred: heading present → take all REF-U after it.
-        for i in range(ref_heading_idx + 1, len(paragraphs)):
-            if _paragraph_style(paragraphs[i]) == "REF-U":
-                ref_para_indices.append(i)
-    else:
-        # Fallback for already-reprocessed docs where the heading was flattened:
-        # find contiguous runs of REF-U paragraphs and pick the longest one as
-        # the full References list (a shorter "Key References" run may co-exist).
-        runs: list[list[int]] = []
-        current: list[int] = []
-        for i, p in enumerate(paragraphs):
-            if _paragraph_style(p) == "REF-U":
-                current.append(i)
-            elif current:
-                runs.append(current)
-                current = []
-        if current:
-            runs.append(current)
-        if runs:
-            ref_para_indices = max(runs, key=len)
-
-    body_end_idx = key_ref_idx if key_ref_idx is not None else (
-        ref_heading_idx if ref_heading_idx is not None
-        else (ref_para_indices[0] if ref_para_indices else len(paragraphs))
-    )
+    ref_para_indices, body_end_idx = _find_reference_layout(paragraphs)
 
     refs = _build_reference_index(paragraphs, ref_para_indices)
 
@@ -395,5 +358,380 @@ def apply_local_bookmarks(input_path: str | Path, output_path: str | Path) -> di
         "Local reference fallback: %s → %s | refs=%d bib_matched=%d bib_unmatched=%d",
         input_path.name, output_path.name,
         stats["ref_count"], stats["bib_matched"], stats["bib_unmatched"],
+    )
+    return stats
+
+
+# ---------- shared reference-layout detection ----------
+
+def _find_reference_layout(paragraphs) -> tuple[list[int], int]:
+    """Return (ref_para_indices, body_end_idx).
+
+    Preferred: a `referencesheading`-styled paragraph marks the References
+    section; every subsequent REF-U paragraph is a reference entry.
+
+    Fallback for reprocessed docs where the heading was flattened: pick the
+    longest contiguous run of REF-U paragraphs and treat it as the References
+    list (a shorter "Key References" run may co-exist earlier in the doc).
+    """
+    ref_heading_idx = None
+    key_ref_idx = None
+    for i, p in enumerate(paragraphs):
+        style = _paragraph_style(p) or ""
+        if "referencesheading" not in style.lower():
+            continue
+        text = "".join(t.text or "" for t in p.iter(W + "t")).strip().lower()
+        if "key" in text and key_ref_idx is None:
+            key_ref_idx = i
+        elif ref_heading_idx is None:
+            ref_heading_idx = i
+
+    ref_para_indices: list[int] = []
+    if ref_heading_idx is not None:
+        for i in range(ref_heading_idx + 1, len(paragraphs)):
+            if _paragraph_style(paragraphs[i]) == "REF-U":
+                ref_para_indices.append(i)
+    else:
+        runs: list[list[int]] = []
+        current: list[int] = []
+        for i, p in enumerate(paragraphs):
+            if _paragraph_style(p) == "REF-U":
+                current.append(i)
+            elif current:
+                runs.append(current)
+                current = []
+        if current:
+            runs.append(current)
+        if runs:
+            ref_para_indices = max(runs, key=len)
+
+    body_end_idx = key_ref_idx if key_ref_idx is not None else (
+        ref_heading_idx if ref_heading_idx is not None
+        else (ref_para_indices[0] if ref_para_indices else len(paragraphs))
+    )
+    return ref_para_indices, body_end_idx
+
+
+# ---------- compound-citation splitter ----------
+
+_BIB_NAME_RE = re.compile(r"^bib_(\d+)(?:_\d+)?$")
+
+
+def _split_run_at_semicolons(run):
+    """Split a `<w:r>` at each `;` in its text.
+
+    Each new run keeps a deep copy of the original `<w:rPr>` and contains one
+    text segment: either the text between two semicolons, or a lone `;`
+    separator. Any non-`<w:t>`/`<w:rPr>` children (tabs, breaks, symbols) stay
+    attached to the LAST new run so they aren't duplicated. If the run text
+    has no `;`, returns `[run]` unchanged.
+
+    Isolating `;` in its own run lets the caller wrap only the citation
+    segments in `bib_N` bookmarks and leave the separators unwrapped.
+    """
+    ts = run.findall(W + "t")
+    text = "".join(t.text or "" for t in ts)
+    if ";" not in text:
+        return [run]
+
+    # Split so each `;` becomes its own segment, separate from the citations
+    # on either side.
+    segments = [s for s in re.split(r"(;)", text) if s]
+    if len(segments) <= 1:
+        return [run]
+
+    rpr = run.find(W + "rPr")
+    tail_children = [c for c in run if c.tag not in (W + "rPr", W + "t")]
+
+    parent = run.getparent()
+    idx = list(parent).index(run)
+
+    new_runs = []
+    for i, seg in enumerate(segments):
+        new_r = etree.Element(W + "r")
+        # Citation segments keep the original `<w:rPr>` (e.g., `citebib`).
+        # Lone `;` separators get NO run-properties so they render as plain
+        # text, with no character style or attribute that any downstream
+        # renderer could interpret as part of a citation.
+        if rpr is not None and seg.strip() != ";":
+            new_r.append(copy.deepcopy(rpr))
+        t_el = etree.SubElement(new_r, W + "t")
+        t_el.text = seg
+        # Preserve any leading/trailing whitespace introduced by the split.
+        t_el.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+        if i == len(segments) - 1:
+            for tc in tail_children:
+                new_r.append(copy.deepcopy(tc))
+        new_runs.append(new_r)
+
+    for i, nr in enumerate(new_runs):
+        parent.insert(idx + i, nr)
+    parent.remove(run)
+    return new_runs
+
+
+def _group_runs_by_semicolon(elements):
+    """Partition `elements` into (kind, runs) tuples separated by `;`-only
+    runs. `kind` is ``"citation"`` for a sub-citation group or ``"separator"``
+    for a lone `;`. Separator runs are kept out of every citation group so
+    the caller can wrap citations without swallowing the `;`. Non-`<w:r>`
+    inline neighbours (rare) stay attached to the current citation group.
+    """
+    groups: list[tuple[str, list]] = []
+    current: list = []
+    for el in elements:
+        if el.tag == W + "r" and _run_text(el).strip() == ";":
+            if current:
+                groups.append(("citation", current))
+                current = []
+            groups.append(("separator", [el]))
+            continue
+        current.append(el)
+    if current:
+        groups.append(("citation", current))
+    return groups
+
+
+def _renumber_affected_bibs(root, affected_refs: set[int]) -> None:
+    """Walk the document in order and rename `bib_N` / `bib_N_k` bookmarks so
+    the k-th occurrence of ref N is `bib_N` when k==1 and `bib_N_k` otherwise.
+
+    Only touches bookmarks whose numeric ref is in `affected_refs` — leaves
+    the rest of the doc's bib_* naming untouched.
+    """
+    counts: dict[int, int] = {}
+    for bs in root.iter(W + "bookmarkStart"):
+        name = bs.get(W + "name") or ""
+        m = _BIB_NAME_RE.match(name)
+        if not m:
+            continue
+        n = int(m.group(1))
+        if n not in affected_refs:
+            continue
+        counts[n] = counts.get(n, 0) + 1
+        k = counts[n]
+        new_name = f"bib_{n}" if k == 1 else f"bib_{n}_{k}"
+        if new_name != name:
+            bs.set(W + "name", new_name)
+
+
+def strip_citation_semicolon_styling(docx_path: str | Path) -> int:
+    """Strip hyperlink-style formatting (`<w:u>` underline, `<w:color>`) from
+    every `;`-only run that sits between two `citebib` runs in the same
+    paragraph.
+
+    Motivation: PPH and Word both tend to inherit the citation's blue-underlined
+    hyperlink formatting onto the `; ` separators between sub-citations. In
+    the WYSIWYG editor those styled separators sit right next to the per-
+    citation `⌈…⌉` bookmark indicators and look, at a glance, like additional
+    bookmark brackets around the semicolon. Stripping the styling makes `;`
+    render as plain text — a true separator, visually distinct from a
+    citation.
+
+    Idempotent: runs whose styling has already been cleaned are skipped.
+    Only touches runs whose text (after stripping whitespace) is exactly `;`.
+    Returns the number of runs cleaned; if zero, the file is not rewritten.
+    """
+    docx_path = Path(docx_path)
+    with zipfile.ZipFile(docx_path, "r") as z:
+        doc_xml = z.read("word/document.xml")
+    root = etree.fromstring(doc_xml)
+    body = root.find(W + "body")
+    if body is None:
+        return 0
+
+    cleaned = 0
+    for para in body.iter(W + "p"):
+        runs = para.findall(W + "r")
+        for i, r in enumerate(runs):
+            if _run_text(r).strip() != ";":
+                continue
+            # Only strip when the `;` really is a citation separator — i.e.
+            # has a `citebib` run on at least one side. Otherwise leave the
+            # author's styling alone.
+            def _is_citebib(other):
+                return other is not None and _run_style(other) == "citebib"
+            prev_r = runs[i - 1] if i > 0 else None
+            next_r = runs[i + 1] if i + 1 < len(runs) else None
+            if not (_is_citebib(prev_r) or _is_citebib(next_r)):
+                continue
+
+            rpr = r.find(W + "rPr")
+            if rpr is None:
+                continue
+            removed_here = False
+            for child in list(rpr):
+                if child.tag in (W + "u", W + "color"):
+                    rpr.remove(child)
+                    removed_here = True
+            # If the rPr is now empty, drop it entirely so the run is truly
+            # unadorned plain text.
+            if removed_here and len(rpr) == 0:
+                r.remove(rpr)
+            if removed_here:
+                cleaned += 1
+
+    if cleaned == 0:
+        return 0
+
+    new_xml = etree.tostring(
+        root, xml_declaration=True, encoding="UTF-8", standalone=True,
+    )
+    tmp = docx_path.with_suffix(docx_path.suffix + ".semi-tmp")
+    with zipfile.ZipFile(docx_path, "r") as zin, \
+         zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename) if item.filename != "word/document.xml" else new_xml
+            zout.writestr(item, data)
+    tmp.replace(docx_path)
+
+    logger.info(
+        "Stripped citation `;` styling from %d run(s) in %s",
+        cleaned, docx_path.name,
+    )
+    return cleaned
+
+
+def split_compound_bib_bookmarks(docx_path: str | Path) -> dict:
+    """Post-process a DOCX so any ``bib_*`` bookmark whose spanned text contains
+    ``;`` is split into one bookmark per ``;``-separated sub-citation, each
+    matched against the References list via `_match_citation`.
+
+    Runs in place on `docx_path`. Idempotent: bookmarks with no ``;``, and
+    non-``bib_`` bookmarks (``ref_*``, Word-native `Bookmark1`, WYSIWYG-added
+    manuals, etc.) are left untouched. If the doc has no References section
+    or no compound `bib_*` bookmarks, the file is not rewritten.
+
+    Returns::
+
+        {
+          "split_bookmarks":  int,   # compound bookmarks that got split
+          "new_bookmarks":    int,   # total sub-bookmarks created
+          "unmatched_parts":  int,   # sub-citations skipped (no matching ref)
+        }
+    """
+    docx_path = Path(docx_path)
+    stats = {"split_bookmarks": 0, "new_bookmarks": 0, "unmatched_parts": 0}
+
+    with zipfile.ZipFile(docx_path, "r") as z:
+        doc_xml = z.read("word/document.xml")
+    root = etree.fromstring(doc_xml)
+
+    body = root.find(W + "body")
+    if body is None:
+        return stats
+
+    paragraphs = body.findall(W + "p")
+    ref_para_indices, _ = _find_reference_layout(paragraphs)
+    if not ref_para_indices:
+        return stats
+    refs = _build_reference_index(paragraphs, ref_para_indices)
+    if not refs:
+        return stats
+
+    ids = _BookmarkIds(root)
+    affected_refs: set[int] = set()
+
+    # Snapshot bib_* starts before we start mutating.
+    bib_starts = [
+        bs for bs in root.iter(W + "bookmarkStart")
+        if _BIB_NAME_RE.match(bs.get(W + "name") or "")
+    ]
+
+    for bs in bib_starts:
+        bid = bs.get(W + "id")
+        parent = bs.getparent()
+        # Only handle bookmarks that live inside a paragraph (citation
+        # bookmarks always do; skip anything oddly nested to stay safe).
+        if parent is None or parent.tag != W + "p":
+            continue
+        be = None
+        for candidate in parent.iter(W + "bookmarkEnd"):
+            if candidate.get(W + "id") == bid:
+                be = candidate
+                break
+        # bookmarkEnd may live in a different paragraph if the bookmark spans
+        # multiple paragraphs — never true for a citation, so skip.
+        if be is None:
+            continue
+
+        siblings = list(parent)
+        try:
+            si = siblings.index(bs)
+            ei = siblings.index(be)
+        except ValueError:
+            continue
+        if ei <= si + 1:
+            continue
+
+        spanned = siblings[si + 1: ei]
+        text = "".join(_run_text(el) for el in spanned if el.tag == W + "r")
+        if ";" not in text:
+            continue
+
+        # Split any run that contains `;` so each `;` ends up at a run boundary.
+        expanded: list = []
+        for el in spanned:
+            if el.tag == W + "r":
+                expanded.extend(_split_run_at_semicolons(el))
+            else:
+                expanded.append(el)
+
+        groups = _group_runs_by_semicolon(expanded)
+        citation_groups = [g for kind, g in groups if kind == "citation"]
+        if len(citation_groups) < 2:
+            # Text contained `;` but grouping produced only one citation
+            # (defensive; e.g., `;` sits inside a non-<w:r> element we can't
+            # split, or the compound was actually a single citation).
+            continue
+
+        old_m = _BIB_NAME_RE.match(bs.get(W + "name") or "")
+        if old_m:
+            affected_refs.add(int(old_m.group(1)))
+
+        # Drop the compound bookmark; sub-bookmarks will be wrapped below.
+        # Separator `;` runs stay in place, unwrapped, so they render as
+        # plain text between the per-citation bookmarks.
+        parent.remove(bs)
+        parent.remove(be)
+
+        for group in citation_groups:
+            group_runs = [el for el in group if el.tag == W + "r"]
+            if not group_runs:
+                continue
+            group_text = "".join(_run_text(r) for r in group_runs)
+            n = _match_citation(group_text, refs)
+            if n is None:
+                stats["unmatched_parts"] += 1
+                continue
+            # Temporary name — renumbering below normalises it to
+            # bib_N / bib_N_k based on final document order.
+            _wrap_runs(group_runs, f"bib_{n}", ids)
+            stats["new_bookmarks"] += 1
+            affected_refs.add(n)
+
+        stats["split_bookmarks"] += 1
+
+    if stats["split_bookmarks"] == 0:
+        return stats
+
+    _renumber_affected_bibs(root, affected_refs)
+
+    new_xml = etree.tostring(
+        root, xml_declaration=True, encoding="UTF-8", standalone=True,
+    )
+
+    tmp = docx_path.with_suffix(docx_path.suffix + ".split-tmp")
+    with zipfile.ZipFile(docx_path, "r") as zin, \
+         zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename) if item.filename != "word/document.xml" else new_xml
+            zout.writestr(item, data)
+    tmp.replace(docx_path)
+
+    logger.info(
+        "Split compound bib bookmarks in %s: split=%d new=%d unmatched=%d",
+        docx_path.name,
+        stats["split_bookmarks"], stats["new_bookmarks"], stats["unmatched_parts"],
     )
     return stats
