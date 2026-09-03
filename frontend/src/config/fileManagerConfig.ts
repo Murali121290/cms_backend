@@ -165,7 +165,9 @@ export type ProcessingActionKey =
   | 'languageEdit' | 'technicalEdit'
   | 'manuscriptAnalysis'
   | 'permissionsCheck' | 'aiCreditExtraction' | 'biasScan' | 'wordToXml'
-  | 'xmlToIndesign' | 'indesignToXml'
+  | 'xmlToIndesign' | 'indesignToXml' | 'viewProof'
+
+const PRODUCTION_STAGES = ['XML Conversion', 'Typesetting', 'Proofreading']
 
 export const PROCESSING_ACTION_STAGE_MAP: Record<ProcessingActionKey, string[] | '*'> = {
   structuring:          ['Pre-editing','Pre-editing QA'],
@@ -177,9 +179,10 @@ export const PROCESSING_ACTION_STAGE_MAP: Record<ProcessingActionKey, string[] |
   permissionsCheck:     ['Digital Processing'],
   aiCreditExtraction:   ['Digital Processing'],
   biasScan:             ['Digital Processing'],
-  wordToXml:            ['XML Conversion'],
-  xmlToIndesign:        ['XML Conversion'],
-  indesignToXml:        ['XML Conversion']
+  wordToXml:            PRODUCTION_STAGES,
+  xmlToIndesign:        PRODUCTION_STAGES,
+  indesignToXml:        PRODUCTION_STAGES,
+  viewProof:            PRODUCTION_STAGES
 }
 
 export function isProcessingActionVisibleForStage(action: ProcessingActionKey, stageName: string): boolean {
