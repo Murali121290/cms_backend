@@ -127,6 +127,12 @@ def init_data():
             except Exception:
                 db.rollback()
 
+        try:
+            db.execute(text("ALTER TABLE users ALTER COLUMN team DROP NOT NULL;"))
+            db.commit()
+        except Exception:
+            db.rollback()
+
         Base.metadata.create_all(bind=engine)
             
         # Define all required roles in RolesMaster
