@@ -485,7 +485,7 @@ function ProcessingActionsMenu({
           </button>
         )}
 
-        {showAction('wordToXml') && row?.subfolder?.toLowerCase() === 'manuscript' && (
+        {showAction('styleValidation') && row?.subfolder?.toLowerCase() === 'manuscript' && (
           <button
             disabled={!fid}
             type="button"
