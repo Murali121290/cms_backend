@@ -111,7 +111,7 @@ services:
     environment:
       REDIS_URL: redis://redis:6379/0
       RUN_MIGRATIONS: "false"
-    command: celery -A app.core.celery_app worker --loglevel=info --concurrency=4 -Q main-queue
+    command: celery -A app.core.celery_app worker --beat --loglevel=info --concurrency=4 -Q main-queue
     depends_on:
       db:
         condition: service_healthy

@@ -17,6 +17,7 @@ from app.domains.clients.models import Client
 from app.domains.workflow.models import (
     RolesMaster, StageMaster, StageDetail, WorkflowMaster, ChapterInfo
 )
+from app.domains.books_on_demand.models import BodClientConfig, BodJob
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

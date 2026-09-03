@@ -45,6 +45,9 @@ import { PostProdCssMatcher } from '@/pages/PostProdCssMatcher'
 import { PostProdEpubValidator } from '@/pages/PostProdEpubValidator'
 import { PostProdEpubValidatorFiles } from '@/pages/PostProdEpubValidatorFiles'
 import { PostProdSlideFormatter } from '@/pages/PostProdSlideFormatter'
+import { BodInternalPage } from '@/pages/books_on_demand/BodInternalPage'
+import { BodInternalJobPage } from '@/pages/books_on_demand/BodInternalJobPage'
+import { BodCustomerReportPage } from '@/pages/books_on_demand/BodCustomerReportPage'
 import { ROLE_PERMISSIONS } from '@/config/rbacConfig'
 import { useRBAC } from '@/hooks/useRBAC'
 
@@ -163,6 +166,9 @@ const router = createBrowserRouter([
       { path: 'post-production/epub-validator', element: <PostProdGuard><PostProdEpubValidator /></PostProdGuard> },
       { path: 'post-production/epub-validator/:projectId', element: <PostProdGuard><PostProdEpubValidatorFiles /></PostProdGuard> },
       { path: 'post-production/slide-formatter', element: <PostProdGuard><PostProdSlideFormatter /></PostProdGuard> },
+      { path: 'bod/internal', element: <BodInternalPage /> },
+      { path: 'bod/internal/:jobId', element: <BodInternalJobPage /> },
+      { path: 'bod/report', element: <BodCustomerReportPage /> },
       { path: 'reports', element: <ReportsPage /> },
       { path: 'reports/schedule', element: <ScheduleReport /> },
       { path: 'reports/today-schedule', element: <TodaySchedule /> },
