@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Users, BarChart3,
-  Settings, ChevronLeft, ChevronRight, Layers, Briefcase, LogOut, Loader2
+  Settings, ChevronLeft, ChevronRight, Layers, Briefcase, LogOut, Loader2, BookOpen
 } from 'lucide-react'
 import { useSidebarStore } from '@/store/useSidebarStore'
 import { useAuthStore } from '@/store/useAuthStore'
@@ -86,7 +86,7 @@ export function Sidebar() {
       : []),
     ...(!isAccessibilityUser
       ? [
-          { to: '/bod/internal', icon: Layers, label: 'Book on Demand' },
+          { to: '/bod/internal', icon: BookOpen, label: 'Book on Demand' },
           { to: '/bod/report', icon: BarChart3, label: 'BOD Report (Customer)' },
           { to: '/reports', icon: BarChart3, label: 'Reports' }
         ]

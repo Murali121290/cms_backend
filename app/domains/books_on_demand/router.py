@@ -114,17 +114,19 @@ def get_customer_report(
         
     if start_date:
         try:
-            sd = datetime.fromisoformat(start_date)
+            start_date_clean = start_date.replace('Z', '+00:00')
+            sd = datetime.fromisoformat(start_date_clean)
             query = query.filter(BodJob.created_at >= sd)
-        except ValueError:
-            pass
+        except ValueError as e:
+            logger.error(f"Error parsing start_date {start_date}: {e}")
             
     if end_date:
         try:
-            ed = datetime.fromisoformat(end_date)
+            end_date_clean = end_date.replace('Z', '+00:00')
+            ed = datetime.fromisoformat(end_date_clean)
             query = query.filter(BodJob.created_at <= ed)
-        except ValueError:
-            pass
+        except ValueError as e:
+            logger.error(f"Error parsing end_date {end_date}: {e}")
             
     jobs = query.all()
     
@@ -333,27 +335,30 @@ def upload_epub(
     config = db.query(BodClientConfig).filter(BodClientConfig.id == job.client_id).first()
     stages = config.custom_stages if config.custom_stages else ["Add job", "Production", "QC", "Archive"]
     
-    # Auto-advance if not in QC
-    if job.current_stage_name != "QC" and job.current_stage_index < len(stages) - 1:
+    qc_index = stages.index("QC") if "QC" in stages else 2
+    
+    # Auto-advance directly to QC if not already there or past it
+    if job.current_stage_index < qc_index:
         # End current stage
         current_stage = job.current_stage_name
         stage_data = history.get(current_stage, {})
         stage_data["end_time"] = now_iso
         history[current_stage] = stage_data
         
-        # Advance to next stage
-        job.current_stage_index += 1
-        new_stage = stages[job.current_stage_index]
-        job.current_stage_name = new_stage
+        # Advance directly to QC
+        job.current_stage_index = qc_index
+        job.current_stage_name = "QC"
         
-        # Set start time for next stage
-        new_stage_data = history.get(new_stage, {})
+        # Set start time for QC
+        new_stage_data = history.get("QC", {})
         new_stage_data["start_time"] = now_iso
-        history[new_stage] = new_stage_data
+        history["QC"] = new_stage_data
         
-        # Send email if moving to QC
-        if job.current_stage_name == "QC":
-            send_bod_qc_ready_email(config.manager_email, job.project_name, job.epub_filename or job.pdf_filename)
+        # Unassign the job
+        job.current_assignee = None
+        
+        # Send email
+        send_bod_qc_ready_email(config.manager_email, job.project_name, job.epub_filename or job.pdf_filename)
             
     job.stage_history = history
     db.commit()
