@@ -79,8 +79,7 @@ export function Sidebar() {
     ...((canAccess(ROLE_PERMISSIONS.access_post_production) || viewer?.team === 'Accessibility Team')
       ? [{ to: '/post-production', icon: Layers, label: 'Backlist' }]
       : []),
-    { to: '/bod/internal', icon: Layers, label: 'Book on Demand' },
-    { to: '/bod/report', icon: BarChart3, label: 'BOD Report (Customer)' },
+    { to: '/bod/report', icon: Layers, label: 'Book on Demand' },
     { to: '/reports', icon: BarChart3, label: 'Reports' },
     ...(canAccess(ROLE_PERMISSIONS.access_settings)
       ? [{ to: '/settings', icon: Settings, label: 'Settings' }]

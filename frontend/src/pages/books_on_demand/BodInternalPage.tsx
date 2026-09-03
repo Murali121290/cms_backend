@@ -170,7 +170,13 @@ export function BodInternalPage() {
     <div className="space-y-6 max-w-7xl mx-auto p-6 text-text">
       {/* Header */}
       <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
+          <button 
+            onClick={() => navigate('/bod/report')} 
+            className="p-1.5 text-muted hover:text-text hover:bg-white/5 rounded-md transition-colors"
+          >
+            <ArrowLeft size={18} />
+          </button>
           <div className="flex items-center gap-3">
             <div className="p-2 bg-accent rounded-lg">
               <FolderOpen size={20} className="text-primary" />
@@ -183,9 +189,11 @@ export function BodInternalPage() {
             </div>
           </div>
         </div>
-        <Button onClick={() => setShowAddJobModal(true)} leftIcon={<Plus size={15} />}>
-          Create Job
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button onClick={() => setShowAddJobModal(true)} leftIcon={<Plus size={15} />}>
+            Create Job
+          </Button>
+        </div>
       </div>
 
       {/* Metrics Row */}
