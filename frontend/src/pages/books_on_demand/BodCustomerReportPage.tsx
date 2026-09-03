@@ -3,6 +3,7 @@ import { Card } from '@/components/ui/Card'
 import { Loader2, Search, Calendar, FileText, CheckCircle2, Clock, Download, Layers, RefreshCw, BarChart2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import api from '@/api/client'
+import * as XLSX from 'xlsx'
 
 export function BodCustomerReportPage() {
   const navigate = useNavigate()
@@ -131,7 +132,6 @@ export function BodCustomerReportPage() {
 
   const downloadReport = () => {
     const headers = [
-      'Job ID',
       'Client',
       'Source PDF',
       'Target EPUB',
@@ -144,7 +144,7 @@ export function BodCustomerReportPage() {
       'QC End Time',
       'Final Status'
     ]
-    const csvRows = [headers.join(',')]
+    const data = [headers]
 
     filteredReport.forEach(job => {
       const { finalStatus, prodStatus, qcStatus, prodData, qcData } = getJobStatuses(job)
@@ -155,31 +155,46 @@ export function BodCustomerReportPage() {
       const qcStart = qcData.start_time ? formatDateTime(qcData.start_time) : '-'
       const qcEnd = qcData.end_time ? formatDateTime(qcData.end_time) : '-'
 
-      const row = [
-        job.id,
-        `"${job.client_name || ''}"`,
-        `"${job.pdf_filename || ''}"`,
-        `"${job.epub_filename || ''}"`,
-        `"${formatDateTime(job.created_at)}"`,
-        `"${prodStatus}"`,
-        `"${prodStart}"`,
-        `"${prodEnd}"`,
-        `"${qcStatus}"`,
-        `"${qcStart}"`,
-        `"${qcEnd}"`,
-        `"${finalStatus}"`
-      ]
-      csvRows.push(row.join(','))
+      data.push([
+        job.client_name || '',
+        job.pdf_filename || '',
+        job.epub_filename || '',
+        formatDateTime(job.created_at),
+        prodStatus,
+        prodStart,
+        prodEnd,
+        qcStatus,
+        qcStart,
+        qcEnd,
+        finalStatus
+      ])
     })
 
-    const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' })
-    const url = window.URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.setAttribute('href', url)
-    a.setAttribute('download', `customer_report_${new Date().toISOString().split('T')[0]}.csv`)
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
+    const wb = XLSX.utils.book_new()
+    const ws = XLSX.utils.aoa_to_sheet(data)
+    XLSX.utils.book_append_sheet(wb, ws, "Report")
+    
+    const now = new Date()
+    const todayStr = now.toISOString().split('T')[0]
+    let filename = `report_all_time.xlsx`
+
+    if (dateRange === 'today') {
+      filename = `report_${todayStr}.xlsx`
+    } else if (dateRange === 'week') {
+      const past = new Date(now)
+      past.setDate(past.getDate() - 7)
+      filename = `report_${past.toISOString().split('T')[0]}_to_${todayStr}.xlsx`
+    } else if (dateRange === 'month') {
+      const past = new Date(now)
+      past.setMonth(past.getMonth() - 1)
+      filename = `report_${past.toISOString().split('T')[0]}_to_${todayStr}.xlsx`
+    } else if (dateRange === 'custom') {
+      const start = fromDate || 'beginning'
+      const end = toDate || todayStr
+      filename = `report_${start}_to_${end}.xlsx`
+    }
+    
+    XLSX.writeFile(wb, filename)
   }
 
   const handleDownloadEpub = async (e: React.MouseEvent, jobId: number, filename: string) => {
@@ -224,11 +239,8 @@ export function BodCustomerReportPage() {
             >
               <Layers size={16} className="text-primary" /> BOD Job Pages
             </button>
-            <button
-              onClick={downloadReport}
-              className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-colors shadow-sm"
-            >
-              <Download size={16} /> Export CSV
+            <button onClick={downloadReport} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-medium text-sm transition-colors shadow-sm">
+              <Download size={16} /> Export Report
             </button>
           </div>
         </div>

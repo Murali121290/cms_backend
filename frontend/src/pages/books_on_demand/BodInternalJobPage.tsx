@@ -18,6 +18,8 @@ export function BodInternalJobPage() {
   useDocumentTitle("Inkflow - Books on Demand")
   const [users, setUsers] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [isAdvancing, setIsAdvancing] = useState(false)
+  const [isUploading, setIsUploading] = useState(false)
   const [activeTab, setActiveTab] = useState<'stage' | 'assignment'>('stage')
 
   const formatDateTime = (dateStr: string | null) => {
@@ -66,12 +68,15 @@ export function BodInternalJobPage() {
   }, [jobId])
 
   const advanceStage = async () => {
+    setIsAdvancing(true)
     try {
       await api.post(`/bod/jobs/${jobId}/advance`)
       toast.success("Job advanced to next stage")
       fetchJob()
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "Failed to advance stage")
+    } finally {
+      setIsAdvancing(false)
     }
   }
 
@@ -82,14 +87,18 @@ export function BodInternalJobPage() {
     const formData = new FormData()
     formData.append('file', file)
 
+    setIsUploading(true)
     try {
       await api.post(`/bod/jobs/${jobId}/upload-epub`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       })
       toast.success("EPUB uploaded and job advanced")
-      fetchJob()
+      navigate('/bod/internal')
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "Failed to upload EPUB")
+    } finally {
+      setIsUploading(false)
+      if (e.target) e.target.value = ''
     }
   }
 
@@ -185,8 +194,8 @@ export function BodInternalJobPage() {
         {/* Action Buttons */}
         <div className="flex gap-2">
           {!isCompleted && job.current_stage_name === 'QC' && (
-            <Button variant="outline" onClick={advanceStage} rightIcon={<ArrowRight size={14} />}>
-              Advance Stage
+            <Button variant="outline" onClick={advanceStage} disabled={isAdvancing} rightIcon={!isAdvancing ? <ArrowRight size={14} /> : undefined}>
+              {isAdvancing ? 'Loading...' : 'Completed'}
             </Button>
           )}
 
@@ -196,11 +205,12 @@ export function BodInternalJobPage() {
                 type="file"
                 accept=".epub"
                 onChange={uploadEpub}
-                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10"
+                disabled={isUploading}
+                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10 disabled:cursor-not-allowed"
                 title="Upload EPUB"
               />
-              <Button variant="primary" leftIcon={<Upload size={14} />}>
-                Upload EPUB
+              <Button variant="primary" disabled={isUploading} leftIcon={!isUploading ? <Upload size={14} /> : undefined}>
+                {isUploading ? 'Uploading...' : 'Upload EPUB'}
               </Button>
             </div>
           )}
