@@ -124,6 +124,10 @@ export function BodInternalPage() {
   const completedJobs = jobs.filter(j => j.status === 'Completed').length
   const activeJobs = jobs.filter(j => j.status === 'Active')
   
+  const unassignedJobs = activeJobs.filter(j => !j.current_assignee).length
+  const addJobStageJobs = activeJobs.filter(j => j.current_stage_name === 'Add job').length
+  const qcStageJobs = activeJobs.filter(j => j.current_stage_name === 'QC').length
+  
   // Progress calculations: assume 4 stages (0,1,2,3). If completed, 100%
   let totalProgressStages = jobs.length * 3
   let completedProgressStages = jobs.reduce((acc, job) => {
@@ -136,6 +140,16 @@ export function BodInternalPage() {
   // Filter options
   const statusOptions = Array.from(new Set(jobs.map(j => j.status))).sort()
   
+  const getUserDisplayName = (username: string | null | undefined) => {
+    if (!username) return ''
+    if (!users || users.length === 0) return username
+    const u = users.find(user => user.user_name === username)
+    if (u && u.first_name) {
+      return `${u.first_name} ${u.last_name || ''}`.trim()
+    }
+    return username
+  }
+
   const allAssignees = new Set<string>()
   jobs.forEach(j => {
       if (j.current_assignee) {
@@ -197,7 +211,7 @@ export function BodInternalPage() {
       </div>
 
       {/* Metrics Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
         <div className="bg-card border border-border/70 rounded-xl p-4 flex items-center gap-3">
           <div className="p-2 bg-primary/10 text-primary rounded-lg">
             <Layers size={18} />
@@ -209,22 +223,42 @@ export function BodInternalPage() {
         </div>
 
         <div className="bg-card border border-border/70 rounded-xl p-4 flex items-center gap-3">
-          <div className="p-2 bg-emerald-500/10 text-emerald-600 rounded-lg">
-            <CheckCircle2 size={18} />
+          <div className="p-2 bg-rose-500/10 text-rose-600 rounded-lg">
+            <User size={18} />
           </div>
           <div>
-            <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Fully Completed</span>
-            <span className="text-lg font-bold text-text">{completedJobs} <span className="text-xs font-normal text-muted">jobs</span></span>
+            <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Unassigned</span>
+            <span className="text-lg font-bold text-text">{unassignedJobs}</span>
           </div>
         </div>
 
         <div className="bg-card border border-border/70 rounded-xl p-4 flex items-center gap-3">
           <div className="p-2 bg-amber-500/10 text-amber-600 rounded-lg">
-            <RefreshCw size={18} className={activeJobs.length > 0 ? 'animate-spin' : ''} />
+            <RefreshCw size={18} />
           </div>
           <div>
-            <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Overall Progress</span>
-            <span className="text-lg font-bold text-text">{completionPercentage}%</span>
+            <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Add Job Stage</span>
+            <span className="text-lg font-bold text-text">{addJobStageJobs}</span>
+          </div>
+        </div>
+        
+        <div className="bg-card border border-border/70 rounded-xl p-4 flex items-center gap-3">
+          <div className="p-2 bg-blue-500/10 text-blue-600 rounded-lg">
+            <CheckCircle2 size={18} />
+          </div>
+          <div>
+            <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">QC Stage</span>
+            <span className="text-lg font-bold text-text">{qcStageJobs}</span>
+          </div>
+        </div>
+
+        <div className="bg-card border border-border/70 rounded-xl p-4 flex items-center gap-3">
+          <div className="p-2 bg-emerald-500/10 text-emerald-600 rounded-lg">
+            <CheckCircle2 size={18} />
+          </div>
+          <div>
+            <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Completed</span>
+            <span className="text-lg font-bold text-text">{completedJobs}</span>
           </div>
         </div>
       </div>
@@ -263,8 +297,8 @@ export function BodInternalPage() {
             >
               <option value="all">All assignees</option>
               <option value="unassigned">Unassigned</option>
-              {assigneeOptions.map(a => (
-                <option key={a} value={a}>{a}</option>
+              {assigneeOptions.map(assignee => (
+                <option key={assignee} value={assignee}>{getUserDisplayName(assignee)}</option>
               ))}
             </select>
 
@@ -342,16 +376,19 @@ export function BodInternalPage() {
                     <div className="flex items-center gap-1 text-muted" onClick={(e) => e.stopPropagation()}>
                       <User size={12} className="text-muted/70" />
                       <select
-                        value={currentAssignee || ''}
+                        value={getUserDisplayName(currentAssignee)}
                         onChange={(e) => assignUser(job.id, e.target.value)}
                         className="bg-transparent border-0 text-primary font-medium focus:ring-0 focus:outline-none cursor-pointer p-0 text-[11px] hover:text-primary-hover"
                       >
                         <option value="" className="text-text bg-card">Unassigned</option>
-                        {users.filter(u => u.active_status).map(u => (
-                          <option key={u.id} value={u.user_name} className="text-text bg-card">
-                            {u.first_name ? `${u.first_name} ${u.last_name}`.trim() : u.user_name}
-                          </option>
-                        ))}
+                        {users.filter(u => u.active_status).map(u => {
+                          const displayName = u.first_name ? `${u.first_name} ${u.last_name || ''}`.trim() : u.user_name;
+                          return (
+                            <option key={u.id} value={displayName} className="text-text bg-card">
+                              {displayName}
+                            </option>
+                          )
+                        })}
                       </select>
                     </div>
                     <span className={`capitalize font-bold px-2 py-0.5 rounded-md text-[9px] border ${

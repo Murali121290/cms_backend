@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Download, Upload, ArrowRight, User, CheckCircle2, Clock } from 'lucide-react'
+import { ArrowLeft, Download, Upload, ArrowRight, User, CheckCircle2, Clock, Layers } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useRBAC } from '@/hooks/useRBAC'
 import { usersApi } from '@/api/users'
@@ -18,6 +18,7 @@ export function BodInternalJobPage() {
   useDocumentTitle("Inkflow - Books on Demand")
   const [users, setUsers] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState<'stage' | 'assignment'>('stage')
 
   const formatDateTime = (dateStr: string | null) => {
     if (!dateStr) return ''
@@ -63,16 +64,6 @@ export function BodInternalJobPage() {
     }, 5000)
     return () => clearInterval(timer)
   }, [jobId])
-
-  const assignUser = async (username: string) => {
-    try {
-      await api.post(`/bod/jobs/${jobId}/assign`, { user_id: username })
-      toast.success("User assigned")
-      fetchJob()
-    } catch (err) {
-      toast.error("Failed to assign user")
-    }
-  }
 
   const advanceStage = async () => {
     try {
@@ -144,6 +135,16 @@ export function BodInternalJobPage() {
   const canUploadEpub = !isCompleted && (job.current_stage_name === 'Production' || job.current_stage_name === 'QC')
   const percent = isCompleted ? 100 : Math.round((job.current_stage_index / 3) * 100)
 
+  const getUserDisplayName = (username: string | null | undefined) => {
+    if (!username) return ''
+    if (!users || users.length === 0) return username
+    const u = users.find(user => user.user_name === username)
+    if (u && u.first_name) {
+      return `${u.first_name} ${u.last_name || ''}`.trim()
+    }
+    return username
+  }
+
   return (
     <div className="space-y-6 max-w-5xl mx-auto p-6 text-text animate-in fade-in">
       {/* Header / Breadcrumb */}
@@ -173,18 +174,9 @@ export function BodInternalJobPage() {
             {!isCompleted && (
               <div className="flex items-center gap-1 text-muted text-xs">
                 <User size={13} className="text-muted/70" />
-                <select
-                  value={job.current_assignee || ''}
-                  onChange={(e) => assignUser(e.target.value)}
-                  className="bg-transparent border border-border rounded px-1.5 py-0.5 text-primary font-medium focus:ring-0 focus:outline-none cursor-pointer hover:border-primary/50"
-                >
-                  <option value="" className="text-text bg-card">Unassigned</option>
-                  {users.filter(u => u.active_status).map(u => (
-                    <option key={u.id} value={u.user_name} className="text-text bg-card">
-                      {u.first_name ? `${u.first_name} ${u.last_name}`.trim() : u.user_name}
-                    </option>
-                  ))}
-                </select>
+                <span className="text-primary font-medium">
+                  {job.current_assignee ? getUserDisplayName(job.current_assignee) : 'Unassigned'}
+                </span>
               </div>
             )}
           </div>
@@ -257,61 +249,79 @@ export function BodInternalJobPage() {
           )}
         </div>
 
-        {/* History Panel */}
-        <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
-          <h3 className="text-sm font-bold border-b border-border pb-2 mb-4">Stage History</h3>
-          <div className="space-y-4">
-            {Object.keys(job.stage_history || {}).map((stageName, idx) => {
-              const data = job.stage_history[stageName]
-              const isCurrent = stageName === job.current_stage_name && !isCompleted
-
-              return (
-                <div key={idx} className="flex gap-3">
-                  <div className="flex flex-col items-center">
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${data.end_time ? 'bg-emerald-500/20 text-emerald-600' :
-                        isCurrent ? 'bg-primary/20 text-primary border-2 border-primary/30' :
-                          'bg-accent text-muted'
-                      }`}>
-                      {data.end_time ? <CheckCircle2 size={12} /> : <div className="w-1.5 h-1.5 rounded-full bg-current" />}
-                    </div>
-                    {idx !== Object.keys(job.stage_history).length - 1 && (
-                      <div className="w-px h-full bg-border my-1" />
-                    )}
-                  </div>
-
-                  <div className="pb-4 flex-1">
-                    <h4 className={`text-sm font-bold ${isCurrent ? 'text-text' : 'text-text/70'}`}>{stageName}</h4>
-
-                    <div className="mt-1.5 space-y-1">
-                      {data.assignee && (
-                        <div className="flex items-center gap-1.5 text-xs text-muted">
-                          <User size={12} /> Assigned to: <strong className="text-text">{data.assignee}</strong>
-                        </div>
-                      )}
-
-                      {data.start_time && (
-                        <div className="flex items-center gap-1.5 text-xs text-muted">
-                          <Clock size={12} /> Started: {formatDateTime(data.start_time)}
-                        </div>
-                      )}
-
-                      {data.end_time && (
-                        <div className="flex items-center gap-1.5 text-xs text-muted">
-                          <CheckCircle2 size={12} /> Completed: {formatDateTime(data.end_time)}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )
-            })}
+        {/* Combined History Panel */}
+        <div className="bg-card border border-border rounded-xl p-5 shadow-sm lg:col-span-1">
+          <div className="flex items-center gap-4 border-b border-border mb-4">
+            <button
+              onClick={() => setActiveTab('stage')}
+              className={`pb-2 text-sm font-bold transition-colors border-b-2 ${
+                activeTab === 'stage' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+              }`}
+            >
+              Stage History
+            </button>
+            {job.assigned_users && Array.isArray(job.assigned_users) && job.assigned_users.length > 0 && (
+              <button
+                onClick={() => setActiveTab('assignment')}
+                className={`pb-2 text-sm font-bold transition-colors border-b-2 ${
+                  activeTab === 'assignment' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                }`}
+              >
+                Assignment History
+              </button>
+            )}
           </div>
-        </div>
 
-        {/* Assignment History Panel */}
-        {job.assigned_users && Array.isArray(job.assigned_users) && job.assigned_users.length > 0 && (
-          <div className="bg-card border border-border rounded-xl p-5 shadow-sm md:col-span-2">
-            <h3 className="text-sm font-bold border-b border-border pb-2 mb-4">Assignment History</h3>
+          {activeTab === 'stage' && (
+            <div className="space-y-4">
+              {Object.keys(job.stage_history || {}).map((stageName, idx) => {
+                const data = job.stage_history[stageName]
+                const isCurrent = stageName === job.current_stage_name && !isCompleted
+
+                return (
+                  <div key={idx} className="flex gap-3">
+                    <div className="flex flex-col items-center">
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${data.end_time ? 'bg-emerald-500/20 text-emerald-600' :
+                          isCurrent ? 'bg-primary/20 text-primary border-2 border-primary/30' :
+                            'bg-accent text-muted'
+                        }`}>
+                        {data.end_time ? <CheckCircle2 size={12} /> : <div className="w-1.5 h-1.5 rounded-full bg-current" />}
+                      </div>
+                      {idx !== Object.keys(job.stage_history).length - 1 && (
+                        <div className="w-px h-full bg-border my-1" />
+                      )}
+                    </div>
+
+                    <div className="pb-4 flex-1">
+                      <h4 className={`text-sm font-bold ${isCurrent ? 'text-text' : 'text-text/70'}`}>{stageName}</h4>
+
+                      <div className="mt-1.5 space-y-1">
+                        {data.assignee && (
+                          <div className="flex items-center gap-1.5 text-xs text-muted">
+                            <User size={12} /> Assigned to: <strong className="text-text">{getUserDisplayName(data.assignee)}</strong>
+                          </div>
+                        )}
+
+                        {data.start_time && (
+                          <div className="flex items-center gap-1.5 text-xs text-muted">
+                            <Clock size={12} /> Started: {formatDateTime(data.start_time)}
+                          </div>
+                        )}
+
+                        {data.end_time && (
+                          <div className="flex items-center gap-1.5 text-xs text-muted">
+                            <CheckCircle2 size={12} /> Completed: {formatDateTime(data.end_time)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {activeTab === 'assignment' && job.assigned_users && Array.isArray(job.assigned_users) && job.assigned_users.length > 0 && (
             <div className="space-y-3">
               {job.assigned_users.map((assignment: any, idx: number) => (
                 <div key={idx} className="flex items-center justify-between bg-background border border-border rounded-lg p-3">
@@ -320,8 +330,8 @@ export function BodInternalJobPage() {
                       <User size={14} />
                     </div>
                     <div>
-                      <p className="text-sm font-semibold text-text m-0">Assigned to: {assignment.user_id}</p>
-                      <p className="text-[10px] text-muted m-0 mt-0.5">Stage: {assignment.stage} • Assigned By: {assignment.assigned_by || 'System'}</p>
+                      <p className="text-sm font-semibold text-text m-0">Assigned to: {getUserDisplayName(assignment.user_id)}</p>
+                      <p className="text-[10px] text-muted m-0 mt-0.5">Stage: {assignment.stage} • Assigned By: {getUserDisplayName(assignment.assigned_by) || 'System'}</p>
                     </div>
                   </div>
                   <div className="text-xs text-muted font-medium">
@@ -330,8 +340,8 @@ export function BodInternalJobPage() {
                 </div>
               ))}
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   )

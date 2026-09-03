@@ -109,9 +109,25 @@ export function BodCustomerReportPage() {
   })
 
   const totalJobs = filteredReport.length
-  const completedJobs = filteredReport.filter(j => j.status === 'Completed' || j.current_stage === 'Archive').length
-  const inProgressJobs = filteredReport.filter(j => j.current_stage === 'Production' || j.current_stage === 'QC').length
-  const completionPercentage = totalJobs > 0 ? Math.round((completedJobs / totalJobs) * 100) : 0
+  let prodCompleted = 0
+  let prodInProgress = 0
+  let prodPending = 0
+  let qcCompleted = 0
+  let qcInProgress = 0
+  let overallCompleted = 0
+
+  filteredReport.forEach(job => {
+    const { finalStatus, prodStatus, qcStatus } = getJobStatuses(job)
+    if (finalStatus === 'Completed') overallCompleted++
+    if (prodStatus === 'Completed') prodCompleted++
+    else if (prodStatus === 'In-progress') prodInProgress++
+    else if (prodStatus === 'YTS') prodPending++
+    
+    if (qcStatus === 'Completed') qcCompleted++
+    else if (qcStatus === 'In-progress') qcInProgress++
+  })
+
+  const completionPercentage = totalJobs > 0 ? Math.round((overallCompleted / totalJobs) * 100) : 0
 
   const downloadReport = () => {
     const headers = [
@@ -218,114 +234,104 @@ export function BodCustomerReportPage() {
         </div>
 
         {/* Metrics Row */}
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
           <div className="bg-card border border-border/70 rounded-xl p-4 flex flex-col justify-center gap-1 shadow-sm">
             <span className="text-[11px] text-muted font-bold uppercase tracking-wider flex items-center gap-1.5"><Layers size={14} className="text-primary"/> Total Books</span>
             <span className="text-2xl font-bold text-text">{totalJobs}</span>
           </div>
-          <div className="bg-card border border-border/70 rounded-xl p-4 flex flex-col justify-center gap-1 shadow-sm">
-            <span className="text-[11px] text-muted font-bold uppercase tracking-wider flex items-center gap-1.5"><CheckCircle2 size={14} className="text-emerald-500"/> Completed</span>
-            <span className="text-2xl font-bold text-text">{completedJobs}</span>
+
+          <div className="bg-card border border-border/70 rounded-xl p-4 flex flex-col justify-center gap-2 shadow-sm">
+            <span className="text-[11px] text-muted font-bold uppercase tracking-wider flex items-center gap-1.5"><Clock size={14} className="text-muted-foreground"/> Yet to start</span>
+            <div className="flex flex-col">
+              <span className="text-2xl font-bold text-text leading-tight">{prodPending}</span>
+            </div>
           </div>
-          <div className="bg-card border border-border/70 rounded-xl p-4 flex flex-col justify-center gap-1 shadow-sm">
-            <span className="text-[11px] text-muted font-bold uppercase tracking-wider flex items-center gap-1.5"><Clock size={14} className="text-amber-500"/> In-Progress</span>
-            <span className="text-2xl font-bold text-text">{inProgressJobs}</span>
+
+          <div className="bg-card border border-border/70 rounded-xl p-4 flex flex-col justify-center gap-2 shadow-sm">
+            <span className="text-[11px] text-muted font-bold uppercase tracking-wider flex items-center gap-1.5"><Clock size={14} className="text-amber-500"/> Production</span>
+            <div className="flex gap-4">
+              <div className="flex flex-col">
+                <span className="text-lg font-bold text-emerald-500 leading-tight">{prodCompleted}</span>
+                <span className="text-[10px] text-muted uppercase">Completed</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-lg font-bold text-amber-500 leading-tight">{prodInProgress}</span>
+                <span className="text-[10px] text-muted uppercase">In-Progress</span>
+              </div>
+            </div>
           </div>
-          <div className="bg-card border border-border/70 rounded-xl p-4 flex flex-col justify-center gap-1 shadow-sm">
-            <span className="text-[11px] text-muted font-bold uppercase tracking-wider flex items-center gap-1.5"><RefreshCw size={14} className="text-blue-500"/> Completion Rate</span>
-            <div className="flex items-end gap-2">
-              <span className="text-2xl font-bold text-text">{completionPercentage}%</span>
+
+          <div className="bg-card border border-border/70 rounded-xl p-4 flex flex-col justify-center gap-2 shadow-sm">
+            <span className="text-[11px] text-muted font-bold uppercase tracking-wider flex items-center gap-1.5"><CheckCircle2 size={14} className="text-blue-500"/> Quality Control</span>
+            <div className="flex gap-4">
+              <div className="flex flex-col">
+                <span className="text-lg font-bold text-emerald-500 leading-tight">{qcCompleted}</span>
+                <span className="text-[10px] text-muted uppercase">Completed</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-lg font-bold text-amber-500 leading-tight">{qcInProgress}</span>
+                <span className="text-[10px] text-muted uppercase">In-Progress</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-card border border-border/70 rounded-xl p-4 flex flex-col justify-center gap-2 shadow-sm">
+            <span className="text-[11px] text-muted font-bold uppercase tracking-wider flex items-center gap-1.5"><RefreshCw size={14} className="text-primary"/> Overall Final</span>
+            <div className="flex items-end justify-between">
+              <div className="flex flex-col">
+                <span className="text-lg font-bold text-emerald-500 leading-tight">{overallCompleted}</span>
+                <span className="text-[10px] text-muted uppercase">Completed</span>
+              </div>
+              <div className="flex flex-col items-end">
+                <span className="text-2xl font-bold text-text leading-none">{completionPercentage}%</span>
+              </div>
             </div>
           </div>
         </div>
 
         {/* Action Bar */}
-        <div className="flex flex-col gap-3 bg-card/50 border border-border/50 p-3 rounded-xl backdrop-blur-md">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-            <div className="relative flex-1 w-full max-w-md">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Search className="h-4 w-4 text-muted/70" />
-              </div>
-              <input
-                type="text"
-                placeholder="Search by filename or client..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-9 pr-4 py-2 bg-background border-border border rounded-lg text-sm text-text placeholder:text-muted focus:ring-1 focus:ring-primary focus:border-primary outline-none transition-all"
-              />
+        <div className="flex items-center gap-2 lg:gap-4 bg-card/50 border border-border/50 p-3 rounded-xl backdrop-blur-md overflow-x-auto hide-scrollbar">
+          {/* Search */}
+          <div className="relative flex-none w-[180px] lg:w-[220px]">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <Search className="h-4 w-4 text-muted/70" />
             </div>
-
-            <div className="flex flex-col items-end gap-3 w-full md:w-auto">
-              <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-                {/* Date Filter */}
-                <div className="relative flex-1 md:flex-none">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <Calendar className="h-4 w-4 text-muted" />
-                  </div>
-                  <select
-                    value={dateRange}
-                    onChange={(e) => setDateRange(e.target.value)}
-                    className="w-full md:w-auto pl-9 pr-8 py-2 bg-background border-border border rounded-lg text-sm text-text focus:ring-1 focus:ring-primary focus:border-primary outline-none transition-shadow"
-                  >
-                    <option value="all">All Time</option>
-                    <option value="today">Today</option>
-                    <option value="week">Last 7 Days</option>
-                    <option value="month">Last Month</option>
-                    <option value="custom">Custom Date</option>
-                  </select>
-                </div>
-                
-              </div>
-
-              {dateRange === 'custom' && (
-                <div className="flex items-center gap-2 w-full md:w-auto justify-end">
-                  <input
-                    type="date"
-                    value={fromDate}
-                    onChange={(e) => setFromDate(e.target.value)}
-                    className="flex-1 md:flex-none px-3 py-1.5 bg-background border border-border rounded-lg text-sm text-text"
-                  />
-                  <span className="text-muted text-sm">to</span>
-                  <input
-                    type="date"
-                    value={toDate}
-                    onChange={(e) => setToDate(e.target.value)}
-                    className="flex-1 md:flex-none px-3 py-1.5 bg-background border border-border rounded-lg text-sm text-text"
-                  />
-                </div>
-              )}
-            </div>
+            <input
+              type="text"
+              placeholder="Search by filename or client..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full pl-9 pr-4 py-2 bg-background border-border border rounded-lg text-sm text-text placeholder:text-muted focus:ring-1 focus:ring-primary focus:border-primary outline-none transition-all"
+            />
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-border/30">
-            <span className="text-xs font-semibold text-muted uppercase tracking-wider mr-1">Stage Filters:</span>
-            
+          {/* Stage Filters */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-muted uppercase tracking-wider hidden lg:inline-block mr-1">Stage:</span>
             <select
               value={prodStatusFilter}
               onChange={(e) => setProdStatusFilter(e.target.value)}
-              className="px-3 py-1.5 bg-background border-border border rounded-lg text-xs text-text focus:ring-1 focus:ring-primary outline-none"
+              className="px-3 py-2 bg-background border-border border rounded-lg text-sm text-text focus:ring-1 focus:ring-primary outline-none"
             >
               <option value="all">Prod: All</option>
               <option value="Completed">Prod: Completed</option>
               <option value="In-progress">Prod: In-progress</option>
               <option value="YTS">Prod: YTS</option>
             </select>
-
             <select
               value={qcStatusFilter}
               onChange={(e) => setQcStatusFilter(e.target.value)}
-              className="px-3 py-1.5 bg-background border-border border rounded-lg text-xs text-text focus:ring-1 focus:ring-primary outline-none"
+              className="px-3 py-2 bg-background border-border border rounded-lg text-sm text-text focus:ring-1 focus:ring-primary outline-none"
             >
               <option value="all">QC: All</option>
               <option value="Completed">QC: Completed</option>
               <option value="In-progress">QC: In-progress</option>
               <option value="YTS">QC: YTS</option>
             </select>
-
             <select
               value={finalStatusFilter}
               onChange={(e) => setFinalStatusFilter(e.target.value)}
-              className="px-3 py-1.5 bg-background border-border border rounded-lg text-xs text-text focus:ring-1 focus:ring-primary outline-none"
+              className="px-3 py-2 bg-background border-border border rounded-lg text-sm text-text focus:ring-1 focus:ring-primary outline-none"
             >
               <option value="all">Final: All</option>
               <option value="Completed">Final: Completed</option>
@@ -333,13 +339,51 @@ export function BodCustomerReportPage() {
               <option value="YTS">Final: YTS</option>
             </select>
           </div>
+
+          {/* Date Filter */}
+          <div className="flex items-center gap-3 ml-auto">
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <Calendar className="h-4 w-4 text-muted" />
+              </div>
+              <select
+                value={dateRange}
+                onChange={(e) => setDateRange(e.target.value)}
+                className="pl-9 pr-8 py-2 bg-background border-border border rounded-lg text-sm text-text focus:ring-1 focus:ring-primary focus:border-primary outline-none transition-shadow"
+              >
+                <option value="all">All Time</option>
+                <option value="today">Today</option>
+                <option value="week">Last 7 Days</option>
+                <option value="month">Last Month</option>
+                <option value="custom">Custom Date</option>
+              </select>
+            </div>
+            
+            {dateRange === 'custom' && (
+              <div className="flex items-center gap-2 animate-in fade-in slide-in-from-right-2 duration-300">
+                <input
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => setFromDate(e.target.value)}
+                  className="px-3 py-2 bg-background border border-border rounded-lg text-sm text-text focus:ring-1 focus:ring-primary outline-none transition-all"
+                />
+                <span className="text-muted text-xs font-semibold uppercase">to</span>
+                <input
+                  type="date"
+                  value={toDate}
+                  onChange={(e) => setToDate(e.target.value)}
+                  className="px-3 py-2 bg-background border border-border rounded-lg text-sm text-text focus:ring-1 focus:ring-primary outline-none transition-all"
+                />
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Data Table */}
         <Card className="overflow-hidden border-border/50 shadow-sm bg-card/80 backdrop-blur-xl">
-          <div className="overflow-x-auto">
+          <div className="overflow-auto max-h-[calc(100vh-350px)] min-h-[400px]">
             <table className="w-full text-left border-collapse whitespace-nowrap">
-              <thead>
+              <thead className="sticky top-0 z-10 shadow-sm bg-card">
                 <tr className="bg-muted/30 border-b border-border/50 backdrop-blur-md">
                   <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider">Job / Client</th>
                   <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider">Created At</th>
