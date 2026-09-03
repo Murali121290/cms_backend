@@ -4,13 +4,13 @@
       "id": "STRUCT001",
       "name": "EPUB Folder Structure Check",
       "scope": "book",
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "STRUCT002",
       "name": "Container File Check",
       "scope": "book",
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "STRUCT003",
@@ -25,19 +25,19 @@
         "nav_file": "nav.xhtml",
         "toc_file": "toc.ncx"
       },
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "STRUCT004",
       "name": "EPUB File Extension Check",
       "scope": "book",
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "CSS002",
       "name": "CSS File Validation",
       "target_path": "OEBPS/css",
-      "enabled": false,
+      "enabled": true,
       "file_name_pattern": "*.css"
     },
     {
@@ -45,27 +45,27 @@
       "name": "XHTML Syntax Check",
       "target_path": "OEBPS/xhtml",
       "file_name_pattern": "*.xhtml",
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "URL001",
       "name": "Internal Link Check",
       "target_path": "OEBPS/xhtml",
-      "enabled": false,
+      "enabled": true,
       "file_name_pattern": "*.xhtml"
     },
     {
       "id": "URL002",
       "name": "External Link Check",
       "target_path": "OEBPS/xhtml",
-      "enabled": false,
+      "enabled": true,
       "file_name_pattern": "*.xhtml"
     },
     {
       "id": "URL003",
       "name": "URL Text Match Check",
       "target_path": "OEBPS/xhtml",
-      "enabled": false,
+      "enabled": true,
       "file_name_pattern": "*.xhtml"
     },
     {
@@ -73,51 +73,48 @@
       "name": "NAV TOC Link Check",
       "target_path": "",
       "enabled": true,
-      "file_name_pattern": "nav.xhtml",
-      "rule_config": {
-        "skip_nav_text": ["cover", "front matter", "editorial advisors", "titlepage", "title page", "copyright", "dedication"]
-      }
+      "file_name_pattern": "nav.xhtml"
     },
     {
       "id": "NAV002",
       "name": "NCX and Navigation link Check",
       "target_path": "",
-      "enabled": false,
+      "enabled": true,
       "file_name_pattern": "toc.ncx"
     },
     {
       "id": "NAV004",
       "name": "Cover Entry in TOC",
       "target_path": "",
-      "enabled": false,
+      "enabled": true,
       "file_name_pattern": "nav.xhtml"
     },
     {
       "id": "NAV005",
       "name": "Page List Link Check",
       "target_path": "",
-      "enabled": false,
+      "enabled": true,
       "file_name_pattern": "nav.xhtml"
     },
     {
       "id": "ASP-COV-001",
       "name": "Aspen: Cover file named cover.jpg",
       "scope": "book",
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "ASP-COV-002",
       "name": "Aspen: Cover height is 1100 pixels",
       "target_path": "OEBPS/images",
       "file_name_pattern": "cover.jpg",
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "ASP-COV-003",
       "name": "Aspen: Cover image is 300 DPI",
       "target_path": "OEBPS/images",
       "file_name_pattern": "cover.jpg",
-      "enabled": false,
+      "enabled": true,
       "rule_config": {
         "expected_dpi": 300
       }
@@ -126,7 +123,7 @@
       "id": "ASP-COV-004",
       "name": "Aspen: Back cover image is not required",
       "scope": "book",
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "ASP-FILE-001",
@@ -139,7 +136,7 @@
       "name": "Aspen: Cover and Front Matter present in NAV",
       "target_path": "",
       "file_name_pattern": "nav.xhtml",
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "ASP-NAV-002",
@@ -149,7 +146,7 @@
         "nav.xhtml",
         "toc.ncx"
       ],
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "ASP-NAV-003",
@@ -165,7 +162,7 @@
         "*Copyright*.xhtml",
         "*copyright*.xhtml"
       ],
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "ASP-COPY-002",
@@ -175,7 +172,7 @@
         "*Copyright*.xhtml",
         "*copyright*.xhtml"
       ],
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "COM-META-001",
@@ -184,7 +181,7 @@
       "file_name_pattern": [
         "*.opf"
       ],
-      "enabled": false,
+      "enabled": true,
       "rule_config": {
         "expected_publisher": "Aspen Publishing"
       }
@@ -196,7 +193,7 @@
       "file_name_pattern": [
         "*.opf"
       ],
-      "enabled": false,
+      "enabled": true,
       "rule_config": {
         "expected_rights_pattern": "copyright\\s*©\\s*\\d{4}\\s+aspen\\s+publishing\\.?\\s+all\\s+rights\\s+reserved\\.?"
       }
@@ -208,7 +205,7 @@
       "file_name_pattern": [
         "*.opf"
       ],
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "ASP-META-004",
@@ -217,7 +214,7 @@
       "file_name_pattern": [
         "*.opf"
       ],
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "ASP-META-005",
@@ -226,7 +223,7 @@
       "file_name_pattern": [
         "*.opf"
       ],
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "ASP-META-006",
@@ -235,7 +232,7 @@
       "file_name_pattern": [
         "*.opf"
       ],
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "ASP-META-007",
@@ -244,7 +241,7 @@
       "file_name_pattern": [
         "*.opf"
       ],
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "ASP-META-008",
@@ -253,7 +250,7 @@
       "file_name_pattern": [
         "*.opf"
       ],
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "ASP-META-009",
@@ -262,7 +259,7 @@
       "file_name_pattern": [
         "*.opf"
       ],
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "ASP-META-010",
@@ -271,7 +268,7 @@
       "file_name_pattern": [
         "*.opf"
       ],
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "ASP-META-011",
@@ -280,7 +277,7 @@
       "file_name_pattern": [
         "*.opf"
       ],
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "ASP-META-012",
@@ -289,7 +286,7 @@
       "file_name_pattern": [
         "*.opf"
       ],
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "ASP-META-013",
@@ -298,7 +295,7 @@
       "file_name_pattern": [
         "*.opf"
       ],
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "ASP-META-014",
@@ -307,7 +304,7 @@
       "file_name_pattern": [
         "*.opf"
       ],
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "ASP-META-015",
@@ -316,7 +313,7 @@
       "file_name_pattern": [
         "*.opf"
       ],
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "ASP-META-016",
@@ -325,7 +322,7 @@
       "file_name_pattern": [
         "*.opf"
       ],
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "ASP-META-017",
@@ -334,7 +331,7 @@
       "file_name_pattern": [
         "*.opf"
       ],
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "ASP-META-018",
@@ -343,7 +340,7 @@
       "file_name_pattern": [
         "*.opf"
       ],
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "ASP-META-019",
@@ -352,7 +349,7 @@
       "file_name_pattern": [
         "*.opf"
       ],
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "ASP-IMG-001",
@@ -365,21 +362,21 @@
           ".jpeg"
         ]
       },
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "ASP-IMG-002",
       "name": "Aspen: <img> alt attribute must not be empty",
       "target_path": "OEBPS/xhtml",
       "file_name_pattern": "*.xhtml",
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "ASP-IMG-003",
       "name": "Aspen: No image over 4,000,000 pixels (W×H)",
       "target_path": "OEBPS/images",
       "file_name_pattern": "*.jpg",
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "ASP-IMG-004",
@@ -393,7 +390,7 @@
       "name": "Aspen: All body images must be at least 300 DPI",
       "target_path": "OEBPS/images",
       "file_name_pattern": "*.jpg",
-      "enabled": false,
+      "enabled": true,
       "rule_config": {
         "expected_dpi": 300,
         "exclude_files": [
@@ -419,7 +416,7 @@
       "name": "Aspen: citations must be linked to the corresponding block",
       "target_path": "OEBPS/xhtml",
       "file_name_pattern": "*.xhtml",
-      "enabled": false,
+      "enabled": true,
       "rule_config": {
         "citation_regex": "\\b(?:see\\s+)?(?:p(?:age|p)\\.?\\s*(\\d{1,4})(?:\\s*[\\-–]\\s*\\d{1,4})?|ch(?:apter)?\\.?\\s*(\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)(?:\\s*[\\-–]\\s*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|fig(?:ure)?\\.?\\s*(\\d+(?:[\\.\\-–]\\d+)*)|table\\.?\\s*(\\d+(?:[\\.\\-–]\\d+)*))[a-zA-Z]*(?![0-9\\-–])"
       }
