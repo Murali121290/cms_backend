@@ -7,7 +7,7 @@ use utf8;
 
 my $InFile=$ARGV[0];
 my $HtmFile=$ARGV[1];
-print "\n$InFile";
+#print "\n$InFile";
 #print "\n**********$HtmFile";
 
 my ($HtmName, $HtmDir, $FileSuffix) = fileparse($HtmFile, "\.[a-z]+");
@@ -25,6 +25,7 @@ my ($HtmName, $HtmDir, $FileSuffix) = fileparse($HtmFile, "\.[a-z]+");
 	$cont=~s#([^"])(http\:[^\s<>]+|www[\.\,\s\;\:\-][^\s<>]+|[^\s<>]+(?:\.edu|\.com|\.org|\.gov|\.net|\.co|\.in))#$1<a href="$2">$2</a>#gsi;
 	$cont=~s#<a href="(www)#<a href="http://$1#gsi;
 =cut
+         $cont =~ s#<CommentHighlight>\s*((?:https?://|www\.)[^\s<]+)\s*</CommentHighlight>#"<CommentHighlight><ext-link ext-link-type=\"uri\" xlink:href=\"".&ApplyHTTP($1)."\">$1</ext-link></CommentHighlight>"#gesxi;
 	$cont=~s#<Hyperlink>(.*?)</Hyperlink>#&hyperlink($1)#gesi;
 	sub hyperlink
 	{
@@ -33,7 +34,8 @@ my ($HtmName, $HtmDir, $FileSuffix) = fileparse($HtmFile, "\.[a-z]+");
 			$hyper="<a href=\"$hyper\">$hyper</a>";
 			return $hyper;
 	}
-	
+
+ #       print $cont . "\n";
 	$cont=~s#<a href="([^\"]*?)"#"<a href=\"".&ApplyHTTP($1)."\""#gesi;
 	sub ApplyHTTP
 	{
@@ -273,9 +275,28 @@ my ($HtmName, $HtmDir, $FileSuffix) = fileparse($HtmFile, "\.[a-z]+");
 	$cont=~s#<(Bold|Italic|underline|Strikethrough|Superscript|Subscript|sans|small-caps|mono)>#"<span class=\"".lc($1)."\">"#isge;
 	$cont=~s#<\/(Bold|Italic|underline|Strikethrough|Superscript|Subscript|sans|small-caps|mono)>#<\/span>#isg;
 
-	
+        my @comquery;
+        my $querycount = 1;
+        #query process
+        while ($cont=~m{<CommentQuery>(\s*)\[QUERY: AQ:(\s*)((?:(?!</CommentQuery>).)*?)</CommentQuery>}s)
+        {
+                my $query = $&;
+                $query=~s{<CommentQuery>}{<query$querycount>}g;
+                $query=~s{</CommentQuery>}{</query$querycount>}g;
+                $query=~s{\[QUERY: AQ:}{AQ:}g;
+                push(@comquery,$query);
+                $cont=~s{<CommentQuery>(\s*)\[QUERY: AQ:(\s*)((?:(?!</CommentQuery>).)*?)</CommentQuery>}{\@q$querycount\@}s;
+                $querycount++;
+        }
+	$cont=~s{<CommentQuery>((?:(?!</CommentQuery>).)*?)</CommentQuery>}{}g;
+        $cont=~s{<\/CommentHighlight><CommentHighlight>}{}g;
+        $cont=~s#<CommentHighlight>\s*HYPERLINK\s+"[^"]*"\s*</CommentHighlight>##gsi;
+        $cont=~s{<CommentHighlight>}{\@hi\@}g;
+        $cont=~s{</CommentHighlight>}{\@\/hi\@}g;
+
+        $cont = $cont . join("\n",@comquery);
 	$cont=~s#\n+#\n#gsi;
- &WriteFile("$HtmFile", "$cont", "HTML");
+        &WriteFile("$HtmFile", "$cont", "HTML");
 	#	&WriteFile_DecToChar("$HtmFile", "$cont", "HTML");
 
 
@@ -284,7 +305,7 @@ my ($HtmName, $HtmDir, $FileSuffix) = fileparse($HtmFile, "\.[a-z]+");
 sub ReadFile
 {
 	my ($infile, $type)=@_;
-	open (IN,"<$infile") or die("Unable to open $type file $infile: $!");
+	open (IN,"<$infile") or die "Unable to open $type file $infile: $!";
 	undef $/; my $cont=<IN>;
 	close IN;
 	return $cont;
@@ -292,7 +313,7 @@ sub ReadFile
 sub ReadFileDec
 {
 	my ($infile, $type)=@_;
-	open (IN,'<:utf8', "$infile") or die("Unable to open $type file $infile: $!");
+	open (IN,'<:utf8', "$infile") or die "Unable to open $type file $infile: $!";
 	undef $/; my $cont=<IN>;
 	close IN;
 	$cont=~s#([^\x00-\x7F])#"\&\#".ord($1)."\;"#gesi;		#-- Char to Decimal
@@ -301,7 +322,7 @@ sub ReadFileDec
 sub ReadFileHex
 {
 	my ($infile, $type)=@_;
-	open (IN,'<:utf8', "$infile") or die("Unable to open $type file $infile: $!");
+	open (IN,'<:utf8', "$infile") or die "Unable to open $type file $infile: $!";
 	undef $/; my $cont=<IN>;
 	close IN;
 	$cont=~s#([^\x00-\x7F])#"\&\#x".sprintf("%04X",ord($1))."\;"#gesi;	#-- Char to Hexa Decimal
@@ -310,7 +331,7 @@ sub ReadFileHex
 sub DecToHex
 {
 	my ($infile, $type)=@_;
-	open (IN,"<$infile") or die("Unable to open $type file $infile: $!");
+	open (IN,"<$infile") or die "Unable to open $type file $infile: $!";
 	undef $/; my $cont=<IN>;
 	close IN;
 	$cont=~s#(\&\#(\d+);)#"\&\#x".sprintf('%04X', "$2")."\;"#gesi;
@@ -319,7 +340,7 @@ sub DecToHex
 sub HexToDec
 {
 	my ($infile, $type)=@_;
-	open (IN,"<$infile") or die("Unable to open $type file $infile: $!");
+	open (IN,"<$infile") or die "Unable to open $type file $infile: $!";
 	undef $/; my $cont=<IN>;
 	close IN;
 	$cont=~s#\&\#x(\w+);#"\&\#".hex($1)."\;"#gesi;
@@ -330,7 +351,7 @@ sub WriteFile
 	my $outfile=shift;
 	my $cont=shift;
 	my $type=shift;
-	open (OUT,">$outfile") or die("Unable to write $type file $outfile: $!");
+	open (OUT,">$outfile") or die "Unable to write $type file $outfile: $!";
 	print OUT $cont;
 	close OUT;
 }
@@ -340,7 +361,7 @@ sub WriteFile_DecToChar
 	my $cont=shift;
 	my $type=shift;
 	$cont=~s#\&\#(\d+);#chr($1)#gesi;
-	open (OUT,'>:utf8', "$outfile") or die("Unable to write $type file $outfile: $!");
+	open (OUT,'>:utf8', "$outfile") or die "Unable to write $type file $outfile: $!";
 	print OUT $cont;
 	close OUT;
 }
@@ -350,7 +371,7 @@ sub WriteFile_HexToChar
 	my $cont=shift;
 	my $type=shift;
 	$cont=~s#\&\#x(\w+);#chr(hex($1))#gesi;
-	open (OUT,'>:utf8', "$outfile") or die("Unable to write $type file $outfile: $!");
+	open (OUT,'>:utf8', "$outfile") or die "Unable to write $type file $outfile: $!";
 	print OUT $cont;
 	close OUT;
 }
