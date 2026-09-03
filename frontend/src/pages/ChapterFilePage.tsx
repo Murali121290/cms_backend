@@ -501,7 +501,7 @@ function ProcessingActionsMenu({
           </button>
         )}
 
-        {showAction('xmlToIndesign') && fname.endsWith('.xml') && row?.subfolder?.toLowerCase() === 'xml' && (
+        {showAction('xmlToIndesign') && row?.subfolder?.toLowerCase() === 'xml' && (
           <button
             disabled={!fid}
             className={btnCls}
@@ -515,7 +515,7 @@ function ProcessingActionsMenu({
           </button>
         )}
 
-        {showAction('indesignToXml') && fname.endsWith('.indd') && row?.subfolder?.toLowerCase() === 'indesign' && (
+        {showAction('indesignToXml') && row?.subfolder?.toLowerCase() === 'indesign' && (
           <button
             disabled={!fid}
             className={btnCls}
@@ -541,7 +541,7 @@ function ProcessingActionsMenu({
           </button>
         )}
 
-        {fname.endsWith('.xhtml') && row?.subfolder?.toLowerCase() === 'proof' && (
+        {showAction('viewProof') && row?.subfolder?.toLowerCase() === 'proof' && (
           <button
             disabled={!fid}
             type="button"
