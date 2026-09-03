@@ -162,19 +162,15 @@ def delete_job(job_id: int, db: Session = Depends(get_db), current_user = Depend
     job.is_deleted = True
     db.commit()
     
-    # Attempt to delete files
-    import os
-    if job.pdf_filepath and os.path.exists(job.pdf_filepath):
-        try:
-            os.remove(job.pdf_filepath)
-        except Exception as e:
-            print(f"Error removing {job.pdf_filepath}: {e}")
-            
-    if job.epub_filepath and os.path.exists(job.epub_filepath):
-        try:
-            os.remove(job.epub_filepath)
-        except Exception as e:
-            print(f"Error removing {job.epub_filepath}: {e}")
+    # Attempt to delete local project directory
+    import os, shutil
+    if job.pdf_filepath:
+        project_dir = os.path.dirname(job.pdf_filepath)
+        if os.path.exists(project_dir):
+            try:
+                shutil.rmtree(project_dir)
+            except Exception as e:
+                print(f"Error removing {project_dir}: {e}")
             
     return {"status": "success"}
 
@@ -318,9 +314,12 @@ def upload_epub(
     settings = get_settings()
     upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
     bod_upload_dir = os.path.join(upload_dir, "bod")
-    os.makedirs(bod_upload_dir, exist_ok=True)
     
-    local_path = os.path.join(bod_upload_dir, f"job_{job.id}_{file.filename}")
+    config = db.query(BodClientConfig).filter(BodClientConfig.id == job.client_id).first()
+    project_dir = os.path.join(bod_upload_dir, config.client_name, job.project_name)
+    os.makedirs(project_dir, exist_ok=True)
+    
+    local_path = os.path.join(project_dir, file.filename)
     
     with open(local_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
@@ -380,10 +379,13 @@ def create_job(
     settings = get_settings()
     upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
     bod_upload_dir = os.path.join(upload_dir, "bod")
-    os.makedirs(bod_upload_dir, exist_ok=True)
     
-    # Prefix filename to ensure uniqueness
-    local_path = os.path.join(bod_upload_dir, f"{config.client_name}_{file.filename}")
+    project_name = file.filename.rsplit('.', 1)[0]
+    
+    project_dir = os.path.join(bod_upload_dir, config.client_name, project_name)
+    os.makedirs(project_dir, exist_ok=True)
+    
+    local_path = os.path.join(project_dir, file.filename)
     
     with open(local_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
@@ -397,8 +399,6 @@ def create_job(
             "start_time": now_iso
         }
     }
-    
-    project_name = file.filename.rsplit('.', 1)[0]
     
     new_job = BodJob(
         client_id=client_id,

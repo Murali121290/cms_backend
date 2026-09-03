@@ -11,6 +11,7 @@ class BodClientConfig(Base):
     ftp_host = Column(String(255), nullable=False)
     ftp_username = Column(String(255), nullable=False)
     ftp_password = Column(String(255), nullable=False)
+    ftp_base_path = Column(String(255), nullable=True, default="BOD")
     manager_email = Column(String(255), nullable=False)
     custom_stages = Column(JSON, nullable=False, default=list) # e.g. ["Add job", "Production", "QC", "Archive"]
     is_active = Column(Boolean, default=True, nullable=False)
