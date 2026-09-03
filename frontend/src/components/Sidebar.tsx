@@ -85,7 +85,10 @@ export function Sidebar() {
       ? [{ to: '/post-production', icon: Layers, label: 'Backlist' }]
       : []),
     ...(!isAccessibilityUser
-      ? [{ to: '/reports', icon: BarChart3, label: 'Reports' }]
+      ? [
+          { to: '/bod/internal', icon: Layers, label: 'Book on Demand' },
+          { to: '/reports', icon: BarChart3, label: 'Reports' }
+        ]
       : []),
     ...(canAccess(ROLE_PERMISSIONS.access_settings) && !isAccessibilityUser
       ? [{ to: '/settings', icon: Settings, label: 'Settings' }]
