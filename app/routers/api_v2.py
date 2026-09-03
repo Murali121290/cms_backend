@@ -6826,7 +6826,7 @@ def api_v2_get_paragraph_styles(
 @router.get("/admin/users", response_model=schemas_v2.AdminUsersResponse)
 def api_v2_admin_users(
     offset: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1),
+    limit: int = Query(1000, ge=1),
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):

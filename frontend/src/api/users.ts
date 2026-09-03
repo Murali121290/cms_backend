@@ -68,7 +68,7 @@ const mapUser = (u: any): User => {
 }
 
 export const usersApi = {
-  list: (skip = 0, limit = 100) =>
+  list: (skip = 0, limit = 1000) =>
     api.get<{ users: any[] }>('/admin/users', { params: { skip, limit } })
       .then(r => r.data.users.map(mapUser)),
 

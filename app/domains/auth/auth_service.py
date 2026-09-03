@@ -8,7 +8,6 @@ from app.domains.auth.user_service import determine_access_level
 def sync_user_from_peoplehub(db: Session, ph_user: dict) -> User:
     emp_id = ph_user["employee_id"]
     email = ph_user.get("company_email") or ph_user.get("email") or f"{emp_id}@s4carlisle.com"
-    dept = ph_user.get("department") or "General"
     designation = ph_user.get("designation")
     password_hash = ph_user["password_hash"]
 
@@ -20,8 +19,10 @@ def sync_user_from_peoplehub(db: Session, ph_user: dict) -> User:
     fn = ph_user.get("first_name")
     ln = ph_user.get("last_name")
 
-    existing_role = user.role if user else None
-    access_lvl = determine_access_level(existing_role)
+    is_admin = emp_id.lower() == "admin" or (user and user.role and user.role.lower() == "admin")
+    initial_role = "admin" if is_admin else None
+    initial_team = "Admin Team" if is_admin else None
+    initial_access = "Admin" if is_admin else None
 
     if not user:
         user = User(
@@ -30,10 +31,10 @@ def sync_user_from_peoplehub(db: Session, ph_user: dict) -> User:
             first_name=fn,
             last_name=ln,
             password_hash=password_hash,
-            role=None,
+            role=initial_role,
             designation=designation,
-            team=dept,
-            access_level=None,
+            team=initial_team,
+            access_level=initial_access,
             active_status=ph_user.get("is_active", True)
         )
         db.add(user)
@@ -44,8 +45,8 @@ def sync_user_from_peoplehub(db: Session, ph_user: dict) -> User:
         user.last_name = ln
         user.password_hash = password_hash
         user.designation = designation
-        user.team = dept
-        user.access_level = access_lvl
+        # Preserve existing user.role and user.team (do NOT overwrite with PeopleHub department or designation)
+        user.access_level = determine_access_level(user.role)
         user.active_status = ph_user.get("is_active", True)
 
     db.commit()
