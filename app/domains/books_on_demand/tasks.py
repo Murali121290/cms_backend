@@ -24,9 +24,10 @@ def watch_ftp_for_new_pdfs():
         for config in active_configs:
             try:
                 with BodFtpService(config.ftp_host, config.ftp_username, config.ftp_password) as ftp:
-                    # Navigate to the BOD folder
+                    # Navigate to the configured base path or default to "BOD"
+                    target_dir = config.ftp_base_path if config.ftp_base_path else "BOD"
                     try:
-                        ftp.ftp.cwd("BOD")
+                        ftp.ftp.cwd(target_dir)
                     except Exception as e:
                         logger.error(f"Failed to change directory to BOD on FTP {config.ftp_host}: {str(e)}")
                         continue
@@ -41,8 +42,13 @@ def watch_ftp_for_new_pdfs():
                         
                         if not existing_job:
                             logger.info(f"Found new PDF for {config.client_name} in BOD folder: {pdf_name}")
+                            project_name = pdf_name.rsplit('.', 1)[0]
                             
-                            local_path = os.path.join(bod_upload_dir, f"{config.client_name}_{pdf_name}")
+                            # Create directory bod_upload_dir / client_name / project_name
+                            project_dir = os.path.join(bod_upload_dir, config.client_name, project_name)
+                            os.makedirs(project_dir, exist_ok=True)
+                            
+                            local_path = os.path.join(project_dir, pdf_name)
                             ftp.download_file(pdf_name, local_path)
                             
                             # Create Job
@@ -53,8 +59,6 @@ def watch_ftp_for_new_pdfs():
                                     "start_time": now_iso
                                 }
                             }
-
-                            project_name = pdf_name.rsplit('.', 1)[0]
                         
                             new_job = BodJob(
                                 client_id=config.id,

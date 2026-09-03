@@ -26,6 +26,7 @@ def upgrade() -> None:
     sa.Column('ftp_host', sa.String(length=255), nullable=False),
     sa.Column('ftp_username', sa.String(length=255), nullable=False),
     sa.Column('ftp_password', sa.String(length=255), nullable=False),
+    sa.Column('ftp_base_path', sa.String(length=255), nullable=True, server_default='BOD'),
     sa.Column('manager_email', sa.String(length=255), nullable=False),
     sa.Column('custom_stages', sa.JSON(), nullable=False),
     sa.Column('is_active', sa.Boolean(), nullable=False),
