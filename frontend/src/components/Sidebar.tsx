@@ -87,6 +87,7 @@ export function Sidebar() {
     ...(!isAccessibilityUser
       ? [
           { to: '/bod/internal', icon: Layers, label: 'Book on Demand' },
+          { to: '/bod/report', icon: BarChart3, label: 'BOD Report (Customer)' },
           { to: '/reports', icon: BarChart3, label: 'Reports' }
         ]
       : []),
