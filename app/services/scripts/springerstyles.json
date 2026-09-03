@@ -445,6 +445,11 @@
                 "bib_ed-fname",
                 "bib_ed-surname",
                 "annotation reference",
-                "[Unset Style]"
+                "[Unset Style]",
+                "TB-BulletList1",
+                "TB-UL-FL1",
+                "italic",
+                "PMI",
+                "Table Grid"
         ]
 }
