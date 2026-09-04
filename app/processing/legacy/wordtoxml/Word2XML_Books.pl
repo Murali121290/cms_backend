@@ -294,6 +294,24 @@ BKMETA
                 $Tmp=~s# class="Exhibit-UN-TableSource"# class="TableSource"#igs;
 		$Tmp=~s#<p><Hyperlink/></p>##igs;
 		$Tmp=~s#<a href="http://;">;</a>#;#igs;
+                $Tmp =~ s{((?:<p\s+class="BulletList1[_]?(?:first|last)?">(.*?)</p>\s*(?:<p\s+class="ListItem-Para-FL1">(.*?)</p>\s*)?)+)}{
+                    my $block = $1;
+                    my $list_items = "";
+
+                    while ($block =~ m{<p\s+class="BulletList1[_]?(?:first|last)?">(.*?)</p>\s*(?:<p\s+class="ListItem-Para-FL1">(.*?)</p>)?}gs) {
+                        my $title = $1;
+                        my $desc  = $2;
+
+                        $list_items .= "<list-item><p>$title</p>\n";
+                        if (defined $desc) {
+                            $list_items .= "<p>$desc</p>\n";
+                        }
+                        $list_items .= "</list-item>\n";
+                    }
+
+                    "<list list-type=\"bullet\">\n" . $list_items . "</list>"
+                }gesx;
+                    
                 $Tmp =~ s{((?:<p\s+class="BulletList1[_]?(?:first|last)?">(.*?)</p>\s*(?:<p\s+class="ListItemPara-FL1">(.*?)</p>\s*)?)+)}{
                     my $block = $1;
                     my $list_items = "";
@@ -360,7 +378,7 @@ BKMETA
                 $Tmp=~s#<p[^>]*>(<strong>)?&lt;(\/)?(original to the au)&gt;(<\/strong>)?<\/p>##isg;
 		#		&WriteFile("$Final_File\.tmp", "$Tmp", "HTML");
                 $Tmp =~ s{&(?!amp;|lt;|gt;|quot;|apos;|#[0-9]+;|#x[0-9a-fA-F]+;|num;|ChLabel;|ChTitle;|contrib;|abstract;|kwd;|KeyTermsHeading;)}{&#x0026;}isg;
-                $Tmp =~ s{&amp;}{&#x0026;}isg;
+                $Tmp =~ s{&amp;}{\&\#x0026;}isg;
                 
                 my $num = "";
 		if($Tmp=~s#<p class="ChapterNumber">\s*(?:<strong>)?(Chapter)?\s*([0-9]+)\s*(?:</strong>)?\s*</p>##is){
@@ -572,15 +590,14 @@ BKMETA
 
                 # Convert unlinked URLs into <ext-link> tags while excluding trailing quotes/punctuation
                 $Tmp =~ s{
-                    \b(https?://[^\s<>"{}|\\^`]+)(?=\s|<|$)
+                    \b(https?://[^\s<>"{}|\\^`]+[^\s<>"{}|\\^`.,;:!])([\.,;:!]?)(?=\s|<|$)
                 }{
-                    my $raw = $1;
-                    my $url = $raw;
-                    my $punct = "";
-                    while ($url =~ s{([.,;:!?"'\)\x{5D}\x{7D}\x{201D}\x{201C}\x{2019}\x{2018}]|\&\#x[0-9a-fA-F]+;)$}{}) {
-                        $punct = $1 . $punct;
-                    }
+                    my $url   = $1;
+                    my $punct = $2;
+
+                    # Determine link type (doi vs standard uri)
                     my $type = ($url =~ m{doi\.org/}) ? "doi" : "uri";
+
                     "<ext-link ext-link-type=\"$type\" xlink:href=\"$url\">$url</ext-link>$punct";
                 }gexi;
 
@@ -754,6 +771,9 @@ LOOP:
                 $Tmp =~ s{<ext-link ext-link-type="uri" xlink:href="([^"]+)">(\s*)<ext-link ext-link-type="uri" xlink:href="([^"]+)">((?:(?!</ext-link>).)*?)</ext-link>(\s*)</ext-link>}{<ext-link ext-link-type="uri" xlink:href="$3">$4</ext-link>}g;
                 $Tmp =~ s{<ext-link ext-link-type="doi" xlink:href="([^"]+)">(\s*)<ext-link ext-link-type="doi" xlink:href="([^"]+)">((?:(?!</ext-link>).)*?)</ext-link>(\s*)</ext-link>}{<ext-link ext-link-type="doi" xlink:href="$3">$4</ext-link>}g;
                 $Tmp =~ s{(<cf21>|</cf21>)}{}g;
+                $Tmp =~ s{<TLink href="([^"]+)">}{}g;
+                $Tmp =~ s{</TLink>}{}g;
+                $Tmp =~ s{(<bibetal>|</bibetal>)}{}g;
 		my $finalCont = "$booMeta$Tmp";
 
 		#Final clean up
@@ -827,13 +847,19 @@ LOOP:
                 $finalCont=~ s{\@\/hi\@}{<!--<\/highlight>-->}g;
                 $finalCont=~ s{<query([0-9]+)>}{<!--<query>-->}g;
                 $finalCont=~ s{</query([0-9]+)>}{<!--</query>-->}g;
-                $finalCont =~ s{<abstract>(\s*)<title>Abstract</title>(\s*)\&abstract;(\s*)</abstract>}{}g;
-                $finalCont =~ s{<kwd-group kwd-group-type="author">(\s*)<title>&KeyTermsHeading;</title>(\s*)&kwd;(\s*)</kwd-group>}{}g;
-                $finalCont =~ s{<contrib-group>(\s*)&contrib;(\s*)</contrib-group>}{}g;
-                $finalCont =~ s{&(?:num|ChLabel|ChTitle|contrib|abstract|kwd|KeyTermsHeading);}{}g;
-                $finalCont =~ s{(<nocitebib>|</nocitebib>)}{}g;
-		$finalCont =~ s{&(?!amp;|lt;|gt;|quot;|apos;|#[0-9]+;|#x[0-9a-fA-F]+;)}{&#x0026;}isg;
-		$finalCont =~ s{([^\x00-\x7F])}{sprintf('&#x%04X;', ord($1))}ge;
+                $finalCont=~ s{<abstract>(\s*)<title>Abstract</title>(\s*)\&abstract;(\s*)</abstract>}{}g;
+                $finalCont=~ s{<kwd-group kwd-group-type="author">(\s*)<title>&KeyTermsHeading;</title>(\s*)&kwd;(\s*)</kwd-group>}{}g;
+		$finalCont=~ s#(\n+)#\n#isg;
+                $finalCont=~ s{  }{ }g;
+                $finalCont=~ s{<p>(\s*)<\/p>}{}g;
+                $finalCont=~ s{(<apple-converted-space>|</apple-converted-space>)}{}g;
+                $finalCont=~ s{<p>\&lt;onlineonly\&gt;</p>(\s*)</([^>]*)>}{</$2>$1<p>\&lt;onlineonly\&gt;</p>}gs;
+                $finalCont=~ s{<p>\&lt;\/onlineonly\&gt;</p>(\s*)</([^>]*)>}{</$2>$1<p>\&lt;\/onlineonly\&gt;</p>}gs;
+                $finalCont=~ s{<contrib-group>(\s*)&contrib;(\s*)</contrib-group>}{}g;
+                $finalCont=~ s{&(?:num|ChLabel|ChTitle|contrib|abstract|kwd|KeyTermsHeading);}{}g;
+                #$finalCont=~ s{(<nocitebib>|</nocitebib>)}{}g;
+		$finalCont=~ s{&(?!amp;|lt;|gt;|quot;|apos;|#[0-9]+;|#x[0-9a-fA-F]+;)}{&#x0026;}isg;
+		$finalCont=~ s{([^\x00-\x7F])}{sprintf('&#x%04X;', ord($1))}ge;
 		&WriteFile("$Final_File", "$finalCont", "HTML");
 		system($PYTHON_BIN, "$File_Path/utf8_converter.py", "$Final_File");
 
