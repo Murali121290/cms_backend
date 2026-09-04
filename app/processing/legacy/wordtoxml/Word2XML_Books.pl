@@ -605,6 +605,7 @@ BKMETA
                 my $figurenumber = $FileName;
                 my @bookid = split('_', $figurenumber);
                 $figurenumber = $bookid[0];
+                $figurenumber=~ s{([0-9]+)}{}g;
                 if (length($num) == 1)
                 {
                         $figurenumber = $figurenumber . "_F0" . $num;
@@ -616,8 +617,29 @@ BKMETA
                 
                 #figure
 		#$Tmp=~s#<p class="FigureLegend">\s*<strong>\s*(Figure)(\s*)([0-9\.\-]+)([0-9]*)((?:(?!<p |<\/p>).)*?)<\/strong>\s*<\/p>(\s*)(<p class="FigureSource">)?((?:(?!<p |<\/p>).)*?)(</p>)?(<p class="FigureNote">)?((?:(?!<p |<\/p>).)*?)(</p>)?#<fig id="fig${num}_&seq3;" orientation="portrait" position="float"><label>$1$2$3$4</label>\n<caption><title>$5</title></caption>\n<graphic xmlns:xlink="http://www.w3.org/1999/xlink" orientation="landscape" xlink:href="$figurenumber\-$3.eps" mime-subtype="jpeg"/>\n$6$7$8\n$9$10$11\n</fig>#isg;
-		$Tmp=~s#<p class="FigureLegend">\s*(<strong>)?\s*(Figure)(\s*)([0-9]+)([\.\-0-9]*)(<\/strong>)?((?:(?!<p |<\/p>).)*?)(<\/strong>)?<\/p>#<fig id="fig${num}_&seq3;" orientation="portrait" position="float"><label>$2$3$4$5</label>\n<caption><title>$7</title></caption>\n<graphic xmlns:xlink="http://www.w3.org/1999/xlink" orientation="landscape" xlink:href="$figurenumber\-$4$5.eps" mime-subtype="jpeg"/>\n</fig>#isg;
-		$Tmp=~s#<p class="FigureLegend">\s*<FigureNumber>(?:<strong>)?\s*(Figure)(\s*)([0-9]+)([\.\-0-9]*)(?:<strong>)?<\/FigureNumber>\s*<strong>((?:(?!<p |<\/p>).)*?)<\/strong>\s*<\/p>#<fig id="fig${num}_&seq3;" orientation="portrait" position="float"><label>$1$2$3$4</label>\n<caption><title>$5</title></caption>\n<graphic xmlns:xlink="http://www.w3.org/1999/xlink" orientation="landscape" xlink:href="$figurenumber\-$4$5.eps" mime-subtype="jpeg"/>\n</fig>#isg;
+		$Tmp=~s{<p class="FigureLegend">\s*(<strong>)?\s*(Figure)(\s*)([0-9]+)([\.\-0-9]*)(<\/strong>)?((?:(?!<p |<\/p>).)*?)(<\/strong>)?<\/p>}{
+                my $tag = $&;
+                my $fignum = $5;
+                $fignum =~ s{\.}{}g;
+                if (length($fignum) == 1)
+                {
+                        $fignum = "0" . $fignum;
+                }
+                $tag=~ s{<p class="FigureLegend">\s*(<strong>)?\s*(Figure)(\s*)([0-9]+)([\.\-0-9]*)(<\/strong>)?((?:(?!<p |<\/p>).)*?)(<\/strong>)?<\/p>}{<fig id="fig${num}_&seq3;" orientation="portrait" position="float"><label>$2$3$4$5</label>\n<caption><title>$7</title></caption>\n<graphic xmlns:xlink="http://www.w3.org/1999/xlink" orientation="landscape" xlink:href="$figurenumber\-$fignum.eps" mime-subtype="jpeg"/>\n</fig>}g;
+                qq($tag);
+
+}isge;
+		$Tmp=~s{<p class="FigureLegend">\s*<FigureNumber>(?:<strong>)?\s*(Figure)(\s*)([0-9]+)([\.\-0-9]*)(?:<strong>)?<\/FigureNumber>\s*<strong>((?:(?!<p |<\/p>).)*?)<\/strong>\s*<\/p>}{
+                        my $tag = $&;
+                        my $fignum = $5;
+                        $fignum =~ s{\.}{}g;
+                        if (length($fignum) == 1)
+                        {
+                                $fignum = "0" . $fignum;
+                        }
+                        $tag=~ s{<p class="FigureLegend">\s*<FigureNumber>(?:<strong>)?\s*(Figure)(\s*)([0-9]+)([\.\-0-9]*)(?:<strong>)?<\/FigureNumber>\s*<strong>((?:(?!<p |<\/p>).)*?)<\/strong>\s*<\/p>}{<fig id="fig${num}_&seq3;" orientation="portrait" position="float"><label>$1$2$3$4</label>\n<caption><title>$5</title></caption>\n<graphic xmlns:xlink="http://www.w3.org/1999/xlink" orientation="landscape" xlink:href="$figurenumber\-$fignum.eps" mime-subtype="jpeg"/>\n</fig>}g;
+                        qq($tag);
+}isge;
                 while (($Tmp =~ m{<\/fig>(\s*)<p class="FigureSource">}si) || ($Tmp =~ m{<\/fig>(\s*)<p class="FigureNote">}si))
                 {
                         $Tmp=~ s{</fig>(\s*)<p class="FigureSource">((?:(?!</p>).)*?)</p>}{<attrib>$2</attrib></fig>$1}s;
@@ -677,6 +699,7 @@ BKMETA
 		push(@ID,"$id");
 		push(@Label,"$Label");
 	}
+=cut        
 		while($Tmp=~s#<(FigureCitation|TableCitation|BoxCitation)>([^<>]+)<\/\1>#<TLink label="$2">$2<\/TLink>#isg){
 			
 		}
@@ -694,7 +717,7 @@ LOOP:
 		for(my $i = 0; $i<scalar(@Label);$i++){
 			$Tmp=~s#<TLink label="\Q$Label[$i]\E[a-z]">#<TLink href="$ID[$i]">#isg;
 		}
-
+=cut
 		#		print "\nL3";
 		#$Tmp=~s#<xref ref-type="([^"]*)"><TLink href="([^"]*)">((?:(?!<\/TLink>|<Tlink ).)*?)<\/TLink>((?:(?!<\/xref>|<xref ).)*?)</xref>#<xref ref-type="$1" rid="$2">$3$4</xref>#isg;
 		#$Tmp=~s#<TLink href="([^"]*)">((?:(?!<\/TLink>|<Tlink ).)*?)<\/TLink>#<xref ref-type="" rid="$1">$2</xref>#isg;
@@ -774,6 +797,7 @@ LOOP:
                 $Tmp =~ s{<TLink href="([^"]+)">}{}g;
                 $Tmp =~ s{</TLink>}{}g;
                 $Tmp =~ s{(<bibetal>|</bibetal>)}{}g;
+                $Tmp =~ s{(<FigureCitation>|<TableCitation>|<BoxCitation>|</FigureCitation>|</TableCitation>|</BoxCitation>|)}{}g;
 		my $finalCont = "$booMeta$Tmp";
 
 		#Final clean up
@@ -1396,6 +1420,8 @@ sub refLinker{
 	$tmp=~ s#(\,|\)|\(|\.)#&#isg;
 	$tmp=~ s#\##\\\##isg;
 	$tmp=~ s#\-#\\\-#isg;
+	$tmp=~ s#\[#\\\[#isg;
+	$tmp=~ s#\]#\\\]#isg;
 	$tmp=~ s# #&#isg;
 	my $tt = $tmp;
 	my $yr = $1 if($tt=~ m#([0-9][0-9][0-9][0-9][a-z]?)$#img);
