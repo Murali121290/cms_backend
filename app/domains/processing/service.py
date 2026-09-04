@@ -64,15 +64,15 @@ PROCESS_PERMISSIONS = {
     "ppd": ["Manuscript Analysis Operator", "ProjectManager", "Admin"],
     "permissions": ["PermissionsManager", "ProjectManager", "Admin"],
     "reference_validation": ["Pre Editor", "Team Lead - Prediting", "Admin","Non-XML Manager", "Non-XML Operator"],
-    "structuring": ["ProjectManager","Pre Editor", "Team Lead - Prediting", "Admin","Non-XML Manager", "Non-XML Operator"],
+    "structuring": ["ProjectManager","Pre Editor", "Team Lead - Prediting", "Admin","Non-XML Manager", "Non-XML Operator", "XML Manager", "XML Operator", "Senior XML Operator"],
     "bias_scan": ["Team Lead - Editorial", "Technical Editor", "Admin","Language Editor", "Team Lead - Language Editing"],
     "credit_extractor_ai": ["PermissionsManager", "ProjectManager", "Admin"],
-    "word_to_xml": ["Admin", "XML Manager", "XML manager"],
-    "xml_to_indesign": ["Admin", "XML Manager", "XML manager"],
-    "indesign_to_xml": ["Admin", "XML Manager", "XML manager"],
-    "extract_design_css": ["Admin", "XML Manager", "XML manager"],
-    "style_validation": ["Admin", "XML Manager", "XML manager"],
-    "view_proof": ["Admin", "XML Manager", "XML manager", "Author", "Reviewer", "Editor", "XML Operator", "Technical Editor", "Pre Editor", "Language Editor"],
+    "word_to_xml": ["Admin", "XML Manager", "XML manager", "XML Operator", "Senior XML Operator"],
+    "xml_to_indesign": ["Admin", "XML Manager", "XML manager", "XML Operator", "Senior XML Operator"],
+    "indesign_to_xml": ["Admin", "XML Manager", "XML manager", "XML Operator", "Senior XML Operator", "Compositor", "Senior Compositor", "Production Manager"],
+    "extract_design_css": ["Admin", "XML Manager", "XML manager", "XML Operator", "Senior XML Operator"],
+    "style_validation": ["Admin", "XML Manager", "XML manager", "XML Operator", "Senior XML Operator"],
+    "view_proof": ["Admin", "XML Manager", "XML manager", "Author", "Reviewer", "Editor", "XML Operator", "Technical Editor", "Pre Editor", "Language Editor", "Compositor", "Senior Compositor", "Production Manager"],
 }
 
 
