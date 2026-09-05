@@ -17,7 +17,7 @@ class ProjectBootstrapValidationError(Exception):
 
 _CHAPTER_CATEGORIES = ["Manuscript", "Art", "InDesign", "Proof", "XML"]
 _DESIGN_CATEGORIES = [
-    "Indesign",
+    "InDesign",
     "Common Art",
     "Pdf",
     "Font",
@@ -75,9 +75,9 @@ def _build_project_bootstrap_upload_plan(
 
 def create_predefined_project_folders(base_path: str):
     predefined_folders = [
-        "Design/Indesign",
+        "Design/InDesign",
         "Design/Pdf",
-        "Design/template/indesign",
+        "Design/template/InDesign",
         "Design/template/Common Art",
         "Design/template/Font",
         "Design/template/Library",

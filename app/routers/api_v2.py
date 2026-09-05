@@ -10,7 +10,7 @@ import logging
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File as FastAPIFile, Form, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pathlib import Path
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
@@ -3667,7 +3667,7 @@ def api_v2_upload_zip(
                     if len(path_parts) > design_idx + 2:
                         category = path_parts[design_idx + 1]
                     else:
-                        category = "Indesign"
+                        category = "InDesign"
                 elif is_ce_path:
                     chapter_no_str = "CE support"
                     ce_idx = [i for i, part in enumerate(path_parts) if part.lower() == "ce support"][0]
@@ -7162,12 +7162,54 @@ def api_v2_get_chapter_by_id(chapter_id: int, db: Session = Depends(database.get
         )
     from app.domains.auth.rbac_config import has_permission
     from sqlalchemy import select
+    import re
+
     chapter = db.execute(select(ChapterInfo).where(ChapterInfo.id == chapter_id)).scalars().first()
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
-    if not has_permission(viewer, "view_all_chapters") and chapter.current_assignee_name != viewer.username:
-        raise HTTPException(status_code=403, detail="Access denied to this chapter")
-    return chapter
+
+    if has_permission(viewer, "view_all_chapters") or chapter.current_assignee_name == viewer.username:
+        return chapter
+
+    c_name = (chapter.chapters or "").strip()
+    c_name_lower = c_name.lower()
+
+    # Allow Design chapter view/download for project participants
+    if c_name == "Design" or c_name_lower == "design":
+        return chapter
+
+    # Allow Art Track chapter view/download if matching viewer's assigned chapters or if user is in graphics team
+    if "art" in c_name_lower:
+        roles_lower = set()
+        if hasattr(viewer, "roles") and viewer.roles:
+            for r in viewer.roles:
+                roles_lower.add((getattr(r, "name", "") or "").lower())
+        if getattr(viewer, "role", None):
+            roles_lower.add(viewer.role.lower())
+        if getattr(viewer, "designation", None):
+            roles_lower.add(viewer.designation.lower())
+        graphics_roles = {"graphics manager", "senior graphics designer", "graphics designer", "production manager", "admin"}
+        if any(any(gr in r for gr in graphics_roles) for r in roles_lower):
+            return chapter
+
+        art_match = re.search(r'\d+', c_name)
+        if art_match:
+            num_str = art_match.group(0)
+            viewer_assigned = db.execute(
+                select(ChapterInfo)
+                .where(ChapterInfo.project == chapter.project)
+                .where(ChapterInfo.current_assignee_name == viewer.username)
+            ).scalars().all()
+            assigned_nums = set()
+            for ac in viewer_assigned:
+                m = re.search(r'\d+', ac.chapters or "")
+                if m:
+                    assigned_nums.add(m.group(0).zfill(2))
+                    assigned_nums.add(str(int(m.group(0))))
+            if num_str.zfill(2) in assigned_nums or str(int(num_str)) in assigned_nums:
+                return chapter
+
+    raise HTTPException(status_code=403, detail="Access denied to this chapter")
 
 @router.get("/chapters/project/{project}", response_model=List[ChapterInfoResponse])
 def api_v2_get_chapters_by_project(project: str, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
@@ -7180,9 +7222,64 @@ def api_v2_get_chapters_by_project(project: str, db: Session = Depends(database.
         )
     from app.domains.auth.rbac_config import has_permission
     from sqlalchemy import select
+    import re
+
     if has_permission(viewer, "view_all_chapters"):
         return list(db.execute(select(ChapterInfo).where(ChapterInfo.project == project)).scalars().all())
-    return list(db.execute(select(ChapterInfo).where(ChapterInfo.project == project).where(ChapterInfo.current_assignee_name == viewer.username)).scalars().all())
+
+    all_proj_chapters = list(db.execute(select(ChapterInfo).where(ChapterInfo.project == project)).scalars().all())
+    assigned = [c for c in all_proj_chapters if c.current_assignee_name == viewer.username]
+    assigned_ids = {c.id for c in assigned}
+
+    assigned_nums = set()
+    for c in assigned:
+        raw_num = c.chapters or ""
+        match = re.search(r'\d+', raw_num)
+        if match:
+            assigned_nums.add(match.group(0).zfill(2))
+            assigned_nums.add(str(int(match.group(0))))
+
+    roles_lower = set()
+    if hasattr(viewer, "roles") and viewer.roles:
+        for r in viewer.roles:
+            roles_lower.add((getattr(r, "name", "") or "").lower())
+    if getattr(viewer, "role", None):
+        roles_lower.add(viewer.role.lower())
+    if getattr(viewer, "designation", None):
+        roles_lower.add(viewer.designation.lower())
+
+    design_roles = {"compositor", "senior compositor", "production manager", "admin", "xml manager", "template team manager", "template designer"}
+    graphics_roles = {"graphics manager", "senior graphics designer", "graphics designer", "production manager", "admin"}
+
+    can_view_design = True
+    can_view_all_art = any(any(gr in r for gr in graphics_roles) for r in roles_lower)
+
+    result = list(assigned)
+    for c in all_proj_chapters:
+        if c.id in assigned_ids:
+            continue
+        c_name = (c.chapters or "").strip()
+        c_name_lower = c_name.lower()
+
+        if c_name == "Design" or c_name_lower == "design":
+            if can_view_design:
+                result.append(c)
+                assigned_ids.add(c.id)
+                continue
+
+        if "art" in c_name_lower:
+            if can_view_all_art:
+                result.append(c)
+                assigned_ids.add(c.id)
+                continue
+            art_match = re.search(r'\d+', c_name)
+            if art_match:
+                num_str = art_match.group(0)
+                if num_str.zfill(2) in assigned_nums or str(int(num_str)) in assigned_nums:
+                    result.append(c)
+                    assigned_ids.add(c.id)
+
+    return result
 
 @router.get("/chapters/client/{client}", response_model=List[ChapterInfoResponse])
 def api_v2_get_chapters_by_client(client: str, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
@@ -8494,3 +8591,133 @@ def api_v2_finalize_mapping(
     total_chapters = db.query(models.Chapter).filter(models.Chapter.project == project.project_code).count()
 
     return {"message": "Files mapped and chapters created.", "created_chapters": total_chapters}
+
+
+@router.post("/uploads/{project_id}/chapter/{chapter_name}/bulk-download")
+def api_v2_chapter_bulk_download(
+    project_id: int,
+    chapter_name: str,
+    payload: schemas_v2.BulkDownloadPayload,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    from urllib.parse import unquote
+    import io
+
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+
+    clean_chapter_name = unquote(chapter_name).strip()
+
+    # Find chapter
+    chapter = db.query(models.ChapterInfo).filter(
+        models.ChapterInfo.project == project.code,
+        (models.ChapterInfo.chapters == clean_chapter_name) | (models.ChapterInfo.chapter_title == clean_chapter_name)
+    ).first()
+
+    raw_num = clean_chapter_name.split("-")[-1] if clean_chapter_name else ""
+    if not chapter and clean_chapter_name.startswith("chapter-") and raw_num.isdigit():
+        chapter = db.query(models.ChapterInfo).filter(
+            models.ChapterInfo.project == project.code,
+            models.ChapterInfo.id == int(raw_num)
+        ).first()
+
+    if not chapter and raw_num:
+        try:
+            chap_num = str(int(raw_num))
+            padded_num = f"{int(raw_num):02d}"
+        except (TypeError, ValueError):
+            chap_num = raw_num
+            padded_num = raw_num
+
+        chapter = db.query(models.ChapterInfo).filter(
+            models.ChapterInfo.project == project.code,
+            (models.ChapterInfo.chapters == chap_num) | (models.ChapterInfo.chapters == padded_num)
+        ).first()
+
+        if not chapter and chap_num.isdigit():
+            chapter = db.query(models.ChapterInfo).filter(
+                models.ChapterInfo.project == project.code,
+                (models.ChapterInfo.chapters.ilike(f"%{padded_num}%") | models.ChapterInfo.chapters.ilike(f"%{chap_num}%"))
+            ).first()
+
+    chapter_folder_str = chapter.chapters if chapter else clean_chapter_name
+
+    zip_buffer = io.BytesIO()
+    added_files = 0
+
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f_item in payload.files:
+            sub = f_item.subfolder or ""
+            fname = f_item.file_name
+            found_path = None
+
+            # 1. Search FileVersion table if subfolder is Backup
+            if sub == "Backup" and chapter:
+                version_entry = db.query(models.FileVersion).join(
+                    models.File, models.FileVersion.file_id == models.File.id
+                ).filter(
+                    models.File.chapter_id == chapter.id,
+                    models.FileVersion.path.like(f"%/{fname}")
+                ).first()
+                if version_entry and version_entry.path and os.path.exists(version_entry.path):
+                    found_path = version_entry.path
+
+            # 2. Search File table by project & chapter & filename
+            if not found_path and chapter:
+                file_rec = db.query(models.File).filter(
+                    models.File.project_id == project.id,
+                    models.File.chapter_id == chapter.id,
+                    models.File.filename == fname
+                ).first()
+                if file_rec and file_rec.path:
+                    cand = file_rec.path if os.path.isabs(file_rec.path) else os.path.join(file_service.UPLOAD_DIR, file_rec.path)
+                    if os.path.exists(cand):
+                        found_path = cand
+
+            # 3. Direct filesystem candidates
+            if not found_path:
+                candidates = [
+                    os.path.join(file_service.UPLOAD_DIR, project.code, chapter_folder_str, sub, fname),
+                    os.path.join(file_service.UPLOAD_DIR, project.code, chapter_folder_str, fname),
+                    os.path.join(file_service.UPLOAD_DIR, project.code, sub, fname),
+                    os.path.join(file_service.UPLOAD_DIR, project.code, fname),
+                ]
+                for cand in candidates:
+                    if os.path.exists(cand) and os.path.isfile(cand):
+                        found_path = cand
+                        break
+
+            if found_path and os.path.exists(found_path):
+                arcname = os.path.join(sub, fname) if sub else fname
+                zf.write(found_path, arcname)
+                added_files += 1
+
+    if added_files == 0:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="FILES_NOT_FOUND",
+            message="None of the requested files could be located on disk.",
+        )
+
+    zip_buffer.seek(0)
+    safe_filename = clean_chapter_name.replace(" ", "_").replace("/", "_")
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{safe_filename}_bulk.zip"'}
+    )
+

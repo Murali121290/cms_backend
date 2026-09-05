@@ -84,7 +84,7 @@ export const FOLDER_CONFIG: Record<string, FolderConfig> = {
   // — the folder is populated only by the conversion pipeline, so a user
   // dropping a file here would create something with no clear source.
   converted:  { label:'Converted',  icon:'Image',         allowUpload:false, allowDownload:true,  columns:['fileName','fileType','dimensions','dpi','colorProfile','size','uploadedBy','uploadedOn'] },
-  indesign:   { label:'Indesign',   icon:'Layers',        allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','packageStatus','size','uploadedBy','uploadedOn'] },
+  indesign:   { label:'InDesign',   icon:'Layers',        allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','packageStatus','size','uploadedBy','uploadedOn'] },
   proof:      { label:'Proof',      icon:'ClipboardCheck',allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','reviewer','reviewStatus','size','uploadedBy','uploadedOn'] },
   xml:        { label:'XML',        icon:'Code2',         allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','xmlType','validationStatus','size','uploadedBy','uploadedOn'] },
   misc:       { label:'Final delivery', icon:'FolderOpen',    allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
@@ -92,11 +92,11 @@ export const FOLDER_CONFIG: Record<string, FolderConfig> = {
 }
 
 export const DESIGN_FOLDER_CONFIG: Record<string, FolderConfig> = {
-  indesign:     { label:'Indesign',   icon:'Layers',        allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','packageStatus','size','uploadedBy','uploadedOn'] },
+  indesign:     { label:'InDesign',   icon:'Layers',        allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','packageStatus','size','uploadedBy','uploadedOn'] },
   converted:    FOLDER_CONFIG.converted,
   pdf:          { label:'Pdf',        icon:'FileText',      allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
   template:     { label:'template',   icon:'Layout',        allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'] },
-  template_indesign:   { label:'indesign',   icon:'Layout',  allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'], parent: 'template' },
+  template_indesign:   { label:'InDesign',   icon:'Layout',  allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'], parent: 'template' },
   template_common_art: { label:'Common Art', icon:'Image',   allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'], parent: 'template' },
   template_font:       { label:'Font',       icon:'Type',    allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'], parent: 'template' },
   template_library:    { label:'Library',    icon:'FolderArchive', allowUpload:true,  allowDownload:true,  columns:['fileName','fileType','size','uploadedBy','uploadedOn'], parent: 'template' },

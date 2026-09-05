@@ -1175,11 +1175,12 @@ export function ChapterFilePage({
   }
 
   async function handleBulkDownload() {
-    if (selectedCount === 0 || downloadBusy) return
+    const targets = selectedCount > 0 ? selectedRows : rows
+    if (targets.length === 0 || downloadBusy) return
     const chapterLabel = chapterFolderData?.chapter_name ?? resolvedChapterLabel
 
-    if (selectedCount === 1) {
-      const row = selectedRows[0]
+    if (targets.length === 1) {
+      const row = targets[0]
       if (row.db_id) {
         const a = document.createElement('a')
         a.href = `/api/v2/files/${row.db_id}/download`
@@ -1194,16 +1195,11 @@ export function ChapterFilePage({
       return
     }
 
-    if (!chapterFolderData) {
-      toast.error('Bulk ZIP download requires folder data — use individual download for now')
-      return
-    }
-
     setDownloadBusy(true)
     try {
       const res = await apiClient.post(
         `/uploads/${pid}/chapter/${chapterLabel}/bulk-download`,
-        { files: selectedRows.map(r => ({ subfolder: r.subfolder, file_name: r.file_name })) },
+        { files: targets.map(r => ({ subfolder: r.subfolder, file_name: r.file_name })) },
         { responseType: 'blob' },
       )
       const url = URL.createObjectURL(new Blob([res.data as BlobPart], { type: 'application/zip' }))
@@ -1303,8 +1299,8 @@ export function ChapterFilePage({
             <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-accent text-primary border border-primary/20 flex-shrink-0">{resolvedStageName}</span>
           )}
           {!resolvedIsAssigned && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 flex-shrink-0">
-              <Eye size={10} /> View Only
+            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 flex-shrink-0 shadow-xs">
+              <Download size={10} /> Download Only
             </span>
           )}
         </div>
@@ -1321,19 +1317,19 @@ export function ChapterFilePage({
         {/* Bulk Download */}
         {activeFolderConfig[activeFolder]?.allowDownload && (
           <button
-            onClick={() => selectedCount > 0 ? void handleBulkDownload() : undefined}
-            disabled={downloadBusy}
-            title={selectedCount === 0 ? 'Select files to download' : undefined}
+            onClick={() => void handleBulkDownload()}
+            disabled={rows.length === 0 || downloadBusy}
+            title={rows.length === 0 ? 'No files to download' : selectedCount === 0 ? 'Download all files in this folder' : undefined}
             className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors shadow-sm relative
-              ${selectedCount > 0 && !downloadBusy
-                ? 'border-primary text-primary hover:bg-accent'
+              ${rows.length > 0 && !downloadBusy
+                ? 'border-primary text-primary hover:bg-accent cursor-pointer'
                 : 'border-border text-muted opacity-50 cursor-not-allowed'}`}
           >
             {downloadBusy ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
-            {downloadBusy ? 'Downloading…' : selectedCount > 1 ? 'Download ZIP' : 'Bulk Download'}
-            {selectedCount > 0 && !downloadBusy && (
+            {downloadBusy ? 'Downloading…' : selectedCount > 1 ? 'Download ZIP' : selectedCount === 1 ? 'Download File' : 'Bulk Download'}
+            {rows.length > 0 && !downloadBusy && (
               <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold px-1 py-0.5 rounded-full bg-primary text-white leading-none min-w-[16px] text-center">
-                {selectedCount}
+                {selectedCount > 0 ? selectedCount : rows.length}
               </span>
             )}
           </button>
