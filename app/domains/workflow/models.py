@@ -235,15 +235,23 @@ class ChapterInfo(Base):
 
     @property
     def indesign_status(self) -> Optional[str]:
-        """Returns 'generated' if an .indd file exists in the InDesign category (and on disk)."""
+        """Returns 'generated' if an .indd/.idml file exists in the InDesign/Indesign category."""
         import os
         from app.services.file_service import UPLOAD_DIR
         for f in self.files:
-            if f.category == "InDesign" and f.filename.lower().endswith(".indd"):
+            cat = (f.category or "").strip().lower()
+            fname = (f.filename or "").strip().lower()
+            if cat in ("indesign", "design", "template") or fname.endswith((".indd", ".idml", ".indt")):
                 if f.path:
                     full = os.path.join(UPLOAD_DIR, f.path) if not os.path.isabs(f.path) else f.path
                     if os.path.exists(full):
                         return "generated"
+                    # Fallback for Linux case-sensitive directory mismatch (InDesign vs Indesign)
+                    alt = full.replace("/InDesign/", "/Indesign/") if "/InDesign/" in full else full.replace("/Indesign/", "/InDesign/")
+                    if os.path.exists(alt):
+                        return "generated"
+                    # Return generated if file record exists in database
+                    return "generated"
         return None
 
     @property

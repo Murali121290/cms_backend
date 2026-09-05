@@ -538,7 +538,7 @@ export function ProjectWorkflow() {
   const [newChapterCategory, setNewChapterCategory] = useState('indesign')
 
   const DESIGN_UPLOAD_CATEGORIES = [
-    { key: 'indesign', label: 'Indesign' },
+    { key: 'indesign', label: 'InDesign' },
     { key: 'common_art', label: 'Common Art' },
     { key: 'pdf', label: 'Pdf' },
     { key: 'font', label: 'Font' },

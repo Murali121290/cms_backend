@@ -1130,4 +1130,14 @@ class WorkspaceDashboardResponse(BaseModel):
     manager_workspace: ManagerWorkspaceData | None = None
 
 
+class BulkDownloadFileItem(BaseModel):
+    subfolder: str | None = None
+    file_name: str
+
+
+class BulkDownloadPayload(BaseModel):
+    files: list[BulkDownloadFileItem]
+
+
+
 
