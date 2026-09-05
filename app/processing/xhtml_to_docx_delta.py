@@ -216,6 +216,66 @@ def _find_run_by_bookmark(para, bookmark_name: str):
     return None
 
 
+def strip_synthetic_bookmarks(doc) -> int:
+    """Strip all synthetic bookmarks (p_bm_, r_bm_, tbl_bm_, cell_bm_, fnpara_bm_, enpara_bm_).
+    Preserves human/reference bookmarks like bib_*, ref_*, etc.
+    """
+    count = 0
+    synthetic_ids = set()
+    prefixes = ("p_bm_", "r_bm_", "tbl_bm_", "cell_bm_", "fnpara_bm_", "enpara_bm_")
+
+    # 1. First pass: find bookmarkStart elements matching synthetic prefixes and collect their IDs
+    for p_elem in doc.element.body.iter(qn("w:p")):
+        for child in list(p_elem):
+            if child.tag == qn("w:bookmarkStart"):
+                name = child.get(qn("w:name"), "")
+                bm_id = child.get(qn("w:id"))
+                if any(name.startswith(pfx) for pfx in prefixes):
+                    synthetic_ids.add(bm_id)
+                    p_elem.remove(child)
+                    count += 1
+            elif child.tag == qn("w:bookmarkEnd"):
+                bm_id = child.get(qn("w:id"))
+                if bm_id in synthetic_ids:
+                    p_elem.remove(child)
+                    count += 1
+
+    # 2. Second pass: check direct body container elements (tbl_bm_)
+    for elem in list(doc.element.body):
+        if elem.tag == qn("w:bookmarkStart"):
+            name = elem.get(qn("w:name"), "")
+            bm_id = elem.get(qn("w:id"))
+            if any(name.startswith(pfx) for pfx in prefixes):
+                synthetic_ids.add(bm_id)
+                doc.element.body.remove(elem)
+                count += 1
+        elif elem.tag == qn("w:bookmarkEnd"):
+            bm_id = elem.get(qn("w:id"))
+            if bm_id in synthetic_ids:
+                doc.element.body.remove(elem)
+                count += 1
+
+    # 3. Third pass: check related parts (footnotes, endnotes, headers, footers)
+    for rel_id, part in doc.part.related_parts.items():
+        if hasattr(part, "_element") and part._element is not None:
+            for p_elem in part._element.findall(f".//{qn('w:p')}"):
+                for child in list(p_elem):
+                    if child.tag == qn("w:bookmarkStart"):
+                        name = child.get(qn("w:name"), "")
+                        bm_id = child.get(qn("w:id"))
+                        if any(name.startswith(pfx) for pfx in prefixes):
+                            synthetic_ids.add(bm_id)
+                            p_elem.remove(child)
+                            count += 1
+                    elif child.tag == qn("w:bookmarkEnd"):
+                        bm_id = child.get(qn("w:id"))
+                        if bm_id in synthetic_ids:
+                            p_elem.remove(child)
+                            count += 1
+
+    return count
+
+
 def _build_bookmark_para_index(doc) -> dict:
     """Builds an O(1) lookup index from bookmark names to their containing paragraphs,
     searching all paragraphs including those inside w:sdt/w:sdtContent elements."""
@@ -251,6 +311,10 @@ class XhtmlToDocxDeltaEngine:
 
         # Build bookmark paragraph index for O(1) lookups
         para_index = _build_bookmark_para_index(doc)
+
+        # Build positional paragraph list matching docx_to_xhtml_runs body_p_map (includes body, table cell, and SDT paragraphs)
+        import docx.text.paragraph
+        all_body_paras = [docx.text.paragraph.Paragraph(p, doc) for p in doc.element.body.iter(qn("w:p"))]
 
         # Find all HTML paragraphs, headings, list items, cell paragraphs, and page breaks
         all_elements = root.xpath("//p | //h1 | //h2 | //h3 | //h4 | //h5 | //h6 | //li | //div[contains(@class, 'page-break')] | //hr[contains(@class, 'page-break')]")
@@ -288,7 +352,21 @@ class XhtmlToDocxDeltaEngine:
                 continue
 
             bm_name = block_el.get("data-bookmark")
-            if not bm_name:
+            target_para = None
+            if bm_name:
+                target_para = para_index.get(bm_name) or _find_note_para_by_bookmark(doc, bm_name)
+
+            if target_para is None:
+                para_idx_str = block_el.get("data-para-idx")
+                if para_idx_str is not None:
+                    try:
+                        p_i = int(para_idx_str)
+                        if 0 <= p_i < len(all_body_paras):
+                            target_para = all_body_paras[p_i]
+                    except ValueError:
+                        pass
+
+            if not target_para:
                 continue
 
             if block_el.tag == "li":
@@ -300,13 +378,11 @@ class XhtmlToDocxDeltaEngine:
                     new_style = "Normal"
                 new_style = normalize_structural_tag_case(new_style)
 
-            # 1. Retrieve the exact paragraph node in the body, table cells, or footnote parts
-            para = para_index.get(bm_name)
-            if not para:
-                para = _find_note_para_by_bookmark(doc, bm_name)
+            # 1. Retrieve the exact paragraph node resolved via bookmark or positional data-para-idx
+            para = target_para
             
             if not para:
-                logger.info(f"Bookmark {bm_name} not found in DOCX (might be a newly added paragraph, skip in-place)")
+                logger.info(f"Paragraph for block not found in DOCX (skip in-place)")
                 continue
 
             # 2. Update paragraph-level style if changed
@@ -373,6 +449,14 @@ class XhtmlToDocxDeltaEngine:
             apply_final_docx_formatting(doc)
         except Exception as fmt_err:
             logger.warning(f"Failed to apply final document formatting in delta: {fmt_err}")
+
+        # Strip synthetic bookmarks before saving clean DOCX output
+        try:
+            removed_bms = strip_synthetic_bookmarks(doc)
+            if removed_bms:
+                logger.info(f"Stripped {removed_bms} legacy synthetic bookmark XML tags before saving DOCX.")
+        except Exception as bm_err:
+            logger.warning(f"Failed to strip synthetic bookmarks: {bm_err}")
 
         # Save atomically
         tmp_path = out_docx_path + ".delta.tmp"
@@ -1090,11 +1174,6 @@ class XhtmlToDocxDeltaEngine:
                 return
 
             bm_name = el.get("data-bookmark")
-            # Auto-generate a bookmark name if it's a span and doesn't have one
-            if tag == 'span' and not bm_name:
-                unique_id = uuid.uuid4().hex[:8]
-                bm_name = f"r_bm_{unique_id}"
-                el.set("data-bookmark", bm_name)
 
             # Parse font-family
             node_font_name = font_name
@@ -1121,23 +1200,17 @@ class XhtmlToDocxDeltaEngine:
                         char_style=node_char_style, is_del=current_is_del
                     )
 
-            # Wrap in <w:bookmarkStart/w:bookmarkEnd> for either
-            #   (a) auto-generated run identity bookmarks (r_bm_*), or
-            #   (b) explicit user/reference-review bookmarks that carry a
-            #       data-bookmark-role attribute (e.g. REF25 from the
-            #       Reference Review auto-bookmark flow, or bib_1/ref_5 that
-            #       the DOCX→XHTML converter surfaced with role="existing").
-            # For (b) we emit the Word bookmark only on the first occurrence
-            # of a given name so we don't produce duplicate bookmark names.
+            # Wrap in <w:bookmarkStart/w:bookmarkEnd> ONLY for explicit user/reference-review
+            # bookmarks that carry a data-bookmark-role attribute (e.g. REF25 or bib_1/ref_5).
+            # We emit the Word bookmark only on the first occurrence of a given name.
             bm_role = el.get("data-bookmark-role")
             is_named_user_bm = bool(bm_name) and bm_role in (
                 "target", "source", "manual", "existing"
-            )
+            ) and not bm_name.startswith("r_bm_")
             if is_named_user_bm and bm_name in emitted_named_bookmarks:
                 process_text_and_children(current_xml_parent)
-            elif bm_name and (bm_name.startswith("r_bm_") or is_named_user_bm):
-                if is_named_user_bm:
-                    emitted_named_bookmarks.add(bm_name)
+            elif is_named_user_bm:
+                emitted_named_bookmarks.add(bm_name)
                 wrap_in_bookmark(current_xml_parent, bm_name, process_text_and_children)
             else:
                 process_text_and_children(current_xml_parent)

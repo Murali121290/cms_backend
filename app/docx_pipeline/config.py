@@ -148,23 +148,29 @@ STYLE_PROPERTY_MAP: dict[str, frozenset] = {
 
 
 # ── Step 8: Caption styles ────────────────────────────────────────────────────
-FIGURE_CAPTION_STYLE = "FigureLegend", "FGC", "FIG-LEG"
-TABLE_CAPTION_STYLE  = "TableCaption", "TT", "T1"
+FIGURE_CAPTION_STYLE = (
+    "FigureLegend", "FGC", "FIG-LEG", "Figure Caption", "FigureCaption",
+    "FC", "FIG-CAP", "Figure Legend", "Caption", "ImageCaption", "FIG"
+)
+TABLE_CAPTION_STYLE  = (
+    "TableCaption", "TT", "T1", "Table Caption", "TableCaption",
+    "TC", "TBL-CAP", "Table Legend", "TBL"
+)
 
 CAPTION_BOUNDARY_STYLES = set(FIGURE_CAPTION_STYLE) | set(TABLE_CAPTION_STYLE)
 
 # Styles consumed into a caption group (source, footnote, abbrev lines)
 CAPTION_GROUP_STYLES = {
     "FGS", "FIG-SRC", "FigureSource", "TableSource",
-    "TableFootnote", "Abbreviation", "TableAbbreviation",
-    "TSN", "TFN",
+    "TableFootnote","TableNote", "Abbreviation", "TableAbbreviation",
+    "TSN", "TFN", "TN", "TB", "TBL-FOOT", "Table Footnote", "Figure Source"
 }
 
-# Regex: matches "Figure 1" or "Figure 12.1"
+# Regex: matches "Figure 1", "Figure 12", "Figure 12.1", "Fig. 3"
 FIGURE_CAPTION_RE = re.compile(
-    r'Figure\s+(\d+)(?:\.(\d+))?', re.IGNORECASE)
+    r'(Figure|Fig\.?)\s+(\d+)(?:[\.-](\d+))?', re.IGNORECASE)
 TABLE_CAPTION_RE  = re.compile(
-    r'Table\s+(\d+)(?:\.(\d+))?',  re.IGNORECASE)
+    r'(Table|Tbl\.?)\s+(\d+)(?:[\.-](\d+))?',  re.IGNORECASE)
 
 # SDT alias/tag values
 SDT_TAG_FIGURE   = "FigureCaption"

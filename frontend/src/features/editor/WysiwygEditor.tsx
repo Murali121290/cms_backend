@@ -183,14 +183,15 @@ const SHORTCUT_GROUPS: {
     ],
   },
   {
-    title: "History",
+    title: "File & History",
     accent: {
       icon: HistoryIcon,
-      iconWrap: "bg-slate-100 border-slate-200",
-      iconColor: "text-slate-600",
-      ring: "hover:ring-slate-200",
+      iconWrap: "bg-amber-50 border-amber-100",
+      iconColor: "text-amber-600",
+      ring: "hover:ring-amber-100",
     },
     items: [
+      { label: "Save & Convert to DOCX", combo: "Ctrl+S" },
       { label: "Undo", combo: "Ctrl+Z" },
       { label: "Redo", combo: "Ctrl+Y" },
     ],
@@ -983,6 +984,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         // Mod + key (no Shift / Alt)
         if (!e.shiftKey && !e.altKey) {
           switch (code) {
+            case "KeyS": return fire(() => handleSaveRef.current());
             case "KeyL": return fire(() => editor.chain().focus().setTextAlign("left").run());
             case "KeyE": return fire(() => editor.chain().focus().setTextAlign("center").run());
             case "KeyR": return fire(() => editor.chain().focus().setTextAlign("right").run());
@@ -1131,6 +1133,11 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         console.error("[Save] onSave rejected:", err);
       }
     };
+
+    const handleSaveRef = useRef(handleSave);
+    useEffect(() => {
+      handleSaveRef.current = handleSave;
+    }, [handleSave]);
 
     const lastEditTimeRef = useRef<number>(0);
 
@@ -1655,6 +1662,26 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           >
             <Maximize2 className="w-4 h-4" />
           </ToolbarButton>
+
+          <ToolbarDivider />
+
+          {/* Top Toolbar Save Button */}
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={isSaving}
+            title={`Save edits to DOCX (${kbd("Ctrl+S")})`}
+            className={`px-3 py-1 text-xs font-bold rounded-md transition-all duration-150 shrink-0 inline-flex items-center gap-1.5 cursor-pointer shadow-sm ${
+              isSaving
+                ? "bg-blue-900/60 text-blue-300 border border-blue-700/50 opacity-75 cursor-not-allowed"
+                : isDirty
+                ? "bg-amber-600 hover:bg-amber-500 text-white border border-amber-500 shadow-amber-900/30"
+                : "bg-blue-600 hover:bg-blue-500 text-white border border-blue-500 shadow-blue-900/30"
+            }`}
+          >
+            <Save className={`w-3.5 h-3.5 ${isSaving ? "animate-spin" : ""}`} />
+            <span>{isSaving ? "Saving..." : isDirty ? "Save *" : "Save"}</span>
+          </button>
 
           {toolbarExtras && (
             <div className="ml-auto flex items-center gap-1.5 shrink-0 pl-2">

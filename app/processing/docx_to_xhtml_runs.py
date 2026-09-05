@@ -285,46 +285,22 @@ def _get_unique_bookmark_id(doc) -> int:
 
 
 def _get_or_create_para_bookmark(para, doc, prefix="p_bm_") -> str:
-    """Finds or creates a unique bookmark for a paragraph."""
-    # Search existing bookmarks in this paragraph
+    """Finds existing bookmark or returns an in-memory synthetic identifier for a paragraph without mutating XML."""
     for elem in para._p:
         if elem.tag == qn("w:bookmarkStart"):
             name = elem.get(qn("w:name"), "")
             if name.startswith(prefix):
                 return name
 
-    # Generate new bookmark
-    doc._dirty = True
     unique_id = uuid.uuid4().hex[:8]
-    bm_name = f"{prefix}{unique_id}"
-    next_id = _get_unique_bookmark_id(doc)
-
-    bm_start = OxmlElement("w:bookmarkStart")
-    bm_start.set(qn("w:id"), str(next_id))
-    bm_start.set(qn("w:name"), bm_name)
-
-    bm_end = OxmlElement("w:bookmarkEnd")
-    bm_end.set(qn("w:id"), str(next_id))
-
-    # Fix 4: Insert bookmark after w:pPr to prevent OOXML validation issues
-    pPr = para._p.find(qn("w:pPr"))
-    if pPr is not None:
-        children = list(para._p)
-        ppr_idx = children.index(pPr)
-        para._p.insert(ppr_idx + 1, bm_start)
-        para._p.insert(ppr_idx + 2, bm_end)
-    else:
-        para._p.insert(0, bm_start)
-        para._p.insert(1, bm_end)
-    return bm_name
+    return f"{prefix}{unique_id}"
 
 
 def _get_or_create_run_bookmark(run, para, doc) -> str:
-    """Finds or creates a unique bookmark wrapping/preceding a run."""
+    """Finds existing run bookmark or returns an in-memory synthetic identifier for a run without mutating XML."""
     r_elem = run._element
     p_children = list(para._p)
     
-    # Track-changed runs are wrapped in w:ins/w:del. We search/place bookmarks around the parent element.
     target_elem = r_elem
     parent = r_elem.getparent() if r_elem is not None else None
     if parent is not None and parent.tag in (qn("w:ins"), qn("w:del")):
@@ -343,31 +319,12 @@ def _get_or_create_run_bookmark(run, para, doc) -> str:
     except ValueError:
         pass
 
-    doc._dirty = True
     unique_id = uuid.uuid4().hex[:8]
-    bm_name = f"r_bm_{unique_id}"
-    next_id = _get_unique_bookmark_id(doc)
-
-    bm_start = OxmlElement("w:bookmarkStart")
-    bm_start.set(qn("w:id"), str(next_id))
-    bm_start.set(qn("w:name"), bm_name)
-
-    bm_end = OxmlElement("w:bookmarkEnd")
-    bm_end.set(qn("w:id"), str(next_id))
-
-    try:
-        r_idx = p_children.index(target_elem)
-        para._p.insert(r_idx, bm_start)
-        para._p.insert(r_idx + 2, bm_end)
-    except ValueError:
-        para._p.append(bm_start)
-        para._p.append(bm_end)
-
-    return bm_name
+    return f"r_bm_{unique_id}"
 
 
 def _get_or_create_table_bookmark(table, doc) -> str:
-    """Finds or creates a unique bookmark wrapping a table, scoped to its parent container."""
+    """Finds existing table bookmark or returns an in-memory synthetic identifier without mutating XML."""
     tbl_elem = table._element
     parent = tbl_elem.getparent()
     parent_children = list(parent) if parent is not None else []
@@ -384,33 +341,8 @@ def _get_or_create_table_bookmark(table, doc) -> str:
     except ValueError:
         pass
 
-    doc._dirty = True
     unique_id = uuid.uuid4().hex[:8]
-    bm_name = f"tbl_bm_{unique_id}"
-    next_id = _get_unique_bookmark_id(doc)
-
-    bm_start = OxmlElement("w:bookmarkStart")
-    bm_start.set(qn("w:id"), str(next_id))
-    bm_start.set(qn("w:name"), bm_name)
-
-    bm_end = OxmlElement("w:bookmarkEnd")
-    bm_end.set(qn("w:id"), str(next_id))
-
-    if parent is not None:
-        try:
-            t_idx = parent_children.index(tbl_elem)
-            parent.insert(t_idx, bm_start)
-            parent.insert(t_idx + 2, bm_end)
-        except ValueError:
-            parent.append(bm_start)
-            parent.append(tbl_elem)
-            parent.append(bm_end)
-    else:
-        doc.element.body.append(bm_start)
-        doc.element.body.append(tbl_elem)
-        doc.element.body.append(bm_end)
-
-    return bm_name
+    return f"tbl_bm_{unique_id}"
 
 
 # ─── Formatting Helpers ───────────────────────────────────────────────────────
@@ -866,7 +798,7 @@ def _table_to_html(table, doc, body_p_map=None, findings_by_para=None) -> str:
                 if not runs:
                     runs = "<br>"
                 p_bm = _get_or_create_para_bookmark(p, doc)
-                cell_inner += f'<p class="{p_style}" data-style-label="{p_style}" data-bookmark="{p_bm}">{runs}</p>'
+                cell_inner += f'<p class="{p_style}" data-style-label="{p_style}" data-para-idx="{para_idx}" data-bookmark="{p_bm}">{runs}</p>'
 
             attrs = f' data-bookmark="{cell_bm}"' if cell_bm else ""
             cells_html.append(f"<td{attrs}>{cell_inner}</td>")
@@ -1140,12 +1072,8 @@ class DocxToXhtmlRunsEngine:
         if notes_html:
             blocks.append(f'<div class="NotesContainer">{notes_html}</div>')
 
-        # Persist all newly generated paragraph & run bookmarks permanently back into the DOCX source file!
-        if getattr(doc, "_dirty", False):
-            doc.save(docx_path)
-            logger.info(f"Assigned structural bookmarks and saved DOCX: {docx_path}")
-        else:
-            logger.info(f"No new bookmarks added. Skipped saving DOCX: {docx_path}")
+        # Read-only XHTML export complete. Zero mutations saved to source DOCX.
+        logger.info(f"Read-only XHTML export completed for DOCX: {docx_path}")
 
         body = "\n".join(blocks)
         return f"<!DOCTYPE html>\n<html><body>{body}</body></html>"
