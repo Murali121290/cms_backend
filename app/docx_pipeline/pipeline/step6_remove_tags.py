@@ -1,4 +1,4 @@
-﻿"""
+"""
 pipeline/step6_remove_tags.py â€” Remove pipeline validation markers and markup tags.
 
 Stripping actions:
@@ -17,9 +17,9 @@ W_ = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 # Tags to unconditionally strip from the document body
 STRIP_XML_TAGS = [
     W_ + "proofErr",
-    W_ + "bookmarkStart",
-    W_ + "bookmarkEnd",
 ]
+
+SYNTHETIC_BOOKMARK_PREFIXES = ("p_bm_", "r_bm_", "tbl_bm_", "cell_bm_", "fnpara_bm_", "enpara_bm_")
 
 # Regex for markup tags (e.g., <H1>, <CAU>). Matches anything in angle brackets without spaces/newlines.
 MARKUP_REGEX = re.compile(r"(\<[^\>\<\s\n]+\>)")
@@ -27,7 +27,7 @@ MARKUP_REGEX = re.compile(r"(\<[^\>\<\s\n]+\>)")
 
 def _strip_elements(body: etree._Element, tag: str) -> int:
     count = 0
-    for el in body.iter(tag):
+    for el in list(body.iter(tag)):
         parent = el.getparent()
         if parent is not None:
             parent.remove(el)
@@ -35,10 +35,35 @@ def _strip_elements(body: etree._Element, tag: str) -> int:
     return count
 
 
+def _strip_synthetic_bookmarks(body: etree._Element) -> int:
+    count = 0
+    synthetic_ids = set()
+
+    for child in list(body.iter(W_ + "bookmarkStart")):
+        name = child.get(f"{W_}name", "")
+        bm_id = child.get(f"{W_}id")
+        if any(name.startswith(pfx) for pfx in SYNTHETIC_BOOKMARK_PREFIXES):
+            synthetic_ids.add(bm_id)
+            parent = child.getparent()
+            if parent is not None:
+                parent.remove(child)
+                count += 1
+
+    for child in list(body.iter(W_ + "bookmarkEnd")):
+        bm_id = child.get(f"{W_}id")
+        if bm_id in synthetic_ids:
+            parent = child.getparent()
+            if parent is not None:
+                parent.remove(child)
+                count += 1
+
+    return count
+
+
 def run(doc: Document, logger: ReportLogger) -> Document:
     logger.set_step("6-remove-tags")
 
-    # 1. Strip XML Elements (Bookmarks, Proofing)
+    # 1. Strip XML Elements (Synthetic Bookmarks, Proofing)
     body = doc.element.body
     xml_total = 0
 
@@ -48,6 +73,12 @@ def run(doc: Document, logger: ReportLogger) -> Document:
         if n:
             short = tag.split("}")[-1]
             logger.info(f"Removed {n} <{short}> XML elements.")
+
+    # Strip only synthetic tracking bookmarks, preserving authentic user & reference bookmarks
+    bm_stripped = _strip_synthetic_bookmarks(body)
+    xml_total += bm_stripped
+    if bm_stripped:
+        logger.info(f"Removed {bm_stripped} synthetic tracking bookmark XML elements (authentic bookmarks preserved).")
 
     # 2. Strip string markup tags matching REGEX
     text_tags_removed = 0
