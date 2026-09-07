@@ -294,6 +294,60 @@ class ChapterInfo(Base):
         return "pending"
 
     @property
+    def design_match_status(self) -> Optional[str]:
+        """Derive design template style match status from uploaded files or background jobs.
+        - None      → no style match report file present
+        - 'valid'   → PASS
+        - 'invalid' → FAIL
+        - 'pending' → job currently processing
+        """
+        import os
+        import json
+        from app.services.file_service import UPLOAD_DIR
+        from app.models import ProcessingJob
+        from app.database import SessionLocal
+
+        file_ids = [f.id for f in self.files if f.category == "Manuscript"]
+        if file_ids:
+            db = SessionLocal()
+            try:
+                job = db.query(ProcessingJob).filter(
+                    ProcessingJob.file_id.in_(file_ids),
+                    ProcessingJob.process_type == "style_match_design"
+                ).order_by(ProcessingJob.created_at.desc()).first()
+                if job and job.status == "processing":
+                    return "pending"
+            except Exception:
+                pass
+            finally:
+                db.close()
+
+        report_files = [f for f in self.files if f.category == "Manuscript" and (f.filename.lower().endswith("_style_match_report.json") or f.filename.lower().endswith("_style_match_report.html"))]
+        if not report_files:
+            return None
+        report_file = sorted(report_files, key=lambda f: f.uploaded_at)[-1]
+        if report_file.path:
+            full_path = os.path.join(UPLOAD_DIR, report_file.path) if not os.path.isabs(report_file.path) else report_file.path
+            if os.path.exists(full_path):
+                try:
+                    if full_path.endswith(".json"):
+                        with open(full_path, "r", encoding="utf-8") as jf:
+                            data = json.load(jf)
+                            if data.get("status") == "PASS":
+                                return "valid"
+                            else:
+                                return "invalid"
+                    else:
+                        content = open(full_path, encoding="utf-8", errors="ignore").read()
+                        if 'badge-pass">PASS' in content or '>PASS</span>' in content:
+                            return "valid"
+                        else:
+                            return "invalid"
+                except Exception:
+                    pass
+        return "pending"
+
+    @property
     def structuring_status(self) -> Optional[str]:
         """Derive structuring status from processing jobs or files.
         - None        → no structuring job or file present

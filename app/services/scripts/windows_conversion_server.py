@@ -1630,9 +1630,132 @@ def view_proof(file: UploadFile = File(...)):
     from starlette.responses import FileResponse
     return FileResponse(out_zip_path, media_type="application/zip", filename="view_proof_output.zip")
 
+@app.post("/extract-design-style")
+def extract_design_style(file: UploadFile = File(...)):
+    session_id = str(uuid.uuid4())
+    workflow_base_dir = r"C:\Users\muraliba\Documents\temp_conversions"
+    temp_dir = os.path.join(workflow_base_dir, f"extract_style_{session_id}")
+    os.makedirs(temp_dir, exist_ok=True)
+    uploaded_file_path = os.path.join(temp_dir, file.filename)
+    
+    logger.info(f"[{session_id}] Received extract-design-style request for {file.filename}")
+    try:
+        with open(uploaded_file_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+    except Exception as e:
+        logger.error(f"[{session_id}] Failed to save uploaded file: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+
+    import json
+    import pythoncom
+    import win32com.client
+    import subprocess
+
+    json_output_path = os.path.join(temp_dir, "design_style.json")
+
+    jsx_script = r"""
+    app.scriptPreferences.userInteractionLevel = UserInteractionLevels.NEVER_INTERACT;
+    try {
+        var inputFile = app.scriptArgs.getValue("InputFile");
+        var outputFile = app.scriptArgs.getValue("OutputFile");
+        
+        var inddFile = new File(inputFile);
+        if (!inddFile.exists) {
+            throw new Error("Input InDesign file does not exist: " + inputFile);
+        }
+        
+        var doc = app.open(inddFile, false);
+        var pStyles = [];
+        var cStyles = [];
+
+        for (var i = 0; i < doc.allParagraphStyles.length; i++) {
+            var name = doc.allParagraphStyles[i].name;
+            if (name && name !== "" && name.indexOf("[") !== 0) {
+                pStyles.push(name);
+            }
+        }
+
+        for (var j = 0; j < doc.allCharacterStyles.length; j++) {
+            var cName = doc.allCharacterStyles[j].name;
+            if (cName && cName !== "" && cName.indexOf("[") !== 0) {
+                cStyles.push(cName);
+            }
+        }
+
+        try {
+            doc.close(SaveOptions.NO);
+        } catch(ce) {}
+
+        function stringifyArray(arr) {
+            var parts = [];
+            for (var k = 0; k < arr.length; k++) {
+                var s = String(arr[k]).replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "\\r");
+                parts.push('"' + s + '"');
+            }
+            return "[" + parts.join(", ") + "]";
+        }
+
+        var jsonStr = '{\n  "paragraph_styles": ' + stringifyArray(pStyles) + ',\n  "character_styles": ' + stringifyArray(cStyles) + '\n}';
+
+        var outFile = new File(outputFile);
+        outFile.encoding = "UTF-8";
+        outFile.open("w");
+        outFile.write(jsonStr);
+        outFile.close();
+    } catch (e) {
+        var errFile = new File(outputFile + ".err");
+        errFile.encoding = "UTF-8";
+        errFile.open("w");
+        errFile.write(e.toString() + (e.line ? " at line " + e.line : ""));
+        errFile.close();
+    }
+    """
+
+    jsx_temp_file = os.path.join(temp_dir, "extract_styles.jsx")
+    with open(jsx_temp_file, "w", encoding="utf-8") as f:
+        f.write(jsx_script)
+
+    pythoncom.CoInitialize()
+    try:
+        try:
+            subprocess.run(["taskkill", "/F", "/IM", "InDesign.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+        indesign_app = win32com.client.Dispatch("InDesign.Application")
+        indesign_app.ScriptArgs.SetValue("InputFile", os.path.abspath(uploaded_file_path))
+        indesign_app.ScriptArgs.SetValue("OutputFile", os.path.abspath(json_output_path))
+        
+        logger.info(f"[{session_id}] Executing JSX script to extract styles...")
+        indesign_app.DoScript(os.path.abspath(jsx_temp_file), 1246973031)
+
+        try:
+            while indesign_app.Documents.Count > 0:
+                indesign_app.Documents.Item(1).Close(1852776783)
+        except Exception:
+            pass
+    except Exception as indesign_err:
+        logger.error(f"[{session_id}] Style extraction failed in InDesign: {str(indesign_err)}")
+        raise HTTPException(status_code=500, detail=f"InDesign style extraction failed: {str(indesign_err)}")
+    finally:
+        pythoncom.CoUninitialize()
+
+    err_path = json_output_path + ".err"
+    if os.path.exists(err_path):
+        with open(err_path, "r", encoding="utf-8") as ef:
+            errMsg = ef.read()
+        raise HTTPException(status_code=500, detail=f"ExtendScript error: {errMsg}")
+
+    if not os.path.exists(json_output_path):
+        raise HTTPException(status_code=500, detail="Failed to produce design_style.json output file.")
+
+    return FileResponse(json_output_path, media_type="application/json", filename="design_style.json")
+
+
 @app.get("/health")
 def health_check():
     return {"status": "healthy", "service": "indesign-to-word-converter", "log_file": log_file}
+
 
 
 if __name__ == "__main__":

@@ -789,11 +789,23 @@ export function FileContextMenu({
                   onClick={() => setConfirmStep({ processType: "bias_scan", mode: "style", actionName: "Bias Scan" })}
                 />
                 {file.category?.toLowerCase() === 'manuscript' && (
-                  <MenuItem
-                    icon={FileCode}
-                    label="Word to XML"
-                    onClick={() => setConfirmStep({ processType: "word_to_xml", mode: "style", actionName: "Word to XML" })}
-                  />
+                  <>
+                    <MenuItem
+                      icon={ShieldCheck}
+                      label="Style Match Design"
+                      onClick={() => setConfirmStep({ processType: "style_match_design", mode: "style", actionName: "Style Match Design" })}
+                    />
+                    <MenuItem
+                      icon={ShieldCheck}
+                      label="Style Validation"
+                      onClick={() => setConfirmStep({ processType: "style_validation", mode: "style", actionName: "Style Validation" })}
+                    />
+                    <MenuItem
+                      icon={FileCode}
+                      label="Word to XML"
+                      onClick={() => setConfirmStep({ processType: "word_to_xml", mode: "style", actionName: "Word to XML" })}
+                    />
+                  </>
                 )}
               </>
             )}

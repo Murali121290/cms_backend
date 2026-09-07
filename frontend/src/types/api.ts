@@ -128,6 +128,7 @@ export interface ChapterSummary {
   indesign_status?: string | null;
   final_delivery_status?: string | null;
   style_status?: string | null;
+  design_match_status?: string | null;
   structuring_status?: string | null;
 }
 
@@ -273,6 +274,8 @@ export interface VersionRecord {
   archived_path: string;
   uploaded_at: string;
   uploaded_by_id: number | null;
+  uploaded_by_name?: string | null;
+  uploaded_by_username?: string | null;
 }
 
 export interface FileVersionsFile {

@@ -356,7 +356,7 @@ function ChapterCard({ chapter, users, plannedDueDates, stageRolesMap, onAssigne
       {/* File Pipeline Status Badges */}
       {!chapter.chapters?.toLowerCase().includes('art') && chapter.workflow !== 'WF-11 Art Process' && (
         <div className="px-4 py-2 border-t border-border flex flex-wrap gap-1.5">
-          {!chapter.style_status && !chapter.xml_status && !chapter.indesign_status && !chapter.final_delivery_status && !chapter.structuring_status ? (
+          {!chapter.style_status && !chapter.design_match_status && !chapter.xml_status && !chapter.indesign_status && !chapter.final_delivery_status && !chapter.structuring_status ? (
             <span className="text-[10px] italic text-muted">No pipeline assets generated yet.</span>
           ) : (
             <>
@@ -374,6 +374,23 @@ function ChapterCard({ chapter, users, plannedDueDates, stageRolesMap, onAssigne
               {chapter.style_status === 'pending' && (
                 <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
                   <Clock size={10} className="text-amber-500 animate-spin" /> Style: Pending
+                </span>
+              )}
+
+              {/* Design Match Validation Status */}
+              {chapter.design_match_status === 'valid' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <CheckCircle2 size={10} className="text-emerald-500" /> Design Match: Valid
+                </span>
+              )}
+              {chapter.design_match_status === 'invalid' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-red-50 text-red-700 border border-red-200">
+                  <AlertCircle size={10} className="text-red-500" /> Design Match: Invalid
+                </span>
+              )}
+              {chapter.design_match_status === 'pending' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                  <Clock size={10} className="text-amber-500 animate-spin" /> Design Match: Pending
                 </span>
               )}
 

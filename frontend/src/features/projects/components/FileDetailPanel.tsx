@@ -173,9 +173,13 @@ export function FileDetailPanel({ file, onClose }: FileDetailPanelProps) {
                       {v.archived_filename}
                     </p>
                     <p className="text-[10px] text-muted">{fmtDate(v.uploaded_at)}</p>
-                    {v.uploaded_by_id != null && (
+                    {v.uploaded_by_name || v.uploaded_by_username ? (
+                      <p className="text-[10px] text-muted">
+                        {v.uploaded_by_name ? `${v.uploaded_by_name} (${v.uploaded_by_username || ''})` : v.uploaded_by_username}
+                      </p>
+                    ) : v.uploaded_by_id != null ? (
                       <p className="text-[10px] text-muted">User #{v.uploaded_by_id}</p>
-                    )}
+                    ) : null}
                   </div>
                   <button
                     onClick={() => void handleDownloadVersion(v)}

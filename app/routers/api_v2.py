@@ -13,6 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File as FastAPIFile, Fo
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pathlib import Path
 from jose import JWTError, jwt
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app import database, models, schemas_v2
@@ -21,6 +22,7 @@ from app.domains.projects.po_intake import service as po_intake_service
 from app.domains.auth.security import get_current_user_from_cookie
 from app.domains.files import image_preview_service
 from app.core.config import get_settings
+from app.core.paths import UPLOADS_DIR
 from app.services import (
     activity_service,
     admin_user_service,
@@ -315,6 +317,7 @@ def _serialize_chapter_summary(chapter: models.Chapter):
         indesign_status=getattr(chapter, "indesign_status", None),
         final_delivery_status=getattr(chapter, "final_delivery_status", None),
         style_status=getattr(chapter, "style_status", None),
+        design_match_status=getattr(chapter, "design_match_status", None),
         structuring_status=getattr(chapter, "structuring_status", None),
     )
 
@@ -537,6 +540,9 @@ def _serialize_upload_result(upload_result: dict, *, viewer: models.User):
 
 
 def _serialize_version_record(version_entry: models.FileVersion):
+    uploader = getattr(version_entry, "uploaded_by", None)
+    name = uploader.first_name if uploader and uploader.first_name else None
+    username = uploader.username if uploader else None
     return schemas_v2.VersionRecord(
         id=version_entry.id,
         file_id=version_entry.file_id,
@@ -545,6 +551,8 @@ def _serialize_version_record(version_entry: models.FileVersion):
         archived_path=version_entry.path,
         uploaded_at=version_entry.uploaded_at,
         uploaded_by_id=version_entry.uploaded_by_id,
+        uploaded_by_name=name,
+        uploaded_by_username=username,
     )
 
 
@@ -1131,20 +1139,65 @@ def api_v2_project_indesign_templates(
         models.ChapterInfo.chapters.ilike("design")
     ).first()
     
-    if not design_chapter:
-        return []
-        
-    from sqlalchemy import or_
-    template_files = db.query(models.File).filter(
-        models.File.chapter_id == design_chapter.id,
-        models.File.category == "template/indesign",
+    from sqlalchemy import or_, func
+    
+    # Flexible DB query matching any .indt or .indd template files for project or design chapter
+    query_filters = [
+        models.File.project_id == project.id,
         or_(
             models.File.filename.ilike("%.indt"),
             models.File.filename.ilike("%.indd")
         )
-    ).all()
+    ]
+    if design_chapter:
+        query_filters.append(
+            or_(
+                models.File.chapter_id == design_chapter.id,
+                func.lower(models.File.category).in_(["template/indesign", "template_indesign", "indesign", "design", "template"])
+            )
+        )
     
-    return [_serialize_file_record(file_record, viewer=viewer, db=db) for file_record in template_files]
+    template_files = db.query(models.File).filter(*query_filters).all()
+    
+    # Fallback disk search if DB returned no templates or to find missing files
+    project_dir = os.path.join(str(UPLOADS_DIR), project.code)
+    if os.path.exists(project_dir):
+        existing_filenames = {tf.filename.lower() for tf in template_files}
+        for root, dirs, files in os.walk(project_dir):
+            if "archive" in root.lower().replace("\\", "/"):
+                continue
+            for fname in files:
+                if fname.lower().endswith((".indt", ".indd")) and fname.lower() not in existing_filenames:
+                    fpath = os.path.join(root, fname)
+                    rel_cat = "template/indesign"
+                    existing_in_db = db.query(models.File).filter(
+                        models.File.project_id == project.id,
+                        func.lower(models.File.filename) == fname.lower()
+                    ).first()
+                    if not existing_in_db:
+                        existing_in_db = models.File(
+                            project_id=project.id,
+                            chapter_id=design_chapter.id if design_chapter else None,
+                            category=rel_cat,
+                            filename=fname,
+                            path=fpath,
+                            uploaded_by_id=viewer.id,
+                        )
+                        db.add(existing_in_db)
+                        db.commit()
+                        db.refresh(existing_in_db)
+                    if existing_in_db not in template_files:
+                        template_files.append(existing_in_db)
+                        existing_filenames.add(fname.lower())
+
+    # Exclude files in Archive subfolders
+    valid_templates = []
+    for tf in template_files:
+        if tf.path and "/archive/" in tf.path.lower().replace("\\", "/"):
+            continue
+        valid_templates.append(tf)
+
+    return [_serialize_file_record(file_record, viewer=viewer, db=db) for file_record in valid_templates]
 
 
 @router.get(
@@ -4279,15 +4332,15 @@ def api_v2_start_batch_jobs(
         if "template_file_id" not in batch_options:
             fallback_template = db.query(models.File).filter(
                 models.File.project_id == project.id,
-                models.File.category.in_(["template/indesign", "InDesign"]),
-                models.File.filename.like("%.indt")
+                func.lower(models.File.category).in_(["template/indesign", "template_indesign", "indesign", "design", "template"]),
+                models.File.filename.ilike("%.indt")
             ).order_by(models.File.uploaded_at.desc()).first()
             
             if not fallback_template:
                 fallback_template = db.query(models.File).filter(
                     models.File.project_id == project.id,
-                    models.File.category.in_(["template/indesign", "InDesign"]),
-                    models.File.filename.like("%.indd")
+                    func.lower(models.File.category).in_(["template/indesign", "template_indesign", "indesign", "design", "template"]),
+                    models.File.filename.ilike("%.indd")
                 ).order_by(models.File.uploaded_at.desc()).first()
 
             if fallback_template:
@@ -4678,7 +4731,9 @@ def api_v2_processing_status(
         "indesign_to_xml",
         "xml_to_indesign",
         "style_validation",
+        "style_match_design",
         "extract_design_css",
+        "extract_design_style",
         "view_proof",
     )
     if process_type not in supported_types:

@@ -28,6 +28,7 @@ export interface Chapter {
   indesign_status?: 'generated' | null
   final_delivery_status?: 'generated' | null
   style_status?: 'valid' | 'invalid' | 'pending' | null
+  design_match_status?: 'valid' | 'invalid' | 'pending' | null
   structuring_status?: 'completed' | 'failed' | 'pending' | null
 }
 

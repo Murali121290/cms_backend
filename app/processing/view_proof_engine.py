@@ -84,6 +84,7 @@ class ViewProofEngine:
                     "Design/template/Font",
                     "Design/template/Library",
                     "Design/template/indesign",
+                    "Design/template/InDesign",
                     "Design/template"
                 ]
                 seen_design_files = {indt_path}
