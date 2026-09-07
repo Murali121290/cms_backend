@@ -1141,13 +1141,10 @@ def api_v2_project_indesign_templates(
     
     from sqlalchemy import or_, func
     
-    # Flexible DB query matching any .indt or .indd template files for project or design chapter
+    # Flexible DB query matching only .indt template files for project or design chapter
     query_filters = [
         models.File.project_id == project.id,
-        or_(
-            models.File.filename.ilike("%.indt"),
-            models.File.filename.ilike("%.indd")
-        )
+        models.File.filename.ilike("%.indt")
     ]
     if design_chapter:
         query_filters.append(
@@ -1167,7 +1164,7 @@ def api_v2_project_indesign_templates(
             if "archive" in root.lower().replace("\\", "/"):
                 continue
             for fname in files:
-                if fname.lower().endswith((".indt", ".indd")) and fname.lower() not in existing_filenames:
+                if fname.lower().endswith(".indt") and fname.lower() not in existing_filenames:
                     fpath = os.path.join(root, fname)
                     rel_cat = "template/indesign"
                     existing_in_db = db.query(models.File).filter(
@@ -1190,9 +1187,11 @@ def api_v2_project_indesign_templates(
                         template_files.append(existing_in_db)
                         existing_filenames.add(fname.lower())
 
-    # Exclude files in Archive subfolders
+    # Exclude files in Archive subfolders and ensure only .indt extensions
     valid_templates = []
     for tf in template_files:
+        if not tf.filename or not tf.filename.lower().endswith(".indt"):
+            continue
         if tf.path and "/archive/" in tf.path.lower().replace("\\", "/"):
             continue
         valid_templates.append(tf)
