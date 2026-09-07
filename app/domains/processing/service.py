@@ -71,7 +71,9 @@ PROCESS_PERMISSIONS = {
     "xml_to_indesign": ["Admin", "XML Manager", "XML manager", "XML Operator", "Senior XML Operator"],
     "indesign_to_xml": ["Admin", "XML Manager", "XML manager", "XML Operator", "Senior XML Operator", "Compositor", "Senior Compositor", "Production Manager"],
     "extract_design_css": ["Admin", "XML Manager", "XML manager", "XML Operator", "Senior XML Operator"],
-    "style_validation": ["Admin", "XML Manager", "XML manager", "XML Operator", "Senior XML Operator"],
+    "extract_design_style": ["Admin", "Template Manager", "template manager", "Template Operator", "template operator", "Production Manager", "production manager"],
+    "style_validation": ["Admin", "Pre Editor", "Team Lead - Prediting", "XML Manager", "XML Operator", "Senior XML Operator", "Non-XML Manager", "Non-XML Operator", "Production Manager"],
+    "style_match_design": ["Admin", "Pre Editor", "Team Lead - Prediting", "XML Manager", "XML Operator", "Senior XML Operator", "Non-XML Manager", "Non-XML Operator", "Production Manager"],
     "view_proof": ["Admin", "XML Manager", "XML manager", "Author", "Reviewer", "Editor", "XML Operator", "Technical Editor", "Pre Editor", "Language Editor", "Compositor", "Senior Compositor", "Production Manager"],
 }
 
@@ -505,6 +507,68 @@ def background_processing_task(
                 generated_files = [css_output_path]
                 success_msg = "InDesign CSS extraction completed successfully"
 
+            elif process_type == "extract_design_style":
+                update_job_status(db, job_id, "processing", "Extracting paragraph & character styles from InDesign template...", 30)
+                from app.core.config import get_settings
+                import redis
+                import requests
+                
+                settings = get_settings()
+                if not settings.INDESIGN_SERVER_URL:
+                    raise ValueError("Windows InDesign Conversion Server is not configured. Please set INDESIGN_SERVER_URL.")
+                
+                url = f"{settings.INDESIGN_SERVER_URL.rstrip('/')}/extract-design-style"
+                redis_client = redis.from_url(settings.REDIS_URL)
+                lock = redis_client.lock("indesign_conversion_lock", timeout=600)
+                
+                logger.info(f"[{job_id}] Acquiring InDesign lock for style extraction...")
+                lock.acquire(blocking=True)
+                try:
+                    logger.info(f"[{job_id}] Lock acquired. Sending style extraction request to: {url}")
+                    with open(file_path, "rb") as f_in:
+                        response = requests.post(
+                            url,
+                            files={"file": (os.path.basename(file_path), f_in.read(), "application/octet-stream")},
+                            timeout=(30.0, 300)
+                        )
+                    if response.status_code != 200:
+                        raise RuntimeError(f"Remote InDesign server returned status code {response.status_code}. Response: {response.text}")
+                finally:
+                    try:
+                        lock.release()
+                    except Exception:
+                        pass
+                
+                from app.domains.projects.models import Project
+                from app.services.file_service import UPLOAD_DIR
+                project = db.query(Project).filter(Project.id == file_record.project_id).first() if file_record.project_id else None
+                chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == file_record.chapter_id).first() if file_record.chapter_id else None
+                
+                primary_dir = os.path.dirname(file_path)
+                save_paths = [os.path.join(primary_dir, "design_style.json")]
+                if project and chapter:
+                    save_paths.extend([
+                        os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "InDesign", "design_style.json"),
+                        os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "Design", "design_style.json"),
+                        os.path.join(UPLOAD_DIR, project.code, "InDesign", "design_style.json"),
+                        os.path.join(UPLOAD_DIR, project.code, "Design", "design_style.json"),
+                        os.path.join(UPLOAD_DIR, project.code, "design_style.json"),
+                    ])
+                
+                json_output_path = save_paths[0]
+                for sp in save_paths:
+                    try:
+                        os.makedirs(os.path.dirname(sp), exist_ok=True)
+                        with open(sp, "wb") as f_out:
+                            f_out.write(response.content)
+                    except Exception:
+                        pass
+                        
+                logger.info(f"[{job_id}] Saved extracted styles to: {json_output_path}")
+                
+                generated_files = [json_output_path]
+                success_msg = "Design template styles extracted successfully to design_style.json"
+
             elif process_type == "style_validation":
                 update_job_status(db, job_id, "processing", "Running Word document style validation...", 30)
                 import sys
@@ -549,6 +613,200 @@ def background_processing_task(
                     
                 generated_files = [output_report_path]
                 success_msg = "Word document style validation completed"
+
+            elif process_type == "style_match_design":
+                update_job_status(db, job_id, "processing", "Validating Word document styles against design template...", 30)
+                import json
+                import docx
+                from docx.enum.style import WD_STYLE_TYPE
+                from app.domains.projects.models import Project
+                from app.services.file_service import UPLOAD_DIR
+                
+                project = db.query(Project).filter(Project.id == file_record.project_id).first() if file_record.project_id else None
+                chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == file_record.chapter_id).first() if file_record.chapter_id else None
+                
+                possible_design_dirs = [
+                    os.path.dirname(file_path),
+                    os.path.dirname(os.path.dirname(file_path)),
+                ]
+                if project and chapter:
+                    possible_design_dirs.extend([
+                        os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "InDesign"),
+                        os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "Design"),
+                        os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "template"),
+                        os.path.join(UPLOAD_DIR, project.code, "InDesign"),
+                        os.path.join(UPLOAD_DIR, project.code, "Design"),
+                        os.path.join(UPLOAD_DIR, project.code, "template"),
+                        os.path.join(UPLOAD_DIR, project.code),
+                    ])
+                
+                design_json_path = None
+                for d_dir in possible_design_dirs:
+                    if d_dir and os.path.exists(d_dir):
+                        candidate = os.path.join(d_dir, "design_style.json")
+                        if os.path.exists(candidate):
+                            design_json_path = candidate
+                            break
+                            
+                # Fallback 1: recursive search in project folder
+                if not design_json_path and project:
+                    proj_root = os.path.join(UPLOAD_DIR, project.code)
+                    if os.path.exists(proj_root):
+                        for root, _, files in os.walk(proj_root):
+                            if "design_style.json" in files:
+                                design_json_path = os.path.join(root, "design_style.json")
+                                break
+                                
+                # Fallback 2: search everywhere in UPLOAD_DIR
+                if not design_json_path and os.path.exists(UPLOAD_DIR):
+                    for root, _, files in os.walk(UPLOAD_DIR):
+                        if "design_style.json" in files:
+                            design_json_path = os.path.join(root, "design_style.json")
+                            break
+                        
+                if not design_json_path:
+                    raise FileNotFoundError("Design template styles (design_style.json) not found. Please click 'Extract Style' on the design template first.")
+                    
+                with open(design_json_path, "r", encoding="utf-8") as f_json:
+                    design_data = json.load(f_json)
+                    
+                template_para_styles = set(design_data.get("paragraph_styles", []))
+                template_char_styles = set(design_data.get("character_styles", []))
+                
+                def is_ignored_style(name: str) -> bool:
+                    if not name:
+                        return True
+                    n = name.strip().lower()
+                    return n == "pmi" or n == "image" or n.startswith("pmi") or n.startswith("image")
+
+                doc = docx.Document(file_path)
+                docx_para_styles = set()
+                docx_char_styles = set()
+                
+                for p in doc.paragraphs:
+                    if p.style and p.style.name:
+                        s_name = p.style.name.strip()
+                        if s_name and not is_ignored_style(s_name):
+                            docx_para_styles.add(s_name)
+                    for r in p.runs:
+                        if r.style and r.style.name:
+                            c_name = r.style.name.strip()
+                            if c_name and c_name not in ("Default Paragraph Font", "Normal", "") and not is_ignored_style(c_name):
+                                docx_char_styles.add(c_name)
+                                
+                for t in doc.tables:
+                    for row in t.rows:
+                        for cell in row.cells:
+                            for p in cell.paragraphs:
+                                if p.style and p.style.name:
+                                    s_name = p.style.name.strip()
+                                    if s_name and not is_ignored_style(s_name):
+                                        docx_para_styles.add(s_name)
+                                for r in p.runs:
+                                    if r.style and r.style.name:
+                                        c_name = r.style.name.strip()
+                                        if c_name and c_name not in ("Default Paragraph Font", "Normal", "") and not is_ignored_style(c_name):
+                                            docx_char_styles.add(c_name)
+                                            
+                mismatched_para = sorted([s for s in docx_para_styles if s not in template_para_styles])
+                mismatched_char = sorted([s for s in docx_char_styles if s not in template_char_styles])
+                matched_para = sorted([s for s in docx_para_styles if s in template_para_styles])
+                matched_char = sorted([s for s in docx_char_styles if s in template_char_styles])
+                
+                manuscript_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "Manuscript")
+                os.makedirs(manuscript_dir, exist_ok=True)
+                base_name = os.path.splitext(os.path.basename(file_path))[0]
+                
+                report_json_path = os.path.join(manuscript_dir, f"{base_name}_style_match_report.json")
+                report_html_path = os.path.join(manuscript_dir, f"{base_name}_style_match_report.html")
+                
+                report_data = {
+                    "manuscript_file": os.path.basename(file_path),
+                    "design_template_file": os.path.basename(design_json_path),
+                    "total_paragraph_styles_used": len(docx_para_styles),
+                    "total_character_styles_used": len(docx_char_styles),
+                    "matched_paragraph_styles": matched_para,
+                    "matched_character_styles": matched_char,
+                    "mismatched_paragraph_styles": mismatched_para,
+                    "mismatched_character_styles": mismatched_char,
+                    "status": "PASS" if (len(mismatched_para) == 0 and len(mismatched_char) == 0) else "FAIL"
+                }
+                
+                with open(report_json_path, "w", encoding="utf-8") as rf:
+                    json.dump(report_data, rf, indent=2)
+                    
+                html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Style Match Design Validation Report</title>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 20px; background: #f8fafc; color: #1e293b; }}
+        .card {{ background: #ffffff; padding: 24px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); max-width: 900px; margin: 0 auto; }}
+        h1 {{ font-size: 20px; color: #0f172a; margin-top: 0; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px; }}
+        .badge {{ display: inline-block; padding: 4px 12px; border-radius: 9999px; font-weight: 600; font-size: 12px; text-transform: uppercase; }}
+        .badge-pass {{ background: #dcfce7; color: #166534; }}
+        .badge-fail {{ background: #fee2e2; color: #991b1b; }}
+        .grid {{ display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin: 20px 0; }}
+        .stat-box {{ background: #f1f5f9; padding: 12px 16px; border-radius: 6px; }}
+        .stat-label {{ font-size: 12px; color: #64748b; font-weight: 500; }}
+        .stat-val {{ font-size: 18px; font-weight: 700; color: #0f172a; margin-top: 4px; }}
+        table {{ width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }}
+        th, td {{ padding: 8px 12px; text-align: left; border-bottom: 1px solid #e2e8f0; }}
+        th {{ background: #f8fafc; font-weight: 600; color: #475569; }}
+        tr:hover {{ background: #f8fafc; }}
+        .tag-missing {{ color: #dc2626; font-weight: 600; }}
+        .tag-ok {{ color: #16a34a; font-weight: 600; }}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h1>Style Match Design Validation Report</h1>
+            <span class="badge {'badge-pass' if report_data['status'] == 'PASS' else 'badge-fail'}">{report_data['status']}</span>
+        </div>
+        <p><strong>Manuscript:</strong> {report_data['manuscript_file']}</p>
+        <p><strong>Template Design JSON:</strong> {report_data['design_template_file']}</p>
+        
+        <div class="grid">
+            <div class="stat-box">
+                <div class="stat-label">Paragraph Styles Matched</div>
+                <div class="stat-val">{len(matched_para)} / {len(docx_para_styles)}</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">Character Styles Matched</div>
+                <div class="stat-val">{len(matched_char)} / {len(docx_char_styles)}</div>
+            </div>
+        </div>
+
+        <h2>Paragraph Style Discrepancies ({len(mismatched_para)})</h2>
+        <table>
+            <thead>
+                <tr><th>Manuscript Paragraph Style</th><th>Design Template Status</th></tr>
+            </thead>
+            <tbody>
+                {''.join(f'<tr><td><code>{s}</code></td><td class="tag-missing">Missing in Design Template Paragraph Styles</td></tr>' for s in mismatched_para) if mismatched_para else '<tr><td colspan="2" class="tag-ok">All manuscript paragraph styles match design template!</td></tr>'}
+            </tbody>
+        </table>
+
+        <h2>Character Style Discrepancies ({len(mismatched_char)})</h2>
+        <table>
+            <thead>
+                <tr><th>Manuscript Character Style</th><th>Design Template Status</th></tr>
+            </thead>
+            <tbody>
+                {''.join(f'<tr><td><code>{s}</code></td><td class="tag-missing">Missing in Design Template Character Styles</td></tr>' for s in mismatched_char) if mismatched_char else '<tr><td colspan="2" class="tag-ok">All manuscript character styles match design template!</td></tr>'}
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>
+"""
+                with open(report_html_path, "w", encoding="utf-8") as hf:
+                    hf.write(html_content)
+                    
+                generated_files = [report_html_path, report_json_path]
+                success_msg = f"Style Match Design validation completed ({report_data['status']})"
 
             else:
                 raise HTTPException(
@@ -700,7 +958,7 @@ def background_processing_task(
                             ("Proof" if processed_filename.lower().endswith((".pdf", ".xhtml", ".css")) else "Misc")
                             if process_type == "indesign_to_xml"
                             else "Misc" if process_type == "extract_design_css"
-                            else "Manuscript" if (process_type in ("style_validation", "ppd") or processed_filename.lower().endswith("_dashboard.html"))
+                            else "Manuscript" if (process_type in ("style_validation", "style_match_design", "ppd") or processed_filename.lower().endswith(("_dashboard.html", "_style_match_report.html", "_style_match_report.json")))
                             else "XML" if processed_filename.lower().endswith((".xml", ".log", ".html"))
                             else "InDesign" if process_type == "xml_to_indesign"
                             else "XML" if process_type == "word_to_xml"

@@ -158,6 +158,7 @@ class ChapterSummary(BaseModel):
     indesign_status: str | None = None
     final_delivery_status: str | None = None
     style_status: str | None = None
+    design_match_status: str | None = None
     structuring_status: str | None = None
 
 
@@ -602,6 +603,8 @@ class VersionRecord(BaseModel):
     archived_path: str
     uploaded_at: datetime
     uploaded_by_id: int | None = None
+    uploaded_by_name: str | None = None
+    uploaded_by_username: str | None = None
 
 
 class FileVersionsFile(BaseModel):

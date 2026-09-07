@@ -35,7 +35,7 @@ import { XmlToIndesignModal } from '@/components/XmlToIndesignModal'
 import {
   startLanguageEdit,
   startPpdGeneration, startPermissionsCheck, startCreditExtraction,
-  startBiasScan, startWordToXml, getProcessingStatus, startIndesignToXml, startExtractDesignCss, startStyleValidation, startViewProof,
+  startBiasScan, startWordToXml, getProcessingStatus, startIndesignToXml, startExtractDesignCss, startExtractDesignStyle, startStyleValidation, startStyleMatchDesign, startViewProof,
 } from '@/api/processing'
 import { deleteFile, downloadFile, generateFigureAssessment, generateFigurePdf } from '@/api/files'
 import { useChapterFilesQuery } from '@/features/projects/useChapterFilesQuery'
@@ -486,19 +486,34 @@ function ProcessingActionsMenu({
         )}
 
         {showAction('styleValidation') && row?.subfolder?.toLowerCase() === 'manuscript' && (
-          <button
-            disabled={!fid}
-            type="button"
-            className={btnCls}
-            onClick={() => fid && setConfirmStep({
-              actionName: 'Style Validation',
-              jobFn: () => startStyleValidation(fid),
-              pollFileId: fid,
-              pollProcessType: 'style_validation'
-            })}
-          >
-            <ShieldCheck size={12} /> Style Validation
-          </button>
+          <>
+            <button
+              disabled={!fid}
+              type="button"
+              className={btnCls}
+              onClick={() => fid && setConfirmStep({
+                actionName: 'Style Match Design',
+                jobFn: () => startStyleMatchDesign(fid),
+                pollFileId: fid,
+                pollProcessType: 'style_match_design'
+              })}
+            >
+              <ShieldCheck size={12} /> Style Match Design
+            </button>
+            <button
+              disabled={!fid}
+              type="button"
+              className={btnCls}
+              onClick={() => fid && setConfirmStep({
+                actionName: 'Style Validation',
+                jobFn: () => startStyleValidation(fid),
+                pollFileId: fid,
+                pollProcessType: 'style_validation'
+              })}
+            >
+              <ShieldCheck size={12} /> Style Validation
+            </button>
+          </>
         )}
 
         {showAction('xmlToIndesign') && row?.subfolder?.toLowerCase() === 'xml' && (
@@ -526,19 +541,34 @@ function ProcessingActionsMenu({
         )}
 
         {(fname.endsWith('.indd') || fname.endsWith('.indt')) && (row?.subfolder?.toLowerCase() === 'indesign' || row?.subfolder?.toLowerCase() === 'design' || row?.subfolder?.toLowerCase() === 'template') && (
-          <button
-            disabled={!fid}
-            type="button"
-            className={btnCls}
-            onClick={() => fid && setConfirmStep({
-              actionName: 'Extract Layout CSS',
-              jobFn: () => startExtractDesignCss(fid),
-              pollFileId: fid,
-              pollProcessType: 'extract_design_css'
-            })}
-          >
-            <Wrench size={12} /> Extract Layout CSS
-          </button>
+          <>
+            <button
+              disabled={!fid}
+              type="button"
+              className={btnCls}
+              onClick={() => fid && setConfirmStep({
+                actionName: 'Extract Style',
+                jobFn: () => startExtractDesignStyle(fid),
+                pollFileId: fid,
+                pollProcessType: 'extract_design_style'
+              })}
+            >
+              <Wrench size={12} /> Extract Style
+            </button>
+            <button
+              disabled={!fid}
+              type="button"
+              className={btnCls}
+              onClick={() => fid && setConfirmStep({
+                actionName: 'Extract Layout CSS',
+                jobFn: () => startExtractDesignCss(fid),
+                pollFileId: fid,
+                pollProcessType: 'extract_design_css'
+              })}
+            >
+              <Wrench size={12} /> Extract Layout CSS
+            </button>
+          </>
         )}
 
         {showAction('viewProof') && row?.subfolder?.toLowerCase() === 'proof' && (

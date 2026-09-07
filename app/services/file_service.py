@@ -1,5 +1,6 @@
 from app.utils.timezone import now_ist_naive
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from fastapi import UploadFile
 from app import models
 from app.domains.projects.models import Project
@@ -98,7 +99,7 @@ def upload_chapter_files(
         if upload.filename.lower().endswith((".xml", ".log")):
             file_category = "XML"
 
-        if upload.filename.lower().endswith(".zip") and category in ["Design", "Art"]:
+        if upload.filename.lower().endswith(".zip") and any(c in category for c in ["Design", "Art", "InDesign", "template"]):
             import zipfile
             import io
             try:
@@ -119,9 +120,9 @@ def upload_chapter_files(
                         os.makedirs(member_base_path, exist_ok=True)
 
                         existing_file = db.query(models.File).filter(
+                            models.File.project_id == project_id,
                             models.File.chapter_id == chapter_id,
-                            models.File.category == member_category,
-                            models.File.filename == fname,
+                            func.lower(models.File.filename) == fname.lower(),
                         ).first()
 
                         if existing_file:
@@ -142,11 +143,17 @@ def upload_chapter_files(
                                 uploaded_by_id=actor_user_id,
                             )
 
+                            existing_file.category = member_category
                             file_path = existing_file.path
+                            if not file_path or not os.path.isabs(file_path):
+                                file_path = f"{member_base_path}/{fname}"
+                                existing_file.path = file_path
+                            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
                             with z.open(member) as src, open(file_path, "wb") as dst:
                                 shutil.copyfileobj(src, dst)
 
-                            existing_file.version += 1
+                            existing_file.version = (existing_file.version or 1) + 1
                             existing_file.uploaded_at = now_ist_naive()
                             existing_file.uploaded_by_id = actor_user_id
                             checkout_service.reset_checkout_after_overwrite(existing_file)
@@ -195,9 +202,9 @@ def upload_chapter_files(
             os.makedirs(file_base_path, exist_ok=True)
 
             existing_file = db.query(models.File).filter(
+                models.File.project_id == project_id,
                 models.File.chapter_id == chapter_id,
-                models.File.category == file_category,
-                models.File.filename == upload.filename,
+                func.lower(models.File.filename) == upload.filename.lower(),
             ).first()
 
             if existing_file:
@@ -218,11 +225,17 @@ def upload_chapter_files(
                     uploaded_by_id=actor_user_id,
                 )
 
+                existing_file.category = file_category
                 file_path = existing_file.path
+                if not file_path or not os.path.isabs(file_path):
+                    file_path = f"{file_base_path}/{upload.filename}"
+                    existing_file.path = file_path
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
                 with open(file_path, "wb") as buffer:
                     shutil.copyfileobj(upload.file, buffer)
 
-                existing_file.version += 1
+                existing_file.version = (existing_file.version or 1) + 1
                 existing_file.uploaded_at = now_ist_naive()
                 existing_file.uploaded_by_id = actor_user_id
                 checkout_service.reset_checkout_after_overwrite(existing_file)

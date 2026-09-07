@@ -89,8 +89,14 @@ export const startIndesignToXml = (fileId: number) =>
 export const startExtractDesignCss = (fileId: number) =>
   startProcessingJob(fileId, "extract_design_css", "style");
 
+export const startExtractDesignStyle = (fileId: number) =>
+  startProcessingJob(fileId, "extract_design_style", "style");
+
 export const startStyleValidation = (fileId: number) =>
   startProcessingJob(fileId, "style_validation", "style");
+
+export const startStyleMatchDesign = (fileId: number) =>
+  startProcessingJob(fileId, "style_match_design", "style");
 
 export const startViewProof = (fileId: number) =>
   startProcessingJob(fileId, "view_proof", "inplace");
