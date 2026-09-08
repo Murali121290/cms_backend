@@ -35,7 +35,10 @@ class ViewProofEngine:
         indt_path = None
         project_dir = os.path.join(upload_dir, project.code)
         
-        for root, _, files in os.walk(project_dir):
+        for root, dirs, files in os.walk(project_dir):
+            dirs[:] = [d for d in dirs if d.lower() != "archive"]
+            if "archive" in root.lower().replace("\\", "/").split("/"):
+                continue
             for f in files:
                 if f.lower().endswith(".indt"):
                     indt_path = os.path.join(root, f)
@@ -46,7 +49,10 @@ class ViewProofEngine:
         if not indt_path:
             logger.warning("No template (.indt) file found recursively in project. Attempting to search for .indd in design directories...")
             # Fallback: search for any .indd in Design folders
-            for root, _, files in os.walk(project_dir):
+            for root, dirs, files in os.walk(project_dir):
+                dirs[:] = [d for d in dirs if d.lower() != "archive"]
+                if "archive" in root.lower().replace("\\", "/").split("/"):
+                    continue
                 if "design" in root.lower() or "template" in root.lower():
                     for f in files:
                         if f.lower().endswith(".indd"):
@@ -91,13 +97,18 @@ class ViewProofEngine:
                 for folder in design_folders:
                     folder_path = os.path.join(project_dir, folder)
                     if os.path.exists(folder_path):
-                        for root, _, files in os.walk(folder_path):
+                        for root, dirs, files in os.walk(folder_path):
+                            dirs[:] = [d for d in dirs if d.lower() != "archive"]
+                            if "archive" in root.lower().replace("\\", "/").split("/"):
+                                continue
                             for file in files:
                                 full_file_path = os.path.join(root, file)
                                 if full_file_path in seen_design_files:
                                     continue
                                 seen_design_files.add(full_file_path)
                                 rel_path = os.path.relpath(full_file_path, project_dir)
+                                if "archive" in rel_path.lower().replace("\\", "/").split("/"):
+                                    continue
                                 zf.write(full_file_path, rel_path)
                 
                 # Include adjacent artfile or Links folder if present next to the original chapter files
