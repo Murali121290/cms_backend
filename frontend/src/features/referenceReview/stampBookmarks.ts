@@ -142,9 +142,31 @@ function resolveCitationRefName(
 
 // Build the strings to search for in the paragraph, ordered
 // most-specific → least-specific.
+//
+// Multi-citation blocks in APA — e.g. "(Smith, 2020; Jones, 2021; Lee, 2019)"
+// — arrive as one CitationPair per referenced work, but with the SAME full
+// `citation` string. Matching on that full string would drop every REF{n}
+// bookmark on top of the same range, so we generate a per-work needle first
+// using the pair's own `author`+`year`. This makes each individual work in the
+// block land on its own text span while still falling back to the whole block
+// (and to the bare reference-number form for AMA) if the specific needle
+// misses.
 function buildCitationNeedles(pair: CitationPair): string[] {
   const out: string[] = [];
   if (pair.ref_number != null) out.push(`[${pair.ref_number}]`);
+
+  const author = (pair.author ?? "").trim();
+  const year = (pair.year ?? "").trim();
+  if (author && year) {
+    out.push(`${author}, ${year}`);
+    out.push(`${author} (${year})`);
+    // "(Smith, 2020)" as a standalone citation — matches when it's the only
+    // work in the parentheses.
+    out.push(`(${author}, ${year})`);
+  } else if (author) {
+    out.push(author);
+  }
+
   if (pair.citation) {
     // Some validators return the citation already surrounded by parens; guard.
     const cleaned = pair.citation.replace(/^\((.*)\)$/, "$1").trim();
@@ -152,6 +174,17 @@ function buildCitationNeedles(pair: CitationPair): string[] {
       out.push(`(${cleaned})`);
       out.push(cleaned);
     }
+  }
+  return dedupePreserveOrder(out);
+}
+
+function dedupePreserveOrder<T>(xs: T[]): T[] {
+  const seen = new Set<T>();
+  const out: T[] = [];
+  for (const x of xs) {
+    if (seen.has(x)) continue;
+    seen.add(x);
+    out.push(x);
   }
   return out;
 }
