@@ -72,8 +72,9 @@ PROCESS_PERMISSIONS = {
     "indesign_to_xml": ["Admin", "XML Manager", "XML manager", "XML Operator", "Senior XML Operator", "Compositor", "Senior Compositor", "Production Manager"],
     "extract_design_css": ["Admin", "XML Manager", "XML manager", "XML Operator", "Senior XML Operator"],
     "extract_design_style": ["Admin", "Template Manager", "template manager", "Template Operator", "template operator", "Production Manager", "production manager"],
-    "style_validation": ["Admin", "Pre Editor", "Team Lead - Prediting", "XML Manager", "XML Operator", "Senior XML Operator", "Non-XML Manager", "Non-XML Operator", "Production Manager"],
+    "style_validation": ["Admin", "Pre Editor", "Team Lead - Prediting", "XML Manager", "XML operator", "XML Operator", "Senior XML Operator", "Non-XML Manager", "Non-XML Operator", "Production Manager"],
     "style_match_design": ["Admin", "Pre Editor", "Team Lead - Prediting", "XML Manager", "XML Operator", "Senior XML Operator", "Non-XML Manager", "Non-XML Operator", "Production Manager"],
+    "art_validation": ["Admin", "Pre Editor", "Team Lead - Prediting", "XML Manager", "XML manager", "XML Operator", "Senior XML Operator", "Non-XML Manager", "Non-XML Operator", "Production Manager"],
     "view_proof": ["Admin", "XML Manager", "XML manager", "Author", "Reviewer", "Editor", "XML Operator", "Technical Editor", "Pre Editor", "Language Editor", "Compositor", "Senior Compositor", "Production Manager"],
 }
 

@@ -160,6 +160,7 @@ class ChapterSummary(BaseModel):
     style_status: str | None = None
     design_match_status: str | None = None
     structuring_status: str | None = None
+    art_status: str | None = None
 
 
 class FileRecord(BaseModel):

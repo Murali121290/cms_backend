@@ -373,7 +373,7 @@ class ChapterInfo(Base):
                     return "pending"
                 elif job.status == "completed":
                     return "completed"
-                elif job.status == "failed":
+                elif job.status in ("failed", "error"):
                     return "failed"
         except Exception:
             pass
@@ -386,5 +386,34 @@ class ChapterInfo(Base):
                 if "_processed.docx" in f.filename.lower() or "_structured.docx" in f.filename.lower():
                     return "completed"
                     
+        return None
+
+    @property
+    def art_status(self) -> Optional[str]:
+        """Derive art validation status from uploaded files.
+        - None      -> no art report file present
+        - 'no_art'  -> chapter has 0 figures and captions
+        - 'valid'   -> 0 missing files and 0 warnings (PASS)
+        - 'warning' -> missing files or warnings exist
+        """
+        import os
+        from app.services.file_service import UPLOAD_DIR
+        report_files = [f for f in self.files if f.filename.lower().endswith("_art_validation_report.html")]
+        if not report_files:
+            return None
+        report_file = sorted(report_files, key=lambda f: f.uploaded_at)[-1]
+        if report_file.path:
+            full_path = os.path.join(UPLOAD_DIR, report_file.path) if not os.path.isabs(report_file.path) else report_file.path
+            if os.path.exists(full_path):
+                try:
+                    content = open(full_path, encoding="utf-8", errors="ignore").read()
+                    if 'There is no art and caption in this chapter' in content or ('Docx Figures' in content and 'val" style="color: #0284c7;">0</div>' in content and 'val" style="color: #dc2626;">0</div>' in content and 'val" style="color: #d97706;">0</div>' in content):
+                        return "no_art"
+                    elif 'Missing Art' in content and 'val" style="color: #dc2626;">0</div>' in content and 'Unreferenced Art' in content and 'val" style="color: #d97706;">0</div>' in content:
+                        return "valid"
+                    else:
+                        return "warning"
+                except Exception:
+                    pass
         return None
 

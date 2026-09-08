@@ -165,7 +165,7 @@ export type ProcessingActionKey =
   | 'languageEdit' | 'technicalEdit'
   | 'manuscriptAnalysis'
   | 'permissionsCheck' | 'aiCreditExtraction' | 'biasScan' | 'wordToXml'
-  | 'xmlToIndesign' | 'indesignToXml' | 'viewProof' | 'styleValidation'
+  | 'xmlToIndesign' | 'indesignToXml' | 'viewProof' | 'styleValidation' | 'artValidation'
 
 const PRODUCTION_STAGES = ['XML Conversion', 'Typesetting', 'Proofreading']
 
@@ -174,6 +174,7 @@ export const PROCESSING_ACTION_STAGE_MAP: Record<ProcessingActionKey, string[] |
   referenceValidation:  ['Pre-editing','Pre-editing QA'],
   referenceReview:      ['Pre-editing','Pre-editing QA'],
   styleValidation:      ['Pre-editing', 'Pre-editing QA', 'XML Conversion', 'Non-XML Processing', 'Non-XML Conversion', 'Manuscript Analysis'],
+  artValidation:        ['Pre-editing', 'Pre-editing QA', 'XML Conversion', 'Non-XML Processing', 'Non-XML Conversion', 'Manuscript Analysis'],
   languageEdit:         ['Language Editing', 'Language Editing QA'],
   technicalEdit:        ['Language Editing','Language Editing QA'],
   manuscriptAnalysis:   ['Manuscript Analysis'],
