@@ -285,6 +285,19 @@ class XhtmlToDocxEngine:
         except Exception as fmt_err:
             logger.warning(f"Failed to apply final document formatting: {fmt_err}")
 
+        # Guarantee every citation/bibliography character style referenced by
+        # the rebuilt runs has a highlight fill in styles.xml. Without this,
+        # spans authored in the editor (e.g. class="cite_bib") point at a
+        # style with no shading and Word renders the run plainly — losing the
+        # highlight the user saw in the editor.
+        try:
+            from app.processing.reference_char_style_applicator import (
+                ensure_reference_char_style_highlights,
+            )
+            ensure_reference_char_style_highlights(doc)
+        except Exception as ref_err:
+            logger.warning(f"Failed to ensure reference char style highlights: {ref_err}")
+
         # 4. ── Save atomically ────────────────────────────────────────────────
         tmp_path = docx_path + ".stylepatch.tmp"
         doc.save(tmp_path)

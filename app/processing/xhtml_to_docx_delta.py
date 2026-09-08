@@ -374,6 +374,19 @@ class XhtmlToDocxDeltaEngine:
         except Exception as fmt_err:
             logger.warning(f"Failed to apply final document formatting in delta: {fmt_err}")
 
+        # Guarantee every citation/bibliography character style referenced by
+        # the just-rebuilt runs has a highlight fill in styles.xml. Without
+        # this, spans authored in the editor (e.g. class="cite_bib") emit a
+        # <w:rStyle w:val="citebib"/> that resolves to a style with no shading
+        # and Word renders the run plainly — losing the highlight the user saw.
+        try:
+            from app.processing.reference_char_style_applicator import (
+                ensure_reference_char_style_highlights,
+            )
+            ensure_reference_char_style_highlights(doc)
+        except Exception as ref_err:
+            logger.warning(f"Failed to ensure reference char style highlights: {ref_err}")
+
         # Save atomically
         tmp_path = out_docx_path + ".delta.tmp"
         doc.save(tmp_path)

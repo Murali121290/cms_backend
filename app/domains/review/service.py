@@ -672,6 +672,34 @@ def get_export_payload(db: Session, *, file_id: int, logger):
         logger.warning(f"Comment injection failed; falling back to plain DOCX: {e}", exc_info=True)
         enriched_path = None
 
+    # Reference workflow finalization: for every citation that is genuinely
+    # missing a reference (or vice-versa), insert the AQ Word comment the
+    # copy-editor would otherwise have to author by hand. Runs against the
+    # export temp copy when we already made one, otherwise a fresh copy so
+    # the on-disk DOCX stays clean and re-saves don't accumulate comments.
+    try:
+        from app.processing.citation_link_finalizer import apply_reference_workflow
+        import shutil
+        import tempfile
+        target = enriched_path
+        if target is None:
+            fd, target = tempfile.mkstemp(suffix=".docx", prefix="export_with_aq_")
+            os.close(fd)
+            shutil.copyfile(processed_path, target)
+        summary = apply_reference_workflow(target, validation_logs=None)
+        if any(summary.get(k) for k in ("missing_citation_aqs", "unused_reference_aqs")):
+            logger.info(f"Reference workflow added AQ comments for file {file_id}: {summary}")
+            enriched_path = target
+        elif enriched_path is None:
+            # No AQ was added and we made the temp copy solely for this pass;
+            # discard it so the caller streams the pristine processed DOCX.
+            try:
+                os.unlink(target)
+            except Exception:
+                pass
+    except Exception as e:
+        logger.warning(f"Reference workflow skipped; falling back to plain DOCX: {e}", exc_info=True)
+
     return {
         "path": enriched_path or processed_path,
         "filename": processed_filename,
