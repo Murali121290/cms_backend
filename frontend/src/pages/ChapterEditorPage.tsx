@@ -703,6 +703,63 @@ export function ChapterEditorPage() {
           cleaned = cleaned.replace(/(<(?:span|ins)[^>]*class="[^"]*tc-insert[^"]*"[^>]*>)(.*?)<\/(?:span|ins)>\s*<(?:span|ins)[^>]*class="[^"]*tc-insert[^"]*"[^>]*>(.*?)<\/(?:span|ins)>/gi, '$1$2$3</span>');
         }
 
+        // Transform InDesign XML tables with direct child cell spans into valid HTML table rows and cells
+        const transformInDesignTables = (html: string): string => {
+          const tableRegex = /(<table[^>]*>)([\s\S]*?)(<\/table>)/gi;
+          return html.replace(tableRegex, (_full, tableOpen: string, content: string, tableClose: string) => {
+            const tcolsMatch = /aid:tcols="(\d+)"/i.exec(tableOpen);
+            const tcols = tcolsMatch ? parseInt(tcolsMatch[1], 10) : 2;
+
+            const cellRegex = /<(span|div)([^>]*data-xml-tag="cell"[^>]*)>([\s\S]*?)<\/\1>/gi;
+            const cells: { attrs: string; inner: string }[] = [];
+            let match: RegExpExecArray | null;
+            while ((match = cellRegex.exec(content)) !== null) {
+              cells.push({ attrs: match[2], inner: match[3] });
+            }
+
+            if (cells.length === 0) {
+              return _full;
+            }
+
+            const rowsHtml: string[] = [];
+            let currentRowCells: string[] = [];
+            let currentColCount = 0;
+            let isHeaderRow = false;
+
+            for (const cell of cells) {
+              const ccolsMatch = /aid:ccols="(\d+)"/i.exec(cell.attrs);
+              const ccols = ccolsMatch ? parseInt(ccolsMatch[1], 10) : 1;
+
+              const isHead = /aid:theader|TableColumnHead|Head/i.test(cell.attrs);
+              if (isHead) {
+                isHeaderRow = true;
+              }
+
+              const tdTag = isHead ? "th" : "td";
+              const colspanAttr = ccols > 1 ? ` colspan="${ccols}"` : "";
+              const cellHtml = `<${tdTag}${colspanAttr} ${cell.attrs}>${cell.inner}</${tdTag}>`;
+              currentRowCells.push(cellHtml);
+              currentColCount += ccols;
+
+              if (currentColCount >= tcols) {
+                const rowTagOpen = isHeaderRow ? '<tr data-xml-tag="tr" class="table-header-row">' : '<tr data-xml-tag="tr">';
+                rowsHtml.push(`${rowTagOpen}${currentRowCells.join("")}</tr>`);
+                currentRowCells = [];
+                currentColCount = 0;
+                isHeaderRow = false;
+              }
+            }
+
+            if (currentRowCells.length > 0) {
+              const rowTagOpen = isHeaderRow ? '<tr data-xml-tag="tr" class="table-header-row">' : '<tr data-xml-tag="tr">';
+              rowsHtml.push(`${rowTagOpen}${currentRowCells.join("")}</tr>`);
+            }
+
+            return `${tableOpen}<tbody>${rowsHtml.join("")}</tbody>${tableClose}`;
+          });
+        };
+
+        cleaned = transformInDesignTables(cleaned);
         setXhtmlContent(cleaned)
       })
       .catch(err => {

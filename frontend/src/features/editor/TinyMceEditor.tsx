@@ -691,10 +691,66 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
       div[data-xml-tag="issue"],
       div[data-xml-tag="fpage"],
       div[data-xml-tag="lpage"],
-      span[data-xml-tag] {
+      span[data-xml-tag]:not([data-xml-tag="cell"]):not([data-xml-tag="table"]):not([data-xml-tag="tr"]):not([data-xml-tag="td"]):not([data-xml-tag="th"]):not([data-xml-tag="table-wrap"]):not([data-xml-tag="author-queries"]):not([aid\\:pstyle*="AQ"]):not([aid\\:pstyle*="aq"]) {
         display: inline !important;
         margin: 0 !important;
         padding: 0 !important;
+      }
+
+      /* ==========================================================================
+         Author Queries (AQ) Section & Item Block Formatting
+         ========================================================================== */
+      span[data-xml-tag="author-queries"],
+      div[data-xml-tag="author-queries"],
+      [data-xml-tag="author-queries"],
+      [aid\\:pstyle="AQ_Head"],
+      [aid\\:pstyle*="AQ_Head"] {
+        display: block !important;
+        margin-top: 2rem !important;
+        margin-bottom: 2rem !important;
+        padding: 1.25rem 1.5rem !important;
+        background-color: #f8fafc !important;
+        border: 1px solid #e2e8f0 !important;
+        border-left: 5px solid #0284c7 !important;
+        border-radius: 8px !important;
+        box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04) !important;
+        clear: both !important;
+        box-sizing: border-box !important;
+        width: 100% !important;
+        font-family: inherit !important;
+        font-weight: 700 !important;
+        color: #0f172a !important;
+      }
+
+      span[aid\\:pstyle*="AQ_Caption"],
+      span[aid\\:pstyle*="AQ_Text"],
+      span[aid\\:pstyle="AQ_Caption"],
+      div[aid\\:pstyle*="AQ_Caption"],
+      p[aid\\:pstyle*="AQ_Caption"],
+      [data-xml-tag="author-queries"] span[aid\\:pstyle*="AQ_Caption"],
+      [data-xml-tag="author-queries"] span[data-xml-tag="x"] {
+        display: block !important;
+        margin-top: 0.75rem !important;
+        margin-bottom: 0.75rem !important;
+        padding: 0.6rem 0.85rem !important;
+        background-color: #ffffff !important;
+        border: 1px solid #cbd5e1 !important;
+        border-radius: 6px !important;
+        line-height: 1.6 !important;
+        color: #1e293b !important;
+        font-size: 0.92rem !important;
+        font-weight: 400 !important;
+        clear: both !important;
+      }
+
+      span[aid\\:pstyle*="AQ_Caption"] span[aid\\:cstyle="bold"],
+      span[aid\\:pstyle*="AQ_Caption"] strong,
+      span[aid\\:pstyle*="AQ_Caption"] b,
+      [data-xml-tag="author-queries"] span[aid\\:cstyle="bold"] {
+        display: inline !important;
+        font-weight: 700 !important;
+        color: #0369a1 !important;
+        margin-right: 0.4rem !important;
       }
       /* Visual styling for character formatting tags & classes */
       b, strong, .bold, .Bold, [data-xml-tag="bold"], [data-xml-tag="Bold"], span.bold {
@@ -720,22 +776,120 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
       .smallcaps, [data-xml-tag="smallcaps"], span.smallcaps {
         font-variant: small-caps !important;
       }
+
+      /* ==========================================================================
+         Table & Cell Layout Styles (Standard HTML & Adobe InDesign XML Tables)
+         ========================================================================== */
+      table-wrap,
+      [data-xml-tag="table-wrap"],
+      .table-wrap,
+      .TableWrap {
+        display: block !important;
+        margin: 1.5rem 0 !important;
+        padding: 1rem !important;
+        background: #ffffff !important;
+        border: 1px solid #cbd5e1 !important;
+        border-radius: 8px !important;
+        box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05) !important;
+        clear: both !important;
+        box-sizing: border-box !important;
+        width: 100% !important;
+      }
+      table-wrap > [data-xml-tag="label"],
+      table-wrap > [data-xml-tag="caption"],
+      [data-xml-tag="table-wrap"] > [data-xml-tag="label"],
+      [data-xml-tag="table-wrap"] > [data-xml-tag="caption"] {
+        display: block !important;
+        margin-bottom: 0.5rem !important;
+      }
+
+      /* Standard HTML Table Layout */
+      table,
+      [data-xml-tag="table"],
+      [aid\\:table="table"] {
+        display: table !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        border-collapse: collapse !important;
+        border-spacing: 0 !important;
+        margin: 1.5rem 0 !important;
+        border: 1px solid #94a3b8 !important;
+        background-color: #ffffff !important;
+        box-sizing: border-box !important;
+        table-layout: auto !important;
+      }
+
+      thead, [data-xml-tag="thead"] { display: table-header-group !important; width: 100% !important; }
+      tbody, [data-xml-tag="tbody"] { display: table-row-group !important; width: 100% !important; }
+      tfoot, [data-xml-tag="tfoot"] { display: table-footer-group !important; width: 100% !important; }
+
+      tr,
+      [data-xml-tag="tr"],
+      [aid\\:table="row"] {
+        display: table-row !important;
+        width: 100% !important;
+      }
+
+      th,
+      td,
+      [data-xml-tag="th"],
+      [data-xml-tag="td"],
+      span[data-xml-tag="cell"],
+      div[data-xml-tag="cell"],
+      [aid\\:table="cell"],
+      [data-xml-tag="cell"] {
+        display: table-cell !important;
+        border: 1px solid #cbd5e1 !important;
+        padding: 10px 14px !important;
+        vertical-align: top !important;
+        font-size: 13px !important;
+        line-height: 1.5 !important;
+        background-color: #ffffff !important;
+        color: #0f172a !important;
+        box-sizing: border-box !important;
+        max-width: none !important;
+        float: none !important;
+        word-break: break-word !important;
+      }
+
+      th,
+      [data-xml-tag="th"],
+      span[data-xml-tag="cell"][aid5\\:cellstyle*="Head"],
+      div[data-xml-tag="cell"][aid5\\:cellstyle*="Head"],
+      [aid\\:table="cell"][aid5\\:cellstyle*="Head"],
+      [aid\\:theader] {
+        background-color: #1e293b !important;
+        color: #ffffff !important;
+        font-weight: 700 !important;
+        text-align: left !important;
+      }
+
+      th p,
+      [data-xml-tag="th"] p,
+      span[data-xml-tag="cell"][aid5\\:cellstyle*="Head"] p,
+      div[data-xml-tag="cell"][aid5\\:cellstyle*="Head"] p,
+      [aid\\:table="cell"][aid5\\:cellstyle*="Head"] p,
+      [aid\\:theader] p {
+        color: #ffffff !important;
+        font-weight: 700 !important;
+      }
+
       ${customCss}
 
-      /* Force single-column block flow for all elements inside TinyMCE body */
+      /* Force single-column block flow for non-table elements inside TinyMCE body */
       body.mce-content-body,
       body.mce-content-body * {
         column-count: auto !important;
         column-width: auto !important;
         columns: auto !important;
       }
-      body.mce-content-body div,
+      body.mce-content-body div:not([data-xml-tag="cell"]):not([data-xml-tag="table"]):not([data-xml-tag="tr"]):not([data-xml-tag="td"]):not([data-xml-tag="th"]),
       body.mce-content-body section,
       body.mce-content-body article,
       body.mce-content-body main,
       body.mce-content-body p,
-      body.mce-content-body [class*="_idGen"],
-      body.mce-content-body [class*="Object"],
+      body.mce-content-body [class*="_idGen"]:not(table):not(tr):not(td):not(th):not(span),
+      body.mce-content-body [class*="Object"]:not(table):not(tr):not(td):not(th):not(span),
       body.mce-content-body [class*="Basic-Text-Frame"] {
         display: block !important;
         width: 100% !important;

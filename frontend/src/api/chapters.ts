@@ -30,6 +30,7 @@ export interface Chapter {
   style_status?: 'valid' | 'invalid' | 'pending' | null
   design_match_status?: 'valid' | 'invalid' | 'pending' | null
   structuring_status?: 'completed' | 'failed' | 'pending' | null
+  art_status?: 'valid' | 'warning' | 'no_art' | 'pending' | null
 }
 
 export interface ChapterUpdate {

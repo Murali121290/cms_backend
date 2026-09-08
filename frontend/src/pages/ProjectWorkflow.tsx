@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, ChevronRight,
-  Calendar, Clock, Zap, BookOpen, AlertCircle, CheckCircle2,
+  Calendar, Clock, Zap, BookOpen, AlertCircle, CheckCircle2, AlertTriangle,
   RotateCcw, Layers, User, BookMarked, Info, Edit2, Plus, Bookmark
 } from 'lucide-react'
 import { ViewSwitcher } from '@/components/ui/ViewSwitcher'
@@ -356,7 +356,7 @@ function ChapterCard({ chapter, users, plannedDueDates, stageRolesMap, onAssigne
       {/* File Pipeline Status Badges */}
       {!chapter.chapters?.toLowerCase().includes('art') && chapter.workflow !== 'WF-11 Art Process' && (
         <div className="px-4 py-2 border-t border-border flex flex-wrap gap-1.5">
-          {!chapter.style_status && !chapter.design_match_status && !chapter.xml_status && !chapter.indesign_status && !chapter.final_delivery_status && !chapter.structuring_status ? (
+          {!chapter.style_status && !chapter.design_match_status && !chapter.art_status && !chapter.xml_status && !chapter.indesign_status && !chapter.final_delivery_status && !chapter.structuring_status ? (
             <span className="text-[10px] italic text-muted">No pipeline assets generated yet.</span>
           ) : (
             <>
@@ -391,6 +391,23 @@ function ChapterCard({ chapter, users, plannedDueDates, stageRolesMap, onAssigne
               {chapter.design_match_status === 'pending' && (
                 <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
                   <Clock size={10} className="text-amber-500 animate-spin" /> Design Match: Pending
+                </span>
+              )}
+
+              {/* Art Validation Status */}
+              {chapter.art_status === 'valid' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <CheckCircle2 size={10} className="text-emerald-500" /> Art: Valid
+                </span>
+              )}
+              {chapter.art_status === 'warning' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                  <AlertTriangle size={10} className="text-amber-500" /> Art: Warnings
+                </span>
+              )}
+              {chapter.art_status === 'no_art' && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                  <Info size={10} className="text-slate-400" /> Art: No Art
                 </span>
               )}
 

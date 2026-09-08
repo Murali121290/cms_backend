@@ -130,6 +130,7 @@ export interface ChapterSummary {
   style_status?: string | null;
   design_match_status?: string | null;
   structuring_status?: string | null;
+  art_status?: string | null;
 }
 
 export interface DashboardResponse {

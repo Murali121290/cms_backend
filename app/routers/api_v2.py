@@ -10,7 +10,7 @@ import logging
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File as FastAPIFile, Form, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from pathlib import Path
 from jose import JWTError, jwt
 from sqlalchemy import func, or_
@@ -52,6 +52,7 @@ from app.processing.structuring_engine import StructuringEngine
 from app.processing.bias_engine import BiasEngine
 from app.processing.ai_extractor_engine import AIExtractorEngine
 from app.processing.xml_engine import XMLEngine
+from app.processing.art_validation_engine import ArtValidationEngine
 from app.utils.utils.structuring_lib.doc_utils import extract_document_structure, update_document_structure
 from app.utils.utils.structuring_lib.rules_loader import get_rules_loader
 from app.utils.utils.structuring_lib.tag_set_loader import list_available_tag_sets
@@ -319,6 +320,7 @@ def _serialize_chapter_summary(chapter: models.Chapter):
         style_status=getattr(chapter, "style_status", None),
         design_match_status=getattr(chapter, "design_match_status", None),
         structuring_status=getattr(chapter, "structuring_status", None),
+        art_status=getattr(chapter, "art_status", None),
     )
 
 
@@ -4731,6 +4733,7 @@ def api_v2_processing_status(
         "xml_to_indesign",
         "style_validation",
         "style_match_design",
+        "art_validation",
         "extract_design_css",
         "extract_design_style",
         "view_proof",
@@ -4779,6 +4782,191 @@ def api_v2_processing_status(
         current_step=status_payload.get("current_step"),
         progress_pct=status_payload.get("progress_pct"),
     )
+
+
+def _resolve_art_directory(file_path: str, db: Session = None, file_record: models.File = None) -> str:
+    """Finds the associated Art folder for a given manuscript docx file across CMS chapter/project structures."""
+    parent_dir = os.path.dirname(file_path)
+    chapter_dir = os.path.dirname(parent_dir)
+    project_dir = os.path.dirname(chapter_dir)
+
+    # Extract chapter number from manuscript filename or chapter folder
+    fname = os.path.basename(file_path)
+    num_match = re.search(r'(?:Ch|Chapter)[\s_\-]*0*(\d+)', fname, re.IGNORECASE)
+    if not num_match:
+        num_match = re.search(r'(?:Ch|Chapter)[\s_\-]*0*(\d+)', os.path.basename(chapter_dir), re.IGNORECASE)
+
+    ch_num = int(num_match.group(1)) if num_match else None
+
+    # 1. Project-level explicit chapter art folder candidates (e.g. Ch 03 - Art/Art, Ch 03/Art)
+    if ch_num is not None and os.path.exists(project_dir):
+        ch_art_candidates = [
+            os.path.join(project_dir, f"Ch {ch_num:02d} - Art", "Art"),
+            os.path.join(project_dir, f"Ch {ch_num} - Art", "Art"),
+            os.path.join(project_dir, f"Ch {ch_num:02d} - Art"),
+            os.path.join(project_dir, f"Ch {ch_num} - Art"),
+            os.path.join(project_dir, f"Ch{ch_num:02d}", "Art"),
+            os.path.join(project_dir, f"Ch{ch_num}", "Art"),
+            os.path.join(project_dir, f"Chapter {ch_num:02d}", "Art"),
+            os.path.join(project_dir, f"Chapter {ch_num}", "Art"),
+        ]
+        for c in ch_art_candidates:
+            if os.path.exists(c) and os.path.isdir(c):
+                if any(f.lower().endswith(('.eps', '.tif', '.tiff', '.jpg', '.jpeg', '.png', '.pdf')) and not f.lower().endswith('.converted.png') for f in os.listdir(c)):
+                    return c
+
+    # 2. Direct candidates relative to manuscript file (excluding InDesign)
+    candidates_direct = [
+        os.path.join(chapter_dir, "Art"),
+        os.path.join(chapter_dir, "art"),
+        os.path.join(chapter_dir, "ART"),
+        os.path.join(parent_dir, "Art"),
+        os.path.join(parent_dir, "art"),
+        os.path.join(chapter_dir, "Input"),
+    ]
+    for c in candidates_direct:
+        if os.path.exists(c) and os.path.isdir(c) and 'indesign' not in c.lower():
+            if any(f.lower().endswith(('.eps', '.tif', '.tiff', '.jpg', '.jpeg', '.png', '.pdf')) and not f.lower().endswith('.converted.png') for f in os.listdir(c) if not f.startswith('.')):
+                return c
+
+    # 3. Check DB File records for category 'Art' if db and file_record provided
+    if db and file_record:
+        art_files_db = db.query(models.File).filter(
+            models.File.project_id == file_record.project_id,
+            models.File.category.ilike('%art%')
+        ).all()
+
+        for af in art_files_db:
+            if af.path and os.path.exists(af.path) and 'indesign' not in af.path.lower():
+                af_dir = os.path.dirname(af.path)
+                if ch_num:
+                    af_dir_lower = af_dir.lower()
+                    ch_patterns = [f'ch {ch_num}', f'ch0{ch_num}', f'ch{ch_num}', f'chapter {ch_num}', f'chapter 0{ch_num}']
+                    if any(p in af_dir_lower for p in ch_patterns):
+                        return af_dir
+                else:
+                    return af_dir
+
+    # 4. Ranked filesystem search in project directory (excluding InDesign)
+    if os.path.exists(project_dir):
+        ranked_dirs = []
+        for root, dirs, files in os.walk(project_dir):
+            if 'indesign' in root.lower():
+                continue
+            images = [f for f in files if f.lower().endswith(('.eps', '.tif', '.tiff', '.jpg', '.jpeg', '.png')) and not f.startswith('.') and not f.lower().endswith('.converted.png')]
+            if not images:
+                continue
+
+            score = 0
+            rel_lower = os.path.relpath(root, project_dir).lower()
+
+            if ch_num is not None:
+                ch_patterns = [f'ch {ch_num}', f'ch{ch_num}', f'ch 0{ch_num}', f'ch0{ch_num}', f'chapter {ch_num}', f'chapter 0{ch_num}', f'/{ch_num}/', f'/{ch_num:02d}/']
+                if any(p in f'/{rel_lower}/' for p in ch_patterns):
+                    score += 10
+                else:
+                    # Do not assign art folders of other chapters
+                    continue
+
+            if 'art' in rel_lower:
+                score += 5
+
+            ranked_dirs.append((score, len(images), root))
+
+        if ranked_dirs:
+            ranked_dirs.sort(key=lambda x: (x[0], x[1]), reverse=True)
+            return ranked_dirs[0][2]
+
+    return parent_dir
+
+
+def _save_art_validation_html_report(db: Session, file_record: models.File, docx_path: str, html_report: str):
+    """Saves the generated HTML validation report to disk and registers it in the DB File table."""
+    try:
+        report_filename = f"{os.path.splitext(os.path.basename(docx_path))[0]}_art_validation_report.html"
+        report_path = os.path.join(os.path.dirname(docx_path), report_filename)
+        with open(report_path, "w", encoding="utf-8") as f:
+            f.write(html_report)
+
+        existing_file = db.query(models.File).filter(
+            models.File.project_id == file_record.project_id,
+            models.File.chapter_id == file_record.chapter_id,
+            models.File.filename == report_filename
+        ).first()
+
+        if not existing_file:
+            db_report_file = models.File(
+                project_id=file_record.project_id,
+                chapter_id=file_record.chapter_id,
+                filename=report_filename,
+                file_type="html",
+                category="Manuscript",
+                path=report_path,
+            )
+            db.add(db_report_file)
+            db.commit()
+    except Exception as e:
+        print(f"[ArtValidation] Error saving report HTML file: {e}")
+
+
+@router.get("/files/{file_id}/art-validation")
+def api_v2_art_validation(
+    file_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+    file_record = db.query(models.File).filter(models.File.id == file_id).first()
+    if not file_record or not file_record.path or not os.path.exists(file_record.path):
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="FILE_NOT_FOUND",
+            message="Source file not found on disk",
+        )
+
+    docx_path = file_record.path
+    art_dir = _resolve_art_directory(docx_path, db=db, file_record=file_record)
+    result = ArtValidationEngine.validate(docx_path, art_dir)
+
+    _save_art_validation_html_report(db, file_record, docx_path, result["html_report"])
+
+    return JSONResponse(status_code=200, content=result)
+
+
+@router.get("/files/{file_id}/art-validation/html")
+def api_v2_art_validation_html(
+    file_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+    file_record = db.query(models.File).filter(models.File.id == file_id).first()
+    if not file_record or not file_record.path or not os.path.exists(file_record.path):
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="FILE_NOT_FOUND",
+            message="Source file not found on disk",
+        )
+
+    docx_path = file_record.path
+    art_dir = _resolve_art_directory(docx_path, db=db, file_record=file_record)
+    result = ArtValidationEngine.validate(docx_path, art_dir)
+
+    _save_art_validation_html_report(db, file_record, docx_path, result["html_report"])
+
+    return HTMLResponse(content=result["html_report"], status_code=200)
 
 
 @router.get("/processing-jobs/{job_id}", response_model=schemas_v2.ProcessingJobResponse)

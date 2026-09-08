@@ -265,5 +265,6 @@ class ChapterInfoResponse(ChapterInfoBase):
     style_status: Optional[str] = None
     design_match_status: Optional[str] = None
     structuring_status: Optional[str] = None
+    art_status: Optional[str] = None
 
     model_config = {"from_attributes": True}
