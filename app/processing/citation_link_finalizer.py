@@ -106,14 +106,47 @@ def split_citation_block(text: str) -> List[str]:
 # ─── Comment insertion helper (idempotent) ──────────────────────────────────
 
 
-def _paragraph_has_comment_text(para, text: str) -> bool:
-    """True if the paragraph already carries a Word comment with `text`.
+_AQ_MISSING_KEY_RE = re.compile(
+    r'AQ:\s*The reference\s*[“"\']([^"”\']+)[”"\']\s*is cited in the text but not given',
+    re.IGNORECASE,
+)
+_AQ_UNUSED_KEY_RE = re.compile(
+    r'AQ:\s*The reference\s*[“"\']([^"”\']+)[”"\']\s*is given in the list but not cited',
+    re.IGNORECASE,
+)
+_YEAR_RE = re.compile(r'(19|20)\d{2}[a-z]?|n\.\s*d\.', re.IGNORECASE)
+_SURNAME_RE = re.compile(r'[A-Z][A-Za-zÀ-ſ\'\-]{1,}')
 
-    Comments live in a separate part (`word/comments.xml`), so we walk the
-    paragraph for a `<w:commentReference>` and look each id up in the parent
-    document's comment map. This is what makes the finalizer safe to call
-    repeatedly.
+
+def _aq_signature(text: str) -> Optional[Tuple[str, str, str]]:
+    """Reduce an AQ comment to (kind, surname_key, year_key) so different
+    phrasings of the same issue collapse.
+
+    S4C emits shorthand like ``AQ: The reference "Capobianco et al., 2025" is
+    given in the list but not cited...``, while Reference Validator emits the
+    full raw ref ``"Capobianco, M., Puzzo, C., ... (2025). Current virtual
+    reality..."``. Both should count as duplicates for the same underlying
+    issue. We key by the FIRST capitalised surname + the YEAR — enough to
+    disambiguate between references without over-collapsing.
     """
+    if not text:
+        return None
+    for kind, rx in (("missing", _AQ_MISSING_KEY_RE), ("unused", _AQ_UNUSED_KEY_RE)):
+        m = rx.search(text)
+        if not m:
+            continue
+        payload = m.group(1)
+        y = _YEAR_RE.search(payload)
+        year_key = (y.group(0) if y else "").lower().replace(".", "").replace(" ", "")
+        s = _SURNAME_RE.search(payload)
+        surname_key = (s.group(0) if s else "").lower()
+        if not surname_key and not year_key:
+            return None
+        return (kind, surname_key, year_key)
+    return None
+
+
+def _collect_paragraph_comment_texts(para) -> List[str]:
     doc = getattr(para.part, "document", None) or para._parent
     part = None
     try:
@@ -125,35 +158,53 @@ def _paragraph_has_comment_text(para, text: str) -> bool:
     except Exception:
         part = None
     if part is None:
-        return False
-
+        return []
     try:
         from lxml import etree
         comments_root = etree.fromstring(part.blob)
     except Exception:
-        return False
-
+        return []
     text_by_id: Dict[str, str] = {}
     for cmt in comments_root.findall(qn("w:comment")):
         cid = cmt.get(qn("w:id"))
         if cid is None:
             continue
-        # Concatenate every text node inside the comment.
         body = "".join((t.text or "") for t in cmt.iter(qn("w:t"))).strip()
         text_by_id[cid] = body
-
-    p_el = para._element
-    for ref in p_el.iter(qn("w:commentReference")):
+    out: List[str] = []
+    for ref in para._element.iter(qn("w:commentReference")):
         cid = ref.get(qn("w:id"))
-        if cid is None:
-            continue
-        if text_by_id.get(cid, "").strip() == text.strip():
+        if cid is not None and cid in text_by_id:
+            out.append(text_by_id[cid])
+    return out
+
+
+def _paragraph_has_comment_text(para, text: str) -> bool:
+    """True if the paragraph already carries an equivalent AQ comment.
+
+    Exact text match takes precedence; if `text` looks like an AQ, we also
+    accept any existing comment whose AQ signature (kind, surname, year)
+    matches — this catches S4C↔Reference Validator phrasing differences for
+    the same issue.
+    """
+    existing = _collect_paragraph_comment_texts(para)
+    if not existing:
+        return False
+    stripped = text.strip()
+    for body in existing:
+        if body.strip() == stripped:
+            return True
+    sig = _aq_signature(text)
+    if sig is None:
+        return False
+    for body in existing:
+        if _aq_signature(body) == sig:
             return True
     return False
 
 
 def _add_aq_comment(doc, para, text: str, author: str = "Reference Validator") -> bool:
-    """Add an AQ comment to `para` unless the same text is already there."""
+    """Add an AQ comment to `para` unless an equivalent AQ is already there."""
     if _paragraph_has_comment_text(para, text):
         return False
     from app.docx_pipeline.utils.docx_helpers import add_comment_to_paragraph
@@ -169,6 +220,252 @@ def _body_paragraphs(doc) -> List[Any]:
     and SDTs. Order matches how the validators number `para_idx`."""
     from docx.text.paragraph import Paragraph
     return [Paragraph(p, doc) for p in doc.element.body.iter(qn("w:p"))]
+
+
+# ─── Export-time DOCX cleanup ───────────────────────────────────────────────
+
+
+# WYSIWYG editor round-trip bookmarks. Every paragraph/run/table/cell gets
+# a `<prefix><hex-suffix>` bookmark so the delta engine can locate edits; those
+# tracking bookmarks are not meaningful in the delivered DOCX and must be
+# stripped before hand-off. Keep this list in sync with the generators in
+# `app/processing/docx_to_xhtml_runs.py` and `xhtml_to_docx_delta.py`.
+_EDITOR_TRACKING_PREFIXES: Tuple[str, ...] = (
+    "r_bm_",
+    "p_bm_",
+    "tbl_bm_",
+    "cell_bm_",
+    "fnpara_bm_",
+    "enpara_bm_",
+)
+
+_W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+_W = "{" + _W_NS + "}"
+
+_REF_UPPER_RE = re.compile(r"^REF(\d+)$")
+
+
+def _strip_editor_tracking_bookmarks(root) -> int:
+    """Remove `w:bookmarkStart`/`w:bookmarkEnd` pairs whose name starts with
+    any of the editor tracking prefixes. Returns the number of pairs removed."""
+    removed_ids: set[str] = set()
+    for bs in list(root.iter(_W + "bookmarkStart")):
+        name = bs.get(_W + "name") or ""
+        if any(name.startswith(p) for p in _EDITOR_TRACKING_PREFIXES):
+            bid = bs.get(_W + "id")
+            if bid is not None:
+                removed_ids.add(bid)
+            parent = bs.getparent()
+            if parent is not None:
+                parent.remove(bs)
+    if not removed_ids:
+        return 0
+    for be in list(root.iter(_W + "bookmarkEnd")):
+        if be.get(_W + "id") in removed_ids:
+            parent = be.getparent()
+            if parent is not None:
+                parent.remove(be)
+    return len(removed_ids)
+
+
+def _rename_ref_uppercase_bookmarks(root) -> int:
+    """Rename `REF{n}` (uppercase, no underscore — Reference Review stamp
+    from the frontend) to the PPH-standard `ref_{n}` (lowercase). Preserves
+    the bookmark id and any nested content."""
+    renamed = 0
+    existing_names = {
+        (bs.get(_W + "name") or "") for bs in root.iter(_W + "bookmarkStart")
+    }
+    for bs in root.iter(_W + "bookmarkStart"):
+        name = bs.get(_W + "name") or ""
+        m = _REF_UPPER_RE.match(name)
+        if not m:
+            continue
+        new_name = f"ref_{m.group(1)}"
+        if new_name in existing_names and new_name != name:
+            # Someone else already owns the target name — drop this REF{n} so
+            # we don't create a duplicate. The bookmarkEnd matched by id will
+            # be cleaned up by the tracking-bookmark pass if it has no start.
+            continue
+        bs.set(_W + "name", new_name)
+        existing_names.add(new_name)
+        renamed += 1
+    return renamed
+
+
+def _dedupe_comments(root, comments_root) -> int:
+    """Remove duplicate comments on the SAME paragraph.
+
+    A duplicate is any comment whose (normalised text) matches an earlier
+    comment on the same paragraph, OR whose AQ signature (kind, surname,
+    year) matches an earlier AQ — this collapses S4C's shorthand and
+    Reference Validator's full-text phrasings of the same "unused reference"
+    / "missing citation" issue. Comments on different paragraphs are kept.
+    """
+    if comments_root is None:
+        return 0
+    text_by_id: Dict[str, Tuple[str, str]] = {}
+    sig_by_id: Dict[str, Optional[Tuple[str, str, str]]] = {}
+    for cmt in comments_root.findall(_W + "comment"):
+        cid = cmt.get(_W + "id")
+        if cid is None:
+            continue
+        author = cmt.get(_W + "author") or ""
+        body = "".join((t.text or "") for t in cmt.iter(_W + "t")).strip()
+        text_by_id[cid] = (author, body)
+        sig_by_id[cid] = _aq_signature(body)
+
+    removed_ids: set[str] = set()
+    # Doc-wide pass, but SCOPED to Reference Validator only: if S4C (or any
+    # other earlier author) already produced an AQ with the same signature,
+    # drop the Reference Validator dup even if it anchored to a different
+    # paragraph. Reference Validator is a strict fallback; it should never
+    # add on top of an existing S4C AQ.
+    seen_sig_global: Dict[Tuple[str, str, str], str] = {}
+    for cmt in comments_root.findall(_W + "comment"):
+        cid = cmt.get(_W + "id")
+        if cid is None:
+            continue
+        sig = sig_by_id.get(cid)
+        if sig is None:
+            continue
+        author = text_by_id.get(cid, ("", ""))[0]
+        if sig in seen_sig_global:
+            # Later occurrence — drop only if it's authored by the fallback.
+            if author == "Reference Validator":
+                removed_ids.add(cid)
+        else:
+            seen_sig_global[sig] = cid
+
+    for para in root.iter(_W + "p"):
+        seen_text: set[Tuple[str, str]] = set()
+        seen_sigs: set[Tuple[str, str, str]] = set()
+        # A comment anchors to a paragraph via `commentRangeStart`, and its
+        # inline marker is `commentReference`. Upstream pipeline stages
+        # sometimes emit the range without a reference (or vice-versa), so we
+        # union both markers when deciding which ids belong to this paragraph.
+        # Walking in document order lets us keep the FIRST anchor and drop
+        # every later duplicate.
+        seen_ids_here: List[str] = []
+        for anchor in para.iter():
+            if anchor.tag == _W + "commentRangeStart" or anchor.tag == _W + "commentReference":
+                cid = anchor.get(_W + "id")
+                if cid is not None and cid not in seen_ids_here:
+                    seen_ids_here.append(cid)
+        for cid in seen_ids_here:
+            key = text_by_id.get(cid)
+            if key is None:
+                continue
+            sig = sig_by_id.get(cid)
+            if key in seen_text:
+                removed_ids.add(cid)
+                continue
+            if sig is not None and sig in seen_sigs:
+                # e.g. Reference Validator's full-text AQ dup of an earlier
+                # S4C shorthand AQ on the same paragraph.
+                removed_ids.add(cid)
+                continue
+            seen_text.add(key)
+            if sig is not None:
+                seen_sigs.add(sig)
+
+    if not removed_ids:
+        return 0
+
+    # Drop the duplicate comment definitions.
+    for cmt in list(comments_root.findall(_W + "comment")):
+        if cmt.get(_W + "id") in removed_ids:
+            comments_root.remove(cmt)
+
+    # Drop the paragraph-level markers (start/end/reference) for those ids.
+    def _drop(tag: str) -> None:
+        for el in list(root.iter(_W + tag)):
+            if el.get(_W + "id") in removed_ids:
+                parent = el.getparent()
+                if parent is not None:
+                    parent.remove(el)
+
+    _drop("commentRangeStart")
+    _drop("commentRangeEnd")
+    # commentReference lives inside a w:r; drop the surrounding run if the
+    # reference was its only meaningful child.
+    for r in list(root.iter(_W + "r")):
+        for cr in list(r.findall(_W + "commentReference")):
+            if cr.get(_W + "id") in removed_ids:
+                r.remove(cr)
+        # Empty run left behind (only rPr) → remove.
+        remaining = [c for c in r if c.tag != _W + "rPr"]
+        if not remaining:
+            parent = r.getparent()
+            if parent is not None:
+                parent.remove(r)
+
+    return len(removed_ids)
+
+
+def finalize_docx_for_export(docx_path: str) -> Dict[str, int]:
+    """Post-process a DOCX to strip editor round-trip artefacts before it is
+    handed to the user.
+
+    * Removes `r_bm_*`, `p_bm_*`, `tbl_bm_*`, `cell_bm_*`, `fnpara_bm_*`,
+      `enpara_bm_*` bookmarks (editor internal tracking anchors).
+    * Renames `REF{n}` → `ref_{n}` so the delivered file matches the PPH
+      reference-bookmark scheme (`ref_N` on entries, `bib_N` on citations).
+    * Deduplicates comments that appear twice on the same paragraph with the
+      same author + text.
+
+    Returns counts for logging; a no-op call rewrites nothing.
+    """
+    import zipfile
+    from lxml import etree
+
+    path = Path(docx_path)
+    if not path.exists():
+        return {"tracking_bookmarks_removed": 0, "ref_bookmarks_renamed": 0, "duplicate_comments_removed": 0}
+
+    with zipfile.ZipFile(path, "r") as z:
+        doc_xml = z.read("word/document.xml")
+        try:
+            comments_xml = z.read("word/comments.xml")
+        except KeyError:
+            comments_xml = None
+        names = z.namelist()
+
+    root = etree.fromstring(doc_xml)
+    comments_root = etree.fromstring(comments_xml) if comments_xml else None
+
+    removed_bm = _strip_editor_tracking_bookmarks(root)
+    renamed = _rename_ref_uppercase_bookmarks(root)
+    removed_c = _dedupe_comments(root, comments_root)
+
+    stats = {
+        "tracking_bookmarks_removed": removed_bm,
+        "ref_bookmarks_renamed": renamed,
+        "duplicate_comments_removed": removed_c,
+    }
+
+    if not any(stats.values()):
+        return stats
+
+    new_doc = etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
+    new_comments = (
+        etree.tostring(comments_root, xml_declaration=True, encoding="UTF-8", standalone=True)
+        if comments_root is not None else None
+    )
+
+    tmp = path.with_suffix(path.suffix + ".finalize-tmp")
+    with zipfile.ZipFile(path, "r") as zin, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            if item.filename == "word/document.xml":
+                zout.writestr(item, new_doc)
+            elif item.filename == "word/comments.xml" and new_comments is not None:
+                zout.writestr(item, new_comments)
+            else:
+                zout.writestr(item, zin.read(item.filename))
+    tmp.replace(path)
+
+    logger.info("Finalized %s: %s", path.name, stats)
+    return stats
 
 
 # ─── Main entry point ───────────────────────────────────────────────────────
@@ -268,6 +565,16 @@ def apply_reference_workflow(
             "Reference workflow: no AQ comments to add for %s (summary=%s)",
             docx_path, summary,
         )
+
+    # Strip editor round-trip artefacts and normalise bookmark naming for the
+    # delivered file. Runs even when no AQs were added — a re-export of a
+    # previously-exported file might still carry tracking bookmarks or
+    # `REF{n}` names from a stampBookmarks pass.
+    try:
+        finalize_stats = finalize_docx_for_export(docx_path)
+        summary.update(finalize_stats)
+    except Exception as e:
+        logger.warning("finalize_docx_for_export failed on %s: %s", docx_path, e, exc_info=True)
 
     return summary
 

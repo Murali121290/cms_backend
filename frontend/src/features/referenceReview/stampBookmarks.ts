@@ -57,9 +57,11 @@ export function stampBookmarks(
   const manualNames = collectManualBookmarkNames(doc);
   for (const name of manualLinkNames) manualNames.add(name);
 
-  // Assign REF{n} names by document order. Entries with an explicit number
+  // Assign ref_{n} names by document order. Entries with an explicit number
   // (Vancouver/AMA) use that; APA entries with number:null get positional
-  // numbering after sorting by paragraph index.
+  // numbering after sorting by paragraph index. `ref_N` matches the
+  // PPH bookmark scheme used by the backend citation validator, so the DOCX
+  // that ships to the copy-editor has one consistent naming convention.
   const sortedEntries = [...referenceEntries]
     .filter((e) => paraByIdx.has(e.para_idx))
     .sort((a, b) => a.para_idx - b.para_idx);
@@ -72,7 +74,7 @@ export function stampBookmarks(
   // TARGETS — one bookmark per reference entry
   sortedEntries.forEach((entry, i) => {
     const n = entry.number ?? i + 1;
-    const name = `REF${n}`;
+    const name = `ref_${n}`;
     if (manualNames.has(name)) return; // manual owns this slot
     entryTextToName.set(normalizeRefText(entry.text), name);
 
@@ -120,7 +122,7 @@ export function stampBookmarks(
   if (changed) editor.view.dispatch(tr);
 }
 
-// Decide which REF{n} a citation points to. Priority:
+// Decide which ref_{n} a citation points to. Priority:
 //   1. explicit ref_number from validator (numeric style),
 //   2. lookup by ref_text against the entry-text map (APA / prose citations).
 // Skip if the resolved name was already claimed by a manual bookmark.
@@ -130,7 +132,7 @@ function resolveCitationRefName(
   manualNames: Set<string>,
 ): string | null {
   if (pair.ref_number != null) {
-    const name = `REF${pair.ref_number}`;
+    const name = `ref_${pair.ref_number}`;
     if (!manualNames.has(name)) return name;
   }
   if (pair.ref_text) {

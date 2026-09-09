@@ -1708,11 +1708,60 @@ def _get_comments_part(doc):
         logging.error(f"_get_comments_part failed: {exc}")
         return None
 
+def _paragraph_already_has_s4c_comment(doc, para, text: str) -> bool:
+    """True if `para` already carries a comment authored by S4C with `text`.
+
+    The APA pipeline may run more than once on the same on-disk DOCX (e.g. a
+    re-validate after edits). Without this guard, `_insert_comments` would
+    append a fresh copy of every AQ each time.
+    """
+    try:
+        from docx.opc.constants import RELATIONSHIP_TYPE as RT
+        from lxml import etree as _etree
+    except Exception:
+        return False
+    try:
+        comments_part = None
+        for rel in doc.part.rels.values():
+            if rel.reltype == RT.COMMENTS:
+                comments_part = rel.target_part
+                break
+        if comments_part is None:
+            return False
+        root = _etree.fromstring(comments_part.blob)
+    except Exception:
+        return False
+    text_by_id: Dict[str, Tuple[str, str]] = {}
+    for cmt in root.findall(qn('w:comment')):
+        cid = cmt.get(qn('w:id'))
+        if cid is None:
+            continue
+        author = cmt.get(qn('w:author')) or ''
+        body = "".join((t.text or "") for t in cmt.iter(qn('w:t'))).strip()
+        text_by_id[cid] = (author, body)
+    stripped = (text or '').strip()
+    for ref in para._p.iter(qn('w:commentReference')):
+        cid = ref.get(qn('w:id'))
+        rec = text_by_id.get(cid)
+        if rec is None:
+            continue
+        author, body = rec
+        if author == COMMENT_AUTHOR and body == stripped:
+            return True
+    return False
+
+
 def insert_comment(doc, para, text, target_run=None, target_text=None):
     try:
         from docx.text.run import Run as _Run
 
         if not para.runs:
+            return False
+
+        # Idempotency: if this paragraph already carries an S4C comment with
+        # the same text, don't add another. Guards against pipeline re-runs
+        # doubling every AQ.
+        if _paragraph_already_has_s4c_comment(doc, para, text):
             return False
 
         def _find_in_ins(search_txt):
