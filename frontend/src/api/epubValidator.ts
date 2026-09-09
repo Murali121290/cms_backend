@@ -46,10 +46,14 @@ export async function validateFolder(folderName: string): Promise<ValidationApiR
 
 export interface EpubSummary {
   total_chapters: number;
+  total_parts?: number;
+  total_sections?: number;
   total_figures: number;
   total_tables: number;
   figure_labels: string[];
   chapter_labels: string[];
+  part_labels?: string[];
+  section_labels?: string[];
   table_labels: string[];
   error?: string;
 }

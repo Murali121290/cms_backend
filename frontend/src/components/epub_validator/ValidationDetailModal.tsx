@@ -18,6 +18,7 @@ import {
   Monitor,
   PanelRightClose,
   ArrowUpDown,
+  ChevronDown,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/utils/epubValidatorUtils';
@@ -1255,72 +1256,131 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                                     )}
                                   </div>
                                 </div>
-                                <div className="space-y-5">
-                                  <div className="bg-card p-3 rounded-lg border border-border shadow-xs">
-                                    <div className="flex justify-between items-center mb-2 border-b border-border pb-1.5">
-                                      <h3 className="text-xs font-bold text-foreground font-serif uppercase tracking-widest">
-                                        Chapters
+                                <div className="space-y-3">
+                                  <details className="bg-card rounded-lg border border-border shadow-xs group [&_summary::-webkit-details-marker]:hidden">
+                                    <summary className="flex justify-between items-center p-3 cursor-pointer select-none">
+                                      <h3 className="text-xs font-bold text-foreground font-serif uppercase tracking-widest flex items-center gap-2 text-primary">
+                                        Chapters <span className="bg-primary/10 text-primary px-1.5 py-0.5 rounded text-[10px]">{summaryData?.chapter_labels?.length || 0}</span>
                                       </h3>
+                                      <ChevronDown className="w-4 h-4 text-muted-foreground transition-transform group-open:rotate-180" />
+                                    </summary>
+                                    <div className="px-3 pb-3 border-t border-border/50 pt-2">
+                                      {(!summaryData?.chapter_labels || summaryData.chapter_labels.length === 0) ? (
+                                        <p className="text-[10px] text-muted-foreground italic">No chapters found.</p>
+                                      ) : (
+                                        <ul className="flex flex-col gap-1.5">
+                                          {summaryData.chapter_labels.map((label: string, i: number) => {
+                                            const displayLabel = showFilenamesInAnalysis ? label : label.replace(/^\[.*?\]\s*/, '');
+                                            return (
+                                              <li key={i} className="px-2.5 py-1.5 bg-primary/10 text-primary-700 dark:text-primary-300 rounded-md text-[10.5px] font-medium leading-relaxed">
+                                                <span className="break-words">{displayLabel}</span>
+                                              </li>
+                                            );
+                                          })}
+                                        </ul>
+                                      )}
                                     </div>
-                                    {(!summaryData?.chapter_labels || summaryData.chapter_labels.length === 0) ? (
-                                      <p className="text-[10px] text-muted-foreground italic">No chapters found.</p>
-                                    ) : (
-                                      <ul className="flex flex-col gap-1.5">
-                                        {summaryData.chapter_labels.map((label: string, i: number) => {
-                                          const displayLabel = showFilenamesInAnalysis ? label : label.replace(/^\[.*?\]\s*/, '');
-                                          return (
-                                            <li key={i} className="px-2.5 py-1.5 bg-primary/10 text-primary-700 dark:text-primary-300 rounded-md text-[10.5px] font-medium leading-relaxed">
-                                              <span className="break-words">{displayLabel}</span>
-                                            </li>
-                                          );
-                                        })}
-                                      </ul>
-                                    )}
-                                  </div>
+                                  </details>
 
-                                  <div className="bg-card p-3 rounded-lg border border-border shadow-xs">
-                                    <div className="flex justify-between items-center mb-2 border-b border-border pb-1.5">
-                                      <h3 className="text-xs font-bold text-foreground font-serif uppercase tracking-widest">
-                                        Figures
+                                  <details className="bg-card rounded-lg border border-border shadow-xs group [&_summary::-webkit-details-marker]:hidden">
+                                    <summary className="flex justify-between items-center p-3 cursor-pointer select-none">
+                                      <h3 className="text-xs font-bold text-foreground font-serif uppercase tracking-widest flex items-center gap-2 text-amber-600">
+                                        Parts <span className="bg-amber-500/10 text-amber-700 px-1.5 py-0.5 rounded text-[10px]">{summaryData?.part_labels?.length || 0}</span>
                                       </h3>
+                                      <ChevronDown className="w-4 h-4 text-muted-foreground transition-transform group-open:rotate-180" />
+                                    </summary>
+                                    <div className="px-3 pb-3 border-t border-border/50 pt-2">
+                                      {(!summaryData?.part_labels || summaryData.part_labels.length === 0) ? (
+                                        <p className="text-[10px] text-muted-foreground italic">No parts found.</p>
+                                      ) : (
+                                        <ul className="flex flex-col gap-1.5">
+                                          {summaryData.part_labels.map((label: string, i: number) => {
+                                            const displayLabel = showFilenamesInAnalysis ? label : label.replace(/^\[.*?\]\s*/, '');
+                                            return (
+                                              <li key={i} className="px-2.5 py-1.5 bg-amber-500/10 text-amber-700 dark:text-amber-300 rounded-md text-[10.5px] font-medium leading-relaxed">
+                                                <span className="break-words">{displayLabel}</span>
+                                              </li>
+                                            );
+                                          })}
+                                        </ul>
+                                      )}
                                     </div>
-                                    {(!summaryData?.figure_labels || summaryData.figure_labels.length === 0) ? (
-                                      <p className="text-[10px] text-muted-foreground italic">No figures found.</p>
-                                    ) : (
-                                      <ul className="flex flex-col gap-1.5">
-                                        {summaryData.figure_labels.map((label: string, i: number) => {
-                                          const displayLabel = showFilenamesInAnalysis ? label : label.replace(/^\[.*?\]\s*/, '');
-                                          return (
-                                            <li key={i} className="px-2.5 py-1.5 bg-primary/10 text-primary-700 dark:text-primary-300 rounded-md text-[10.5px] font-medium leading-relaxed">
-                                              <span className="break-words">{displayLabel}</span>
-                                            </li>
-                                          );
-                                        })}
-                                      </ul>
-                                    )}
-                                  </div>
+                                  </details>
 
-                                  <div className="bg-card p-3 rounded-lg border border-border shadow-xs">
-                                    <div className="flex justify-between items-center mb-2 border-b border-border pb-1.5">
-                                      <h3 className="text-xs font-bold text-foreground font-serif uppercase tracking-widest">
-                                        Tables
+                                  <details className="bg-card rounded-lg border border-border shadow-xs group [&_summary::-webkit-details-marker]:hidden">
+                                    <summary className="flex justify-between items-center p-3 cursor-pointer select-none">
+                                      <h3 className="text-xs font-bold text-foreground font-serif uppercase tracking-widest flex items-center gap-2 text-purple-600">
+                                        Sections <span className="bg-purple-500/10 text-purple-700 px-1.5 py-0.5 rounded text-[10px]">{summaryData?.section_labels?.length || 0}</span>
                                       </h3>
+                                      <ChevronDown className="w-4 h-4 text-muted-foreground transition-transform group-open:rotate-180" />
+                                    </summary>
+                                    <div className="px-3 pb-3 border-t border-border/50 pt-2">
+                                      {(!summaryData?.section_labels || summaryData.section_labels.length === 0) ? (
+                                        <p className="text-[10px] text-muted-foreground italic">No sections found.</p>
+                                      ) : (
+                                        <ul className="flex flex-col gap-1.5">
+                                          {summaryData.section_labels.map((label: string, i: number) => {
+                                            const displayLabel = showFilenamesInAnalysis ? label : label.replace(/^\[.*?\]\s*/, '');
+                                            return (
+                                              <li key={i} className="px-2.5 py-1.5 bg-purple-500/10 text-purple-700 dark:text-purple-300 rounded-md text-[10.5px] font-medium leading-relaxed">
+                                                <span className="break-words">{displayLabel}</span>
+                                              </li>
+                                            );
+                                          })}
+                                        </ul>
+                                      )}
                                     </div>
-                                    {(!summaryData?.table_labels || summaryData.table_labels.length === 0) ? (
-                                      <p className="text-[10px] text-muted-foreground italic">No tables found.</p>
-                                    ) : (
-                                      <ul className="flex flex-col gap-1.5">
-                                        {summaryData.table_labels.map((label: string, i: number) => {
-                                          const displayLabel = showFilenamesInAnalysis ? label : label.replace(/^\[.*?\]\s*/, '');
-                                          return (
-                                            <li key={i} className="px-2.5 py-1.5 bg-primary/10 text-primary-700 dark:text-primary-300 rounded-md text-[10.5px] font-medium leading-relaxed">
-                                              <span className="break-words">{displayLabel}</span>
-                                            </li>
-                                          );
-                                        })}
-                                      </ul>
-                                    )}
-                                  </div>
+                                  </details>
+
+                                  <details className="bg-card rounded-lg border border-border shadow-xs group [&_summary::-webkit-details-marker]:hidden">
+                                    <summary className="flex justify-between items-center p-3 cursor-pointer select-none">
+                                      <h3 className="text-xs font-bold text-foreground font-serif uppercase tracking-widest flex items-center gap-2 text-emerald-600">
+                                        Figures <span className="bg-emerald-500/10 text-emerald-700 px-1.5 py-0.5 rounded text-[10px]">{summaryData?.figure_labels?.length || 0}</span>
+                                      </h3>
+                                      <ChevronDown className="w-4 h-4 text-muted-foreground transition-transform group-open:rotate-180" />
+                                    </summary>
+                                    <div className="px-3 pb-3 border-t border-border/50 pt-2">
+                                      {(!summaryData?.figure_labels || summaryData.figure_labels.length === 0) ? (
+                                        <p className="text-[10px] text-muted-foreground italic">No figures found.</p>
+                                      ) : (
+                                        <ul className="flex flex-col gap-1.5">
+                                          {summaryData.figure_labels.map((label: string, i: number) => {
+                                            const displayLabel = showFilenamesInAnalysis ? label : label.replace(/^\[.*?\]\s*/, '');
+                                            return (
+                                              <li key={i} className="px-2.5 py-1.5 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 rounded-md text-[10.5px] font-medium leading-relaxed">
+                                                <span className="break-words">{displayLabel}</span>
+                                              </li>
+                                            );
+                                          })}
+                                        </ul>
+                                      )}
+                                    </div>
+                                  </details>
+
+                                  <details className="bg-card rounded-lg border border-border shadow-xs group [&_summary::-webkit-details-marker]:hidden">
+                                    <summary className="flex justify-between items-center p-3 cursor-pointer select-none">
+                                      <h3 className="text-xs font-bold text-foreground font-serif uppercase tracking-widest flex items-center gap-2 text-blue-600">
+                                        Tables <span className="bg-blue-500/10 text-blue-700 px-1.5 py-0.5 rounded text-[10px]">{summaryData?.table_labels?.length || 0}</span>
+                                      </h3>
+                                      <ChevronDown className="w-4 h-4 text-muted-foreground transition-transform group-open:rotate-180" />
+                                    </summary>
+                                    <div className="px-3 pb-3 border-t border-border/50 pt-2">
+                                      {(!summaryData?.table_labels || summaryData.table_labels.length === 0) ? (
+                                        <p className="text-[10px] text-muted-foreground italic">No tables found.</p>
+                                      ) : (
+                                        <ul className="flex flex-col gap-1.5">
+                                          {summaryData.table_labels.map((label: string, i: number) => {
+                                            const displayLabel = showFilenamesInAnalysis ? label : label.replace(/^\[.*?\]\s*/, '');
+                                            return (
+                                              <li key={i} className="px-2.5 py-1.5 bg-blue-500/10 text-blue-700 dark:text-blue-300 rounded-md text-[10.5px] font-medium leading-relaxed">
+                                                <span className="break-words">{displayLabel}</span>
+                                              </li>
+                                            );
+                                          })}
+                                        </ul>
+                                      )}
+                                    </div>
+                                  </details>
                                 </div>
                               </div>
                             </motion.div>
