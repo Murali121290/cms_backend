@@ -22,19 +22,27 @@ def extract_epub_summary(folder_name: str, refresh: bool = False) -> dict:
             pass
     
     total_chapters = 0
+    total_parts = 0
+    total_sections = 0
     total_figures = 0
     total_tables = 0
     figure_labels = []
     chapter_labels = []
+    part_labels = []
+    section_labels = []
     table_labels = []
     
     if not base_path.exists():
         return {
             "total_chapters": 0,
+            "total_parts": 0,
+            "total_sections": 0,
             "total_figures": 0,
             "total_tables": 0,
             "figure_labels": [],
             "chapter_labels": [],
+            "part_labels": [],
+            "section_labels": [],
             "table_labels": [],
             "error": "EPUB folder not found."
         }
@@ -45,21 +53,28 @@ def extract_epub_summary(folder_name: str, refresh: bool = False) -> dict:
             if file.endswith((".xhtml", ".html")):
                 filepath = Path(root) / file
                 
-                # Rule: count .xhtml files as chapters only if filename has chapter_ or ch_
-                is_chapter = "chapter_" in file.lower() or "ch_" in file.lower()
+                # Rule: count .xhtml files as chapters, parts, or sections based on filename
+                is_chapter = "_chapter" in file.lower() or "_ch" in file.lower()
+                is_part = "_part" in file.lower()
+                is_section = "_section" in file.lower()
                 
-                # Rule: figure and table only check on chapter files
-                if not is_chapter:
+                # Rule: figure and table only check on these content files
+                if not (is_chapter or is_part or is_section):
                     continue
                     
-                total_chapters += 1
+                if is_chapter:
+                    total_chapters += 1
+                    chapter_labels.append(file)
+                elif is_part:
+                    total_parts += 1
+                    part_labels.append(file)
+                elif is_section:
+                    total_sections += 1
+                    section_labels.append(file)
                 
                 try:
                     with open(filepath, "r", encoding="utf-8") as f:
                         soup = BeautifulSoup(f, "html.parser")
-                        
-                        # Just use the filename for the chapter label
-                        chapter_labels.append(file)
 
                         # Find all tables and figures
                         tables = soup.find_all("table")
@@ -121,10 +136,14 @@ def extract_epub_summary(folder_name: str, refresh: bool = False) -> dict:
                     
     result = {
         "total_chapters": total_chapters,
+        "total_parts": total_parts,
+        "total_sections": total_sections,
         "total_figures": total_figures,
         "total_tables": total_tables,
         "figure_labels": figure_labels,
         "chapter_labels": chapter_labels,
+        "part_labels": part_labels,
+        "section_labels": section_labels,
         "table_labels": table_labels
     }
     
