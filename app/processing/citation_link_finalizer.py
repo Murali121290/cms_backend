@@ -247,25 +247,83 @@ _REF_UPPER_RE = re.compile(r"^REF(\d+)$")
 
 def _strip_editor_tracking_bookmarks(root) -> int:
     """Remove `w:bookmarkStart`/`w:bookmarkEnd` pairs whose name starts with
-    any of the editor tracking prefixes. Returns the number of pairs removed."""
-    removed_ids: set[str] = set()
+    any of the editor tracking prefixes.
+
+    The tracking-bookmark id space overlaps with the legit `bib_N`/`ref_N` id
+    space (both generators seed from max+1 independently). Matching a
+    bookmarkEnd by id alone would collapse legit ends too. Instead we walk
+    the document in order and pair each bookmarkEnd with the most recent
+    bookmarkStart that shares its id — remove the end only when its paired
+    start is a tracking bookmark.
+
+    Returns the number of bookmarkStart elements removed.
+    """
+    open_stack_by_id: Dict[str, List[Any]] = {}
+    to_remove: List[Any] = []
+    for el in root.iter():
+        tag = el.tag
+        if tag == _W + "bookmarkStart":
+            bid = el.get(_W + "id")
+            if bid is None:
+                continue
+            name = el.get(_W + "name") or ""
+            is_tracking = any(name.startswith(p) for p in _EDITOR_TRACKING_PREFIXES)
+            open_stack_by_id.setdefault(bid, []).append((el, is_tracking))
+        elif tag == _W + "bookmarkEnd":
+            bid = el.get(_W + "id")
+            if bid is None:
+                continue
+            stack = open_stack_by_id.get(bid)
+            if not stack:
+                # Orphan end (no matching open start) — leave it alone.
+                continue
+            start_el, is_tracking = stack.pop()
+            if is_tracking:
+                to_remove.append(start_el)
+                to_remove.append(el)
+
+    # Any still-open tracking starts (no matching end reached) — also drop.
+    for stack in open_stack_by_id.values():
+        for start_el, is_tracking in stack:
+            if is_tracking:
+                to_remove.append(start_el)
+
+    removed_starts = 0
+    for el in to_remove:
+        parent = el.getparent()
+        if parent is not None:
+            parent.remove(el)
+            if el.tag == _W + "bookmarkStart":
+                removed_starts += 1
+    return removed_starts
+
+
+def _repair_orphan_bookmark_starts(root) -> int:
+    """Insert a zero-length `<w:bookmarkEnd>` right after any `<w:bookmarkStart>`
+    that has no matching end in the doc. Word ignores bookmarks whose end is
+    missing, so unclosed starts (a not-uncommon upstream artefact — e.g.
+    `_GoBack` in some template flows) would otherwise hide the bookmark from
+    Word's Bookmark dialog and any cross-reference features.
+    """
+    from lxml import etree
+    seen_ends: set[str] = {be.get(_W + "id") for be in root.iter(_W + "bookmarkEnd")}
+    repaired = 0
     for bs in list(root.iter(_W + "bookmarkStart")):
-        name = bs.get(_W + "name") or ""
-        if any(name.startswith(p) for p in _EDITOR_TRACKING_PREFIXES):
-            bid = bs.get(_W + "id")
-            if bid is not None:
-                removed_ids.add(bid)
-            parent = bs.getparent()
-            if parent is not None:
-                parent.remove(bs)
-    if not removed_ids:
-        return 0
-    for be in list(root.iter(_W + "bookmarkEnd")):
-        if be.get(_W + "id") in removed_ids:
-            parent = be.getparent()
-            if parent is not None:
-                parent.remove(be)
-    return len(removed_ids)
+        bid = bs.get(_W + "id")
+        if bid is None or bid in seen_ends:
+            continue
+        parent = bs.getparent()
+        if parent is None:
+            continue
+        end = etree.SubElement(parent, _W + "bookmarkEnd")
+        # SubElement appends at parent end — move it to sit right after bs
+        parent.remove(end)
+        idx = list(parent).index(bs)
+        parent.insert(idx + 1, end)
+        end.set(_W + "id", bid)
+        seen_ends.add(bid)
+        repaired += 1
+    return repaired
 
 
 def _rename_ref_uppercase_bookmarks(root) -> int:
@@ -436,11 +494,13 @@ def finalize_docx_for_export(docx_path: str) -> Dict[str, int]:
 
     removed_bm = _strip_editor_tracking_bookmarks(root)
     renamed = _rename_ref_uppercase_bookmarks(root)
+    orphaned_starts_repaired = _repair_orphan_bookmark_starts(root)
     removed_c = _dedupe_comments(root, comments_root)
 
     stats = {
         "tracking_bookmarks_removed": removed_bm,
         "ref_bookmarks_renamed": renamed,
+        "orphan_bookmark_ends_added": orphaned_starts_repaired,
         "duplicate_comments_removed": removed_c,
     }
 
