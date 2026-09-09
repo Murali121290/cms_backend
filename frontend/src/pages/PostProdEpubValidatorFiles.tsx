@@ -25,6 +25,8 @@ import {
   X as XIcon,
   Type,
   RefreshCcw,
+  Bookmark,
+  FileText,
 } from 'lucide-react';
 import { XHTMLCard, xhtmlCardVariants } from '@/components/epub_validator/XHTMLCard';
 import { ValidationDetailModal } from '@/components/epub_validator/ValidationDetailModal';
@@ -216,6 +218,14 @@ export function PostProdEpubValidatorFiles() {
     return summaryData?.table_labels ? [...summaryData.table_labels].sort(naturalSort) : [];
   }, [summaryData?.table_labels]);
 
+  const sortedPartLabels = useMemo(() => {
+    return summaryData?.part_labels ? [...summaryData.part_labels].sort(naturalSort) : [];
+  }, [summaryData?.part_labels]);
+
+  const sortedSectionLabels = useMemo(() => {
+    return summaryData?.section_labels ? [...summaryData.section_labels].sort(naturalSort) : [];
+  }, [summaryData?.section_labels]);
+
   const allBackendFiles = useMemo(
     () => (filesData?.files ?? []).sort((a, b) => naturalSort(a.file_name, b.file_name)),
     [filesData],
@@ -295,7 +305,7 @@ export function PostProdEpubValidatorFiles() {
 
   // ── Layout mode (grid vs list view) ──────────────────────────────────────────
   const [layoutMode, setLayoutMode] = useState<'grid' | 'list'>('list');
-  const [activeReportTab, setActiveReportTab] = useState<'chapters' | 'figures' | 'tables'>('figures');
+  const [activeReportTab, setActiveReportTab] = useState<'chapters' | 'parts' | 'sections' | 'figures' | 'tables'>('figures');
 
   // ── Validation state (in-memory only, per session) ─────────────────────────
   // Not persisted: opening/reloading a book always starts on the Pending state
@@ -1971,7 +1981,7 @@ export function PostProdEpubValidatorFiles() {
                       ) : (
                         <div className="space-y-6">
                           {/* Top Metric Cards */}
-                          <div className="grid grid-cols-3 gap-3">
+                          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
                             <Card 
                               className={`shadow-none cursor-pointer transition-all ${activeReportTab === 'chapters' ? 'border-primary bg-primary/10 ring-1 ring-primary/20' : 'border-primary/20 bg-primary/5 hover:bg-primary/10'}`}
                               onClick={() => setActiveReportTab('chapters')}
@@ -1982,6 +1992,30 @@ export function PostProdEpubValidatorFiles() {
                                   <div className="text-[11px] font-bold text-primary/90 uppercase tracking-wider">Chapters</div>
                                 </div>
                                 <div className="text-lg font-black text-primary">{summaryData?.total_chapters || 0}</div>
+                              </CardBody>
+                            </Card>
+                            <Card 
+                              className={`shadow-none cursor-pointer transition-all ${activeReportTab === 'parts' ? 'border-amber-500 bg-amber-500/10 ring-1 ring-amber-500/20' : 'border-amber-500/20 bg-amber-500/5 hover:bg-amber-500/10'}`}
+                              onClick={() => setActiveReportTab('parts')}
+                            >
+                              <CardBody className="p-3 flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <Bookmark className="w-4 h-4 text-amber-600/70" />
+                                  <div className="text-[11px] font-bold text-amber-600/90 uppercase tracking-wider">Parts</div>
+                                </div>
+                                <div className="text-lg font-black text-amber-600">{summaryData?.total_parts || 0}</div>
+                              </CardBody>
+                            </Card>
+                            <Card 
+                              className={`shadow-none cursor-pointer transition-all ${activeReportTab === 'sections' ? 'border-purple-500 bg-purple-500/10 ring-1 ring-purple-500/20' : 'border-purple-500/20 bg-purple-500/5 hover:bg-purple-500/10'}`}
+                              onClick={() => setActiveReportTab('sections')}
+                            >
+                              <CardBody className="p-3 flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <FileText className="w-4 h-4 text-purple-600/70" />
+                                  <div className="text-[11px] font-bold text-purple-600/90 uppercase tracking-wider">Sections</div>
+                                </div>
+                                <div className="text-lg font-black text-purple-600">{summaryData?.total_sections || 0}</div>
                               </CardBody>
                             </Card>
                             <Card 
@@ -2112,6 +2146,66 @@ export function PostProdEpubValidatorFiles() {
                                 ) : (
                                   <div className="p-8 text-center text-muted-foreground text-sm italic">
                                     No table labels found.
+                                  </div>
+                                )}
+                              </CardBody>
+                            </Card>
+                          )}
+
+                          {/* Parts List */}
+                          {activeReportTab === 'parts' && (
+                            <Card className="shadow-sm border-border/50 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                              <div className="px-4 py-3 border-b border-border/50 bg-muted/20">
+                                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                                  <Bookmark className="w-4 h-4 text-amber-500" />
+                                  Part List
+                                </h3>
+                              </div>
+                              <CardBody className="p-0">
+                                {sortedPartLabels.length > 0 ? (
+                                  <ul className="divide-y divide-border/50 max-h-[500px] overflow-y-auto">
+                                    {sortedPartLabels.map((label, idx) => (
+                                      <li key={idx} className="px-4 py-2.5 text-sm hover:bg-muted/30 transition-colors flex items-start gap-3">
+                                        <span className="text-muted-foreground font-mono text-xs w-6 text-right shrink-0">{idx + 1}.</span>
+                                        <span className="text-foreground leading-snug break-words">
+                                          {showFilenames ? label : label.replace(/\.(xhtml|html)$/i, '')}
+                                        </span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : (
+                                  <div className="p-8 text-center text-muted-foreground text-sm italic">
+                                    No part labels found.
+                                  </div>
+                                )}
+                              </CardBody>
+                            </Card>
+                          )}
+
+                          {/* Sections List */}
+                          {activeReportTab === 'sections' && (
+                            <Card className="shadow-sm border-border/50 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                              <div className="px-4 py-3 border-b border-border/50 bg-muted/20">
+                                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                                  <FileText className="w-4 h-4 text-purple-500" />
+                                  Section List
+                                </h3>
+                              </div>
+                              <CardBody className="p-0">
+                                {sortedSectionLabels.length > 0 ? (
+                                  <ul className="divide-y divide-border/50 max-h-[500px] overflow-y-auto">
+                                    {sortedSectionLabels.map((label, idx) => (
+                                      <li key={idx} className="px-4 py-2.5 text-sm hover:bg-muted/30 transition-colors flex items-start gap-3">
+                                        <span className="text-muted-foreground font-mono text-xs w-6 text-right shrink-0">{idx + 1}.</span>
+                                        <span className="text-foreground leading-snug break-words">
+                                          {showFilenames ? label : label.replace(/\.(xhtml|html)$/i, '')}
+                                        </span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : (
+                                  <div className="p-8 text-center text-muted-foreground text-sm italic">
+                                    No section labels found.
                                   </div>
                                 )}
                               </CardBody>
