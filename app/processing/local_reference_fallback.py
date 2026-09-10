@@ -515,6 +515,127 @@ def _renumber_affected_bibs(root, affected_refs: set[int]) -> None:
             bs.set(W + "name", new_name)
 
 
+def wrap_bib_bookmarks_with_hyperlinks(docx_path: str | Path) -> dict:
+    """For every ``bib_N`` / ``bib_N_M`` bookmark in the DOCX, wrap the runs
+    it spans in ``<w:hyperlink w:anchor="ref_N"/>`` so the citation is clickable
+    and jumps to the corresponding reference entry.
+
+    Only wraps when a matching ``ref_N`` bookmark actually exists in the doc,
+    so Word never renders a broken link. Runs that already sit inside a
+    ``<w:hyperlink>`` are skipped — the function is safe to run more than once
+    and safe to run on documents whose citations already have external
+    hyperlinks (e.g. author-supplied URLs).
+
+    The bookmarkStart/bookmarkEnd stay at the paragraph level, siblings of the
+    new hyperlink — this preserves the existing bookmark placement semantics
+    and lets downstream tools that iterate ``<w:bookmarkStart>`` continue
+    working unchanged.
+
+    Returns::
+
+        {
+          "wrapped":         int,   # citations that got a new hyperlink
+          "already_linked":  int,   # skipped because a hyperlink was in the way
+          "unresolved":      int,   # skipped because ref_N does not exist
+        }
+    """
+    docx_path = Path(docx_path)
+    stats = {"wrapped": 0, "already_linked": 0, "unresolved": 0}
+
+    with zipfile.ZipFile(docx_path, "r") as z:
+        doc_xml = z.read("word/document.xml")
+    root = etree.fromstring(doc_xml)
+
+    existing_refs: set[str] = set()
+    for bs in root.iter(W + "bookmarkStart"):
+        name = bs.get(W + "name") or ""
+        if re.fullmatch(r"ref_\d+", name):
+            existing_refs.add(name)
+    if not existing_refs:
+        return stats
+
+    # Snapshot bib_* starts before we mutate the tree.
+    bib_starts = [
+        bs for bs in root.iter(W + "bookmarkStart")
+        if _BIB_NAME_RE.match(bs.get(W + "name") or "")
+    ]
+
+    for bs in bib_starts:
+        name = bs.get(W + "name") or ""
+        m = _BIB_NAME_RE.match(name)
+        if not m:
+            continue
+        target = f"ref_{m.group(1)}"
+        if target not in existing_refs:
+            stats["unresolved"] += 1
+            continue
+
+        parent = bs.getparent()
+        if parent is None or parent.tag != W + "p":
+            continue
+
+        bid = bs.get(W + "id")
+        be = None
+        for cand in parent.iter(W + "bookmarkEnd"):
+            if cand.get(W + "id") == bid:
+                be = cand
+                break
+        if be is None:
+            continue
+
+        sibs = list(parent)
+        try:
+            si = sibs.index(bs)
+            ei = sibs.index(be)
+        except ValueError:
+            continue
+        if ei <= si + 1:
+            continue
+
+        spanned = sibs[si + 1: ei]
+        runs = [el for el in spanned if el.tag == W + "r"]
+        if not runs:
+            continue
+
+        # Any of the runs already inside a hyperlink (e.g. external URL)?
+        # Wrapping again would produce nested <w:hyperlink> which Word rejects.
+        if any(r.getparent().tag == W + "hyperlink" for r in runs):
+            stats["already_linked"] += 1
+            continue
+
+        hl = etree.Element(W + "hyperlink")
+        hl.set(W + "anchor", target)
+        hl.set(W + "history", "1")
+        first_r_idx = list(parent).index(runs[0])
+        parent.insert(first_r_idx, hl)
+        for r in runs:
+            parent.remove(r)
+            hl.append(r)
+        stats["wrapped"] += 1
+
+    if stats["wrapped"] == 0:
+        return stats
+
+    new_xml = etree.tostring(
+        root, xml_declaration=True, encoding="UTF-8", standalone=True,
+    )
+    tmp = docx_path.with_suffix(docx_path.suffix + ".hl-tmp")
+    with zipfile.ZipFile(docx_path, "r") as zin, \
+         zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename) if item.filename != "word/document.xml" else new_xml
+            zout.writestr(item, data)
+    tmp.replace(docx_path)
+
+    logger.info(
+        "Wrapped %d bib_N citations with ref_N hyperlinks in %s "
+        "(already_linked=%d, unresolved=%d)",
+        stats["wrapped"], docx_path.name,
+        stats["already_linked"], stats["unresolved"],
+    )
+    return stats
+
+
 def strip_citation_semicolon_styling(docx_path: str | Path) -> int:
     """Strip hyperlink-style formatting (`<w:u>` underline, `<w:color>`) from
     every `;`-only run that sits between two `citebib` runs in the same

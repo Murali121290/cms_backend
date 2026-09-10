@@ -2525,6 +2525,48 @@ def api_v2_analyze_files_for_stylesheet(
 
 
 
+def _serve_docx_finalized(path: str, filename: str, media_type: str) -> FileResponse:
+    """Serve `path` after stripping editor round-trip artefacts.
+
+    For DOCX files, copies to a temp location and runs
+    `finalize_docx_for_export` (strips `r_bm_*/p_bm_*/cell_bm_*/tbl_bm_*/fnpara_bm_*/enpara_bm_*`
+    tracking bookmarks, renames `REF{N}` → `ref_{N}`, dedupes duplicate AQ
+    comments). If the file needs no changes the finalizer is idempotent and
+    the temp copy is streamed unchanged. For non-DOCX files the original path
+    is returned directly.
+    """
+    if not filename.lower().endswith(".docx"):
+        return FileResponse(path=path, filename=filename, media_type=media_type)
+
+    from starlette.background import BackgroundTask
+    from app.processing.citation_link_finalizer import finalize_docx_for_export
+
+    fd, tmp_path = tempfile.mkstemp(suffix=".docx", prefix="download_finalized_")
+    os.close(fd)
+    shutil.copyfile(path, tmp_path)
+    try:
+        finalize_docx_for_export(tmp_path)
+    except Exception as exc:
+        logger.warning(
+            "finalize_docx_for_export failed for %s (%s); serving unfinalized copy",
+            filename, exc,
+        )
+
+    def _cleanup():
+        if os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    return FileResponse(
+        path=tmp_path,
+        filename=filename,
+        media_type=media_type,
+        background=BackgroundTask(_cleanup),
+    )
+
+
 @router.get("/files/{file_id}/download")
 def api_v2_download_file(
     file_id: int,
@@ -2547,7 +2589,7 @@ def api_v2_download_file(
             message="File not found.",
         )
 
-    return FileResponse(
+    return _serve_docx_finalized(
         path=file_record.path,
         filename=file_record.filename,
         media_type="application/octet-stream",
@@ -4220,7 +4262,7 @@ def api_v2_download_file_version(
             message="Version not found.",
         )
 
-    return FileResponse(
+    return _serve_docx_finalized(
         path=version_entry.path,
         filename=version_service.get_archived_filename(version_entry),
         media_type="application/octet-stream",
