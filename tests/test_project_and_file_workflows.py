@@ -754,3 +754,48 @@ def test_activities_page_renders_upload_and_processing_entries(
     assert "activity_source.docx" in response.text
     assert project_record.title in response.text
     assert chapter_record.title in response.text
+
+
+def test_resolve_track_workflow_assigns_distinct_workflows(
+    auth_cookie_client,
+    admin_user,
+    db_session,
+):
+    from app.domains.workflow.models import WorkflowMaster, StageMaster
+    for wf in ["WF-05 COMP Only", "WF-11 Art Process", "WF-06 Design"]:
+        stage_name = f"{wf} Stage 1"
+        if not db_session.query(StageMaster).filter(StageMaster.stage_name == stage_name).first():
+            db_session.add(StageMaster(stage_name=stage_name, active_status=True))
+        if not db_session.query(WorkflowMaster).filter(WorkflowMaster.workflow_name == wf).first():
+            db_session.add(WorkflowMaster(workflow_name=wf, stage_name=stage_name))
+    db_session.commit()
+
+    client = auth_cookie_client(admin_user)
+    res = client.post(
+        "/api/v2/projects/bootstrap",
+        data={
+            "code": "TRACKTEST01",
+            "title": "Track Test Project",
+            "xml_standard": "NLM",
+            "workflow_name": "WF-05 COMP Only",
+            "manuscript_workflow_name": "WF-05 COMP Only",
+            "art_workflow_name": "WF-11 Art Process",
+            "design_workflow_name": "WF-06 Design",
+        },
+    )
+    assert res.status_code == 200, res.text
+    project = db_session.query(Project).filter(Project.code == "TRACKTEST01").first()
+
+    from app.routers.api_v2 import resolve_track_workflow
+    ms_wf, ms_stage = resolve_track_workflow(db_session, project, "01")
+    art_wf, art_stage = resolve_track_workflow(db_session, project, "Ch 01 - Art")
+    design_wf, design_stage = resolve_track_workflow(db_session, project, "Design")
+
+    assert ms_wf == "WF-05 COMP Only"
+    assert ms_stage == "WF-05 COMP Only Stage 1"
+    assert art_wf == "WF-11 Art Process"
+    assert art_stage == "WF-11 Art Process Stage 1"
+    assert design_wf == "WF-06 Design"
+    assert design_stage == "WF-06 Design Stage 1"
+
+

@@ -981,12 +981,15 @@ def background_processing_task(
                                 project = db.query(Project).filter(Project.id == file_record.project_id).first()
                                 chapter = db.query(models.ChapterInfo).filter(models.ChapterInfo.id == file_record.chapter_id).first()
                                 
-                                if project and chapter:
+                                chap_folder = (chapter.chapters if chapter and getattr(chapter, 'chapters', None) else chapter.number) if chapter else None
+                                if project and chap_folder:
                                     backup_dir = os.path.abspath(
-                                        f"{UPLOAD_DIR}/{project.code}/{chapter.number}/{new_category}"
+                                        f"{UPLOAD_DIR}/{project.code}/{chap_folder}/{new_category}"
                                     )
                                 else:
-                                    backup_dir = os.path.dirname(existing_file.path)
+                                    backup_dir = os.path.dirname(existing_file.path) if existing_file.path else UPLOAD_DIR
+                                    if not os.path.isabs(backup_dir):
+                                        backup_dir = os.path.abspath(os.path.join(UPLOAD_DIR, backup_dir))
 
                                 # Create archive record
                                 archive_existing_file(
@@ -995,15 +998,22 @@ def background_processing_task(
                                     base_path=backup_dir,
                                     uploaded_by_id=user_id,
                                 )
-                                # Overwrite existing physical file
                                 target_path = existing_file.path
+                                if target_path and not os.path.isabs(target_path):
+                                    target_path = os.path.abspath(os.path.join(UPLOAD_DIR, target_path))
+
                                 if target_path and target_path != processed_path:
                                     if os.path.exists(target_path):
                                         try:
                                             os.remove(target_path)
                                         except Exception:
                                             pass
-                                    shutil.move(processed_path, target_path)
+                                    try:
+                                        shutil.move(processed_path, target_path)
+                                    except Exception as mv_err:
+                                        logger.warning(f"Could not move {processed_path} to {target_path}: {mv_err}")
+                                        target_path = processed_path
+                                    existing_file.path = target_path
                                 else:
                                     existing_file.path = processed_path
 

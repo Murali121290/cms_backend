@@ -1143,5 +1143,57 @@ class BulkDownloadPayload(BaseModel):
     files: list[BulkDownloadFileItem]
 
 
+class BulkTransitionItemPreview(BaseModel):
+    chapter_id: int
+    chapter_number: str
+    chapter_num: str | None = None
+    chapter_title: str | None = None
+    current_stage: str
+    next_stage: str | None = None
+    workflow_name: str
+    is_last_stage: bool = False
+
+    def model_post_init(self, __context):
+        if not self.chapter_num:
+            self.chapter_num = self.chapter_number
+
+
+class BulkTransitionConfigRequest(BaseModel):
+    chapter_ids: list[int]
+
+
+class BulkTransitionConfigResponse(BaseModel):
+    has_config: bool = False
+    has_email_config: bool = False
+    chapters: list[BulkTransitionItemPreview] = Field(default_factory=list)
+    preview_items: list[BulkTransitionItemPreview] = Field(default_factory=list)
+    custom_message: str | None = None
+    to: list[str] = Field(default_factory=list)
+    cc: list[str] = Field(default_factory=list)
+    subject: str | None = None
+    body: str | None = None
+    from_email: str | None = None
+
+    def model_post_init(self, __context):
+        if not self.preview_items and self.chapters:
+            self.preview_items = self.chapters
+        if not self.chapters and self.preview_items:
+            self.chapters = self.preview_items
+        if self.has_config and not self.has_email_config:
+            self.has_email_config = self.has_config
+        if self.has_email_config and not self.has_config:
+            self.has_config = self.has_email_config
+
+
+class BulkTransitionExecuteRequest(BaseModel):
+    chapter_ids: list[int]
+    send_email: bool = False
+    to_emails: list[str] = Field(default_factory=list)
+    cc_emails: list[str] = Field(default_factory=list)
+    subject: str = ""
+    body: str = ""
+
+
+
 
 
