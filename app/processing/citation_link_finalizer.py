@@ -243,6 +243,182 @@ _W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 _W = "{" + _W_NS + "}"
 
 _REF_UPPER_RE = re.compile(r"^REF(\d+)$")
+_BIB_LOWER_RE = re.compile(r"^bib_(\d+)(?:_\d+)?$")
+
+
+def _rpr_of(r_elem):
+    """Return the `<w:rPr>` child of a `<w:r>`, creating it (as the first
+    child, per OOXML schema) if absent."""
+    from lxml import etree as _etree
+    rPr = r_elem.find(_W + "rPr")
+    if rPr is None:
+        rPr = _etree.Element(_W + "rPr")
+        r_elem.insert(0, rPr)
+    return rPr
+
+
+def _run_char_style(r_elem):
+    rPr = r_elem.find(_W + "rPr")
+    if rPr is None:
+        return None
+    rst = rPr.find(_W + "rStyle")
+    return rst.get(_W + "val") if rst is not None else None
+
+
+def _add_highlight(r_elem, color: str) -> bool:
+    """Add `<w:highlight w:val="{color}"/>` to a run's rPr. Skips if the run
+    already has a highlight (respecting whatever colour is there). Returns
+    True when a highlight was added."""
+    from lxml import etree as _etree
+    rPr = _rpr_of(r_elem)
+    if rPr.find(_W + "highlight") is not None:
+        return False
+    hl = _etree.Element(_W + "highlight")
+    hl.set(_W + "val", color)
+    rPr.append(hl)
+    return True
+
+
+def _apply_citation_highlights(root) -> int:
+    """Highlight citation clusters green (matched) or yellow (unmatched).
+
+    A *citation cluster* is a contiguous span of runs where every run is
+    either ``citebib``-styled OR sits inside a ``bib_N``/``bib_N_M``
+    bookmark. Any non-citation run breaks the cluster. Once a cluster
+    ends, all its runs are highlighted the same colour:
+
+    * **green** when at least one run in the cluster is inside a ``bib_N``
+      bookmark (the citation resolved to a reference entry).
+    * **yellow** when no run in the cluster is inside any ``bib_N``
+      (the citation is unmatched — an AQ comment likely flags the
+      paragraph).
+
+    Runs are located by pre-order traversal of the paragraph, so runs
+    nested inside a ``<w:hyperlink>`` are still picked up. Respects any
+    existing ``<w:highlight>`` — never overrides an author or upstream
+    decision. Idempotent.
+    """
+    added = 0
+    for p in root.iter(_W + "p"):
+        bib_ids: set = set()
+        for bs in p.iter(_W + "bookmarkStart"):
+            name = bs.get(_W + "name") or ""
+            if _BIB_LOWER_RE.match(name):
+                bid = bs.get(_W + "id")
+                if bid:
+                    bib_ids.add(bid)
+
+        open_bib: set = set()
+        cluster_runs: list = []  # runs in the current cluster
+        cluster_any_in_bib = False
+
+        def _flush():
+            nonlocal added, cluster_any_in_bib
+            if not cluster_runs:
+                return
+            color = "green" if cluster_any_in_bib else "yellow"
+            for r in cluster_runs:
+                if _add_highlight(r, color):
+                    added += 1
+            cluster_runs.clear()
+            cluster_any_in_bib = False
+
+        for el in p.iter():
+            if el is p:
+                continue
+            tag = el.tag
+            if tag == _W + "bookmarkStart":
+                bid = el.get(_W + "id")
+                if bid in bib_ids:
+                    open_bib.add(bid)
+            elif tag == _W + "bookmarkEnd":
+                bid = el.get(_W + "id")
+                if bid in bib_ids:
+                    open_bib.discard(bid)
+            elif tag == _W + "r":
+                is_citebib = _run_char_style(el) == "citebib"
+                is_in_bib = bool(open_bib)
+                if is_citebib or is_in_bib:
+                    cluster_runs.append(el)
+                    if is_in_bib:
+                        cluster_any_in_bib = True
+                else:
+                    _flush()
+        _flush()
+    return added
+
+
+def _wrap_bib_citations_with_hyperlinks(root) -> int:
+    """For every ``bib_N`` / ``bib_N_M`` bookmark, wrap the runs it spans in
+    ``<w:hyperlink w:anchor="ref_N"/>`` so citations are clickable in Word.
+
+    Only wraps when a matching ``ref_N`` bookmark exists in the same document,
+    so Word never renders a dangling link. Runs already inside a
+    ``<w:hyperlink>`` are skipped — the pass is idempotent and safe on
+    docs whose citations already carry external URL hyperlinks.
+
+    Returns the count of citations wrapped (0 if nothing changed).
+    """
+    from lxml import etree as _etree
+
+    existing_refs: set[str] = set()
+    for bs in root.iter(_W + "bookmarkStart"):
+        name = bs.get(_W + "name") or ""
+        if re.fullmatch(r"ref_\d+", name):
+            existing_refs.add(name)
+    if not existing_refs:
+        return 0
+
+    bib_starts = [
+        bs for bs in root.iter(_W + "bookmarkStart")
+        if _BIB_LOWER_RE.match(bs.get(_W + "name") or "")
+    ]
+
+    wrapped = 0
+    for bs in bib_starts:
+        m = _BIB_LOWER_RE.match(bs.get(_W + "name") or "")
+        if not m:
+            continue
+        target = f"ref_{m.group(1)}"
+        if target not in existing_refs:
+            continue
+        parent = bs.getparent()
+        if parent is None or parent.tag != _W + "p":
+            continue
+        bid = bs.get(_W + "id")
+        be = None
+        for cand in parent.iter(_W + "bookmarkEnd"):
+            if cand.get(_W + "id") == bid:
+                be = cand
+                break
+        if be is None:
+            continue
+        sibs = list(parent)
+        try:
+            si = sibs.index(bs)
+            ei = sibs.index(be)
+        except ValueError:
+            continue
+        if ei <= si + 1:
+            continue
+        spanned = sibs[si + 1: ei]
+        runs = [el for el in spanned if el.tag == _W + "r"]
+        if not runs:
+            continue
+        if any(r.getparent().tag == _W + "hyperlink" for r in runs):
+            continue
+
+        hl = _etree.Element(_W + "hyperlink")
+        hl.set(_W + "anchor", target)
+        hl.set(_W + "history", "1")
+        first_r_idx = list(parent).index(runs[0])
+        parent.insert(first_r_idx, hl)
+        for r in runs:
+            parent.remove(r)
+            hl.append(r)
+        wrapped += 1
+
+    return wrapped
 
 
 def _strip_editor_tracking_bookmarks(root) -> int:
@@ -329,25 +505,49 @@ def _repair_orphan_bookmark_starts(root) -> int:
 def _rename_ref_uppercase_bookmarks(root) -> int:
     """Rename `REF{n}` (uppercase, no underscore — Reference Review stamp
     from the frontend) to the PPH-standard `ref_{n}` (lowercase). Preserves
-    the bookmark id and any nested content."""
+    the bookmark id and any nested content.
+
+    When `ref_{n}` already exists at another position (both anchors point at
+    reference entry N), the redundant `REF{n}` bookmarkStart AND its matching
+    bookmarkEnd are removed so the delivered file carries only the canonical
+    `ref_{n}` scheme.
+
+    Returns the total number of `REF{n}` bookmarks removed or renamed.
+    """
     renamed = 0
     existing_names = {
         (bs.get(_W + "name") or "") for bs in root.iter(_W + "bookmarkStart")
     }
+    to_remove_ids: set[str] = set()
     for bs in root.iter(_W + "bookmarkStart"):
         name = bs.get(_W + "name") or ""
         m = _REF_UPPER_RE.match(name)
         if not m:
             continue
         new_name = f"ref_{m.group(1)}"
+        bid = bs.get(_W + "id")
         if new_name in existing_names and new_name != name:
-            # Someone else already owns the target name — drop this REF{n} so
-            # we don't create a duplicate. The bookmarkEnd matched by id will
-            # be cleaned up by the tracking-bookmark pass if it has no start.
+            # `ref_{n}` already anchors reference N somewhere else — drop this
+            # `REF{n}` duplicate entirely so the delivered file matches the
+            # PPH bookmark scheme exactly.
+            if bid is not None:
+                to_remove_ids.add(bid)
+            parent = bs.getparent()
+            if parent is not None:
+                parent.remove(bs)
+            renamed += 1
             continue
         bs.set(_W + "name", new_name)
         existing_names.add(new_name)
         renamed += 1
+
+    if to_remove_ids:
+        for be in list(root.iter(_W + "bookmarkEnd")):
+            if be.get(_W + "id") in to_remove_ids:
+                parent = be.getparent()
+                if parent is not None:
+                    parent.remove(be)
+
     return renamed
 
 
@@ -469,6 +669,10 @@ def finalize_docx_for_export(docx_path: str) -> Dict[str, int]:
       `enpara_bm_*` bookmarks (editor internal tracking anchors).
     * Renames `REF{n}` → `ref_{n}` so the delivered file matches the PPH
       reference-bookmark scheme (`ref_N` on entries, `bib_N` on citations).
+    * Wraps each `bib_N` citation in a `<w:hyperlink w:anchor="ref_N"/>` so
+      clicking the citation in Word jumps to the reference entry.
+    * Applies green highlight to matched citations (runs inside a `bib_N`)
+      and yellow to unmatched `citebib`-styled runs (no matching reference).
     * Deduplicates comments that appear twice on the same paragraph with the
       same author + text.
 
@@ -479,7 +683,13 @@ def finalize_docx_for_export(docx_path: str) -> Dict[str, int]:
 
     path = Path(docx_path)
     if not path.exists():
-        return {"tracking_bookmarks_removed": 0, "ref_bookmarks_renamed": 0, "duplicate_comments_removed": 0}
+        return {
+            "tracking_bookmarks_removed": 0,
+            "ref_bookmarks_renamed": 0,
+            "duplicate_comments_removed": 0,
+            "citation_hyperlinks_wrapped": 0,
+            "citation_highlights_added": 0,
+        }
 
     with zipfile.ZipFile(path, "r") as z:
         doc_xml = z.read("word/document.xml")
@@ -496,12 +706,16 @@ def finalize_docx_for_export(docx_path: str) -> Dict[str, int]:
     renamed = _rename_ref_uppercase_bookmarks(root)
     orphaned_starts_repaired = _repair_orphan_bookmark_starts(root)
     removed_c = _dedupe_comments(root, comments_root)
+    wrapped_hl = _wrap_bib_citations_with_hyperlinks(root)
+    highlighted = _apply_citation_highlights(root)
 
     stats = {
         "tracking_bookmarks_removed": removed_bm,
         "ref_bookmarks_renamed": renamed,
         "orphan_bookmark_ends_added": orphaned_starts_repaired,
         "duplicate_comments_removed": removed_c,
+        "citation_hyperlinks_wrapped": wrapped_hl,
+        "citation_highlights_added": highlighted,
     }
 
     if not any(stats.values()):
