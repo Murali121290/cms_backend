@@ -87,9 +87,10 @@ export const chaptersApi = {
     }).then(r => r.data)
   },
 
-  createManuscriptChaptersFromZip: (projectId: number, file: File) => {
+  createManuscriptChaptersFromZip: (projectId: number, file: File, workflowName?: string) => {
     const formData = new FormData()
     formData.append('file', file)
+    if (workflowName) formData.append('workflow_name', workflowName)
     return api.post<ChapterZipUploadResponse>(`/projects/${projectId}/chapters/create-with-manuscript-zip`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then(r => r.data)
@@ -104,11 +105,73 @@ export const chaptersApi = {
     }).then(r => r.data)
   },
 
-  createArtChaptersFromZip: (projectId: number, file: File) => {
+  createArtChaptersFromZip: (projectId: number, file: File, workflowName?: string) => {
     const formData = new FormData()
     formData.append('file', file)
+    if (workflowName) formData.append('workflow_name', workflowName)
     return api.post<ChapterZipUploadResponse>(`/projects/${projectId}/chapters/create-with-art-zip`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then(r => r.data)
   },
+
+  updateTrackWorkflow: (projectId: number, track: string, workflowName: string) => {
+    return api.patch<{ success: boolean; track: string; workflow_name: string }>(`/projects/${projectId}/track-workflows`, {
+      track,
+      workflow_name: workflowName,
+    }).then(r => r.data)
+  },
+
+  getBulkTransitionConfig: (payload: { stage_name: string; chapter_ids: number[] }) => {
+    return api.post<BulkTransitionConfigResponse>('/chapters/bulk-transition-config', payload).then(r => r.data)
+  },
+
+  bulkTransitionExecute: (payload: BulkTransitionExecutePayload) => {
+    return api.post<{ status: string; transitioned_count: number }>('/chapters/bulk-transition', payload).then(r => r.data)
+  },
 }
+
+export interface BulkTransitionItemPreview {
+  chapter_id: number
+  chapter_number?: string
+  chapter_num?: string
+  workflow_name: string
+  current_stage: string
+  next_stage: string | null
+  is_last_stage?: boolean
+  is_final_stage?: boolean
+}
+
+export interface BulkTransitionEmailDefaults {
+  to_email: string
+  cc_email: string
+  subject: string
+  body: string
+}
+
+export interface BulkTransitionConfigResponse {
+  stage_name?: string
+  total_chapters?: number
+  has_config?: boolean
+  has_email_config?: boolean
+  chapters?: BulkTransitionItemPreview[]
+  preview_items?: BulkTransitionItemPreview[]
+  custom_message?: string | null
+  to?: string[]
+  cc?: string[]
+  subject?: string | null
+  body?: string | null
+  from_email?: string | null
+  email_defaults?: BulkTransitionEmailDefaults | null
+}
+
+export interface BulkTransitionExecutePayload {
+  stage_name: string
+  chapter_ids: number[]
+  send_email: boolean
+  email_to?: string
+  email_cc?: string
+  email_subject?: string
+  email_body?: string
+}
+
+

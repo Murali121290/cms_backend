@@ -4,14 +4,14 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, ChevronRight,
   Calendar, Clock, Zap, BookOpen, AlertCircle, CheckCircle2, AlertTriangle,
-  RotateCcw, Layers, User, BookMarked, Info, Edit2, Plus, Bookmark
+  RotateCcw, Layers, User, BookMarked, Info, Edit2, Plus, Bookmark, Mail, Send
 } from 'lucide-react'
 import { ViewSwitcher } from '@/components/ui/ViewSwitcher'
 import { useViewMode } from '@/hooks/useViewMode'
 import { projectsApi } from '@/api/projects'
 import type { Project } from '@/api/projects'
 import { chaptersApi } from '@/api/chapters'
-import type { Chapter } from '@/api/chapters'
+import type { Chapter, BulkTransitionConfigResponse } from '@/api/chapters'
 import { workflowsApi } from '@/api/workflows'
 import type { WorkflowStage } from '@/api/workflows'
 import { usersApi } from '@/api/users'
@@ -49,7 +49,7 @@ function sortChapters(a: { chapters: string }, b: { chapters: string }) {
 }
 
 function orderStages(stages: WorkflowStage[]): WorkflowStage[] {
-  const byName = new Map(stages.map(s => [s.stage_name, s]))
+  const byName = new Map((stages || []).map(s => [s.stage_name, s]))
   const first = stages.find(s => !s.previous_stage)
   if (!first) return stages
   const result: WorkflowStage[] = []
@@ -183,7 +183,7 @@ function WorkflowRail({ stages, chapters, filterStage, onStageClick, stageRolesM
     <div className="sticky top-0 z-20 bg-background/95 backdrop-blur border-b border-border px-6 py-3">
       <div className="flex items-center gap-1 overflow-x-auto pb-0.5 scrollbar-none">
         <Layers size={13} className="text-muted flex-shrink-0 mr-1" />
-        {stages.map((stage, i) => {
+        {(stages || []).map((stage, i) => {
           const cnt = countByStage.get(stage.stage_name) ?? 0
           const active = filterStage === stage.stage_name
           const isMyStage = !isHighlightExempt
@@ -274,7 +274,7 @@ function AssigneeSelect({ value, users, onChange, disabled, widthCls = 'w-28', c
         title={currentDisplay}
       >
         <option value="">— Unassigned —</option>
-        {assignable.map(u => {
+        {(assignable || []).map(u => {
           const fn = (u.first_name || '').trim()
           const ln = (u.last_name || '').trim()
           const fullName = `${fn} ${ln}`.trim()
@@ -490,7 +490,7 @@ export function ProjectWorkflow() {
   const navigate = useNavigate()
   const id = Number(projectId)
 
-  const { roles } = useRBAC()
+  const { roles, viewer, canAccess } = useRBAC()
   const showBatchButtons = roles.some(role => {
     const r = role.toLowerCase()
     return r === 'admin' || r === 'xml operator' || r === 'xml manager'
@@ -550,9 +550,36 @@ export function ProjectWorkflow() {
   const [batchProcessing, setBatchProcessing] = useState(false)
   const [bulkAssignModalOpen, setBulkAssignModalOpen] = useState(false)
   const [selectedBulkChapterIds, setSelectedBulkChapterIds] = useState<Set<number>>(new Set())
+
+  // Group Proceed state
+  const [groupProceedStage, setGroupProceedStage] = useState('')
+  const [groupProceedModalOpen, setGroupProceedModalOpen] = useState(false)
+  const [selectedGroupProceedChapterIds, setSelectedGroupProceedChapterIds] = useState<Set<number>>(new Set())
+  const [groupProceedConfig, setGroupProceedConfig] = useState<BulkTransitionConfigResponse | null>(null)
+  const [loadingGroupProceedConfig, setLoadingGroupProceedConfig] = useState(false)
+  const [executingGroupProceed, setExecutingGroupProceed] = useState(false)
+  const [sendEmailToggle, setSendEmailToggle] = useState(true)
+
   const [batchModalType, setBatchModalType] = useState<'word_to_xml' | 'style_validation' | 'structuring' | 'xml_to_indesign' | 'indesign_to_xml' | null>(null)
   const [batchSelectedChapterIds, setBatchSelectedChapterIds] = useState<Set<number>>(new Set())
   const [batchTemplateId, setBatchTemplateId] = useState<number | ''>('')
+
+  useEffect(() => {
+    if (!groupProceedModalOpen || !groupProceedStage || selectedGroupProceedChapterIds.size === 0) {
+      setGroupProceedConfig(null)
+      return
+    }
+    setLoadingGroupProceedConfig(true)
+    chaptersApi.getBulkTransitionConfig({
+      stage_name: groupProceedStage,
+      chapter_ids: Array.from(selectedGroupProceedChapterIds),
+    })
+      .then(config => {
+        setGroupProceedConfig(config)
+      })
+      .catch(() => toast.error('Failed to load stage transition configuration'))
+      .finally(() => setLoadingGroupProceedConfig(false))
+  }, [groupProceedModalOpen, groupProceedStage, selectedGroupProceedChapterIds])
 
   useEffect(() => {
     if (batchModalType === 'xml_to_indesign' && !batchTemplateId) {
@@ -568,7 +595,8 @@ export function ProjectWorkflow() {
   const [newChapterFile, setNewChapterFile] = useState<File | null>(null)
   const [addingChapter, setAddingChapter] = useState(false)
   const [addChapterError, setAddChapterError] = useState<string | null>(null)
-
+  const [selectedTrackWf, setSelectedTrackWf] = useState('')
+  const [allWorkflowNames, setAllWorkflowNames] = useState<string[]>([])
   const [newChapterCategory, setNewChapterCategory] = useState('indesign')
 
   const DESIGN_UPLOAD_CATEGORIES = [
@@ -605,16 +633,22 @@ export function ProjectWorkflow() {
         ])
 
         setChapters(chs)
-        setStageRolesMap(new Map(allStages.map(s => [s.stage_name, s.roles])))
+        setStageRolesMap(new Map((allStages || []).map(s => [s.stage_name, s.roles])))
 
-        // Find unique workflows across all chapters, including default project workflow
-        const uniqueWfs = Array.from(new Set(chs.map(c => c.workflow).filter(Boolean))) as string[]
-        if (p.workflow_name && !uniqueWfs.includes(p.workflow_name)) {
-          uniqueWfs.push(p.workflow_name)
-        }
+        // Fetch all system workflows to allow track workflow selection
+        const allSystemWfs = await workflowsApi.getAllStages().catch(() => [] as WorkflowStage[])
+        const allWfNames = Array.from(new Set((allSystemWfs || []).map(s => s?.workflow_name).filter(Boolean)))
+        setAllWorkflowNames(allWfNames)
+
+        // Find unique workflows across all chapters, default project workflow, and all system workflows
+        const uniqueWfs = Array.from(new Set([
+          ...(chs || []).map(c => c.workflow).filter(Boolean),
+          p.workflow_name,
+          ...allWfNames
+        ].filter(Boolean))) as string[]
 
         // Fetch all workflows stages
-        const wfPromises = uniqueWfs.map(wf =>
+        const wfPromises = (uniqueWfs || []).map(wf =>
           workflowsApi.getWorkflow(wf)
             .then(stages => ({ workflowName: wf, stages }))
             .catch(() => ({ workflowName: wf, stages: [] as WorkflowStage[] }))
@@ -745,6 +779,36 @@ export function ProjectWorkflow() {
     [bulkTargets, selectedBulkChapterIds]
   )
 
+  // Helper to resolve chapters assigned to the current logged-in user in a given stage
+  const getMyAssignedChapterIdsForStage = (stg: string): Set<number> => {
+    if (!stg) return new Set()
+    const uName = viewer?.username?.trim()
+    if (!uName) return new Set()
+    const myAssigned = activeChapters.filter(
+      c => c.stage_name === stg &&
+           c.current_assignee_name &&
+           c.current_assignee_name.trim().toLowerCase() === uName.toLowerCase()
+    )
+    return new Set(myAssigned.map(c => c.id))
+  }
+
+  // Group Proceed targets (only chapters assigned to the currently logged-in user in the selected stage)
+  const groupProceedTargets = useMemo(
+    () => {
+      if (!groupProceedStage) return []
+      const uName = viewer?.username?.trim().toLowerCase()
+      if (!uName) return []
+      return activeChapters
+        .filter(c =>
+          c.stage_name === groupProceedStage &&
+          c.current_assignee_name &&
+          c.current_assignee_name.trim().toLowerCase() === uName
+        )
+        .sort(sortChapters)
+    },
+    [activeChapters, groupProceedStage, viewer?.username]
+  )
+
   // Next sequential chapter number, zero-padded (e.g. "06") — chapters must be added in order, no gaps
   const nextChapterNumber = useMemo(() => {
     const nums = chapters.map(c => parseInt(c.chapters, 10)).filter(n => !isNaN(n))
@@ -828,6 +892,27 @@ export function ProjectWorkflow() {
     setBulkStage('')
     setBulkAssignee('')
     setSelectedBulkChapterIds(new Set())
+  }
+
+  async function handleGroupProceedSubmit() {
+    if (!groupProceedStage || selectedGroupProceedChapterIds.size === 0) return
+    setExecutingGroupProceed(true)
+    try {
+      const res = await chaptersApi.bulkTransitionExecute({
+        stage_name: groupProceedStage,
+        chapter_ids: Array.from(selectedGroupProceedChapterIds),
+        send_email: sendEmailToggle,
+      })
+      toast.success(`Successfully transitioned ${res.transitioned_count} chapter(s) to their next stage.`)
+      setGroupProceedModalOpen(false)
+      // Refresh chapters list
+      const refreshed = await chaptersApi.getByProject(project?.code || project?.project_code || '')
+      setChapters(refreshed)
+    } catch (err: any) {
+      toast.error(getApiErrorMessage(err, 'Failed to execute group proceed'))
+    } finally {
+      setExecutingGroupProceed(false)
+    }
   }
 
   async function handleBatchProcess(processType: string) {
@@ -936,6 +1021,7 @@ export function ProjectWorkflow() {
     setNewChapterFile(null)
     setAddChapterError(null)
     setNewChapterCategory('indesign')
+    setSelectedTrackWf(activeWorkflowName || '')
     setIsAddChapterOpen(true)
   }
 
@@ -967,22 +1053,44 @@ export function ProjectWorkflow() {
       }
 
       if (activeTab === 'art') {
-        const result = await chaptersApi.createArtChaptersFromZip(id, newChapterFile)
+        const result = await chaptersApi.createArtChaptersFromZip(id, newChapterFile, selectedTrackWf || activeWorkflowName)
         setChapters(prev => [...prev, ...result.created])
         setIsAddChapterOpen(false)
-        const skippedNote = result.skipped.length > 0 ? `, ${result.skipped.length} skipped` : ''
-        toast.success(`${result.created.length} Art chapter(s) created${skippedNote}`)
+
+        if (result.created.length > 0 && result.skipped.length > 0) {
+          toast.success(`${result.created.length} Art chapter(s) created, ${result.skipped.length} chapter(s) already exist`)
+        } else if (result.created.length > 0) {
+          toast.success(`${result.created.length} Art chapter(s) created successfully`)
+        } else if (result.skipped.length > 0) {
+          const firstReason = result.skipped[0]?.reason || ''
+          if (firstReason.includes('already exist')) {
+            toast.info(`${result.skipped.length} chapter(s) already exist in project`)
+          } else {
+            toast.error(`0 Art chapters created — ${result.skipped.length} file(s) skipped`)
+          }
+        }
         if (result.created.length > 0 && (project?.status === 'Active' || project?.status === 'Completed')) {
           navigate(`/projects/${id}/planning`)
         }
         return
       }
 
-      const result = await chaptersApi.createManuscriptChaptersFromZip(id, newChapterFile)
+      const result = await chaptersApi.createManuscriptChaptersFromZip(id, newChapterFile, selectedTrackWf || activeWorkflowName)
       setChapters(prev => [...prev, ...result.created])
       setIsAddChapterOpen(false)
-      const skippedNote = result.skipped.length > 0 ? `, ${result.skipped.length} skipped` : ''
-      toast.success(`${result.created.length} chapter(s) created${skippedNote}`)
+
+      if (result.created.length > 0 && result.skipped.length > 0) {
+        toast.success(`${result.created.length} chapter(s) created, ${result.skipped.length} chapter(s) already exist`)
+      } else if (result.created.length > 0) {
+        toast.success(`${result.created.length} chapter(s) created successfully`)
+      } else if (result.skipped.length > 0) {
+        const firstReason = result.skipped[0]?.reason || ''
+        if (firstReason.includes('already exist')) {
+          toast.info(`${result.skipped.length} chapter(s) already exist in project`)
+        } else {
+          toast.error(`0 chapters created — ${result.skipped.length} file(s) skipped`)
+        }
+      }
       if (result.created.length > 0 && (project?.status === 'Active' || project?.status === 'Completed')) {
         navigate(`/projects/${id}/planning`)
       }
@@ -1199,6 +1307,8 @@ export function ProjectWorkflow() {
         >
           🎨 Design ({designChapters.length})
         </button>
+
+
       </div>
 
       {/* ── Sticky Workflow Rail ── */}
@@ -1273,6 +1383,44 @@ export function ProjectWorkflow() {
             className="text-xs font-medium px-3 py-1.5 rounded-lg bg-primary text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-primary/90 transition-colors"
           >
             {bulkStage ? `Select chapters (${bulkTargets.length})` : 'Assign'}
+          </button>
+
+          <span className="w-px h-5 bg-border mx-1" />
+
+          {/* Group Proceed */}
+          <span className="text-xs text-muted flex items-center gap-1 mr-1">
+            <Send size={11} /> Group Proceed
+          </span>
+
+          <select
+            value={groupProceedStage}
+            onChange={e => {
+              const stg = e.target.value
+              setGroupProceedStage(stg)
+              const uName = viewer?.username?.trim().toLowerCase()
+              const assigned = activeChapters.filter(
+                c => c.stage_name === stg &&
+                     c.current_assignee_name &&
+                     c.current_assignee_name.trim().toLowerCase() === uName
+              )
+              setSelectedGroupProceedChapterIds(new Set(assigned.map(c => c.id)))
+            }}
+            className="text-xs bg-card border border-border rounded-lg px-2.5 py-1.5 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 appearance-none cursor-pointer"
+          >
+            <option value="">Select stage…</option>
+            {orderedStages.map(s => <option key={s.stage_name} value={s.stage_name}>{s.stage_name}</option>)}
+          </select>
+
+          <button
+            onClick={() => {
+              setSelectedGroupProceedChapterIds(new Set(groupProceedTargets.map(c => c.id)))
+              setGroupProceedModalOpen(true)
+            }}
+            disabled={!groupProceedStage || groupProceedTargets.length === 0}
+            className="text-xs font-medium px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-1"
+          >
+            <Send size={11} />
+            {groupProceedStage ? `Proceed (${groupProceedTargets.length})` : 'Proceed'}
           </button>
 
           {showBatchButtons && activeTab === 'manuscript' && (
@@ -1657,6 +1805,169 @@ export function ProjectWorkflow() {
         </div>
       </Modal>
 
+      {/* Group Proceed Modal */}
+      <Modal
+        isOpen={groupProceedModalOpen}
+        onClose={() => { if (!executingGroupProceed) setGroupProceedModalOpen(false) }}
+        title="Group Proceed Chapters to Next Stage"
+        description={`Advance selected chapters from stage "${groupProceedStage}" to their next workflow stage. Email notifications will be sent automatically based on stage configuration.`}
+        footer={
+          <div className="flex gap-3 justify-end items-center">
+            <button
+              onClick={() => setGroupProceedModalOpen(false)}
+              disabled={executingGroupProceed}
+              className="px-4 py-2 text-sm font-medium text-text bg-background border border-border rounded-lg hover:bg-surface transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleGroupProceedSubmit}
+              disabled={executingGroupProceed || selectedGroupProceedChapterIds.size === 0 || loadingGroupProceedConfig}
+              className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
+            >
+              {executingGroupProceed && <Spinner size="sm" />}
+              <Send size={14} />
+              {executingGroupProceed ? 'Proceeding…' : `Proceed ${selectedGroupProceedChapterIds.size} chapter${selectedGroupProceedChapterIds.size !== 1 ? 's' : ''}`}
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          {/* Chapter Selection */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-semibold text-text">
+                Select Chapters in Stage ({selectedGroupProceedChapterIds.size}/{groupProceedTargets.length} selected)
+              </label>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedGroupProceedChapterIds(getMyAssignedChapterIdsForStage(groupProceedStage))}
+                  className="text-xs text-emerald-600 hover:underline font-medium"
+                >
+                  Select assigned to me ({getMyAssignedChapterIdsForStage(groupProceedStage).size})
+                </button>
+                <span className="text-border">|</span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedGroupProceedChapterIds(
+                    selectedGroupProceedChapterIds.size === groupProceedTargets.length
+                      ? new Set()
+                      : new Set(groupProceedTargets.map(c => c.id))
+                  )}
+                  className="text-xs text-primary hover:underline font-medium"
+                >
+                  {selectedGroupProceedChapterIds.size === groupProceedTargets.length ? 'Deselect all' : 'Select all'}
+                </button>
+              </div>
+            </div>
+
+            <div className="max-h-56 overflow-y-auto border border-border rounded-lg divide-y divide-border">
+              {groupProceedTargets.length === 0 ? (
+                <div className="p-4 text-center text-xs text-muted">
+                  No chapters in stage "{groupProceedStage}" are currently assigned to you ({viewer?.username}).
+                </div>
+              ) : (
+                groupProceedTargets.map(c => (
+                  <label key={c.id} className="flex items-center gap-2.5 px-3 py-2 text-sm cursor-pointer hover:bg-surface">
+                    <input
+                      type="checkbox"
+                      checked={selectedGroupProceedChapterIds.has(c.id)}
+                      onChange={() => {
+                        setSelectedGroupProceedChapterIds(prev => {
+                          const next = new Set(prev)
+                          if (next.has(c.id)) next.delete(c.id)
+                          else next.add(c.id)
+                          return next
+                        })
+                      }}
+                      className="rounded border-border"
+                    />
+                    <span className="font-semibold text-primary text-xs uppercase w-8 flex-shrink-0">{c.chapters}</span>
+                    <span className="truncate text-text flex-1 min-w-0 font-medium">{c.chapter_title || c.chapters}</span>
+                    <span className="text-xs text-muted font-medium bg-surface px-2 py-0.5 rounded border border-border">
+                      {c.workflow || 'Default'}
+                    </span>
+                  </label>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Dynamic Next Stage Preview Table */}
+          {loadingGroupProceedConfig ? (
+            <div className="flex items-center justify-center py-6 gap-2 text-xs text-muted">
+              <Spinner size="sm" /> Resolving next stage workflows...
+            </div>
+          ) : groupProceedConfig && (
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-text flex items-center gap-1">
+                <ChevronRight size={14} className="text-emerald-600" />
+                Transition Destinations Preview
+              </label>
+              <div className="border border-border rounded-lg overflow-hidden bg-surface/30">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-surface border-b border-border font-semibold text-muted">
+                    <tr>
+                      <th className="px-3 py-2">Chapter</th>
+                      <th className="px-3 py-2">Workflow</th>
+                      <th className="px-3 py-2">Current Stage</th>
+                      <th className="px-3 py-2">Next Stage</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {(groupProceedConfig?.chapters || groupProceedConfig?.preview_items || []).map(item => (
+                      <tr key={item.chapter_id} className="hover:bg-accent/20">
+                        <td className="px-3 py-2 font-semibold text-primary uppercase">{item.chapter_number || item.chapter_num}</td>
+                        <td className="px-3 py-2 text-muted">{item.workflow_name}</td>
+                        <td className="px-3 py-2 text-text font-medium">{item.current_stage}</td>
+                        <td className="px-3 py-2">
+                          {item.next_stage ? (
+                            <span className="inline-flex items-center gap-1 font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                              {item.next_stage}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded">
+                              ✓ Final Stage (Complete)
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Email Notification Section */}
+          <div className="border border-border rounded-xl p-3 bg-surface/40 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 cursor-pointer select-none text-xs font-bold text-text">
+                <input
+                  type="checkbox"
+                  checked={sendEmailToggle}
+                  onChange={e => setSendEmailToggle(e.target.checked)}
+                  className="rounded border-border text-emerald-600 focus:ring-emerald-500"
+                />
+                <Mail size={14} className="text-emerald-600" />
+                Send Email Notification on Stage Transition
+              </label>
+              {(groupProceedConfig?.has_config || groupProceedConfig?.has_email_config) && (
+                <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded font-semibold">
+                  Configured via JSON
+                </span>
+              )}
+            </div>
+            {sendEmailToggle && (
+              <p className="text-[11px] text-muted pl-6">
+                Recipients and email template will be automatically fetched from the client stage transition JSON configuration.
+              </p>
+            )}
+          </div>
+        </div>
+      </Modal>
+
       {/* Dedicated Batch Modal */}
       <Modal
         isOpen={batchModalType !== null}
@@ -1851,6 +2162,37 @@ export function ProjectWorkflow() {
                   Design track is not enabled for this project.
                 </p>
               )}
+            </div>
+          )}
+
+          {(activeTab === 'manuscript' || activeTab === 'art') && (
+            <div>
+              <label className="block text-xs font-semibold text-text mb-1">
+                {activeTab === 'manuscript' ? 'Manuscript Track Workflow' : 'Art Track Workflow'}
+              </label>
+              {activeWorkflowName ? (
+                <div className="w-full text-sm bg-surface border border-border rounded-lg px-3 py-2 text-text font-semibold flex items-center justify-between">
+                  <span>{activeWorkflowName}</span>
+                  <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded font-semibold uppercase tracking-wider">
+                    🔒 Locked
+                  </span>
+                </div>
+              ) : (
+                <select
+                  value={selectedTrackWf}
+                  onChange={e => setSelectedTrackWf(e.target.value)}
+                  disabled={addingChapter}
+                  className="w-full text-sm bg-background border border-border rounded-lg px-3 py-2 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-60 font-medium"
+                >
+                  <option value="">-- Select Workflow --</option>
+                  {(allWorkflowNames || []).map(name => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
+              )}
+              <p className="text-[11px] text-muted mt-1">
+                This workflow is locked and assigned to all newly uploaded {activeTab === 'manuscript' ? 'manuscript' : 'art'} chapters.
+              </p>
             </div>
           )}
 

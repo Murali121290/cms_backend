@@ -10,22 +10,13 @@ from app.domains.projects.models import Project
 _CHAPTER_CATEGORIES = ["Manuscript", "Art", "InDesign", "Proof", "XML"]
 
 
-def create_chapter(db: Session, *, project_id: int, number: str, title: str, upload_dir: str, status: str = "In-progress"):
+def create_chapter(db: Session, *, project_id: int, number: str, title: str, upload_dir: str, status: str = "In-progress", workflow_name: str | None = None):
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         return {"project": None, "chapter": None}
 
-    from app.domains.workflow.models import WorkflowMaster
-    from sqlalchemy import or_
-    
-    first_stage = None
-    if project.workflow_name:
-        first_stage_row = db.query(WorkflowMaster).filter(
-            WorkflowMaster.workflow_name == project.workflow_name,
-            or_(WorkflowMaster.previous_stage.is_(None), WorkflowMaster.previous_stage == "")
-        ).first()
-        if first_stage_row:
-            first_stage = first_stage_row.stage_name
+    from app.routers.api_v2 import resolve_track_workflow
+    wf_name, first_stage = resolve_track_workflow(db, project, number, requested_wf=workflow_name)
 
     new_chapter = models.ChapterInfo(
         client=project.division_code or "",
@@ -34,7 +25,7 @@ def create_chapter(db: Session, *, project_id: int, number: str, title: str, upl
         chapter_title=title,
         status=status,
         stage_name=first_stage,
-        workflow=project.workflow_name or "Workflow1",
+        workflow=wf_name or "Workflow1",
         priority=getattr(project, "priority", None) or "Normal",
         complexity_level=getattr(project, "composition", None) or "Medium",
         project_manager_name=getattr(project, "project_manager", None) or None,

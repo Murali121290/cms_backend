@@ -1,4 +1,5 @@
 from app import models
+from app.domains.workflow.models import StageMaster, WorkflowMaster
 from app.utils.timezone import now_ist_naive
 
 
@@ -59,10 +60,13 @@ def test_api_v2_session_register_bootstraps_first_user_without_auth_cookie(clien
             "id": 1,
             "username": "founder",
             "email": "founder@example.com",
+            "first_name": None,
+            "last_name": None,
             "roles": ["Admin"],
             "is_active": True,
             "team": "Admin Team",
             "designation": None,
+            "access_level": "Admin",
         },
         "redirect_to": "/ui/login",
     }
@@ -376,3 +380,66 @@ def test_api_v2_activities_returns_summary_and_typed_items(
     assert "project" in first_item
     assert "chapter" in first_item
     assert "relative_time" in first_item
+
+
+def test_api_v2_bulk_transition_config_and_execute(
+    auth_cookie_client,
+    admin_user,
+    db_session,
+    project_factory,
+    chapter_factory,
+):
+    project = project_factory(code="PRJ-BULK")
+
+    # Seed stages and workflow master
+    s1 = StageMaster(stage_name="Job Initiation")
+    s2 = StageMaster(stage_name="Manuscript Analysis")
+    wf1 = WorkflowMaster(workflow_name="WF-05 COMP Only", stage_name="Job Initiation", next_stage="Manuscript Analysis")
+    wf2 = WorkflowMaster(workflow_name="WF-05 COMP Only", stage_name="Manuscript Analysis", previous_stage="Job Initiation")
+    db_session.add_all([s1, s2, wf1, wf2])
+    db_session.commit()
+
+    ch1 = chapter_factory(project=project, number="01", title="Chapter 01")
+    ch1.stage_name = "Job Initiation"
+    ch1.workflow = "WF-05 COMP Only"
+    ch2 = chapter_factory(project=project, number="02", title="Chapter 02")
+    ch2.stage_name = "Job Initiation"
+    ch2.workflow = "WF-05 COMP Only"
+    db_session.add_all([ch1, ch2])
+    db_session.commit()
+    db_session.refresh(ch1)
+    db_session.refresh(ch2)
+
+    client = auth_cookie_client(admin_user)
+
+    # 1. Config preview endpoint
+    config_resp = client.post(
+        "/api/v2/chapters/bulk-transition-config",
+        json={"chapter_ids": [ch1.id, ch2.id]},
+    )
+    assert config_resp.status_code == 200
+    config_data = config_resp.json()
+    assert config_data["has_config"] is True
+    assert len(config_data["chapters"]) == 2
+    assert config_data["chapters"][0]["current_stage"] == "Job Initiation"
+    assert config_data["chapters"][0]["next_stage"] == "Manuscript Analysis"
+
+    # 2. Execute bulk transition endpoint
+    exec_resp = client.post(
+        "/api/v2/chapters/bulk-transition",
+        json={
+            "chapter_ids": [ch1.id, ch2.id],
+            "send_email": False,
+        },
+    )
+    assert exec_resp.status_code == 200
+    exec_data = exec_resp.json()
+    assert exec_data["status"] == "ok"
+    assert exec_data["transitioned_count"] == 2
+
+    # Verify chapters moved to Manuscript Analysis
+    db_session.refresh(ch1)
+    db_session.refresh(ch2)
+    assert ch1.stage_name == "Manuscript Analysis"
+    assert ch2.stage_name == "Manuscript Analysis"
+
