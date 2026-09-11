@@ -203,12 +203,127 @@ def _paragraph_has_comment_text(para, text: str) -> bool:
     return False
 
 
-def _add_aq_comment(doc, para, text: str, author: str = "Reference Validator") -> bool:
-    """Add an AQ comment to `para` unless an equivalent AQ is already there."""
+def _find_citation_anchor_runs(para, citation_text: str) -> List[Any]:
+    """Return the `<w:r>` runs in `para` that together spell `citation_text`.
+
+    Used to scope a "missing citation" AQ to the exact citation string in the
+    paragraph rather than the whole paragraph. Match is whitespace-insensitive
+    and considers only citation-styled runs (`citebib` character style) or
+    runs already inside a `bib_*` bookmark — that keeps the anchor tight and
+    avoids grabbing surrounding narrative text.
+    """
+    if not citation_text:
+        return []
+
+    def _norm(s: str) -> str:
+        return re.sub(r"\s+", " ", (s or "").strip().lower())
+
+    needle = _norm(citation_text.strip("()[]"))
+    if not needle:
+        return []
+
+    p_el = para._element
+    # Identify runs sitting inside a bib_N bookmark so we can prefer those.
+    bib_ids: set = set()
+    for bs in p_el.iter(_W + "bookmarkStart"):
+        name = bs.get(_W + "name") or ""
+        if _BIB_LOWER_RE.match(name):
+            bid = bs.get(_W + "id")
+            if bid:
+                bib_ids.add(bid)
+
+    runs: List[Any] = []
+    inside_bib: List[bool] = []
+    open_bib: set = set()
+    for el in p_el.iter():
+        if el is p_el:
+            continue
+        tag = el.tag
+        if tag == _W + "bookmarkStart":
+            bid = el.get(_W + "id")
+            if bid in bib_ids:
+                open_bib.add(bid)
+        elif tag == _W + "bookmarkEnd":
+            bid = el.get(_W + "id")
+            if bid in bib_ids:
+                open_bib.discard(bid)
+        elif tag == _W + "r":
+            runs.append(el)
+            inside_bib.append(bool(open_bib))
+
+    if not runs:
+        return []
+
+    def _run_text_of(r) -> str:
+        return "".join((t.text or "") for t in r.findall(_W + "t"))
+
+    # Sliding window over runs — find the shortest span whose concatenated
+    # text (normalised) contains the citation. Prefer a window whose runs are
+    # mostly citation-styled / inside bib_N.
+    best: Optional[Tuple[int, int]] = None
+    for i in range(len(runs)):
+        acc = ""
+        for j in range(i, len(runs)):
+            acc += _run_text_of(runs[j])
+            if len(_norm(acc)) < len(needle):
+                continue
+            if needle in _norm(acc):
+                if best is None or (j - i) < (best[1] - best[0]):
+                    best = (i, j)
+                break
+
+    if best is None:
+        return []
+    i, j = best
+    return runs[i:j + 1]
+
+
+def _find_reference_anchor_runs(para) -> List[Any]:
+    """Return a short anchor for an "unused reference" AQ.
+
+    Uses the first content run of the reference paragraph (typically the
+    `bib_surname` run, e.g. "Capobianco"). Falls back to the first run when
+    no styled surname run is present.
+    """
+    p_el = para._element
+    first_run = None
+    for r in p_el.iter(_W + "r"):
+        first_run = first_run or r
+        rpr = r.find(_W + "rPr")
+        if rpr is None:
+            continue
+        rst = rpr.find(_W + "rStyle")
+        if rst is None:
+            continue
+        val = (rst.get(_W + "val") or "").lower()
+        if val in ("bibsurname", "bib_surname"):
+            return [r]
+    return [first_run] if first_run is not None else []
+
+
+def _add_aq_comment(
+    doc,
+    para,
+    text: str,
+    author: str = "Reference Validator",
+    *,
+    anchor_runs: Optional[List[Any]] = None,
+) -> bool:
+    """Add an AQ comment to `para` unless an equivalent AQ is already there.
+
+    When `anchor_runs` is provided the comment range wraps exactly those runs;
+    otherwise it is inserted as a zero-length point comment. Full-paragraph
+    ranges are never used — Word renders them as full-paragraph shading, which
+    is a visible defect in the delivered DOCX.
+    """
     if _paragraph_has_comment_text(para, text):
         return False
     from app.docx_pipeline.utils.docx_helpers import add_comment_to_paragraph
-    add_comment_to_paragraph(doc, para, text=text, author=author)
+    add_comment_to_paragraph(
+        doc, para, text=text, author=author,
+        anchor_runs=anchor_runs,
+        range_mode="point",
+    )
     return True
 
 
@@ -661,6 +776,169 @@ def _dedupe_comments(root, comments_root) -> int:
     return len(removed_ids)
 
 
+_REF_PARA_STYLES: Tuple[str, ...] = (
+    "REF-U", "REF-N", "REF-OPEN", "Reference", "Bibliography",
+    "BIB", "BIBH1", "BIBH2", "REFERENCE",
+)
+_HYPERLINK_BLUE_HEXES: Tuple[str, ...] = ("0563C1", "0000FF")
+
+
+def _shrink_paragraph_wide_comment_ranges(root) -> int:
+    """Shrink any `<w:commentRangeStart>` / `<w:commentRangeEnd>` pair whose
+    range covers essentially an entire paragraph down to a zero-length point
+    range placed right after `<w:pPr>`.
+
+    Word renders paragraph-wide comment ranges as full-paragraph shading — a
+    visible defect. The AQ workflow used to insert every comment as
+    paragraph-wide because `add_comment_to_paragraph` had no anchor-runs
+    support. Newly emitted comments now anchor to specific runs or use a
+    point range, but historical DOCX files re-exported through this finalizer
+    may still carry legacy paragraph-wide ranges. This pass rewrites them so
+    the delivered file looks like the golden.
+
+    A range is considered "paragraph-wide" when its start and end are in the
+    same paragraph AND the concatenated text between them equals the whole
+    paragraph's text (whitespace-collapsed). Ranges narrower than that (e.g.
+    already anchored to a citation) are left alone. Idempotent.
+    """
+    shrunk = 0
+    starts: Dict[str, Any] = {}
+    ends: Dict[str, Any] = {}
+    for cs in root.iter(_W + "commentRangeStart"):
+        cid = cs.get(_W + "id")
+        if cid is not None:
+            starts[cid] = cs
+    for ce in root.iter(_W + "commentRangeEnd"):
+        cid = ce.get(_W + "id")
+        if cid is not None:
+            ends[cid] = ce
+
+    def _paragraph_of(el):
+        p = el
+        while p is not None and p.tag != _W + "p":
+            p = p.getparent()
+        return p
+
+    def _norm(s: str) -> str:
+        return re.sub(r"\s+", " ", (s or "").strip())
+
+    for cid, cs in list(starts.items()):
+        ce = ends.get(cid)
+        if ce is None:
+            continue
+        ps = _paragraph_of(cs)
+        pe = _paragraph_of(ce)
+        if ps is None or ps is not pe:
+            # Multi-paragraph range — never touched by the AQ workflow; leave.
+            continue
+
+        full_text = _norm(
+            "".join(t.text or "" for t in ps.iter(_W + "t"))
+        )
+        if not full_text:
+            continue
+
+        collect = False
+        inside: List[str] = []
+        for el in ps.iter():
+            if el is cs:
+                collect = True
+                continue
+            if el is ce:
+                collect = False
+                break
+            if collect and el.tag == _W + "t":
+                inside.append(el.text or "")
+        span_text = _norm("".join(inside))
+
+        # Only shrink when the range covers the whole paragraph. A one-char
+        # tolerance handles occasional trailing whitespace / paragraph mark.
+        if span_text != full_text and abs(len(span_text) - len(full_text)) > 1:
+            continue
+
+        # Move the end to sit immediately after the start (zero-length range).
+        parent = cs.getparent()
+        if parent is None:
+            continue
+        if ce.getparent() is not None:
+            ce.getparent().remove(ce)
+        start_idx = list(parent).index(cs)
+        parent.insert(start_idx + 1, ce)
+        shrunk += 1
+
+    return shrunk
+
+
+def _strip_reference_run_fake_hyperlinks(root) -> int:
+    """Strip direct `<w:u>` and hyperlink-blue `<w:color>` from runs that
+    represent reference/citation content — matches the golden DOCX shape.
+
+    Two categories of runs are cleaned:
+
+    1. Every run inside a paragraph whose `pStyle` is a known reference style
+       (REF-U / REF-N / Bibliography). Separator runs (", "), page-number
+       runs, DOIs, etc. all live in these paragraphs and shouldn't look like
+       hyperlinks.
+    2. Every run whose character style is a `bib_*` / `cite_*` style, wherever
+       it lives. Body-text citations (`citebib`) fall here — Word's Hyperlink
+       character style still auto-applies when the run sits inside a real
+       `<w:hyperlink>` wrapper, so this cleanup is visually a no-op for
+       genuinely clickable citations while removing the hard-coded styling
+       from citations that were stamped by editor round-trips.
+
+    Other rPr children (`rStyle`, `highlight`, bold, italic, fonts…) are
+    preserved. Idempotent.
+    """
+    stripped = 0
+
+    def _clean_run(r) -> bool:
+        rPr = r.find(_W + "rPr")
+        if rPr is None:
+            return False
+        changed = False
+        u = rPr.find(_W + "u")
+        if u is not None:
+            rPr.remove(u)
+            changed = True
+        color = rPr.find(_W + "color")
+        if color is not None:
+            cv = (color.get(_W + "val") or "").upper()
+            if cv in _HYPERLINK_BLUE_HEXES:
+                rPr.remove(color)
+                changed = True
+        return changed
+
+    def _rstyle_of(r) -> str:
+        rPr = r.find(_W + "rPr")
+        if rPr is None:
+            return ""
+        rst = rPr.find(_W + "rStyle")
+        return (rst.get(_W + "val") if rst is not None else "") or ""
+
+    for p in root.iter(_W + "p"):
+        pPr = p.find(_W + "pPr")
+        pStyle = pPr.find(_W + "pStyle") if pPr is not None else None
+        style_val = (pStyle.get(_W + "val") or "") if pStyle is not None else ""
+        para_is_ref = style_val in _REF_PARA_STYLES
+
+        for r in p.iter(_W + "r"):
+            rstyle = _rstyle_of(r).lower()
+            run_is_bib_cite = (
+                rstyle.startswith("bib_")
+                or rstyle.startswith("cite_")
+                or rstyle in {"bibsurname", "bibfname", "bibyear", "bibtitle",
+                              "bibjournal", "bibvolume", "bibissue", "bibfpage",
+                              "biblpage", "bibdoi", "bibpublisher", "biborganization",
+                              "bibbook", "bibeditionno", "biburl", "bibchaptertitle",
+                              "bibinstitution", "bibarticle", "citebib"}
+            )
+            if not (para_is_ref or run_is_bib_cite):
+                continue
+            if _clean_run(r):
+                stripped += 1
+    return stripped
+
+
 def finalize_docx_for_export(docx_path: str) -> Dict[str, int]:
     """Post-process a DOCX to strip editor round-trip artefacts before it is
     handed to the user.
@@ -689,6 +967,8 @@ def finalize_docx_for_export(docx_path: str) -> Dict[str, int]:
             "duplicate_comments_removed": 0,
             "citation_hyperlinks_wrapped": 0,
             "citation_highlights_added": 0,
+            "reference_run_fake_links_cleaned": 0,
+            "paragraph_wide_comment_ranges_shrunk": 0,
         }
 
     with zipfile.ZipFile(path, "r") as z:
@@ -708,6 +988,8 @@ def finalize_docx_for_export(docx_path: str) -> Dict[str, int]:
     removed_c = _dedupe_comments(root, comments_root)
     wrapped_hl = _wrap_bib_citations_with_hyperlinks(root)
     highlighted = _apply_citation_highlights(root)
+    ref_runs_cleaned = _strip_reference_run_fake_hyperlinks(root)
+    comment_ranges_shrunk = _shrink_paragraph_wide_comment_ranges(root)
 
     stats = {
         "tracking_bookmarks_removed": removed_bm,
@@ -716,6 +998,8 @@ def finalize_docx_for_export(docx_path: str) -> Dict[str, int]:
         "duplicate_comments_removed": removed_c,
         "citation_hyperlinks_wrapped": wrapped_hl,
         "citation_highlights_added": highlighted,
+        "reference_run_fake_links_cleaned": ref_runs_cleaned,
+        "paragraph_wide_comment_ranges_shrunk": comment_ranges_shrunk,
     }
 
     if not any(stats.values()):
@@ -804,7 +1088,8 @@ def apply_reference_workflow(
 
         for seg in segments:
             aq = AQ_MISSING_CITATION_TEMPLATE.format(citation=seg)
-            added = _add_aq_comment(doc, para, aq, author=author)
+            anchor = _find_citation_anchor_runs(para, seg)
+            added = _add_aq_comment(doc, para, aq, author=author, anchor_runs=anchor)
             if added:
                 summary["missing_citation_aqs"] += 1
             else:
@@ -822,7 +1107,8 @@ def apply_reference_workflow(
         if not ref_text:
             continue
         aq = AQ_UNUSED_REFERENCE_TEMPLATE.format(reference=ref_text)
-        added = _add_aq_comment(doc, para, aq, author=author)
+        anchor = _find_reference_anchor_runs(para)
+        added = _add_aq_comment(doc, para, aq, author=author, anchor_runs=anchor)
         if added:
             summary["unused_reference_aqs"] += 1
         else:

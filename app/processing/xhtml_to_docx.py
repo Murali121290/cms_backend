@@ -410,11 +410,24 @@ class XhtmlToDocxEngine:
                 rPr.append(i)
                 has_rPr = True
             
-            # Link style default styling: blue + underline
-            final_underline = underline or is_link
+            # Real hyperlinks emit `<w:hyperlink>` wrappers separately; runs
+            # inside a wrapper inherit the Hyperlink character style
+            # automatically, so we no longer stamp blue + underline on the
+            # `<w:rPr>` from `is_link`. That inline stamping also fired for
+            # editor-only anchors (WYSIWYG wraps each reference part in `<a>`
+            # for click-nav), which made every reference run look like a
+            # hyperlink in the exported DOCX. Runs carrying a `bib_*` /
+            # `cite_*` character style additionally suppress explicit
+            # underline/color, because those styles own the run's appearance.
+            is_structured_ref_run = bool(
+                char_style
+                and (char_style.startswith("bib_") or char_style.startswith("cite_"))
+            )
+            final_underline = underline
             final_color = color
-            if is_link and not final_color:
-                final_color = "0563C1" # Microsoft Word default hyperlink blue
+            if is_structured_ref_run:
+                final_underline = False
+                final_color = None
 
             if final_underline:
                 u = OxmlElement('w:u')
