@@ -675,10 +675,25 @@ class XhtmlToDocxDeltaEngine:
                 rPr.append(s_el)
                 has_rPr = True
 
-            final_underline = underline or is_link
+            # Do NOT synthesise inline underline / blue color from is_link.
+            # Real hyperlinks are emitted as `<w:hyperlink>` wrappers by the
+            # `<a>` branch below; runs inside a wrapper inherit the Hyperlink
+            # character style (blue + underline) automatically. Stamping the
+            # styling directly on `<w:rPr>` also fires for `<a>` tags that have
+            # no href — e.g. the WYSIWYG editor's per-part reference anchors —
+            # which is what made every reference run look like a hyperlink in
+            # the exported DOCX. Runs carrying a `bib_*` / `cite_*` character
+            # style additionally suppress explicit underline/color, because
+            # those styles fully own the run's appearance (matches golden).
+            is_structured_ref_run = bool(
+                char_style
+                and (char_style.startswith("bib_") or char_style.startswith("cite_"))
+            )
+            final_underline = underline
             final_color = color
-            if is_link and not final_color:
-                final_color = "0563C1"
+            if is_structured_ref_run:
+                final_underline = False
+                final_color = None
 
             if final_underline:
                 u = OxmlElement('w:u')

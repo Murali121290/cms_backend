@@ -78,10 +78,33 @@ def get_run_formatting(run) -> tuple[bool, bool]:
 
 # â”€â”€ Office Document Comment Injection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-def add_comment_to_paragraph(doc, para, text: str, author: str = "Pipeline Validation"):
-    """
-    Adds a native Word comment to the specified paragraph by forcefully
-    building and updating the document's comments XML relationship packages.
+def add_comment_to_paragraph(
+    doc,
+    para,
+    text: str,
+    author: str = "Pipeline Validation",
+    *,
+    anchor_runs=None,
+    range_mode: str = "paragraph",
+):
+    """Add a native Word comment to `para`.
+
+    ``anchor_runs`` — optional list of `<w:r>` lxml elements (already inside
+    `para`) that the comment range should wrap. When supplied, the range spans
+    from just before the first anchor run to just after the last, so Word only
+    shades the specific text those runs contain. This matches the golden DOCX
+    behaviour where citation/reference AQs anchor to the citation text itself,
+    never to the whole paragraph.
+
+    ``range_mode`` — how to place the range when ``anchor_runs`` is not given:
+
+    * ``"paragraph"`` (default, back-compat) — wraps the entire paragraph. Kept
+      for the heading-validation callers that intentionally comment on the
+      whole heading.
+    * ``"point"`` — inserts a zero-length range right after `<w:pPr>`. Word
+      shows a marker but does not shade the paragraph. Use for AQs that should
+      not visually highlight anything (e.g. "unused reference" when we can't
+      pinpoint a specific run).
     """
     # 1. Acquire or build the comments.xml package relationship
     comments_part = None
@@ -126,26 +149,55 @@ def add_comment_to_paragraph(doc, para, text: str, author: str = "Pipeline Valid
     
     comments_el.append(comment_node)
     
-    # 4. Bind the comment marker explicitly to the user's paragraph.
+    # 4. Bind the comment marker to the user's paragraph.
     #    OOXML requires <w:pPr> to be the first child of <w:p> when present, so
     #    commentRangeStart must come AFTER pPr — inserting at index 0 produces
     #    a document Word will flag as needing repair.
     p_el = para._element
 
     pPr_el = p_el.find(qn('w:pPr'))
-    insert_idx = (list(p_el).index(pPr_el) + 1) if pPr_el is not None else 0
+    after_pPr_idx = (list(p_el).index(pPr_el) + 1) if pPr_el is not None else 0
 
     c_start = OxmlElement('w:commentRangeStart')
     c_start.set(qn('w:id'), comment_id)
-    p_el.insert(insert_idx, c_start)
-
     c_end = OxmlElement('w:commentRangeEnd')
     c_end.set(qn('w:id'), comment_id)
-    p_el.append(c_end) # Wraps to the end of paragraph
 
     r_node = OxmlElement('w:r')
     c_ref = OxmlElement('w:commentReference')
     c_ref.set(qn('w:id'), comment_id)
     r_node.append(c_ref)
-    p_el.append(r_node) # Inject reference tag natively
+
+    valid_anchor_runs = [r for r in (anchor_runs or []) if r is not None and r.getparent() is p_el]
+
+    if valid_anchor_runs:
+        # Anchor the range around the specific runs. Insert commentRangeStart
+        # immediately before the first anchor and commentRangeEnd immediately
+        # after the last — Word will highlight exactly that text and nothing
+        # else, matching the golden DOCX's behaviour.
+        first = valid_anchor_runs[0]
+        last = valid_anchor_runs[-1]
+        first_idx = list(p_el).index(first)
+        p_el.insert(first_idx, c_start)
+        # Re-lookup last's index because the insert above shifted positions.
+        last_idx = list(p_el).index(last)
+        p_el.insert(last_idx + 1, c_end)
+        # commentReference sits at end of paragraph so all Word clients pick
+        # it up regardless of whether they render range or reference markers.
+        p_el.append(r_node)
+    elif range_mode == "point":
+        # Zero-length range: start and end are adjacent, so Word shows a
+        # marker but does not shade any text. Used when we know the paragraph
+        # the AQ belongs to but not the specific target text.
+        p_el.insert(after_pPr_idx, c_start)
+        p_el.insert(after_pPr_idx + 1, c_end)
+        p_el.append(r_node)
+    else:
+        # Legacy "paragraph" mode — wraps the whole paragraph. Kept for
+        # heading-validation callers that intentionally comment on the entire
+        # heading. Word renders this as a full-paragraph shade, which is
+        # exactly what the citation/reference workflow must NOT do.
+        p_el.insert(after_pPr_idx, c_start)
+        p_el.append(c_end)
+        p_el.append(r_node)
 
