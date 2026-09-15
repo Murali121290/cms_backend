@@ -33,14 +33,14 @@ W  = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 W_ = "{%s}" % W
 
 # --- Regex Patterns explicitly mapped to VBA User rules ---
-RE_FIG_SINGLE = re.compile(r"(Figure|Fig\.?)\s+([0-9]{1,3})[\.-]([0-9]{1,3})", re.IGNORECASE)
-RE_TBL_SINGLE = re.compile(r"(Table)\s+([0-9]{1,3})[\.-]([0-9]{1,3})", re.IGNORECASE)
+RE_FIG_SINGLE = re.compile(r"(Figure|Fig\.?)\s+([0-9]{1,3})(?:[\.-]([0-9]{1,3}))?", re.IGNORECASE)
+RE_TBL_SINGLE = re.compile(r"(Table|Tbl\.?)\s+([0-9]{1,3})(?:[\.-]([0-9]{1,3}))?", re.IGNORECASE)
 
-RE_FIG_MULTI_AND = re.compile(r"(Figures?|Figs?\.?)\s+([0-9]{1,3})[\.-]([0-9]{1,3})\s+and\s+([0-9]{1,3})[\.-]([0-9]{1,3})", re.IGNORECASE)
-RE_TBL_MULTI_AND = re.compile(r"(Tables?)\s+([0-9]{1,3})[\.-]([0-9]{1,3})\s+and\s+([0-9]{1,3})[\.-]([0-9]{1,3})", re.IGNORECASE)
+RE_FIG_MULTI_AND = re.compile(r"(Figures?|Figs?\.?)\s+([0-9]{1,3})(?:[\.-]([0-9]{1,3}))?\s+and\s+([0-9]{1,3})(?:[\.-]([0-9]{1,3}))?", re.IGNORECASE)
+RE_TBL_MULTI_AND = re.compile(r"(Tables?|Tbls?\.?)\s+([0-9]{1,3})(?:[\.-]([0-9]{1,3}))?\s+and\s+([0-9]{1,3})(?:[\.-]([0-9]{1,3}))?", re.IGNORECASE)
 
-RE_FIG_MULTI_TO = re.compile(r"(Figures?|Figs?\.?)\s+([0-9]{1,3})[\.-]([0-9]{1,3})\s+to\s+([0-9]{1,3})[\.-]([0-9]{1,3})", re.IGNORECASE)
-RE_TBL_MULTI_TO = re.compile(r"(Tables?)\s+([0-9]{1,3})[\.-]([0-9]{1,3})\s+to\s+([0-9]{1,3})[\.-]([0-9]{1,3})", re.IGNORECASE)
+RE_FIG_MULTI_TO = re.compile(r"(Figures?|Figs?\.?)\s+([0-9]{1,3})(?:[\.-]([0-9]{1,3}))?\s+(?:to|-|–)\s+([0-9]{1,3})(?:[\.-]([0-9]{1,3}))?", re.IGNORECASE)
+RE_TBL_MULTI_TO = re.compile(r"(Tables?|Tbls?\.?)\s+([0-9]{1,3})(?:[\.-]([0-9]{1,3}))?\s+(?:to|-|–)\s+([0-9]{1,3})(?:[\.-]([0-9]{1,3}))?", re.IGNORECASE)
 
 _BX_SUFFIX_RE = re.compile(r'^BX\d+[_-](.+)$', re.IGNORECASE)
 
@@ -224,12 +224,15 @@ def _process_paragraph_regex(p_el: etree._Element, logger: ReportLogger, is_capt
         style = match["style"]
         
         # INNERS
-        wrap_range_in_sdt(p_el, spans[0][0], spans[0][1], match["inner"], match["inner"], style)
-        wrap_range_in_sdt(p_el, spans[1][0], spans[1][1], "ChapNo", "ChapNo", style)
-        wrap_range_in_sdt(p_el, spans[2][0], spans[2][1], "SeqNo", "SeqNo", style)
+        if len(spans) > 0 and spans[0][0] != -1:
+            wrap_range_in_sdt(p_el, spans[0][0], spans[0][1], match["inner"], match["inner"], style)
+        if len(spans) > 1 and spans[1][0] != -1:
+            wrap_range_in_sdt(p_el, spans[1][0], spans[1][1], "ChapNo", "ChapNo", style)
+        if len(spans) > 2 and spans[2][0] != -1:
+            wrap_range_in_sdt(p_el, spans[2][0], spans[2][1], "SeqNo", "SeqNo", style)
         
         # Multi-references have extended scopes
-        if len(groups) == 5:
+        if len(spans) >= 5 and spans[3][0] != -1 and spans[4][0] != -1:
             wrap_range_in_sdt(p_el, spans[3][0], spans[3][1], "ChapNo1", "ChapNo1", style)
             wrap_range_in_sdt(p_el, spans[4][0], spans[4][1], "SeqNo1", "SeqNo1", style)
             

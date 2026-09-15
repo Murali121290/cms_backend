@@ -235,15 +235,23 @@ class ChapterInfo(Base):
 
     @property
     def indesign_status(self) -> Optional[str]:
-        """Returns 'generated' if an .indd file exists in the InDesign category (and on disk)."""
+        """Returns 'generated' if an .indd/.idml file exists in the InDesign/Indesign category."""
         import os
         from app.services.file_service import UPLOAD_DIR
         for f in self.files:
-            if f.category == "InDesign" and f.filename.lower().endswith(".indd"):
+            cat = (f.category or "").strip().lower()
+            fname = (f.filename or "").strip().lower()
+            if cat in ("indesign", "design", "template") or fname.endswith((".indd", ".idml", ".indt")):
                 if f.path:
                     full = os.path.join(UPLOAD_DIR, f.path) if not os.path.isabs(f.path) else f.path
                     if os.path.exists(full):
                         return "generated"
+                    # Fallback for Linux case-sensitive directory mismatch (InDesign vs Indesign)
+                    alt = full.replace("/InDesign/", "/Indesign/") if "/InDesign/" in full else full.replace("/Indesign/", "/InDesign/")
+                    if os.path.exists(alt):
+                        return "generated"
+                    # Return generated if file record exists in database
+                    return "generated"
         return None
 
     @property
@@ -286,6 +294,60 @@ class ChapterInfo(Base):
         return "pending"
 
     @property
+    def design_match_status(self) -> Optional[str]:
+        """Derive design template style match status from uploaded files or background jobs.
+        - None      → no style match report file present
+        - 'valid'   → PASS
+        - 'invalid' → FAIL
+        - 'pending' → job currently processing
+        """
+        import os
+        import json
+        from app.services.file_service import UPLOAD_DIR
+        from app.models import ProcessingJob
+        from app.database import SessionLocal
+
+        file_ids = [f.id for f in self.files if f.category == "Manuscript"]
+        if file_ids:
+            db = SessionLocal()
+            try:
+                job = db.query(ProcessingJob).filter(
+                    ProcessingJob.file_id.in_(file_ids),
+                    ProcessingJob.process_type == "style_match_design"
+                ).order_by(ProcessingJob.created_at.desc()).first()
+                if job and job.status == "processing":
+                    return "pending"
+            except Exception:
+                pass
+            finally:
+                db.close()
+
+        report_files = [f for f in self.files if f.category == "Manuscript" and (f.filename.lower().endswith("_style_match_report.json") or f.filename.lower().endswith("_style_match_report.html"))]
+        if not report_files:
+            return None
+        report_file = sorted(report_files, key=lambda f: f.uploaded_at)[-1]
+        if report_file.path:
+            full_path = os.path.join(UPLOAD_DIR, report_file.path) if not os.path.isabs(report_file.path) else report_file.path
+            if os.path.exists(full_path):
+                try:
+                    if full_path.endswith(".json"):
+                        with open(full_path, "r", encoding="utf-8") as jf:
+                            data = json.load(jf)
+                            if data.get("status") == "PASS":
+                                return "valid"
+                            else:
+                                return "invalid"
+                    else:
+                        content = open(full_path, encoding="utf-8", errors="ignore").read()
+                        if 'badge-pass">PASS' in content or '>PASS</span>' in content:
+                            return "valid"
+                        else:
+                            return "invalid"
+                except Exception:
+                    pass
+        return "pending"
+
+    @property
     def structuring_status(self) -> Optional[str]:
         """Derive structuring status from processing jobs or files.
         - None        → no structuring job or file present
@@ -311,7 +373,7 @@ class ChapterInfo(Base):
                     return "pending"
                 elif job.status == "completed":
                     return "completed"
-                elif job.status == "failed":
+                elif job.status in ("failed", "error"):
                     return "failed"
         except Exception:
             pass
@@ -324,5 +386,34 @@ class ChapterInfo(Base):
                 if "_processed.docx" in f.filename.lower() or "_structured.docx" in f.filename.lower():
                     return "completed"
                     
+        return None
+
+    @property
+    def art_status(self) -> Optional[str]:
+        """Derive art validation status from uploaded files.
+        - None      -> no art report file present
+        - 'no_art'  -> chapter has 0 figures and captions
+        - 'valid'   -> 0 missing files and 0 warnings (PASS)
+        - 'warning' -> missing files or warnings exist
+        """
+        import os
+        from app.services.file_service import UPLOAD_DIR
+        report_files = [f for f in self.files if f.filename.lower().endswith("_art_validation_report.html")]
+        if not report_files:
+            return None
+        report_file = sorted(report_files, key=lambda f: f.uploaded_at)[-1]
+        if report_file.path:
+            full_path = os.path.join(UPLOAD_DIR, report_file.path) if not os.path.isabs(report_file.path) else report_file.path
+            if os.path.exists(full_path):
+                try:
+                    content = open(full_path, encoding="utf-8", errors="ignore").read()
+                    if 'There is no art and caption in this chapter' in content or ('Docx Figures' in content and 'val" style="color: #0284c7;">0</div>' in content and 'val" style="color: #dc2626;">0</div>' in content and 'val" style="color: #d97706;">0</div>' in content):
+                        return "no_art"
+                    elif 'Missing Art' in content and 'val" style="color: #dc2626;">0</div>' in content and 'Unreferenced Art' in content and 'val" style="color: #d97706;">0</div>' in content:
+                        return "valid"
+                    else:
+                        return "warning"
+                except Exception:
+                    pass
         return None
 

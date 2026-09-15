@@ -619,12 +619,6 @@ export function StructuringReviewPage() {
               isSaving={editorSave.isPending}
               saveLabel="Save & Convert to DOCX"
               documentTitle={review.file.filename}
-              /* Save & Export lives in the Reference Review panel as the
-                 single save/export action for this page — hide the editor's
-                 own Save button and omit exportHref so no duplicates render.
-                 The editor's onSave prop stays wired for programmatic saves
-                 (autosave, keyboard shortcut) triggered from within it. */
-              hideSaveButton
               trackChangesEnabled={trackChangesEnabled}
               onTrackChangesToggle={setTrackChangesEnabled}
               height={isFullscreen ? "calc(100vh - 20px)" : "calc(100vh - 160px)"}

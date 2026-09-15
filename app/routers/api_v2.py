@@ -10,17 +10,21 @@ import logging
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File as FastAPIFile, Form, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from pathlib import Path
 from jose import JWTError, jwt
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app import database, models, schemas_v2
 from app.domains.projects.models import Project, ProjectStylesheet
+from app.domains.workflow.models import StageMaster, WorkflowMaster
 from app.domains.projects.po_intake import service as po_intake_service
 from app.domains.auth.security import get_current_user_from_cookie
 from app.domains.files import image_preview_service
 from app.core.config import get_settings
+from app.core.paths import UPLOADS_DIR
 from app.services import (
     activity_service,
     admin_user_service,
@@ -50,6 +54,7 @@ from app.processing.structuring_engine import StructuringEngine
 from app.processing.bias_engine import BiasEngine
 from app.processing.ai_extractor_engine import AIExtractorEngine
 from app.processing.xml_engine import XMLEngine
+from app.processing.art_validation_engine import ArtValidationEngine
 from app.utils.utils.structuring_lib.doc_utils import extract_document_structure, update_document_structure
 from app.utils.utils.structuring_lib.rules_loader import get_rules_loader
 from app.utils.utils.structuring_lib.tag_set_loader import list_available_tag_sets
@@ -315,7 +320,9 @@ def _serialize_chapter_summary(chapter: models.Chapter):
         indesign_status=getattr(chapter, "indesign_status", None),
         final_delivery_status=getattr(chapter, "final_delivery_status", None),
         style_status=getattr(chapter, "style_status", None),
+        design_match_status=getattr(chapter, "design_match_status", None),
         structuring_status=getattr(chapter, "structuring_status", None),
+        art_status=getattr(chapter, "art_status", None),
     )
 
 
@@ -537,6 +544,9 @@ def _serialize_upload_result(upload_result: dict, *, viewer: models.User):
 
 
 def _serialize_version_record(version_entry: models.FileVersion):
+    uploader = getattr(version_entry, "uploaded_by", None)
+    name = uploader.first_name if uploader and uploader.first_name else None
+    username = uploader.username if uploader else None
     return schemas_v2.VersionRecord(
         id=version_entry.id,
         file_id=version_entry.file_id,
@@ -545,6 +555,8 @@ def _serialize_version_record(version_entry: models.FileVersion):
         archived_path=version_entry.path,
         uploaded_at=version_entry.uploaded_at,
         uploaded_by_id=version_entry.uploaded_by_id,
+        uploaded_by_name=name,
+        uploaded_by_username=username,
     )
 
 
@@ -1131,20 +1143,64 @@ def api_v2_project_indesign_templates(
         models.ChapterInfo.chapters.ilike("design")
     ).first()
     
-    if not design_chapter:
-        return []
-        
-    from sqlalchemy import or_
-    template_files = db.query(models.File).filter(
-        models.File.chapter_id == design_chapter.id,
-        models.File.category == "template/indesign",
-        or_(
-            models.File.filename.ilike("%.indt"),
-            models.File.filename.ilike("%.indd")
-        )
-    ).all()
+    from sqlalchemy import or_, func
     
-    return [_serialize_file_record(file_record, viewer=viewer, db=db) for file_record in template_files]
+    # Flexible DB query matching only .indt template files for project or design chapter
+    query_filters = [
+        models.File.project_id == project.id,
+        models.File.filename.ilike("%.indt")
+    ]
+    if design_chapter:
+        query_filters.append(
+            or_(
+                models.File.chapter_id == design_chapter.id,
+                func.lower(models.File.category).in_(["template/indesign", "template_indesign", "indesign", "design", "template"])
+            )
+        )
+    
+    template_files = db.query(models.File).filter(*query_filters).all()
+    
+    # Fallback disk search if DB returned no templates or to find missing files
+    project_dir = os.path.join(str(UPLOADS_DIR), project.code)
+    if os.path.exists(project_dir):
+        existing_filenames = {tf.filename.lower() for tf in template_files}
+        for root, dirs, files in os.walk(project_dir):
+            if "archive" in root.lower().replace("\\", "/"):
+                continue
+            for fname in files:
+                if fname.lower().endswith(".indt") and fname.lower() not in existing_filenames:
+                    fpath = os.path.join(root, fname)
+                    rel_cat = "template/indesign"
+                    existing_in_db = db.query(models.File).filter(
+                        models.File.project_id == project.id,
+                        func.lower(models.File.filename) == fname.lower()
+                    ).first()
+                    if not existing_in_db:
+                        existing_in_db = models.File(
+                            project_id=project.id,
+                            chapter_id=design_chapter.id if design_chapter else None,
+                            category=rel_cat,
+                            filename=fname,
+                            path=fpath,
+                            uploaded_by_id=viewer.id,
+                        )
+                        db.add(existing_in_db)
+                        db.commit()
+                        db.refresh(existing_in_db)
+                    if existing_in_db not in template_files:
+                        template_files.append(existing_in_db)
+                        existing_filenames.add(fname.lower())
+
+    # Exclude files in Archive subfolders and ensure only .indt extensions
+    valid_templates = []
+    for tf in template_files:
+        if not tf.filename or not tf.filename.lower().endswith(".indt"):
+            continue
+        if tf.path and "/archive/" in tf.path.lower().replace("\\", "/"):
+            continue
+        valid_templates.append(tf)
+
+    return [_serialize_file_record(file_record, viewer=viewer, db=db) for file_record in valid_templates]
 
 
 @router.get(
@@ -1425,6 +1481,72 @@ def api_v2_extract_po(
     return schemas_v2.POExtractionResponse(**result)
 
 
+def resolve_track_workflow(
+    db: Session,
+    project: Project,
+    chapter_number: str,
+    requested_wf: str | None = None
+) -> tuple[str, str | None]:
+    """
+    Resolves the track-specific workflow name and initial stage for a chapter.
+    Tracks:
+      - 'design': chapter_number == "Design"
+      - 'art': "Art" in chapter_number or chapter_number.endswith(" - Art")
+      - 'manuscript': numeric chapters, FM, BM, etc.
+    """
+    track = "manuscript"
+    if chapter_number == "Design":
+        track = "design"
+    elif "Art" in chapter_number or chapter_number.endswith(" - Art"):
+        track = "art"
+
+    file_details = getattr(project, "file_details", None) or {}
+    if not isinstance(file_details, dict):
+        file_details = {}
+    track_wfs = file_details.get("track_workflows", {})
+    if not isinstance(track_wfs, dict):
+        track_wfs = {}
+
+    target_wf = None
+    if requested_wf and requested_wf.strip():
+        target_wf = requested_wf.strip()
+        track_wfs[track] = target_wf
+        file_details["track_workflows"] = track_wfs
+        project.file_details = file_details
+        flag_modified(project, "file_details")
+        db.commit()
+    elif track_wfs.get(track):
+        target_wf = track_wfs.get(track)
+    else:
+        from app.domains.workflow.models import ChapterInfo as _ChapterInfo
+        all_cis = db.query(_ChapterInfo).filter(_ChapterInfo.project == project.project_code).all()
+        matching_wf = None
+        for ci in all_cis:
+            if ci.chapters:
+                ci_track = "manuscript"
+                if ci.chapters == "Design":
+                    ci_track = "design"
+                elif "Art" in ci.chapters or ci.chapters.endswith(" - Art"):
+                    ci_track = "art"
+                if ci_track == track and ci.workflow:
+                    matching_wf = ci.workflow
+                    break
+        target_wf = matching_wf or project.workflow_name or ""
+
+    first_stage = None
+    if target_wf:
+        from app.domains.workflow.models import WorkflowMaster as _WorkflowMaster
+        from sqlalchemy import or_ as _or
+        first_stage_row = db.query(_WorkflowMaster).filter(
+            _WorkflowMaster.workflow_name == target_wf,
+            _or(_WorkflowMaster.previous_stage.is_(None), _WorkflowMaster.previous_stage == "")
+        ).first()
+        if first_stage_row:
+            first_stage = first_stage_row.stage_name
+
+    return target_wf or "", first_stage
+
+
 @router.post("/projects/bootstrap", response_model=schemas_v2.ProjectBootstrapResponse)
 def api_v2_project_bootstrap(
     code: str = Form(...),
@@ -1557,9 +1679,24 @@ def api_v2_project_bootstrap(
     if extracted_po_data:
         try:
             parsed_po_data = json.loads(extracted_po_data)
-            project.file_details = parsed_po_data
         except (TypeError, ValueError):
             logging.error("Failed to parse extracted_po_data JSON for project %s", code)
+
+    if not isinstance(parsed_po_data, dict):
+        parsed_po_data = {}
+
+    track_wfs = parsed_po_data.get("track_workflows", {})
+    if not isinstance(track_wfs, dict):
+        track_wfs = {}
+    if design_workflow_name:
+        track_wfs["design"] = design_workflow_name
+    if manuscript_workflow_name:
+        track_wfs["manuscript"] = manuscript_workflow_name
+    if art_workflow_name:
+        track_wfs["art"] = art_workflow_name
+    parsed_po_data["track_workflows"] = track_wfs
+
+    project.file_details = parsed_po_data
 
     if po_file is not None and po_file.filename:
         try:
@@ -3709,7 +3846,7 @@ def api_v2_upload_zip(
                     if len(path_parts) > design_idx + 2:
                         category = path_parts[design_idx + 1]
                     else:
-                        category = "Indesign"
+                        category = "InDesign"
                 elif is_ce_path:
                     chapter_no_str = "CE support"
                     ce_idx = [i for i, part in enumerate(path_parts) if part.lower() == "ce support"][0]
@@ -3741,16 +3878,7 @@ def api_v2_upload_zip(
                         models.Chapter.chapters == chapter_no_str,
                     ).first()
                     if not chapter:
-                        from app.domains.workflow.models import WorkflowMaster as _WorkflowMaster
-                        from sqlalchemy import or_ as _or
-                        first_stage = None
-                        if project.workflow_name:
-                            first_stage_row = db.query(_WorkflowMaster).filter(
-                                _WorkflowMaster.workflow_name == project.workflow_name,
-                                _or(_WorkflowMaster.previous_stage.is_(None), _WorkflowMaster.previous_stage == "")
-                            ).first()
-                            if first_stage_row:
-                                first_stage = first_stage_row.stage_name
+                        wf_name, start_stage = resolve_track_workflow(db, project, chapter_no_str)
 
                         # Setup pretty title for Art pack track chapters
                         if "Art" in chapter_no_str:
@@ -3766,11 +3894,11 @@ def api_v2_upload_zip(
                             project=project.project_code,
                             chapters=chapter_no_str,
                             chapter_title=chapter_title,
-                            workflow=project.workflow_name or "",
+                            workflow=wf_name,
                             status="Received",
                             complexity_level=getattr(project, "composition", None) or "Medium",
                             stage_level=1,
-                            stage_name=first_stage,
+                            stage_name=start_stage,
                             published_status="Draft",
                             priority=getattr(project, "priority", None) or "Normal",
                         )
@@ -4321,15 +4449,15 @@ def api_v2_start_batch_jobs(
         if "template_file_id" not in batch_options:
             fallback_template = db.query(models.File).filter(
                 models.File.project_id == project.id,
-                models.File.category.in_(["template/indesign", "InDesign"]),
-                models.File.filename.like("%.indt")
+                func.lower(models.File.category).in_(["template/indesign", "template_indesign", "indesign", "design", "template"]),
+                models.File.filename.ilike("%.indt")
             ).order_by(models.File.uploaded_at.desc()).first()
             
             if not fallback_template:
                 fallback_template = db.query(models.File).filter(
                     models.File.project_id == project.id,
-                    models.File.category.in_(["template/indesign", "InDesign"]),
-                    models.File.filename.like("%.indd")
+                    func.lower(models.File.category).in_(["template/indesign", "template_indesign", "indesign", "design", "template"]),
+                    models.File.filename.ilike("%.indd")
                 ).order_by(models.File.uploaded_at.desc()).first()
 
             if fallback_template:
@@ -4720,7 +4848,10 @@ def api_v2_processing_status(
         "indesign_to_xml",
         "xml_to_indesign",
         "style_validation",
+        "style_match_design",
+        "art_validation",
         "extract_design_css",
+        "extract_design_style",
         "view_proof",
     )
     if process_type not in supported_types:
@@ -4767,6 +4898,191 @@ def api_v2_processing_status(
         current_step=status_payload.get("current_step"),
         progress_pct=status_payload.get("progress_pct"),
     )
+
+
+def _resolve_art_directory(file_path: str, db: Session = None, file_record: models.File = None) -> str:
+    """Finds the associated Art folder for a given manuscript docx file across CMS chapter/project structures."""
+    parent_dir = os.path.dirname(file_path)
+    chapter_dir = os.path.dirname(parent_dir)
+    project_dir = os.path.dirname(chapter_dir)
+
+    # Extract chapter number from manuscript filename or chapter folder
+    fname = os.path.basename(file_path)
+    num_match = re.search(r'(?:Ch|Chapter)[\s_\-]*0*(\d+)', fname, re.IGNORECASE)
+    if not num_match:
+        num_match = re.search(r'(?:Ch|Chapter)[\s_\-]*0*(\d+)', os.path.basename(chapter_dir), re.IGNORECASE)
+
+    ch_num = int(num_match.group(1)) if num_match else None
+
+    # 1. Project-level explicit chapter art folder candidates (e.g. Ch 03 - Art/Art, Ch 03/Art)
+    if ch_num is not None and os.path.exists(project_dir):
+        ch_art_candidates = [
+            os.path.join(project_dir, f"Ch {ch_num:02d} - Art", "Art"),
+            os.path.join(project_dir, f"Ch {ch_num} - Art", "Art"),
+            os.path.join(project_dir, f"Ch {ch_num:02d} - Art"),
+            os.path.join(project_dir, f"Ch {ch_num} - Art"),
+            os.path.join(project_dir, f"Ch{ch_num:02d}", "Art"),
+            os.path.join(project_dir, f"Ch{ch_num}", "Art"),
+            os.path.join(project_dir, f"Chapter {ch_num:02d}", "Art"),
+            os.path.join(project_dir, f"Chapter {ch_num}", "Art"),
+        ]
+        for c in ch_art_candidates:
+            if os.path.exists(c) and os.path.isdir(c):
+                if any(f.lower().endswith(('.eps', '.tif', '.tiff', '.jpg', '.jpeg', '.png', '.pdf')) and not f.lower().endswith('.converted.png') for f in os.listdir(c)):
+                    return c
+
+    # 2. Direct candidates relative to manuscript file (excluding InDesign)
+    candidates_direct = [
+        os.path.join(chapter_dir, "Art"),
+        os.path.join(chapter_dir, "art"),
+        os.path.join(chapter_dir, "ART"),
+        os.path.join(parent_dir, "Art"),
+        os.path.join(parent_dir, "art"),
+        os.path.join(chapter_dir, "Input"),
+    ]
+    for c in candidates_direct:
+        if os.path.exists(c) and os.path.isdir(c) and 'indesign' not in c.lower():
+            if any(f.lower().endswith(('.eps', '.tif', '.tiff', '.jpg', '.jpeg', '.png', '.pdf')) and not f.lower().endswith('.converted.png') for f in os.listdir(c) if not f.startswith('.')):
+                return c
+
+    # 3. Check DB File records for category 'Art' if db and file_record provided
+    if db and file_record:
+        art_files_db = db.query(models.File).filter(
+            models.File.project_id == file_record.project_id,
+            models.File.category.ilike('%art%')
+        ).all()
+
+        for af in art_files_db:
+            if af.path and os.path.exists(af.path) and 'indesign' not in af.path.lower():
+                af_dir = os.path.dirname(af.path)
+                if ch_num:
+                    af_dir_lower = af_dir.lower()
+                    ch_patterns = [f'ch {ch_num}', f'ch0{ch_num}', f'ch{ch_num}', f'chapter {ch_num}', f'chapter 0{ch_num}']
+                    if any(p in af_dir_lower for p in ch_patterns):
+                        return af_dir
+                else:
+                    return af_dir
+
+    # 4. Ranked filesystem search in project directory (excluding InDesign)
+    if os.path.exists(project_dir):
+        ranked_dirs = []
+        for root, dirs, files in os.walk(project_dir):
+            if 'indesign' in root.lower():
+                continue
+            images = [f for f in files if f.lower().endswith(('.eps', '.tif', '.tiff', '.jpg', '.jpeg', '.png')) and not f.startswith('.') and not f.lower().endswith('.converted.png')]
+            if not images:
+                continue
+
+            score = 0
+            rel_lower = os.path.relpath(root, project_dir).lower()
+
+            if ch_num is not None:
+                ch_patterns = [f'ch {ch_num}', f'ch{ch_num}', f'ch 0{ch_num}', f'ch0{ch_num}', f'chapter {ch_num}', f'chapter 0{ch_num}', f'/{ch_num}/', f'/{ch_num:02d}/']
+                if any(p in f'/{rel_lower}/' for p in ch_patterns):
+                    score += 10
+                else:
+                    # Do not assign art folders of other chapters
+                    continue
+
+            if 'art' in rel_lower:
+                score += 5
+
+            ranked_dirs.append((score, len(images), root))
+
+        if ranked_dirs:
+            ranked_dirs.sort(key=lambda x: (x[0], x[1]), reverse=True)
+            return ranked_dirs[0][2]
+
+    return parent_dir
+
+
+def _save_art_validation_html_report(db: Session, file_record: models.File, docx_path: str, html_report: str):
+    """Saves the generated HTML validation report to disk and registers it in the DB File table."""
+    try:
+        report_filename = f"{os.path.splitext(os.path.basename(docx_path))[0]}_art_validation_report.html"
+        report_path = os.path.join(os.path.dirname(docx_path), report_filename)
+        with open(report_path, "w", encoding="utf-8") as f:
+            f.write(html_report)
+
+        existing_file = db.query(models.File).filter(
+            models.File.project_id == file_record.project_id,
+            models.File.chapter_id == file_record.chapter_id,
+            models.File.filename == report_filename
+        ).first()
+
+        if not existing_file:
+            db_report_file = models.File(
+                project_id=file_record.project_id,
+                chapter_id=file_record.chapter_id,
+                filename=report_filename,
+                file_type="html",
+                category="Manuscript",
+                path=report_path,
+            )
+            db.add(db_report_file)
+            db.commit()
+    except Exception as e:
+        print(f"[ArtValidation] Error saving report HTML file: {e}")
+
+
+@router.get("/files/{file_id}/art-validation")
+def api_v2_art_validation(
+    file_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+    file_record = db.query(models.File).filter(models.File.id == file_id).first()
+    if not file_record or not file_record.path or not os.path.exists(file_record.path):
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="FILE_NOT_FOUND",
+            message="Source file not found on disk",
+        )
+
+    docx_path = file_record.path
+    art_dir = _resolve_art_directory(docx_path, db=db, file_record=file_record)
+    result = ArtValidationEngine.validate(docx_path, art_dir)
+
+    _save_art_validation_html_report(db, file_record, docx_path, result["html_report"])
+
+    return JSONResponse(status_code=200, content=result)
+
+
+@router.get("/files/{file_id}/art-validation/html")
+def api_v2_art_validation_html(
+    file_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+    file_record = db.query(models.File).filter(models.File.id == file_id).first()
+    if not file_record or not file_record.path or not os.path.exists(file_record.path):
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="FILE_NOT_FOUND",
+            message="Source file not found on disk",
+        )
+
+    docx_path = file_record.path
+    art_dir = _resolve_art_directory(docx_path, db=db, file_record=file_record)
+    result = ArtValidationEngine.validate(docx_path, art_dir)
+
+    _save_art_validation_html_report(db, file_record, docx_path, result["html_report"])
+
+    return HTMLResponse(content=result["html_report"], status_code=200)
 
 
 @router.get("/processing-jobs/{job_id}", response_model=schemas_v2.ProcessingJobResponse)
@@ -6977,7 +7293,7 @@ def api_v2_get_paragraph_styles(
 @router.get("/admin/users", response_model=schemas_v2.AdminUsersResponse)
 def api_v2_admin_users(
     offset: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1),
+    limit: int = Query(1000, ge=1),
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -7313,12 +7629,54 @@ def api_v2_get_chapter_by_id(chapter_id: int, db: Session = Depends(database.get
         )
     from app.domains.auth.rbac_config import has_permission
     from sqlalchemy import select
+    import re
+
     chapter = db.execute(select(ChapterInfo).where(ChapterInfo.id == chapter_id)).scalars().first()
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
-    if not has_permission(viewer, "view_all_chapters") and chapter.current_assignee_name != viewer.username:
-        raise HTTPException(status_code=403, detail="Access denied to this chapter")
-    return chapter
+
+    if has_permission(viewer, "view_all_chapters") or chapter.current_assignee_name == viewer.username:
+        return chapter
+
+    c_name = (chapter.chapters or "").strip()
+    c_name_lower = c_name.lower()
+
+    # Allow Design chapter view/download for project participants
+    if c_name == "Design" or c_name_lower == "design":
+        return chapter
+
+    # Allow Art Track chapter view/download if matching viewer's assigned chapters or if user is in graphics team
+    if "art" in c_name_lower:
+        roles_lower = set()
+        if hasattr(viewer, "roles") and viewer.roles:
+            for r in viewer.roles:
+                roles_lower.add((getattr(r, "name", "") or "").lower())
+        if getattr(viewer, "role", None):
+            roles_lower.add(viewer.role.lower())
+        if getattr(viewer, "designation", None):
+            roles_lower.add(viewer.designation.lower())
+        graphics_roles = {"graphics manager", "senior graphics designer", "graphics designer", "production manager", "admin"}
+        if any(any(gr in r for gr in graphics_roles) for r in roles_lower):
+            return chapter
+
+        art_match = re.search(r'\d+', c_name)
+        if art_match:
+            num_str = art_match.group(0)
+            viewer_assigned = db.execute(
+                select(ChapterInfo)
+                .where(ChapterInfo.project == chapter.project)
+                .where(ChapterInfo.current_assignee_name == viewer.username)
+            ).scalars().all()
+            assigned_nums = set()
+            for ac in viewer_assigned:
+                m = re.search(r'\d+', ac.chapters or "")
+                if m:
+                    assigned_nums.add(m.group(0).zfill(2))
+                    assigned_nums.add(str(int(m.group(0))))
+            if num_str.zfill(2) in assigned_nums or str(int(num_str)) in assigned_nums:
+                return chapter
+
+    raise HTTPException(status_code=403, detail="Access denied to this chapter")
 
 @router.get("/chapters/project/{project}", response_model=List[ChapterInfoResponse])
 def api_v2_get_chapters_by_project(project: str, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
@@ -7331,9 +7689,64 @@ def api_v2_get_chapters_by_project(project: str, db: Session = Depends(database.
         )
     from app.domains.auth.rbac_config import has_permission
     from sqlalchemy import select
+    import re
+
     if has_permission(viewer, "view_all_chapters"):
         return list(db.execute(select(ChapterInfo).where(ChapterInfo.project == project)).scalars().all())
-    return list(db.execute(select(ChapterInfo).where(ChapterInfo.project == project).where(ChapterInfo.current_assignee_name == viewer.username)).scalars().all())
+
+    all_proj_chapters = list(db.execute(select(ChapterInfo).where(ChapterInfo.project == project)).scalars().all())
+    assigned = [c for c in all_proj_chapters if c.current_assignee_name == viewer.username]
+    assigned_ids = {c.id for c in assigned}
+
+    assigned_nums = set()
+    for c in assigned:
+        raw_num = c.chapters or ""
+        match = re.search(r'\d+', raw_num)
+        if match:
+            assigned_nums.add(match.group(0).zfill(2))
+            assigned_nums.add(str(int(match.group(0))))
+
+    roles_lower = set()
+    if hasattr(viewer, "roles") and viewer.roles:
+        for r in viewer.roles:
+            roles_lower.add((getattr(r, "name", "") or "").lower())
+    if getattr(viewer, "role", None):
+        roles_lower.add(viewer.role.lower())
+    if getattr(viewer, "designation", None):
+        roles_lower.add(viewer.designation.lower())
+
+    design_roles = {"compositor", "senior compositor", "production manager", "admin", "xml manager", "template team manager", "template designer"}
+    graphics_roles = {"graphics manager", "senior graphics designer", "graphics designer", "production manager", "admin"}
+
+    can_view_design = True
+    can_view_all_art = any(any(gr in r for gr in graphics_roles) for r in roles_lower)
+
+    result = list(assigned)
+    for c in all_proj_chapters:
+        if c.id in assigned_ids:
+            continue
+        c_name = (c.chapters or "").strip()
+        c_name_lower = c_name.lower()
+
+        if c_name == "Design" or c_name_lower == "design":
+            if can_view_design:
+                result.append(c)
+                assigned_ids.add(c.id)
+                continue
+
+        if "art" in c_name_lower:
+            if can_view_all_art:
+                result.append(c)
+                assigned_ids.add(c.id)
+                continue
+            art_match = re.search(r'\d+', c_name)
+            if art_match:
+                num_str = art_match.group(0)
+                if num_str.zfill(2) in assigned_nums or str(int(num_str)) in assigned_nums:
+                    result.append(c)
+                    assigned_ids.add(c.id)
+
+    return result
 
 @router.get("/chapters/client/{client}", response_model=List[ChapterInfoResponse])
 def api_v2_get_chapters_by_client(client: str, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
@@ -7668,6 +8081,7 @@ def api_v2_create_chapter_with_art(
 def api_v2_create_chapters_with_manuscript_zip(
     project_id: int,
     file: UploadFile = FastAPIFile(...),
+    workflow_name: str | None = Form(None),
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -7678,6 +8092,17 @@ def api_v2_create_chapters_with_manuscript_zip(
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="PROJECT_NOT_FOUND", message="Project not found.")
+
+    if workflow_name and workflow_name.strip():
+        file_details = getattr(project, "file_details", None) or {}
+        if not isinstance(file_details, dict): file_details = {}
+        track_wfs = file_details.get("track_workflows", {})
+        if not isinstance(track_wfs, dict): track_wfs = {}
+        track_wfs["manuscript"] = workflow_name.strip()
+        file_details["track_workflows"] = track_wfs
+        project.file_details = file_details
+        flag_modified(project, "file_details")
+        db.commit()
 
     if not file.filename or not file.filename.lower().endswith(".zip"):
         return _error_response(
@@ -7733,6 +8158,7 @@ def api_v2_create_chapters_with_manuscript_zip(
                     title=title,
                     upload_dir=file_service.UPLOAD_DIR,
                     status="Received",
+                    workflow_name=workflow_name,
                 )
                 new_chapter = result["chapter"]
                 if not new_chapter:
@@ -7767,6 +8193,7 @@ def api_v2_create_chapters_with_manuscript_zip(
 def api_v2_create_chapters_with_art_zip(
     project_id: int,
     file: UploadFile = FastAPIFile(...),
+    workflow_name: str | None = Form(None),
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -7777,6 +8204,17 @@ def api_v2_create_chapters_with_art_zip(
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="PROJECT_NOT_FOUND", message="Project not found.")
+
+    if workflow_name and workflow_name.strip():
+        file_details = getattr(project, "file_details", None) or {}
+        if not isinstance(file_details, dict): file_details = {}
+        track_wfs = file_details.get("track_workflows", {})
+        if not isinstance(track_wfs, dict): track_wfs = {}
+        track_wfs["art"] = workflow_name.strip()
+        file_details["track_workflows"] = track_wfs
+        project.file_details = file_details
+        flag_modified(project, "file_details")
+        db.commit()
 
     if not file.filename or not file.filename.lower().endswith(".zip"):
         return _error_response(
@@ -7851,6 +8289,7 @@ def api_v2_create_chapters_with_art_zip(
                 title=f"Chapter {new_num:02d} Art",
                 upload_dir=file_service.UPLOAD_DIR,
                 status="Received",
+                workflow_name=workflow_name,
             )
             new_chapter = result["chapter"]
             if not new_chapter:
@@ -7895,6 +8334,85 @@ def api_v2_create_chapters_with_art_zip(
     )
 
 
+from pydantic import BaseModel
+
+class TrackWorkflowUpdateRequest(BaseModel):
+    track: str
+    workflow_name: str
+
+@router.patch("/projects/{project_id}/track-workflows")
+def api_v2_update_track_workflow(
+    project_id: int,
+    req: TrackWorkflowUpdateRequest,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(status_code=status.HTTP_401_UNAUTHORIZED, code="AUTH_REQUIRED", message="Authentication required.")
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(status_code=status.HTTP_404_NOT_FOUND, code="PROJECT_NOT_FOUND", message="Project not found.")
+
+    track = req.track.lower().strip()
+    if track not in ("design", "manuscript", "art"):
+        return _error_response(status_code=status.HTTP_400_BAD_REQUEST, code="INVALID_TRACK", message="Track must be 'design', 'manuscript', or 'art'.")
+
+    file_details = getattr(project, "file_details", None) or {}
+    if not isinstance(file_details, dict):
+        file_details = {}
+    track_wfs = file_details.get("track_workflows", {})
+    if not isinstance(track_wfs, dict):
+        track_wfs = {}
+    track_wfs[track] = req.workflow_name.strip()
+    file_details["track_workflows"] = track_wfs
+    project.file_details = file_details
+    flag_modified(project, "file_details")
+
+    from app.domains.workflow.models import ChapterInfo as _ChapterInfo, WorkflowMaster as _WorkflowMaster
+    from sqlalchemy import or_ as _or
+
+    first_stage_row = db.query(_WorkflowMaster).filter(
+        _WorkflowMaster.workflow_name == req.workflow_name,
+        _or(_WorkflowMaster.previous_stage.is_(None), _WorkflowMaster.previous_stage == "")
+    ).first()
+    first_stage = first_stage_row.stage_name if first_stage_row else None
+
+    all_cis = db.query(_ChapterInfo).filter(_ChapterInfo.project == project.code).all()
+    for ci in all_cis:
+        if not ci.chapters:
+            continue
+        ci_track = "manuscript"
+        if ci.chapters == "Design":
+            ci_track = "design"
+        elif "Art" in ci.chapters or ci.chapters.endswith(" - Art"):
+            ci_track = "art"
+
+        if ci_track == track:
+            ci.workflow = req.workflow_name
+            if first_stage:
+                ci.stage_name = first_stage
+
+    all_ch = db.query(models.Chapter).filter(models.Chapter.project == project.project_code).all()
+    for ch in all_ch:
+        if not ch.chapters:
+            continue
+        ch_track = "manuscript"
+        if ch.chapters == "Design":
+            ch_track = "design"
+        elif "Art" in ch.chapters or ch.chapters.endswith(" - Art"):
+            ch_track = "art"
+
+        if ch_track == track:
+            ch.workflow = req.workflow_name
+            if first_stage:
+                ch.stage_name = first_stage
+
+    db.commit()
+    return {"success": True, "track": track, "workflow_name": req.workflow_name}
+
+
 @router.post("/projects/{project_id}/sync-chapters")
 def api_v2_sync_chapters(project_id: int, db: Session = Depends(database.get_db), user=Depends(get_current_user_from_cookie)):
     """Sync CMS chapters → WMS chapter_details for projects created before auto-sync was added."""
@@ -7921,16 +8439,17 @@ def api_v2_sync_chapters(project_id: int, db: Session = Depends(database.get_db)
     created = 0
     for ch in cms_chapters:
         if ch.chapters and ch.chapters not in existing_nums:
+            wf_name, start_stage = resolve_track_workflow(db, project, ch.chapters)
             db.add(ChapterInfo(
                 client=project.division_code or "",
                 project=project.code,
                 chapters=ch.chapters,
                 chapter_title=ch.chapter_title or f"Chapter {ch.chapters}",
-                workflow=project.workflow_name or "",
+                workflow=ch.workflow or wf_name,
                 status="Received",
                 complexity_level=getattr(project, "composition", None) or "Medium",
                 stage_level=1,
-                stage_name=first_stage,
+                stage_name=ch.stage_name or start_stage or first_stage,
                 published_status="Draft",
                 priority=getattr(project, "priority", None) or "Normal",
                 project_manager_name=getattr(project, "project_manager", None) or None,
@@ -8079,6 +8598,44 @@ def _resolve_placeholders(text: str, chapter, project, client, current_stage: st
     for key, value in placeholders.items():
         resolved = resolved.replace(key, str(value))
     return resolved
+
+def _sort_chapter_key(ch_str: str):
+    import re
+    if ch_str == 'FM':
+        return (0, 0, '')
+    if ch_str == 'BM':
+        return (2, 0, '')
+    match = re.search(r'\d+', ch_str)
+    if match:
+        return (1, int(match.group(0)), ch_str)
+    return (3, 0, ch_str)
+
+def _format_multi_chapter_email(subject: str, body: str, first_ch_num: str, chapter_numbers: list[str]) -> tuple[str, str]:
+    import re
+    seen = set()
+    unique_chs = []
+    for c in chapter_numbers:
+        if c and c not in seen:
+            seen.add(c)
+            unique_chs.append(c)
+
+    sorted_chs = sorted(unique_chs, key=_sort_chapter_key)
+    ch_names_str = ", ".join(sorted_chs)
+
+    new_subject = subject
+    if first_ch_num and first_ch_num in new_subject:
+        new_subject = new_subject.replace(first_ch_num, ch_names_str)
+
+    new_body = body
+    if first_ch_num and f"Chapter {first_ch_num}" in new_body:
+        new_body = new_body.replace(f"Chapter {first_ch_num}", f"Chapters {ch_names_str}")
+    elif first_ch_num and first_ch_num in new_body:
+        new_body = new_body.replace(first_ch_num, ch_names_str)
+
+    new_body = new_body.replace("The chapter has been moved", "The chapters have been moved")
+    new_body = new_body.replace("is now ready for processing", "are now ready for processing")
+
+    return new_subject, new_body
 
 @router.get("/chapters/{chapter_id}/transition-config", response_model=TransitionConfigResponse)
 def api_v2_get_chapter_transition_config(
@@ -8231,6 +8788,248 @@ def api_v2_chapter_transition_email(
         "stage_name": chapter.stage_name,
         "status": chapter.status
     }}
+
+
+@router.post("/chapters/bulk-transition-config", response_model=schemas_v2.BulkTransitionConfigResponse)
+def api_v2_bulk_transition_config(
+    payload: schemas_v2.BulkTransitionConfigRequest,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie)
+):
+    _require_cookie_user(user)
+    from sqlalchemy import select
+    from app.domains.workflow.models import ChapterInfo, WorkflowMaster
+    from app.domains.projects.models import Project
+    from app.domains.clients.models import Client
+
+    if not payload.chapter_ids:
+        return schemas_v2.BulkTransitionConfigResponse(has_config=False, chapters=[])
+
+    chapters = db.execute(select(ChapterInfo).where(ChapterInfo.id.in_(payload.chapter_ids))).scalars().all()
+    if not chapters:
+        return schemas_v2.BulkTransitionConfigResponse(has_config=False, chapters=[])
+
+    previews: list[schemas_v2.BulkTransitionItemPreview] = []
+    first_ch = chapters[0]
+    first_project = db.execute(select(Project).where(Project.project_code == first_ch.project)).scalars().first()
+    first_client = None
+    if first_project and first_project.client_id:
+        first_client = db.execute(select(Client).where(Client.id == first_project.client_id)).scalars().first()
+
+    for ch in chapters:
+        ch_project = first_project if (first_project and first_project.project_code == ch.project) else db.execute(select(Project).where(Project.project_code == ch.project)).scalars().first()
+        ch_workflow = (ch.workflow or "").strip() or (ch_project.workflow_name if ch_project else "") or "Workflow1"
+        
+        stages = db.execute(
+            select(WorkflowMaster)
+            .where(WorkflowMaster.workflow_name == ch_workflow)
+        ).scalars().all()
+
+        current_stage = ch.stage_name or ""
+        next_stage_name = None
+        is_last = False
+
+        if stages:
+            curr_obj = next((s for s in stages if s.stage_name == current_stage), None)
+            if curr_obj and curr_obj.next_stage:
+                next_stage_name = curr_obj.next_stage
+            last_obj = next((s for s in stages if not s.next_stage), None)
+            if last_obj and last_obj.stage_name == (next_stage_name or current_stage):
+                is_last = True
+
+        previews.append(schemas_v2.BulkTransitionItemPreview(
+            chapter_id=ch.id,
+            chapter_number=ch.chapters,
+            chapter_title=ch.chapter_title,
+            current_stage=current_stage,
+            next_stage=next_stage_name,
+            workflow_name=ch_workflow,
+            is_last_stage=is_last,
+        ))
+
+    client_name = first_project.client_name if first_project else first_ch.client
+    client_identifier = first_client.division if (first_client and first_client.division) else client_name
+    current_stage_label = first_ch.stage_name or ""
+    sample_next_stage = previews[0].next_stage or ""
+
+    cfg = _get_stage_notification_config(client_identifier, current_stage_label)
+    if not cfg:
+        return schemas_v2.BulkTransitionConfigResponse(has_config=False, chapters=previews)
+
+    custom_msg = _resolve_placeholders(cfg.get("custom_message", ""), first_ch, first_project, first_client, current_stage_label, sample_next_stage)
+    to_resolved = [_resolve_placeholders(e, first_ch, first_project, first_client, current_stage_label, sample_next_stage) for e in cfg.get("to", [])]
+    cc_resolved = [_resolve_placeholders(e, first_ch, first_project, first_client, current_stage_label, sample_next_stage) for e in cfg.get("cc", [])]
+    subj_resolved = _resolve_placeholders(cfg.get("subject", ""), first_ch, first_project, first_client, current_stage_label, sample_next_stage)
+    body_resolved = _resolve_placeholders(cfg.get("body", ""), first_ch, first_project, first_client, current_stage_label, sample_next_stage)
+
+    if len(previews) > 1:
+        subj_resolved, body_resolved = _format_multi_chapter_email(
+            subj_resolved,
+            body_resolved,
+            first_ch.chapters,
+            [p.chapter_number for p in previews if p.chapter_number]
+        )
+
+    return schemas_v2.BulkTransitionConfigResponse(
+        has_config=True,
+        chapters=previews,
+        custom_message=custom_msg,
+        to=to_resolved,
+        cc=cc_resolved,
+        subject=subj_resolved,
+        body=body_resolved,
+        from_email=settings.SMTP_FROM
+    )
+
+
+@router.post("/chapters/bulk-transition")
+def api_v2_bulk_transition_execute(
+    payload: schemas_v2.BulkTransitionExecuteRequest,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie)
+):
+    _require_cookie_user(user)
+    from sqlalchemy import select
+    from app.domains.workflow.models import ChapterInfo, WorkflowMaster
+    from app.domains.projects.models import Project
+    from app.domains.workflow.api_v1 import stage_transition as internal_stage_transition, TransitionPayload
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+
+    if not payload.chapter_ids:
+        return {"message": "No chapters selected", "transitioned_count": 0}
+
+    chapters = db.execute(select(ChapterInfo).where(ChapterInfo.id.in_(payload.chapter_ids))).scalars().all()
+    if not chapters:
+        return {"message": "No matching chapters found", "transitioned_count": 0}
+
+    transitioned_count = 0
+    transitioned_chapters = []
+
+    for ch in chapters:
+        project = db.execute(select(Project).where(Project.project_code == ch.project)).scalars().first()
+        project_code = project.code if project else ch.project
+        if not project_code:
+            continue
+
+        ch_workflow = (ch.workflow or "").strip() or (project.workflow_name if project else "") or "Workflow1"
+        stages = db.execute(
+            select(WorkflowMaster)
+            .where(WorkflowMaster.workflow_name == ch_workflow)
+        ).scalars().all()
+
+        current_stage = ch.stage_name or ""
+        next_stage_name = None
+        if stages:
+            curr_obj = next((s for s in stages if s.stage_name == current_stage), None)
+            if curr_obj and curr_obj.next_stage:
+                next_stage_name = curr_obj.next_stage
+
+        if not next_stage_name:
+            continue
+
+        t_payload = TransitionPayload(
+            from_stage=current_stage,
+            to_stage=next_stage_name,
+        )
+        try:
+            internal_stage_transition(project_code, ch.chapters, t_payload, db=db)
+        except Exception as err:
+            logging.error("Failed internal stage transition for chapter %s: %s", ch.chapters, err)
+
+        ch.stage_name = next_stage_name
+        ch.current_assignee_name = None
+
+        last_stage_obj = next((s for s in stages if not s.next_stage), None) if stages else None
+        if last_stage_obj and last_stage_obj.stage_name == next_stage_name:
+            ch.status = "complete"
+
+        transitioned_count += 1
+        transitioned_chapters.append({
+            "id": ch.id,
+            "chapter": ch.chapters,
+            "from_stage": current_stage,
+            "to_stage": next_stage_name,
+            "status": ch.status
+        })
+
+    db.commit()
+
+    if payload.send_email:
+        to_emails = payload.to_emails or []
+        cc_emails = payload.cc_emails or []
+        subject = payload.subject or ""
+        body = payload.body or ""
+
+        if not to_emails and chapters:
+            first_ch = chapters[0]
+            first_project = db.execute(select(Project).where(Project.project_code == first_ch.project)).scalars().first()
+            first_client = None
+            if first_project and first_project.client_id:
+                from app.domains.clients.models import Client
+                first_client = db.execute(select(Client).where(Client.id == first_project.client_id)).scalars().first()
+
+            client_name = first_project.client_name if first_project else first_ch.client
+            client_identifier = first_client.division if (first_client and first_client.division) else client_name
+            current_stage_label = transitioned_chapters[0]["from_stage"] if transitioned_chapters else (first_ch.stage_name or "")
+            sample_next_stage = transitioned_chapters[0]["to_stage"] if transitioned_chapters else ""
+
+            cfg = _get_stage_notification_config(client_identifier, current_stage_label)
+            if cfg:
+                to_emails = [_resolve_placeholders(e, first_ch, first_project, first_client, current_stage_label, sample_next_stage) for e in cfg.get("to", [])]
+                cc_emails = [_resolve_placeholders(e, first_ch, first_project, first_client, current_stage_label, sample_next_stage) for e in cfg.get("cc", [])]
+
+                raw_subject = cfg.get("subject", "")
+                raw_body = cfg.get("body", "")
+
+                subject = _resolve_placeholders(raw_subject, first_ch, first_project, first_client, current_stage_label, sample_next_stage)
+                body = _resolve_placeholders(raw_body, first_ch, first_project, first_client, current_stage_label, sample_next_stage)
+
+                if len(transitioned_chapters) > 1:
+                    subject, body = _format_multi_chapter_email(
+                        subject,
+                        body,
+                        first_ch.chapters,
+                        [item["chapter"] for item in transitioned_chapters if item.get("chapter")]
+                    )
+
+        if to_emails:
+            msg = MIMEMultipart()
+            msg['From'] = settings.SMTP_FROM
+            msg['To'] = ", ".join(to_emails)
+            if cc_emails:
+                msg['Cc'] = ", ".join(cc_emails)
+            msg['Subject'] = subject or "Bulk Stage Transition Notification"
+            msg.attach(MIMEText(body or "", 'plain'))
+
+            try:
+                if settings.SMTP_USE_SSL:
+                    server = smtplib.SMTP_SSL(settings.SMTP_HOST, settings.SMTP_PORT)
+                else:
+                    server = smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT)
+
+                server.ehlo()
+                if not settings.SMTP_USE_SSL and settings.SMTP_USE_TLS:
+                    server.starttls()
+                    server.ehlo()
+
+                if settings.SMTP_USERNAME and settings.SMTP_PASSWORD:
+                    server.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
+
+                recipients = to_emails + (cc_emails if cc_emails else [])
+                server.sendmail(msg['From'], recipients, msg.as_string())
+                server.quit()
+            except Exception as e:
+                logging.error("SMTP bulk send failed: %s", e)
+
+    return {
+        "status": "ok",
+        "message": f"Successfully advanced {transitioned_count} chapter(s).",
+        "transitioned_count": transitioned_count,
+        "chapters": transitioned_chapters
+    }
+
 
 
 
@@ -8494,16 +9293,17 @@ def api_v2_finalize_mapping(
             models.Chapter.chapters == ch_num,
         ).first()
         if not chapter:
+            wf_name, start_stage = resolve_track_workflow(db, project, ch_num)
             chapter = models.Chapter(
                 client=project.division_code or "",
                 project=project.project_code,
                 chapters=ch_num,
                 chapter_title=ch_title,
-                workflow=project.workflow_name or "",
+                workflow=wf_name,
                 status="Received",
                 complexity_level=getattr(project, "composition", None) or "Medium",
                 stage_level=1,
-                stage_name=first_stage,
+                stage_name=start_stage,
                 published_status="Draft",
                 priority=getattr(project, "priority", None) or "Normal",
             )
@@ -8570,16 +9370,17 @@ def api_v2_finalize_mapping(
     }
     for _ch in all_cms_chapters:
         if _ch.chapters and _ch.chapters not in existing_ci_nums:
+            wf_name, start_stage = resolve_track_workflow(db, project, _ch.chapters)
             db.add(_ChapterInfo(
                 client=project.division_code or "",
                 project=project.code,
                 chapters=_ch.chapters,
                 chapter_title=_ch.chapter_title or f"Chapter {_ch.chapters}",
-                workflow=project.workflow_name or "",
+                workflow=_ch.workflow or wf_name,
                 status="Received",
                 complexity_level=getattr(project, "composition", None) or "Medium",
                 stage_level=1,
-                stage_name=first_stage,
+                stage_name=_ch.stage_name or start_stage or first_stage,
                 published_status="Draft",
                 priority=getattr(project, "priority", None) or "Normal",
                 project_manager_name=getattr(project, "project_manager", None) or None,
@@ -8645,3 +9446,136 @@ def api_v2_finalize_mapping(
     total_chapters = db.query(models.Chapter).filter(models.Chapter.project == project.project_code).count()
 
     return {"message": "Files mapped and chapters created.", "created_chapters": total_chapters}
+
+
+@router.post("/uploads/{project_id}/chapter/{chapter_name}/bulk-download")
+def api_v2_chapter_bulk_download(
+    project_id: int,
+    chapter_name: str,
+    payload: schemas_v2.BulkDownloadPayload,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    from urllib.parse import unquote
+    import io
+
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Authentication required.",
+        )
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+
+    clean_chapter_name = unquote(chapter_name).strip()
+
+    # Find chapter
+    chapter = db.query(models.ChapterInfo).filter(
+        models.ChapterInfo.project == project.code,
+        (models.ChapterInfo.chapters == clean_chapter_name) | (models.ChapterInfo.chapter_title == clean_chapter_name)
+    ).first()
+
+    raw_num = clean_chapter_name.split("-")[-1] if clean_chapter_name else ""
+    if not chapter and clean_chapter_name.startswith("chapter-") and raw_num.isdigit():
+        chapter = db.query(models.ChapterInfo).filter(
+            models.ChapterInfo.project == project.code,
+            models.ChapterInfo.id == int(raw_num)
+        ).first()
+
+    if not chapter and raw_num:
+        try:
+            chap_num = str(int(raw_num))
+            padded_num = f"{int(raw_num):02d}"
+        except (TypeError, ValueError):
+            chap_num = raw_num
+            padded_num = raw_num
+
+        chapter = db.query(models.ChapterInfo).filter(
+            models.ChapterInfo.project == project.code,
+            (models.ChapterInfo.chapters == chap_num) | (models.ChapterInfo.chapters == padded_num)
+        ).first()
+
+        if not chapter and chap_num.isdigit():
+            chapter = db.query(models.ChapterInfo).filter(
+                models.ChapterInfo.project == project.code,
+                (models.ChapterInfo.chapters.ilike(f"%{padded_num}%") | models.ChapterInfo.chapters.ilike(f"%{chap_num}%"))
+            ).first()
+
+    chapter_folder_str = chapter.chapters if chapter else clean_chapter_name
+
+    zip_buffer = io.BytesIO()
+    added_files = 0
+
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f_item in payload.files:
+            sub = f_item.subfolder or ""
+            fname = f_item.file_name
+            found_path = None
+
+            # 1. Search FileVersion table if subfolder is Backup
+            if sub == "Backup" and chapter:
+                version_entry = db.query(models.FileVersion).join(
+                    models.File, models.FileVersion.file_id == models.File.id
+                ).filter(
+                    models.File.chapter_id == chapter.id,
+                    models.FileVersion.path.like(f"%/{fname}")
+                ).first()
+                if version_entry and version_entry.path and os.path.exists(version_entry.path):
+                    found_path = version_entry.path
+
+            # 2. Search File table by project & chapter & filename
+            if not found_path and chapter:
+                file_rec = db.query(models.File).filter(
+                    models.File.project_id == project.id,
+                    models.File.chapter_id == chapter.id,
+                    models.File.filename == fname
+                ).first()
+                if file_rec and file_rec.path:
+                    cand = file_rec.path if os.path.isabs(file_rec.path) else os.path.join(file_service.UPLOAD_DIR, file_rec.path)
+                    if os.path.exists(cand):
+                        found_path = cand
+
+            # 3. Direct filesystem candidates
+            if not found_path:
+                candidates = [
+                    os.path.join(file_service.UPLOAD_DIR, project.code, chapter_folder_str, sub, fname),
+                    os.path.join(file_service.UPLOAD_DIR, project.code, chapter_folder_str, fname),
+                    os.path.join(file_service.UPLOAD_DIR, project.code, sub, fname),
+                    os.path.join(file_service.UPLOAD_DIR, project.code, fname),
+                ]
+                for cand in candidates:
+                    if os.path.exists(cand) and os.path.isfile(cand):
+                        found_path = cand
+                        break
+
+            if found_path and os.path.exists(found_path):
+                arcname = os.path.join(sub, fname) if sub else fname
+                zf.write(found_path, arcname)
+                added_files += 1
+
+    if added_files == 0:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="FILES_NOT_FOUND",
+            message="None of the requested files could be located on disk.",
+        )
+
+    zip_buffer.seek(0)
+    safe_filename = clean_chapter_name.replace(" ", "_").replace("/", "_")
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{safe_filename}_bulk.zip"'}
+    )
+
+
+
+

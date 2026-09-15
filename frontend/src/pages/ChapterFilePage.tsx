@@ -32,10 +32,11 @@ import { FileDetailPanel } from '@/features/projects/components/FileDetailPanel'
 import { ReferenceCheckModal } from '@/features/projects/components/ReferenceCheckModal'
 import { TagSetSelectModal } from '@/features/projects/components/TagSetSelectModal'
 import { XmlToIndesignModal } from '@/components/XmlToIndesignModal'
+import { ArtValidationModal } from '@/components/ArtValidationModal'
 import {
   startLanguageEdit,
   startPpdGeneration, startPermissionsCheck, startCreditExtraction,
-  startBiasScan, startWordToXml, getProcessingStatus, startIndesignToXml, startExtractDesignCss, startStyleValidation, startViewProof,
+  startBiasScan, startWordToXml, getProcessingStatus, startIndesignToXml, startExtractDesignCss, startExtractDesignStyle, startStyleValidation, startStyleMatchDesign, startViewProof,
 } from '@/api/processing'
 import { deleteFile, downloadFile, generateFigureAssessment, generateFigurePdf } from '@/api/files'
 import { useChapterFilesQuery } from '@/features/projects/useChapterFilesQuery'
@@ -275,11 +276,12 @@ function IconTooltipButton({
 }
 
 function ProcessingActionsMenu({
-  row, onOpenReferenceCheck, onOpenXmlToIndesign, stageName, isAssigned, projectId, chapterId,
+  row, onOpenReferenceCheck, onOpenXmlToIndesign, onOpenArtValidation, stageName, isAssigned, projectId, chapterId,
 }: {
   row: FileRow | null
   onOpenReferenceCheck: (file: FileRecord) => void
   onOpenXmlToIndesign: (fileId: number, fileName: string) => void
+  onOpenArtValidation: (fileId: number, fileName: string) => void
   stageName: string
   isAssigned: boolean
   projectId: number
@@ -485,23 +487,49 @@ function ProcessingActionsMenu({
           </button>
         )}
 
-        {showAction('wordToXml') && row?.subfolder?.toLowerCase() === 'manuscript' && (
+        {showAction('styleValidation') && row?.subfolder?.toLowerCase() === 'manuscript' && (
+          <>
+            <button
+              disabled={!fid}
+              type="button"
+              className={btnCls}
+              onClick={() => fid && setConfirmStep({
+                actionName: 'Style Match Design',
+                jobFn: () => startStyleMatchDesign(fid),
+                pollFileId: fid,
+                pollProcessType: 'style_match_design'
+              })}
+            >
+              <ShieldCheck size={12} /> Style Match Design
+            </button>
+            <button
+              disabled={!fid}
+              type="button"
+              className={btnCls}
+              onClick={() => fid && setConfirmStep({
+                actionName: 'Style Validation',
+                jobFn: () => startStyleValidation(fid),
+                pollFileId: fid,
+                pollProcessType: 'style_validation'
+              })}
+            >
+              <ShieldCheck size={12} /> Style Validation
+            </button>
+          </>
+        )}
+
+        {showAction('artValidation') && row?.subfolder?.toLowerCase() === 'manuscript' && (
           <button
             disabled={!fid}
             type="button"
             className={btnCls}
-            onClick={() => fid && setConfirmStep({
-              actionName: 'Style Validation',
-              jobFn: () => startStyleValidation(fid),
-              pollFileId: fid,
-              pollProcessType: 'style_validation'
-            })}
+            onClick={() => fid && onOpenArtValidation(fid, row?.file_name || '')}
           >
-            <ShieldCheck size={12} /> Style Validation
+            <Image size={12} /> Art Validation
           </button>
         )}
 
-        {showAction('xmlToIndesign') && fname.endsWith('.xml') && row?.subfolder?.toLowerCase() === 'xml' && (
+        {showAction('xmlToIndesign') && row?.subfolder?.toLowerCase() === 'xml' && (
           <button
             disabled={!fid}
             className={btnCls}
@@ -515,7 +543,7 @@ function ProcessingActionsMenu({
           </button>
         )}
 
-        {showAction('indesignToXml') && fname.endsWith('.indd') && row?.subfolder?.toLowerCase() === 'indesign' && (
+        {showAction('indesignToXml') && row?.subfolder?.toLowerCase() === 'indesign' && (
           <button
             disabled={!fid}
             className={btnCls}
@@ -526,22 +554,37 @@ function ProcessingActionsMenu({
         )}
 
         {(fname.endsWith('.indd') || fname.endsWith('.indt')) && (row?.subfolder?.toLowerCase() === 'indesign' || row?.subfolder?.toLowerCase() === 'design' || row?.subfolder?.toLowerCase() === 'template') && (
-          <button
-            disabled={!fid}
-            type="button"
-            className={btnCls}
-            onClick={() => fid && setConfirmStep({
-              actionName: 'Extract Layout CSS',
-              jobFn: () => startExtractDesignCss(fid),
-              pollFileId: fid,
-              pollProcessType: 'extract_design_css'
-            })}
-          >
-            <Wrench size={12} /> Extract Layout CSS
-          </button>
+          <>
+            <button
+              disabled={!fid}
+              type="button"
+              className={btnCls}
+              onClick={() => fid && setConfirmStep({
+                actionName: 'Extract Style',
+                jobFn: () => startExtractDesignStyle(fid),
+                pollFileId: fid,
+                pollProcessType: 'extract_design_style'
+              })}
+            >
+              <Wrench size={12} /> Extract Style
+            </button>
+            <button
+              disabled={!fid}
+              type="button"
+              className={btnCls}
+              onClick={() => fid && setConfirmStep({
+                actionName: 'Extract Layout CSS',
+                jobFn: () => startExtractDesignCss(fid),
+                pollFileId: fid,
+                pollProcessType: 'extract_design_css'
+              })}
+            >
+              <Wrench size={12} /> Extract Layout CSS
+            </button>
+          </>
         )}
 
-        {fname.endsWith('.xhtml') && row?.subfolder?.toLowerCase() === 'proof' && (
+        {showAction('viewProof') && row?.subfolder?.toLowerCase() === 'proof' && (
           <button
             disabled={!fid}
             type="button"
@@ -673,6 +716,7 @@ export function ChapterFilePage({
   const [expandedSources, setExpandedSources] = useState<Record<number, boolean>>({})
   const queryClient = useQueryClient()
   const [xmlToIndesignFile, setXmlToIndesignFile] = useState<{ id: number; name: string } | null>(null)
+  const [artValidationFile, setArtValidationFile] = useState<{ id: number; name: string } | null>(null)
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({
     template: true,
   })
@@ -1175,11 +1219,12 @@ export function ChapterFilePage({
   }
 
   async function handleBulkDownload() {
-    if (selectedCount === 0 || downloadBusy) return
+    const targets = selectedCount > 0 ? selectedRows : rows
+    if (targets.length === 0 || downloadBusy) return
     const chapterLabel = chapterFolderData?.chapter_name ?? resolvedChapterLabel
 
-    if (selectedCount === 1) {
-      const row = selectedRows[0]
+    if (targets.length === 1) {
+      const row = targets[0]
       if (row.db_id) {
         const a = document.createElement('a')
         a.href = `/api/v2/files/${row.db_id}/download`
@@ -1194,16 +1239,11 @@ export function ChapterFilePage({
       return
     }
 
-    if (!chapterFolderData) {
-      toast.error('Bulk ZIP download requires folder data — use individual download for now')
-      return
-    }
-
     setDownloadBusy(true)
     try {
       const res = await apiClient.post(
         `/uploads/${pid}/chapter/${chapterLabel}/bulk-download`,
-        { files: selectedRows.map(r => ({ subfolder: r.subfolder, file_name: r.file_name })) },
+        { files: targets.map(r => ({ subfolder: r.subfolder, file_name: r.file_name })) },
         { responseType: 'blob' },
       )
       const url = URL.createObjectURL(new Blob([res.data as BlobPart], { type: 'application/zip' }))
@@ -1303,8 +1343,8 @@ export function ChapterFilePage({
             <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-accent text-primary border border-primary/20 flex-shrink-0">{resolvedStageName}</span>
           )}
           {!resolvedIsAssigned && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 flex-shrink-0">
-              <Eye size={10} /> View Only
+            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 flex-shrink-0 shadow-xs">
+              <Download size={10} /> Download Only
             </span>
           )}
         </div>
@@ -1321,19 +1361,19 @@ export function ChapterFilePage({
         {/* Bulk Download */}
         {activeFolderConfig[activeFolder]?.allowDownload && (
           <button
-            onClick={() => selectedCount > 0 ? void handleBulkDownload() : undefined}
-            disabled={downloadBusy}
-            title={selectedCount === 0 ? 'Select files to download' : undefined}
+            onClick={() => void handleBulkDownload()}
+            disabled={rows.length === 0 || downloadBusy}
+            title={rows.length === 0 ? 'No files to download' : selectedCount === 0 ? 'Download all files in this folder' : undefined}
             className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors shadow-sm relative
-              ${selectedCount > 0 && !downloadBusy
-                ? 'border-primary text-primary hover:bg-accent'
+              ${rows.length > 0 && !downloadBusy
+                ? 'border-primary text-primary hover:bg-accent cursor-pointer'
                 : 'border-border text-muted opacity-50 cursor-not-allowed'}`}
           >
             {downloadBusy ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
-            {downloadBusy ? 'Downloading…' : selectedCount > 1 ? 'Download ZIP' : 'Bulk Download'}
-            {selectedCount > 0 && !downloadBusy && (
+            {downloadBusy ? 'Downloading…' : selectedCount > 1 ? 'Download ZIP' : selectedCount === 1 ? 'Download File' : 'Bulk Download'}
+            {rows.length > 0 && !downloadBusy && (
               <span className="absolute -top-1.5 -right-1.5 text-[9px] font-bold px-1 py-0.5 rounded-full bg-primary text-white leading-none min-w-[16px] text-center">
-                {selectedCount}
+                {selectedCount > 0 ? selectedCount : rows.length}
               </span>
             )}
           </button>
@@ -1515,6 +1555,7 @@ export function ChapterFilePage({
                   row={selectedCount === 1 ? selectedRows[0] : null}
                   onOpenReferenceCheck={setRefCheckFile}
                   onOpenXmlToIndesign={(fileId, fileName) => setXmlToIndesignFile({ id: fileId, name: fileName })}
+                  onOpenArtValidation={(fileId, fileName) => setArtValidationFile({ id: fileId, name: fileName })}
                   stageName={resolvedStageName}
                   isAssigned={resolvedIsAssigned}
                   projectId={pid}
@@ -1688,6 +1729,16 @@ export function ChapterFilePage({
           fileName={xmlToIndesignFile.name}
           projectId={pid}
           onComplete={invalidateFiles}
+        />
+      )}
+
+      {/* ── Art Validation Modal ────────────────────────────────────────── */}
+      {artValidationFile && (
+        <ArtValidationModal
+          isOpen={artValidationFile !== null}
+          onClose={() => setArtValidationFile(null)}
+          fileId={artValidationFile.id}
+          fileName={artValidationFile.name}
         />
       )}
     </div>

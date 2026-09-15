@@ -60,7 +60,7 @@ class User(Base):
     password_hash   = Column(Text,         nullable=False)
     role            = Column(String(50),   nullable=True)
     designation     = Column(String(50),   nullable=True)
-    team            = Column(String(50),   nullable=False)
+    team            = Column(String(50),   nullable=True)
     customer_access = Column(DialectJSONB,  nullable=False, default=list)
     access_level    = Column(String(50),   nullable=True, default="standard")
     active_status   = Column(Boolean,      nullable=False, default=True)

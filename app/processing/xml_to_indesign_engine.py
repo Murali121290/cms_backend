@@ -70,23 +70,35 @@ class XMLToInDesignEngine:
                 xml_filename = os.path.basename(file_path)
                 zf.write(file_path, xml_filename)
                 
-                # Add Template (.indt) file at its relative path: Design/template/indesign/name
+                # Add Template (.indt) file at its relative path and ensure both indesign and InDesign folders have it
                 template_rel = os.path.relpath(template_path, project_dir)
                 zf.write(template_path, template_rel)
+                
+                fname = os.path.basename(template_path)
+                zf.write(template_path, f"Design/template/indesign/{fname}")
+                zf.write(template_path, f"Design/template/InDesign/{fname}")
                 
                 # Add Design folders
                 design_folders = [
                     "Design/template/Common Art",
                     "Design/template/Font",
-                    "Design/template/Library"
+                    "Design/template/Library",
+                    "Design/template/indesign",
+                    "Design/template/InDesign",
                 ]
                 for folder in design_folders:
                     folder_path = os.path.join(project_dir, folder)
                     if os.path.exists(folder_path):
-                        for root, _, files in os.walk(folder_path):
+                        for root, dirs, files in os.walk(folder_path):
+                            # Skip archive subdirectories
+                            dirs[:] = [d for d in dirs if d.lower() != "archive"]
+                            if "archive" in root.lower().replace("\\", "/").split("/"):
+                                continue
                             for file in files:
                                 full_file_path = os.path.join(root, file)
                                 rel_path = os.path.relpath(full_file_path, project_dir)
+                                if "archive" in rel_path.lower().replace("\\", "/").split("/"):
+                                    continue
                                 zf.write(full_file_path, rel_path)
                                 
                 # Add Chapter Art files (Links) packaged under 'artfile/'

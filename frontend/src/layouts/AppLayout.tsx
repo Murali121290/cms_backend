@@ -15,7 +15,12 @@ export function AppLayout() {
   const { viewer } = useRBAC()
   const { showWarning, extendSession, forceLogout } = useAutoLogout()
 
-  if (viewer?.team === 'Accessibility Team' && (pathname === '/' || pathname === '/dashboard')) {
+  const isAccessibilityUser =
+    viewer?.team === 'Accessibility Team' ||
+    Boolean(viewer?.role && String(viewer.role).toLowerCase().includes('accessibility')) ||
+    Boolean((viewer as any)?.roles && (viewer as any).roles.some((r: any) => String(typeof r === 'string' ? r : r.name).toLowerCase().includes('accessibility')))
+
+  if (isAccessibilityUser && (pathname === '/' || pathname === '/dashboard' || pathname === '/workspace' || pathname === '/clients')) {
     return <Navigate to="/post-production" replace />
   }
 

@@ -89,8 +89,50 @@ export const startIndesignToXml = (fileId: number) =>
 export const startExtractDesignCss = (fileId: number) =>
   startProcessingJob(fileId, "extract_design_css", "style");
 
+export const startExtractDesignStyle = (fileId: number) =>
+  startProcessingJob(fileId, "extract_design_style", "style");
+
 export const startStyleValidation = (fileId: number) =>
   startProcessingJob(fileId, "style_validation", "style");
 
+export const startStyleMatchDesign = (fileId: number) =>
+  startProcessingJob(fileId, "style_match_design", "style");
+
 export const startViewProof = (fileId: number) =>
   startProcessingJob(fileId, "view_proof", "inplace");
+
+export interface ArtValidationSummary {
+  total_docx_figures: number;
+  total_art_files: number;
+  matched_count: number;
+  missing_count: number;
+  unreferenced_count: number;
+  warning_count: number;
+}
+
+export interface ArtValidationDetail {
+  type: string;
+  fig_num: string;
+  docx_ref: string;
+  docx_style: string;
+  filename: string;
+  status: string;
+  status_badge: string;
+  width_picas: number | null;
+  height_picas: number | null;
+  resolution_dpi: string | null;
+  file_path: string | null;
+}
+
+export interface ArtValidationResponse {
+  status: string;
+  summary: ArtValidationSummary;
+  details: ArtValidationDetail[];
+  html_report: string;
+}
+
+export async function getArtValidation(fileId: number): Promise<ArtValidationResponse> {
+  const response = await apiClient.get<ArtValidationResponse>(`/files/${fileId}/art-validation`);
+  return response.data;
+}
+

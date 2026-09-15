@@ -370,9 +370,9 @@ def validate_page_citation_links(file_details, rule_config=None):
                 "extract": m.group(0),
                 "line_number": line_num,
             })
-            if len(issues) >= 25:
+            if len(issues) >= 50:
                 break
-        if len(issues) >= 25:
+        if len(issues) >= 50:
             break
     return {"issues_count": len(issues), "issues": issues}
 

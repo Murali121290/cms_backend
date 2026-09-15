@@ -33,6 +33,16 @@
       "target_path": "OEBPS/xhtml",
       "enabled": false,
       "file_name_pattern": "*.xhtml"
+    },
+    {
+      "id": "COM-LINK-001",
+      "name": "Citations must be linked to the corresponding block",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true,
+      "rule_config": {
+        "citation_regex": "\\b(?:see\\s+)?(?:p(?:ages?|p)?(?![a-zA-Z])\\.?[ \\t\\-]*(\\d{1,4})(?:[ \\t]*[\\-–][ \\t]*\\d{1,4})?|ch(?:apter|ap)?(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))(?:[ \\t]*[\\-–][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|fig(?:ure)?(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:tbl\\.?|table)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:exh\\.?|exhibit)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:pl\\.?|plate)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|map(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|box(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:sec\\.?|section)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:pt\\.?|part)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:app\\.?|appendix)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:illus\\.?|illustration)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])))\\b"
+      }
     }
   ]
 }

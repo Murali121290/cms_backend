@@ -330,6 +330,12 @@ def validate_nav_xhtml(file_details, rule_config=None):
         if href.startswith("http"):
             continue
 
+        # Skip specific nav items (configured in rule_config)
+        inner_config = rule_config.get("rule_config", {}) if rule_config else {}
+        skip_items = inner_config.get("skip_nav_text", [])
+        if nav_text.strip().lower() in [item.lower() for item in skip_items]:
+            continue
+
         # Split file and ID
         if "#" in href:
             chapter_file, target_id = href.split("#", 1)
@@ -444,35 +450,81 @@ def validate_nav_xhtml(file_details, rule_config=None):
             })
             continue
 
-        # Get heading text
-        heading_text = current_element.get_text(separator="", strip=True)
+        # Get heading text, using null byte to track tag boundaries and strip=False to preserve node spaces
+        # Collect text from current heading and any immediately following headings (split headings)
+        collected_headings = [current_element]
+        next_sib = current_element.find_next_sibling()
+        while next_sib:
+            if next_sib.name in heading_tags or any(cls in heading_classes for cls in next_sib.get("class", [])):
+                collected_headings.append(next_sib)
+                next_sib = next_sib.find_next_sibling()
+            else:
+                # If there's a `<br/>` or empty `<p>` we could theoretically skip it, but typically they are true siblings.
+                break
+                
+        heading_texts = [h.get_text(separator="\x00", strip=False) for h in collected_headings]
+        heading_text = " ".join(heading_texts)
 
-        # TEXT MATCH check (case-insensitive)
-        if nav_text.lower() != heading_text.lower():
-            issues.append({
-                "rule_name": "Heading Text Mismatch",
-                "type": "heading_text_mismatch",
-                "href": href,
-                "expected_text": nav_text,
-                "actual_text": heading_text,
-                "message": "Nav text and heading text mismatch",
-                "category": "Error",
-                "line_number": line_num,
-                "extract": nav_text,
-            })
-        # True case mismatch (only triggers if the text is identical ignoring case)
-        elif nav_text != heading_text:
-            issues.append({
-                "rule_name": "Heading Case Mismatch",
-                "type": "heading_case_mismatch",
-                "href": href,
-                "expected_text": nav_text,
-                "actual_text": heading_text,
-                "message": "Case mismatch",
-                "category": "Warning",
-                "line_number": line_num,
-                 "extract": nav_text
-            })
+        # TEXT MATCH check with normalized spacing
+        import re
+        def normalize_spacing(text):
+            # 1. Remove \x00 before punctuation (e.g. `1\x00.` -> `1.`)
+            text = re.sub(r'\x00+([.,:;!?\)\]])', r'\1', text)
+            
+            # 2. If \x00 is AFTER punctuation and before a letter/number/quote, 
+            # it indicates a tag boundary (e.g. `</span>Gun`). 
+            # We assume CSS handles the spacing here, so we convert the boundary to a space.
+            text = re.sub(r'([.,:;!?\)\]])\x00+(?=[a-zA-Z0-9\(\[\"\'“‘])', r'\1 ', text)
+            
+            # 3. Remove all other \x00 (e.g. drop caps like `C\x00hapter` -> `Chapter`)
+            text = text.replace('\x00', '')
+            
+            # 4. Collapse multiple spaces into a single space
+            text = re.sub(r'\s+', ' ', text)
+            return text.strip()
+            
+        nav_text_norm = normalize_spacing(nav_text)
+        heading_text_norm = normalize_spacing(heading_text)
+
+        matched = False
+        if nav_text_norm.lower() == heading_text_norm.lower():
+            matched = True
+        elif len(heading_texts) > 1:
+            # Fallback for split headings: structural punctuation (. : -) is often added to the TOC 
+            # exactly at the boundary between two split heading elements.
+            # We build a regex that allows optional punctuation ONLY at these specific boundaries,
+            # ensuring all other text/punctuation (like trailing dots) is strictly checked.
+            escaped_texts = [re.escape(normalize_spacing(t).lower()) for t in heading_texts]
+            separator_pattern = r'\s*[.:\-]?\s*'
+            full_pattern = "^" + separator_pattern.join(escaped_texts) + "$"
+            if re.match(full_pattern, nav_text_norm.lower()):
+                matched = True
+
+        if not matched:
+                issues.append({
+                    "rule_name": "Heading Text Mismatch",
+                    "type": "heading_text_mismatch",
+                    "href": href,
+                    "expected_text": nav_text,
+                    "actual_text": heading_text,
+                    "message": "Nav text and heading text mismatch",
+                    "category": "Error",
+                    "line_number": line_num,
+                    "extract": nav_text,
+                })
+        # # True case mismatch (triggers if text is identical ignoring case and spacing variations)
+        # elif nav_text_norm != heading_text_norm:
+        #     issues.append({
+        #         "rule_name": "Heading Case Mismatch",
+        #         "type": "heading_case_mismatch",
+        #         "href": href,
+        #         "expected_text": nav_text,
+        #         "actual_text": heading_text,
+        #         "message": "Case mismatch",
+        #         "category": "Warning",
+        #         "line_number": line_num,
+        #          "extract": nav_text
+        #     })
 
         # Heading level validation
         if current_element.name in heading_tags:
@@ -489,13 +541,14 @@ def validate_nav_xhtml(file_details, rule_config=None):
                 parent_heading_level = file_heading_map[chapter_file][parent_nav_level]
                 # Child heading must be deeper
                 if heading_level <= parent_heading_level:
+                    expected_min_level = parent_heading_level + 1
                     issues.append({
                         "rule_name": "Nav Hierarchy Mismatch",
                         "type": "hierarchy_mismatch",
                         "href": href,
-                        "message": (f'"{heading_text}" heading hierarchy does not match chapter heading level. '
-                                   f'Navigation level: h{parent_nav_level} '
-                                   f'Chapter heading level: h{heading_level}'),
+                        "message": (f'"{heading_text}" heading hierarchy does not match TOC hierarchy. '
+                                   f'TOC implies this should be at least h{expected_min_level}, '
+                                   f'but an h{heading_level} was found in the chapter.'),
                         "category": "Error",
                         "line_number": line_num,
                     })

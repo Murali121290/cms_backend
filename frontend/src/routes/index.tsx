@@ -50,7 +50,12 @@ import { useRBAC } from '@/hooks/useRBAC'
 
 function PostProdGuard({ children }: { children: React.ReactNode }) {
   const { canAccess, viewer } = useRBAC()
-  const hasAccess = canAccess(ROLE_PERMISSIONS.access_post_production) || viewer?.team === 'Accessibility Team'
+  const isAccessUser =
+    viewer?.team === 'Accessibility Team' ||
+    Boolean(viewer?.role && String(viewer.role).toLowerCase().includes('accessibility')) ||
+    Boolean((viewer as any)?.roles && (viewer as any).roles.some((r: any) => String(typeof r === 'string' ? r : r.name).toLowerCase().includes('accessibility')))
+
+  const hasAccess = canAccess(ROLE_PERMISSIONS.access_post_production) || isAccessUser
   if (!hasAccess) {
     return <Navigate to="/" replace />
   }
