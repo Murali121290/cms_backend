@@ -106,12 +106,15 @@ def split_citation_block(text: str) -> List[str]:
 # ─── Comment insertion helper (idempotent) ──────────────────────────────────
 
 
+# The opening smart-quote is optional: an earlier pipeline pass sometimes
+# drops the leading “ (e.g. when the citation starts with an ASCII char that
+# tripped a quote-balancing pass). We anchor on the trailing quote instead.
 _AQ_MISSING_KEY_RE = re.compile(
-    r'AQ:\s*The reference\s*[“"\']([^"”\']+)[”"\']\s*is cited in the text but not given',
+    r'AQ:\s*The reference\s*[“"\']?(.+?)[”"\']\s*is cited in the text but not given',
     re.IGNORECASE,
 )
 _AQ_UNUSED_KEY_RE = re.compile(
-    r'AQ:\s*The reference\s*[“"\']([^"”\']+)[”"\']\s*is given in the list but not cited',
+    r'AQ:\s*The reference\s*[“"\']?(.+?)[”"\']\s*is given in the list but not cited',
     re.IGNORECASE,
 )
 _YEAR_RE = re.compile(r'(19|20)\d{2}[a-z]?|n\.\s*d\.', re.IGNORECASE)
@@ -203,71 +206,77 @@ def _paragraph_has_comment_text(para, text: str) -> bool:
     return False
 
 
-def _find_citation_anchor_runs(para, citation_text: str) -> List[Any]:
-    """Return the `<w:r>` runs in `para` that together spell `citation_text`.
+def _norm_citation(s: str) -> str:
+    """Collapse a citation string to a comparable form.
 
-    Used to scope a "missing citation" AQ to the exact citation string in the
-    paragraph rather than the whole paragraph. Match is whitespace-insensitive
-    and considers only citation-styled runs (`citebib` character style) or
-    runs already inside a `bib_*` bookmark — that keeps the anchor tight and
-    avoids grabbing surrounding narrative text.
+    Parens/brackets/commas/periods are dropped and whitespace collapsed so
+    ``(Smith, 2020)``, ``Smith (2020)`` and ``Smith 2020`` all normalise to
+    the same token stream. Case is lowered. This is what makes the anchor
+    finder tolerate the formatting variants callers pass in — the CitationProcessor
+    may emit ``Name (Year)`` while the paragraph carries ``(Name, Year)``.
     """
-    if not citation_text:
-        return []
+    if not s:
+        return ""
+    s = re.sub(r"[()\[\],.]", " ", s).lower()
+    return re.sub(r"\s+", " ", s).strip()
 
-    def _norm(s: str) -> str:
-        return re.sub(r"\s+", " ", (s or "").strip().lower())
 
-    needle = _norm(citation_text.strip("()[]"))
+def _locate_citation_in_text(text: str, citation_text: str) -> Optional[Tuple[int, int]]:
+    """Return the (start, end) char offsets of `citation_text` inside `text`,
+    or None if not found.
+
+    Word tokens must appear in order but separators between them may vary
+    (spaces, commas, opening parens) — this matches ``Smith (2020)`` in a
+    paragraph carrying ``(Smith, 2020)`` and vice versa. If an enclosing
+    paren/bracket sits directly adjacent to the match, it is included in
+    the returned span so the user sees the whole ``(citation)`` block.
+    """
+    tokens = re.findall(r"\w+", citation_text)
+    if not tokens:
+        return None
+    pattern = r"[\s(),\[\]]*".join(re.escape(t) for t in tokens)
+    m = re.search(pattern, text, re.IGNORECASE)
+    if m is None:
+        return None
+    start, end = m.start(), m.end()
+    # Grow left/right to include an immediately-adjacent opening/closing
+    # bracket, so ``(Smith, 2020)`` is captured whole rather than just
+    # ``Smith, 2020``.
+    if start > 0 and text[start - 1] in "([":
+        start -= 1
+    if end < len(text) and text[end] in ")]":
+        end += 1
+    return (start, end)
+
+
+def _find_citation_runs_by_text(p_el, citation_text: str) -> List[Any]:
+    """Return the `<w:r>` runs in `p_el` that together spell `citation_text`.
+
+    Sliding window over the paragraph's runs picks the shortest contiguous
+    run span whose concatenated text (normalised via `_norm_citation` —
+    parens/commas/case ignored) contains the citation. Returns [] if no
+    span matches. Works on a raw lxml `<w:p>` element so both the
+    python-docx path and the XML-finalize path can call it.
+    """
+    needle = _norm_citation(citation_text)
     if not needle:
         return []
 
-    p_el = para._element
-    # Identify runs sitting inside a bib_N bookmark so we can prefer those.
-    bib_ids: set = set()
-    for bs in p_el.iter(_W + "bookmarkStart"):
-        name = bs.get(_W + "name") or ""
-        if _BIB_LOWER_RE.match(name):
-            bid = bs.get(_W + "id")
-            if bid:
-                bib_ids.add(bid)
-
-    runs: List[Any] = []
-    inside_bib: List[bool] = []
-    open_bib: set = set()
-    for el in p_el.iter():
-        if el is p_el:
-            continue
-        tag = el.tag
-        if tag == _W + "bookmarkStart":
-            bid = el.get(_W + "id")
-            if bid in bib_ids:
-                open_bib.add(bid)
-        elif tag == _W + "bookmarkEnd":
-            bid = el.get(_W + "id")
-            if bid in bib_ids:
-                open_bib.discard(bid)
-        elif tag == _W + "r":
-            runs.append(el)
-            inside_bib.append(bool(open_bib))
-
+    runs: List[Any] = [el for el in p_el.iter(_W + "r") if el is not p_el]
     if not runs:
         return []
 
     def _run_text_of(r) -> str:
         return "".join((t.text or "") for t in r.findall(_W + "t"))
 
-    # Sliding window over runs — find the shortest span whose concatenated
-    # text (normalised) contains the citation. Prefer a window whose runs are
-    # mostly citation-styled / inside bib_N.
     best: Optional[Tuple[int, int]] = None
     for i in range(len(runs)):
         acc = ""
         for j in range(i, len(runs)):
             acc += _run_text_of(runs[j])
-            if len(_norm(acc)) < len(needle):
+            if len(_norm_citation(acc)) < len(needle):
                 continue
-            if needle in _norm(acc):
+            if needle in _norm_citation(acc):
                 if best is None or (j - i) < (best[1] - best[0]):
                     best = (i, j)
                 break
@@ -275,20 +284,167 @@ def _find_citation_anchor_runs(para, citation_text: str) -> List[Any]:
     if best is None:
         return []
     i, j = best
+
+    # Extend the window by one run on each side when that neighbour holds
+    # nothing but an enclosing bracket. The sliding window minimises the run
+    # count and can end just before a closing ")"/"]" run, leaving Word to
+    # highlight the citation without its closing paren.
+    def _is_bracket_only(r_el, brackets: str) -> bool:
+        text = _run_text_of(r_el).strip()
+        return bool(text) and all(c in brackets for c in text)
+
+    while j + 1 < len(runs) and _is_bracket_only(runs[j + 1], ")]"):
+        j += 1
+    while i - 1 >= 0 and _is_bracket_only(runs[i - 1], "(["):
+        i -= 1
+
     return runs[i:j + 1]
 
 
-def _find_reference_anchor_runs(para) -> List[Any]:
-    """Return a short anchor for an "unused reference" AQ.
+def _tighten_citation_runs(runs: List[Any], citation_text: str) -> List[Any]:
+    """Trim the run span so it contains only the citation text.
 
-    Uses the first content run of the reference paragraph (typically the
-    `bib_surname` run, e.g. "Capobianco"). Falls back to the first run when
-    no styled surname run is present.
+    Splits the first and/or last run of `runs` when they carry non-citation
+    prefix/suffix text (typical for narrative paragraphs where the citation
+    was never a separate run to begin with). Interior runs are kept as-is.
+    Returns the tightened list of runs; falls back to `runs` unchanged when
+    the citation can't be located inside the concatenated text.
     """
-    p_el = para._element
+    if not runs:
+        return runs
+
+    def _run_text_of(r) -> str:
+        return "".join((t.text or "") for t in r.findall(_W + "t"))
+
+    parts = [_run_text_of(r) for r in runs]
+    concat = "".join(parts)
+    loc = _locate_citation_in_text(concat, citation_text)
+    if loc is None:
+        return runs
+    cit_start, cit_end = loc
+
+    # Map global offsets to (run_index, within_run_offset).
+    offsets = [0]
+    for p in parts:
+        offsets.append(offsets[-1] + len(p))
+
+    def _run_pos_for(pos: int) -> Tuple[int, int]:
+        for k in range(len(runs)):
+            if offsets[k] <= pos < offsets[k + 1]:
+                return k, pos - offsets[k]
+        return len(runs) - 1, len(parts[-1])
+
+    fi, fo = _run_pos_for(cit_start)
+    if cit_end > cit_start:
+        li, lo = _run_pos_for(cit_end - 1)
+        lo += 1
+    else:
+        li, lo = fi, fo
+
+    if fi == 0 and fo == 0 and li == len(runs) - 1 and lo == len(parts[-1]):
+        return runs  # citation already fills the run span exactly.
+
+    from lxml import etree as _etree
+
+    def _split_at(r_el, split_positions: List[int]) -> List[Any]:
+        """Split `r_el` at the given char positions inside its text.
+
+        Returns the list of new runs replacing `r_el` (length =
+        len(split_positions)+1). Each new run inherits a deep copy of `r_el`
+        's rPr. `xml:space="preserve"` is set on every text node so leading/
+        trailing whitespace survives round-tripping through Word.
+        """
+        text = _run_text_of(r_el)
+        rPr = r_el.find(_W + "rPr")
+        parent = r_el.getparent()
+        insert_at = list(parent).index(r_el)
+        parent.remove(r_el)
+
+        chunks: List[str] = []
+        prev = 0
+        for pos in split_positions:
+            chunks.append(text[prev:pos])
+            prev = pos
+        chunks.append(text[prev:])
+
+        new_runs: List[Any] = []
+        for chunk in chunks:
+            new_r = _etree.Element(_W + "r")
+            if rPr is not None:
+                new_r.append(_etree.fromstring(_etree.tostring(rPr)))
+            new_t = _etree.SubElement(new_r, _W + "t")
+            new_t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+            new_t.text = chunk
+            parent.insert(insert_at, new_r)
+            insert_at += 1
+            new_runs.append(new_r)
+        return new_runs
+
+    # Build the tightened run list. Runs outside [fi, li] are dropped from
+    # the anchor list; runs inside are kept, with fi/li possibly split.
+    tight: List[Any] = []
+    if fi == li:
+        # Single run holds the entire citation — split at up to two points.
+        splits = []
+        if fo > 0:
+            splits.append(fo)
+        if lo < len(parts[fi]):
+            splits.append(lo)
+        if not splits:
+            tight.append(runs[fi])
+        else:
+            pieces = _split_at(runs[fi], splits)
+            # The citation is the piece(s) between the split points. When we
+            # split at both fo and lo, `pieces` has 3 chunks and the middle
+            # is the citation. When we split at only fo (citation ends at
+            # end of run) or only lo (citation starts at start of run), the
+            # citation is the last or first piece respectively.
+            if fo > 0 and lo < len(parts[fi]):
+                tight.append(pieces[1])
+            elif fo > 0:
+                tight.append(pieces[1])
+            else:
+                tight.append(pieces[0])
+    else:
+        # Multi-run: split fi at fo (prefix) and li at lo (suffix); keep
+        # everything from the "post-fo" piece through the "pre-lo" piece.
+        if fo > 0:
+            pieces = _split_at(runs[fi], [fo])
+            tight.append(pieces[1])
+        else:
+            tight.append(runs[fi])
+        for k in range(fi + 1, li):
+            tight.append(runs[k])
+        if lo < len(parts[li]):
+            pieces = _split_at(runs[li], [lo])
+            tight.append(pieces[0])
+        else:
+            tight.append(runs[li])
+
+    return tight
+
+
+def _find_citation_anchor_runs(para, citation_text: str) -> List[Any]:
+    """Return the `<w:r>` runs in `para` that together spell `citation_text`.
+
+    Thin python-docx wrapper over `_find_citation_runs_by_text` so callers
+    holding a Paragraph object don't have to reach into `_element`.
+    """
+    return _find_citation_runs_by_text(para._element, citation_text)
+
+
+def _find_reference_runs_in_p_el(p_el) -> List[Any]:
+    """Return a short anchor for an "unused reference" AQ on a raw `<w:p>`.
+
+    Uses the run whose rStyle names the bib surname (e.g. `bibsurname` /
+    `bib_surname`) so the highlight lands on the author name Word already
+    styles distinctly. Falls back to the first content run when no styled
+    surname run is present.
+    """
     first_run = None
     for r in p_el.iter(_W + "r"):
-        first_run = first_run or r
+        if first_run is None:
+            first_run = r
         rpr = r.find(_W + "rPr")
         if rpr is None:
             continue
@@ -299,6 +455,55 @@ def _find_reference_anchor_runs(para) -> List[Any]:
         if val in ("bibsurname", "bib_surname"):
             return [r]
     return [first_run] if first_run is not None else []
+
+
+def _find_reference_anchor_runs(para) -> List[Any]:
+    """python-docx wrapper over `_find_reference_runs_in_p_el`."""
+    return _find_reference_runs_in_p_el(para._element)
+
+
+# Any AQ that quotes a citation string (e.g. "Note that the citation of
+# reference "X" has been changed to "Y" ...") — we can still relocate its
+# range if either quoted string is present in the paragraph. The regex
+# matches a single quoted phrase; the extractor scans the whole AQ body
+# with `finditer` so both "X" and "Y" are collected.
+_AQ_QUOTED_PHRASE_RE = re.compile(r'[“"\']([^"”\'\n]{2,120})[”"\']')
+
+
+def _extract_aq_target(comment_body: str) -> Optional[Tuple[str, List[str]]]:
+    """Return (kind, [target_text, ...]) for an AQ body, or None otherwise.
+
+    * `kind == "missing"` — a missing-citation AQ; targets is a single
+      element: the citation string to find in the paragraph.
+    * `kind == "unused"` — an unused-reference AQ; targets is a single
+      element (the reference display string, only used for logging;
+      `_find_reference_runs_in_p_el` picks the surname/first run itself).
+    * `kind == "citation"` — any other AQ that mentions one or more quoted
+      citations (year-mismatch "changed to", spelling-mismatch, secondary,
+      suffix, etc.). Targets is every quoted string in the body, in order —
+      the anchor pass tries each until it finds one in the paragraph. This
+      lets us pull a paragraph-wide S4C AQ range down onto the specific
+      citation the AQ is actually about, even when the AQ template isn't
+      one of the two we handle explicitly.
+    """
+    if not comment_body:
+        return None
+    m = _AQ_MISSING_KEY_RE.search(comment_body)
+    if m:
+        return ("missing", [m.group(1)])
+    m = _AQ_UNUSED_KEY_RE.search(comment_body)
+    if m:
+        return ("unused", [m.group(1)])
+    # Only look for quoted phrases inside actual AQ bodies — otherwise a
+    # regular comment containing a stray quoted string would be treated as
+    # an AQ and get its range moved.
+    if "AQ" not in comment_body[:8].upper():
+        return None
+    quoted = [m.group(1).strip() for m in _AQ_QUOTED_PHRASE_RE.finditer(comment_body)]
+    quoted = [q for q in quoted if q]
+    if quoted:
+        return ("citation", quoted)
+    return None
 
 
 def _add_aq_comment(
@@ -783,27 +988,51 @@ _REF_PARA_STYLES: Tuple[str, ...] = (
 _HYPERLINK_BLUE_HEXES: Tuple[str, ...] = ("0563C1", "0000FF")
 
 
-def _shrink_paragraph_wide_comment_ranges(root) -> int:
-    """Shrink any `<w:commentRangeStart>` / `<w:commentRangeEnd>` pair whose
-    range covers essentially an entire paragraph down to a zero-length point
-    range placed right after `<w:pPr>`.
+def _anchor_comment_ranges_to_citation(root, comments_root) -> int:
+    """Relocate AQ comment ranges to wrap exactly the citation-text runs.
 
-    Word renders paragraph-wide comment ranges as full-paragraph shading — a
-    visible defect. The AQ workflow used to insert every comment as
-    paragraph-wide because `add_comment_to_paragraph` had no anchor-runs
-    support. Newly emitted comments now anchor to specific runs or use a
-    point range, but historical DOCX files re-exported through this finalizer
-    may still carry legacy paragraph-wide ranges. This pass rewrites them so
-    the delivered file looks like the golden.
+    Word renders a comment range as a highlight on the text between
+    `<w:commentRangeStart>` and `<w:commentRangeEnd>`. When the range spans
+    the whole paragraph (legacy behaviour) or sits zero-length at the top of
+    the paragraph (older shrink behaviour), Word visually attaches the
+    comment to the entire paragraph — the defect this pass fixes.
 
-    A range is considered "paragraph-wide" when its start and end are in the
-    same paragraph AND the concatenated text between them equals the whole
-    paragraph's text (whitespace-collapsed). Ranges narrower than that (e.g.
-    already anchored to a citation) are left alone. Idempotent.
+    For every AQ comment whose `<w:commentRangeStart>`/`<w:commentRangeEnd>`
+    pair lives in a single paragraph:
+
+    * A **missing-citation** AQ has the citation string inside its body. We
+      locate the run span that spells that citation and move the range to
+      hug those runs exactly. A yellow `<w:highlight>` is added on those
+      runs so the visual matches the "unmatched citation" convention.
+    * An **unused-reference** AQ anchors to the reference paragraph's
+      surname run (or first content run), matching the golden convention
+      where the AQ marker sits on the author name.
+
+    Multi-paragraph ranges are also handled — the S4C editor pipeline
+    sometimes emits a range whose start sits in one paragraph and end sits
+    in the next (an artefact of splitting a paragraph after the range was
+    inserted). We search the start's paragraph first, then the end's, then
+    a two-paragraph window around each; whichever paragraph actually
+    carries the citation wins, and BOTH markers are moved there.
+
+    Non-AQ comments and AQs whose target text isn't present in any
+    nearby paragraph are left untouched. Idempotent — a range already
+    correctly anchored is repositioned to the same span.
     """
-    shrunk = 0
+    if comments_root is None:
+        return 0
+
+    body_by_id: Dict[str, str] = {}
+    for cmt in comments_root.findall(_W + "comment"):
+        cid = cmt.get(_W + "id")
+        if cid is None:
+            continue
+        body = "".join((t.text or "") for t in cmt.iter(_W + "t")).strip()
+        body_by_id[cid] = body
+
     starts: Dict[str, Any] = {}
     ends: Dict[str, Any] = {}
+    refs: Dict[str, Any] = {}
     for cs in root.iter(_W + "commentRangeStart"):
         cid = cs.get(_W + "id")
         if cid is not None:
@@ -812,6 +1041,10 @@ def _shrink_paragraph_wide_comment_ranges(root) -> int:
         cid = ce.get(_W + "id")
         if cid is not None:
             ends[cid] = ce
+    for cr in root.iter(_W + "commentReference"):
+        cid = cr.get(_W + "id")
+        if cid is not None:
+            refs[cid] = cr
 
     def _paragraph_of(el):
         p = el
@@ -819,54 +1052,126 @@ def _shrink_paragraph_wide_comment_ranges(root) -> int:
             p = p.getparent()
         return p
 
-    def _norm(s: str) -> str:
-        return re.sub(r"\s+", " ", (s or "").strip())
+    def _outer_child_of_p(el, p):
+        """Walk up from `el` until the parent is `p`, returning the direct
+        child of `p` (e.g. `<w:hyperlink>` when the run lives inside one).
+        Returns None if `el` isn't a descendant of `p`."""
+        cur = el
+        while cur is not None and cur.getparent() is not p:
+            cur = cur.getparent()
+        return cur
 
+    def _search_paragraphs(seed_p, kind: str, targets: List[str]) -> Tuple[Any, List[Any]]:
+        """Walk out from `seed_p` looking for a paragraph that carries one of
+        `targets`. Checks the seed paragraph, then its previous sibling, then
+        its next sibling — that window covers the common S4C artefact where
+        the range's end slipped into the neighbouring paragraph. For
+        multi-target AQs (year-mismatch quotes both old and new citation),
+        each target is tried in turn; the first hit wins.
+        Returns (paragraph, runs) or (None, []) if nothing matches.
+        """
+        if seed_p is None:
+            return (None, [])
+        candidates = [seed_p]
+        prev_sib = seed_p.getprevious()
+        while prev_sib is not None and prev_sib.tag != _W + "p":
+            prev_sib = prev_sib.getprevious()
+        if prev_sib is not None:
+            candidates.append(prev_sib)
+        next_sib = seed_p.getnext()
+        while next_sib is not None and next_sib.tag != _W + "p":
+            next_sib = next_sib.getnext()
+        if next_sib is not None:
+            candidates.append(next_sib)
+        for cand in candidates:
+            if kind == "unused":
+                runs = _find_reference_runs_in_p_el(cand)
+                if runs:
+                    return (cand, runs)
+                continue
+            # missing / citation kinds both use text-based lookup.
+            for target in targets:
+                runs = _find_citation_runs_by_text(cand, target)
+                if runs:
+                    runs = _tighten_citation_runs(runs, target)
+                    return (cand, runs)
+        return (None, [])
+
+    relocated = 0
     for cid, cs in list(starts.items()):
         ce = ends.get(cid)
         if ce is None:
             continue
         ps = _paragraph_of(cs)
         pe = _paragraph_of(ce)
-        if ps is None or ps is not pe:
-            # Multi-paragraph range — never touched by the AQ workflow; leave.
+
+        aq = _extract_aq_target(body_by_id.get(cid, ""))
+        if aq is None:
+            # Not a known AQ — leave alone.
+            continue
+        kind, targets = aq
+
+        # Prefer the start's paragraph, but if the citation isn't there try
+        # the end's paragraph and adjacent siblings — the S4C editor
+        # sometimes splits a paragraph after the range was inserted, so the
+        # end slips into what became the following paragraph.
+        target_para, citation_runs = _search_paragraphs(ps, kind, targets)
+        if not citation_runs and pe is not ps:
+            target_para, citation_runs = _search_paragraphs(pe, kind, targets)
+
+        if not citation_runs or target_para is None:
             continue
 
-        full_text = _norm(
-            "".join(t.text or "" for t in ps.iter(_W + "t"))
-        )
-        if not full_text:
+        first_child = _outer_child_of_p(citation_runs[0], target_para)
+        last_child = _outer_child_of_p(citation_runs[-1], target_para)
+        if first_child is None or last_child is None:
             continue
 
-        collect = False
-        inside: List[str] = []
-        for el in ps.iter():
-            if el is cs:
-                collect = True
-                continue
-            if el is ce:
-                collect = False
-                break
-            if collect and el.tag == _W + "t":
-                inside.append(el.text or "")
-        span_text = _norm("".join(inside))
+        # Detach the current range markers wherever they sit — including
+        # inside a different paragraph than the citation.
+        cs_parent = cs.getparent()
+        if cs_parent is not None:
+            cs_parent.remove(cs)
+        ce_parent = ce.getparent()
+        if ce_parent is not None:
+            ce_parent.remove(ce)
 
-        # Only shrink when the range covers the whole paragraph. A one-char
-        # tolerance handles occasional trailing whitespace / paragraph mark.
-        if span_text != full_text and abs(len(span_text) - len(full_text)) > 1:
-            continue
+        # Re-insert around the citation runs.
+        first_idx = list(target_para).index(first_child)
+        target_para.insert(first_idx, cs)
+        # Re-lookup last_idx: inserting cs shifts subsequent positions.
+        last_idx = list(target_para).index(last_child)
+        target_para.insert(last_idx + 1, ce)
 
-        # Move the end to sit immediately after the start (zero-length range).
-        parent = cs.getparent()
-        if parent is None:
-            continue
-        if ce.getparent() is not None:
-            ce.getparent().remove(ce)
-        start_idx = list(parent).index(cs)
-        parent.insert(start_idx + 1, ce)
-        shrunk += 1
+        # Word's UI draws the comment's blue selection band from the
+        # `<w:commentReference/>` inline marker back to `<w:commentRangeStart>`.
+        # If the reference marker is stranded elsewhere in the paragraph
+        # (e.g. appended at the end by the S4C editor pipeline), Word paints
+        # every intervening character blue. Move the reference marker into
+        # the same run that sits right after commentRangeEnd so the visible
+        # selection matches the range exactly.
+        cr = refs.get(cid)
+        if cr is not None:
+            cr_run = cr.getparent()  # <w:r> that wraps the commentReference
+            if cr_run is not None and cr_run.tag == _W + "r":
+                cr_run_parent = cr_run.getparent()
+                if cr_run_parent is not None:
+                    cr_run_parent.remove(cr_run)
+                # Insert the reference-run right after commentRangeEnd.
+                ce_idx = list(target_para).index(ce)
+                target_para.insert(ce_idx + 1, cr_run)
 
-    return shrunk
+        # For missing-citation AQs, yellow-highlight the citation runs so
+        # Word colours the flagged text (matches the "unmatched" convention
+        # used elsewhere in this finalizer). Skip runs that already carry a
+        # highlight — never override an author or upstream decision.
+        if kind == "missing":
+            for r in citation_runs:
+                _add_highlight(r, "yellow")
+
+        relocated += 1
+
+    return relocated
 
 
 def _strip_reference_run_fake_hyperlinks(root) -> int:
@@ -968,7 +1273,7 @@ def finalize_docx_for_export(docx_path: str) -> Dict[str, int]:
             "citation_hyperlinks_wrapped": 0,
             "citation_highlights_added": 0,
             "reference_run_fake_links_cleaned": 0,
-            "paragraph_wide_comment_ranges_shrunk": 0,
+            "comment_ranges_anchored_to_citation": 0,
         }
 
     with zipfile.ZipFile(path, "r") as z:
@@ -989,7 +1294,7 @@ def finalize_docx_for_export(docx_path: str) -> Dict[str, int]:
     wrapped_hl = _wrap_bib_citations_with_hyperlinks(root)
     highlighted = _apply_citation_highlights(root)
     ref_runs_cleaned = _strip_reference_run_fake_hyperlinks(root)
-    comment_ranges_shrunk = _shrink_paragraph_wide_comment_ranges(root)
+    comment_ranges_anchored = _anchor_comment_ranges_to_citation(root, comments_root)
 
     stats = {
         "tracking_bookmarks_removed": removed_bm,
@@ -999,7 +1304,7 @@ def finalize_docx_for_export(docx_path: str) -> Dict[str, int]:
         "citation_hyperlinks_wrapped": wrapped_hl,
         "citation_highlights_added": highlighted,
         "reference_run_fake_links_cleaned": ref_runs_cleaned,
-        "paragraph_wide_comment_ranges_shrunk": comment_ranges_shrunk,
+        "comment_ranges_anchored_to_citation": comment_ranges_anchored,
     }
 
     if not any(stats.values()):
