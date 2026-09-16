@@ -166,23 +166,25 @@ function ProjectCard({ project, users, onDelete, onEdit, onRefresh }: ProjectCar
         )}
 
         {/* Assignee + Status badge row */}
-        <div className="mt-3 flex items-center justify-between text-[11px]">
-          <div className="flex items-center gap-1 text-muted" onClick={(e) => e.stopPropagation()}>
-            <UserIcon size={12} className="text-muted/70" />
+        <div className="mt-3 flex items-center justify-between text-[11px] gap-2">
+          <div className="flex items-center gap-1 text-muted min-w-0 flex-1" onClick={(e) => e.stopPropagation()}>
+            <UserIcon size={12} className="text-muted/70 shrink-0" />
             <select
               value={project.assignee || ''}
               onChange={handleAssigneeChange}
-              className="bg-transparent border-0 text-primary font-medium focus:ring-0 focus:outline-none cursor-pointer p-0 text-[11px] hover:text-primary-hover"
+              className="bg-transparent border-0 text-primary font-medium focus:ring-0 focus:outline-none cursor-pointer p-0 text-[11px] hover:text-primary-hover w-full truncate"
             >
               <option value="" className="text-text bg-card">Unassigned</option>
               {users.filter((u) => u.active_status).map((u) => (
                 <option key={u.id} value={u.user_name} className="text-text bg-card">
-                  {u.user_name}
+                  {u.first_name || u.last_name ? `${u.first_name || ''} ${u.last_name || ''}`.trim() : u.user_name}
                 </option>
               ))}
             </select>
           </div>
-          <ValidationBadge status={project.validation_status} />
+          <div className="shrink-0">
+            <ValidationBadge status={project.validation_status} />
+          </div>
         </div>
 
         {/* Progress bar visual indicator */}
@@ -549,11 +551,17 @@ export function PostProdEpubValidator() {
             >
               <option value="all">All assignees</option>
               <option value="unassigned">Unassigned</option>
-              {assigneeOptions.map((a) => (
-                <option key={a} value={a}>
-                  {a}
-                </option>
-              ))}
+              {assigneeOptions.map((a) => {
+                const matchedUser = users.find((u) => u.user_name === a);
+                const displayName = matchedUser?.first_name || matchedUser?.last_name 
+                  ? `${matchedUser.first_name || ''} ${matchedUser.last_name || ''}`.trim() 
+                  : a;
+                return (
+                  <option key={a} value={a}>
+                    {displayName}
+                  </option>
+                );
+              })}
             </select>
 
             {hasActiveFilters && (
@@ -834,7 +842,7 @@ export function PostProdEpubValidator() {
                   <option value="">Unassigned</option>
                   {users.filter((u) => u.active_status).map((u) => (
                     <option key={u.id} value={u.user_name}>
-                      {u.user_name}
+                      {u.first_name || u.last_name ? `${u.first_name || ''} ${u.last_name || ''}`.trim() : u.user_name}
                     </option>
                   ))}
                 </select>
