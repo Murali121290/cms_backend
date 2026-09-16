@@ -107,11 +107,14 @@
       "name": "Aspen: Cover height is 1100 pixels",
       "target_path": "OEBPS/images",
       "file_name_pattern": "cover.jpg",
-      "enabled": true
+      "enabled": true,
+      "rule_config": {
+        "expected_height": 1100
+      }
     },
     {
       "id": "ASP-COV-003",
-      "name": "Aspen: Cover image is 300 DPI",
+      "name": "Aspen: Cover image is exactly 300 DPI",
       "target_path": "OEBPS/images",
       "file_name_pattern": "cover.jpg",
       "enabled": true,

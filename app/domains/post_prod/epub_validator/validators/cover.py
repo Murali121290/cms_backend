@@ -6,9 +6,6 @@ from PIL import Image
 from ..engine.registry import rule
 
 
-_EXPECTED_HEIGHT_PX = 1100
-
-
 def _find_cover(epub_folder: str) -> str | None:
     for candidate in glob.glob(os.path.join(epub_folder, "**", "cover.*"), recursive=True):
         if os.path.basename(candidate).lower().startswith("cover.") and \
@@ -64,7 +61,19 @@ def validate_cover_filename(target, rule_config=None):
 
 @rule("ASP-COV-002")
 def validate_cover_height(target, rule_config=None):
-    """Cover height must be 1100 pixels."""
+    """Cover height must equal expected_height configured in rule_config."""
+    expected_height = None
+    if rule_config and "rule_config" in rule_config:
+        expected_height = rule_config["rule_config"].get("expected_height")
+
+    if expected_height is None:
+        return {"issues_count": 1, "issues": [{
+            "type": "rule_configuration_error",
+            "message": "Rule configuration is missing 'expected_height'. Please configure it in customer.json.",
+            "category": "Error",
+            "file_path": str(target) if target else "",
+        }]}
+
     if isinstance(target, dict) and target.get("file_path"):
         cover = target["file_path"]
         epub = target.get("epub_path") or (os.path.dirname(cover) if cover else "")
@@ -87,10 +96,10 @@ def validate_cover_height(target, rule_config=None):
             "category": "Warning",
             "file_path": os.path.relpath(cover, epub) if epub else cover,
         }]}
-    if height != _EXPECTED_HEIGHT_PX:
+    if height != expected_height:
         return {"issues_count": 1, "issues": [{
             "type": "cover_wrong_height",
-            "message": f"Cover height is {height}px; expected {_EXPECTED_HEIGHT_PX}px",
+            "message": f"Cover height is {height}px; expected {expected_height}px",
             "category": "Error",
             "file_path": os.path.relpath(cover, epub) if epub else cover,
         }]}
