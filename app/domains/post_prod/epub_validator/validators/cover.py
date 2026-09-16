@@ -74,9 +74,9 @@ def validate_cover_height(target, rule_config=None):
             "file_path": str(target) if target else "",
         }]}
 
-    if isinstance(target, dict) and target.get("file_path"):
-        cover = target["file_path"]
-        epub = target.get("epub_path") or (os.path.dirname(cover) if cover else "")
+    if isinstance(target, dict) and (target.get("full_path") or target.get("file_path")):
+        cover = target.get("full_path") or target.get("file_path")
+        epub = target.get("epub_root") or target.get("epub_path") or (os.path.dirname(cover) if cover else "")
     elif isinstance(target, dict) and target.get("epub_path"):
         epub = target["epub_path"]
         cover = _find_cover(epub)
@@ -121,9 +121,9 @@ def validate_cover_dpi(target, rule_config=None):
             "file_path": str(target) if target else "",
         }]}
 
-    if isinstance(target, dict) and target.get("file_path"):
-        cover = target["file_path"]
-        epub = target.get("epub_path") or (os.path.dirname(cover) if cover else "")
+    if isinstance(target, dict) and (target.get("full_path") or target.get("file_path")):
+        cover = target.get("full_path") or target.get("file_path")
+        epub = target.get("epub_root") or target.get("epub_path") or (os.path.dirname(cover) if cover else "")
     elif isinstance(target, dict) and target.get("epub_path"):
         epub = target["epub_path"]
         cover = _find_cover(epub)
