@@ -387,7 +387,7 @@
     },
     {
       "id": "IMG-001",
-      "name": "Aspen: All body images must be at least 300 DPI",
+      "name": "Aspen: All body images must be exactly 300 DPI",
       "target_path": "OEBPS/images",
       "file_name_pattern": "*.jpg",
       "enabled": true,

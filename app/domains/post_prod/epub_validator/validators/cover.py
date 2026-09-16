@@ -137,15 +137,15 @@ def validate_cover_dpi(target, rule_config=None):
     if dpi is None:
         return {"issues_count": 1, "issues": [{
             "type": "cover_dpi_unknown",
-            "message": f"Cover image has no DPI metadata; cannot confirm {expected_dpi} DPI",
+            "message": f"Cover image has no DPI metadata; cannot confirm exact {expected_dpi} DPI",
             "category": "Warning",
             "file_path": os.path.relpath(cover, epub) if epub else cover,
         }]}
     x_dpi, y_dpi = dpi[0], dpi[1]
-    if round(x_dpi) < expected_dpi or round(y_dpi) < expected_dpi:
+    if round(x_dpi) != expected_dpi or round(y_dpi) != expected_dpi:
         return {"issues_count": 1, "issues": [{
-            "type": "cover_low_dpi",
-            "message": f"Cover DPI is {x_dpi}x{y_dpi}; expected at least {expected_dpi} DPI",
+            "type": "cover_invalid_dpi",
+            "message": f"Cover DPI is {x_dpi}x{y_dpi}; required exact resolution is {expected_dpi} DPI",
             "category": "Error",
             "file_path": os.path.relpath(cover, epub) if epub else cover,
         }]}
