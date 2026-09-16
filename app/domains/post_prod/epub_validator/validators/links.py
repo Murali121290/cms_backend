@@ -210,6 +210,24 @@ def _page_id_for_number(page_num: str, existing: set[str]) -> str | None:
     return None
 
 
+def _roman_to_int(s: str) -> int | None:
+    """Convert a Roman numeral string to an integer. Returns None if not a valid Roman numeral."""
+    s = s.upper()
+    vals = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}
+    if not s or not all(c in vals for c in s):
+        return None
+    total = 0
+    prev = 0
+    for ch in reversed(s):
+        curr = vals[ch]
+        if curr < prev:
+            total -= curr
+        else:
+            total += curr
+        prev = curr
+    return total if total > 0 else None
+
+
 _CHAPTER_NUMS_CACHE: dict[str, set[str]] = {}
 
 def _epub_chapter_numbers(epub: str) -> set[str]:
@@ -219,10 +237,15 @@ def _epub_chapter_numbers(epub: str) -> set[str]:
     nums: set[str] = set()
     for xhtml in glob.glob(os.path.join(epub, "**", "*.xhtml"), recursive=True):
         basename = os.path.basename(xhtml).lower()
-        # Match base chapter numbers in filenames like ch110.xhtml, chapter-11.xhtml
-        m = re.search(r'(?:ch|chapter|c|part|sec(?:tion)?)[_-]?(\d+)', basename)
+        # Match base chapter numbers in filenames like ch110.xhtml, chapter-11.xhtml, or Chapter_IV
+        m = re.search(r'(?:ch|chapter|c|part|sec(?:tion)?)[_-]?(\d+|[ivxlcdm]+)', basename)
         if m:
-            nums.add(m.group(1).lstrip("0") or "0")
+            raw = m.group(1).lstrip("0") or "0"
+            nums.add(raw)
+            # Also store Arabic equivalent if the captured value is a Roman numeral
+            arabic = _roman_to_int(raw)
+            if arabic is not None:
+                nums.add(str(arabic))
 
 
     _CHAPTER_NUMS_CACHE[epub] = nums
@@ -334,8 +357,13 @@ def validate_page_citation_links(file_details, rule_config=None):
                 base_chapter = base_match.group(1) if base_match else chapter_num_full
                 
                 available_chapters = _epub_chapter_numbers(epub)
-                if available_chapters and base_chapter not in available_chapters:
-                    continue
+                if available_chapters:
+                    # Normalize citation: try comparing as-is (lowercase), and also as Arabic equivalent
+                    chapter_lower = base_chapter.lower()
+                    arabic_equiv = _roman_to_int(base_chapter)
+                    arabic_str = str(arabic_equiv) if arabic_equiv else None
+                    if chapter_lower not in available_chapters and (arabic_str is None or arabic_str not in available_chapters):
+                        continue
 
             # If it is a page citation, only validate if the page exists in this book
             if m.group(1) is not None and epub:
@@ -343,23 +371,22 @@ def validate_page_citation_links(file_details, rule_config=None):
                 if page_ids and _page_id_for_number(page_num, page_ids) is None:
                     continue
                     
-            # If it is a Figure citation, verify it exists
-            special_message = None
+            # If it is a Figure citation, only validate if the figure exists in this book
             if is_figure and summary_labels["figures"]:
                 fig_num = m.group(3)
                 if fig_num and fig_num not in summary_labels["figures"]:
-                    special_message = f"Citation '{m.group(0)}' looks like a citation but is not found in this book."
+                    continue
             
-            # If it is a Table citation, verify it exists
+            # If it is a Table citation, only validate if the table exists in this book
             if is_table and summary_labels["tables"]:
                 table_num = m.group(4)
                 if table_num and table_num not in summary_labels["tables"]:
-                    special_message = f"Citation '{m.group(0)}' looks like a citation but is not found in this book."
+                    continue
 
-            msg = special_message or f"Citation '{m.group(0)}' is not wrapped in a link."
-            rule_name = "Citation Not In Book" if special_message else "Citation Not Linked"
-            issue_type = "citation_not_in_book" if special_message else "page_citation_not_linked"
-            category = "Warning" if special_message else "Error"
+            msg = f"Citation '{m.group(0)}' is not wrapped in a link."
+            rule_name = "Citation Not Linked"
+            issue_type = "page_citation_not_linked"
+            category = "Error"
 
             issues.append({
                 "rule_name": rule_name,
@@ -692,6 +719,46 @@ def validate_url_text_match(file_details, rule_config=None):
                     "extract": href,
                 })
     return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("URL006")
+def validate_bare_url_text(file_details, rule_config=None):
+    """Find http:// / https:// / www. URLs that appear as plain text but are NOT inside an <a> tag."""
+    file_path = file_details["full_path"]
+    issues = []
+    url_pattern = re.compile(
+        r'https?://[^\s<>"\']*|'
+        r'www\.[^\s<>"\']+\.[^\s<>"\']{2,}|'
+        r'\b(?:[a-zA-Z0-9-]+\.)+(?:com|in|org|net|edu|gov|co|io|us|uk|ca|de|jp|fr|au|info|biz|me|app|dev|store|tech|ai|online|site|xyz)\b(?:/[^\s<>"\']*)?',
+        re.IGNORECASE
+    )
+
+    with open(file_path, "r", encoding="utf-8") as f:
+        soup = BeautifulSoup(f.read(), "html.parser")
+
+    for text_node in soup.find_all(string=True):
+        # Skip if this text is inside an <a>, <script>, <style> or <title>
+        if text_node.find_parent(["a", "script", "style", "title"]):
+            continue
+        parent = text_node.parent
+        if parent is None:
+            continue
+        line_num = getattr(parent, "sourceline", None)
+
+        for m in url_pattern.finditer(str(text_node)):
+            url = m.group(0).rstrip(".,;:!?)")
+            if not url:
+                continue
+            issues.append({
+                "type": "bare_url_not_linked",
+                "message": f"URL '{url}' appears as plain text but is not wrapped in an <a> tag.",
+                "category": "Warning",
+                "line_number": line_num,
+                "extract": url,
+            })
+
+    return {"issues_count": len(issues), "issues": issues}
+
 
 
 @rule("URL004")

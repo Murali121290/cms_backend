@@ -428,7 +428,7 @@ def validate_all_images_in_opf(file_details, rule_config=None):
 
 @rule("IMG-001")
 def validate_body_image_dpi(file_details, rule_config=None):
-    """Every body image (not just the cover) must be at least 300 DPI."""
+    """Every body image (not just the cover) must be exactly 300 DPI."""
     file_path = file_details.get("file_path", "")
     full_path = file_details.get("full_path", "")
 
@@ -466,16 +466,16 @@ def validate_body_image_dpi(file_details, rule_config=None):
     if dpi is None:
         return {"issues_count": 1, "issues": [{
             "type": "image_dpi_unknown",
-            "message": f"Image has no DPI metadata; cannot confirm {expected_dpi} DPI.",
+            "message": f"Image has no DPI metadata; cannot confirm exact {expected_dpi} DPI.",
             "category": "Warning",
             "file_path": file_path,
         }]}
 
     x_dpi, y_dpi = dpi[0], dpi[1]
-    if round(x_dpi) < expected_dpi or round(y_dpi) < expected_dpi:
+    if round(x_dpi) != expected_dpi or round(y_dpi) != expected_dpi:
         return {"issues_count": 1, "issues": [{
-            "type": "image_low_dpi",
-            "message": f"Image is {x_dpi}x{y_dpi} DPI; required minimum is {expected_dpi} DPI.",
+            "type": "image_invalid_dpi",
+            "message": f"Image is {x_dpi}x{y_dpi} DPI; required exact resolution is {expected_dpi} DPI.",
             "category": "Error",
             "file_path": file_path,
         }]}

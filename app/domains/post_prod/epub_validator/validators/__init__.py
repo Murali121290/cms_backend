@@ -24,6 +24,7 @@ from . import (  # noqa: F401
     style_mismatch,
     table,
     xhtml,
+    toc_merge,
 )
 
 
