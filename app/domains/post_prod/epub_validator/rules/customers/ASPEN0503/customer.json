@@ -69,6 +69,13 @@
       "file_name_pattern": "*.xhtml"
     },
     {
+      "id": "URL006",
+      "name": "Aspen: Plain text URLs must be wrapped in an <a> tag",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true
+    },
+    {
       "id": "NAV001",
       "name": "NAV TOC Link Check",
       "target_path": "",
@@ -435,13 +442,6 @@
       "name": "Aspen: External links must not have underline styling",
       "scope": "book",
       "enabled": false
-    },
-    {
-      "id": "URL006",
-      "name": "Aspen: Plain text URLs must be wrapped in an <a> tag",
-      "target_path": "OEBPS/xhtml",
-      "file_name_pattern": "*.xhtml",
-      "enabled": true
     },
     {
       "id": "TOC-MERGE-001",
