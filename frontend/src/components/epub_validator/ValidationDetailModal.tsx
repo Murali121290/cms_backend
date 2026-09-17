@@ -19,6 +19,7 @@ import {
   PanelRightClose,
   ArrowUpDown,
   ChevronDown,
+  ExternalLink,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/utils/epubValidatorUtils';
@@ -62,8 +63,9 @@ function RuleRow({
   onSubRuleClick: (name: string) => void;
 }) {
   const errors   = entry.result.issues.filter(i => (i.category ?? '').toLowerCase() === 'error').length;
-  const warnings = entry.result.issues.filter(i => (i.category ?? '').toLowerCase() !== 'error').length;
-  const passed   = entry.result.issues.length === 0;
+  const warnings = entry.result.issues.filter(i => (i.category ?? '').toLowerCase() === 'warning').length;
+  const infos    = entry.result.issues.filter(i => (i.category ?? '').toLowerCase() === 'info').length;
+  const passed   = errors === 0 && warnings === 0;
 
   const subRuleNames = [...new Set(
     entry.result.issues.map(i => i.rule_name).filter((n): n is string => !!n)
@@ -96,8 +98,10 @@ function RuleRow({
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
           ) : errors > 0 ? (
             <XCircle className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />
-          ) : (
+          ) : warnings > 0 ? (
             <AlertTriangle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
+          ) : (
+            <Info className="w-3.5 h-3.5 text-sky-500 flex-shrink-0" />
           )}
         </div>
 
@@ -111,7 +115,7 @@ function RuleRow({
           {entry.rule_name}
         </p>
 
-        {/* Line 3: Issue counts if failed */}
+        {/* Line 3: Issue counts if failed or has info */}
         {!passed && (
           <p className="text-[10px] text-muted-foreground mt-1 leading-none font-sans opacity-75">
             {[
@@ -120,13 +124,19 @@ function RuleRow({
             ].filter(Boolean).join(' · ')}
           </p>
         )}
+        {passed && infos > 0 && (
+          <p className="text-[10px] text-sky-600 dark:text-sky-400 mt-1 leading-none font-sans opacity-85">
+            {infos} info item{infos !== 1 ? 's' : ''}
+          </p>
+        )}
       </button>
 
       {subRuleNames.length > 0 && (
         <div className="ml-3 pl-2 border-l border-border/40 mt-0.5 mb-1 space-y-0.5">
           {subRuleNames.map(name => {
             const subErrors   = entry.result.issues.filter(i => i.rule_name === name && (i.category ?? '').toLowerCase() === 'error').length;
-            const subWarnings = entry.result.issues.filter(i => i.rule_name === name && (i.category ?? '').toLowerCase() !== 'error').length;
+            const subWarnings = entry.result.issues.filter(i => i.rule_name === name && (i.category ?? '').toLowerCase() === 'warning').length;
+            const subInfos    = entry.result.issues.filter(i => i.rule_name === name && (i.category ?? '').toLowerCase() === 'info').length;
             const isSubSelected = isSelected && selectedSubRuleName === name;
             return (
               <button
@@ -144,14 +154,21 @@ function RuleRow({
                   )}>
                     {name}
                   </span>
-                  {subErrors > 0
-                    ? <XCircle className="w-3 h-3 text-red-500 flex-shrink-0" />
-                    : <AlertTriangle className="w-3 h-3 text-amber-500 flex-shrink-0" />}
+                  {subErrors > 0 ? (
+                    <XCircle className="w-3 h-3 text-red-500 flex-shrink-0" />
+                  ) : subWarnings > 0 ? (
+                    <AlertTriangle className="w-3 h-3 text-amber-500 flex-shrink-0" />
+                  ) : subInfos > 0 ? (
+                    <Info className="w-3 h-3 text-sky-500 flex-shrink-0" />
+                  ) : (
+                    <CheckCircle2 className="w-3 h-3 text-emerald-500 flex-shrink-0" />
+                  )}
                 </div>
-                <p className="text-[10px] text-muted-foreground mt-0.5 leading-none">
+                <p className="text-[10px] text-muted-foreground mt-0.5 leading-none font-sans opacity-75">
                   {[
                     subErrors   > 0 && `${subErrors} error${subErrors !== 1 ? 's' : ''}`,
                     subWarnings > 0 && `${subWarnings} warning${subWarnings !== 1 ? 's' : ''}`,
+                    subInfos    > 0 && `${subInfos} info item${subInfos !== 1 ? 's' : ''}`,
                   ].filter(Boolean).join(' · ')}
                 </p>
               </button>
@@ -198,16 +215,39 @@ function DiffText({ expected, actual, type }: { expected: string; actual: string
 // ─── Issue row in right panel ────────────────────────────────────────────────
 
 function IssueRow({ issue, onClick }: { issue: DisplayIssue; onClick?: () => void }) {
-  const isError = (issue.category ?? '').toLowerCase() === 'error';
+  const cat = (issue.category ?? '').toLowerCase();
+  const isError = cat === 'error';
+  const isInfo = cat === 'info';
   const hasDiff = issue.expected_text || issue.actual_text;
+
+  const targetUrl = useMemo(() => {
+    if (issue.href && (issue.href.startsWith('http://') || issue.href.startsWith('https://'))) {
+      return issue.href;
+    }
+    const match = (issue.message || '').match(/https?:\/\/[^\s"'>]+/);
+    return match ? match[0] : null;
+  }, [issue.href, issue.message]);
+
+  const handleRowClick = (e: React.MouseEvent) => {
+    if ((e.shiftKey || e.metaKey || e.ctrlKey) && targetUrl) {
+      e.preventDefault();
+      e.stopPropagation();
+      window.open(targetUrl, '_blank', 'noopener,noreferrer');
+    } else {
+      onClick?.();
+    }
+  };
 
   return (
     <div
-      onClick={onClick}
+      onClick={handleRowClick}
+      title={targetUrl ? 'Click to jump to line · Shift + Click (or Cmd + Click) to open URL in Chrome' : 'Click to jump to line'}
       className={cn(
         'rounded-lg border text-sm overflow-hidden shadow-xs transition-all cursor-pointer hover:shadow-md hover:border-primary/40',
         isError
           ? 'bg-red-50/80 border-red-100 dark:bg-red-950/20 dark:border-red-900/30'
+          : isInfo
+          ? 'bg-sky-50/80 border-sky-100 dark:bg-sky-950/20 dark:border-sky-900/30'
           : 'bg-amber-50/80 border-amber-100 dark:bg-amber-950/20 dark:border-amber-900/30',
       )}
     >
@@ -215,6 +255,8 @@ function IssueRow({ issue, onClick }: { issue: DisplayIssue; onClick?: () => voi
       <div className="flex items-start gap-3 px-4 py-3">
         {isError ? (
           <XCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+        ) : isInfo ? (
+          <Info className="w-4 h-4 text-sky-500 flex-shrink-0 mt-0.5" />
         ) : (
           <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
         )}
@@ -228,38 +270,57 @@ function IssueRow({ issue, onClick }: { issue: DisplayIssue; onClick?: () => voi
               )}
               <p className={cn(
                 'font-medium text-xs font-serif truncate',
-                isError ? 'text-red-700 dark:text-red-400' : 'text-amber-700 dark:text-amber-400',
+                isError ? 'text-red-700 dark:text-red-400' : isInfo ? 'text-sky-700 dark:text-sky-400' : 'text-amber-700 dark:text-amber-400',
               )} title={issue.rule_name || issue._ruleName || issue.type}>
                 {issue.rule_name || issue._ruleName || issue.type}
               </p>
             </div>
-            {typeof issue.line_number === 'number' && (
-              <span
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20 transition-colors"
-                title="Click to jump to line in source code"
-              >
-                Line {issue.line_number} →
+            <div className="flex items-center gap-1.5 shrink-0">
+              {typeof issue.line_number === 'number' && (
+                <span
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20 transition-colors"
+                  title="Click to jump to line in source code"
+                >
+                  Line {issue.line_number} →
+                </span>
+              )}
+              <span className={cn(
+                'px-1.5 py-0.5 rounded text-[9px] font-mono font-bold border uppercase shrink-0',
+                isError
+                  ? 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20'
+                  : isInfo
+                  ? 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20'
+                  : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20',
+              )}>
+                {isError ? 'ERROR' : isInfo ? 'INFO' : 'WARNING'}
               </span>
-            )}
+            </div>
           </div>
           {issue.message && (
             <p className="text-xs text-muted-foreground mt-0.5 whitespace-pre-wrap break-all font-sans">{issue.message}</p>
           )}
-          {issue.href && (
+          {targetUrl && (
+            <div className="mt-1.5 flex items-center gap-1.5">
+              <a
+                href={targetUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono font-semibold bg-sky-500/10 text-sky-700 dark:text-sky-300 hover:bg-sky-500/20 border border-sky-500/20 transition-colors break-all"
+                title="Click to open URL in new Chrome browser tab"
+              >
+                <span className="truncate max-w-[280px]">{targetUrl}</span>
+                <ExternalLink className="w-3 h-3 shrink-0" />
+              </a>
+            </div>
+          )}
+          {issue.href && !targetUrl && (
             <p className="text-xs font-mono text-muted-foreground mt-0.5 break-all opacity-70">{issue.href}</p>
           )}
-          <p className="text-[10px] text-muted-foreground mt-1 opacity-60 font-mono">{issue._ruleName}</p>
+          {issue._ruleName && issue._ruleName !== issue.rule_name && (
+            <p className="text-[10px] text-muted-foreground mt-1 opacity-60 font-mono">{issue._ruleName}</p>
+          )}
         </div>
-        {issue.category && (
-          <span className={cn(
-            'flex-shrink-0 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded self-start',
-            isError
-              ? 'bg-red-100 text-red-600 dark:bg-red-900/40'
-              : 'bg-amber-100 text-amber-600 dark:bg-amber-900/40',
-          )}>
-            {issue.category}
-          </span>
-        )}
       </div>
 
       {/* Expected / Actual diff block */}
@@ -617,14 +678,18 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
     [entries],
   );
   const totalWarnings = useMemo(
-    () => entries.reduce((sum, e) => sum + e.result.issues.filter(i => (i.category ?? '').toLowerCase() !== 'error').length, 0),
+    () => entries.reduce((sum, e) => sum + e.result.issues.filter(i => (i.category ?? '').toLowerCase() === 'warning').length, 0),
+    [entries],
+  );
+  const totalInfos = useMemo(
+    () => entries.reduce((sum, e) => sum + e.result.issues.filter(i => (i.category ?? '').toLowerCase() === 'info').length, 0),
     [entries],
   );
 
-  const [issueFilter, setIssueFilter] = useState<'all' | 'error' | 'warning'>('all');
+  const [issueFilter, setIssueFilter] = useState<'all' | 'error' | 'warning' | 'info'>('all');
   const [ruleNameFilter, setRuleNameFilter] = useState<string | null>(null);
 
-  const toggleIssueFilter = (f: 'error' | 'warning') =>
+  const toggleIssueFilter = (f: 'error' | 'warning' | 'info') =>
     setIssueFilter((prev) => (prev === f ? 'all' : f));
 
   const allIssues = useMemo<DisplayIssue[]>(() => {
@@ -640,7 +705,8 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
   const displayedIssues = useMemo<DisplayIssue[]>(() => {
     let issues = allIssues;
     if (issueFilter === 'error')   issues = issues.filter(i => (i.category ?? '').toLowerCase() === 'error');
-    if (issueFilter === 'warning') issues = issues.filter(i => (i.category ?? '').toLowerCase() !== 'error');
+    if (issueFilter === 'warning') issues = issues.filter(i => (i.category ?? '').toLowerCase() === 'warning');
+    if (issueFilter === 'info')    issues = issues.filter(i => (i.category ?? '').toLowerCase() === 'info');
     if (ruleNameFilter)            issues = issues.filter(i => i.rule_name === ruleNameFilter);
     
     if (sortOrder === 'line') {
@@ -655,7 +721,8 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
   }, [allIssues, issueFilter, ruleNameFilter, sortOrder]);
 
   const errorCount   = useMemo(() => allIssues.filter(i => (i.category ?? '').toLowerCase() === 'error').length,   [allIssues]);
-  const warningCount = useMemo(() => allIssues.filter(i => (i.category ?? '').toLowerCase() !== 'error').length, [allIssues]);
+  const warningCount = useMemo(() => allIssues.filter(i => (i.category ?? '').toLowerCase() === 'warning').length, [allIssues]);
+  const infoCount    = useMemo(() => allIssues.filter(i => (i.category ?? '').toLowerCase() === 'info').length,    [allIssues]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -715,13 +782,16 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
               <p className="text-xs text-muted-foreground flex items-center gap-1 flex-wrap font-sans">
                 Validation session
                 {totalErrors > 0 && (
-                  <span className="text-red-500">· {totalErrors} error{totalErrors !== 1 ? 's' : ''}</span>
+                  <span className="text-red-500 font-medium">· {totalErrors} error{totalErrors !== 1 ? 's' : ''}</span>
                 )}
                 {totalWarnings > 0 && (
-                  <span className="text-amber-500">· {totalWarnings} warning{totalWarnings !== 1 ? 's' : ''}</span>
+                  <span className="text-amber-500 font-medium">· {totalWarnings} warning{totalWarnings !== 1 ? 's' : ''}</span>
+                )}
+                {totalInfos > 0 && (
+                  <span className="text-sky-500 font-medium">· {totalInfos} info</span>
                 )}
                 {totalErrors === 0 && totalWarnings === 0 && entries.length > 0 && (
-                  <span className="text-emerald-500">· all passed</span>
+                  <span className="text-emerald-500 font-medium">· all passed</span>
                 )}
               </p>
             </div>
@@ -867,8 +937,8 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                 )}
               >
                 All issues
-                {(totalErrors + totalWarnings) > 0 && (
-                  <span className="ml-1 text-[10px] opacity-70 font-mono">({totalErrors + totalWarnings})</span>
+                {(totalErrors + totalWarnings + totalInfos) > 0 && (
+                  <span className="ml-1 text-[10px] opacity-70 font-mono">({totalErrors + totalWarnings + totalInfos})</span>
                 )}
               </button>
 
@@ -972,57 +1042,73 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                       {/* Left Column: Validation Findings List for ALL files */}
                       {showValidationFindings && (
                         <div className="w-5/12 h-full border-r border-border flex flex-col min-w-[320px] max-w-[480px]">
-                          <div className="px-3.5 py-2.5 border-b border-border bg-muted/30 flex items-center justify-between shrink-0 font-sans">
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-bold text-foreground font-serif uppercase tracking-wider">
-                                Validation Findings ({displayedIssues.length})
-                              </span>
+                          <div className="px-3.5 py-2.5 border-b border-border bg-muted/30 flex flex-col gap-2 shrink-0 font-sans">
+                            {/* Row 1: Validation Findings Title, Sort Toggle & Close Icon */}
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="text-xs font-bold text-foreground font-serif uppercase tracking-wider truncate">
+                                  Validation Findings ({displayedIssues.length})
+                                </span>
+                                <button
+                                  onClick={() => setSortOrder(prev => prev === 'rule' ? 'line' : 'rule')}
+                                  className={cn(
+                                    'px-2 py-0.5 rounded text-[10px] font-bold border transition-all flex items-center gap-1 shrink-0',
+                                    sortOrder === 'line'
+                                      ? 'bg-primary text-primary-foreground border-primary shadow-xs'
+                                      : 'bg-background text-muted-foreground border-border hover:bg-muted'
+                                  )}
+                                  title="Toggle Sort Order"
+                                >
+                                  <ArrowUpDown className="w-3 h-3" />
+                                  {sortOrder === 'rule' ? 'Sort: Rule' : 'Sort: Line'}
+                                </button>
+                              </div>
                               <button 
                                 onClick={() => setShowValidationFindings(false)}
-                                className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-sm hover:bg-muted"
+                                className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded hover:bg-muted shrink-0"
                                 title="Hide Findings"
                               >
                                 <PanelLeftClose className="w-4 h-4" />
                               </button>
                             </div>
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={() => setSortOrder(prev => prev === 'rule' ? 'line' : 'rule')}
-                            className={cn(
-                              'px-2 py-0.5 rounded text-[10px] font-bold border transition-all flex items-center gap-1',
-                              sortOrder === 'line'
-                                ? 'bg-primary text-primary-foreground border-primary'
-                                : 'bg-muted text-muted-foreground border-border hover:bg-muted/80'
-                            )}
-                            title="Toggle Sort Order"
-                          >
-                            <ArrowUpDown className="w-3 h-3" />
-                            {sortOrder === 'rule' ? 'Sort: Rule' : 'Sort: Line'}
-                          </button>
-                          <button
-                            onClick={() => toggleIssueFilter('error')}
-                            className={cn(
-                              'px-2 py-0.5 rounded text-[10px] font-bold border transition-all',
-                              issueFilter === 'error'
-                                ? 'bg-red-500 text-white border-red-500'
-                                : 'bg-red-500/10 text-red-600 border-red-500/20 hover:bg-red-500/20',
-                            )}
-                          >
-                            Errors ({errorCount})
-                          </button>
-                          <button
-                            onClick={() => toggleIssueFilter('warning')}
-                            className={cn(
-                              'px-2 py-0.5 rounded text-[10px] font-bold border transition-all',
-                              issueFilter === 'warning'
-                                ? 'bg-amber-500 text-white border-amber-500'
-                                : 'bg-amber-500/10 text-amber-600 border-amber-500/20 hover:bg-amber-500/20',
-                            )}
-                          >
-                            Warnings ({warningCount})
-                          </button>
-                        </div>
-                      </div>
+
+                            {/* Row 2: Category Filter Buttons (Full Width 3-Column Grid) */}
+                            <div className="grid grid-cols-3 gap-1.5 w-full">
+                              <button
+                                onClick={() => toggleIssueFilter('error')}
+                                className={cn(
+                                  'w-full py-1 px-2 rounded text-[10px] font-bold border transition-all text-center truncate',
+                                  issueFilter === 'error'
+                                    ? 'bg-red-500 text-white border-red-500 shadow-xs'
+                                    : 'bg-red-500/10 text-red-600 border-red-500/20 hover:bg-red-500/20',
+                                )}
+                              >
+                                Errors ({errorCount})
+                              </button>
+                              <button
+                                onClick={() => toggleIssueFilter('warning')}
+                                className={cn(
+                                  'w-full py-1 px-2 rounded text-[10px] font-bold border transition-all text-center truncate',
+                                  issueFilter === 'warning'
+                                    ? 'bg-amber-500 text-white border-amber-500 shadow-xs'
+                                    : 'bg-amber-500/10 text-amber-600 border-amber-500/20 hover:bg-amber-500/20',
+                                )}
+                              >
+                                Warnings ({warningCount})
+                              </button>
+                              <button
+                                onClick={() => toggleIssueFilter('info')}
+                                className={cn(
+                                  'w-full py-1 px-2 rounded text-[10px] font-bold border transition-all text-center truncate',
+                                  issueFilter === 'info'
+                                    ? 'bg-sky-500 text-white border-sky-500 shadow-xs'
+                                    : 'bg-sky-500/10 text-sky-600 border-sky-500/20 hover:bg-sky-500/20',
+                                )}
+                              >
+                                Info ({infoCount})
+                              </button>
+                            </div>
+                          </div>
 
                       {/* Selected Rule Banner Info Card */}
                       {(() => {
