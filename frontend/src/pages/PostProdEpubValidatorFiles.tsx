@@ -27,6 +27,7 @@ import {
   RefreshCcw,
   Bookmark,
   FileText,
+  Info as InfoIcon,
 } from 'lucide-react';
 import { XHTMLCard, xhtmlCardVariants } from '@/components/epub_validator/XHTMLCard';
 import { ValidationDetailModal } from '@/components/epub_validator/ValidationDetailModal';
@@ -602,18 +603,19 @@ export function PostProdEpubValidatorFiles() {
 
   // ── Aggregate issues per file ───────────────────────────────────────────────
   const fileIssues = useMemo(() => {
-    const map = new Map<string, { errors: number; warnings: number }>();
+    const map = new Map<string, { errors: number; warnings: number; infos: number }>();
     if (!validationData) return map;
 
     for (const entry of validationData.files) {
       const name = entry.file_details.file_name;
       // Skip book-level entries — they are shown in the Book Overview Panel, not on file cards
       if (!name || name === '[book-level]' || name === '') continue;
-      const agg = map.get(name) ?? { errors: 0, warnings: 0 };
+      const agg = map.get(name) ?? { errors: 0, warnings: 0, infos: 0 };
       for (const issue of entry.result.issues) {
-        const isError = (issue.category ?? '').toLowerCase() === 'error';
-        if (isError) agg.errors++;
-        else agg.warnings++;
+        const cat = (issue.category ?? '').toLowerCase();
+        if (cat === 'error') agg.errors++;
+        else if (cat === 'warning') agg.warnings++;
+        else if (cat === 'info') agg.infos++;
       }
       map.set(name, agg);
     }
@@ -645,25 +647,30 @@ export function PostProdEpubValidatorFiles() {
   const stats = useMemo(() => {
     const allFiles = allBackendFiles;
     const total = allFiles.length;
-    let passed = 0, warnings = 0, failed = 0, pending = 0;
+    let passed = 0, warnings = 0, failed = 0, pending = 0, infos = 0;
     for (const f of allFiles) {
       const status = getFileStatus(f.file_name);
       if (status === 'passed') passed++;
       else if (status === 'failed') failed++;
       else if (status === 'warning') warnings++;
       else pending++;
+
+      const agg = fileIssues.get(f.file_name);
+      if (agg && agg.infos > 0) {
+        infos += agg.infos;
+      }
     }
-    return { total, passed, warnings, failed, pending };
+    return { total, passed, warnings, failed, pending, infos };
   }, [allBackendFiles, fileIssues, validationData]);
 
   const hasValidated = validationData !== null;
 
   // ── Category Tab & Status & Rule filters ─────────────────────────────────────
   const [activeCategoryTab, setActiveCategoryTab] = useState<'summary' | 'front_matter' | 'chapters' | 'back_matter' | 'css' | 'images' | 'fonts' | 'other' | 'all'>('all');
-  const [activeFilter, setActiveFilter] = useState<XHTMLFileStatus | null>(null);
+  const [activeFilter, setActiveFilter] = useState<XHTMLFileStatus | 'info' | null>(null);
   const [selectedRuleFilter, setSelectedRuleFilter] = useState<string | null>(null);
 
-  const toggleFilter = (status: XHTMLFileStatus) => {
+  const toggleFilter = (status: XHTMLFileStatus | 'info') => {
     setSelectedRuleFilter(null);
     setActiveFilter((prev) => (prev === status ? null : status));
   };
@@ -729,12 +736,12 @@ export function PostProdEpubValidatorFiles() {
       let entryHasWarnings = false;
 
       for (const issue of entry.result.issues) {
-        const isErr = (issue.category ?? '').toLowerCase() === 'error';
-        if (isErr) {
+        const cat = (issue.category ?? '').toLowerCase();
+        if (cat === 'error') {
           item.errors++;
           totalErrors++;
           entryHasErrors = true;
-        } else {
+        } else if (cat === 'warning') {
           item.warnings++;
           totalWarnings++;
           entryHasWarnings = true;
@@ -782,6 +789,9 @@ export function PostProdEpubValidatorFiles() {
       return xhtmlFiles.filter((f) => ruleMatchingFiles.has(f.file_name));
     }
     if (activeFilter) {
+      if (activeFilter === 'info') {
+        return xhtmlFiles.filter((f) => (fileIssues.get(f.file_name)?.infos ?? 0) > 0);
+      }
       return xhtmlFiles.filter((f) => getFileStatus(f.file_name) === activeFilter);
     }
     return xhtmlFiles;
@@ -796,36 +806,48 @@ export function PostProdEpubValidatorFiles() {
       return cssFiles.filter((f) => ruleMatchingFiles.has(f.file_name));
     }
     if (activeFilter) {
+      if (activeFilter === 'info') {
+        return cssFiles.filter((f) => (fileIssues.get(f.file_name)?.infos ?? 0) > 0);
+      }
       return cssFiles.filter((f) => getFileStatus(f.file_name) === activeFilter);
     }
     return cssFiles;
-  }, [cssFiles, activeFilter, selectedRuleFilter, ruleMatchingFiles]);
+  }, [cssFiles, activeFilter, selectedRuleFilter, ruleMatchingFiles, fileIssues]);
 
   const visibleImageFiles = useMemo(() => {
     if (selectedRuleFilter && ruleMatchingFiles) {
       return imageFiles.filter((f) => ruleMatchingFiles.has(f.file_name));
     }
     if (activeFilter) {
+      if (activeFilter === 'info') {
+        return imageFiles.filter((f) => (fileIssues.get(f.file_name)?.infos ?? 0) > 0);
+      }
       return imageFiles.filter((f) => getFileStatus(f.file_name) === activeFilter);
     }
     return imageFiles;
-  }, [imageFiles, activeFilter, selectedRuleFilter, ruleMatchingFiles]);
+  }, [imageFiles, activeFilter, selectedRuleFilter, ruleMatchingFiles, fileIssues]);
 
   const visibleFontFiles = useMemo(() => {
     if (selectedRuleFilter && ruleMatchingFiles) {
       return fontFiles.filter((f) => ruleMatchingFiles.has(f.file_name));
     }
     if (activeFilter) {
+      if (activeFilter === 'info') {
+        return fontFiles.filter((f) => (fileIssues.get(f.file_name)?.infos ?? 0) > 0);
+      }
       return fontFiles.filter((f) => getFileStatus(f.file_name) === activeFilter);
     }
     return fontFiles;
-  }, [fontFiles, activeFilter, selectedRuleFilter, ruleMatchingFiles]);
+  }, [fontFiles, activeFilter, selectedRuleFilter, ruleMatchingFiles, fileIssues]);
 
   const visibleOtherFiles = useMemo(() => {
     if (selectedRuleFilter && ruleMatchingFiles) {
       return otherFiles.filter((f) => ruleMatchingFiles.has(f.file_name));
     }
     if (activeFilter) {
+      if (activeFilter === 'info') {
+        return otherFiles.filter((f) => (fileIssues.get(f.file_name)?.infos ?? 0) > 0);
+      }
       return otherFiles.filter((f) => getFileStatus(f.file_name) === activeFilter);
     }
     return otherFiles;
@@ -1644,7 +1666,9 @@ export function PostProdEpubValidatorFiles() {
                       ) : (
                         <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-border">
                           {allIssues.map((issue, idx) => {
-                            const isError = (issue.category ?? '').toLowerCase() === 'error';
+                            const cat = (issue.category ?? '').toLowerCase();
+                            const isError = cat === 'error';
+                            const isInfo = cat === 'info';
                             return (
                               <div
                                 key={idx}
@@ -1652,12 +1676,18 @@ export function PostProdEpubValidatorFiles() {
                                   'flex items-start gap-2.5 rounded-lg px-3 py-2 text-xs border',
                                   isError
                                     ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800/40 text-red-700 dark:text-red-300'
+                                    : isInfo
+                                    ? 'bg-sky-50 dark:bg-sky-950/30 border-sky-200 dark:border-sky-800/40 text-sky-700 dark:text-sky-300'
                                     : 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/40 text-amber-700 dark:text-amber-300',
                                 )}
                               >
-                                {isError
-                                  ? <XCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-red-500" />
-                                  : <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-500" />}
+                                {isError ? (
+                                  <XCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-red-500" />
+                                ) : isInfo ? (
+                                  <InfoIcon className="w-3.5 h-3.5 shrink-0 mt-0.5 text-sky-500" />
+                                ) : (
+                                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-500" />
+                                )}
                                 <span className="leading-relaxed font-sans">{issue.message}</span>
                               </div>
                             );
@@ -1668,8 +1698,8 @@ export function PostProdEpubValidatorFiles() {
                   );
                 })()}
 
-                {/* ── 5-stat summary row ─────────────────────────────────────────── */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 font-sans">
+                {/* ── 6-stat summary row ─────────────────────────────────────────── */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 font-sans">
                   <StatCard
                     label="Total Files"
                     value={stats.total}
@@ -1683,7 +1713,7 @@ export function PostProdEpubValidatorFiles() {
                     value={stats.pending}
                     total={stats.total}
                     icon={Clock}
-                                    barColor="bg-slate-400"
+                    barColor="bg-slate-400"
                     valueColor={stats.pending > 0 ? 'text-slate-500' : 'text-foreground'}
                     isActive={activeFilter === 'pending'}
                     onClick={() => toggleFilter('pending')}
@@ -1717,6 +1747,16 @@ export function PostProdEpubValidatorFiles() {
                     valueColor={hasValidated && stats.failed > 0 ? 'text-red-500' : 'text-foreground'}
                     isActive={activeFilter === 'failed'}
                     onClick={() => toggleFilter('failed')}
+                  />
+                  <StatCard
+                    label="Info"
+                    value={stats.infos}
+                    total={stats.total}
+                    icon={InfoIcon}
+                    barColor="bg-sky-400"
+                    valueColor={hasValidated && stats.infos > 0 ? 'text-sky-600' : 'text-foreground'}
+                    isActive={activeFilter === 'info'}
+                    onClick={() => toggleFilter('info')}
                   />
                 </div>
                 {/* ── Top Horizontal Category Navigation Tabs ─────────────────────────────────── */}
@@ -2250,6 +2290,7 @@ export function PostProdEpubValidatorFiles() {
                                 status={status}
                                 errors={agg?.errors ?? 0}
                                 warnings={agg?.warnings ?? 0}
+                                infos={agg?.infos ?? 0}
                                 isValidating={validatingFiles.has(file.file_name)}
                                 onValidate={() => handleValidateFile(file.file_name)}
                                 onOpen={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
@@ -2297,6 +2338,7 @@ export function PostProdEpubValidatorFiles() {
                                 status={status}
                                 errors={agg?.errors ?? 0}
                                 warnings={agg?.warnings ?? 0}
+                                infos={agg?.infos ?? 0}
                                 isValidating={validatingFiles.has(file.file_name)}
                                 onValidate={() => handleValidateFile(file.file_name)}
                                 onOpen={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
@@ -2344,6 +2386,7 @@ export function PostProdEpubValidatorFiles() {
                                 status={status}
                                 errors={agg?.errors ?? 0}
                                 warnings={agg?.warnings ?? 0}
+                                infos={agg?.infos ?? 0}
                                 isValidating={validatingFiles.has(file.file_name)}
                                 onValidate={() => handleValidateFile(file.file_name)}
                                 onOpen={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
@@ -2383,7 +2426,7 @@ export function PostProdEpubValidatorFiles() {
                           animate="show"
                         >
                           {visibleCssFiles.map((file, i) => {
-                            const agg = fileIssues.get(file.file_name) ?? { errors: 0, warnings: 0 };
+                            const agg = fileIssues.get(file.file_name) ?? { errors: 0, warnings: 0, infos: 0 };
                             return (
                             <motion.div key={`css-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
                               <XHTMLCard
@@ -2393,6 +2436,7 @@ export function PostProdEpubValidatorFiles() {
                                 status={getFileStatus(file.file_name)}
                                 errors={agg.errors}
                                 warnings={agg.warnings}
+                                infos={agg.infos}
                                 onOpen={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
                                 index={i}
                               />
@@ -2452,7 +2496,7 @@ export function PostProdEpubValidatorFiles() {
                           animate="show"
                         >
                           {visibleImageFiles.map((file, i) => {
-                            const agg = fileIssues.get(file.file_name) ?? { errors: 0, warnings: 0 };
+                            const agg = fileIssues.get(file.file_name) ?? { errors: 0, warnings: 0, infos: 0 };
                             return (
                             <motion.div key={`img-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
                               <XHTMLCard
@@ -2462,6 +2506,7 @@ export function PostProdEpubValidatorFiles() {
                                 status={getFileStatus(file.file_name)}
                                 errors={agg.errors}
                                 warnings={agg.warnings}
+                                infos={agg.infos}
                                 isValidating={validatingFiles.has(file.file_name)}
                                 onValidate={() => handleValidateFile(file.file_name)}
                                 onOpen={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
@@ -2514,6 +2559,7 @@ export function PostProdEpubValidatorFiles() {
                                   status={status}
                                   errors={agg?.errors ?? 0}
                                   warnings={agg?.warnings ?? 0}
+                                  infos={agg?.infos ?? 0}
                                   isValidating={validatingFiles.has(file.file_name)}
                                   onValidate={canValidate ? () => handleValidateFile(file.file_name) : undefined}
                                   onOpen={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
@@ -2566,6 +2612,7 @@ export function PostProdEpubValidatorFiles() {
                                   status={status}
                                   errors={agg?.errors ?? 0}
                                   warnings={agg?.warnings ?? 0}
+                                  infos={agg?.infos ?? 0}
                                   isValidating={validatingFiles.has(file.file_name)}
                                   onValidate={canValidate ? () => handleValidateFile(file.file_name) : undefined}
                                   onOpen={() => { 
