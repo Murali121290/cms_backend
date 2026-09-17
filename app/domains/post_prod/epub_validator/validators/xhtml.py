@@ -1052,3 +1052,94 @@ def validate_blockquote_q_tags(file_details, rule_config=None):
                 issues.append(issue)
 
     return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("ASP-TXT-001")
+def validate_heading_first_paragraph_class(file_details, rule_config=None):
+    """Paragraph (<p>) tags directly following heading (<h1..h6>) tags must use consistent class names.
+    For each heading level (e.g. <h1>, <h2>), the majority class used by first <p> tags following the heading
+    is determined as canonical. If there are no repetitions, the first occurrence is used as canonical.
+    Any mismatched <p> class is reported as a Warning.
+    """
+    file_path = file_details["full_path"]
+    issues = []
+    
+    try:
+        from bs4 import BeautifulSoup
+        with open(file_path, "r", encoding="utf-8") as f:
+            html_text = f.read()
+        soup = BeautifulSoup(html_text, "html.parser")
+        lines = html_text.splitlines()
+    except Exception as e:
+        return {"issues_count": 0, "issues": []}
+
+    from collections import Counter
+
+    for level in ["h1", "h2", "h3", "h4", "h5", "h6"]:
+        collected = []  # list of tuples: (first_p_elem, line_num, p_class_str)
+        class_counts = Counter()
+
+        for h_tag in soup.find_all(level):
+            first_p = None
+            curr = h_tag.next_element
+            while curr is not None:
+                if getattr(curr, "name", None) == "p":
+                    first_p = curr
+                    break
+                if getattr(curr, "name", None) in ["h1", "h2", "h3", "h4", "h5", "h6"]:
+                    break
+                curr = curr.next_element
+            
+            if not first_p:
+                continue
+
+            p_classes = first_p.get("class") or []
+            if isinstance(p_classes, str):
+                p_classes = p_classes.split()
+            p_class_str = " ".join(p_classes).strip()
+
+            line_num = None
+            if hasattr(first_p, 'sourceline') and first_p.sourceline:
+                line_num = first_p.sourceline
+            else:
+                p_str = str(first_p)[:30]
+                for idx, line in enumerate(lines, 1):
+                    if p_str in line:
+                        line_num = idx
+                        break
+
+            collected.append((first_p, line_num, p_class_str))
+            class_counts[p_class_str] += 1
+
+        if not collected:
+            continue
+
+        # Determine canonical class name:
+        # If there is a majority (max count > 1), pick the majority class.
+        # If no repetition exists (max count == 1), fallback to the first occurrence.
+        max_freq = max(class_counts.values())
+        if max_freq > 1:
+            # Pick the class with highest frequency (first in document order if tie)
+            canonical_class = next(c for _, _, c in collected if class_counts[c] == max_freq)
+        else:
+            canonical_class = collected[0][2]
+
+        # Flag any item whose class differs from canonical_class
+        for first_p, line_num, p_class_str in collected:
+            if p_class_str != canonical_class:
+                issue = {
+                    "type": "heading_p_class_mismatch",
+                    "rule_name": f"Heading {level.upper()} Paragraph Class Check",
+                    "message": (
+                        f"First <p> tag following <{level}> has class '{p_class_str or '(none)'}', "
+                        f"which does not match expected majority class '{canonical_class or '(none)'}' for <{level}> sections."
+                    ),
+                    "category": "Warning",
+                    "href": file_details.get("relative_path"),
+                    "extract": str(first_p)[:150],
+                }
+                if line_num:
+                    issue["line_number"] = line_num
+                issues.append(issue)
+
+    return {"issues_count": len(issues), "issues": issues}

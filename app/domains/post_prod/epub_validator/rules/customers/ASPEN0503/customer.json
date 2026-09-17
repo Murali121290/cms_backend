@@ -416,6 +416,13 @@
       "enabled": true
     },
     {
+      "id": "ASP-TXT-001",
+      "name": "Aspen: First <p> tag following each <h1..h6> heading must use a consistent class name",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true
+    },
+    {
       "id": "ASP-PAGE-001",
       "name": "Aspen: Page ruler (pagebreak marker) present for every non-blank PDF page",
       "scope": "book",
