@@ -436,7 +436,7 @@ def _get_run_formatting(run) -> dict:
     return res
 
 
-def _run_to_html(run, para, doc, track_change_element=None, para_findings=None) -> str:
+def _run_to_html(run, para, doc, track_change_element=None, para_findings=None, inside_track_change=False) -> str:
     """Render a run as a run-anchored span with direct formatting and its run bookmark.
 
     Args:
@@ -445,6 +445,7 @@ def _run_to_html(run, para, doc, track_change_element=None, para_findings=None) 
         doc: The Document
         track_change_element: The w:ins or w:del XML element if this run is inside one, else None
         para_findings: Optional list of scan findings in this paragraph
+        inside_track_change: True if this run is already inside an enclosing ins or del tag
     """
     text = run.text or ""
 
@@ -484,6 +485,9 @@ def _run_to_html(run, para, doc, track_change_element=None, para_findings=None) 
         inner = f"<em>{inner}</em>"
     if fmt["bold"]:
         inner = f"<strong>{inner}</strong>"
+    if fmt["highlight"]:
+        hl_color = fmt["highlight"]
+        inner = f'<mark class="tc-highlight" data-color="{html.escape(hl_color, quote=True)}">{inner}</mark>'
 
     style = _run_inline_style(fmt)
     rpr = _rpr_b64(run)
@@ -545,6 +549,10 @@ def _run_to_html(run, para, doc, track_change_element=None, para_findings=None) 
 
     span_html = f"<span{attrs}>{inner}</span>"
 
+    # If the run is already inside an enclosing <ins> or <del> block, don't duplicate tags
+    if inside_track_change:
+        return span_html
+
     # Check for track changes and wrap accordingly
     # First try the passed track_change_element (runs inside w:ins/w:del are passed explicitly)
     if track_change_element is not None:
@@ -552,11 +560,11 @@ def _run_to_html(run, para, doc, track_change_element=None, para_findings=None) 
         if tc_tag == qn('w:ins'):
             author_attr = f' data-author="{html.escape(track_change_element.get(qn("w:author"), ""))}"'
             date_attr = f' data-date="{html.escape(track_change_element.get(qn("w:date"), ""))}"'
-            return f"<ins{author_attr}{date_attr}>{span_html}</ins>"
+            return f'<ins class="tc-insert"{author_attr}{date_attr}>{span_html}</ins>'
         elif tc_tag == qn('w:del'):
             author_attr = f' data-author="{html.escape(track_change_element.get(qn("w:author"), ""))}"'
             date_attr = f' data-date="{html.escape(track_change_element.get(qn("w:date"), ""))}"'
-            return f"<del{author_attr}{date_attr}>{span_html}</del>"
+            return f'<del class="tc-delete"{author_attr}{date_attr}>{span_html}</del>'
 
     # Fall back to checking the run's parent hierarchy
     tc_info = _get_run_track_change_info(run)
@@ -564,13 +572,14 @@ def _run_to_html(run, para, doc, track_change_element=None, para_findings=None) 
         if tc_info['type'] == 'insertion':
             author_attr = f' data-author="{html.escape(tc_info["author"])}"' if tc_info["author"] else ""
             date_attr = f' data-date="{html.escape(tc_info["date"])}"' if tc_info["date"] else ""
-            return f"<ins{author_attr}{date_attr}>{span_html}</ins>"
+            return f'<ins class="tc-insert"{author_attr}{date_attr}>{span_html}</ins>'
         elif tc_info['type'] == 'deletion':
             author_attr = f' data-author="{html.escape(tc_info["author"])}"' if tc_info["author"] else ""
             date_attr = f' data-date="{html.escape(tc_info["date"])}"' if tc_info["date"] else ""
-            return f"<del{author_attr}{date_attr}>{span_html}</del>"
+            return f'<del class="tc-delete"{author_attr}{date_attr}>{span_html}</del>'
 
     return span_html
+
 
 
 def _block_sdt_to_html(sdt_elem, doc, body_p_map=None, findings_by_para=None) -> str:
@@ -643,7 +652,7 @@ def _is_user_visible_bookmark_name(name: str) -> bool:
     return True
 
 
-def _paragraph_content_to_html(p_elem, para, doc, findings_by_para=None, para_idx=0) -> str:
+def _paragraph_content_to_html(p_elem, para, doc, findings_by_para=None, para_idx=0, inside_track_change=False) -> str:
     """
     Recursively renders the children of a paragraph element to HTML.
     Supports nested w:sdt, w:ins, w:del, w:hyperlink, and w:r elements, preserving hierarchy.
@@ -709,19 +718,20 @@ def _paragraph_content_to_html(p_elem, para, doc, findings_by_para=None, para_id
 
         if tag_local == 'r':
             run = Run(child, para)
-            parts.append(_run_to_html(run, para, doc, track_change_element=None, para_findings=para_findings))
+            parts.append(_run_to_html(run, para, doc, track_change_element=None, para_findings=para_findings, inside_track_change=inside_track_change))
 
         elif tag_local == 'ins':
             author_attr = f' data-author="{html.escape(child.get(qn("w:author"), ""))}"' if child.get(qn("w:author")) else ""
             date_attr = f' data-date="{html.escape(child.get(qn("w:date"), ""))}"' if child.get(qn("w:date")) else ""
-            inner_html = _paragraph_content_to_html(child, para, doc, findings_by_para, para_idx)
-            parts.append(f"<ins{author_attr}{date_attr}>{inner_html}</ins>")
+            inner_html = _paragraph_content_to_html(child, para, doc, findings_by_para, para_idx, inside_track_change=True)
+            parts.append(f'<ins class="tc-insert"{author_attr}{date_attr}>{inner_html}</ins>')
             
         elif tag_local == 'del':
             author_attr = f' data-author="{html.escape(child.get(qn("w:author"), ""))}"' if child.get(qn("w:author")) else ""
             date_attr = f' data-date="{html.escape(child.get(qn("w:date"), ""))}"' if child.get(qn("w:date")) else ""
-            inner_html = _paragraph_content_to_html(child, para, doc, findings_by_para, para_idx)
-            parts.append(f"<del{author_attr}{date_attr}>{inner_html}</del>")
+            inner_html = _paragraph_content_to_html(child, para, doc, findings_by_para, para_idx, inside_track_change=True)
+            parts.append(f'<del class="tc-delete"{author_attr}{date_attr}>{inner_html}</del>')
+
             
         elif tag_local == 'sdt':
             alias, tag_val = _sdt_props(child)

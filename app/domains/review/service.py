@@ -447,7 +447,8 @@ def import_word_comments_into_xhtml(
 
     # Wrap matching XHTML paragraphs with <span data-comment-id="UUID">.
     try:
-        root = lxml.html.fromstring(xhtml_content)
+        cleaned_content = re.sub(r'^\s*<\?xml[^>]*\?>', '', xhtml_content) if isinstance(xhtml_content, str) else xhtml_content
+        root = lxml.html.fromstring(cleaned_content)
     except Exception as e:
         logger.warning(f"Word-comment import: could not parse XHTML: {e}")
         return xhtml_content

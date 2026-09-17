@@ -1,8 +1,14 @@
 import json
+import logging
+import os
+import re
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from app import models, schemas_v2
+from app.core.paths import UPLOADS_DIR
 from app.domains.projects.models import ProjectStylesheet
+
+logger = logging.getLogger(__name__)
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
@@ -96,6 +102,114 @@ def get_active_stylesheet_for_project(
     )
 
 
+def _save_stylesheet_to_disk(db: Session, ss: ProjectStylesheet) -> str | None:
+    """Save/sync the stylesheet JSON to the project's 'CE support/Style sheet template' folder and register in files table."""
+    try:
+        from app import models
+        from app.domains.projects.models import Project
+        project = db.query(Project).filter(Project.id == ss.project_id).first()
+        if not project or not project.project_code:
+            return None
+
+        ce_template_dir = os.path.join(
+            str(UPLOADS_DIR),
+            project.project_code,
+            "CE support",
+            "Style sheet template",
+        )
+        os.makedirs(ce_template_dir, exist_ok=True)
+
+        safe_name = re.sub(r'[^a-zA-Z0-9_\-]', '_', ss.name).strip('_') or f"stylesheet_{ss.id}"
+        filename = f"{safe_name}_stylesheet.json"
+        file_path = os.path.join(ce_template_dir, filename)
+
+        data = _serialize_stylesheet(ss, db=db).model_dump(mode="json")
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+
+        logger.info("Synced stylesheet %s to disk at %s", ss.id, file_path)
+
+        # Also register in models.File so it appears in Chapter File Manager under 'Style sheet template'
+        ce_chapter = (
+            db.query(models.ChapterInfo)
+            .filter(
+                models.ChapterInfo.project == project.project_code,
+                models.ChapterInfo.chapters.ilike("ce support"),
+            )
+            .first()
+        )
+        if ce_chapter:
+            db_file = (
+                db.query(models.File)
+                .filter(
+                    models.File.project_id == project.id,
+                    models.File.chapter_id == ce_chapter.id,
+                    models.File.filename == filename,
+                )
+                .first()
+            )
+            if not db_file:
+                db_file = models.File(
+                    filename=filename,
+                    file_type=".json",
+                    path=file_path,
+                    project_id=project.id,
+                    chapter_id=ce_chapter.id,
+                    category="Style sheet template",
+                    is_original=True,
+                )
+                db.add(db_file)
+                db.commit()
+                logger.info("Registered stylesheet file in files DB table with ID %s", db_file.id)
+            else:
+                db_file.path = file_path
+                db_file.category = "Style sheet template"
+                db.commit()
+
+        return file_path
+    except Exception as exc:
+        logger.warning("Failed to auto-save stylesheet %s to disk: %s", getattr(ss, "id", None), exc)
+        return None
+
+
+def _delete_stylesheet_from_disk(db: Session, ss: ProjectStylesheet) -> None:
+    """Remove stylesheet JSON file from disk and files table when deleted."""
+    try:
+        from app import models
+        from app.domains.projects.models import Project
+        project = db.query(Project).filter(Project.id == ss.project_id).first()
+        if not project or not project.project_code:
+            return
+
+        ce_template_dir = os.path.join(
+            str(UPLOADS_DIR),
+            project.project_code,
+            "CE support",
+            "Style sheet template",
+        )
+        safe_name = re.sub(r'[^a-zA-Z0-9_\-]', '_', ss.name).strip('_') or f"stylesheet_{ss.id}"
+        filename = f"{safe_name}_stylesheet.json"
+        file_path = os.path.join(ce_template_dir, filename)
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            logger.info("Removed deleted stylesheet JSON from disk: %s", file_path)
+
+        db_file = (
+            db.query(models.File)
+            .filter(
+                models.File.project_id == project.id,
+                models.File.filename == filename,
+                models.File.category == "Style sheet template",
+            )
+            .first()
+        )
+        if db_file:
+            db.delete(db_file)
+            db.commit()
+    except Exception as exc:
+        logger.warning("Failed to remove deleted stylesheet %s from disk: %s", getattr(ss, "id", None), exc)
+
+
 def create_stylesheet(
     db: Session,
     *,
@@ -119,6 +233,7 @@ def create_stylesheet(
     db.add(ss)
     db.commit()
     db.refresh(ss)
+    _save_stylesheet_to_disk(db, ss)
     return ss
 
 
@@ -152,6 +267,7 @@ def update_stylesheet(
         ss.analyzed_file_ids = json.dumps(analyzed_file_ids)
     db.commit()
     db.refresh(ss)
+    _save_stylesheet_to_disk(db, ss)
     return ss
 
 
@@ -168,6 +284,7 @@ def delete_stylesheet(
     )
     if not ss:
         return False
+    _delete_stylesheet_from_disk(db, ss)
     db.delete(ss)
     db.commit()
     return True
@@ -204,4 +321,5 @@ def activate_stylesheet(
 
     target.is_active = True
     db.commit()
+    _save_stylesheet_to_disk(db, target)
     return {"activated_id": stylesheet_id, "deactivated_ids": deactivated_ids}
