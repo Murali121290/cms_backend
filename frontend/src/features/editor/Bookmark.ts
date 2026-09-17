@@ -77,6 +77,11 @@ export const Bookmark = Mark.create({
             const name = el.getAttribute("data-bookmark");
             const role = el.getAttribute("data-bookmark-role");
             if (!name || !role) return false;
+            // Missing-citation marks aren't cross-anchors — they carry no
+            // counterpart, so a click should just place the caret (default
+            // ProseMirror behavior). Skipping here also stops the click from
+            // being treated as an interaction on the mark.
+            if (role === "missing") return false;
             const otherRole = role === "target" ? "source" : "target";
             const counter = view.dom.querySelector(
               `[data-bookmark="${CSS.escape(name)}"][data-bookmark-role="${otherRole}"]`,

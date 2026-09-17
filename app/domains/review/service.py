@@ -1150,8 +1150,31 @@ def save_xhtml_delta_and_convert(
         with open(xhtml_path, "w", encoding="utf-8") as f:
             f.write(html_content)
 
+        # Load AQ / editor comments keyed by uuid so the delta engine can
+        # emit matching <w:comment> bodies for every <span data-comment-id>
+        # it finds. Without this the export would keep the range markers
+        # but Word would show empty balloons (or drop them entirely).
+        comments_by_uuid: Dict[str, str] = {}
+        try:
+            from app import models as _models
+            rows = (
+                db.query(_models.Comment)
+                .filter(_models.Comment.file_id == file_id)
+                .all()
+            )
+            for row in rows:
+                if row.comment_uuid:
+                    comments_by_uuid[row.comment_uuid] = row.text or ""
+        except Exception as cmt_err:
+            logger.warning(f"Failed to load comments for export: {cmt_err}")
+
         # 2. Patch in-place directly on the existing file path!
-        XhtmlToDocxDeltaEngine().convert(xhtml_path, source_path, username=username)
+        XhtmlToDocxDeltaEngine().convert(
+            xhtml_path,
+            source_path,
+            username=username,
+            comments_by_uuid=comments_by_uuid,
+        )
         logger.info(f"Delta-patched DOCX version {file_record.version + 1} in-place: {source_path}")
 
         # Update the mtime of xhtml_path to match or be newer than source_path's mtime to ensure cache hit on reload

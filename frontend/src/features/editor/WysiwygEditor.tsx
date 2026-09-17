@@ -2151,7 +2151,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         })()}
 
         {/* â”€â”€ Document Area â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-        <div className="flex-1 overflow-y-auto bg-gradient-to-tr from-slate-200 to-slate-100 px-6 py-6 pb-20 flex items-start justify-center overflow-x-auto">
+        <div className="flex-1 overflow-y-auto bg-gradient-to-tr from-slate-200 to-slate-100 px-6 pt-0 pb-20 flex items-start justify-center overflow-x-auto">
           <div className={sidePanel ? "flex gap-6 max-w-[1400px] justify-start lg:justify-center" : "flex justify-center"}>
             {/* Word-style A4 Document Page — fixed width so it looks like a
                 physical sheet on the canvas, regardless of viewport width. */}
