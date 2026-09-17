@@ -5786,12 +5786,14 @@ def api_v2_get_file_xhtml(
     if os.path.exists(xhtml_path) and os.path.getmtime(xhtml_path) >= file_mtime:
         logger.info(f"Serving cached XHTML for file {file_id}")
     else:
-        # Always force a fresh conversion to ensure the editor shows the latest text/formatting
-        from app.processing.docx_to_xhtml import DocxToXhtmlEngine
+        # Use DocxToXhtmlRunsEngine to preserve track changes, highlights, math, and run bookmarks
+        from app.processing.docx_to_xhtml_runs import DocxToXhtmlRunsEngine
         try:
             os.makedirs(os.path.dirname(xhtml_path), exist_ok=True)
-            engine = DocxToXhtmlEngine()
-            engine.convert(file_path, xhtml_path)
+            engine = DocxToXhtmlRunsEngine()
+            content = engine.convert(file_path, file_id=file_id)
+            with open(xhtml_path, "w", encoding="utf-8") as f:
+                f.write(content)
         except Exception as e:
             return _error_response(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

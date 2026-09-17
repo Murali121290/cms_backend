@@ -18,7 +18,9 @@ def _f(seg: Segment, m: re.Match, category: str, rule_id: str,
     # For pattern matching in fixer: use surface-specific pattern instead of shared regex
     # This ensures "one" matches only "one", not any number when multiple number rules apply
     surface = m.group(0)
-    surface_pattern = r'\b' + re.escape(surface) + r'\b'
+    prefix = r'\b' if (surface and (surface[0].isalnum() or surface[0] == '_')) else ''
+    suffix = r'\b' if (surface and (surface[-1].isalnum() or surface[-1] == '_')) else ''
+    surface_pattern = prefix + re.escape(surface) + suffix
     return Finding(
         category=category, rule_id=rule_id, rule_label=rule_label,
         surface=m.group(0), canonical=canonical,
@@ -346,6 +348,21 @@ def detect_references(seg: Segment) -> Iterable[Finding]:
         for m in iter_unmasked_matches(pat, seg.text, seg.mask):
             yield _f(seg, m, "te_point", rule_id, "Chapter reference style", "reference_style", pat=pat)
 # ---------------------------------------------------------------------------
+# Rule 5: number ranges — "1 to 6", "1–6", "1-6"
+# ---------------------------------------------------------------------------
+RANGE_PATTERNS = [
+    (re.compile(r"\b\d+\s+to\s+\d+\b"), "range_to"),
+    (re.compile(r"\b\d+\u2013\d+\b"), "range_endash"),
+    (re.compile(r"\b\d+-\d+\b"), "range_hyphen"),
+]
+def detect_number_ranges(seg: Segment) -> Iterable[Finding]:
+    for pat, rule_id in RANGE_PATTERNS:
+        for m in iter_unmasked_matches(pat, seg.text, seg.mask):
+            prefix = seg.text[max(0, m.start() - 30) : m.start()]
+            if _CITATION_LABEL_PREFIX.search(prefix):
+                continue
+            yield _f(seg, m, "te_point", rule_id, "Number range style", "range_style", pat=pat)
+# ---------------------------------------------------------------------------
 # Rule 13: number style (0–9 numeral vs spelled out and 0–99 numeral vs spelled out)
 # ---------------------------------------------------------------------------
 DIGIT_SPELL_PATTERNS = [
@@ -360,17 +377,70 @@ _CITATION_LABEL_PREFIX = re.compile(
     r'(?:'
     r'\b(?:Fig(?:ure)?s?|Figs?|Tables?|Tab(?:le)?s?|Box(?:es)?|'
     r'Chapters?|CHAPTER|Sections?|Eq(?:uation)?s?|'
-    r'App(?:endix)?(?:endices)?|Ref(?:erence)?s?)\s*\.?\s*|'
+    r'App(?:endix)?(?:endices)?|Ref(?:erence)?s?|p\.?|pp\.?|para\.?)\s*\.?\s*|'
     r'\d+\.\s*'  # matches "3." in "Fig. 3.[1]"
     r')$',
     re.IGNORECASE,
 )
+_UNIT_OR_COMPOUND_SUFFIX_RE = re.compile(
+    r'^(?:\s*|-)(?:'
+    r'kg|g|mg|mcg|\u03bcg|m|cm|mm|km|l|ml|lb|lbs|oz|yd|ft|in|mi|'
+    r'mph|kph|rpm|hz|khz|mhz|ghz|v|w|kw|'
+    r'sec|secs|min|mins|hr|hrs|wk|wks|mo|mos|yr|yrs|'
+    r'fold|way|step|point|part|stage|degree|\u00b0|\u00ba|%|per\s+cent|percent|'
+    r'/wk|/day|/hr|/sec|/min|/yr|/kg|/g|/m|/l|/ml'
+    r')\b',
+    re.IGNORECASE
+)
+_STATISTICAL_CONTEXT_RE = re.compile(
+    r'(?:[pPnN]\s*[=<>]|\u00b1|CI|SD|SE|ratio\s*\d|\b\d+:\d+\b)',
+    re.IGNORECASE
+)
+def is_number_exception(text: str, start: int, end: int, rule_id: str) -> bool:
+    """Returns True if a number match at [start, end] is a standard publishing exception."""
+    # 1. Decimal or Currency check: preceded/followed by dot, comma in numbers, or currency sign ($ € £ ¥)
+    if start > 0 and text[start - 1] in ('$', '€', '£', '¥', '.', ','):
+        return True
+    if end < len(text) and text[end] in ('.', ','):
+        if end + 1 < len(text) and text[end + 1].isdigit():
+            return True
+        if text[end] in ('°', 'º', '%'):
+            return True
+
+    # 2. Units / Compound Suffix check (e.g., "9 kg", "20 lb", "75 mph", "10-fold", "7 %")
+    suffix = text[end : min(len(text), end + 25)]
+    if _UNIT_OR_COMPOUND_SUFFIX_RE.match(suffix):
+        return True
+
+    # 3. Citation / Reference Prefix check (e.g., "Figure 1", "Table 3", "Box 2.4", "p. 9")
+    prefix = text[max(0, start - 35) : start]
+    if _CITATION_LABEL_PREFIX.search(prefix):
+        return True
+
+    # 4. Dates / Times check (e.g., 4-digit years like 1998, 2024, or times like "5 p.m.", "9:00 a.m.")
+    matched_text = text[start:end]
+    if len(matched_text) == 4 and matched_text.isdigit() and 1800 <= int(matched_text) <= 2099:
+        return True
+    if re.search(r'\b(?:a\.m\.|p\.m\.|am|pm)\b', suffix, re.IGNORECASE):
+        return True
+
+    # 5. Statistical context check (e.g. p < .05, N = 9, ratio 3:1)
+    surrounding = text[max(0, start - 15) : min(len(text), end + 15)]
+    if _STATISTICAL_CONTEXT_RE.search(surrounding):
+        return True
+
+    # 6. Technical / Alphanumeric identifier check
+    if start > 0 and text[start - 1].isalpha():
+        return True
+    if end < len(text) and text[end].isalpha():
+        return True
+
+    return False
 def detect_digit_spell(seg: Segment) -> Iterable[Finding]:
     # First, collect all range matches so we can exclude individual numbers within ranges
     range_matches = set()
     for pat, _ in RANGE_PATTERNS:
         for m in iter_unmasked_matches(pat, seg.text, seg.mask):
-            # Mark the start and end positions of range matches
             range_matches.add((m.start(), m.end()))
     # Track which (position, rule_id) pairs we've already yielded to avoid duplicates
     seen = set()
@@ -384,21 +454,11 @@ def detect_digit_spell(seg: Segment) -> Iterable[Finding]:
                     break
             if is_in_range:
                 continue
-            prefix = seg.text[max(0, m.start() - 30) : m.start()]
-            if _CITATION_LABEL_PREFIX.search(prefix):
+
+            # Apply comprehensive publishing exception filter
+            if is_number_exception(seg.text, m.start(), m.end(), rule_id):
                 continue
-            # Skip numbers followed by degree symbol (measurements: 30°, 45°, etc.)
-            if m.end() < len(seg.text) and seg.text[m.end()] in '°º':
-                continue
-            # Skip digits adjacent to word characters (e.g., "four3" should not flag the "3")
-            if rule_id.startswith("num_") and rule_id.endswith("_numeral"):
-                # Check if preceded by word char (letter/digit)
-                if m.start() > 0 and seg.text[m.start()-1].isalpha():
-                    continue
-                # Check if followed by word char (letter/digit)
-                if m.end() < len(seg.text) and seg.text[m.end()].isalpha():
-                    continue
-            # Skip duplicate: if we've already reported this position with a different rule_id, skip it
+
             pos_key = (m.start(), m.end())
             if pos_key in seen:
                 continue

@@ -305,7 +305,9 @@ class XhtmlToDocxDeltaEngine:
         with open(html_path, "r", encoding="utf-8") as f:
             html_content = f.read()
 
-        root = lxml.html.fromstring(html_content)
+        # lxml does not accept XML encoding declaration in unicode strings
+        html_cleaned = re.sub(r'^\s*<\?xml[^>]*\?>', '', html_content)
+        root = lxml.html.fromstring(html_cleaned)
         doc = Document(out_docx_path)
         patched = 0
 

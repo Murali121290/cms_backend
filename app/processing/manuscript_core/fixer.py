@@ -52,6 +52,8 @@ def _fix_paragraph(p_element, fixes, para_mask: list[bool] | None = None):
     Applies a list of dicts: {"pattern": re.Pattern, "replacement": str}
     to the runs in a paragraph using Track Changes.
     Skips matches that fall inside quoted regions (para_mask).
+    Only processes w:r elements whose direct parent is p_element to avoid
+    'Element is not a child of this node' on runs inside hyperlinks/ins/del.
     """
     global _rev_id_counter
 
@@ -59,9 +61,12 @@ def _fix_paragraph(p_element, fixes, para_mask: list[bool] | None = None):
     while changed:
         changed = False
 
-        # Build char offset map: for each run, its starting offset in the
-        # paragraph's concatenated text. Needed for quote-mask checking.
-        run_elements = p_element.findall(f".//{qn('w:r')}")
+        # Only collect runs that are DIRECT children of p_element.
+        # Runs nested inside w:hyperlink / w:ins / w:del / w:bookmarkStart etc.
+        # cannot be re-parented with p_element.index() — that call throws
+        # 'Element is not a child of this node'.
+        run_elements = [child for child in p_element if child.tag == qn('w:r')]
+
         char_offsets: dict[int, int] = {}
         offset = 0
         for idx, r in enumerate(run_elements):
@@ -109,7 +114,7 @@ def _fix_paragraph(p_element, fixes, para_mask: list[bool] | None = None):
             for t in t_nodes:
                 r_elem.remove(t)
 
-            insert_idx = p_element.index(r_elem)
+            insert_idx = list(p_element).index(r_elem)
 
             start = match.start() - run_offset
             end = match.end() - run_offset
@@ -181,11 +186,30 @@ def _fix_paragraph(p_element, fixes, para_mask: list[bool] | None = None):
             break  # re-scan paragraph from start
 
 
+def make_surface_pattern(surface: str) -> str:
+    """Build a regex pattern for a surface form, avoiding invalid \\b boundaries
+    when boundary characters are non-alphanumeric (e.g. %, ., -, (, /).
+    """
+    if not surface:
+        return ""
+    prefix = r'\b' if (surface[0].isalnum() or surface[0] == '_') else ''
+    suffix = r'\b' if (surface[-1].isalnum() or surface[-1] == '_') else ''
+    return prefix + re.escape(surface) + suffix
+
+
 def _fix_paragraph_targeted(p_element, fix: dict, allowed_start: int):
-    """Apply a single fix only at the exact char offset `allowed_start` within the paragraph."""
+    """Apply a single fix only at or near char offset `allowed_start` within the paragraph.
+
+    Only operates on w:r elements that are DIRECT children of p_element to avoid
+    'Element is not a child of this node' when runs are nested inside
+    w:hyperlink / w:ins / w:del / w:bookmarkStart etc.
+    """
     global _rev_id_counter
 
-    run_elements = p_element.findall(f".//{qn('w:r')}")
+    # Only direct-child runs — nested runs (inside hyperlinks, existing track-change
+    # nodes, bookmarks) cannot have p_element.index() called on them.
+    run_elements = [child for child in p_element if child.tag == qn('w:r')]
+
     char_offsets: dict[int, int] = {}
     offset = 0
     for idx, r in enumerate(run_elements):
@@ -198,6 +222,11 @@ def _fix_paragraph_targeted(p_element, fix: dict, allowed_start: int):
         run_texts.append(''.join(t.text or "" for t in r.findall(qn('w:t'))))
     para_text = "".join(run_texts)
 
+    # Find the candidate match closest to allowed_start that fits inside a run
+    best_candidate = None
+    min_dist = float("inf")
+    best_run_data = None
+
     for run_idx, r_elem in enumerate(run_elements):
         t_nodes = r_elem.findall(qn('w:t'))
         if not t_nodes:
@@ -209,72 +238,81 @@ def _fix_paragraph_targeted(p_element, fix: dict, allowed_start: int):
         run_end = run_offset + len(original_text)
 
         for m in fix["pattern"].finditer(para_text):
-            if m.start() != allowed_start:
-                continue
-            if not (m.start() >= run_offset and m.end() <= run_end):
-                continue
+            if m.start() >= run_offset and m.end() <= run_end:
+                dist = abs(m.start() - allowed_start)
+                if dist < min_dist:
+                    min_dist = dist
+                    best_candidate = m
+                    best_run_data = (r_elem, t_nodes, original_text, run_offset)
 
-            rPr = r_elem.find(qn('w:rPr'))
-            for t in t_nodes:
-                r_elem.remove(t)
-            insert_idx = p_element.index(r_elem)
+    if best_candidate is None or min_dist > 15:
+        return
 
-            start = m.start() - run_offset
-            end = m.end() - run_offset
-            pre_text = original_text[:start]
-            del_text = m.group(0)
-            replacement = fix["replacement"]
-            ins_text = replacement(m) if callable(replacement) else replacement
-            post_text = original_text[end:]
+    m = best_candidate
+    r_elem, t_nodes, original_text, run_offset = best_run_data
 
-            if pre_text:
-                new_t = etree.Element(qn('w:t'))
-                new_t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
-                new_t.text = pre_text
-                r_elem.append(new_t)
-                insert_idx += 1
-            else:
-                p_element.remove(r_elem)
+    rPr = r_elem.find(qn('w:rPr'))
+    for t in t_nodes:
+        r_elem.remove(t)
+    # Safe: r_elem is guaranteed to be a direct child of p_element
+    insert_idx = list(p_element).index(r_elem)
 
-            del_node = etree.Element(qn('w:del'))
-            del_node.set(qn('w:id'), str(_rev_id_counter))
-            del_node.set(qn('w:author'), 'AI Consistency Checker')
-            del_node.set(qn('w:date'), _get_time_str())
-            _rev_id_counter += 1
-            del_r = etree.Element(qn('w:r'))
-            if rPr is not None: del_r.append(copy.deepcopy(rPr))
-            del_t = etree.Element(qn('w:delText'))
-            del_t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
-            del_t.text = del_text
-            del_r.append(del_t)
-            del_node.append(del_r)
-            p_element.insert(insert_idx, del_node)
-            insert_idx += 1
+    start = m.start() - run_offset
+    end = m.end() - run_offset
+    pre_text = original_text[:start]
+    del_text = m.group(0)
+    replacement = fix["replacement"]
+    ins_text = replacement(m) if callable(replacement) else replacement
+    post_text = original_text[end:]
 
-            ins_node = etree.Element(qn('w:ins'))
-            ins_node.set(qn('w:id'), str(_rev_id_counter))
-            ins_node.set(qn('w:author'), 'AI Consistency Checker')
-            ins_node.set(qn('w:date'), _get_time_str())
-            _rev_id_counter += 1
-            ins_r = etree.Element(qn('w:r'))
-            if rPr is not None: ins_r.append(copy.deepcopy(rPr))
-            ins_t = etree.Element(qn('w:t'))
-            ins_t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
-            ins_t.text = ins_text
-            ins_r.append(ins_t)
-            ins_node.append(ins_r)
-            p_element.insert(insert_idx, ins_node)
-            insert_idx += 1
+    if pre_text:
+        new_t = etree.Element(qn('w:t'))
+        new_t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+        new_t.text = pre_text
+        r_elem.append(new_t)
+        insert_idx += 1
+    else:
+        p_element.remove(r_elem)
 
-            if post_text:
-                post_r = etree.Element(qn('w:r'))
-                if rPr is not None: post_r.append(copy.deepcopy(rPr))
-                post_t = etree.Element(qn('w:t'))
-                post_t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
-                post_t.text = post_text
-                post_r.append(post_t)
-                p_element.insert(insert_idx, post_r)
-            return
+    del_node = etree.Element(qn('w:del'))
+    del_node.set(qn('w:id'), str(_rev_id_counter))
+    del_node.set(qn('w:author'), 'AI Consistency Checker')
+    del_node.set(qn('w:date'), _get_time_str())
+    _rev_id_counter += 1
+    del_r = etree.Element(qn('w:r'))
+    if rPr is not None: del_r.append(copy.deepcopy(rPr))
+    del_t = etree.Element(qn('w:delText'))
+    del_t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+    del_t.text = del_text
+    del_r.append(del_t)
+    del_node.append(del_r)
+    p_element.insert(insert_idx, del_node)
+    insert_idx += 1
+
+    ins_node = etree.Element(qn('w:ins'))
+    ins_node.set(qn('w:id'), str(_rev_id_counter))
+    ins_node.set(qn('w:author'), 'AI Consistency Checker')
+    ins_node.set(qn('w:date'), _get_time_str())
+    _rev_id_counter += 1
+    ins_r = etree.Element(qn('w:r'))
+    if rPr is not None: ins_r.append(copy.deepcopy(rPr))
+    ins_t = etree.Element(qn('w:t'))
+    ins_t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+    ins_t.text = ins_text
+    ins_r.append(ins_t)
+    ins_node.append(ins_r)
+    p_element.insert(insert_idx, ins_node)
+    insert_idx += 1
+
+    if post_text:
+        post_r = etree.Element(qn('w:r'))
+        if rPr is not None: post_r.append(copy.deepcopy(rPr))
+        post_t = etree.Element(qn('w:t'))
+        post_t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+        post_t.text = post_text
+        post_r.append(post_t)
+        p_element.insert(insert_idx, post_r)
+    return
 
 
 def apply_fixes_targeted(input_docx: Path, output_docx: Path, targeted_fixes: list[dict]):
@@ -318,8 +356,17 @@ def apply_fixes_targeted(input_docx: Path, output_docx: Path, targeted_fixes: li
                 ]
 
                 if para_fixes:
-                    for tf in para_fixes:
-                        pat_str = r'\b' + re.escape(tf["surface"]) + r'\b'
+                    # Sort fixes right-to-left so earlier text offsets are unaffected by later replacements
+                    para_fixes_sorted = sorted(
+                        para_fixes,
+                        key=lambda x: x.get("match_start", 0),
+                        reverse=True
+                    )
+                    for tf in para_fixes_sorted:
+                        surface = tf.get("surface", "")
+                        pat_str = tf.get("search_pattern")
+                        if not pat_str or (surface and (not surface[0].isalnum() or not surface[-1].isalnum())):
+                            pat_str = make_surface_pattern(surface)
                         fix = {
                             "pattern": re.compile(pat_str),
                             "replacement": tf["replacement"],
@@ -550,10 +597,11 @@ def build_fixes_from_selection(
     for finding in findings:
         if finding.get('rule_id') in target_rules and finding.get('replacement'):
 
-            # Use the search_pattern the detector used, or fallback to exact string
+            # Use the search_pattern the detector used, or fallback to safe pattern
             pat_str = finding.get('search_pattern')
-            if not pat_str:
-                pat_str = r'\b' + re.escape(finding['surface']) + r'\b'
+            surface = finding.get('surface', '')
+            if not pat_str or (surface and (not surface[0].isalnum() or not surface[-1].isalnum())):
+                pat_str = make_surface_pattern(surface)
 
             fixes.append({
                 "pattern": re.compile(pat_str),
@@ -600,8 +648,9 @@ def build_highlight_texts_from_selection(
     for finding in findings:
         if finding.get("rule_id") in target_rules and not finding.get("replacement"):
             pat_str = finding.get("search_pattern")
-            if not pat_str:
-                pat_str = r'\b' + re.escape(finding.get("surface", "")) + r'\b'
+            surface = finding.get("surface", "")
+            if not pat_str or (surface and (not surface[0].isalnum() or not surface[-1].isalnum())):
+                pat_str = make_surface_pattern(surface)
             key = (pat_str, finding.get("region", "body"), finding.get("source", "body"))
             if key not in seen:
                 seen.add(key)

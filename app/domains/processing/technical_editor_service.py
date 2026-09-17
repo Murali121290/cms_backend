@@ -188,12 +188,14 @@ def apply_edits(
             hl_texts = []
             seen = set()
             for hf in highlight_findings:
+                surface = hf.get("surface", "")
                 pat_str = hf.get("search_pattern")
-                if not pat_str:
-                    surface = hf.get("surface", "")
+                if not pat_str or (surface and (not surface[0].isalnum() or not surface[-1].isalnum())):
                     if not surface:
                         continue
-                    pat_str = r'\b' + re.escape(surface) + r'\b'
+                    prefix = r'\b' if (surface[0].isalnum() or surface[0] == '_') else ''
+                    suffix = r'\b' if (surface[-1].isalnum() or surface[-1] == '_') else ''
+                    pat_str = prefix + re.escape(surface) + suffix
                 key = (pat_str, hf.get("region", "body"), hf.get("source", "body"))
                 if key not in seen:
                     seen.add(key)
@@ -234,6 +236,26 @@ def apply_edits(
                     cache_path.unlink()
                 except Exception:
                     pass
+
+            # Invalidate and pre-generate fresh XHTML with track changes and highlights
+            dir_name = os.path.dirname(file_path)
+            base_name = os.path.splitext(os.path.basename(file_path))[0]
+            xhtml_path = os.path.join(dir_name, "xhtml", f"{base_name}.html")
+            if os.path.exists(xhtml_path):
+                try:
+                    os.remove(xhtml_path)
+                except Exception:
+                    pass
+
+            try:
+                from app.processing.docx_to_xhtml_runs import DocxToXhtmlRunsEngine
+                os.makedirs(os.path.dirname(xhtml_path), exist_ok=True)
+                fresh_xhtml = DocxToXhtmlRunsEngine().convert(file_path, file_id=file_id)
+                with open(xhtml_path, "w", encoding="utf-8") as xf:
+                    xf.write(fresh_xhtml)
+                logger.info(f"Pre-generated fresh XHTML for file {file_id} with track changes/highlights")
+            except Exception as e:
+                logger.warning(f"Could not pre-generate fresh XHTML for file {file_id}: {e}")
 
             return {"status": "completed", "new_file_id": file_record.id}
 

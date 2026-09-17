@@ -500,6 +500,11 @@ const ToolbarDivider = () => <div className="w-px h-5 bg-slate-700 mx-1" />;
 export interface WysiwygEditorHandle {
   editor: any; // TipTap Editor instance
   triggerCommentDialog: () => void;
+  replaceOccurrence: (
+    occ: Occurrence,
+    replacementText: string,
+    options?: { asTrackChanges?: boolean; highlightOnly?: boolean }
+  ) => boolean;
 }
 
 export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>(
@@ -534,6 +539,10 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
   ) {
     const sidebarCollapsed = useSidebarStore((s) => s.collapsed);
     const [tcEnabled, setTcEnabled] = useState(trackChangesEnabled);
+
+    useEffect(() => {
+      setTcEnabled(trackChangesEnabled);
+    }, [trackChangesEnabled]);
     const [activeGutter, setActiveGutter] = useState<{
       pos: number;
       element: HTMLElement;
@@ -672,8 +681,24 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         // paragraph text is deterministic and immune to that race.
         originalParagraphsRef.current = extractParagraphs(initialContent);
         setIsDirty(false);
+
+        // Re-dispatch occurrences onto the newly populated document
+        if (occurrences.length > 0) {
+          const store = (editor as any).storage?.occurrenceHighlight;
+          if (store) {
+            store.occurrences = occurrences;
+            store.selectedIndex = selectedOccurrenceIndex;
+            store.onOccurrenceClick = onOccurrenceClick ?? null;
+          }
+          const tr = editor.state.tr.setMeta("occurrenceHighlight", {
+            occurrences,
+            selectedIndex: selectedOccurrenceIndex,
+            onOccurrenceClick,
+          });
+          editor.view.dispatch(tr);
+        }
       }
-    }, [editor, initialContent]);
+    }, [editor, initialContent, occurrences, selectedOccurrenceIndex, onOccurrenceClick]);
 
     // Eye toggle: switch between editable current view and read-only diff view.
     // setContent uses { emitUpdate: false } so the toggle never flags the
@@ -793,12 +818,12 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
 
     // Update occurrences highlighting and wire click callback
     useEffect(() => {
-      if (editor) {
-        const ext = editor.extensionManager.extensions.find((e: any) => e.name === "occurrenceHighlight");
-        if (ext) {
-          (ext as any).storage.occurrences = occurrences;
-          (ext as any).storage.selectedIndex = selectedOccurrenceIndex;
-          (ext as any).storage.onOccurrenceClick = onOccurrenceClick ?? null;
+      if (editor && !editor.isDestroyed) {
+        const store = (editor as any).storage?.occurrenceHighlight;
+        if (store) {
+          store.occurrences = occurrences;
+          store.selectedIndex = selectedOccurrenceIndex;
+          store.onOccurrenceClick = onOccurrenceClick ?? null;
         }
 
         const tr = editor.state.tr.setMeta("occurrenceHighlight", {
@@ -808,35 +833,69 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         });
         editor.view.dispatch(tr);
 
-        // Scroll to selected occurrence
+        // Scroll to selected occurrence with center alignment
         if (selectedOccurrenceIndex >= 0 && occurrences.length > selectedOccurrenceIndex) {
           const occ = occurrences[selectedOccurrenceIndex];
-          const blocks: { pos: number; size: number; text: string }[] = [];
+          const blocks: { pos: number; size: number; text: string; paraIdx: number | null }[] = [];
           editor.state.doc.descendants((node, pos) => {
             if (node.isBlock && (node.type.name === "paragraph" || node.type.name.startsWith("heading"))) {
-              blocks.push({ pos, size: node.content.size, text: node.textContent });
+              const rawParaIdx = node.attrs?.paraIdx != null ? parseInt(node.attrs.paraIdx, 10) : null;
+              blocks.push({
+                pos,
+                size: node.content.size,
+                text: node.textContent,
+                paraIdx: Number.isFinite(rawParaIdx) ? rawParaIdx : null,
+              });
             }
           });
 
-          let bestBlockIdx = -1;
+          let bestBlock: typeof blocks[0] | null = null;
           let bestScore = Infinity;
           let bestMatchStart = -1;
 
-          blocks.forEach((block, blockIdx) => {
-            const surfaceIdx = block.text.indexOf(occ.surface);
-            if (surfaceIdx !== -1) {
-              const score = Math.abs(blockIdx - occ.para_index);
-              if (score < bestScore) {
-                bestScore = score;
-                bestBlockIdx = blockIdx;
-                bestMatchStart = surfaceIdx;
+          for (let blockIdx = 0; blockIdx < blocks.length; blockIdx++) {
+            const block = blocks[blockIdx];
+            if (!block.text || !block.text.includes(occ.surface)) continue;
+
+            const paraDistance =
+              block.paraIdx !== null
+                ? Math.abs(block.paraIdx - occ.para_index)
+                : Math.abs(blockIdx - occ.para_index);
+
+            let matchPos = -1;
+            if (
+              occ.match_start >= 0 &&
+              occ.match_start + occ.surface.length <= block.text.length &&
+              block.text.substring(occ.match_start, occ.match_start + occ.surface.length) === occ.surface
+            ) {
+              matchPos = occ.match_start;
+            } else {
+              let searchIdx = 0;
+              let closestDist = Infinity;
+              while (searchIdx <= block.text.length - occ.surface.length) {
+                const foundAt = block.text.indexOf(occ.surface, searchIdx);
+                if (foundAt === -1) break;
+                const dist = Math.abs(foundAt - occ.match_start);
+                if (dist < closestDist) {
+                  closestDist = dist;
+                  matchPos = foundAt;
+                }
+                searchIdx = foundAt + 1;
               }
             }
-          });
 
-          if (bestBlockIdx !== -1) {
-            const matchedBlock = blocks[bestBlockIdx];
-            const from = matchedBlock.pos + 1 + bestMatchStart;
+            if (matchPos !== -1) {
+              const score = paraDistance * 1000 + Math.abs(matchPos - occ.match_start);
+              if (score < bestScore) {
+                bestScore = score;
+                bestBlock = block;
+                bestMatchStart = matchPos;
+              }
+            }
+          }
+
+          if (bestBlock && bestMatchStart !== -1) {
+            const from = bestBlock.pos + 1 + bestMatchStart;
             try {
               const domInfo = editor.view.domAtPos(from);
               const el =
@@ -956,11 +1015,153 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
       setCommentDialog({ mode: "create", commentUuid: commentId, quotedText: quoted });
     }, [editor, numericFileId]);
 
-    // Expose editor instance + imperative comment trigger to parent via ref
+    // Imperative replace occurrence logic: replaces the matched occurrence text with the
+    // replacement text in the editor. Supports revision marks (track changes) or direct edit.
+    const replaceOccurrence = useCallback(
+      (
+        occ: Occurrence,
+        replacementText: string,
+        options?: { asTrackChanges?: boolean; highlightOnly?: boolean }
+      ): boolean => {
+        if (!editor || editor.isDestroyed || !occ?.surface) return false;
+
+        const doc = editor.state.doc;
+        const blocks: { pos: number; size: number; text: string; paraIdx: number | null }[] = [];
+        doc.descendants((node, pos) => {
+          if (node.isBlock && (node.type.name === "paragraph" || node.type.name.startsWith("heading"))) {
+            const rawParaIdx = node.attrs?.paraIdx != null ? parseInt(node.attrs.paraIdx, 10) : null;
+            blocks.push({
+              pos,
+              size: node.content.size,
+              text: node.textContent,
+              paraIdx: Number.isFinite(rawParaIdx) ? rawParaIdx : null,
+            });
+          }
+        });
+
+        let bestBlock: typeof blocks[0] | null = null;
+        let bestScore = Infinity;
+        let bestMatchStart = -1;
+
+        for (let blockIdx = 0; blockIdx < blocks.length; blockIdx++) {
+          const block = blocks[blockIdx];
+          if (!block.text || !block.text.includes(occ.surface)) continue;
+
+          const paraDistance =
+            block.paraIdx !== null
+              ? Math.abs(block.paraIdx - occ.para_index)
+              : Math.abs(blockIdx - occ.para_index);
+
+          let matchPos = -1;
+          if (
+            occ.match_start >= 0 &&
+            occ.match_start + occ.surface.length <= block.text.length &&
+            block.text.substring(occ.match_start, occ.match_start + occ.surface.length) === occ.surface
+          ) {
+            matchPos = occ.match_start;
+          } else {
+            let searchIdx = 0;
+            let closestDist = Infinity;
+            while (searchIdx <= block.text.length - occ.surface.length) {
+              const foundAt = block.text.indexOf(occ.surface, searchIdx);
+              if (foundAt === -1) break;
+              const dist = Math.abs(foundAt - occ.match_start);
+              if (dist < closestDist) {
+                closestDist = dist;
+                matchPos = foundAt;
+              }
+              searchIdx = foundAt + 1;
+            }
+          }
+
+          if (matchPos !== -1) {
+            const score = paraDistance * 1000 + Math.abs(matchPos - occ.match_start);
+            if (score < bestScore) {
+              bestScore = score;
+              bestBlock = block;
+              bestMatchStart = matchPos;
+            }
+          }
+        }
+
+        if (!bestBlock || bestMatchStart === -1) return false;
+
+        const from = bestBlock.pos + 1 + bestMatchStart;
+        const to = from + occ.surface.length;
+
+        // Protection: Guard against double-replacement on text that was already deleted / track-changed
+        let isAlreadyTracked = false;
+        doc.nodesBetween(from, to, (n) => {
+          if (n.marks && n.marks.some((m) => m.type.name === "del")) {
+            isAlreadyTracked = true;
+          }
+        });
+        if (isAlreadyTracked && options?.asTrackChanges) {
+          // Already replaced with revision mark — do not insert duplicates!
+          return false;
+        }
+
+        const tr = editor.state.tr;
+        const schema = editor.schema;
+        const asTrack = options?.asTrackChanges ?? false;
+        const isHighlightOnly = options?.highlightOnly ?? false;
+        const delMarkType = schema.marks.del;
+        const insMarkType = schema.marks.ins;
+        const highlightMarkType = schema.marks.highlight;
+
+        if (isHighlightOnly || (!asTrack && !replacementText)) {
+          // Highlight Only: Apply yellow highlight mark without modifying/deleting the text!
+          if (highlightMarkType) {
+            tr.addMark(from, to, highlightMarkType.create({ color: "#fef08a" }));
+          }
+        } else if (asTrack && delMarkType && insMarkType) {
+          const author = currentUser || "Reviewer";
+          const date = new Date().toISOString();
+          const changeId = crypto.randomUUID();
+
+          tr.addMark(from, to, delMarkType.create({ author, date, changeId }));
+          if (replacementText) {
+            tr.insert(to, schema.text(replacementText, [insMarkType.create({ author, date, changeId })]));
+          }
+        } else if (replacementText) {
+          tr.insertText(replacementText, from, to);
+        }
+
+        tr.setMeta("preventTrackChanges", true);
+        editor.view.dispatch(tr);
+        setIsDirty(true);
+        onContentChange?.();
+
+        // Scroll to the modified position safely after DOM update
+        setTimeout(() => {
+          try {
+            if (editor && !editor.isDestroyed && editor.view?.dom) {
+              const domInfo = editor.view.domAtPos(from);
+              const el =
+                domInfo.node.nodeType === Node.TEXT_NODE
+                  ? domInfo.node.parentElement
+                  : (domInfo.node as Element);
+              el?.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+          } catch {
+            /* ignore safely */
+          }
+        }, 50);
+
+        return true;
+      },
+      [editor, currentUser, onContentChange]
+    );
+
+    // Expose editor instance + imperative comment & occurrence triggers to parent via ref
     useImperativeHandle(
       ref,
-      () => ({ editor: editor as any, triggerCommentDialog: openCommentDialog }),
-      [editor, openCommentDialog],
+      () => ({
+        editor: editor as any,
+        triggerCommentDialog: openCommentDialog,
+        replaceOccurrence,
+      }),
+      [editor, openCommentDialog, replaceOccurrence],
     );
 
     // ── Keyboard shortcuts ───────────────────────────────────────────────────
@@ -2392,21 +2593,28 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           height: 0;
           pointer-events: none;
         }
-        .tc-insert {
-          background-color: rgba(34, 197, 94, 0.2);
-          text-decoration: underline;
-          text-decoration-color: rgb(22, 163, 74);
+        ins, .tc-insert {
+          background-color: rgba(34, 197, 94, 0.2) !important;
+          text-decoration: underline !important;
+          text-decoration-color: rgb(22, 163, 74) !important;
+          color: rgb(21, 128, 61) !important;
         }
-        .tc-delete {
-          background-color: rgba(239, 68, 68, 0.15);
-          text-decoration: line-through;
-          text-decoration-color: rgb(220, 38, 38);
-          color: rgba(127, 29, 29, 0.8);
-          padding: 2px 4px;
-          border-radius: 2px;
+        del, .tc-delete {
+          background-color: rgba(239, 68, 68, 0.15) !important;
+          text-decoration: line-through !important;
+          text-decoration-color: rgb(220, 38, 38) !important;
+          color: rgba(127, 29, 29, 0.8) !important;
+          padding: 2px 4px !important;
+          border-radius: 2px !important;
         }
-        .tc-delete:hover {
-          background-color: rgba(239, 68, 68, 0.25);
+        del:hover, .tc-delete:hover {
+          background-color: rgba(239, 68, 68, 0.25) !important;
+        }
+        mark, .tc-highlight {
+          background-color: #fef08a !important;
+          color: #854d0e !important;
+          padding: 1px 3px !important;
+          border-radius: 2px !important;
         }
         /* ── Review mode (eye toggle) — original vs current diff overlay ───── */
         .rv-del {
@@ -2426,35 +2634,46 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         /* Occurrence highlights */
         .occurrence-highlight {
           padding: 1px 3px !important;
-          border-radius: 2px !important;
+          border-radius: 3px !important;
           cursor: pointer !important;
           transition: all 0.18s ease-in-out !important;
-          background-color: rgba(249, 115, 22, 0.20) !important;
+          background-color: rgba(249, 115, 22, 0.22) !important;
           border-bottom: 2px solid rgba(249, 115, 22, 0.85) !important;
           color: inherit !important;
         }
 
         .occurrence-highlight:hover {
-          background-color: rgba(249, 115, 22, 0.3) !important;
+          background-color: rgba(249, 115, 22, 0.38) !important;
         }
 
         /* --- Active Selection (Vivid Focus Pulsating Highlights) --- */
         @keyframes green-highlight-pulse {
-          0% { box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.3); }
-          50% { box-shadow: 0 0 0 5px rgba(34, 197, 94, 0.55); }
-          100% { box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.3); }
+          0% {
+            box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.5), 0 0 10px rgba(34, 197, 94, 0.35);
+          }
+          50% {
+            box-shadow: 0 0 0 5px rgba(34, 197, 94, 0.85), 0 0 16px rgba(34, 197, 94, 0.55);
+          }
+          100% {
+            box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.5), 0 0 10px rgba(34, 197, 94, 0.35);
+          }
         }
 
-        .occurrence-highlight-selected {
-          background-color: rgba(34, 197, 94, 0.40) !important;
-          border-bottom: 2.5px solid rgba(34, 197, 94, 0.95) !important;
-          color: #14532d !important;
+        .occurrence-highlight-selected,
+        .occurrence-stylesheet-selected,
+        [class*="occurrence-"][class*="-selected"] {
+          background-color: rgba(34, 197, 94, 0.55) !important;
+          border-bottom: 3px solid #16a34a !important;
+          color: #052e16 !important;
           font-weight: 700 !important;
-          padding: 2px 3px !important;
-          border-radius: 3px !important;
-          animation: green-highlight-pulse 2s infinite ease-in-out !important;
+          padding: 2px 5px !important;
+          border-radius: 4px !important;
+          outline: 2px solid #22c55e !important;
+          outline-offset: 1px !important;
+          animation: green-highlight-pulse 1.8s infinite ease-in-out !important;
           transition: all 0.18s ease-in-out !important;
           opacity: 1 !important;
+          display: inline !important;
         }
 
 
