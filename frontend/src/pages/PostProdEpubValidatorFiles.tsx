@@ -1760,199 +1760,218 @@ export function PostProdEpubValidatorFiles() {
                   />
                 </div>
                 {/* ── Top Horizontal Category Navigation Tabs ─────────────────────────────────── */}
-                <div className="flex items-center gap-2 border-b border-border/80 pb-px font-sans overflow-x-auto scrollbar-none">
+                {(() => {
+                  const getCategoryTabBadgeStyle = (isTabActive: boolean) => {
+                    if (activeFilter === 'failed') {
+                      return isTabActive
+                        ? 'bg-red-500/20 text-red-600 dark:text-red-400 font-bold border border-red-500/30'
+                        : 'bg-red-500/10 text-red-600 dark:text-red-400 font-bold';
+                    }
+                    if (activeFilter === 'passed') {
+                      return isTabActive
+                        ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-500/30'
+                        : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold';
+                    }
+                    if (activeFilter === 'warning') {
+                      return isTabActive
+                        ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 font-bold border border-amber-500/30'
+                        : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 font-bold';
+                    }
+                    if (activeFilter === 'info') {
+                      return isTabActive
+                        ? 'bg-sky-500/20 text-sky-600 dark:text-sky-400 font-bold border border-sky-500/30'
+                        : 'bg-sky-500/10 text-sky-600 dark:text-sky-400 font-bold';
+                    }
+                    if (activeFilter === 'pending') {
+                      return isTabActive
+                        ? 'bg-slate-500/20 text-slate-600 dark:text-slate-400 font-bold border border-slate-500/30'
+                        : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 font-bold';
+                    }
+                    // Default normal / clear filter state -> Chapter / Primary theme color for ALL category counts!
+                    return isTabActive
+                      ? 'bg-primary/20 text-primary font-bold border border-primary/30'
+                      : 'bg-primary/10 text-primary/80 font-semibold';
+                  };
 
-                  {frontMatterFiles.length > 0 && (
-                    <button
-                      onClick={() => setActiveCategoryTab('front_matter')}
-                      className={cn(
-                        'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
-                        activeCategoryTab === 'front_matter'
-                          ? 'border-orange-500 text-orange-600 dark:text-orange-400 bg-orange-500/10 shadow-xs'
-                          : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                  return (
+                    <div className="flex items-center gap-2 border-b border-border/80 pb-px font-sans overflow-x-auto scrollbar-none">
+                      {frontMatterFiles.length > 0 && (
+                        <button
+                          onClick={() => setActiveCategoryTab('front_matter')}
+                          className={cn(
+                            'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
+                            activeCategoryTab === 'front_matter'
+                              ? 'border-orange-500 text-orange-600 dark:text-orange-400 bg-orange-500/10 shadow-xs'
+                              : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                          )}
+                        >
+                          <BookOpen className="w-4 h-4 text-orange-500 shrink-0" />
+                          <span>Front Matter</span>
+                          <span
+                            className={cn(
+                              'px-2 py-0.5 rounded-full text-[10px] font-mono transition-colors',
+                              getCategoryTabBadgeStyle(activeCategoryTab === 'front_matter')
+                            )}
+                          >
+                            {visibleFrontMatterFiles.length}
+                          </span>
+                        </button>
                       )}
-                    >
-                      <BookOpen className="w-4 h-4 text-orange-500 shrink-0" />
-                      <span>Front Matter</span>
-                      <span
+
+                      {chapterFiles.length > 0 && (
+                        <button
+                          onClick={() => setActiveCategoryTab('chapters')}
+                          className={cn(
+                            'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
+                            activeCategoryTab === 'chapters'
+                              ? 'border-primary text-primary bg-primary/10 shadow-xs'
+                              : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                          )}
+                        >
+                          <BookOpen className="w-4 h-4 text-primary shrink-0" />
+                          <span>Chapters</span>
+                          <span
+                            className={cn(
+                              'px-2 py-0.5 rounded-full text-[10px] font-mono transition-colors',
+                              getCategoryTabBadgeStyle(activeCategoryTab === 'chapters')
+                            )}
+                          >
+                            {visibleChapterFiles.length}
+                          </span>
+                        </button>
+                      )}
+
+                      {backMatterFiles.length > 0 && (
+                        <button
+                          onClick={() => setActiveCategoryTab('back_matter')}
+                          className={cn(
+                            'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
+                            activeCategoryTab === 'back_matter'
+                              ? 'border-fuchsia-500 text-fuchsia-600 dark:text-fuchsia-400 bg-fuchsia-500/10 shadow-xs'
+                              : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                          )}
+                        >
+                          <BookOpen className="w-4 h-4 text-fuchsia-500 shrink-0" />
+                          <span>Back Matter</span>
+                          <span
+                            className={cn(
+                              'px-2 py-0.5 rounded-full text-[10px] font-mono transition-colors',
+                              getCategoryTabBadgeStyle(activeCategoryTab === 'back_matter')
+                            )}
+                          >
+                            {visibleBackMatterFiles.length}
+                          </span>
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() => setActiveCategoryTab('css')}
                         className={cn(
-                          'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold transition-colors',
-                          activeCategoryTab === 'front_matter'
-                            ? 'bg-orange-500/20 text-orange-600 dark:text-orange-400'
-                            : 'bg-orange-500/10 text-orange-600/80 dark:text-orange-400/80',
+                          'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
+                          activeCategoryTab === 'css'
+                            ? 'border-violet-500 text-violet-600 dark:text-violet-400 bg-violet-500/10 shadow-xs'
+                            : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
                         )}
                       >
-                        {visibleFrontMatterFiles.length}
-                      </span>
-                    </button>
-                  )}
+                        <Braces className="w-4 h-4 text-violet-500 shrink-0" />
+                        <span>CSS</span>
+                        <span
+                          className={cn(
+                            'px-2 py-0.5 rounded-full text-[10px] font-mono transition-colors',
+                            getCategoryTabBadgeStyle(activeCategoryTab === 'css')
+                          )}
+                        >
+                          {visibleCssFiles.length}
+                        </span>
+                      </button>
 
-                  {chapterFiles.length > 0 && (
-                    <button
-                      onClick={() => setActiveCategoryTab('chapters')}
-                      className={cn(
-                        'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
-                        activeCategoryTab === 'chapters'
-                          ? 'border-primary text-primary bg-primary/10 shadow-xs'
-                          : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
-                      )}
-                    >
-                      <BookOpen className="w-4 h-4 text-primary shrink-0" />
-                      <span>Chapters</span>
-                      <span
+                      <button
+                        onClick={() => setActiveCategoryTab('images')}
                         className={cn(
-                          'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold transition-colors',
-                          activeCategoryTab === 'chapters'
-                            ? 'bg-primary/20 text-primary'
-                            : 'bg-primary/10 text-primary/80',
+                          'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
+                          activeCategoryTab === 'images'
+                            ? 'border-blue-500 text-blue-600 dark:text-blue-400 bg-blue-500/10 shadow-xs'
+                            : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
                         )}
                       >
-                        {visibleChapterFiles.length}
-                      </span>
-                    </button>
-                  )}
+                        <ImageIcon className="w-4 h-4 text-blue-500 shrink-0" />
+                        <span>Images</span>
+                        <span
+                          className={cn(
+                            'px-2 py-0.5 rounded-full text-[10px] font-mono transition-colors',
+                            getCategoryTabBadgeStyle(activeCategoryTab === 'images')
+                          )}
+                        >
+                          {visibleImageFiles.length}
+                        </span>
+                      </button>
 
-                  {backMatterFiles.length > 0 && (
-                    <button
-                      onClick={() => setActiveCategoryTab('back_matter')}
-                      className={cn(
-                        'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
-                        activeCategoryTab === 'back_matter'
-                          ? 'border-rose-500 text-rose-600 dark:text-rose-400 bg-rose-500/10 shadow-xs'
-                          : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                      {fontFiles.length > 0 && (
+                        <button
+                          onClick={() => setActiveCategoryTab('fonts')}
+                          className={cn(
+                            'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
+                            activeCategoryTab === 'fonts'
+                              ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 shadow-xs'
+                              : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                          )}
+                        >
+                          <Type className="w-4 h-4 text-indigo-500 shrink-0" />
+                          <span>Fonts</span>
+                          <span
+                            className={cn(
+                              'px-2 py-0.5 rounded-full text-[10px] font-mono transition-colors',
+                              getCategoryTabBadgeStyle(activeCategoryTab === 'fonts')
+                            )}
+                          >
+                            {visibleFontFiles.length}
+                          </span>
+                        </button>
                       )}
-                    >
-                      <BookOpen className="w-4 h-4 text-rose-500 shrink-0" />
-                      <span>Back Matter</span>
-                      <span
+
+                      <button
+                        onClick={() => setActiveCategoryTab('other')}
                         className={cn(
-                          'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold transition-colors',
-                          activeCategoryTab === 'back_matter'
-                            ? 'bg-rose-500/20 text-rose-600 dark:text-rose-400'
-                            : 'bg-rose-500/10 text-rose-600/80 dark:text-rose-400/80',
+                          'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
+                          activeCategoryTab === 'other'
+                            ? 'border-cyan-500 text-cyan-600 dark:text-cyan-400 bg-cyan-500/10 shadow-xs'
+                            : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
                         )}
                       >
-                        {visibleBackMatterFiles.length}
-                      </span>
-                    </button>
-                  )}
+                        <FileCode2 className="w-4 h-4 text-cyan-500 shrink-0" />
+                        <span>Metadata Files</span>
+                        <span
+                          className={cn(
+                            'px-2 py-0.5 rounded-full text-[10px] font-mono transition-colors',
+                            getCategoryTabBadgeStyle(activeCategoryTab === 'other')
+                          )}
+                        >
+                          {visibleOtherFiles.length}
+                        </span>
+                      </button>
 
-                  <button
-                    onClick={() => setActiveCategoryTab('css')}
-                    className={cn(
-                      'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
-                      activeCategoryTab === 'css'
-                        ? 'border-violet-500 text-violet-600 dark:text-violet-400 bg-violet-500/10 shadow-xs'
-                        : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
-                    )}
-                  >
-                    <Braces className="w-4 h-4 text-violet-500 shrink-0" />
-                    <span>CSS</span>
-                    <span
-                      className={cn(
-                        'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold transition-colors',
-                        activeCategoryTab === 'css'
-                          ? 'bg-violet-500/20 text-violet-600 dark:text-violet-400'
-                          : 'bg-violet-500/10 text-violet-600/80 dark:text-violet-400/80',
-                      )}
-                    >
-                      {visibleCssFiles.length}
-                    </span>
-                  </button>
-
-                  <button
-                    onClick={() => setActiveCategoryTab('images')}
-                    className={cn(
-                      'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
-                      activeCategoryTab === 'images'
-                        ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 shadow-xs'
-                        : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
-                    )}
-                  >
-                    <ImageIcon className="w-4 h-4 text-emerald-500 shrink-0" />
-                    <span>Images</span>
-                    <span
-                      className={cn(
-                        'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold transition-colors',
-                        activeCategoryTab === 'images'
-                          ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
-                          : 'bg-emerald-500/10 text-emerald-600/80 dark:text-emerald-400/80',
-                      )}
-                    >
-                      {visibleImageFiles.length}
-                    </span>
-                  </button>
-
-                  {fontFiles.length > 0 && (
-                    <button
-                      onClick={() => setActiveCategoryTab('fonts')}
-                      className={cn(
-                        'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
-                        activeCategoryTab === 'fonts'
-                          ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 shadow-xs'
-                          : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
-                      )}
-                    >
-                      <Type className="w-4 h-4 text-indigo-500 shrink-0" />
-                      <span>Fonts</span>
-                      <span
+                      <button
+                        onClick={() => setActiveCategoryTab('all')}
                         className={cn(
-                          'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold transition-colors',
-                          activeCategoryTab === 'fonts'
-                            ? 'bg-indigo-500/20 text-indigo-600 dark:text-indigo-400'
-                            : 'bg-indigo-500/10 text-indigo-600/80 dark:text-indigo-400/80',
+                          'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg sm:ml-auto',
+                          activeCategoryTab === 'all'
+                            ? 'border-foreground text-foreground bg-muted shadow-xs font-bold'
+                            : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
                         )}
                       >
-                        {visibleFontFiles.length}
-                      </span>
-                    </button>
-                  )}
-
-                  <button
-                    onClick={() => setActiveCategoryTab('other')}
-                    className={cn(
-                      'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
-                      activeCategoryTab === 'other'
-                        ? 'border-sky-500 text-sky-600 dark:text-sky-400 bg-sky-500/10 shadow-xs'
-                        : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
-                    )}
-                  >
-                    <FileCode2 className="w-4 h-4 text-sky-500 shrink-0" />
-                    <span>Metadata Files</span>
-                    <span
-                      className={cn(
-                        'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold transition-colors',
-                        activeCategoryTab === 'other'
-                          ? 'bg-sky-500/20 text-sky-600 dark:text-sky-400'
-                          : 'bg-sky-500/10 text-sky-600/80 dark:text-sky-400/80',
-                      )}
-                    >
-                      {visibleOtherFiles.length}
-                    </span>
-                  </button>
-
-                  <button
-                    onClick={() => setActiveCategoryTab('all')}
-                    className={cn(
-                      'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg sm:ml-auto',
-                      activeCategoryTab === 'all'
-                        ? 'border-foreground text-foreground bg-muted shadow-xs font-bold'
-                        : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
-                    )}
-                  >
-                    <span>All Files</span>
-                    <span
-                      className={cn(
-                        'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold transition-colors',
-                        activeCategoryTab === 'all'
-                          ? 'bg-primary/20 text-primary'
-                          : 'bg-muted text-muted-foreground',
-                      )}
-                    >
-                      {allBackendFiles.length}
-                    </span>
-                  </button>
-                </div>
+                        <span>All Files</span>
+                        <span
+                          className={cn(
+                            'px-2 py-0.5 rounded-full text-[10px] font-mono transition-colors',
+                            getCategoryTabBadgeStyle(activeCategoryTab === 'all')
+                          )}
+                        >
+                          {allBackendFiles.length}
+                        </span>
+                      </button>
+                    </div>
+                  );
+                })()}
 
                 {(activeFilter || selectedRuleFilter) && (
                   <div className="flex items-center justify-between text-xs text-muted-foreground font-sans bg-muted/40 px-3 py-2 rounded-lg border border-border/50">
