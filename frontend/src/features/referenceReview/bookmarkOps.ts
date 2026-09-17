@@ -2,7 +2,7 @@ import type { Editor } from "@tiptap/react";
 
 import type { ManualLink, ReferenceValidationReviewResponse } from "@/api/referenceReview";
 
-export type BookmarkRole = "target" | "source" | "manual" | "existing";
+export type BookmarkRole = "target" | "source" | "manual" | "existing" | "missing";
 
 export interface BookmarkInfo {
   name: string;
@@ -180,7 +180,7 @@ export function getUnlinkedBookmarks(
   referenceEntries: ReferenceEntry[],
   manualLinks: ManualLink[],
 ): BookmarkInfo[] {
-  const all = listBookmarks(editor);
+  const all = listBookmarks(editor).filter((b) => b.role !== "missing");
   if (all.length === 0) return [];
 
   const linkedNames = new Set<string>();

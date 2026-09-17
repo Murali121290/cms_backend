@@ -441,6 +441,7 @@ export function TechnicalEditorPage() {
               }}
               isSaving={editorSave.isPending}
               saveLabel="Save & Convert to DOCX"
+              hideSaveButton
               documentTitle={review.file.filename}
               height={isFullscreen ? "calc(100vh - 20px)" : "calc(100vh - 260px)"}
               styles={allStyles}

@@ -166,6 +166,230 @@ def _get_unique_bookmark_id(doc) -> int:
     return next_id
 
 
+# ─── Word comments (word/comments.xml) plumbing ─────────────────────────────
+# Delta save/convert emits `<w:commentRangeStart/End>` + `<w:commentReference>`
+# inside `<w:p>` for every editor `<span data-comment-id>` it encounters, then
+# calls `_flush_comments_part` to add matching `<w:comment>` bodies into
+# `word/comments.xml` (creating the part on demand if the source DOCX had no
+# comments). Modelled on the pattern in legacy/ReferencesStructing.py.
+
+_W_COMMENTS_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+_MC_COMMENTS_NS = "http://schemas.openxmlformats.org/markup-compatibility/2006"
+_W14_COMMENTS_NS = "http://schemas.microsoft.com/office/word/2010/wordml"
+_COMMENTS_NSMAP = {
+    "w": _W_COMMENTS_NS,
+    "mc": _MC_COMMENTS_NS,
+    "w14": _W14_COMMENTS_NS,
+}
+_COMMENTS_REL = (
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments"
+)
+_COMMENTS_CT = (
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"
+)
+
+
+def _fresh_comments_tree():
+    """Return an empty `<w:comments>` root with the correct w: prefix."""
+    from lxml import etree as _et
+    root = _et.Element(f"{{{_W_COMMENTS_NS}}}comments", nsmap=_COMMENTS_NSMAP)
+    root.set(f"{{{_MC_COMMENTS_NS}}}Ignorable", "w14 wp14")
+    return root
+
+
+def _next_docx_comment_id(doc) -> int:
+    """
+    Highest existing w:id inside word/comments.xml + 1 (0 if none).
+
+    Reads via the document's relationships so it works both when the part
+    has been loaded by python-docx and when it was written by a previous
+    delta save (which round-trips through the zip helper below).
+    """
+    from lxml import etree as _et
+    doc_part = doc.part
+    for rel in doc_part.rels.values():
+        if rel.reltype == _COMMENTS_REL:
+            try:
+                blob = rel.target_part.blob  # XmlPart computes fresh from tree
+            except Exception:
+                blob = getattr(rel.target_part, "_blob", b"")
+            try:
+                tree = _et.fromstring(blob)
+                used = [
+                    int(c.get(f"{{{_W_COMMENTS_NS}}}id"))
+                    for c in tree.findall(f"{{{_W_COMMENTS_NS}}}comment")
+                    if c.get(f"{{{_W_COMMENTS_NS}}}id") is not None
+                ]
+                return (max(used) + 1) if used else 0
+            except Exception:
+                return 0
+    return 0
+
+
+def _flush_comments_into_docx_zip(
+    docx_path: str,
+    comment_state: dict,
+    author: str = "WYSIWYG Editor",
+) -> None:
+    """
+    Post-save writeback: open the just-saved DOCX zip and (a) add or update
+    `word/comments.xml` with a `<w:comment>` body for every uuid the
+    traversal allocated a `w:id` to, (b) ensure the relationship exists in
+    `word/_rels/document.xml.rels`, (c) ensure the content-type override
+    exists in `[Content_Types].xml`.
+
+    Rewrites the zip in place. Doing this after python-docx's own save
+    sidesteps its XmlPart caching (which would drop any in-memory blob
+    edits) and works for both first-time comment insertion and appending
+    to a DOCX that already carries comments.
+    """
+    import zipfile
+    import shutil
+    from lxml import etree as _et
+
+    assigned = comment_state.get("assigned") or {}
+    texts = comment_state.get("texts") or {}
+    if not assigned:
+        return
+
+    initials = "".join(w[0] for w in (author or "").split() if w)[:4] or "AQ"
+
+    # Read the existing zip fully into memory (small enough for this use)
+    # so we can rewrite in place without losing anything.
+    with zipfile.ZipFile(docx_path, "r") as src:
+        parts_data = {name: src.read(name) for name in src.namelist()}
+
+    # Every re-save fully rebuilds a paragraph's runs and range markers
+    # (see _patch_paragraph_runs), so the only <w:commentRangeStart> /
+    # <w:commentReference> ids present in document.xml at this point are
+    # the ones emitted this round. Collect them so we can prune stale
+    # comment bodies orphaned by earlier saves.
+    referenced_ids: set[str] = set()
+    try:
+        doc_xml_tree = _et.fromstring(parts_data.get("word/document.xml", b"<x/>"))
+        for tag in ("commentRangeStart", "commentReference"):
+            for el in doc_xml_tree.iter(f"{{{_W_COMMENTS_NS}}}{tag}"):
+                cid = el.get(f"{{{_W_COMMENTS_NS}}}id")
+                if cid is not None:
+                    referenced_ids.add(cid)
+    except Exception:
+        pass
+
+    # --- word/comments.xml ---------------------------------------------
+    if "word/comments.xml" in parts_data:
+        try:
+            tree = _et.fromstring(parts_data["word/comments.xml"])
+        except Exception:
+            tree = _fresh_comments_tree()
+    else:
+        tree = _fresh_comments_tree()
+
+    # Prune orphans first — any <w:comment> whose id is no longer
+    # referenced in document.xml (and isn't about to be added by this
+    # round) has to go, or comments.xml grows unbounded across saves.
+    keep_ids = set(referenced_ids)
+    for wid in (str(w) for w in (assigned or {}).values()):
+        keep_ids.add(wid)
+    for c in list(tree.findall(f"{{{_W_COMMENTS_NS}}}comment")):
+        cid = c.get(f"{{{_W_COMMENTS_NS}}}id")
+        if cid is not None and cid not in keep_ids:
+            tree.remove(c)
+
+    existing_ids = {
+        c.get(f"{{{_W_COMMENTS_NS}}}id")
+        for c in tree.findall(f"{{{_W_COMMENTS_NS}}}comment")
+        if c.get(f"{{{_W_COMMENTS_NS}}}id") is not None
+    }
+
+    for uuid_key, wid in assigned.items():
+        wid_str = str(wid)
+        if wid_str in existing_ids:
+            continue
+        body = texts.get(uuid_key)
+        if body is None:
+            # No stored body — skip rather than emitting a blank comment
+            # that Word will display as an empty balloon.
+            continue
+        c_el = _et.SubElement(tree, f"{{{_W_COMMENTS_NS}}}comment")
+        c_el.set(f"{{{_W_COMMENTS_NS}}}id", wid_str)
+        c_el.set(f"{{{_W_COMMENTS_NS}}}author", author or "AQ")
+        c_el.set(f"{{{_W_COMMENTS_NS}}}initials", initials)
+        p_el = _et.SubElement(c_el, f"{{{_W_COMMENTS_NS}}}p")
+        r_el = _et.SubElement(p_el, f"{{{_W_COMMENTS_NS}}}r")
+        t_el = _et.SubElement(r_el, f"{{{_W_COMMENTS_NS}}}t")
+        t_el.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+        t_el.text = body
+        existing_ids.add(wid_str)
+
+    parts_data["word/comments.xml"] = _et.tostring(
+        tree,
+        xml_declaration=True,
+        encoding="UTF-8",
+        standalone=True,
+    )
+
+    # --- [Content_Types].xml override ----------------------------------
+    ct_name = "[Content_Types].xml"
+    if ct_name in parts_data:
+        try:
+            ct_tree = _et.fromstring(parts_data[ct_name])
+            ct_ns = "http://schemas.openxmlformats.org/package/2006/content-types"
+            has_override = any(
+                el.get("PartName") == "/word/comments.xml"
+                for el in ct_tree.findall(f"{{{ct_ns}}}Override")
+            )
+            if not has_override:
+                override = _et.SubElement(ct_tree, f"{{{ct_ns}}}Override")
+                override.set("PartName", "/word/comments.xml")
+                override.set("ContentType", _COMMENTS_CT)
+                parts_data[ct_name] = _et.tostring(
+                    ct_tree,
+                    xml_declaration=True,
+                    encoding="UTF-8",
+                    standalone=True,
+                )
+        except Exception:
+            pass
+
+    # --- word/_rels/document.xml.rels ----------------------------------
+    rels_name = "word/_rels/document.xml.rels"
+    if rels_name in parts_data:
+        try:
+            rels_tree = _et.fromstring(parts_data[rels_name])
+            rels_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
+            has_rel = any(
+                el.get("Target", "").endswith("comments.xml")
+                and el.get("Type") == _COMMENTS_REL
+                for el in rels_tree.findall(f"{{{rels_ns}}}Relationship")
+            )
+            if not has_rel:
+                used_ids = [
+                    el.get("Id", "") for el in rels_tree.findall(f"{{{rels_ns}}}Relationship")
+                ]
+                n = 1
+                while f"rId{n}" in used_ids:
+                    n += 1
+                rel_el = _et.SubElement(rels_tree, f"{{{rels_ns}}}Relationship")
+                rel_el.set("Id", f"rId{n}")
+                rel_el.set("Type", _COMMENTS_REL)
+                rel_el.set("Target", "comments.xml")
+                parts_data[rels_name] = _et.tostring(
+                    rels_tree,
+                    xml_declaration=True,
+                    encoding="UTF-8",
+                    standalone=True,
+                )
+        except Exception:
+            pass
+
+    # --- rewrite the zip -----------------------------------------------
+    tmp_zip = docx_path + ".cmts.tmp"
+    with zipfile.ZipFile(tmp_zip, "w", zipfile.ZIP_DEFLATED) as dst:
+        for name, data in parts_data.items():
+            dst.writestr(name, data)
+    shutil.move(tmp_zip, docx_path)
+
+
 def _find_para_by_bookmark(doc, bookmark_name: str):
     """Finds a body paragraph or table cell paragraph containing the specified bookmark."""
     # 1. Search in body paragraphs
@@ -295,7 +519,13 @@ def _build_bookmark_para_index(doc) -> dict:
 class XhtmlToDocxDeltaEngine:
     """Apply HTML edits back to the DOCX in-place using unique tracking bookmarks."""
 
-    def convert(self, html_path: str, out_docx_path: str, username: str = "WYSIWYG Editor") -> str:
+    def convert(
+        self,
+        html_path: str,
+        out_docx_path: str,
+        username: str = "WYSIWYG Editor",
+        comments_by_uuid: dict | None = None,
+    ) -> str:
         if not os.path.exists(html_path):
             raise RuntimeError(f"Input HTML not found: {html_path}")
         if not os.path.exists(out_docx_path):
@@ -308,6 +538,20 @@ class XhtmlToDocxDeltaEngine:
         root = lxml.html.fromstring(html_content)
         doc = Document(out_docx_path)
         patched = 0
+        # Comment plumbing — shared state across all paragraph patches.
+        # `_comment_state` tracks:
+        #   - assigned:  uuid → docx w:id (int)  (each uuid gets exactly one id)
+        #   - texts:     uuid → comment body text (from the DB)
+        # Populated during traversal (each `<span data-comment-id>` allocates
+        # a w:id) and drained into word/comments.xml after all paragraphs
+        # are patched. Using a shared dict keeps the id space consistent
+        # even when the same uuid appears in multiple places (rare but
+        # possible if the mark got split across formatting boundaries).
+        self._comment_state = {
+            "assigned": {},
+            "texts": dict(comments_by_uuid or {}),
+            "next_id": _next_docx_comment_id(doc),
+        }
 
         # Build bookmark paragraph index for O(1) lookups
         para_index = _build_bookmark_para_index(doc)
@@ -466,6 +710,19 @@ class XhtmlToDocxDeltaEngine:
         # Save atomically
         tmp_path = out_docx_path + ".delta.tmp"
         doc.save(tmp_path)
+
+        # Flush any Query-created AQ comments into word/comments.xml so the
+        # <w:commentRangeStart/End> + <w:commentReference> markers emitted
+        # during traversal have matching <w:comment> bodies. Without this
+        # Word treats the range markers as orphans and silently drops the
+        # comments on load. We rewrite the zip directly rather than going
+        # through python-docx's XmlPart because the XmlPart computes its
+        # blob from an internal element tree, so any change to `_blob`
+        # after loading is lost on re-save.
+        try:
+            _flush_comments_into_docx_zip(tmp_path, self._comment_state, author=username)
+        except Exception as cmt_err:
+            logger.warning(f"Failed to flush comments part: {cmt_err}", exc_info=True)
         
         # Ensure revision tracking is enabled
         try:
@@ -694,6 +951,12 @@ class XhtmlToDocxDeltaEngine:
         for child in list(p_elem):
             tag_name = etree.QName(child.tag).localname
             if tag_name in ('r', 'ins', 'del', 'hyperlink', 'sdt', 'oMath', 'oMathPara'):
+                p_elem.remove(child)
+            elif tag_name in ('commentRangeStart', 'commentRangeEnd'):
+                # commentReference lives inside <w:r> so it's dropped by the
+                # w:r branch above; the paragraph-level range markers need
+                # to be cleared separately so re-saves don't accumulate
+                # stale start/end pairs from prior rounds.
                 p_elem.remove(child)
             elif tag_name in ('bookmarkStart', 'bookmarkEnd'):
                 name = child.get(qn('w:name'), '') or ''
@@ -1222,11 +1485,38 @@ class XhtmlToDocxDeltaEngine:
 
             # Wrap in <w:bookmarkStart/w:bookmarkEnd> ONLY for explicit user/reference-review
             # bookmarks that carry a data-bookmark-role attribute (e.g. REF25 or bib_1/ref_5).
+            # `missing` here is the marker stamped by stampBookmarks on an
+            # in-text citation with no matching reference entry; once the
+            # user resolves it via the Alt+R linking flow it stays as
+            # `missing` + linked=true, so we must still emit a Word bookmark
+            # for it — otherwise the citation ↔ reference relationship the
+            # user just created would be dropped on export.
             # We emit the Word bookmark only on the first occurrence of a given name.
             bm_role = el.get("data-bookmark-role")
             is_named_user_bm = bool(bm_name) and bm_role in (
-                "target", "source", "manual", "existing"
+                "target", "source", "manual", "existing", "missing"
             ) and not bm_name.startswith("r_bm_")
+
+            # AQ comment span — allocate a w:id for this uuid (once) and
+            # bracket the produced runs with commentRangeStart/End + a
+            # commentReference run. The <w:comment> body itself is written
+            # into word/comments.xml after the whole doc is traversed
+            # (see _flush_comments_part). Multiple traversals of the same
+            # uuid reuse the same w:id so the bracket markers stay balanced.
+            comment_uuid = el.get("data-comment-id") if tag == "span" else None
+            comment_wid: int | None = None
+            if comment_uuid:
+                state = self._comment_state
+                wid = state["assigned"].get(comment_uuid)
+                if wid is None:
+                    wid = state["next_id"]
+                    state["next_id"] = wid + 1
+                    state["assigned"][comment_uuid] = wid
+                comment_wid = wid
+                start = OxmlElement("w:commentRangeStart")
+                start.set(qn("w:id"), str(comment_wid))
+                current_xml_parent.append(start)
+
             if is_named_user_bm and bm_name in emitted_named_bookmarks:
                 process_text_and_children(current_xml_parent)
             elif is_named_user_bm:
@@ -1234,6 +1524,16 @@ class XhtmlToDocxDeltaEngine:
                 wrap_in_bookmark(current_xml_parent, bm_name, process_text_and_children)
             else:
                 process_text_and_children(current_xml_parent)
+
+            if comment_wid is not None:
+                end = OxmlElement("w:commentRangeEnd")
+                end.set(qn("w:id"), str(comment_wid))
+                current_xml_parent.append(end)
+                ref_r = OxmlElement("w:r")
+                ref = OxmlElement("w:commentReference")
+                ref.set(qn("w:id"), str(comment_wid))
+                ref_r.append(ref)
+                current_xml_parent.append(ref_r)
 
             if el.tail:
                 # Tail text sits outside the current element, so the inherited

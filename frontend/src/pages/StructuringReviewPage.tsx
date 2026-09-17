@@ -618,6 +618,7 @@ export function StructuringReviewPage() {
               }}
               isSaving={editorSave.isPending}
               saveLabel="Save & Convert to DOCX"
+              hideSaveButton
               documentTitle={review.file.filename}
               trackChangesEnabled={trackChangesEnabled}
               onTrackChangesToggle={setTrackChangesEnabled}

@@ -86,17 +86,38 @@ export function stampBookmarks(
 
   // SOURCES — in-text citations. Try needles in priority order and stop
   // once a paragraph yields at least one hit for a given citation.
-  for (const pair of citationPairs) {
-    const name = resolveCitationRefName(pair, entryTextToName, manualNames);
+  //
+  // Two robustness knobs vs. the original loop:
+  //   - Synthetic-name fallback for status="ok" pairs where the validator
+  //     matched the citation but neither `ref_number` nor `ref_text` maps
+  //     to an entry (fuzzy-matched APA text that doesn't hash-equal the
+  //     bibliography entry). We still stamp role="source" so the green
+  //     matched-citation highlight lands; the source just points at a
+  //     synthetic name with no target counterpart, which is fine since
+  //     the highlight is what matters.
+  //   - Paragraph fallback: if `pair.para_idx` is set but doesn't resolve
+  //     to a doc paragraph (indexing drift between validator and editor),
+  //     search every paragraph rather than dropping the pair entirely.
+  for (let pairIdx = 0; pairIdx < citationPairs.length; pairIdx++) {
+    const pair = citationPairs[pairIdx];
+    let name = resolveCitationRefName(pair, entryTextToName, manualNames);
+    if (!name && pair.status === "ok") {
+      const authorPart = (pair.author ?? "").replace(/[^A-Za-z0-9]/g, "");
+      const yearPart = (pair.year ?? "").replace(/[^A-Za-z0-9]/g, "");
+      name = `okcite_${pairIdx}_${authorPart || "x"}_${yearPart || "x"}`.slice(0, 40);
+    }
     if (!name) continue;
 
     const needles = buildCitationNeedles(pair);
     if (needles.length === 0) continue;
 
-    const candidates: ParaInfo[] =
-      pair.para_idx != null
-        ? [paraByIdx.get(pair.para_idx)].filter((p): p is ParaInfo => Boolean(p))
-        : paras;
+    let candidates: ParaInfo[];
+    if (pair.para_idx != null) {
+      const p = paraByIdx.get(pair.para_idx);
+      candidates = p ? [p] : paras; // fallback to full-doc search on drift
+    } else {
+      candidates = paras;
+    }
 
     for (const para of candidates) {
       let matchedInThisPara = false;
@@ -119,7 +140,75 @@ export function stampBookmarks(
     }
   }
 
+  // MISSING — citations that exist in text but don't map to any reference
+  // entry (status="missing"). Stamp with role="missing" so the editor can
+  // (a) highlight them and (b) locate them at the cursor for Alt+R. The name
+  // is deterministic per paragraph+offset so re-stamps are idempotent and
+  // don't create duplicate marks. These marks carry no auto-linking meaning;
+  // the SOURCE loop above already skipped them because resolveCitationRefName
+  // returned null. On successful manual link, the missing mark is removed and
+  // the natural SOURCE stamping takes over on the next refetch.
+  for (let pairIdx = 0; pairIdx < citationPairs.length; pairIdx++) {
+    const pair = citationPairs[pairIdx];
+    if (pair.status !== "missing") continue;
+
+    const needles = buildCitationNeedles(pair);
+    if (needles.length === 0) continue;
+
+    const candidates: ParaInfo[] =
+      pair.para_idx != null
+        ? [paraByIdx.get(pair.para_idx)].filter((p): p is ParaInfo => Boolean(p))
+        : paras;
+
+    for (const para of candidates) {
+      let matchedInThisPara = false;
+      for (const needle of needles) {
+        let searchStart = 0;
+        while (true) {
+          const idx = para.text.indexOf(needle, searchStart);
+          if (idx === -1) break;
+          matchedInThisPara = true;
+          const from = para.from + idx;
+          const to = from + needle.length;
+          const name = `missingcite_${para.idx}_${idx}`;
+          if (
+            !rangeHasBookmark(doc, from, to, name, "missing") &&
+            // Don't stamp missing over a range that's already a linked source —
+            // if the auto-linker matched it above, it's not missing anymore.
+            !rangeHasSource(doc, from, to)
+          ) {
+            tr.addMark(from, to, bookmarkType.create({ name, role: "missing" }));
+            changed = true;
+          }
+          searchStart = idx + needle.length;
+        }
+        if (matchedInThisPara) break;
+      }
+    }
+  }
+
   if (changed) editor.view.dispatch(tr);
+}
+
+// True if any text node in [from, to) already carries a bookmark mark with
+// role="source" (regardless of name). Used to avoid tagging a citation as
+// "missing" when the auto-linker has already claimed the same range as an
+// auto-linked source.
+function rangeHasSource(doc: any, from: number, to: number): boolean {
+  let has = false;
+  doc.nodesBetween(from, to, (node: any) => {
+    if (has) return false;
+    if (node.isText) {
+      for (const m of node.marks) {
+        if (m.type.name === "bookmark" && m.attrs?.role === "source") {
+          has = true;
+          return false;
+        }
+      }
+    }
+    return true;
+  });
+  return has;
 }
 
 // Decide which ref_{n} a citation points to. Priority:
