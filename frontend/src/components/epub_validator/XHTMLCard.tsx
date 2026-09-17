@@ -11,6 +11,7 @@ import {
   AlertTriangle,
   XCircle,
   Loader2,
+  Info as InfoIcon,
 } from 'lucide-react';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -66,15 +67,19 @@ function statusText(
   status: XHTMLFileStatus,
   errors: number,
   warnings: number,
+  infos: number = 0,
 ): string {
   if (status === 'pending')  return 'Awaiting validation';
-  if (status === 'passed')   return 'No issues found';
+  if (status === 'passed') {
+    return infos > 0 ? `Passed (${infos} info item${infos !== 1 ? 's' : ''})` : 'No issues found';
+  }
   const errStr = `${errors} error${errors !== 1 ? 's' : ''}`;
   const warnStr = `${warnings} warning${warnings !== 1 ? 's' : ''}`;
+  const infoStr = infos > 0 ? `, ${infos} info` : '';
   if (status === 'failed') {
-    return warnings > 0 ? `${errStr}, ${warnStr}` : errStr;
+    return warnings > 0 ? `${errStr}, ${warnStr}${infoStr}` : `${errStr}${infoStr}`;
   }
-  return warnStr;
+  return `${warnStr}${infoStr}`;
 }
 
 // ─── Card ─────────────────────────────────────────────────────────────────────
@@ -91,6 +96,7 @@ interface XHTMLCardProps {
   status: XHTMLFileStatus;
   errors?: number;
   warnings?: number;
+  infos?: number;
   isValidating?: boolean;
   onValidate?: () => void;
   onPreview?: () => void;
@@ -105,6 +111,7 @@ export function XHTMLCard({
   status,
   errors = 0,
   warnings = 0,
+  infos = 0,
   isValidating = false,
   onValidate,
   onPreview,
@@ -161,7 +168,7 @@ export function XHTMLCard({
               </div>
             </div>
 
-            {/* Errors / Warnings Summary */}
+            {/* Errors / Warnings / Infos Summary */}
             <div
               onClick={onOpen}
               className="flex items-center gap-2 cursor-pointer text-xs shrink-0 font-medium"
@@ -176,6 +183,12 @@ export function XHTMLCard({
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 font-bold text-[11px]">
                   <AlertTriangle className="w-3.5 h-3.5" />
                   {warnings} {warnings === 1 ? 'Warning' : 'Warnings'}
+                </span>
+              )}
+              {infos > 0 && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-600 dark:text-sky-400 font-bold text-[11px]">
+                  <InfoIcon className="w-3.5 h-3.5" />
+                  {infos} {infos === 1 ? 'Info' : 'Infos'}
                 </span>
               )}
               {errors === 0 && warnings === 0 && status === 'passed' && (
@@ -306,7 +319,7 @@ export function XHTMLCard({
               ? 'Stylesheet — view & edit source'
               : isImage
               ? 'Image asset — graphics'
-              : statusText(status, errors, warnings)}
+              : statusText(status, errors, warnings, infos)}
           </p>
 
           {/* Buttons */}
