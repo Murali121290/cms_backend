@@ -224,8 +224,28 @@ function IssueRow({ issue, onClick }: { issue: DisplayIssue; onClick?: () => voi
     if (issue.href && (issue.href.startsWith('http://') || issue.href.startsWith('https://'))) {
       return issue.href;
     }
-    const match = (issue.message || '').match(/https?:\/\/[^\s"'>]+/);
-    return match ? match[0] : null;
+    const msg = issue.message || '';
+    const fullMatch = msg.match(/https?:\/\/[^\s"'>]+/i);
+    if (fullMatch) return fullMatch[0];
+
+    const quotedMatch = msg.match(/URL\s+['"]?([^'"\s]+)['"]?/i);
+    if (quotedMatch && quotedMatch[1]) {
+      const raw = quotedMatch[1].replace(/['",.]*$/, '');
+      return raw.startsWith('http') ? raw : `https://${raw}`;
+    }
+
+    const domainMatch = msg.match(/(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?:\/[^\s"'>]*)?/i);
+    if (domainMatch) {
+      const raw = domainMatch[0].replace(/['",.]*$/, '');
+      return raw.startsWith('http') ? raw : `https://${raw}`;
+    }
+
+    if (issue.href && (issue.href.includes('.') && !issue.href.endsWith('.xhtml') && !issue.href.endsWith('.html'))) {
+      const raw = issue.href.trim();
+      return raw.startsWith('http') ? raw : `https://${raw}`;
+    }
+
+    return null;
   }, [issue.href, issue.message]);
 
   const handleRowClick = (e: React.MouseEvent) => {
