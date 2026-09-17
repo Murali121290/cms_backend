@@ -410,10 +410,17 @@
     },
     {
       "id": "ASP-IMG-005",
-      "name": "Aspen: <img> should be center-aligned via class or inline style",
+      "name": "Aspen: <img> should be center-aligned via class only",
       "target_path": "OEBPS/xhtml",
       "file_name_pattern": "*.xhtml",
-      "enabled": false
+      "enabled": true
+    },
+    {
+      "id": "ASP-TXT-001",
+      "name": "Aspen: First <p> tag following each <h1..h6> heading must use a consistent class name",
+      "target_path": "OEBPS/xhtml",
+      "file_name_pattern": "*.xhtml",
+      "enabled": true
     },
     {
       "id": "ASP-PAGE-001",

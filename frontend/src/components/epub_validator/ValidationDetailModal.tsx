@@ -224,8 +224,28 @@ function IssueRow({ issue, onClick }: { issue: DisplayIssue; onClick?: () => voi
     if (issue.href && (issue.href.startsWith('http://') || issue.href.startsWith('https://'))) {
       return issue.href;
     }
-    const match = (issue.message || '').match(/https?:\/\/[^\s"'>]+/);
-    return match ? match[0] : null;
+    const msg = issue.message || '';
+    const fullMatch = msg.match(/https?:\/\/[^\s"'>]+/i);
+    if (fullMatch) return fullMatch[0];
+
+    const quotedMatch = msg.match(/URL\s+['"]?([^'"\s]+)['"]?/i);
+    if (quotedMatch && quotedMatch[1]) {
+      const raw = quotedMatch[1].replace(/['",.]*$/, '');
+      return raw.startsWith('http') ? raw : `https://${raw}`;
+    }
+
+    const domainMatch = msg.match(/(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?:\/[^\s"'>]*)?/i);
+    if (domainMatch) {
+      const raw = domainMatch[0].replace(/['",.]*$/, '');
+      return raw.startsWith('http') ? raw : `https://${raw}`;
+    }
+
+    if (issue.href && (issue.href.includes('.') && !issue.href.endsWith('.xhtml') && !issue.href.endsWith('.html'))) {
+      const raw = issue.href.trim();
+      return raw.startsWith('http') ? raw : `https://${raw}`;
+    }
+
+    return null;
   }, [issue.href, issue.message]);
 
   const handleRowClick = (e: React.MouseEvent) => {
@@ -330,15 +350,19 @@ function IssueRow({ issue, onClick }: { issue: DisplayIssue; onClick?: () => voi
           isError ? 'bg-red-100/50 border-red-200/60 dark:bg-red-950/40 dark:border-red-900/50' : 'bg-amber-100/50 border-amber-200/60 dark:bg-amber-950/40 dark:border-amber-900/50',
         )}>
           {issue.expected_text && (
-            <div className="px-3 py-1.5 flex items-start gap-2 border-b border-inherit">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 shrink-0 w-14 font-sans pt-0.5">Expected</span>
-              <DiffText expected={issue.expected_text} actual={issue.actual_text || ''} type="expected" />
+            <div className="px-3 py-2 flex flex-col gap-1 border-b border-inherit">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 font-sans">Expected</span>
+              <div className="break-all font-mono">
+                <DiffText expected={issue.expected_text} actual={issue.actual_text || ''} type="expected" />
+              </div>
             </div>
           )}
           {issue.actual_text && (
-            <div className="px-3 py-1.5 flex items-start gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-red-600 dark:text-red-400 shrink-0 w-14 font-sans pt-0.5">Actual</span>
-              <DiffText expected={issue.expected_text || ''} actual={issue.actual_text} type="actual" />
+            <div className="px-3 py-2 flex flex-col gap-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-red-600 dark:text-red-400 font-sans">Actual</span>
+              <div className="break-all font-mono">
+                <DiffText expected={issue.expected_text || ''} actual={issue.actual_text} type="actual" />
+              </div>
             </div>
           )}
         </div>
