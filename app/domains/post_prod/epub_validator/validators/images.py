@@ -228,18 +228,21 @@ def _css_center_declarations(epub: str) -> set[str]:
             body = m.group(2).lower()
             if "text-align" in body and "center" in body:
                 centering_classes.add(cls)
-            elif "margin" in body and "auto" in body and "display" in body and "block" in body:
+            elif "margin" in body and "auto" in body:
                 centering_classes.add(cls)
     return centering_classes
 
 
 @rule("ASP-IMG-005")
 def validate_image_center_alignment(file_details, rule_config=None):
-    """Body <img> elements should be center-aligned via a class or inline style,
+    """Body <img> elements should be center-aligned via a class only,
     or wrapped in a <figure>/<div> whose class centers content.
     """
     with open(file_details["full_path"], "r", encoding="utf-8") as f:
-        soup = BeautifulSoup(f.read(), "html.parser")
+        content = f.read()
+
+    soup = BeautifulSoup(content, "html.parser")
+    lines = content.splitlines()
 
     epub = file_details.get("epub_root")
     if not epub:
@@ -252,41 +255,56 @@ def validate_image_center_alignment(file_details, rule_config=None):
                 break
     css_centered_classes = _css_center_declarations(epub) if epub else set()
 
-    def _is_centered(el) -> bool:
+    def _is_centered_via_class(el) -> bool:
         classes = el.get("class") or []
+        if isinstance(classes, str):
+            classes = classes.split()
         if any(_CENTER_HINTS_RE.search(c) for c in classes):
             return True
         if any(c in css_centered_classes for c in classes):
-            return True
-        style = (el.get("style") or "").lower().replace(" ", "")
-        if "text-align:center" in style:
-            return True
-        if "margin:0auto" in style or "margin:auto" in style:
             return True
         return False
 
     issues = []
     for img in soup.find_all("img"):
-        if _is_centered(img):
+        # Only check figure images
+        if not img.find_parent("figure"):
+            continue
+
+        if _is_centered_via_class(img):
             continue
         parent = img.parent
         centered = False
         while parent is not None and parent.name != "body":
-            if _is_centered(parent):
+            if _is_centered_via_class(parent):
                 centered = True
                 break
             parent = parent.parent
         if not centered:
             src = img.get("src", "")
-            issues.append({
-                "type": "image_not_centered",
+            line_num = None
+            if hasattr(img, 'sourceline') and img.sourceline:
+                line_num = img.sourceline
+            else:
+                for idx, line in enumerate(lines, 1):
+                    if "src=" in line and src in line:
+                        line_num = idx
+                        break
+
+            issue = {
+                "type": "image_not_centered_via_class",
+                "rule_name": "Image Center Alignment Check",
                 "message": (
-                    f"<img src='{src}'> is not center-aligned via class or inline style. "
-                    "Aspen convention is center placement."
+                    f"<figure> <img src='{src}'> is not center-aligned via class. "
+                    "Aspen convention requires figure images to be center-aligned via class assignment."
                 ),
                 "category": "Warning",
                 "href": src,
-            })
+                "extract": str(img)[:150],
+            }
+            if line_num:
+                issue["line_number"] = line_num
+            issues.append(issue)
     return {"issues_count": len(issues), "issues": issues}
 
 @rule("GWP-IMG-001")
