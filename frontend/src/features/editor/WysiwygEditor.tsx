@@ -1200,6 +1200,11 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
               editor.chain().focus().insertContent({ type: "pageBreak" }).run()
             );
             case "Equal": return fire(() => editor.chain().focus().toggleSubscript().run());
+            // Ctrl+S / Cmd+S — persist current editor state via the same
+            // handleSave the Save button uses (no export, no download). Ref
+            // indirection keeps this closure fresh without re-binding the
+            // listener on every render.
+            case "KeyS": return fire(() => handleSaveRef.current());
           }
         }
 
@@ -1335,10 +1340,11 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
       }
     };
 
+    // Keep a live ref to handleSave so the Ctrl+S keydown listener (attached
+    // once per editor mount) always invokes the latest closure — otherwise it
+    // would capture the first render's onSave prop and go stale.
     const handleSaveRef = useRef(handleSave);
-    useEffect(() => {
-      handleSaveRef.current = handleSave;
-    }, [handleSave]);
+    handleSaveRef.current = handleSave;
 
     const lastEditTimeRef = useRef<number>(0);
 
@@ -2146,7 +2152,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         })()}
 
         {/* â”€â”€ Document Area â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-        <div className="flex-1 overflow-y-auto bg-gradient-to-tr from-slate-200 to-slate-100 px-6 py-6 pb-20 flex items-start justify-center overflow-x-auto">
+        <div className="flex-1 overflow-y-auto bg-gradient-to-tr from-slate-200 to-slate-100 px-6 pt-0 pb-20 flex items-start justify-center overflow-x-auto">
           <div className={sidePanel ? "flex gap-6 max-w-[1400px] justify-start lg:justify-center" : "flex justify-center"}>
             {/* Word-style A4 Document Page — fixed width so it looks like a
                 physical sheet on the canvas, regardless of viewport width. */}

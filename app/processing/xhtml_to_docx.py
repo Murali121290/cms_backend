@@ -285,6 +285,19 @@ class XhtmlToDocxEngine:
         except Exception as fmt_err:
             logger.warning(f"Failed to apply final document formatting: {fmt_err}")
 
+        # Guarantee every citation/bibliography character style referenced by
+        # the rebuilt runs has a highlight fill in styles.xml. Without this,
+        # spans authored in the editor (e.g. class="cite_bib") point at a
+        # style with no shading and Word renders the run plainly — losing the
+        # highlight the user saw in the editor.
+        try:
+            from app.processing.reference_char_style_applicator import (
+                ensure_reference_char_style_highlights,
+            )
+            ensure_reference_char_style_highlights(doc)
+        except Exception as ref_err:
+            logger.warning(f"Failed to ensure reference char style highlights: {ref_err}")
+
         # 4. ── Save atomically ────────────────────────────────────────────────
         tmp_path = docx_path + ".stylepatch.tmp"
         doc.save(tmp_path)
@@ -397,11 +410,24 @@ class XhtmlToDocxEngine:
                 rPr.append(i)
                 has_rPr = True
             
-            # Link style default styling: blue + underline
-            final_underline = underline or is_link
+            # Real hyperlinks emit `<w:hyperlink>` wrappers separately; runs
+            # inside a wrapper inherit the Hyperlink character style
+            # automatically, so we no longer stamp blue + underline on the
+            # `<w:rPr>` from `is_link`. That inline stamping also fired for
+            # editor-only anchors (WYSIWYG wraps each reference part in `<a>`
+            # for click-nav), which made every reference run look like a
+            # hyperlink in the exported DOCX. Runs carrying a `bib_*` /
+            # `cite_*` character style additionally suppress explicit
+            # underline/color, because those styles own the run's appearance.
+            is_structured_ref_run = bool(
+                char_style
+                and (char_style.startswith("bib_") or char_style.startswith("cite_"))
+            )
+            final_underline = underline
             final_color = color
-            if is_link and not final_color:
-                final_color = "0563C1" # Microsoft Word default hyperlink blue
+            if is_structured_ref_run:
+                final_underline = False
+                final_color = None
 
             if final_underline:
                 u = OxmlElement('w:u')

@@ -90,6 +90,17 @@ _RE_BAD_INPRES = re.compile(r'\(\s*([^\s\d][^()]{0,80}?),\s*(In\s+Press|IN\s+PRE
 _RE_ETAL_NOPER = re.compile(r'\bet\s+al(?!\.)\b')
 _RE_ETDOT_AL   = re.compile(r'\bet\.\s*al\.?', re.IGNORECASE)
 _RE_PAREN_AND  = re.compile(r'\(\s*([^\s\d][^(),]{1,120}?)\s+and\s+([^\s\d][^(),]{1,120}?),\s*((?:19|20)\d{2}[a-z]?)\s*\)', re.IGNORECASE | re.UNICODE | re.DOTALL)
+# Narrative two-author "&" that should be "and":
+#   "Smith & Jones (2020) argued..."  →  "Smith and Jones (2020) argued..."
+# APA 7 §8.17 — use "and" in running prose, "&" only inside parentheses. The
+# lookbehind rules out matches inside an already-parenthetical citation.
+_RE_NARR_AMP   = re.compile(
+    r"(?<!\()([A-Z][A-Za-z'’\-]+(?:\s+[A-Z][A-Za-z'’\-]+){0,2})"
+    r"\s+&\s+"
+    r"([A-Z][A-Za-z'’\-]+(?:\s+[A-Z][A-Za-z'’\-]+){0,2})"
+    r"\s+\((" + _Y + r")\)",
+    re.UNICODE,
+)
 _RE_BIB_ABBREV = re.compile(r'\[([A-Z]{2,8})\]')
 _HEADING_RE    = re.compile(r"heading\s*\d|title", re.IGNORECASE)
 _FOOTNOTE_RE   = re.compile(r"footnote|endnote", re.IGNORECASE)
@@ -255,6 +266,34 @@ def _count_authors(full: str, et_al_min: int = ET_AL_MIN) -> int:
 
     return max(count, 1)
 
+def _all_surnames(full: str) -> List[str]:
+    """Extract every author's surname from a bibliography author string.
+
+    Handles APA formats like "Smith, J., & Jones, K." and "Smith, J. B.,
+    Jones, K. M., & Lee, R." Ignores initial-only tokens and "et al." so the
+    surnames pile up in the order they appeared. Returns [] on empty input.
+    Used by `fix_etal_expansion` to rebuild a two-author citation when the
+    author wrote "Smith et al." for a work that actually has only 2 authors.
+    """
+    fc = re.sub(r'\[.*?\]', '', full or '').strip()
+    if not fc:
+        return []
+    parts = re.split(r'\s*&\s*|\s+and\s+|\s*,\s*', fc, flags=re.IGNORECASE)
+    surnames: List[str] = []
+    for part in parts:
+        part = part.strip().rstrip('.,')
+        if not part:
+            continue
+        if re.search(r'\bet\s+al\b', part, re.IGNORECASE):
+            part = re.sub(r'(?i)\bet\s+al\.?\b', '', part).strip()
+            if not part:
+                continue
+        if _INITIAL_ONLY_RE.match(part):
+            continue
+        surnames.append(part)
+    return surnames
+
+
 def _is_org_match(cite_auth: str, bib_auth: str) -> bool:
     c_parts = [p.strip() for p in re.split(r',|&', cite_auth) if p.strip()]
     if not c_parts:
@@ -323,7 +362,7 @@ class ApaFixer:
             or _RE_MISS_COMMA.search(text) or _RE_YR_RANGE.search(text)
             or _RE_BAD_ND.search(text) or _RE_BAD_INPRES.search(text)
             or _RE_ETAL_NOPER.search(text) or _RE_ETDOT_AL.search(text)
-            or _RE_PAREN_AND.search(text)
+            or _RE_PAREN_AND.search(text) or _RE_NARR_AMP.search(text)
         )
 
     @staticmethod
@@ -378,6 +417,18 @@ class ApaFixer:
                 "parenthetical_ampersand"
             )
 
+        def _narr_amp(m):
+            # Reverse of _paren_and: in running prose (narrative citations)
+            # APA uses "and" between two authors, not "&". Skip organization
+            # names since orgs never take an ampersand-to-and conversion.
+            if _ORG_UPPER_RUN.search(m.group(0)) or _ORG_KW_RE.search(m.group(0)):
+                return m.group(0)
+            return _chg(
+                m.group(0),
+                f"{m.group(1).strip()} and {m.group(2).strip()} ({m.group(3)})",
+                "narrative_and"
+            )
+
         def _nd(m):
             return _chg(
                 m.group(0),
@@ -397,6 +448,7 @@ class ApaFixer:
         r = _RE_ETAL_NOPER.sub(_etalp, r)
         r = _RE_ETDOT_AL.sub(_etdotal, r)
         r = _RE_PAREN_AND.sub(_paren_and, r)
+        r = _RE_NARR_AMP.sub(_narr_amp, r)
         r = _RE_BAD_ND.sub(_nd, r)
         r = _RE_BAD_INPRES.sub(_inp, r)
         for m in _RE_YR_RANGE.finditer(r):
@@ -407,19 +459,63 @@ class ApaFixer:
         return r, changes
 
     @staticmethod
-    def fix_etal_expansion(cite_author: str, bib: Dict) -> Optional[str]:
-        n = bib.get("author_count", 1)
-        has_etal = re.search(r"\bet\s+al\b", cite_author, re.IGNORECASE)
+    def fix_etal_expansion(
+        cite_author: str,
+        bib: Dict,
+        cite_type: Optional[str] = None,
+    ) -> Optional[str]:
+        """Return the correct citation-author form for `bib`, or None if the
+        current text is already right.
 
-        if n < ET_AL_MIN:
-            if n == 2 and has_etal:
-                return None  # retain et al. as written — do not expand to two-author form
+        APA 7 §8.17:
+          * 1 author  → "Smith"
+          * 2 authors → "Smith and Jones" in narrative,
+                        "Smith & Jones" in parenthetical
+          * 3+ authors → "Smith et al." in both
+
+        Historic behavior only auto-expanded 3+ author refs. This adds
+        symmetric handling for the two-author case so a citation like
+        "Smith et al." for a Smith-&-Jones reference is corrected to the
+        two-name form (with "and" or "&" chosen from `cite_type`).
+        """
+        n = bib.get("author_count", 1)
+        has_etal = bool(re.search(r"\bet\s+al\b", cite_author, re.IGNORECASE))
+        is_narrative = (cite_type == "narrative")
+        connector = "and" if is_narrative else "&"
+
+        # ── 2-author refs ────────────────────────────────────────────────────
+        # Any cited form other than "S1 <conn> S2" (with the right conn for
+        # the cite type) is wrong: "et al." is wrong, "S1 & S2" in narrative
+        # is wrong, "S1 and S2" in parenthetical is wrong, and a single
+        # surname is wrong.
+        if n == 2 and not bib.get("is_org"):
+            surnames = _all_surnames(bib.get("full_author", ""))
+            if len(surnames) >= 2:
+                target = f"{surnames[0]} {connector} {surnames[1]}"
+                if _norm(target) != _norm(cite_author):
+                    return _to_smart_quotes(target)
             return None
 
+        # ── 1-author or org refs ─────────────────────────────────────────────
+        if n < ET_AL_MIN:
+            return None
+
+        # ── 3+ author refs ───────────────────────────────────────────────────
         if has_etal:
             return None
-
-        first = bib.get("display", "").split(" et al.")[0].split(" &")[0].strip()
+        # Prefer building from `full_author` so the result is a clean surname
+        # regardless of whether `display` was already collapsed by `_display`
+        # ("Smith et al.") or is still a raw citation string with initials
+        # ("Smith, J., Jones, K., & Lee, R.").
+        surnames = _all_surnames(bib.get("full_author", ""))
+        if surnames:
+            first = surnames[0]
+        else:
+            first = (bib.get("display", "")
+                     .split(" et al.")[0]
+                     .split(" and ")[0]
+                     .split(" &")[0]
+                     .strip())
         res = f"{first} et al." if first else None
         return _to_smart_quotes(res) if res else None
 
@@ -955,7 +1051,12 @@ def match_citation(
     return MatchResult(best_key, best_mt, best_score)
 
 # ── et al. checker ────────────────────────────────────────────────────────────
-def check_etal_enforcement(cite_author: str, bib: Dict, et_al_min: int = ET_AL_MIN) -> Optional[str]:
+def check_etal_enforcement(
+    cite_author: str,
+    bib: Dict,
+    et_al_min: int = ET_AL_MIN,
+    cite_type: Optional[str] = None,
+) -> Optional[str]:
     n   = bib.get("author_count", 1)
     has = bool(re.search(r"\bet\s+al\b", cite_author, re.IGNORECASE))
 
@@ -973,6 +1074,20 @@ def check_etal_enforcement(cite_author: str, bib: Dict, et_al_min: int = ET_AL_M
                 "— list all names.")
     if n >= et_al_min and has and not re.search(r"\bet\s+al\.", cite_author, re.IGNORECASE):
         return "et al. PUNCTUATION: missing period — must be 'et al.' (with period)."
+
+    # Two-author connector: "and" is required in narrative, "&" in
+    # parenthetical (APA 7 §8.17). Flag either direction of mismatch so the
+    # auto-fix in ApaFixer.fix_etal_expansion runs.
+    if n == 2 and not has:
+        want = "and" if cite_type == "narrative" else "&"
+        wrong = "&" if want == "and" else "and"
+        # Word boundary keeps "brand" out of the "and" match.
+        wrong_re = r"\s&\s" if wrong == "&" else r"\band\b"
+        if re.search(wrong_re, cite_author):
+            return (f"two-author connector: use '{want}' "
+                    f"({'narrative' if cite_type == 'narrative' else 'parenthetical'} "
+                    "citation) — currently uses "
+                    f"'{wrong}'.")
     return None
 
 # ── Bibliography structural checks ───────────────────────────────────────────
@@ -1593,11 +1708,60 @@ def _get_comments_part(doc):
         logging.error(f"_get_comments_part failed: {exc}")
         return None
 
+def _paragraph_already_has_s4c_comment(doc, para, text: str) -> bool:
+    """True if `para` already carries a comment authored by S4C with `text`.
+
+    The APA pipeline may run more than once on the same on-disk DOCX (e.g. a
+    re-validate after edits). Without this guard, `_insert_comments` would
+    append a fresh copy of every AQ each time.
+    """
+    try:
+        from docx.opc.constants import RELATIONSHIP_TYPE as RT
+        from lxml import etree as _etree
+    except Exception:
+        return False
+    try:
+        comments_part = None
+        for rel in doc.part.rels.values():
+            if rel.reltype == RT.COMMENTS:
+                comments_part = rel.target_part
+                break
+        if comments_part is None:
+            return False
+        root = _etree.fromstring(comments_part.blob)
+    except Exception:
+        return False
+    text_by_id: Dict[str, Tuple[str, str]] = {}
+    for cmt in root.findall(qn('w:comment')):
+        cid = cmt.get(qn('w:id'))
+        if cid is None:
+            continue
+        author = cmt.get(qn('w:author')) or ''
+        body = "".join((t.text or "") for t in cmt.iter(qn('w:t'))).strip()
+        text_by_id[cid] = (author, body)
+    stripped = (text or '').strip()
+    for ref in para._p.iter(qn('w:commentReference')):
+        cid = ref.get(qn('w:id'))
+        rec = text_by_id.get(cid)
+        if rec is None:
+            continue
+        author, body = rec
+        if author == COMMENT_AUTHOR and body == stripped:
+            return True
+    return False
+
+
 def insert_comment(doc, para, text, target_run=None, target_text=None):
     try:
         from docx.text.run import Run as _Run
 
         if not para.runs:
+            return False
+
+        # Idempotency: if this paragraph already carries an S4C comment with
+        # the same text, don't add another. Guards against pipeline re-runs
+        # doubling every AQ.
+        if _paragraph_already_has_s4c_comment(doc, para, text):
             return False
 
         def _find_in_ins(search_txt):
@@ -2113,10 +2277,10 @@ class CitationProcessor:
             ref = self.bibliography[rk]
             ref["cited"] = True
             self._cited_keys.add(rk)
-            ew = check_etal_enforcement(auth, ref, self._et_al_min)
+            ew = check_etal_enforcement(auth, ref, self._et_al_min, cite_type=ct)
             if ew:
                 _mark_block_yellow()
-                ff = ApaFixer.fix_etal_expansion(auth, ref)
+                ff = ApaFixer.fix_etal_expansion(auth, ref, cite_type=ct)
                 if ff and ff != auth:
                     tracked_replace(para, auth, ff, YELLOW, self.cite_style_id)
                     self._add_issue(
@@ -2540,9 +2704,15 @@ def apply_apa_style_prep(doc):
         except Exception:
             pass
 
-    # 2. Parse bibliography to build lookup mapping
+    # 2. Parse bibliography to build lookup mapping. Also record the exact
+    # paragraph elements that the bibliography detection identifies, so the
+    # cite_bib application pass below can skip them by identity rather than
+    # by style name. That way we don't gate on `REF-U` / `Reference-Alphabetical`
+    # (or any other stylistic label) — a paragraph is treated as a
+    # bibliography entry iff the detection logic says so.
     in_bib = False
     bibliography = {}
+    bib_para_elements: Set = set()
     for idx, para in enumerate(doc.paragraphs):
         txt = para.text.strip()
         if "<ref-open>" in txt.lower():
@@ -2552,6 +2722,7 @@ def apply_apa_style_prep(doc):
             in_bib = False
             continue
         if in_bib and txt:
+            bib_para_elements.add(para._p)
             e = BibliographyParser.parse_entry(txt)
             if e:
                 k1 = f"{_norm(e['display'])}|{e['year']}"
@@ -2560,10 +2731,15 @@ def apply_apa_style_prep(doc):
                 bibliography[k2] = e
 
     if not bibliography:
-        # Fallback to REF-U / Reference-Alphabetical paragraphs if no tags
+        # Fallback: no <ref-open>/<ref-close> markers, so the bibliography
+        # boundary is inferred from the REF-U style — this is bibliography
+        # DETECTION only. The style name never influences cite_bib
+        # application directly; it just feeds the set of paragraphs the
+        # detector considers to be bibliography entries.
         for idx, para in enumerate(doc.paragraphs):
             style_name = (para.style.name or "") if para.style else ""
-            if ("REF-U" in style_name or "Reference-Alphabetical" in style_name) and para.text.strip():
+            if "REF-U" in style_name and para.text.strip():
+                bib_para_elements.add(para._p)
                 e = BibliographyParser.parse_entry(para.text)
                 if e:
                     k1 = f"{_norm(e['display'])}|{e['year']}"
@@ -2571,15 +2747,19 @@ def apply_apa_style_prep(doc):
                     bibliography[k1] = e
                     bibliography[k2] = e
 
-    # 3. Apply style to runs for matched citations
+    # 3. Apply style to runs for matched citations.
+    # Skip paragraphs the bibliography detector already claimed — matches
+    # by paragraph identity, not by REF-U / Reference-Alphabetical style
+    # name. If a doc author uses either style for something other than a
+    # reference entry, we no longer accidentally exclude it from cite_bib
+    # tagging.
     for para in doc.paragraphs:
         txt = para.text
         if "<ref-open>" in txt.lower():
             break
-        style_name = (para.style.name or "") if para.style else ""
-        if "REF-U" in style_name or "Reference-Alphabetical" in style_name:
+        if para._p in bib_para_elements:
             continue
-            
+
         citations = CitationExtractor.extract(txt)
         if not citations:
             continue

@@ -2662,6 +2662,48 @@ def api_v2_analyze_files_for_stylesheet(
 
 
 
+def _serve_docx_finalized(path: str, filename: str, media_type: str) -> FileResponse:
+    """Serve `path` after stripping editor round-trip artefacts.
+
+    For DOCX files, copies to a temp location and runs
+    `finalize_docx_for_export` (strips `r_bm_*/p_bm_*/cell_bm_*/tbl_bm_*/fnpara_bm_*/enpara_bm_*`
+    tracking bookmarks, renames `REF{N}` → `ref_{N}`, dedupes duplicate AQ
+    comments). If the file needs no changes the finalizer is idempotent and
+    the temp copy is streamed unchanged. For non-DOCX files the original path
+    is returned directly.
+    """
+    if not filename.lower().endswith(".docx"):
+        return FileResponse(path=path, filename=filename, media_type=media_type)
+
+    from starlette.background import BackgroundTask
+    from app.processing.citation_link_finalizer import finalize_docx_for_export
+
+    fd, tmp_path = tempfile.mkstemp(suffix=".docx", prefix="download_finalized_")
+    os.close(fd)
+    shutil.copyfile(path, tmp_path)
+    try:
+        finalize_docx_for_export(tmp_path)
+    except Exception as exc:
+        logger.warning(
+            "finalize_docx_for_export failed for %s (%s); serving unfinalized copy",
+            filename, exc,
+        )
+
+    def _cleanup():
+        if os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    return FileResponse(
+        path=tmp_path,
+        filename=filename,
+        media_type=media_type,
+        background=BackgroundTask(_cleanup),
+    )
+
+
 @router.get("/files/{file_id}/download")
 def api_v2_download_file(
     file_id: int,
@@ -2684,7 +2726,7 @@ def api_v2_download_file(
             message="File not found.",
         )
 
-    return FileResponse(
+    return _serve_docx_finalized(
         path=file_record.path,
         filename=file_record.filename,
         media_type="application/octet-stream",
@@ -4348,7 +4390,7 @@ def api_v2_download_file_version(
             message="Version not found.",
         )
 
-    return FileResponse(
+    return _serve_docx_finalized(
         path=version_entry.path,
         filename=version_service.get_archived_filename(version_entry),
         media_type="application/octet-stream",
@@ -6732,6 +6774,115 @@ def api_v2_reference_edit(
         old_text=result["old_text"],
         new_text=result["new_text"],
         changed=result["changed"],
+    )
+
+
+@router.get(
+    "/files/{file_id}/reference-review/manual-links",
+    response_model=schemas_v2.ManualLinkListResponse,
+)
+def api_v2_reference_manual_links_list(
+    file_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+    try:
+        resolved = structuring_review_service.resolve_processed_target(db, file_id=file_id)
+    except HTTPException as exc:
+        return _error_response(status_code=exc.status_code, code="FILE_NOT_FOUND",
+                               message=str(exc.detail))
+    doc = structuring_review_service.read_manual_links(resolved["processed_path"], logger=logger)
+    return schemas_v2.ManualLinkListResponse(
+        version=doc.get("version", 1),
+        links=[schemas_v2.ManualLinkEntry(**lnk) for lnk in doc.get("links", [])],
+    )
+
+
+@router.post(
+    "/files/{file_id}/reference-review/manual-links",
+    response_model=schemas_v2.ManualLinkUpsertResponse,
+)
+def api_v2_reference_manual_links_upsert(
+    file_id: int,
+    payload: schemas_v2.ManualLinkUpsertRequest,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+    try:
+        resolved = structuring_review_service.resolve_processed_target(db, file_id=file_id)
+    except HTTPException as exc:
+        return _error_response(status_code=exc.status_code, code="FILE_NOT_FOUND",
+                               message=str(exc.detail))
+    try:
+        entry = structuring_review_service.upsert_manual_link(
+            resolved["processed_path"],
+            bookmark_name=payload.bookmark_name,
+            ref_number=payload.ref_number,
+            ref_text=payload.ref_text,
+            citation_text=payload.citation_text,
+            linked_by=viewer.username,
+            logger=logger,
+        )
+    except Exception as exc:
+        return _error_response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            code="MANUAL_LINK_WRITE_FAILED",
+            message=f"Failed to persist manual link: {exc}",
+        )
+    # Invalidate ref-review cache so next load reflects the new merged status
+    structuring_review_service.invalidate_ref_review_cache(
+        resolved["processed_path"], logger=logger,
+    )
+    return schemas_v2.ManualLinkUpsertResponse(link=schemas_v2.ManualLinkEntry(**entry))
+
+
+@router.delete(
+    "/files/{file_id}/reference-review/manual-links/{bookmark_name}",
+    response_model=schemas_v2.ManualLinkDeleteResponse,
+)
+def api_v2_reference_manual_links_delete(
+    file_id: int,
+    bookmark_name: str,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+    try:
+        resolved = structuring_review_service.resolve_processed_target(db, file_id=file_id)
+    except HTTPException as exc:
+        return _error_response(status_code=exc.status_code, code="FILE_NOT_FOUND",
+                               message=str(exc.detail))
+    deleted = structuring_review_service.delete_manual_link(
+        resolved["processed_path"],
+        bookmark_name=bookmark_name,
+        logger=logger,
+    )
+    structuring_review_service.invalidate_ref_review_cache(
+        resolved["processed_path"], logger=logger,
+    )
+    return schemas_v2.ManualLinkDeleteResponse(
+        bookmark_name=bookmark_name,
+        deleted=deleted,
     )
 
 

@@ -16,6 +16,48 @@ from app.processing.xhtml_to_docx_delta import XhtmlToDocxDeltaEngine
 from app.utils.utils.structuring_lib.annotator import normalize_structural_tag_case
 import re
 
+def _build_body_to_allp_translator(doc):
+    """Return `body_idx → all-w:p idx` translator for `doc`.
+
+    Two indexing schemes co-exist in this codebase:
+
+    - `enumerate(doc.paragraphs)` — body-level only, skips paragraphs inside
+      tables/cells. Used by `CitationProcessor` (APA validator).
+    - `doc.element.body.iter(w:p)` — every `<w:p>` in document order,
+      table-cell paragraphs included. Used by `docx_to_xhtml_runs`, and
+      therefore by every `data-para-idx` value the WYSIWYG editor sees.
+
+    When there's a table above the References section the two schemes
+    diverge (body-level index is smaller than all-w:p index by the number
+    of cell paragraphs). Reference entries reported with a body-level index
+    then map onto whatever table-cell paragraph happens to sit at the same
+    all-w:p position in the editor — which is why REF{n} bookmarks stamped
+    from that index land inside table cells.
+
+    The returned function accepts a body-level index and returns the
+    equivalent all-w:p index. `None`/negative inputs pass through as `-1`.
+    "Virtual" encoded indices produced by `CitationProcessor` for
+    table/textbox contexts (values >= len(doc.paragraphs)) are returned
+    unchanged — they were never meant to be looked up in the frontend.
+    """
+    from docx.oxml.ns import qn as _qn_body
+    body_paragraphs = list(doc.paragraphs)
+    all_p_map = {
+        p_elem: i
+        for i, p_elem in enumerate(doc.element.body.iter(_qn_body("w:p")))
+    }
+
+    def _translate(body_idx):
+        if body_idx is None:
+            return -1
+        if body_idx < 0 or body_idx >= len(body_paragraphs):
+            return body_idx
+        elem = body_paragraphs[body_idx]._element
+        return all_p_map.get(elem, body_idx)
+
+    return _translate
+
+
 def _get_full_reference_text(para, doc_paragraphs, para_index_map) -> str:
     idx = para_index_map.get(para._element)
     if idx is None:
@@ -631,6 +673,34 @@ def get_export_payload(db: Session, *, file_id: int, logger):
         logger.warning(f"Comment injection failed; falling back to plain DOCX: {e}", exc_info=True)
         enriched_path = None
 
+    # Reference workflow finalization: for every citation that is genuinely
+    # missing a reference (or vice-versa), insert the AQ Word comment the
+    # copy-editor would otherwise have to author by hand. Runs against the
+    # export temp copy when we already made one, otherwise a fresh copy so
+    # the on-disk DOCX stays clean and re-saves don't accumulate comments.
+    try:
+        from app.processing.citation_link_finalizer import apply_reference_workflow
+        import shutil
+        import tempfile
+        target = enriched_path
+        if target is None:
+            fd, target = tempfile.mkstemp(suffix=".docx", prefix="export_with_aq_")
+            os.close(fd)
+            shutil.copyfile(processed_path, target)
+        summary = apply_reference_workflow(target, validation_logs=None)
+        if any(summary.get(k) for k in ("missing_citation_aqs", "unused_reference_aqs")):
+            logger.info(f"Reference workflow added AQ comments for file {file_id}: {summary}")
+            enriched_path = target
+        elif enriched_path is None:
+            # No AQ was added and we made the temp copy solely for this pass;
+            # discard it so the caller streams the pristine processed DOCX.
+            try:
+                os.unlink(target)
+            except Exception:
+                pass
+    except Exception as e:
+        logger.warning(f"Reference workflow skipped; falling back to plain DOCX: {e}", exc_info=True)
+
     return {
         "path": enriched_path or processed_path,
         "filename": processed_filename,
@@ -1080,8 +1150,31 @@ def save_xhtml_delta_and_convert(
         with open(xhtml_path, "w", encoding="utf-8") as f:
             f.write(html_content)
 
+        # Load AQ / editor comments keyed by uuid so the delta engine can
+        # emit matching <w:comment> bodies for every <span data-comment-id>
+        # it finds. Without this the export would keep the range markers
+        # but Word would show empty balloons (or drop them entirely).
+        comments_by_uuid: Dict[str, str] = {}
+        try:
+            from app import models as _models
+            rows = (
+                db.query(_models.Comment)
+                .filter(_models.Comment.file_id == file_id)
+                .all()
+            )
+            for row in rows:
+                if row.comment_uuid:
+                    comments_by_uuid[row.comment_uuid] = row.text or ""
+        except Exception as cmt_err:
+            logger.warning(f"Failed to load comments for export: {cmt_err}")
+
         # 2. Patch in-place directly on the existing file path!
-        XhtmlToDocxDeltaEngine().convert(xhtml_path, source_path, username=username)
+        XhtmlToDocxDeltaEngine().convert(
+            xhtml_path,
+            source_path,
+            username=username,
+            comments_by_uuid=comments_by_uuid,
+        )
         logger.info(f"Delta-patched DOCX version {file_record.version + 1} in-place: {source_path}")
 
         # Update the mtime of xhtml_path to match or be newer than source_path's mtime to ensure cache hit on reload
@@ -1115,7 +1208,7 @@ def save_xhtml_delta_and_convert(
         raise HTTPException(status_code=500, detail=f"XHTML delta save/convert failed: {str(e)}")
 
 
-REF_REVIEW_CACHE_VERSION = 4
+REF_REVIEW_CACHE_VERSION = 5
 
 
 def _ref_review_cache_path(processed_path: str) -> str:
@@ -1270,6 +1363,8 @@ def _run_validation_on_doc(
         report = cite_proc.run()
         report_dict = report.to_dict()
 
+        _body_to_allp_idx = _build_body_to_allp_translator(cite_proc.doc)
+
         validation_logs["stats"] = dict(report.stats)
         validation_logs["total_refs"] = report.total_refs
         validation_logs["total_cites"] = report.total_cites
@@ -1313,7 +1408,7 @@ def _run_validation_on_doc(
                 "year": entry.get("year", ""),
                 "ref_text": entry.get("raw", ""),
                 "status": status,
-                "para_idx": entry.get("para_idx", -1),
+                "para_idx": _body_to_allp_idx(entry.get("para_idx", -1)),
             }
             score = score_by_raw.get(raw_cite)
             if score is not None:
@@ -1329,7 +1424,7 @@ def _run_validation_on_doc(
                     "year": "",
                     "ref_text": "",
                     "status": "missing",
-                    "para_idx": issue.get("para_idx", -1),
+                    "para_idx": _body_to_allp_idx(issue.get("para_idx", -1)),
                 })
 
         reference_entries = []
@@ -1339,7 +1434,7 @@ def _run_validation_on_doc(
                 "text": entry.get("raw", ""),
                 "style": "REF-U",
                 "is_cited": entry.get("cited", False),
-                "para_idx": entry.get("para_idx", -1),
+                "para_idx": _body_to_allp_idx(entry.get("para_idx", -1)),
             })
 
         validation_logs["citation_pairs"] = citation_pairs
@@ -1376,13 +1471,18 @@ def build_reference_review_page_state(db: Session, *, file_id: int, style: Optio
                     logger.info(f"Reference review cache HIT for file {file_id}")
                     # Styles list (static, cheap to rebuild)
                     styles = _ref_review_styles()
+                    cached_logs = cached["validation_logs"]
+                    merge_manual_links_into_logs(
+                        cached_logs,
+                        read_manual_links(processed_path, logger=logger),
+                    )
                     return {
                         "status": "ok",
                         "file": file_record,
                         "filename": cached["filename"],
                         "content": cached["content"],
                         "styles": styles,
-                        "validation_logs": cached["validation_logs"],
+                        "validation_logs": cached_logs,
                     }
         except Exception as e:
             logger.warning(f"Reference review cache read failed (will regenerate): {e}")
@@ -1460,6 +1560,9 @@ def build_reference_review_page_state(db: Session, *, file_id: int, style: Optio
     styles = _ref_review_styles()
 
     # ── Write cache so the next page load is instant ──────────────────────────
+    # Cache the raw validation_logs (before manual-links merge) so the merge
+    # always reflects the current sidecar without stale linked-status bleeding
+    # into the cache.
     try:
         import json
         docx_mtime = os.path.getmtime(processed_path)
@@ -1478,6 +1581,11 @@ def build_reference_review_page_state(db: Session, *, file_id: int, style: Optio
         logger.info(f"Reference review cache written for file {file_id}")
     except Exception as e:
         logger.warning(f"Reference review cache write failed (non-fatal): {e}")
+
+    merge_manual_links_into_logs(
+        validation_logs,
+        read_manual_links(processed_path, logger=logger),
+    )
 
     return {
         "status": "ok",
@@ -1686,6 +1794,11 @@ def run_validation_only(db: Session, *, file_id: int, style: Optional[str] = Non
             logger.error(f"Error computing validation stats: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Validation failed: {str(e)}")
 
+    merge_manual_links_into_logs(
+        validation_logs,
+        read_manual_links(processed_path, logger=logger),
+    )
+
     return {
         "validation_logs": validation_logs,
         "detected_style": validation_logs.get("detected_style", "AMA"),
@@ -1860,3 +1973,140 @@ def invalidate_ref_review_cache(processed_path: str, logger=None) -> None:
         except Exception as e:
             if logger:
                 logger.warning(f"Failed to remove ref review cache: {e}")
+
+
+# ── Manual bookmark → citation → reference links ──────────────────────────────
+# Sidecar JSON next to the processed DOCX. Persists user-created mappings for
+# bookmarks that the auto-linker couldn't resolve (Word-native bookmarks the
+# validator didn't recognize, or manual bookmarks the user added). Kept out of
+# the DB on purpose: matches the existing "derive at read time" pattern and
+# needs no migrations. Promote to a table later if audit trail is required.
+
+MANUAL_LINKS_VERSION = 1
+
+
+def _manual_links_path(processed_path: str) -> str:
+    dir_name = os.path.dirname(processed_path)
+    base_name = os.path.splitext(os.path.basename(processed_path))[0]
+    return os.path.join(dir_name, f".{base_name}.manual_links.json")
+
+
+def _empty_manual_links_doc() -> Dict[str, Any]:
+    return {"version": MANUAL_LINKS_VERSION, "links": []}
+
+
+def read_manual_links(processed_path: str, logger=None) -> Dict[str, Any]:
+    """Load the manual-links sidecar. Returns an empty doc if missing/corrupt."""
+    import json
+    path = _manual_links_path(processed_path)
+    if not os.path.exists(path):
+        return _empty_manual_links_doc()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict) or not isinstance(data.get("links"), list):
+            return _empty_manual_links_doc()
+        data.setdefault("version", MANUAL_LINKS_VERSION)
+        return data
+    except Exception as e:
+        if logger:
+            logger.warning(f"manual_links read failed at {path}: {e}")
+        return _empty_manual_links_doc()
+
+
+def _write_manual_links(processed_path: str, doc: Dict[str, Any], logger=None) -> None:
+    import json
+    path = _manual_links_path(processed_path)
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(doc, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        if logger:
+            logger.error(f"manual_links write failed at {path}: {e}")
+        raise
+
+
+def upsert_manual_link(
+    processed_path: str,
+    *,
+    bookmark_name: str,
+    ref_number: Optional[int],
+    ref_text: str,
+    citation_text: Optional[str],
+    linked_by: Optional[str],
+    logger=None,
+) -> Dict[str, Any]:
+    """Insert or replace the manual link for `bookmark_name`. Returns the stored link."""
+    from datetime import datetime, timezone
+    doc = read_manual_links(processed_path, logger=logger)
+    now = datetime.now(timezone.utc).isoformat()
+    entry = {
+        "bookmark_name": bookmark_name,
+        "ref_number": ref_number,
+        "ref_text": ref_text,
+        "citation_text": citation_text,
+        "linked_by": linked_by,
+        "linked_at": now,
+    }
+    links = [lnk for lnk in doc["links"] if lnk.get("bookmark_name") != bookmark_name]
+    links.append(entry)
+    doc["links"] = links
+    _write_manual_links(processed_path, doc, logger=logger)
+    return entry
+
+
+def delete_manual_link(
+    processed_path: str,
+    *,
+    bookmark_name: str,
+    logger=None,
+) -> bool:
+    """Remove a manual link. Returns True if something was deleted."""
+    doc = read_manual_links(processed_path, logger=logger)
+    before = len(doc["links"])
+    doc["links"] = [lnk for lnk in doc["links"] if lnk.get("bookmark_name") != bookmark_name]
+    if len(doc["links"]) == before:
+        return False
+    _write_manual_links(processed_path, doc, logger=logger)
+    return True
+
+
+def merge_manual_links_into_logs(
+    validation_logs: Dict[str, Any],
+    manual_links_doc: Dict[str, Any],
+) -> None:
+    """
+    Fold persisted manual links into validation_logs so the panel's stats/statuses
+    reflect them. Mutates `validation_logs` in place.
+
+    - Adds `manual_links` array (raw list, for the frontend).
+    - For each manual link with a `ref_number`, marks matching `citation_pairs`
+      as "ok" and matching `reference_entries.is_cited = True`, so counts
+      shift from Missing/Unused into Matched exactly like an auto-link would.
+    """
+    links = list(manual_links_doc.get("links") or [])
+    validation_logs["manual_links"] = links
+    if not links:
+        return
+
+    linked_ref_numbers = {int(lnk["ref_number"]) for lnk in links if lnk.get("ref_number") is not None}
+    linked_ref_texts = {
+        (lnk.get("ref_text") or "").strip().lower()
+        for lnk in links
+        if lnk.get("ref_text")
+    }
+
+    for pair in validation_logs.get("citation_pairs") or []:
+        rn = pair.get("ref_number")
+        rt = (pair.get("ref_text") or "").strip().lower()
+        if (rn is not None and rn in linked_ref_numbers) or (rt and rt in linked_ref_texts):
+            if pair.get("status") != "ok":
+                pair["status"] = "ok"
+                pair["manual_linked"] = True
+
+    for entry in validation_logs.get("reference_entries") or []:
+        num = entry.get("number")
+        txt = (entry.get("text") or "").strip().lower()
+        if (num is not None and num in linked_ref_numbers) or (txt and txt in linked_ref_texts):
+            entry["is_cited"] = True
+            entry["manual_linked"] = True

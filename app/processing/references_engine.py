@@ -6,7 +6,12 @@ from pathlib import Path
 
 from app.core.config import get_settings
 from app.integrations.pph.client import PPHClient, PPHClientError
-from app.processing.local_reference_fallback import apply_local_bookmarks
+from app.processing.local_reference_fallback import (
+    apply_local_bookmarks,
+    split_compound_bib_bookmarks,
+    strip_citation_semicolon_styling,
+    wrap_bib_bookmarks_with_hyperlinks,
+)
 from app.processing.reference_char_style_applicator import apply_reference_char_styles
 
 # Legacy imports
@@ -117,6 +122,27 @@ class ReferencesEngine:
                     generated_files.append(full_path)
                     if full_path.endswith("_Processed.docx"):
                         apply_reference_char_styles(full_path)
+                        try:
+                            split_compound_bib_bookmarks(full_path)
+                        except Exception as split_err:
+                            engine_logger.warning(
+                                "split_compound_bib_bookmarks failed on PPH output %s: %s",
+                                os.path.basename(full_path), split_err,
+                            )
+                        try:
+                            strip_citation_semicolon_styling(full_path)
+                        except Exception as strip_err:
+                            engine_logger.warning(
+                                "strip_citation_semicolon_styling failed on PPH output %s: %s",
+                                os.path.basename(full_path), strip_err,
+                            )
+                        try:
+                            wrap_bib_bookmarks_with_hyperlinks(full_path)
+                        except Exception as hl_err:
+                            engine_logger.warning(
+                                "wrap_bib_bookmarks_with_hyperlinks failed on PPH output %s: %s",
+                                os.path.basename(full_path), hl_err,
+                            )
         return generated_files
 
     # ------------------------------------------------------------------
@@ -140,6 +166,30 @@ class ReferencesEngine:
                 "apply_reference_char_styles failed on local fallback output: %s", style_err,
             )
 
+        split_stats = {"split_bookmarks": 0, "new_bookmarks": 0, "unmatched_parts": 0}
+        try:
+            split_stats = split_compound_bib_bookmarks(processed_path)
+        except Exception as split_err:
+            engine_logger.warning(
+                "split_compound_bib_bookmarks failed on local fallback output: %s", split_err,
+            )
+
+        semicolons_cleaned = 0
+        try:
+            semicolons_cleaned = strip_citation_semicolon_styling(processed_path)
+        except Exception as strip_err:
+            engine_logger.warning(
+                "strip_citation_semicolon_styling failed on local fallback output: %s", strip_err,
+            )
+
+        hyperlink_stats = {"wrapped": 0, "already_linked": 0, "unresolved": 0}
+        try:
+            hyperlink_stats = wrap_bib_bookmarks_with_hyperlinks(processed_path)
+        except Exception as hl_err:
+            engine_logger.warning(
+                "wrap_bib_bookmarks_with_hyperlinks failed on local fallback output: %s", hl_err,
+            )
+
         with open(log_path, "w", encoding="utf-8") as f:
             f.write(
                 "Local reference-bookmark fallback\n"
@@ -149,6 +199,13 @@ class ReferencesEngine:
                 f"ref_bookmarks_added: {stats['ref_count']}\n"
                 f"bib_bookmarks_added: {stats['bib_matched']}\n"
                 f"citations_unmatched: {stats['bib_unmatched']}\n"
+                f"compound_bookmarks_split: {split_stats['split_bookmarks']}\n"
+                f"sub_bookmarks_created: {split_stats['new_bookmarks']}\n"
+                f"unmatched_sub_citations: {split_stats['unmatched_parts']}\n"
+                f"semicolons_stripped: {semicolons_cleaned}\n"
+                f"citation_hyperlinks_wrapped: {hyperlink_stats['wrapped']}\n"
+                f"citation_hyperlinks_already_linked: {hyperlink_stats['already_linked']}\n"
+                f"citation_hyperlinks_unresolved: {hyperlink_stats['unresolved']}\n"
             )
 
         engine_logger.info(
