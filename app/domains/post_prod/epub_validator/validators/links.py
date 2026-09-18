@@ -431,7 +431,7 @@ def validate_page_citation_links(file_details, rule_config=None):
             # If it is a chapter citation, only validate if the base chapter exists in this book
             if m.group(2) is not None and epub:
                 chapter_num_full = m.group(2).lstrip("0") or "0"
-                base_match = re.match(r'^(\d+)', chapter_num_full)
+                base_match = re.match(r'^(\d+|[IVXLCDMivxlcdm]+)', chapter_num_full)
                 base_chapter = base_match.group(1) if base_match else chapter_num_full
                 
                 available_chapters = _epub_chapter_numbers(epub)
