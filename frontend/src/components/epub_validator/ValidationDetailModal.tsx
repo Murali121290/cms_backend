@@ -212,6 +212,8 @@ function DiffText({ expected, actual, type }: { expected: string; actual: string
   );
 }
 
+const URL_PATTERN = /https?:\/\/[^\s<>"\']*|www\.[^\s<>"\']+\.[^\s<>"\']{2,}|\b(?:[a-zA-Z0-9-]+\.)+(?:com|in|org|net|edu|gov|co|io|us|uk|ca|de|jp|fr|au|info|biz|me|app|dev|store|tech|ai|online|site|xyz)\b(?:\/[^\s<>"\']*)?/i;
+
 // ─── Issue row in right panel ────────────────────────────────────────────────
 
 function IssueRow({ issue, onClick }: { issue: DisplayIssue; onClick?: () => void }) {
@@ -225,23 +227,17 @@ function IssueRow({ issue, onClick }: { issue: DisplayIssue; onClick?: () => voi
       return issue.href;
     }
     const msg = issue.message || '';
-    const fullMatch = msg.match(/https?:\/\/[^\s"'>]+/i);
-    if (fullMatch) return fullMatch[0];
-
-    const quotedMatch = msg.match(/URL\s+['"]?([^'"\s]+)['"]?/i);
-    if (quotedMatch && quotedMatch[1]) {
-      const raw = quotedMatch[1].replace(/['",.]*$/, '');
-      return raw.startsWith('http') ? raw : `https://${raw}`;
+    const match = msg.match(URL_PATTERN);
+    if (match) {
+      const raw = match[0].replace(/['",.]*$/, '');
+      if (raw.startsWith('http://') || raw.startsWith('https://')) {
+        return raw;
+      }
+      return `https://${raw}`;
     }
 
-    const domainMatch = msg.match(/(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?:\/[^\s"'>]*)?/i);
-    if (domainMatch) {
-      const raw = domainMatch[0].replace(/['",.]*$/, '');
-      return raw.startsWith('http') ? raw : `https://${raw}`;
-    }
-
-    if (issue.href && (issue.href.includes('.') && !issue.href.endsWith('.xhtml') && !issue.href.endsWith('.html'))) {
-      const raw = issue.href.trim();
+    if (issue.href && URL_PATTERN.test(issue.href)) {
+      const raw = issue.href.trim().replace(/['",.]*$/, '');
       return raw.startsWith('http') ? raw : `https://${raw}`;
     }
 
