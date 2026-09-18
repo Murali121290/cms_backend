@@ -435,6 +435,7 @@ export interface WysiwygEditorProps {
   exportHref?: string;
   documentTitle?: string;
   sidePanel?: React.ReactNode;
+  leftSidebarSlot?: React.ReactNode;
   height?: string;
   trackChangesEnabled?: boolean;
   onTrackChangesToggle?: (v: boolean) => void;
@@ -531,6 +532,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
       currentUser,
       fileId,
       toolbarExtras,
+      leftSidebarSlot,
       hideToolbar = false,
       inlineSaveBar = true,
       hideSaveButton = false,
@@ -1185,7 +1187,6 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         // Mod + key (no Shift / Alt)
         if (!e.shiftKey && !e.altKey) {
           switch (code) {
-            case "KeyS": return fire(() => handleSaveRef.current());
             case "KeyL": return fire(() => editor.chain().focus().setTextAlign("left").run());
             case "KeyE": return fire(() => editor.chain().focus().setTextAlign("center").run());
             case "KeyR": return fire(() => editor.chain().focus().setTextAlign("right").run());
@@ -2152,7 +2153,9 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         })()}
 
         {/* â”€â”€ Document Area â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-        <div className="flex-1 overflow-y-auto bg-gradient-to-tr from-slate-200 to-slate-100 px-6 pt-0 pb-20 flex items-start justify-center overflow-x-auto">
+        <div className="flex-1 flex overflow-hidden min-h-0 relative">
+          {leftSidebarSlot}
+          <div className="flex-1 overflow-y-auto bg-gradient-to-tr from-slate-200 to-slate-100 px-6 pt-0 pb-20 flex items-start justify-center overflow-x-auto">
           <div className={sidePanel ? "flex gap-6 max-w-[1400px] justify-start lg:justify-center" : "flex justify-center"}>
             {/* Word-style A4 Document Page — fixed width so it looks like a
                 physical sheet on the canvas, regardless of viewport width. */}
@@ -2302,6 +2305,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
             )}
           </div>
         </div>
+      </div>
 
         {/* â”€â”€ Save Bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
         <div

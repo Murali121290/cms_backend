@@ -104,6 +104,20 @@ ADDITIONAL_REVIEW_STYLES = [
 def resolve_processed_target(db: Session, *, file_id: int):
     file_record = db.query(File).filter(File.id == file_id).first()
     if not file_record:
+        from app.models import FileVersion
+        ver_record = db.query(FileVersion).filter(FileVersion.id == file_id).first()
+        if ver_record:
+            if ver_record.path and os.path.exists(ver_record.path):
+                parent_file = db.query(File).filter(File.id == ver_record.file_id).first() if ver_record.file_id else None
+                return {
+                    "file_record": parent_file or ver_record,
+                    "processed_path": ver_record.path,
+                    "processed_filename": os.path.basename(ver_record.path),
+                }
+            elif ver_record.file_id:
+                file_record = db.query(File).filter(File.id == ver_record.file_id).first()
+
+    if not file_record:
         raise HTTPException(status_code=404, detail="File not found")
 
     filename_lower = file_record.filename.lower()
@@ -1906,7 +1920,7 @@ def xslt_convert_to_xhtml(db: Session, *, file_id: int) -> Dict[str, Any]:
     Python-converted cache used by the existing load flow.
     Returns: {"status": "ok", "content": str}
     """
-    from app.processing.xslt_docx_to_xhtml import XsltDocxToXhtmlEngine
+    from app.processing.docx_to_xhtml import DocxToXhtmlEngine
     from pathlib import Path as _Path
 
     resolved = resolve_processed_target(db, file_id=file_id)
@@ -1916,8 +1930,10 @@ def xslt_convert_to_xhtml(db: Session, *, file_id: int) -> Dict[str, Any]:
     if not os.path.exists(source_path):
         raise HTTPException(status_code=404, detail="Physical file missing on disk")
 
+    xslt_cache = _Path(_get_xhtml_path(source_path)).with_suffix("._xslt.xhtml")
     try:
-        full_html = XsltDocxToXhtmlEngine().convert(source_path)
+        DocxToXhtmlEngine().convert(source_path, str(xslt_cache))
+        full_html = xslt_cache.read_text(encoding="utf-8") if xslt_cache.exists() else ""
     except Exception as e:
         logger.error(f"XSLT conversion failed for file {file_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"XSLT conversion failed: {str(e)}")
@@ -1927,7 +1943,6 @@ def xslt_convert_to_xhtml(db: Session, *, file_id: int) -> Dict[str, Any]:
     body_match = re.search(r'<body[^>]*>(.*?)</body>', full_html, re.DOTALL | re.IGNORECASE)
     content = body_match.group(1).strip() if body_match else full_html
 
-    xslt_cache = _Path(_get_xhtml_path(source_path)).with_suffix("._xslt.xhtml")
     try:
         os.makedirs(str(xslt_cache.parent), exist_ok=True)
         xslt_cache.write_text(content, encoding="utf-8")
@@ -1944,7 +1959,7 @@ def xslt_save_to_docx(db: Session, *, file_id: int, xhtml: str) -> Dict[str, Any
     processed DOCX until the pipeline is fully validated.
     Returns: {"status": "ok", "output_path": str}
     """
-    from app.processing.xslt_xhtml_to_docx import XsltXhtmlToDocxEngine
+    from app.processing.xhtml_to_docx import XhtmlToDocxEngine
     from pathlib import Path as _Path
 
     resolved = resolve_processed_target(db, file_id=file_id)
@@ -1953,11 +1968,20 @@ def xslt_save_to_docx(db: Session, *, file_id: int, xhtml: str) -> Dict[str, Any
     docx_path = _Path(processed_path)
     output_path = docx_path.with_name(docx_path.stem + "_xslt_output.docx")
 
+    # Write temporary HTML file for XhtmlToDocxEngine to consume
+    tmp_html_path = docx_path.with_suffix(".tmp.html")
     try:
-        XsltXhtmlToDocxEngine().convert(xhtml, str(output_path))
+        tmp_html_path.write_text(xhtml, encoding="utf-8")
+        XhtmlToDocxEngine().convert(str(tmp_html_path), str(output_path))
     except Exception as e:
         logger.error(f"XSLT DOCX save failed for file {file_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"XSLT save failed: {str(e)}")
+    finally:
+        if tmp_html_path.exists():
+            try:
+                tmp_html_path.unlink()
+            except Exception:
+                pass
 
     return {"status": "ok", "output_path": str(output_path)}
 

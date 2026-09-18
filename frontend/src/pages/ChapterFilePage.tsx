@@ -400,6 +400,16 @@ function ProcessingActionsMenu({
           </button>
         )}
 
+        {showAction('unifiedReview') && (
+          <button
+            disabled={!fid}
+            className={btnCls}
+            onClick={() => fid && navigate(uiPaths.unifiedReview(projectId, chapterId, fid))}
+          >
+            <Layout size={12} /> Open in Review Studio
+          </button>
+        )}
+
         {showAction('referenceValidation') && (
           <button
             disabled={!fid || !row}

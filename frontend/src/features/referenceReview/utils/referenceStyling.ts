@@ -229,8 +229,8 @@ export function styleReferenceText(text: string): string {
 }
 
 export function diffWordsToHTML(oldStr: string, newStr: string, currentUser: string = "Editor"): string {
-  const oldWords = oldStr.split(/(\s+)/);
-  const newWords = newStr.split(/(\s+)/);
+  const oldWords = oldStr.match(/[\w'-]+|[^\w\s]+|\s+/g) || [];
+  const newWords = newStr.match(/[\w'-]+|[^\w\s]+|\s+/g) || [];
 
   const dp: number[][] = Array(oldWords.length + 1).fill(0).map(() => Array(newWords.length + 1).fill(0));
   for (let i = 1; i <= oldWords.length; i++) {
@@ -256,7 +256,7 @@ export function diffWordsToHTML(oldStr: string, newStr: string, currentUser: str
     } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
       const text = newWords[j - 1];
       if (text.trim() !== "") {
-        result.push(`<ins data-author="${currentUser}" data-date="${timestamp}">${escapeHTML(text)}</ins>`);
+        result.push(`<ins class="tc-insert" data-author="${currentUser}" data-date="${timestamp}">${escapeHTML(text)}</ins>`);
       } else {
         result.push(text);
       }
@@ -264,7 +264,7 @@ export function diffWordsToHTML(oldStr: string, newStr: string, currentUser: str
     } else {
       const text = oldWords[i - 1];
       if (text.trim() !== "") {
-        result.push(`<del data-author="${currentUser}" data-date="${timestamp}">${escapeHTML(text)}</del>`);
+        result.push(`<del class="tc-delete" data-author="${currentUser}" data-date="${timestamp}">${escapeHTML(text)}</del>`);
       } else {
         result.push(text);
       }
@@ -280,14 +280,11 @@ export function diffWordsToHTML(oldStr: string, newStr: string, currentUser: str
 }
 
 export function styledDiffHTML(oldStr: string, newStr: string, currentUser: string = "Editor"): string {
-  const timestamp = new Date().toISOString().replace(/\.\d+Z$/, "Z");
-
-  const styledOld = styleReferenceText(oldStr);
-  const styledNew = styleReferenceText(newStr);
-
   if (!oldStr || !oldStr.trim()) {
+    const timestamp = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+    const styledNew = styleReferenceText(newStr);
     return `<ins class="tc-insert" data-author="${currentUser}" data-date="${timestamp}">${styledNew}</ins>`;
   }
 
-  return `<del class="tc-delete" data-author="${currentUser}" data-date="${timestamp}">${styledOld}</del> <ins class="tc-insert" data-author="${currentUser}" data-date="${timestamp}">${styledNew}</ins>`;
+  return diffWordsToHTML(oldStr, newStr, currentUser);
 }
