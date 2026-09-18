@@ -29,6 +29,7 @@ import { useStructuringReviewQuery } from "@/features/structuringReview/useStruc
 import { WysiwygEditor, useEditorSaveRuns, type WysiwygEditorHandle, OnlyOfficeEditor, OnlyOfficeSidePanel, type OnlyOfficeEditorHandle, CollaboraSidePanel, ChangesReviewPanel } from "@/features/editor";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useFileXhtmlRunsQuery } from "@/features/technicalReview/useFileXhtmlRunsQuery";
+import { LeftStructuringSidebar } from "@/features/structuringReview/components/LeftStructuringSidebar";
 import { CommentsPanel } from "@/features/structuringReview/components/CommentsPanel";
 import { StylesPanel } from "@/features/structuringReview/components/EditorStylesPanel";
 import { VersionHistoryPanel } from "@/features/structuringReview/components/VersionHistoryPanel";
@@ -627,104 +628,35 @@ export function StructuringReviewPage() {
               onAddStyle={handleAddStyle}
               currentUser={currentUser}
               fileId={normalizedFileId?.toString()}
+              leftSidebarSlot={
+                <LeftStructuringSidebar
+                  fileId={normalizedFileId}
+                  allStyles={allStyles}
+                  charStyles={review.char_styles}
+                  onAddStyle={handleAddStyle}
+                  editorRef={editorRef}
+                  onOpenVersion={(versionId) => {
+                    if (normalizedProjectId && normalizedChapterId) {
+                      navigate(uiPaths.structuringReview(normalizedProjectId, normalizedChapterId, versionId) + "?tab=editor");
+                    }
+                  }}
+                />
+              }
               toolbarExtras={
-                <ToolbarPopoverGroup>
-                  <ToolbarPopover
-                    id="comments"
-                    icon={<MessageSquare className="w-3.5 h-3.5" />}
-                    label="Comments"
-                    title="Comments"
-                    sticky
-                    width={360}
-                  >
-                    <CommentsPanel fileId={normalizedFileId} editorRef={editorRef} />
-                  </ToolbarPopover>
-                  <ToolbarPopover
-                    id="para"
-                    icon={<FileText className="w-3.5 h-3.5" />}
-                    label="Para"
-                    title="Paragraph Styles"
-                    sticky
-                    width={320}
-                  >
-                    <StylesPanel
-                      styles={allStyles}
-                      editorRef={editorRef}
-                      onAddStyle={handleAddStyle}
-                      fileId={normalizedFileId}
-                      charStyles={review.char_styles}
-                      visibleTabs={["paragraph"]}
-                    />
-                  </ToolbarPopover>
-                  <ToolbarPopover
-                    id="char"
-                    icon={<BookOpen className="w-3.5 h-3.5" />}
-                    label="Char"
-                    title="Character Styles"
-                    sticky
-                    width={320}
-                  >
-                    <StylesPanel
-                      styles={allStyles}
-                      editorRef={editorRef}
-                      onAddStyle={handleAddStyle}
-                      fileId={normalizedFileId}
-                      charStyles={review.char_styles}
-                      visibleTabs={["character"]}
-                    />
-                  </ToolbarPopover>
-                  <ToolbarPopover
-                    id="group"
-                    icon={<Layers className="w-3.5 h-3.5" />}
-                    label="Group"
-                    title="Document Elements"
-                    sticky
-                    width={360}
-                  >
-                    <StylesPanel
-                      styles={allStyles}
-                      editorRef={editorRef}
-                      onAddStyle={handleAddStyle}
-                      fileId={normalizedFileId}
-                      charStyles={review.char_styles}
-                      visibleTabs={["group"]}
-                    />
-                  </ToolbarPopover>
-                  <ToolbarPopover
-                    id="history"
-                    icon={<Clock className="w-3.5 h-3.5" />}
-                    label="History"
-                    title="Version History"
-                    width={320}
-                    hideHeader
-                  >
-                    <VersionHistoryPanel
-                      fileId={normalizedFileId}
-                      currentFileId={normalizedFileId}
-                      defaultExpanded
-                      onOpenVersion={(versionId) => {
-                        navigate(uiPaths.structuringReview(normalizedProjectId, normalizedChapterId, versionId) + "?tab=editor");
-                      }}
-                    />
-                  </ToolbarPopover>
-                  {/* Reference Review toggle — opens/closes the right-side
-                      Reference Review panel. Hidden by default; editor
-                      reflows to full width when the panel is closed. */}
-                  <button
-                    type="button"
-                    aria-pressed={showReferencePanel}
-                    onClick={() => setShowReferencePanel((prev) => !prev)}
-                    title="Reference Review — citations, references, and validation"
-                    className={`px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md border shrink-0 inline-flex items-center gap-1.5 transition-all duration-150 cursor-pointer ${
-                      showReferencePanel
-                        ? "bg-orange-600 text-white border-orange-500"
-                        : "bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-slate-100"
-                    }`}
-                  >
-                    <Library className="w-3.5 h-3.5" />
-                    Reference Review
-                  </button>
-                </ToolbarPopoverGroup>
+                <button
+                  type="button"
+                  aria-pressed={showReferencePanel}
+                  onClick={() => setShowReferencePanel((prev) => !prev)}
+                  title="Reference Review — citations, references, and validation"
+                  className={`px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md border shrink-0 inline-flex items-center gap-1.5 transition-all duration-150 cursor-pointer ${
+                    showReferencePanel
+                      ? "bg-orange-600 text-white border-orange-500"
+                      : "bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-slate-100"
+                  }`}
+                >
+                  <Library className="w-3.5 h-3.5" />
+                  Reference Review
+                </button>
               }
             />
               </>

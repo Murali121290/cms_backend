@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ComponentType, RefObject } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
   AlertTriangle,
@@ -86,6 +87,7 @@ interface Props {
 }
 
 export function ReferenceReviewSidePanel({ fileId, editorRef }: Props) {
+  const queryClient = useQueryClient();
   const [styleOverride, setStyleOverride] = useState<"AUTO" | "AMA" | "APA">("AUTO");
   const [citationFormat, setCitationFormat] =
     useState<"auto" | "superscript" | "bracket" | "paren" | "plain">("auto");
@@ -962,7 +964,13 @@ export function ReferenceReviewSidePanel({ fileId, editorRef }: Props) {
                   is_cited: r.is_cited,
                 }}
                 onLocate={() => locate(r.para_idx, r.number ?? undefined, r.text)}
-                onSaved={() => reviewQuery.refetch()}
+                onSaved={() => {
+                  void reviewQuery.refetch();
+                  if (fileId != null) {
+                    void queryClient.invalidateQueries({ queryKey: ["file-xhtml-runs", fileId] });
+                    void queryClient.invalidateQueries({ queryKey: ["file-xhtml-runs", Number(fileId)] });
+                  }
+                }}
               />
             ))}
           </ul>

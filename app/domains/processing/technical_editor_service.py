@@ -50,7 +50,13 @@ def scan_errors(
         logger.error(f"Scan failed: File ID {file_id} not found in DB")
         raise HTTPException(status_code=404, detail="File not found")
 
-    file_path = os.path.abspath(file_record.path)
+    # Scan the current processed DOCX (falls back to the original upload when no
+    # Structuring/Reference Review pass has produced one yet) — same convention
+    # save_xhtml_and_convert already uses for Technical Review's own plain save,
+    # so a chained Structuring -> Technical flow scans the right document.
+    from app.domains.review.service import resolve_processed_target
+    resolved = resolve_processed_target(db, file_id=file_id)
+    file_path = os.path.abspath(resolved["processed_path"])
     if not os.path.exists(file_path):
         logger.error(f"Scan failed: Physical file missing at {file_path}")
         raise HTTPException(status_code=404, detail=f"Physical file missing: {file_path}")
@@ -152,7 +158,12 @@ def apply_edits(
     if not file_record:
         raise HTTPException(status_code=404, detail="File not found")
 
-    file_path = os.path.abspath(file_record.path)
+    # Apply onto the current processed DOCX (same target scan_errors/the plain
+    # save already use) so fixes land on top of any prior Structuring/Reference
+    # Review edits instead of the untouched original upload.
+    from app.domains.review.service import resolve_processed_target
+    resolved = resolve_processed_target(db, file_id=file_id)
+    file_path = os.path.abspath(resolved["processed_path"])
     output_path = file_path + ".te.tmp"
 
     # Get user id for archiving

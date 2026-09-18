@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { Search, X, RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
@@ -63,6 +64,7 @@ export function EditReferenceModal({
   onSaved,
   onSaveTrackChanges,
 }: Props) {
+  const queryClient = useQueryClient();
   const initialQuery = useMemo(() => extractTitleForQuery(originalText), [originalText]);
   const [editedText, setEditedText] = useState(originalText);
   const [searchQuery, setSearchQuery] = useState(initialQuery);
@@ -129,6 +131,12 @@ export function EditReferenceModal({
             { new_text: editedText.trim(), track_changes: true },
           );
           resultData = data;
+
+          // Invalidate both reference review list and editor xhtml runs query so editor canvas updates immediately
+          void queryClient.invalidateQueries({ queryKey: ["reference-review", fileId] });
+          void queryClient.invalidateQueries({ queryKey: ["reference-review", Number(fileId)] });
+          void queryClient.invalidateQueries({ queryKey: ["file-xhtml-runs", fileId] });
+          void queryClient.invalidateQueries({ queryKey: ["file-xhtml-runs", Number(fileId)] });
         } catch (apiErr) {
           console.warn("Backend edit reference API call warning:", apiErr);
         }
@@ -153,6 +161,19 @@ export function EditReferenceModal({
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleUseResult = (formattedResult: string) => {
+    const numMatch = originalText.match(/^(\s*\[?\d+\]?[\.\s]+)/) || editedText.match(/^(\s*\[?\d+\]?[\.\s]+)/);
+    if (numMatch) {
+      const prefix = numMatch[1];
+      const cleanFormatted = formattedResult.replace(/^(\s*\[?\d+\]?[\.\s]+)/, "");
+      if (!formattedResult.trim().startsWith(prefix.trim())) {
+        setEditedText(`${prefix}${cleanFormatted}`);
+        return;
+      }
+    }
+    setEditedText(formattedResult);
   };
 
   const dirty = editedText.trim() !== originalText.trim();
@@ -328,7 +349,7 @@ export function EditReferenceModal({
                     <Button
                       variant="secondary"
                       size="sm"
-                      onClick={() => setEditedText(result.formatted)}
+                      onClick={() => handleUseResult(result.formatted)}
                       className="shrink-0 text-[10px] font-bold px-2 py-1 h-auto cursor-pointer"
                     >
                       Use Result

@@ -30,6 +30,7 @@ import { TechnicalReviewPage } from '@/pages/TechnicalReviewPage'
 import { TechnicalEditorPage } from '@/pages/TechnicalEditorPage'
 import { StructuringReviewPage } from '@/pages/StructuringReviewPage'
 import { ReferenceValidationReviewPage } from '@/pages/ReferenceValidationReviewPage'
+import { UnifiedReviewEditorPage } from '@/pages/UnifiedReviewEditorPage'
 import { FileEditorPage } from '@/pages/FileEditorPage'
 import { DocxEditorPage } from '@/pages/DocxEditorPage'
 import { StylesheetsPage } from '@/pages/StylesheetsPage'
@@ -150,6 +151,7 @@ const router = createBrowserRouter([
       { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/technical-review', element: <TechnicalReviewPage /> },
       { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/technical-editor', element: <TechnicalEditorPage /> },
       { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/reference-review', element: <ReferenceTabRedirect /> },
+      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/unified-review', element: <UnifiedReviewEditorPage /> },
 
       // ── File-level pages (clients prefix) ───────────────────────────────────
       { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/edit', element: <FileEditorPage /> },
@@ -159,6 +161,7 @@ const router = createBrowserRouter([
       { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/technical-review', element: <TechnicalReviewPage /> },
       { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/technical-editor', element: <TechnicalEditorPage /> },
       { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/reference-review', element: <ReferenceTabRedirect /> },
+      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/unified-review', element: <UnifiedReviewEditorPage /> },
 
       { path: 'projects', element: <ProjectsPage /> },
       { path: 'chapters', element: <Placeholder title="Chapters" /> },

@@ -162,7 +162,7 @@ export function getProcessingActions(stageName: string): string[] {
 // the corresponding <DropdownMenu.Item> in ChapterFilePage.tsx — no other code changes needed.
 export type ProcessingActionKey =
   | 'structuring' | 'referenceValidation' | 'referenceReview'
-  | 'languageEdit' | 'technicalEdit'
+  | 'languageEdit' | 'technicalEdit' | 'unifiedReview'
   | 'manuscriptAnalysis'
   | 'permissionsCheck' | 'aiCreditExtraction' | 'biasScan' | 'wordToXml'
   | 'xmlToIndesign' | 'indesignToXml' | 'viewProof' | 'styleValidation' | 'artValidation'
@@ -177,6 +177,7 @@ export const PROCESSING_ACTION_STAGE_MAP: Record<ProcessingActionKey, string[] |
   artValidation:        ['Pre-editing', 'Pre-editing QA', 'XML Conversion', 'Non-XML Processing', 'Non-XML Conversion', 'Manuscript Analysis'],
   languageEdit:         ['Language Editing', 'Language Editing QA'],
   technicalEdit:        ['Language Editing','Language Editing QA'],
+  unifiedReview:        ['Pre-editing','Pre-editing QA','Language Editing','Language Editing QA'],
   manuscriptAnalysis:   ['Manuscript Analysis'],
   permissionsCheck:     ['Digital Processing'],
   aiCreditExtraction:   ['Digital Processing'],

@@ -5542,6 +5542,52 @@ def api_v2_technical_export_html(
     )
 
 
+@router.get("/files/{file_id}/technical-review/export")
+def api_v2_technical_export(
+    file_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+
+    try:
+        export_payload = structuring_review_service.get_export_payload(
+            db,
+            file_id=file_id,
+            logger=logger,
+        )
+    except HTTPException as exc:
+        code = "TECHNICAL_EXPORT_FAILED"
+        detail_message = str(exc.detail)
+        if exc.status_code == 404:
+            code = "PROCESSED_FILE_MISSING" if "Processed file not found" in detail_message else "FILE_NOT_FOUND"
+        return _error_response(
+            status_code=exc.status_code,
+            code=code,
+            message=detail_message,
+        )
+
+    cleanup = None
+    if export_payload.get("is_temp"):
+        from starlette.background import BackgroundTask
+        import os as _os
+        tmp_path = export_payload["path"]
+        cleanup = BackgroundTask(lambda: _os.path.exists(tmp_path) and _os.unlink(tmp_path))
+
+    return FileResponse(
+        path=export_payload["path"],
+        filename=export_payload["filename"],
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        background=cleanup,
+    )
+
+
 @router.get("/projects/{project_id}/technical-review/export")
 def api_v2_bulk_export_analysis(
     project_id: int,
@@ -5810,7 +5856,12 @@ def api_v2_get_file_xhtml(
             message="File not found",
         )
 
-    file_path = os.path.abspath(file_record.path)
+    # Read the current processed DOCX (falls back to the original upload when
+    # none exists yet) — the same convention save_xhtml_and_convert already
+    # uses for this file's plain save, so the editor and Technical Review's
+    # scan/apply agree on which document is "current".
+    resolved = structuring_review_service.resolve_processed_target(db, file_id=file_id)
+    file_path = os.path.abspath(resolved["processed_path"])
     if not os.path.exists(file_path):
         return _error_response(
             status_code=status.HTTP_404_NOT_FOUND,

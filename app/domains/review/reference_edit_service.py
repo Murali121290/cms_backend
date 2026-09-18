@@ -184,6 +184,82 @@ def _make_ins_run(text: str, sample_run, author: str, date: str, rev_id: int) ->
     return ins_el
 
 
+def _apply_word_level_track_changes(
+    p,
+    old_text: str,
+    new_text: str,
+    sample_run,
+    author: str,
+    now: str,
+    rev_id: int,
+):
+    """Apply word/token-level tracked changes (w:del / w:ins) to paragraph p."""
+    import difflib
+    import re
+
+    old_tokens = re.findall(r"\S+|\s+", old_text)
+    new_tokens = re.findall(r"\S+|\s+", new_text)
+
+    matcher = difflib.SequenceMatcher(None, old_tokens, new_tokens)
+    opcodes = matcher.get_opcodes()
+
+    runs = list(p.findall(W + "r"))
+    first_run_idx = list(p).index(runs[0]) if runs else len(p)
+    for r in runs:
+        p.remove(r)
+
+    curr_idx = first_run_idx
+    for tag, i1, i2, j1, j2 in opcodes:
+        if tag == "equal":
+            eq_text = "".join(old_tokens[i1:i2])
+            if eq_text:
+                r_el = etree.Element(W + "r")
+                if sample_run is not None:
+                    rpr = sample_run.find(W + "rPr")
+                    if rpr is not None:
+                        r_el.append(deepcopy(rpr))
+                t_el = etree.SubElement(r_el, W + "t")
+                t_el.text = eq_text
+                t_el.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+                p.insert(curr_idx, r_el)
+                curr_idx += 1
+        elif tag in ("delete", "replace"):
+            del_text = "".join(old_tokens[i1:i2])
+            if del_text:
+                del_el = etree.Element(W + "del")
+                del_el.set(W + "id", str(rev_id))
+                del_el.set(W + "author", author)
+                del_el.set(W + "date", now)
+
+                r_el = etree.SubElement(del_el, W + "r")
+                if sample_run is not None:
+                    rpr = sample_run.find(W + "rPr")
+                    if rpr is not None:
+                        r_el.append(deepcopy(rpr))
+                del_t = etree.SubElement(r_el, W + "delText")
+                del_t.text = del_text
+                del_t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+
+                p.insert(curr_idx, del_el)
+                curr_idx += 1
+                rev_id += 1
+
+            if tag == "replace":
+                ins_text = "".join(new_tokens[j1:j2])
+                if ins_text:
+                    ins_el = _make_ins_run(ins_text, sample_run, author, now, rev_id)
+                    p.insert(curr_idx, ins_el)
+                    curr_idx += 1
+                    rev_id += 1
+        elif tag == "insert":
+            ins_text = "".join(new_tokens[j1:j2])
+            if ins_text:
+                ins_el = _make_ins_run(ins_text, sample_run, author, now, rev_id)
+                p.insert(curr_idx, ins_el)
+                curr_idx += 1
+                rev_id += 1
+
+
 def apply_reference_edit(
     docx_path: str | Path,
     ref_number: int,
@@ -218,14 +294,8 @@ def apply_reference_edit(
     now = _iso_now()
     rev_id = _next_revision_id(root)
 
-    if track_changes and runs:
-        del_el = _wrap_runs_as_deletion(runs, author, now, rev_id)
-        first_run_idx = list(p).index(runs[0])
-        for r in runs:
-            p.remove(r)
-        ins_el = _make_ins_run(new_text, sample_run, author, now, rev_id + 1)
-        p.insert(first_run_idx, del_el)
-        p.insert(first_run_idx + 1, ins_el)
+    if track_changes and (runs or old_text):
+        _apply_word_level_track_changes(p, old_text, new_text, sample_run, author, now, rev_id)
     else:
         first_run_idx = list(p).index(runs[0]) if runs else None
         for r in runs:
