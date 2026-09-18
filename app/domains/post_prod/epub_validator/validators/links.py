@@ -17,6 +17,7 @@ from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import json
+from typing import Any
 
 from ..engine.registry import rule
 from ..services.upload_service import UPLOAD_DIR
@@ -330,22 +331,51 @@ def _epub_chapter_numbers(epub: str) -> set[str]:
     return nums
 
 
-_SUMMARY_CACHE: dict[str, dict[str, set[str]]] = {}
+_SUMMARY_CACHE: dict[str, dict[str, Any]] = {}
 
-def _get_summary_labels(folder_name: str) -> dict[str, set[str]]:
+def _get_summary_labels(folder_name: str) -> dict[str, Any]:
     if not folder_name:
-        return {"figures": set(), "tables": set()}
+        return {
+            "figures": set(),
+            "tables": set(),
+            "total_chapters": None,
+            "total_parts": None,
+            "total_sections": None,
+            "total_figures": None,
+            "total_tables": None,
+        }
         
     if folder_name in _SUMMARY_CACHE:
         return _SUMMARY_CACHE[folder_name]
 
     cache_path = os.path.join(UPLOAD_DIR, folder_name, "summary_cache.json")
-    labels = {"figures": set(), "tables": set()}
+    if not os.path.exists(cache_path):
+        try:
+            from ..services.summary_service import extract_epub_summary
+            extract_epub_summary(folder_name)
+        except Exception:
+            pass
+
+    labels: dict[str, Any] = {
+        "figures": set(),
+        "tables": set(),
+        "total_chapters": None,
+        "total_parts": None,
+        "total_sections": None,
+        "total_figures": None,
+        "total_tables": None,
+    }
     
     if os.path.exists(cache_path):
         try:
             with open(cache_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
+                
+            labels["total_chapters"] = data.get("total_chapters", 0)
+            labels["total_parts"] = data.get("total_parts", 0)
+            labels["total_sections"] = data.get("total_sections", 0)
+            labels["total_figures"] = data.get("total_figures", 0)
+            labels["total_tables"] = data.get("total_tables", 0)
                 
             for label in data.get("figure_labels", []):
                 m = re.search(r'fig(?:ure)?\.?\s*(\d+(?:[\.\-–]\d+)*)', label, re.IGNORECASE)
@@ -429,19 +459,22 @@ def validate_page_citation_links(file_details, rule_config=None):
                     continue
 
             # If it is a chapter citation, only validate if the base chapter exists in this book
-            if m.group(2) is not None and epub:
-                chapter_num_full = m.group(2).lstrip("0") or "0"
-                base_match = re.match(r'^(\d+)', chapter_num_full)
-                base_chapter = base_match.group(1) if base_match else chapter_num_full
-                
-                available_chapters = _epub_chapter_numbers(epub)
-                if available_chapters:
-                    # Normalize citation: try comparing as-is (lowercase), and also as Arabic equivalent
-                    chapter_lower = base_chapter.lower()
-                    arabic_equiv = _roman_to_int(base_chapter)
-                    arabic_str = str(arabic_equiv) if arabic_equiv else None
-                    if chapter_lower not in available_chapters and (arabic_str is None or arabic_str not in available_chapters):
-                        continue
+            if m.group(2) is not None:
+                if summary_labels.get("total_chapters") == 0:
+                    continue
+                if epub:
+                    chapter_num_full = m.group(2).lstrip("0") or "0"
+                    base_match = re.match(r'^(\d+|[IVXLCDMivxlcdm]+)', chapter_num_full)
+                    base_chapter = base_match.group(1) if base_match else chapter_num_full
+                    
+                    available_chapters = _epub_chapter_numbers(epub)
+                    if available_chapters:
+                        # Normalize citation: try comparing as-is (lowercase), and also as Arabic equivalent
+                        chapter_lower = base_chapter.lower()
+                        arabic_equiv = _roman_to_int(base_chapter)
+                        arabic_str = str(arabic_equiv) if arabic_equiv else None
+                        if chapter_lower not in available_chapters and (arabic_str is None or arabic_str not in available_chapters):
+                            continue
 
             # If it is a page citation, only validate if the page exists in this book
             if m.group(1) is not None and epub:
@@ -449,16 +482,34 @@ def validate_page_citation_links(file_details, rule_config=None):
                 if page_ids and _page_id_for_number(page_num, page_ids) is None:
                     continue
                     
-            # If it is a Figure citation, only validate if the figure exists in this book
-            if is_figure and summary_labels["figures"]:
-                fig_num = m.group(3)
-                if fig_num and fig_num not in summary_labels["figures"]:
+            # If it is a Figure citation, only validate if figures exist and match in this book
+            if is_figure:
+                if summary_labels.get("total_figures") == 0:
                     continue
+                if summary_labels["figures"]:
+                    fig_num = m.group(3)
+                    if fig_num and fig_num not in summary_labels["figures"]:
+                        continue
             
-            # If it is a Table citation, only validate if the table exists in this book
-            if is_table and summary_labels["tables"]:
-                table_num = m.group(4)
-                if table_num and table_num not in summary_labels["tables"]:
+            # If it is a Table citation, only validate if tables exist and match in this book
+            if is_table:
+                if summary_labels.get("total_tables") == 0:
+                    continue
+                if summary_labels["tables"]:
+                    table_num = m.group(4)
+                    if table_num and table_num not in summary_labels["tables"]:
+                        continue
+
+            # If it is a Section citation (Group 9), skip if total_sections is 0 or if statutory/external legal reference
+            is_section = m.group(9) is not None if len(m.groups()) >= 9 else False
+            if is_section:
+                # If analysis summary indicates 0 sections in the book, do not flag section citation errors
+                if summary_labels.get("total_sections") == 0:
+                    continue
+
+                # Skip statutory / external legal references (e.g. Section 307 of SOX / Code / Act / U.S.C.)
+                remainder = str(text_node)[m.end():m.end() + 50]
+                if re.match(r'^\s+(?:of\s+(?:sox|erisa|title\s+\d+|the\s+(?:code|act|statute|rules?|constitution|dodd|false\s+claims))|codified|§|\(?\d+\s+u\.s\.c|\(?\d+\s+c\.f\.r)', remainder, re.IGNORECASE):
                     continue
 
             msg = f"Citation '{m.group(0)}' is not wrapped in a link."

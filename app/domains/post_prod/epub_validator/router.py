@@ -39,6 +39,7 @@ from .services.ace_service import (
 from .services.epubcheck_service import (
     run_epubcheck_report,
     get_cached_epubcheck_report,
+    generate_epubcheck_txt_report,
 )
 from .services.summary_service import extract_epub_summary
 
@@ -453,6 +454,18 @@ def get_epubcheck_report_route(folder_name: str):
     return {"status": True, "report": report}
 
 
+@router.get("/epubcheck/{folder_name}/download-log")
+def download_epubcheck_log_route(folder_name: str, db: Session = Depends(get_db)):
+    txt_content, download_filename, _ = generate_epubcheck_txt_report(folder_name, db)
+    return Response(
+        content=txt_content,
+        media_type="text/plain; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{download_filename}"'
+        },
+    )
+
+
 @router.post("/epubcheck/{folder_name}")
 async def run_epubcheck_report_route(
     folder_name: str,
@@ -630,16 +643,18 @@ async def export_epub(
     if not epub_dir.is_dir():
         raise HTTPException(status_code=404, detail="EPUB source directory not found.")
 
-    # Get export filename based on customer configuration
+    # Base name for filenames (eISBN > project_name > folder_name)
     project = ev_projects_db.get_project_by_folder(db, folder_name)
-    if project and project.eisbn:
-        filename = f"{project.eisbn}_EPUB.epub"
-    elif project and project.project_name:
-        filename = f"{project.project_name}_EPUB.epub"
+    if project and project.eisbn and project.eisbn.strip():
+        base_name = project.eisbn.strip()
+    elif project and project.project_name and project.project_name.strip():
+        base_name = project.project_name.strip()
     else:
-        filename = f"{folder_name}_EPUB.epub"
+        base_name = folder_name
 
-    def _build_zip() -> bytes:
+    epub_filename = f"{base_name}_EPUB.epub"
+
+    def _build_epub_zip() -> bytes:
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as zf:
             mimetype_path = epub_dir / "mimetype"
@@ -658,11 +673,62 @@ async def export_epub(
                     )
         return buf.getvalue()
 
-    zip_bytes = await asyncio.to_thread(_build_zip)
+    epub_bytes = await asyncio.to_thread(_build_epub_zip)
+
+    # Check for ACE validation zip
+    ace_bytes: Optional[bytes] = None
+    ace_filename: Optional[str] = None
+    try:
+        ace_h_dir = ace_html_report_dir(folder_name)
+        if ace_h_dir.is_dir():
+            ace_zip_path = get_ace_report_zip_path(folder_name)
+            if ace_zip_path.is_file():
+                ace_bytes = ace_zip_path.read_bytes()
+                ace_filename = f"{base_name}-ace-report.zip"
+    except Exception:
+        pass
+
+    # Check for EPUBCheck .txt log file
+    txt_bytes: Optional[bytes] = None
+    txt_filename: Optional[str] = None
+    try:
+        cached_epubcheck = get_cached_epubcheck_report(folder_name)
+        if cached_epubcheck and cached_epubcheck.get("status") != "fatal":
+            txt_content, txt_fn, _ = generate_epubcheck_txt_report(folder_name, db)
+            txt_bytes = txt_content.encode("utf-8")
+            txt_filename = txt_fn
+    except Exception:
+        pass
+
+    # If neither ACE nor EPUBCheck reports exist, return ONLY the final .epub file
+    if not ace_bytes and not txt_bytes:
+        return Response(
+            content=epub_bytes,
+            media_type="application/epub+zip",
+            headers={"Content-Disposition": f'attachment; filename="{epub_filename}"'},
+        )
+
+    # If ACE or EPUBCheck reports exist, return a ZIP bundle containing EPUB + validation reports
+    bundle_filename = f"{base_name}_EPUB_package.zip"
+
+    def _build_bundle_zip() -> bytes:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            # 1. Final EPUB file
+            zf.writestr(epub_filename, epub_bytes)
+            # 2. ACE validation ZIP (if present)
+            if ace_bytes and ace_filename:
+                zf.writestr(ace_filename, ace_bytes)
+            # 3. EPUBCheck log .txt (if present)
+            if txt_bytes and txt_filename:
+                zf.writestr(txt_filename, txt_bytes)
+        return buf.getvalue()
+
+    bundle_zip_bytes = await asyncio.to_thread(_build_bundle_zip)
     return Response(
-        content=zip_bytes,
-        media_type="application/epub+zip",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        content=bundle_zip_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{bundle_filename}"'},
     )
 
 

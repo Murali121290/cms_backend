@@ -120,16 +120,74 @@ def get_cached_report(folder_name: str) -> dict[str, Any] | None:
         return None
 
 
+def _patch_ace_cli() -> None:
+    """Ensure DAISY ACE's Electron cli.js respects process.env.ACE_CONCURRENCY instead of hardcoding 4."""
+    cli_paths = [
+        "/usr/local/lib/node_modules/@daisy/ace/node_modules/@daisy/ace-axe-runner-electron/lib/cli.js",
+        "/usr/local/lib/node_modules/@daisy/ace/node_modules/@daisy/ace-axe-runner-electron/src/cli.js",
+        "/usr/local/lib/node_modules/@daisy/ace-axe-runner-electron/lib/cli.js",
+        "/usr/local/lib/node_modules/@daisy/ace-axe-runner-electron/src/cli.js",
+    ]
+    target_str = "const CONCURRENT_INSTANCES = 4;"
+    replacement_str = "const CONCURRENT_INSTANCES = process.env.ACE_CONCURRENCY ? parseInt(process.env.ACE_CONCURRENCY, 10) : 1;"
+    for p_str in cli_paths:
+        p = Path(p_str)
+        if p.is_file():
+            try:
+                txt = p.read_text(encoding="utf-8")
+                if target_str in txt:
+                    p.write_text(txt.replace(target_str, replacement_str), encoding="utf-8")
+            except Exception:
+                pass
+
+
+def _find_ace_runner_cmd(html_dir: Path, epub_path: Path) -> list[str]:
+    """Build the command to execute ACE.
+
+    Launches Electron directly with Chromium flags passed BEFORE cli.js to
+    guarantee that --no-sandbox, --disable-gpu, and --disable-dev-shm-usage are
+    applied before the renderer process initializes acehttps:// URLs.
+    """
+    _patch_ace_cli()
+    electron_paths = [
+        "/usr/local/lib/node_modules/@daisy/ace/node_modules/electron/dist/electron",
+        "/usr/local/lib/node_modules/@daisy/ace-axe-runner-electron/node_modules/electron/dist/electron",
+    ]
+    cli_paths = [
+        "/usr/local/lib/node_modules/@daisy/ace/node_modules/@daisy/ace-axe-runner-electron/lib/cli.js",
+        "/usr/local/lib/node_modules/@daisy/ace-axe-runner-electron/lib/cli.js",
+    ]
+
+    electron_bin = next((p for p in electron_paths if os.path.exists(p)), None)
+    cli_js = next((p for p in cli_paths if os.path.exists(p)), None)
+
+    if electron_bin and cli_js:
+        return [
+            electron_bin,
+            "--no-sandbox",
+            "--disable-gpu",
+            "--disable-software-rasterizer",
+            "--disable-dev-shm-usage",
+            cli_js,
+            "--outdir", str(html_dir),
+            "--force",
+            "--timeout", "600000",
+            str(epub_path)
+        ]
+
+    ace_bin = _find_ace_binary()
+    if ace_bin:
+        return [ace_bin, "--no-sandbox", "--outdir", str(html_dir), "--force", "--timeout", "600000", str(epub_path)]
+
+    return []
+
+
 def run_ace(folder_name: str) -> dict[str, Any]:
     """Run ACE on the EPUB and return the normalised report.
 
     Raises HTTPException with a clear message when the binary is missing
     or the run fails — the route hands these back to the frontend as-is.
     """
-    ace_bin = _find_ace_binary()
-    if ace_bin is None:
-        raise HTTPException(status_code=503, detail=ACE_MISSING_MESSAGE)
-
     epub = _epub_path(folder_name)
     if not epub.is_file():
         raise HTTPException(
@@ -144,13 +202,18 @@ def run_ace(folder_name: str) -> dict[str, Any]:
         shutil.rmtree(html_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
 
+    base_cmd = _find_ace_runner_cmd(html_dir, epub)
+    if not base_cmd:
+        raise HTTPException(status_code=503, detail=ACE_MISSING_MESSAGE)
+
     # ACE spawns Electron/Chromium, which needs a display. In headless
     # environments (Docker, CI) wrap the call with xvfb-run when it's
     # available so a virtual display gets spun up automatically.
-    cmd = [ace_bin, "--outdir", str(html_dir), "--force", str(epub)]
     xvfb = shutil.which("xvfb-run")
     if xvfb and not os.environ.get("DISPLAY"):
-        cmd = [xvfb, "-a", "--server-args=-screen 0 1024x768x24", *cmd]
+        cmd = [xvfb, "-a", "--server-args=-screen 0 1024x768x24", *base_cmd]
+    else:
+        cmd = base_cmd
 
     # Give the Electron subprocess a full user environment. When uvicorn
     # was started from a stripped shell (or via a hook), the inherited env
@@ -164,6 +227,10 @@ def run_ace(folder_name: str) -> dict[str, Any]:
     env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
     env["ELECTRON_DISABLE_SANDBOX"] = "1"
     env["NODE_NO_WARNINGS"] = "1"
+    env["ELECTRON_DISABLE_GPU"] = "1"
+    env["ELECTRON_EXTRA_LAUNCH_ARGS"] = "--disable-gpu --disable-software-rasterizer --disable-dev-shm-usage --no-sandbox --disable-setuid-sandbox"
+    env["CHROMIUM_FLAGS"] = "--disable-gpu --disable-software-rasterizer --disable-dev-shm-usage --no-sandbox"
+    env["ACE_CONCURRENCY"] = os.environ.get("ACE_CONCURRENCY", "2")
 
     started = time.monotonic()
     try:
@@ -171,7 +238,7 @@ def run_ace(folder_name: str) -> dict[str, Any]:
             cmd,
             capture_output=True,
             text=True,
-            timeout=300,
+            timeout=600,
             check=False,
             env=env,
         )
@@ -180,7 +247,7 @@ def run_ace(folder_name: str) -> dict[str, Any]:
     except subprocess.TimeoutExpired:
         raise HTTPException(
             status_code=504,
-            detail="ACE timed out after 5 minutes.",
+            detail="ACE timed out after 10 minutes.",
         )
 
     report_file = html_dir / "report.json"
