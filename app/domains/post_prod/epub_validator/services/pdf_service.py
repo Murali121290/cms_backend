@@ -131,14 +131,9 @@ def find_pdf_page(folder_name: str, xhtml_filename: str) -> dict:
                 }
 
             # ── Fallback path: Use bookmarks/TOC matching ────────────────────
-            # Try to extract chapter number from filename
-            chapter_num = None
-            ch_match = re.search(r'Chapter[_\s-]*(\d+)', xhtml_filename, re.IGNORECASE)
-            if ch_match:
-                chapter_num = int(ch_match.group(1))
-
-            # Extract XHTML start & end page numbers from pagebreak list
             def roman_to_int(s):
+                if not s:
+                    return None
                 s = s.lower().strip()
                 if not re.match(r'^[ivxlcdm]+$', s):
                     return None
@@ -155,6 +150,8 @@ def find_pdf_page(folder_name: str, xhtml_filename: str) -> dict:
                 return total_val if total_val > 0 else None
 
             def parse_page_val(p_str):
+                if not p_str:
+                    return None, False
                 if p_str.isdigit():
                     return int(p_str), False
                 roman_val = roman_to_int(p_str)
@@ -162,60 +159,102 @@ def find_pdf_page(folder_name: str, xhtml_filename: str) -> dict:
                     return roman_val, True
                 return None, False
 
+            def parse_chapter_num(filename):
+                m = re.search(r'Ch(?:apter)?[_\s-]*(\d+)', filename, re.IGNORECASE)
+                if m:
+                    return int(m.group(1))
+                m_rom = re.search(r'Ch(?:apter)?[_\s-]*([IVXLCDM]+)\b', filename, re.IGNORECASE)
+                if m_rom:
+                    return roman_to_int(m_rom.group(1))
+                return None
+
+            chapter_num = parse_chapter_num(xhtml_filename)
             p_start_val, start_is_roman = parse_page_val(pages[0])
             p_end_val, end_is_roman = parse_page_val(pages[-1])
 
+            doc = fitz.open(pdf_file)
+            toc = doc.get_toc()
+
+            bookmarks = []
+            for level, title, pdf_page in toc:
+                is_fm = bool(re.search(r'\bFM\b|Front\s*Matter', title, re.IGNORECASE))
+                ch_start, ch_end = None, None
+                if not is_fm:
+                    ch_m = re.search(r'Ch(?:apter)?[_\s]*(\d+)(?:[_\s-]*Ch(?:apter)?[_\s]*(\d+))?', title, re.IGNORECASE)
+                    if ch_m:
+                        ch_start = int(ch_m.group(1))
+                        ch_end = int(ch_m.group(2)) if ch_m.group(2) else ch_start
+                    else:
+                        ch_m_rom = re.search(r'Ch(?:apter)?[_\s]*([IVXLCDM]+)\b', title, re.IGNORECASE)
+                        if ch_m_rom:
+                            r_val = roman_to_int(ch_m_rom.group(1))
+                            if r_val:
+                                ch_start, ch_end = r_val, r_val
+
+                p_start, s_is_rom = None, False
+                p_end, e_is_rom = None, False
+
+                p_m = re.search(r'\b(?:p|FM_p)?([ivxlcdm\d]+)[_\s-]+([ivxlcdm\d]+)\b', title, re.IGNORECASE)
+                if not p_m:
+                    p_m = re.search(r'[_\s]p[_\s]*([ivxlcdm\d]+)[_\s-]+([ivxlcdm\d]+)', title, re.IGNORECASE)
+                if p_m:
+                    p_start, s_is_rom = parse_page_val(p_m.group(1))
+                    p_end, e_is_rom = parse_page_val(p_m.group(2))
+
+                bookmarks.append({
+                    'title': title,
+                    'pdf_page': pdf_page,
+                    'is_fm': is_fm,
+                    'ch_range': (ch_start, ch_end) if ch_start is not None else None,
+                    'page_range': (p_start, p_end) if p_start is not None else None,
+                    'is_roman': s_is_rom
+                })
+
+            doc.close()
+
+            best_bookmark = None
+
+            # Strategy 1: Page Range matching with matching roman/digit type & total bounds check
             if p_start_val is not None and p_end_val is not None:
-                doc = fitz.open(pdf_file)
-                toc = doc.get_toc()
-                best_bookmark = None
+                for b in bookmarks:
+                    if b['page_range'] and b['page_range'][0] is not None and b['page_range'][1] is not None:
+                        ls, le = b['page_range']
+                        if b['is_roman'] == start_is_roman and ls <= p_start_val and p_end_val <= le:
+                            off = b['pdf_page'] - ls
+                            if 1 <= (p_start_val + off) <= total:
+                                best_bookmark = b
+                                break
 
-                for item in toc:
-                    level, title, pdf_page = item[0], item[1], item[2]
+            # Strategy 2: Match Chapter Number
+            if not best_bookmark and chapter_num is not None:
+                for b in bookmarks:
+                    if b['ch_range'] and b['ch_range'][0] <= chapter_num <= b['ch_range'][1]:
+                        best_bookmark = b
+                        break
 
-                    # Front matter
-                    if chapter_num is None or not re.search(r'Ch(?:apter)?', title, re.IGNORECASE):
-                        if start_is_roman and re.search(r'FM|Front\s*Matter', title, re.IGNORECASE):
-                            page_match = re.search(r'[_\s]p[_\s]*([ivxlcdm]+)[_\s-]*([ivxlcdm]+)', title, re.IGNORECASE)
-                            if page_match:
-                                log_start = roman_to_int(page_match.group(1))
-                                log_end = roman_to_int(page_match.group(2))
-                                if log_start is not None and log_end is not None:
-                                    if p_start_val >= log_start and p_end_val <= log_end:
-                                        best_bookmark = bookmark = {"pdf_page": pdf_page, "logical_range": (log_start, log_end)}
-                                        break
-                        continue
+            # Strategy 3: Match Front Matter
+            if not best_bookmark and start_is_roman:
+                for b in bookmarks:
+                    if b['is_fm']:
+                        best_bookmark = b
+                        break
 
-                    # Chapters
-                    chapter_match = re.search(r'Ch(?:apter)?[_\s]*(\d+)(?:[_\s-]*Ch(?:apter)?[_\s]*(\d+))?', title, re.IGNORECASE)
-                    if chapter_match:
-                        ch_start = int(chapter_match.group(1))
-                        ch_end = int(chapter_match.group(2)) if chapter_match.group(2) else ch_start
-                        if ch_start <= chapter_num <= ch_end:
-                            page_match = re.search(r'[_\s]p(?:age)?[_\s]*(\d+)[_\s-]*(\d+)', title, re.IGNORECASE)
-                            if page_match:
-                                log_start = int(page_match.group(1))
-                                log_end = int(page_match.group(2))
-                                if p_start_val >= log_start and p_end_val <= log_end:
-                                    best_bookmark = {"pdf_page": pdf_page, "logical_range": (log_start, log_end)}
-                                    break
-                            else:
-                                best_bookmark = {"pdf_page": pdf_page, "logical_range": (None, None)}
-
-                doc.close()
-
-                if best_bookmark:
-                    bookmark_pdf_start = best_bookmark["pdf_page"]
-                    log_start, log_end = best_bookmark["logical_range"]
-                    if log_start is not None:
-                        offset = bookmark_pdf_start - log_start
-                        pdf_start = p_start_val + offset
-                        pdf_end = p_end_val + offset
-                        return {
-                            "page": max(1, pdf_start),
-                            "end_page": min(total, pdf_end),
-                            "total_pages": total
-                        }
+            if best_bookmark:
+                if best_bookmark['page_range'] and best_bookmark['page_range'][0] is not None and p_start_val is not None:
+                    offset = best_bookmark['pdf_page'] - best_bookmark['page_range'][0]
+                    pdf_s = max(1, p_start_val + offset)
+                    pdf_e = min(total, (p_end_val + offset) if p_end_val else pdf_s)
+                    return {
+                        "page": pdf_s,
+                        "end_page": pdf_e,
+                        "total_pages": total
+                    }
+                else:
+                    return {
+                        "page": max(1, best_bookmark['pdf_page']),
+                        "end_page": min(total, best_bookmark['pdf_page'] + 10),
+                        "total_pages": total
+                    }
 
             return {
                 "page": 1,
