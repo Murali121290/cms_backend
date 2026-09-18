@@ -39,6 +39,7 @@ from .services.ace_service import (
 from .services.epubcheck_service import (
     run_epubcheck_report,
     get_cached_epubcheck_report,
+    generate_epubcheck_txt_report,
 )
 from .services.summary_service import extract_epub_summary
 
@@ -451,6 +452,18 @@ def get_epubcheck_report_route(folder_name: str):
     if report is None:
         return {"status": False, "message": "No EPUBCheck report yet."}
     return {"status": True, "report": report}
+
+
+@router.get("/epubcheck/{folder_name}/download-log")
+def download_epubcheck_log_route(folder_name: str, db: Session = Depends(get_db)):
+    txt_content, download_filename, _ = generate_epubcheck_txt_report(folder_name, db)
+    return Response(
+        content=txt_content,
+        media_type="text/plain; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{download_filename}"'
+        },
+    )
 
 
 @router.post("/epubcheck/{folder_name}")
