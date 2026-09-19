@@ -23,7 +23,7 @@
     },
     {
       "id": "URL004",
-      "name": "PDF–EPUB Link Match",
+      "name": "PDF\u2013EPUB Link Match",
       "scope": "book",
       "enabled": false
     },
@@ -39,16 +39,16 @@
       "name": "Citations must be linked to the corresponding block",
       "target_path": "OEBPS/xhtml",
       "file_name_pattern": [
-        "*_chapter*.xhtml",
-        "*_chap*.xhtml",
-        "*_ch*.xhtml",
-        "*chapter*.xhtml",
-        "*chap*.xhtml",
-        "*ch[0-9]*.xhtml"
+        "*_[cC]hapter*.xhtml",
+        "*_[cC]hap*.xhtml",
+        "*_[cC]h*.xhtml",
+        "*[cC]hapter*.xhtml",
+        "*[cC]hap*.xhtml",
+        "*[cC]h[0-9]*.xhtml"
       ],
       "enabled": true,
       "rule_config": {
-        "citation_regex": "\\b(?:see\\s+)?(?:p(?:ages?|p)?(?![a-zA-Z])\\.?[ \\t\\-]*(\\d{1,4})(?:[ \\t]*[\\-–][ \\t]*\\d{1,4})?|ch(?:apter|ap)?(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))(?:[ \\t]*[\\-–][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|fig(?:ure)?(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:tbl\\.?|table)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:exh\\.?|exhibit)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:pl\\.?|plate)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|map(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|box(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:sec\\.?|section)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:pt\\.?|part)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:app\\.?|appendix)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:illus\\.?|illustration)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-–][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])))\\b"
+        "citation_regex": "\\b(?:see\\s+)?(?:p(?:ages?|p)?(?![a-zA-Z])\\.?[ \\t\\-]*(\\d{1,4})(?:[ \\t]*[\\-\u2013][ \\t]*\\d{1,4})?|ch(?:apter|ap)?(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)(?:[ \\t]*[\\-\u2013][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|fig(?:ure)?(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:tbl\\.?|table)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:exh\\.?|exhibit)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:pl\\.?|plate)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|map(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|box(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:sec\\.?|section)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:pt\\.?|part)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:app\\.?|appendix)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:illus\\.?|illustration)(?![a-zA-Z])\\.?[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty))\\b"
       }
     }
   ]
