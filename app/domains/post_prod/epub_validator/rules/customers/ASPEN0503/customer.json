@@ -205,7 +205,7 @@
       ],
       "enabled": true,
       "rule_config": {
-        "expected_rights_pattern": "copyright\\s*©\\s*\\d{4}\\s+aspen\\s+publishing\\.?\\s+all\\s+rights\\s+reserved\\.?"
+        "expected_rights_pattern": "copyright\\s*\u00a9\\s*\\d{4}\\s+aspen\\s+publishing\\.?\\s+all\\s+rights\\s+reserved\\.?"
       }
     },
     {
@@ -383,7 +383,7 @@
     },
     {
       "id": "ASP-IMG-003",
-      "name": "Aspen: No image over 4,000,000 pixels (W×H)",
+      "name": "Aspen: No image over 4,000,000 pixels (W\u00d7H)",
       "target_path": "OEBPS/images",
       "file_name_pattern": "*.jpg",
       "enabled": true
@@ -433,16 +433,16 @@
       "name": "Aspen: citations must be linked to the corresponding block",
       "target_path": "OEBPS/xhtml",
       "file_name_pattern": [
-        "*_chapter*.xhtml",
-        "*_chap*.xhtml",
-        "*_ch*.xhtml",
-        "*chapter*.xhtml",
-        "*chap*.xhtml",
-        "*ch[0-9]*.xhtml"
+        "*_[cC]hapter*.xhtml",
+        "*_[cC]hap*.xhtml",
+        "*_[cC]h*.xhtml",
+        "*[cC]hapter*.xhtml",
+        "*[cC]hap*.xhtml",
+        "*[cC]h[0-9]*.xhtml"
       ],
       "enabled": true,
       "rule_config": {
-        "citation_regex": "\\b(?:see\\s+)?(?:(?:pages?|pp\\.|p\\.)(?![a-zA-Z])[ \\t\\-]*(\\d{1,4})(?:[ \\t]*[\\-\u2013][ \\t]*\\d{1,4})?|(?:chapter|chap\\.|ch\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))(?:[ \\t]*[\\-\u2013][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|(?:figure|fig\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:table|tbl\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:exhibit|exh\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:plate|pl\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|map(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|box(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:section|sec\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:part|pt\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z]))|(?:appendix|app\\.)(?![a-zA-Z])[ \\t\\-]*([1-9]|10|[A-K])|(?:illustration|illus\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])))\\b"
+        "citation_regex": "\\b(?:see\\s+)?(?:(?:pages?|pp\\.|p\\.)(?![a-zA-Z])[ \\t\\-]*(\\d{1,4})(?:[ \\t]*[\\-\u2013][ \\t]*\\d{1,4})?|(?:chapter|chap\\.|ch\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)(?:[ \\t]*[\\-\u2013][ \\t]*\\d+(?:[a-zA-Z]?\\.?\\d+)*(?:\\.\\w+)*)?|(?:figure|fig\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:table|tbl\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:exhibit|exh\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:plate|pl\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|map(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|box(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:section|sec\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:part|pt\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)|(?:appendix|app\\.)(?![a-zA-Z])[ \\t\\-]*([1-9]|10|[A-K]|one|two|three|four|five|six|seven|eight|nine|ten)|(?:illustration|illus\\.)(?![a-zA-Z])[ \\t\\-]*(\\d+(?:[.\\-\u2013][a-zA-Z0-9]+)*[a-zA-Z]?|(?!(?:did|mix|civil|mid|mild|vivid|dim|ill|mill|lid|dill|div|vic|doc)\\b)[IVXLCDM]{2,}(?:\\.[A-Z0-9]+)*|[IVXLCDM](?:\\.[A-Z0-9]+)+|[A-Z](?![a-zA-Z])|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty))\\b"
       }
     },
     {

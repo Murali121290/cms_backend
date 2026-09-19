@@ -289,6 +289,16 @@ def _page_id_for_number(page_num: str, existing: set[str]) -> str | None:
     return None
 
 
+def _word_to_int(s: str) -> int | None:
+    """Convert a word number (e.g. 'one', 'two') to an integer."""
+    words = {
+        "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+        "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20,
+        "thirty": 30, "forty": 40, "fifty": 50
+    }
+    return words.get(s.lower())
+
+
 def _roman_to_int(s: str) -> int | None:
     """Convert a Roman numeral string to an integer. Returns None if not a valid Roman numeral."""
     s = s.upper()
@@ -473,7 +483,9 @@ def validate_page_citation_links(file_details, rule_config=None):
                         chapter_lower = base_chapter.lower()
                         arabic_equiv = _roman_to_int(base_chapter)
                         arabic_str = str(arabic_equiv) if arabic_equiv else None
-                        if chapter_lower not in available_chapters and (arabic_str is None or arabic_str not in available_chapters):
+                        word_equiv = _word_to_int(base_chapter)
+                        word_str = str(word_equiv) if word_equiv else None
+                        if chapter_lower not in available_chapters and (arabic_str is None or arabic_str not in available_chapters) and (word_str is None or word_str not in available_chapters):
                             continue
 
             # If it is a page citation, only validate if the page exists in this book
@@ -488,8 +500,11 @@ def validate_page_citation_links(file_details, rule_config=None):
                     continue
                 if summary_labels["figures"]:
                     fig_num = m.group(3)
-                    if fig_num and fig_num not in summary_labels["figures"]:
-                        continue
+                    if fig_num:
+                        word_equiv = _word_to_int(fig_num)
+                        word_str = str(word_equiv) if word_equiv else None
+                        if fig_num not in summary_labels["figures"] and (word_str is None or word_str not in summary_labels["figures"]):
+                            continue
             
             # If it is a Table citation, only validate if tables exist and match in this book
             if is_table:
@@ -497,8 +512,11 @@ def validate_page_citation_links(file_details, rule_config=None):
                     continue
                 if summary_labels["tables"]:
                     table_num = m.group(4)
-                    if table_num and table_num not in summary_labels["tables"]:
-                        continue
+                    if table_num:
+                        word_equiv = _word_to_int(table_num)
+                        word_str = str(word_equiv) if word_equiv else None
+                        if table_num not in summary_labels["tables"] and (word_str is None or word_str not in summary_labels["tables"]):
+                            continue
 
             # If it is a Section citation (Group 9), skip if total_sections is 0 or if statutory/external legal reference
             is_section = m.group(9) is not None if len(m.groups()) >= 9 else False
