@@ -7,13 +7,15 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 
 from app.database import get_db
+from app.core.config import get_settings
 from app.domains.auth.security import get_current_user_from_cookie
 from app.domains.auth.rbac_config import has_post_prod_access
 
 from .models import WebPdfProject
-from .services import web_pdf_projects_db
+from .services import web_pdf_projects_db, font_service, security_service
 from .services.upload_service import process_upload
 from .services.merge_service import categorize_file, merge_pdfs
+from .services.trim_service import trim_crop_engine
 
 
 def check_post_prod_access(user=Depends(get_current_user_from_cookie)):
@@ -164,6 +166,13 @@ class MergeRequest(BaseModel):
     files: list[MergeFile]
 
 
+class TrimRequest(BaseModel):
+    mode: str
+    margins: Optional[list[float]] = None
+    standardize_size: bool = False
+    remove_marks: bool = False
+
+
 @router.post("/projects/{project_id}/merge")
 def merge_project_files(
     project_id: int,
@@ -222,6 +231,43 @@ def merge_project_files(
         raise HTTPException(status_code=500, detail=f"Failed to merge PDF files: {result.get('error', 'Unknown error')}")
 
 
+@router.post("/projects/{project_id}/trim")
+def trim_project_pdf(
+    project_id: int,
+    body: TrimRequest,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    merged_path = os.path.join(project["folder_name"], "merged.pdf")
+    if not os.path.exists(merged_path):
+        raise HTTPException(status_code=400, detail="Merged PDF not found. Please merge files first.")
+        
+    trimmed_output_path = os.path.join(project["folder_name"], "trimmed.pdf")
+    
+    success, result_msg = trim_crop_engine(
+        pdf_path=merged_path,
+        mode=body.mode,
+        margins=body.margins,
+        standardize_size=body.standardize_size,
+        remove_marks=body.remove_marks,
+        output_path=trimmed_output_path
+    )
+    
+    if not success:
+        raise HTTPException(status_code=500, detail=f"Trim failed: {result_msg}")
+        
+    project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
+    if project_obj:
+        project_obj.status = "Trimmed"
+        db.commit()
+        
+    return {"message": "PDF trimmed successfully", "trimmed_path": trimmed_output_path}
+
+
 @router.get("/projects/{project_id}/merged-pdf")
 def get_merged_pdf(
     project_id: int,
@@ -232,11 +278,16 @@ def get_merged_pdf(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    merged_path = os.path.join(project["folder_name"], "merged.pdf")
-    if not os.path.exists(merged_path):
-        raise HTTPException(status_code=404, detail="Merged PDF not found. Please merge files first.")
+    # If the project has been trimmed, serve the trimmed version. Otherwise serve the merged one.
+    if project.get("status") == "Trimmed":
+        pdf_path = os.path.join(project["folder_name"], "trimmed.pdf")
+    else:
+        pdf_path = os.path.join(project["folder_name"], "merged.pdf")
+        
+    if not os.path.exists(pdf_path):
+        raise HTTPException(status_code=404, detail="PDF not found. Please merge files first.")
 
-    return FileResponse(merged_path, media_type="application/pdf")
+    return FileResponse(pdf_path, media_type="application/pdf")
 
 
 def _serialize_history(h: Any) -> dict:
@@ -276,4 +327,66 @@ def get_merge_history(
         .all()
     )
     return [_serialize_history(h) for h in history_rows]
+
+@router.get("/projects/{project_id}/fonts-status")
+def check_fonts_status(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """Check if all fonts in the current PDF are fully embedded."""
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    settings = get_settings()
+    base_dir = project["folder_name"]
+    
+    # Use trimmed file if it exists, else use merged
+    merged_pdf_path = os.path.join(base_dir, "merged.pdf")
+    trimmed_pdf_path = os.path.join(base_dir, "trimmed.pdf")
+    
+    if os.path.exists(trimmed_pdf_path):
+        target_pdf = trimmed_pdf_path
+    elif os.path.exists(merged_pdf_path):
+        target_pdf = merged_pdf_path
+    else:
+        raise HTTPException(status_code=404, detail="No PDF file available to check.")
+
+    try:
+        font_status = font_service.check_fonts_embedded(target_pdf)
+        return font_status
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/projects/{project_id}/security-status")
+def check_security_status(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """Check if the current PDF is free of password protection."""
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    settings = get_settings()
+    base_dir = project["folder_name"]
+    
+    # Use trimmed file if it exists, else use merged
+    merged_pdf_path = os.path.join(base_dir, "merged.pdf")
+    trimmed_pdf_path = os.path.join(base_dir, "trimmed.pdf")
+    
+    if os.path.exists(trimmed_pdf_path):
+        target_pdf = trimmed_pdf_path
+    elif os.path.exists(merged_pdf_path):
+        target_pdf = merged_pdf_path
+    else:
+        raise HTTPException(status_code=404, detail="No PDF file available to check.")
+
+    try:
+        security_status = security_service.check_pdf_security(target_pdf)
+        return security_status
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 

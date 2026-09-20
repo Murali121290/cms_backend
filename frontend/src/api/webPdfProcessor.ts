@@ -95,3 +95,21 @@ export async function mergeProjectFiles(projectId: number, files: MergeFile[]): 
   }
 }
 
+export interface TrimConfig {
+  mode: string;
+  margins?: number[];
+  standardize_size: boolean;
+  remove_marks: boolean;
+}
+
+export async function trimProjectPDF(projectId: number, config: TrimConfig): Promise<{ message: string; trimmed_path: string }> {
+  try {
+    const { data } = await api.post<{ message: string; trimmed_path: string }>(
+      `/post-prod/web-pdf-processor/projects/${projectId}/trim`,
+      config,
+    );
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to trim PDF file'));
+  }
+}

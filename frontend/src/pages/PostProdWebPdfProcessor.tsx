@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
-  CheckCircle2,
+  CheckCircle2, Lock, Unlock, ShieldAlert, AlertCircle,
   Edit,
   Filter,
   FolderOpen,
@@ -29,6 +29,7 @@ import {
   deleteProject,
   listProjectFiles,
   mergeProjectFiles,
+  trimProjectPDF,
   type WebPdfProject,
   type ProjectFile,
 } from '@/api/webPdfProcessor';
@@ -36,8 +37,11 @@ import { usersApi, type User } from '@/api/users';
 
 interface ClientCompany {
   id: number;
-  company: string;
-  division: string;
+  company?: string;
+  name_company?: string;
+  first_name?: string;
+  surname?: string;
+  division?: string;
 }
 
 // ── Validation Badge ──────────────────────────────────────────────────────────
@@ -207,6 +211,21 @@ export function PostProdWebPdfProcessor() {
   const [projectFiles, setProjectFiles] = useState<(ProjectFile & { selected: boolean })[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [merging, setMerging] = useState(false);
+  
+  // Trim
+  const [trimMode, setTrimMode] = useState('auto');
+  const [trimMargins, setTrimMargins] = useState({ top: 0, right: 0, bottom: 0, left: 0 });
+  const [standardizeSize, setStandardizeSize] = useState(false);
+  const [removeMarks, setRemoveMarks] = useState(false);
+  const [trimming, setTrimming] = useState(false);
+  
+  // Fonts Check
+  const [activeStep, setActiveStep] = useState(1);
+  const [checkingFonts, setCheckingFonts] = useState(false);
+  const [fontsStatus, setFontsStatus] = useState<any>(null);
+  const [checkingSecurity, setCheckingSecurity] = useState(false);
+  const [securityStatus, setSecurityStatus] = useState<any>(null);
+  const [pdfRefreshKey, setPdfRefreshKey] = useState(Date.now());
 
   // Modals
   const [showAddModal, setShowAddModal] = useState(false);
@@ -216,7 +235,7 @@ export function PostProdWebPdfProcessor() {
   const [savingEdit, setSavingEdit] = useState(false);
 
   // Form
-  const [selectedClientId, setSelectedClientId] = useState('');
+  const [customerName, setCustomerName] = useState('');
   const [clientCode, setClientCode] = useState('');
   const [projectName, setProjectName] = useState('');
   const [zipFile, setZipFile] = useState<File | null>(null);
@@ -280,12 +299,7 @@ export function PostProdWebPdfProcessor() {
 
   // ── Handlers ────────────────────────────────────────────────────────────
 
-  const handleClientChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const idStr = e.target.value;
-    setSelectedClientId(idStr);
-    const found = clients.find((c) => String(c.id) === idStr);
-    setClientCode(found ? found.division : '');
-  };
+
 
   const handleSelectProject = async (p: WebPdfProject) => {
     setSelectedProject(p);
@@ -309,17 +323,14 @@ export function PostProdWebPdfProcessor() {
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!projectName.trim()) { setErrorMsg('Project Name is required'); return; }
-    if (!selectedClientId) { setErrorMsg('Please select a client'); return; }
+    if (!customerName) { setErrorMsg('Please select a client'); return; }
     if (!zipFile) { setErrorMsg('Please choose a ZIP file'); return; }
-
-    const clientComp = clients.find((c) => String(c.id) === selectedClientId);
-    if (!clientComp) return;
 
     setUploading(true);
     setErrorMsg(null);
 
     const formData = new FormData();
-    formData.append('client', clientComp.company);
+    formData.append('client', customerName);
     formData.append('client_code', clientCode);
     formData.append('project_name', projectName.trim());
     formData.append('file', zipFile);
@@ -328,7 +339,7 @@ export function PostProdWebPdfProcessor() {
       await createProject(formData);
       toast.success('Project created and ZIP uploaded successfully!');
       setShowAddModal(false);
-      setProjectName(''); setSelectedClientId(''); setClientCode(''); setZipFile(null);
+      setProjectName(''); setCustomerName(''); setClientCode(''); setZipFile(null);
       fetchProjects();
     } catch (err: any) {
       setErrorMsg(err.message || 'Upload failed');
@@ -411,6 +422,70 @@ export function PostProdWebPdfProcessor() {
     }
   };
 
+  const handleTrim = async () => {
+    if (!selectedProject) return;
+    setTrimming(true);
+    try {
+      await trimProjectPDF(selectedProject.id, {
+        mode: trimMode,
+        margins: trimMode === 'fixed' ? [trimMargins.top, trimMargins.right, trimMargins.bottom, trimMargins.left] : undefined,
+        standardize_size: standardizeSize,
+        remove_marks: removeMarks,
+      });
+      toast.success('PDF trimmed successfully!');
+      setPdfRefreshKey(Date.now()); setSelectedProject(prev => prev ? { ...prev, status: "Trimmed" } : prev);
+      setPdfRefreshKey(Date.now()); setSelectedProject(prev => prev ? { ...prev, status: "Trimmed" } : prev);
+      fetchProjects();
+      
+      // Force iframe refresh by updating the project slightly or we can just rely on the key/src reload
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to trim PDF.');
+    } finally {
+      setTrimming(false);
+    }
+  };
+
+  
+  const handleCheckSecurity = async () => {
+    if (!selectedProject) return;
+    setCheckingSecurity(true);
+    setSecurityStatus(null);
+    try {
+      const res = await fetch(`/api/v2/post-prod/web-pdf-processor/projects/${selectedProject.id}/security-status`);
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.detail || 'Failed to check security');
+      }
+      const data = await res.json();
+      setSecurityStatus(data);
+      toast.success('Security check completed');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to check security');
+    } finally {
+      setCheckingSecurity(false);
+    }
+  };
+
+  const handleCheckFonts = async () => {
+    if (!selectedProject) return;
+    setCheckingFonts(true);
+    setFontsStatus(null);
+    try {
+      const res = await fetch(`/api/v2/post-prod/web-pdf-processor/projects/${selectedProject.id}/fonts-status`);
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.detail || 'Failed to check fonts');
+      }
+      const data = await res.json();
+      setFontsStatus(data);
+      toast.success('Font check completed');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to check fonts');
+    } finally {
+      setCheckingFonts(false);
+    }
+  };
+
   // ── Filtered list ───────────────────────────────────────────────────────
 
   const filteredProjects = projects.filter((p) => {
@@ -443,8 +518,13 @@ export function PostProdWebPdfProcessor() {
           <Button
             variant="ghost"
             onClick={() => {
-              if (selectedProject) setSelectedProject(null);
-              else navigate('/post-production');
+              if (selectedProject) {
+                setSelectedProject(null);
+                setFontsStatus(null);
+                setActiveStep(1);
+              } else {
+                navigate('/post-production');
+              }
             }}
             className="p-1.5 h-auto rounded-lg text-muted hover:text-text hover:bg-border/60 shrink-0"
           >
@@ -495,17 +575,18 @@ export function PostProdWebPdfProcessor() {
             <h2 className="text-sm font-bold text-text mb-3 flex items-center gap-2 shrink-0">
               <FileText size={16} className="text-primary" />
               Merged PDF Preview
-              {selectedProject.status === 'Merged' && (
+              {(selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed') && (
                 <span className="ml-auto text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
-                  ✓ Merged
+                  ✓ {selectedProject.status}
                 </span>
               )}
             </h2>
 
             <div className="flex-1 rounded-xl overflow-hidden bg-card border border-border relative">
-              {selectedProject.status === 'Merged' ? (
+              {selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed' ? (
                 <iframe
-                  src={`/api/v2/post-prod/web-pdf-processor/projects/${selectedProject.id}/merged-pdf`}
+                  key={`${selectedProject.id}-${selectedProject.status}-${pdfRefreshKey}`} // force reload if status or key changes
+                  src={`/api/v2/post-prod/web-pdf-processor/projects/${selectedProject.id}/merged-pdf?t=${pdfRefreshKey}`}
                   className="w-full h-full border-0"
                   title="Merged PDF Preview"
                 />
@@ -521,111 +602,402 @@ export function PostProdWebPdfProcessor() {
             </div>
           </div>
 
-          {/* RIGHT — File Categorisation & Controls */}
-          <div className="flex flex-col p-6 overflow-hidden bg-card">
-            <div className="flex items-start justify-between mb-4 shrink-0 gap-3">
-              <div>
-                <h2 className="text-sm font-bold text-text m-0">Step 1 — Merge PDF</h2>
-                <p className="text-[11px] text-muted m-0 mt-0.5">
-                  Auto-detected below. Check/uncheck, reorder, or re-categorize files, then merge.
-                </p>
-              </div>
-              <Button
-                onClick={handleMerge}
-                disabled={merging || loadingFiles}
-                className="text-xs font-semibold h-9 px-4 flex items-center gap-1.5 shrink-0"
-              >
-                {merging ? <RefreshCw size={14} className="animate-spin" /> : <Play size={14} />}
-                {merging ? 'Merging...' : 'Merge & Convert'}
-              </Button>
-            </div>
-
-            {/* Category legend */}
-            <div className="flex flex-wrap gap-1.5 mb-3 shrink-0">
-              {Object.entries(CATEGORY_LABELS).map(([cat, { label, color }]) => (
-                <span key={cat} className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${color}`}>
-                  {cat} — {label}
-                </span>
-              ))}
-            </div>
-
-            {/* File list */}
-            {loadingFiles ? (
-              <div className="flex-1 flex items-center justify-center text-xs text-muted">
-                <RefreshCw size={18} className="animate-spin mr-2" />
-                Scanning package files...
-              </div>
-            ) : (
-              <div className="flex-1 overflow-y-auto rounded-xl border border-border divide-y divide-border/50">
-                {projectFiles.length === 0 ? (
-                  <div className="p-8 text-center text-xs text-muted">
-                    No PDF files found in this package's extract folder.
+          {/* RIGHT — Stepper Panel */}
+          <div className="flex flex-col overflow-hidden bg-card border-l border-border/80">
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              
+              {/* Step 1: Merge PDFs */}
+              <div className={`border border-border rounded-xl overflow-hidden bg-background transition-colors ${activeStep === 1 ? 'ring-1 ring-primary border-primary/50' : ''}`}>
+                <button
+                  onClick={() => setActiveStep(1)}
+                  className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                      selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed' 
+                      ? 'bg-emerald-500/20 text-emerald-600' 
+                      : activeStep === 1 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                    }`}>
+                      {selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed' ? <CheckCircle2 size={14} /> : '1'}
+                    </div>
+                    <h2 className="text-sm font-bold text-text m-0">Step 1 — Merge PDF</h2>
                   </div>
-                ) : (
-                  projectFiles.map((file, idx) => {
-                    const catStyle = CATEGORY_LABELS[file.category] || CATEGORY_LABELS.TEXT;
-                    return (
-                      <div
-                        key={file.relative_path}
-                        className={`p-3 flex items-center gap-3 text-xs transition-colors ${
-                          file.selected ? 'bg-card' : 'bg-muted/10'
-                        }`}
+                  {activeStep === 1 ? <ChevronUp size={18} className="text-muted" /> : <ChevronDown size={18} className="text-muted" />}
+                </button>
+                
+                {activeStep === 1 && (
+                  <div className="p-4 border-t border-border flex flex-col gap-4 h-[500px]">
+                    <div className="flex items-start justify-between shrink-0 gap-3">
+                      <p className="text-[11px] text-muted m-0">
+                        Auto-detected below. Check/uncheck, reorder, or re-categorize files, then merge.
+                      </p>
+                      <Button
+                        onClick={handleMerge}
+                        disabled={merging || loadingFiles}
+                        className="text-xs font-semibold h-8 px-4 flex items-center gap-1.5 shrink-0"
                       >
-                        {/* Checkbox */}
-                        <input
-                          type="checkbox"
-                          checked={file.selected}
-                          onChange={() => toggleFile(idx)}
-                          className="rounded border-border text-primary focus:ring-primary w-4 h-4 cursor-pointer shrink-0"
-                        />
+                        {merging ? <RefreshCw size={14} className="animate-spin" /> : <Play size={14} />}
+                        {merging ? 'Merging...' : 'Merge & Convert'}
+                      </Button>
+                    </div>
 
-                        {/* File info */}
-                        <div className={`min-w-0 flex-1 ${!file.selected ? 'opacity-50' : ''}`}>
-                          <p className="font-semibold text-text truncate m-0" title={file.filename}>
-                            {file.filename}
-                          </p>
-                          <p className="text-[10px] text-muted m-0 mt-0.5">
-                            {(file.size / 1024 / 1024).toFixed(2)} MB
-                          </p>
-                        </div>
+                    {/* Category legend */}
+                    <div className="flex flex-wrap gap-1.5 shrink-0">
+                      {Object.entries(CATEGORY_LABELS).map(([cat, { label, color }]) => (
+                        <span key={cat} className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${color}`}>
+                          {cat} — {label}
+                        </span>
+                      ))}
+                    </div>
 
-                        {/* Category selector */}
-                        <select
-                          value={file.category}
-                          onChange={(e) => changeCategory(idx, e.target.value as ProjectFile['category'])}
-                          className={`text-[11px] font-semibold rounded-lg border py-1 px-2 focus:outline-none bg-background ${catStyle.color}`}
-                          disabled={!file.selected}
-                        >
-                          <option value="FC">Cover (FC)</option>
-                          <option value="FM">Front Matter (FM)</option>
-                          <option value="TEXT">Chapter (TEXT)</option>
-                          <option value="BM">Back Matter (BM)</option>
-                          <option value="BC">Back Cover (BC)</option>
-                        </select>
-
-                        {/* Order controls */}
-                        <div className="flex flex-col shrink-0">
-                          <button
-                            onClick={() => moveFile(idx, 'up')}
-                            disabled={idx === 0}
-                            className="p-0.5 hover:bg-border/60 rounded text-muted hover:text-text disabled:opacity-25 transition-colors"
-                          >
-                            <ChevronUp size={14} />
-                          </button>
-                          <button
-                            onClick={() => moveFile(idx, 'down')}
-                            disabled={idx === projectFiles.length - 1}
-                            className="p-0.5 hover:bg-border/60 rounded text-muted hover:text-text disabled:opacity-25 transition-colors"
-                          >
-                            <ChevronDown size={14} />
-                          </button>
-                        </div>
+                    {/* File list */}
+                    {loadingFiles ? (
+                      <div className="flex-1 flex items-center justify-center text-xs text-muted">
+                        <RefreshCw size={18} className="animate-spin mr-2" />
+                        Scanning package files...
                       </div>
-                    );
-                  })
+                    ) : (
+                      <div className="flex-1 overflow-y-auto rounded-xl border border-border divide-y divide-border/50">
+                        {projectFiles.length === 0 ? (
+                          <div className="p-8 text-center text-xs text-muted">
+                            No PDF files found in this package's extract folder.
+                          </div>
+                        ) : (
+                          projectFiles.map((file, idx) => {
+                            const catStyle = CATEGORY_LABELS[file.category] || CATEGORY_LABELS.TEXT;
+                            return (
+                              <div
+                                key={file.relative_path}
+                                className={`p-3 flex items-center gap-3 text-xs transition-colors ${
+                                  file.selected ? 'bg-card' : 'bg-muted/10'
+                                }`}
+                              >
+                                {/* Checkbox */}
+                                <input
+                                  type="checkbox"
+                                  checked={file.selected}
+                                  onChange={() => toggleFile(idx)}
+                                  className="rounded border-border text-primary focus:ring-primary w-4 h-4 cursor-pointer shrink-0"
+                                />
+
+                                {/* File info */}
+                                <div className={`min-w-0 flex-1 ${!file.selected ? 'opacity-50' : ''}`}>
+                                  <p className="font-semibold text-text truncate m-0" title={file.filename}>
+                                    {file.filename}
+                                  </p>
+                                  <p className="text-[10px] text-muted m-0 mt-0.5">
+                                    {(file.size / 1024 / 1024).toFixed(2)} MB
+                                  </p>
+                                </div>
+
+                                {/* Category selector */}
+                                <select
+                                  value={file.category}
+                                  onChange={(e) => changeCategory(idx, e.target.value as ProjectFile['category'])}
+                                  className={`text-[11px] font-semibold rounded-lg border py-1 px-2 focus:outline-none bg-background ${catStyle.color}`}
+                                  disabled={!file.selected}
+                                >
+                                  <option value="FC">Cover (FC)</option>
+                                  <option value="FM">Front Matter (FM)</option>
+                                  <option value="TEXT">Chapter (TEXT)</option>
+                                  <option value="BM">Back Matter (BM)</option>
+                                  <option value="BC">Back Cover (BC)</option>
+                                </select>
+
+                                {/* Order controls */}
+                                <div className="flex flex-col shrink-0">
+                                  <button
+                                    onClick={() => moveFile(idx, 'up')}
+                                    disabled={idx === 0}
+                                    className="p-0.5 hover:bg-border/60 rounded text-muted hover:text-text disabled:opacity-25 transition-colors"
+                                  >
+                                    <ChevronUp size={14} />
+                                  </button>
+                                  <button
+                                    onClick={() => moveFile(idx, 'down')}
+                                    disabled={idx === projectFiles.length - 1}
+                                    className="p-0.5 hover:bg-border/60 rounded text-muted hover:text-text disabled:opacity-25 transition-colors"
+                                  >
+                                    <ChevronDown size={14} />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
-            )}
+
+              {/* Step 2: Trim PDF */}
+              <div className={`border border-border rounded-xl overflow-hidden bg-background transition-colors ${activeStep === 2 ? 'ring-1 ring-primary border-primary/50' : ''}`}>
+                <button
+                  onClick={() => {
+                    if (selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed') {
+                      setActiveStep(2);
+                    }
+                  }}
+                  disabled={selectedProject.status !== 'Merged' && selectedProject.status !== 'Trimmed'}
+                  className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                      selectedProject.status === 'Trimmed' 
+                      ? 'bg-emerald-500/20 text-emerald-600' 
+                      : activeStep === 2 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                    }`}>
+                      {selectedProject.status === 'Trimmed' ? <CheckCircle2 size={14} /> : '2'}
+                    </div>
+                    <h2 className="text-sm font-bold text-text m-0">Step 2 — Trim PDF</h2>
+                  </div>
+                  {activeStep === 2 ? <ChevronUp size={18} className="text-muted" /> : <ChevronDown size={18} className="text-muted" />}
+                </button>
+
+                {activeStep === 2 && (
+                  <div className="p-4 border-t border-border flex flex-col gap-4">
+                    <div className="flex items-start justify-between shrink-0 gap-3">
+                      <p className="text-[11px] text-muted m-0">
+                        Select a trim mode to crop the PDF pages.
+                      </p>
+                      <Button
+                        onClick={handleTrim}
+                        disabled={trimming}
+                        className="text-xs font-semibold h-8 px-4 flex items-center gap-1.5 shrink-0"
+                      >
+                        {trimming ? <RefreshCw size={14} className="animate-spin" /> : <Edit size={14} />}
+                        {trimming ? 'Trimming...' : 'Trim PDF'}
+                      </Button>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div>
+                        <label className="text-[11px] font-semibold text-text block mb-1">Crop Mode</label>
+                        <select
+                          value={trimMode}
+                          onChange={(e) => setTrimMode(e.target.value)}
+                          className="w-full text-xs p-2 rounded-lg border border-border bg-background text-text focus:outline-none focus:ring-1 focus:ring-primary"
+                        >
+                          <option value="auto">Auto Fix Bounds</option>
+                          <option value="fixed">Fixed Margins</option>
+                          <option value="trimbox">PDF TrimBox</option>
+                          <option value="bleedbox">PDF BleedBox</option>
+                        </select>
+                      </div>
+
+                      {trimMode === 'fixed' && (
+                        <div className="grid grid-cols-2 gap-3 p-3 rounded border border-border bg-muted/10">
+                          <div>
+                            <label className="text-[10px] font-semibold text-muted block mb-1">Top Margin</label>
+                            <input
+                              type="number"
+                              value={trimMargins.top}
+                              onChange={(e) => setTrimMargins({ ...trimMargins, top: Number(e.target.value) })}
+                              className="w-full text-xs p-1.5 rounded border border-border bg-background"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-semibold text-muted block mb-1">Right Margin</label>
+                            <input
+                              type="number"
+                              value={trimMargins.right}
+                              onChange={(e) => setTrimMargins({ ...trimMargins, right: Number(e.target.value) })}
+                              className="w-full text-xs p-1.5 rounded border border-border bg-background"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-semibold text-muted block mb-1">Bottom Margin</label>
+                            <input
+                              type="number"
+                              value={trimMargins.bottom}
+                              onChange={(e) => setTrimMargins({ ...trimMargins, bottom: Number(e.target.value) })}
+                              className="w-full text-xs p-1.5 rounded border border-border bg-background"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-semibold text-muted block mb-1">Left Margin</label>
+                            <input
+                              type="number"
+                              value={trimMargins.left}
+                              onChange={(e) => setTrimMargins({ ...trimMargins, left: Number(e.target.value) })}
+                              className="w-full text-xs p-1.5 rounded border border-border bg-background"
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      <label className="flex items-center gap-2 mt-4 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={standardizeSize}
+                          onChange={(e) => setStandardizeSize(e.target.checked)}
+                          className="rounded border-border text-primary focus:ring-primary w-4 h-4"
+                        />
+                        <div>
+                          <p className="text-xs font-semibold text-text m-0">Standardize Size</p>
+                          <p className="text-[10px] text-muted m-0">Ensures all pages end up the same dimension.</p>
+                        </div>
+                      </label>
+
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={removeMarks}
+                          onChange={(e) => setRemoveMarks(e.target.checked)}
+                          className="rounded border-border text-primary focus:ring-primary w-4 h-4"
+                        />
+                        <div>
+                          <p className="text-xs font-semibold text-text m-0">Remove Marks outside bounds</p>
+                          <p className="text-[10px] text-muted m-0">Sanitizes crop box edge artifacts.</p>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Step 3: Check Fonts */}
+              <div className={`border border-border rounded-xl overflow-hidden bg-background transition-colors ${activeStep === 3 ? 'ring-1 ring-primary border-primary/50' : ''}`}>
+                <button
+                  onClick={() => {
+                    if (selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed') {
+                      setActiveStep(3);
+                    }
+                  }}
+                  disabled={selectedProject.status !== 'Merged' && selectedProject.status !== 'Trimmed'}
+                  className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                      fontsStatus && fontsStatus.all_embedded 
+                      ? 'bg-emerald-500/20 text-emerald-600' 
+                      : fontsStatus && !fontsStatus.all_embedded
+                      ? 'bg-amber-500/20 text-amber-600'
+                      : activeStep === 3 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                    }`}>
+                      {fontsStatus ? (
+                        fontsStatus.all_embedded ? <CheckCircle2 size={14} /> : <XCircle size={14} />
+                      ) : '3'}
+                    </div>
+                    <h2 className="text-sm font-bold text-text m-0">Step 3 — Check Fonts</h2>
+                  </div>
+                  {activeStep === 3 ? <ChevronUp size={18} className="text-muted" /> : <ChevronDown size={18} className="text-muted" />}
+                </button>
+
+                {activeStep === 3 && (
+                  <div className="p-4 border-t border-border flex flex-col gap-4">
+                    <div className="flex items-start justify-between shrink-0 gap-3">
+                      <p className="text-[11px] text-muted m-0">
+                        Check if all fonts in the current PDF are fully embedded.
+                      </p>
+                      <Button
+                        onClick={handleCheckFonts}
+                        disabled={checkingFonts}
+                        className="text-xs font-semibold h-8 px-4 flex items-center gap-1.5 shrink-0"
+                      >
+                        {checkingFonts ? <RefreshCw size={14} className="animate-spin" /> : <FileText size={14} />}
+                        {checkingFonts ? 'Checking...' : 'Check Fonts'}
+                      </Button>
+                    </div>
+
+                    {fontsStatus && (
+                      <div className={`p-4 rounded-lg border ${fontsStatus.all_embedded ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600' : 'bg-amber-500/10 border-amber-500/20 text-amber-700'}`}>
+                        <div className="flex items-center gap-2 mb-2">
+                          {fontsStatus.all_embedded ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+                          <h4 className="font-bold text-sm m-0">
+                            {fontsStatus.all_embedded ? 'All Fonts Embedded' : 'Missing Embedded Fonts'}
+                          </h4>
+                        </div>
+                        <p className="text-xs m-0 mb-3 opacity-90">
+                          Total Fonts Detected: {fontsStatus.total_fonts}
+                        </p>
+                        
+                        {!fontsStatus.all_embedded && fontsStatus.missing_fonts.length > 0 && (
+                          <div className="bg-background/50 p-3 rounded border border-amber-500/20">
+                            <h5 className="text-[10px] uppercase tracking-wider font-bold mb-2">Unembedded Fonts</h5>
+                            <ul className="list-disc pl-4 text-xs space-y-1">
+                              {fontsStatus.missing_fonts.map((f: string, i: number) => (
+                                <li key={i}>{f}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Step 4: Check Security */}
+              <div className={`border border-border rounded-xl overflow-hidden bg-background transition-colors ${activeStep === 4 ? 'ring-1 ring-primary border-primary/50' : ''}`}>
+                <button
+                  onClick={() => {
+                    if (selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed') {
+                      setActiveStep(4);
+                    }
+                  }}
+                  disabled={selectedProject.status !== 'Merged' && selectedProject.status !== 'Trimmed'}
+                  className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                      securityStatus && securityStatus.is_free_of_protection 
+                      ? 'bg-emerald-500/20 text-emerald-600' 
+                      : securityStatus && !securityStatus.is_free_of_protection
+                      ? 'bg-amber-500/20 text-amber-600'
+                      : activeStep === 4 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                    }`}>
+                      {securityStatus ? (
+                        securityStatus.is_free_of_protection ? <CheckCircle2 size={14} /> : <XCircle size={14} />
+                      ) : '4'}
+                    </div>
+                    <h2 className="text-sm font-bold text-text m-0">Step 4 — Check Security</h2>
+                  </div>
+                  {activeStep === 4 ? <ChevronUp size={18} className="text-muted" /> : <ChevronDown size={18} className="text-muted" />}
+                </button>
+
+                {activeStep === 4 && (
+                  <div className="p-4 border-t border-border flex flex-col gap-4">
+                    <div className="flex items-start justify-between shrink-0 gap-3">
+                      <p className="text-[11px] text-muted m-0">
+                        Check if the current PDF is free of password protection and encryption.
+                      </p>
+                      <Button
+                        onClick={handleCheckSecurity}
+                        disabled={checkingSecurity}
+                        className="text-xs font-semibold h-8 px-4 flex items-center gap-1.5 shrink-0"
+                      >
+                        {checkingSecurity ? <RefreshCw size={14} className="animate-spin" /> : <ShieldAlert size={14} />}
+                        {checkingSecurity ? 'Checking...' : 'Check Security'}
+                      </Button>
+                    </div>
+
+                    {securityStatus && (
+                      <div className={`p-4 rounded-lg border ${securityStatus.is_free_of_protection ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600' : 'bg-amber-500/10 border-amber-500/20 text-amber-700'}`}>
+                        <div className="flex items-center gap-2 mb-2">
+                          {securityStatus.is_free_of_protection ? <Unlock size={16} /> : <Lock size={16} />}
+                          <h4 className="font-bold text-sm m-0">
+                            {securityStatus.is_free_of_protection ? 'Free of Password Protection' : 'Security Protection Detected!'}
+                          </h4>
+                        </div>
+                        
+                        {!securityStatus.is_free_of_protection && (
+                          <div className="bg-background/50 p-3 rounded border border-amber-500/20 mt-3">
+                            <ul className="list-disc pl-4 text-xs space-y-1">
+                              {securityStatus.needs_pass && <li>Needs Password to open.</li>}
+                              {securityStatus.is_encrypted && <li>File is Encrypted.</li>}
+                              {securityStatus.error && <li className="text-red-500">{securityStatus.error}</li>}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+            </div>
           </div>
         </div>
       ) : (
@@ -747,17 +1119,24 @@ export function PostProdWebPdfProcessor() {
           )}
           <div className="space-y-1">
             <label className="text-xs font-semibold text-text block">Client Company *</label>
-            <select
-              value={selectedClientId}
-              onChange={handleClientChange}
+              <select
+              value={customerName}
+              onChange={e => {
+                const selectedVal = e.target.value;
+                setCustomerName(selectedVal);
+                const matched = clients.find(c => c.company === selectedVal);
+                if (matched && matched.division) {
+                  setClientCode(matched.division);
+                } else {
+                  setClientCode('');
+                }
+              }}
               required
               className="w-full text-xs p-2 rounded-lg border border-border bg-background text-text focus:outline-none focus:ring-1 focus:ring-primary"
             >
               <option value="">— Select Client —</option>
               {clients.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.company} {c.division && `(${c.division})`}
-                </option>
+                <option key={c.id} value={c.company}>{c.company}</option>
               ))}
             </select>
           </div>

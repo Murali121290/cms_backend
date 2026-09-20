@@ -147,11 +147,15 @@ def _require_cookie_user(user):
     return None
 
 
-def _has_admin_role(user: models.User):
+def _has_admin_role(user: models.User | None):
+    if not user or not hasattr(user, 'roles') or user.roles is None:
+        return False
     return "Admin" in [role.name for role in user.roles]
 
 
-def _has_admin_or_pm_role(user: models.User):
+def _has_admin_or_pm_role(user: models.User | None):
+    if not user or not hasattr(user, 'roles') or user.roles is None:
+        return False
     return any(role.name in ("Admin", "ProjectManager") for role in user.roles)
 
 
