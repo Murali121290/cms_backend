@@ -522,5 +522,17 @@
   ],
   "export": {
     "filename_format": "{eisbn}_EPUB.epub"
-  }
+  },
+  "category_order": [
+    "STRUCTURE CHECK",
+    "XHTML CHECK",
+    "CSS CHECK",
+    "IMAGE CHECK",
+    "METADATA CHECK",
+    "COPYRIGHT CHECK",
+    "TOC CHECK",
+    "NAVIGATION CHECK",
+    "LINK CHECK",
+    "TEXT FORMATTING CHECK"
+  ]
 }

@@ -946,9 +946,23 @@ export function PostProdEpubValidatorFiles() {
       return acc;
     }, {} as Record<string, typeof rules>);
 
+    const activeOrder = validationData?.category_order || [];
+
     const sortedCategories = Object.keys(grouped).sort((a, b) => {
+      // Always put 'General Check' at the very bottom
       if (a === 'General Check') return 1;
       if (b === 'General Check') return -1;
+
+      const idxA = activeOrder.indexOf(a.toUpperCase());
+      const idxB = activeOrder.indexOf(b.toUpperCase());
+
+      // If both are in the preferred list, sort by their position in the list
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      // If only one is in the list, it comes first
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+
+      // Otherwise, sort alphabetically
       return a.localeCompare(b);
     });
 

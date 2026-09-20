@@ -51,7 +51,11 @@ def validate_epub(
     def _count_active(rules: list[dict]) -> int:
         return len([r for r in rules if r.get("enabled", True) and registry.get(r["id"])])
 
+    customer_config = loader.load_customer_config(resolved_customer) if resolved_customer else {}
     customer_rules = loader.load_customer(resolved_customer) if resolved_customer else []
+    
+    if customer_config and "category_order" in customer_config:
+        report["category_order"] = customer_config["category_order"]
     
     if customer_rules:
         general_rules = []
