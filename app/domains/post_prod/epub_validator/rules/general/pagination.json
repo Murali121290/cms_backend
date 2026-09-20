@@ -5,13 +5,15 @@
       "name": "Pagebreak Format Check",
       "target_path": "OEBPS/xhtml",
       "enabled": false,
-      "file_name_pattern": "*.xhtml"
+      "file_name_pattern": "*.xhtml",
+      "category": "Page Check"
     },
     {
       "id": "PAGE002",
       "name": "Page Number Sequence Check",
       "scope": "book",
-      "enabled": false
+      "enabled": false,
+      "category": "Page Check"
     }
   ]
 }

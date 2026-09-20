@@ -4,7 +4,8 @@
       "id": "LINK004",
       "name": "Footnote Link Check (two-way)",
       "scope": "book",
-      "enabled": false
+      "enabled": false,
+      "category": "Link Check"
     }
   ]
 }

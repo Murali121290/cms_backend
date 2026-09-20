@@ -4,13 +4,15 @@
       "id": "META001",
       "name": "Required Metadata Check",
       "scope": "book",
-      "enabled": false
+      "enabled": false,
+      "category": "Metadata Check"
     },
     {
       "id": "META002",
       "name": "Accessibility Metadata Check",
       "scope": "book",
-      "enabled": false
+      "enabled": false,
+      "category": "Metadata Check"
     }
   ]
 }

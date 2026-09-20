@@ -28,7 +28,11 @@ import {
   Bookmark,
   FileText,
   Info as InfoIcon,
+  ChevronRight,
+  ChevronDown,
+  Check,
 } from 'lucide-react';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { XHTMLCard, xhtmlCardVariants } from '@/components/epub_validator/XHTMLCard';
 import { ValidationDetailModal } from '@/components/epub_validator/ValidationDetailModal';
 import { AccessibilityReportModal } from '@/components/epub_validator/AccessibilityReportModal';
@@ -59,6 +63,7 @@ import {
   type EvProject,
   getEpubSummary,
   type EpubSummary,
+  getCategories,
 } from '@/api/epubValidator';
 import { useEpubBookStore } from '@/hooks/useEpubBookStore';
 import { cn, formatDate, titleCase } from '@/utils/epubValidatorUtils';
@@ -182,7 +187,15 @@ export function PostProdEpubValidatorFiles() {
     retry: 1,
   });
 
+  const { data: availableCategories = [] } = useQuery({
+    queryKey: ['epub-categories', project?.client_code || project?.client],
+    queryFn: () => getCategories(project?.client_code || project?.client),
+    enabled: !!(project?.client_code || project?.client),
+    staleTime: 5 * 60_000,
+  });
+
   const [showFilenames, setShowFilenames] = useState(false);
+  const [validationCategory, setValidationCategory] = useState<string>('');
 
   const { data: summaryData, isLoading: isLoadingSummary, refetch: refetchSummary, isFetching: isFetchingSummary } = useQuery({
     queryKey: ['epub-summary', folderName],
@@ -429,7 +442,7 @@ export function PostProdEpubValidatorFiles() {
     })();
 
     return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [folderName]);
 
 
@@ -502,7 +515,7 @@ export function PostProdEpubValidatorFiles() {
     setValidationData(null);
 
     try {
-      const { task_id } = await startValidation(folderName);
+      const { task_id } = await startValidation(folderName, undefined, validationCategory || undefined);
       const startTime = Date.now();
       saveTask(task_id, startTime); // persist so refresh can resume
       setTaskStartTime(startTime);
@@ -698,6 +711,7 @@ export function PostProdEpubValidatorFiles() {
     type RuleAgg = {
       rule_id: string;
       rule_name: string;
+      category: string;
       errors: number;
       warnings: number;
       files: Set<string>;
@@ -726,6 +740,7 @@ export function PostProdEpubValidatorFiles() {
       const item = targetMap.get(key) ?? {
         rule_id: entry.rule_id,
         rule_name: entry.rule_name,
+        category: (entry as any).category || 'General Check',
         errors: 0,
         warnings: 0,
         files: new Set<string>(),
@@ -915,6 +930,110 @@ export function PostProdEpubValidatorFiles() {
     );
   }, [selectedFile, validationData]);
 
+  const renderGroupedRules = (
+    rules: typeof ruleSummary.generalBook,
+    getToggleFn: (r: typeof ruleSummary.generalBook[0], isBookOnlyRule: boolean) => () => void,
+    getIsSelected: (r: typeof ruleSummary.generalBook[0], ruleKey: string, isBookOnlyRule: boolean) => boolean,
+    getSubtext: (r: typeof ruleSummary.generalBook[0], isBookOnlyRule: boolean) => string,
+    activeColorClass: string,
+    hoverColorClass: string,
+    badgeColorClass: string,
+  ) => {
+    const grouped = rules.reduce((acc, r) => {
+      const cat = r.category || 'General Check';
+      if (!acc[cat]) acc[cat] = [];
+      acc[cat].push(r);
+      return acc;
+    }, {} as Record<string, typeof rules>);
+
+    const sortedCategories = Object.keys(grouped).sort((a, b) => {
+      if (a === 'General Check') return 1;
+      if (b === 'General Check') return -1;
+      return a.localeCompare(b);
+    });
+
+    return (
+      <div className="space-y-4 pt-1">
+        {sortedCategories.map(cat => {
+          const categoryRules = grouped[cat];
+          const hasErrors = categoryRules.some(r => r.errors > 0);
+          const hasWarnings = categoryRules.some(r => r.warnings > 0);
+
+          return (
+            <details key={cat} className="group space-y-1.5">
+              <summary className="flex items-center justify-between cursor-pointer list-none [&::-webkit-details-marker]:hidden text-[10px] font-bold text-muted-foreground uppercase tracking-widest pl-1 mb-1 select-none hover:text-foreground transition-colors">
+                <div className="flex items-center gap-1.5">
+                  <ChevronRight className="w-3 h-3 transition-transform group-open:rotate-90 shrink-0" />
+                  {cat}
+                </div>
+                {/* Indicator only visible when collapsed (group-open:hidden) */}
+                <div className="flex items-center gap-1 pr-1 group-open:hidden opacity-80">
+                  {hasErrors && <XCircle className="w-3 h-3 text-red-500" />}
+                  {hasWarnings && !hasErrors && <AlertTriangle className="w-3 h-3 text-amber-500" />}
+                  {!hasErrors && !hasWarnings && <CheckCircle2 className="w-3 h-3 text-emerald-500" />}
+                </div>
+              </summary>
+              <div className="space-y-1 pl-1">
+                {categoryRules.map(r => {
+                  const isBookOnlyRule = !r.hasFileEntries && (r.errors > 0 || r.warnings > 0);
+                  const ruleKey = r.rule_id || r.rule_name;
+                  const isSelected = getIsSelected(r, ruleKey, isBookOnlyRule);
+
+                  return (
+                    <button
+                      key={ruleKey}
+                      onClick={getToggleFn(r, isBookOnlyRule)}
+                      className={cn(
+                        'w-full text-left p-2.5 rounded-xl transition-all border text-xs flex items-start justify-between gap-2.5',
+                        isSelected
+                          ? activeColorClass
+                          : `bg-card border-border/60 text-foreground transition-all duration-150 ${hoverColorClass}`
+                      )}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {r.rule_id && (
+                            <span className={cn("font-mono text-[10px] font-bold px-1 py-0.2 rounded shrink-0", badgeColorClass)}>
+                              {r.rule_id}
+                            </span>
+                          )}
+                          <p className="font-medium font-serif truncate leading-tight">
+                            {r.rule_name}
+                          </p>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground mt-1 font-mono">
+                          {getSubtext(r, isBookOnlyRule)}
+                        </p>
+                      </div>
+                      {/* Icons */}
+                      <div className="flex items-center gap-1 shrink-0 pt-0.5">
+                        {r.errors > 0 && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500/10 text-red-600 dark:text-red-400">
+                            <XCircle className="w-3 h-3" />
+                            {r.errors}
+                          </span>
+                        )}
+                        {r.warnings > 0 && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                            <AlertTriangle className="w-3 h-3" />
+                            {r.warnings}
+                          </span>
+                        )}
+                        {r.errors === 0 && r.warnings === 0 && (
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </details>
+          );
+        })}
+      </div>
+    );
+  };
+
 
   return (
     <>
@@ -1029,8 +1148,8 @@ export function PostProdEpubValidatorFiles() {
         transition={{ duration: 0.22 }}
       >
         {/* ── Sticky header ──────────────────────────────────────────────────── */}
-        <div className="border-b border-border/60 pb-4 flex flex-col md:flex-row md:items-start justify-between gap-4">
-          <div className="flex items-start gap-3 min-w-0 flex-1">
+        <div className="border-b border-border/60 pb-4 flex flex-row items-start justify-between gap-4 flex-wrap">
+          <div className="flex items-start gap-3 min-w-[320px] flex-1">
             <Button
               variant="ghost"
               size="sm"
@@ -1064,24 +1183,18 @@ export function PostProdEpubValidatorFiles() {
                   </span>
                 )}
               </div>
-              <p className="text-xs text-muted mt-1 flex items-center gap-2 flex-wrap font-sans">
+              <div className="text-xs text-muted mt-1.5 flex flex-col gap-1.5 font-sans">
                 {project ? (
                   <>
-                    <span>
+                    <span className="font-medium text-foreground/80">
                       {project.client} {project.client_code && `(${project.client_code})`}
-                    </span>
-                    <span className="text-border">·</span>
-                    <span className="inline-flex items-center gap-1 text-muted">
-                      <User size={12} className="text-muted/70" />
-                      <span>{project.assignee || 'Not Assigned'}</span>
                     </span>
                   </>
                 ) : (
                   <span className="font-mono text-[11px] font-semibold">{folderName}</span>
                 )}
                 {validationData && validationData.customer !== undefined && (
-                  <>
-                    <span className="text-border">·</span>
+                  <div>
                     {validationData.customer ? (
                       <span
                         className="inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
@@ -1097,27 +1210,69 @@ export function PostProdEpubValidatorFiles() {
                         General only
                       </span>
                     )}
-                  </>
+                  </div>
                 )}
-              </p>
+              </div>
             </div>
           </div>
 
-          <div className="flex flex-col items-end gap-2 shrink-0 font-sans">
+          <div className="flex flex-col items-start sm:items-end gap-2 font-sans ml-auto">
             {/* Main top action buttons */}
-            <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap sm:justify-end">
               <button
                 onClick={() => setActiveCategoryTab('summary')}
                 className={cn(
                   "inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg border transition-all shadow-xs shrink-0 whitespace-nowrap",
-                  activeCategoryTab === 'summary' 
-                    ? "bg-primary text-white border-primary" 
+                  activeCategoryTab === 'summary'
+                    ? "bg-primary text-white border-primary"
                     : "bg-card border-border hover:bg-primary/10 text-foreground hover:border-primary/40 hover:text-primary"
                 )}
               >
                 <BookMarked className="w-4 h-4 shrink-0" />
                 <span className="whitespace-nowrap">Analysis Report</span>
               </button>
+
+              <DropdownMenu.Root>
+                <DropdownMenu.Trigger asChild>
+                  <button
+                    disabled={isValidating || isLoading}
+                    className="inline-flex items-center gap-2 px-3 py-2 h-9 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-muted text-foreground transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                  >
+                    <span className="truncate max-w-[140px]">
+                      {validationCategory ? validationCategory : 'All Categories'}
+                    </span>
+                    <ChevronDown className="w-3.5 h-3.5 opacity-50 shrink-0" />
+                  </button>
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Portal>
+                  <DropdownMenu.Content
+                    align="start"
+                    sideOffset={4}
+                    className="z-50 w-48 bg-card border border-border/80 rounded-lg shadow-lg overflow-hidden font-sans p-1 animate-in fade-in zoom-in-95"
+                  >
+                    <DropdownMenu.Item
+                      onClick={() => setValidationCategory('')}
+                      className="flex items-center gap-2 px-2 py-1.5 text-xs rounded-md cursor-pointer outline-none data-[highlighted]:bg-primary/10 data-[highlighted]:text-primary transition-colors text-foreground font-medium"
+                    >
+                      <span className="flex-1">All Categories</span>
+                      {validationCategory === '' && <Check className="w-3.5 h-3.5 text-primary shrink-0" />}
+                    </DropdownMenu.Item>
+                    
+                    {availableCategories.length > 0 && <DropdownMenu.Separator className="h-px bg-border/60 my-1 mx-1" />}
+                    
+                    {availableCategories.map((cat) => (
+                      <DropdownMenu.Item
+                        key={cat}
+                        onClick={() => setValidationCategory(cat)}
+                        className="flex items-center gap-2 px-2 py-1.5 text-xs rounded-md cursor-pointer outline-none data-[highlighted]:bg-primary/10 data-[highlighted]:text-primary transition-colors text-foreground"
+                      >
+                        <span className="flex-1 truncate">{cat}</span>
+                        {validationCategory === cat && <Check className="w-3.5 h-3.5 text-primary shrink-0" />}
+                      </DropdownMenu.Item>
+                    ))}
+                  </DropdownMenu.Content>
+                </DropdownMenu.Portal>
+              </DropdownMenu.Root>
 
               <button
                 onClick={handleValidateAll}
@@ -1164,15 +1319,41 @@ export function PostProdEpubValidatorFiles() {
                 </span>
               </button>
 
+            </div>
+
+            {/* Secondary row below: View report options & Export */}
+            <div className="flex items-center gap-2 flex-wrap text-xs pt-0.5 sm:justify-end w-full">
+              {aceReport && !isAceRunning && (
+                <button
+                  onClick={() => setAceModalOpen(true)}
+                  disabled={isValidating}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-all border border-primary/20 disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none"
+                >
+                  <Eye className="w-3.5 h-3.5 shrink-0" />
+                  <span>View Accessibility Report</span>
+                </button>
+              )}
+
+              {epubCheckReport && !isEpubCheckRunning && (
+                <button
+                  onClick={() => setEpubCheckModalOpen(true)}
+                  disabled={isValidating}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-all border border-primary/20 disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none"
+                >
+                  <Eye className="w-3.5 h-3.5 shrink-0" />
+                  <span>View EPUBCheck Report</span>
+                </button>
+              )}
+
               <button
                 onClick={handleExport}
                 disabled={isExporting || isLoading || isValidating}
-                className="inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-primary/10 text-foreground hover:border-primary/40 hover:text-primary transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
+                className="inline-flex flex-row items-center justify-center gap-2 px-3 py-1.5 h-8 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-primary/10 text-foreground hover:border-primary/40 hover:text-primary transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
               >
                 {isExporting ? (
-                  <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                  <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
                 ) : (
-                  <Download className="w-4 h-4 shrink-0" />
+                  <Download className="w-3.5 h-3.5 shrink-0" />
                 )}
                 <span className="whitespace-nowrap">{isExporting ? 'Exporting…' : 'Export EPUB'}</span>
               </button>
@@ -1192,41 +1373,13 @@ export function PostProdEpubValidatorFiles() {
                     }
                   }}
                   disabled={isExporting || isLoading || isValidating}
-                  className="inline-flex flex-row items-center justify-center gap-2 px-4 py-2 h-9 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-green-500/10 text-green-700 hover:border-green-500/40 hover:text-green-600 transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
+                  className="inline-flex flex-row items-center justify-center gap-2 px-3 py-1.5 h-8 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-green-500/10 text-green-700 hover:border-green-500/40 hover:text-green-600 transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0 whitespace-nowrap"
                 >
-                  <Download className="w-4 h-4 shrink-0" />
+                  <Download className="w-3.5 h-3.5 shrink-0" />
                   <span className="whitespace-nowrap">Download QA Report</span>
                 </button>
               )}
             </div>
-
-
-            {/* Secondary row below: View report options */}
-            {(aceReport || epubCheckReport) && (
-              <div className="flex items-center gap-2 flex-wrap text-xs pt-0.5">
-                {aceReport && !isAceRunning && (
-                  <button
-                    onClick={() => setAceModalOpen(true)}
-                    disabled={isValidating}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-all border border-primary/20 disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none"
-                  >
-                    <Eye className="w-3.5 h-3.5 shrink-0" />
-                    <span>View Accessibility Report</span>
-                  </button>
-                )}
-
-                {epubCheckReport && !isEpubCheckRunning && (
-                  <button
-                    onClick={() => setEpubCheckModalOpen(true)}
-                    disabled={isValidating}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-all border border-primary/20 disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none"
-                  >
-                    <Eye className="w-3.5 h-3.5 shrink-0" />
-                    <span>View EPUBCheck Report</span>
-                  </button>
-                )}
-              </div>
-            )}
           </div>
         </div>
 
@@ -1242,7 +1395,7 @@ export function PostProdEpubValidatorFiles() {
                   exit={{ opacity: 0 }}
                   className="absolute -inset-x-4 -inset-y-4 z-40 bg-background/40 backdrop-blur-[3px] rounded-xl h-[calc(100%+2rem)]"
                 />
-                
+
                 {/* Fixed modal card so it stays in viewport without taking up document space */}
                 <motion.div
                   initial={{ opacity: 0, scale: 0.96 }}
@@ -1308,1361 +1461,1239 @@ export function PostProdEpubValidatorFiles() {
 
           {/* ── File Classification Setup ───────────────────────────────────── */}
           {!isLoading && xhtmlFiles.length > 0 && (!project?.file_mappings || Object.keys(project.file_mappings).length === 0) ? (
-            <FileClassificationSetup 
-              folderName={folderName} 
-              xhtmlFiles={xhtmlFiles} 
-              onComplete={() => queryClient.invalidateQueries({ queryKey: ['epub-projects'] })} 
+            <FileClassificationSetup
+              folderName={folderName}
+              xhtmlFiles={xhtmlFiles}
+              onComplete={() => queryClient.invalidateQueries({ queryKey: ['epub-projects'] })}
             />
           ) : (
             <>
               {/* Accessibility check error banner */}
-          {aceError && (
-            <div className="flex items-start justify-between gap-3 px-4 py-3 rounded-lg bg-danger/10 border border-danger/20 text-xs text-danger font-sans">
-              <div className="flex items-start gap-2">
-                <XCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                <span>{aceError}</span>
-              </div>
-              <button
-                onClick={() => setAceError(null)}
-                className="text-xs font-semibold hover:underline shrink-0"
-              >
-                Dismiss
-              </button>
-            </div>
-          )}
-
-          {/* Export success banner */}
-          <AnimatePresence>
-            {exportSuccess && (
-              <motion.div
-                className="flex items-center gap-2 px-4 py-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-700 dark:bg-emerald-950/30 dark:border-emerald-900/40 dark:text-emerald-400 font-sans"
-                initial={{ opacity: 0, y: -4 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -4 }}
-                transition={{ duration: 0.2 }}
-              >
-                <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-                EPUB exported successfully — check your downloads.
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* ── Categorized file cards layout (with Rules Sidebar if validated) ─────────── */}
-          {isLoading ? (
-            <SkeletonGrid />
-          ) : isError || !filesData?.status ? (
-            <EmptyState
-              icon={FileCode2}
-              title="Could not load files"
-              description="Make sure the folder is existing and accessible."
-              action={
-                <Button onClick={() => navigate('/post-production/epub-validator')} className="font-semibold text-xs">
-                  Back to Dashboard
-                </Button>
-              }
-            />
-          ) : allBackendFiles.length === 0 ? (
-            <EmptyState
-              icon={FileCode2}
-              title="No files found"
-              description="This EPUB folder doesn't contain any files."
-              action={
-                <Button onClick={() => navigate('/post-production/epub-validator')} className="font-semibold text-xs">
-                  Back to Dashboard
-                </Button>
-              }
-            />
-          ) : (
-            <div className="flex flex-col lg:flex-row gap-6 items-start">
-              {/* Left Rules Sidebar (Validation Rules with Scroll Option) */}
-              {hasValidated && (ruleSummary.generalBook.length > 0 || ruleSummary.general.length > 0 || ruleSummary.customer.length > 0) && (
-                <div className="w-full lg:w-80 xl:w-96 shrink-0 bg-card rounded-xl border border-border/80 shadow-sm p-4 space-y-4 font-sans">
-                  <div className="flex items-center justify-between border-b border-border/60 pb-2.5">
-                    <div>
-                      <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground font-serif">
-                        Validation Rules
-                      </h2>
-                      <p className="text-[11px] text-muted-foreground mt-0.5 font-sans">
-                        Click a rule to explore issues
-                      </p>
-                    </div>
-                    {(selectedRuleFilter || selectedBookRuleId) && (
-                      <button
-                        onClick={() => { setSelectedRuleFilter(null); setSelectedBookRuleId(null); }}
-                        className="text-[11px] text-primary hover:underline font-semibold"
-                      >
-                        Reset
-                      </button>
-                    )}
+              {aceError && (
+                <div className="flex items-start justify-between gap-3 px-4 py-3 rounded-lg bg-danger/10 border border-danger/20 text-xs text-danger font-sans">
+                  <div className="flex items-start gap-2">
+                    <XCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                    <span>{aceError}</span>
                   </div>
-
-                  <div className="space-y-4 max-h-[calc(100vh-14rem)] min-h-[250px] overflow-y-auto pr-1.5 scrollbar-thin scrollbar-thumb-border font-sans">
-
-                    {/* ── General Book Rules (book-scope) ───────────────────── */}
-                    {ruleSummary.generalBook.length > 0 && (
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between px-1">
-                          <div className="flex items-center gap-1.5">
-                            <BookMarked className="w-3 h-3 text-slate-500" />
-                            <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wide">
-                              General Book
-                            </span>
-                          </div>
-                          <span className="text-[10px] text-muted-foreground font-mono">
-                            ({ruleSummary.generalBook.length})
-                          </span>
-                        </div>
-                        <div className="space-y-1">
-                          {ruleSummary.generalBook.map((r) => {
-                            const isSelected = selectedBookRuleId === (r.rule_id || r.rule_name);
-                            return (
-                              <button
-                                key={r.rule_id || r.rule_name}
-                                onClick={() => toggleBookRule(r.rule_id || r.rule_name)}
-                                className={cn(
-                                  'w-full text-left p-2.5 rounded-xl transition-all border text-xs flex items-start justify-between gap-2.5',
-                                  isSelected
-                                    ? 'bg-slate-500/10 border-slate-500/40 ring-1 ring-slate-500/30 text-slate-700 dark:text-slate-300 font-bold shadow-xs'
-                                    : 'bg-card hover:bg-slate-500/5 hover:border-slate-500/30 border-border/60 text-foreground transition-all duration-150',
-                                )}
-                              >
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    {r.rule_id && (
-                                      <span className="font-mono text-[10px] font-bold text-slate-500 bg-slate-100 dark:bg-slate-800 px-1 py-0.2 rounded shrink-0">
-                                        {r.rule_id}
-                                      </span>
-                                    )}
-                                    <p className="font-medium font-serif truncate leading-tight">
-                                      {r.rule_name}
-                                    </p>
-                                  </div>
-                                  <p className="text-[10px] text-muted-foreground mt-1 font-mono">
-                                    Book-scope rule
-                                  </p>
-                                </div>
-                                <div className="flex items-center gap-1 shrink-0 pt-0.5">
-                                  {r.errors > 0 && (
-                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500/10 text-red-600 dark:text-red-400">
-                                      <XCircle className="w-3 h-3" />
-                                      {r.errors}
-                                    </span>
-                                  )}
-                                  {r.warnings > 0 && (
-                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400">
-                                      <AlertTriangle className="w-3 h-3" />
-                                      {r.warnings}
-                                    </span>
-                                  )}
-                                  {r.errors === 0 && r.warnings === 0 && (
-                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                                  )}
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* ── General File Rules ─────────────────────────────────── */}
-                    {ruleSummary.general.length > 0 && (
-                      <div className={cn('space-y-1.5', ruleSummary.generalBook.length > 0 && 'pt-2 border-t border-border/40')}>
-                        <div className="flex items-center justify-between px-1">
-                          <div className="flex items-center gap-1.5">
-                            <FileCode2 className="w-3 h-3 text-foreground/60" />
-                            <span className="text-[11px] font-bold text-foreground/80 uppercase tracking-wide">
-                              General
-                            </span>
-                          </div>
-                          <span className="text-[10px] text-muted-foreground font-mono">
-                            ({ruleSummary.general.length})
-                          </span>
-                        </div>
-                        <div className="space-y-1">
-                          {ruleSummary.general.map((r) => {
-                            const isSelected = selectedRuleFilter === (r.rule_id || r.rule_name);
-                            return (
-                              <button
-                                key={r.rule_id || r.rule_name}
-                                onClick={() => toggleRuleFilter(r.rule_id || r.rule_name)}
-                                className={cn(
-                                  'w-full text-left p-2.5 rounded-xl transition-all border text-xs flex items-start justify-between gap-2.5',
-                                  isSelected
-                                    ? 'bg-primary/10 border-primary/40 ring-1 ring-primary/30 text-primary font-bold shadow-xs'
-                                    : 'bg-card hover:bg-primary/5 hover:border-primary/30 hover:text-primary border-border/60 text-foreground transition-all duration-150',
-                                )}
-                              >
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    {r.rule_id && (
-                                      <span className="font-mono text-[10px] font-bold text-muted-foreground bg-muted px-1 py-0.2 rounded shrink-0">
-                                        {r.rule_id}
-                                      </span>
-                                    )}
-                                    <p className="font-medium font-serif truncate leading-tight">
-                                      {r.rule_name}
-                                    </p>
-                                  </div>
-                                  <p className="text-[10px] text-muted-foreground mt-1 font-mono">
-                                    {r.files.size} file{r.files.size !== 1 ? 's' : ''} affected
-                                  </p>
-                                </div>
-                                <div className="flex items-center gap-1 shrink-0 pt-0.5">
-                                  {r.errors > 0 && (
-                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500/10 text-red-600 dark:text-red-400">
-                                      <XCircle className="w-3 h-3" />
-                                      {r.errors}
-                                    </span>
-                                  )}
-                                  {r.warnings > 0 && (
-                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400">
-                                      <AlertTriangle className="w-3 h-3" />
-                                      {r.warnings}
-                                    </span>
-                                  )}
-                                  {r.errors === 0 && r.warnings === 0 && (
-                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                                  )}
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* ── Customer Rules ─────────────────────────────────────── */}
-                    {ruleSummary.customer.length > 0 && (
-                      <div className="space-y-1.5 pt-2 border-t border-border/40">
-                        <div className="flex items-center justify-between px-1">
-                          <div className="flex items-center gap-1.5">
-                            <User className="w-3 h-3 text-primary" />
-                            <span className="text-[11px] font-bold text-primary uppercase tracking-wide">
-                              {ruleSummary.customerName
-                                ? `${ruleSummary.customerName.charAt(0).toUpperCase()}${ruleSummary.customerName.slice(1)} Rules`
-                                : 'Customer Rules'}
-                            </span>
-                          </div>
-                          <span className="text-[10px] text-muted-foreground font-mono">
-                            ({ruleSummary.customer.length})
-                          </span>
-                        </div>
-                        <div className="space-y-1">
-                          {ruleSummary.customer.map((r) => {
-                            // If this rule has no file-level entries, it's book-scope — use toggleBookRule
-                            const isBookOnlyRule = !r.hasFileEntries && (r.errors > 0 || r.warnings > 0);
-                            const ruleKey = r.rule_id || r.rule_name;
-                            const isSelected = isBookOnlyRule
-                              ? selectedBookRuleId === ruleKey
-                              : selectedRuleFilter === ruleKey;
-                            return (
-                              <button
-                                key={ruleKey}
-                                onClick={() => isBookOnlyRule ? toggleBookRule(ruleKey) : toggleRuleFilter(ruleKey)}
-                                className={cn(
-                                  'w-full text-left p-2.5 rounded-xl transition-all border text-xs flex items-start justify-between gap-2.5',
-                                  isSelected
-                                    ? 'bg-primary/10 border-primary/40 ring-1 ring-primary/30 text-primary font-bold shadow-xs'
-                                    : 'bg-card hover:bg-primary/5 hover:border-primary/30 hover:text-primary border-border/60 text-foreground transition-all duration-150',
-                                )}
-                              >
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    {r.rule_id && (
-                                      <span className="font-mono text-[10px] font-bold text-primary/80 bg-primary/10 px-1 py-0.2 rounded shrink-0">
-                                        {r.rule_id}
-                                      </span>
-                                    )}
-                                    <p className="font-medium font-serif truncate leading-tight">
-                                      {r.rule_name}
-                                    </p>
-                                  </div>
-                                  <p className="text-[10px] text-muted-foreground mt-1 font-mono">
-                                    {isBookOnlyRule ? 'Book-scope rule' : `${r.files.size} file${r.files.size !== 1 ? 's' : ''} affected`}
-                                  </p>
-                                </div>
-                                <div className="flex items-center gap-1 shrink-0 pt-0.5">
-                                  {r.errors > 0 && (
-                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500/10 text-red-600 dark:text-red-400">
-                                      <XCircle className="w-3 h-3" />
-                                      {r.errors}
-                                    </span>
-                                  )}
-                                  {r.warnings > 0 && (
-                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400">
-                                      <AlertTriangle className="w-3 h-3" />
-                                      {r.warnings}
-                                    </span>
-                                  )}
-                                  {r.errors === 0 && r.warnings === 0 && (
-                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                                  )}
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                  <button
+                    onClick={() => setAceError(null)}
+                    className="text-xs font-semibold hover:underline shrink-0"
+                  >
+                    Dismiss
+                  </button>
                 </div>
               )}
 
-              {/* Main Right Area: Summary Stats + Top Category Tabs on top, Files below */}
-              <div className="flex-1 min-w-0 space-y-6">
+              {/* Export success banner */}
+              <AnimatePresence>
+                {exportSuccess && (
+                  <motion.div
+                    className="flex items-center gap-2 px-4 py-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-700 dark:bg-emerald-950/30 dark:border-emerald-900/40 dark:text-emerald-400 font-sans"
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                    EPUB exported successfully — check your downloads.
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
-                {/* ── Book Overview Panel (shown when a General Book or customer book-scope rule is selected) ─── */}
-                {selectedBookRuleId && (() => {
-                  const bookEntries = validationData?.files.filter(
-                    (e) => (e.rule_id || e.rule_name) === selectedBookRuleId &&
-                      (!e.file_details.file_name || e.file_details.file_name === '[book-level]' || e.file_details.file_name === '')
-                  ) ?? [];
-                  // Look up rule metadata from both generalBook and customer lists
-                  const bookRule = [...ruleSummary.generalBook, ...ruleSummary.customer].find(
-                    (r) => (r.rule_id || r.rule_name) === selectedBookRuleId
-                  );
-                  const allIssues = bookEntries.flatMap((e) => e.result.issues);
-                  return (
-                    <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 p-4 shadow-sm font-sans">
-                      {/* Header */}
-                      <div className="flex items-start justify-between mb-3 gap-3">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <BookMarked className="w-4 h-4 text-slate-500 shrink-0" />
-                          <div className="min-w-0">
-                            <p className="text-sm font-bold text-foreground font-serif truncate">
-                              {bookRule?.rule_name ?? selectedBookRuleId}
-                            </p>
-                            <p className="text-[11px] font-mono text-slate-500 mt-0.5">{selectedBookRuleId} · Book-scope</p>
-                          </div>
+              {/* ── Categorized file cards layout (with Rules Sidebar if validated) ─────────── */}
+              {isLoading ? (
+                <SkeletonGrid />
+              ) : isError || !filesData?.status ? (
+                <EmptyState
+                  icon={FileCode2}
+                  title="Could not load files"
+                  description="Make sure the folder is existing and accessible."
+                  action={
+                    <Button onClick={() => navigate('/post-production/epub-validator')} className="font-semibold text-xs">
+                      Back to Dashboard
+                    </Button>
+                  }
+                />
+              ) : allBackendFiles.length === 0 ? (
+                <EmptyState
+                  icon={FileCode2}
+                  title="No files found"
+                  description="This EPUB folder doesn't contain any files."
+                  action={
+                    <Button onClick={() => navigate('/post-production/epub-validator')} className="font-semibold text-xs">
+                      Back to Dashboard
+                    </Button>
+                  }
+                />
+              ) : (
+                <div className="flex flex-col lg:flex-row gap-6 items-start">
+                  {/* Left Rules Sidebar (Validation Rules with Scroll Option) */}
+                  {hasValidated && (ruleSummary.generalBook.length > 0 || ruleSummary.general.length > 0 || ruleSummary.customer.length > 0) && (
+                    <div className="w-full lg:w-80 xl:w-96 shrink-0 bg-card rounded-xl border border-border/80 shadow-sm p-4 space-y-4 font-sans">
+                      <div className="flex items-center justify-between border-b border-border/60 pb-2.5">
+                        <div>
+                          <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground font-serif">
+                            Validation Rules
+                          </h2>
+                          <p className="text-[11px] text-muted-foreground mt-0.5 font-sans">
+                            Click a rule to explore issues
+                          </p>
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          {(bookRule?.errors ?? 0) > 0 && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400">
-                              <XCircle className="w-3 h-3" /> {bookRule!.errors} error{bookRule!.errors !== 1 ? 's' : ''}
-                            </span>
-                          )}
-                          {(bookRule?.warnings ?? 0) > 0 && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">
-                              <AlertTriangle className="w-3 h-3" /> {bookRule!.warnings} warning{bookRule!.warnings !== 1 ? 's' : ''}
-                            </span>
-                          )}
+                        {(selectedRuleFilter || selectedBookRuleId) && (
                           <button
-                            onClick={() => setSelectedBookRuleId(null)}
-                            className="ml-1 p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 hover:text-foreground transition-colors"
-                            title="Close"
+                            onClick={() => { setSelectedRuleFilter(null); setSelectedBookRuleId(null); }}
+                            className="text-[11px] text-primary hover:underline font-semibold"
                           >
-                            <XIcon className="w-3.5 h-3.5" />
+                            Reset
                           </button>
-                        </div>
+                        )}
                       </div>
 
-                      {/* Issues list */}
-                      {allIssues.length === 0 ? (
-                        <div className="flex items-center gap-2 py-2 text-[12px] text-emerald-600 dark:text-emerald-400">
-                          <CheckCircle2 className="w-4 h-4" />
-                          No issues found for this rule.
+                      <div className="space-y-4 max-h-[calc(100vh-14rem)] min-h-[250px] overflow-y-auto pr-1.5 scrollbar-thin scrollbar-thumb-border font-sans">
+
+                        {/* ── General Book Rules (book-scope) ───────────────────── */}
+                        {ruleSummary.generalBook.length > 0 && (
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between px-1">
+                              <div className="flex items-center gap-1.5">
+                                <BookMarked className="w-3 h-3 text-slate-500" />
+                                <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wide">
+                                  General Book
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-muted-foreground font-mono">
+                                ({ruleSummary.generalBook.length})
+                              </span>
+                            </div>
+                            <div className="space-y-1">
+                              {renderGroupedRules(
+                                ruleSummary.generalBook,
+                                (r) => () => toggleBookRule(r.rule_id || r.rule_name),
+                                (r, ruleKey) => selectedBookRuleId === ruleKey,
+                                () => 'Book-scope rule',
+                                'bg-slate-500/10 border-slate-500/40 ring-1 ring-slate-500/30 text-slate-700 dark:text-slate-300 font-bold shadow-xs',
+                                'hover:bg-slate-500/5 hover:border-slate-500/30',
+                                'text-slate-500 bg-slate-100 dark:bg-slate-800'
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* ── General File Rules ─────────────────────────────────── */}
+                        {ruleSummary.general.length > 0 && (
+                          <div className={cn('space-y-1.5', ruleSummary.generalBook.length > 0 && 'pt-2 border-t border-border/40')}>
+                            <div className="flex items-center justify-between px-1">
+                              <div className="flex items-center gap-1.5">
+                                <FileCode2 className="w-3 h-3 text-foreground/60" />
+                                <span className="text-[11px] font-bold text-foreground/80 uppercase tracking-wide">
+                                  General
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-muted-foreground font-mono">
+                                ({ruleSummary.general.length})
+                              </span>
+                            </div>
+                            <div className="space-y-1">
+                              {renderGroupedRules(
+                                ruleSummary.general,
+                                (r) => () => toggleRuleFilter(r.rule_id || r.rule_name),
+                                (r, ruleKey) => selectedRuleFilter === ruleKey,
+                                (r) => `${r.files.size} file${r.files.size !== 1 ? 's' : ''} affected`,
+                                'bg-slate-500/10 border-slate-500/40 ring-1 ring-slate-500/30 text-slate-700 dark:text-slate-300 font-bold shadow-xs',
+                                'hover:bg-slate-500/5 hover:border-slate-500/30',
+                                'text-slate-500 bg-slate-100 dark:bg-slate-800'
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* ── Customer Rules ─────────────────────────────────────── */}
+                        {ruleSummary.customer.length > 0 && (
+                          <div className="space-y-1.5 pt-2 border-t border-border/40">
+                            <div className="flex items-center justify-between px-1">
+                              <div className="flex items-center gap-1.5">
+                                <User className="w-3 h-3 text-primary" />
+                                <span className="text-[11px] font-bold text-primary uppercase tracking-wide">
+                                  {ruleSummary.customerName
+                                    ? `${ruleSummary.customerName.charAt(0).toUpperCase()}${ruleSummary.customerName.slice(1)} Rules`
+                                    : 'Customer Rules'}
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-muted-foreground font-mono">
+                                ({ruleSummary.customer.length})
+                              </span>
+                            </div>
+                            <div className="space-y-1">
+                              {renderGroupedRules(
+                                ruleSummary.customer,
+                                (r, isBookOnlyRule) => () => isBookOnlyRule ? toggleBookRule(r.rule_id || r.rule_name) : toggleRuleFilter(r.rule_id || r.rule_name),
+                                (r, ruleKey, isBookOnlyRule) => isBookOnlyRule ? selectedBookRuleId === ruleKey : selectedRuleFilter === ruleKey,
+                                (r, isBookOnlyRule) => isBookOnlyRule ? 'Book-scope rule' : `${r.files.size} file${r.files.size !== 1 ? 's' : ''} affected`,
+                                'bg-primary/10 border-primary/40 ring-1 ring-primary/30 text-primary font-bold shadow-xs',
+                                'hover:bg-primary/5 hover:border-primary/30 hover:text-primary',
+                                'text-primary/80 bg-primary/10'
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Main Right Area: Summary Stats + Top Category Tabs on top, Files below */}
+                  <div className="flex-1 min-w-0 space-y-6">
+
+                    {/* ── Book Overview Panel (shown when a General Book or customer book-scope rule is selected) ─── */}
+                    {selectedBookRuleId && (() => {
+                      const bookEntries = validationData?.files.filter(
+                        (e) => (e.rule_id || e.rule_name) === selectedBookRuleId &&
+                          (!e.file_details.file_name || e.file_details.file_name === '[book-level]' || e.file_details.file_name === '')
+                      ) ?? [];
+                      // Look up rule metadata from both generalBook and customer lists
+                      const bookRule = [...ruleSummary.generalBook, ...ruleSummary.customer].find(
+                        (r) => (r.rule_id || r.rule_name) === selectedBookRuleId
+                      );
+                      const allIssues = bookEntries.flatMap((e) => e.result.issues);
+                      return (
+                        <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 p-4 shadow-sm font-sans">
+                          {/* Header */}
+                          <div className="flex items-start justify-between mb-3 gap-3">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <BookMarked className="w-4 h-4 text-slate-500 shrink-0" />
+                              <div className="min-w-0">
+                                <p className="text-sm font-bold text-foreground font-serif truncate">
+                                  {bookRule?.rule_name ?? selectedBookRuleId}
+                                </p>
+                                <p className="text-[11px] font-mono text-slate-500 mt-0.5">{selectedBookRuleId} · Book-scope</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              {(bookRule?.errors ?? 0) > 0 && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400">
+                                  <XCircle className="w-3 h-3" /> {bookRule!.errors} error{bookRule!.errors !== 1 ? 's' : ''}
+                                </span>
+                              )}
+                              {(bookRule?.warnings ?? 0) > 0 && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">
+                                  <AlertTriangle className="w-3 h-3" /> {bookRule!.warnings} warning{bookRule!.warnings !== 1 ? 's' : ''}
+                                </span>
+                              )}
+                              <button
+                                onClick={() => setSelectedBookRuleId(null)}
+                                className="ml-1 p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 hover:text-foreground transition-colors"
+                                title="Close"
+                              >
+                                <XIcon className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Issues list */}
+                          {allIssues.length === 0 ? (
+                            <div className="flex items-center gap-2 py-2 text-[12px] text-emerald-600 dark:text-emerald-400">
+                              <CheckCircle2 className="w-4 h-4" />
+                              No issues found for this rule.
+                            </div>
+                          ) : (
+                            <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-border">
+                              {allIssues.map((issue, idx) => {
+                                const cat = (issue.category ?? '').toLowerCase();
+                                const isError = cat === 'error';
+                                const isInfo = cat === 'info';
+                                return (
+                                  <div
+                                    key={idx}
+                                    className={cn(
+                                      'flex items-start gap-2.5 rounded-lg px-3 py-2 text-xs border',
+                                      isError
+                                        ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800/40 text-red-700 dark:text-red-300'
+                                        : isInfo
+                                          ? 'bg-sky-50 dark:bg-sky-950/30 border-sky-200 dark:border-sky-800/40 text-sky-700 dark:text-sky-300'
+                                          : 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/40 text-amber-700 dark:text-amber-300',
+                                    )}
+                                  >
+                                    {isError ? (
+                                      <XCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-red-500" />
+                                    ) : isInfo ? (
+                                      <InfoIcon className="w-3.5 h-3.5 shrink-0 mt-0.5 text-sky-500" />
+                                    ) : (
+                                      <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-500" />
+                                    )}
+                                    <span className="leading-relaxed font-sans">{issue.message}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
-                      ) : (
-                        <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-border">
-                          {allIssues.map((issue, idx) => {
-                            const cat = (issue.category ?? '').toLowerCase();
-                            const isError = cat === 'error';
-                            const isInfo = cat === 'info';
-                            return (
-                              <div
-                                key={idx}
+                      );
+                    })()}
+
+                    {/* ── 6-stat summary row ─────────────────────────────────────────── */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 font-sans">
+                      <StatCard
+                        label="Total Files"
+                        value={stats.total}
+                        total={stats.total}
+                        icon={BookOpen}
+                        barColor="bg-primary"
+                        valueColor="text-foreground"
+                      />
+                      <StatCard
+                        label="Pending"
+                        value={stats.pending}
+                        total={stats.total}
+                        icon={Clock}
+                        barColor="bg-slate-400"
+                        valueColor={stats.pending > 0 ? 'text-slate-500' : 'text-foreground'}
+                        isActive={activeFilter === 'pending'}
+                        onClick={() => toggleFilter('pending')}
+                      />
+                      <StatCard
+                        label="Passed"
+                        value={stats.passed}
+                        total={stats.total}
+                        icon={CheckCircle2}
+                        barColor="bg-emerald-500"
+                        valueColor={hasValidated ? 'text-emerald-600' : 'text-foreground'}
+                        isActive={activeFilter === 'passed'}
+                        onClick={() => toggleFilter('passed')}
+                      />
+                      <StatCard
+                        label="Warnings"
+                        value={stats.warnings}
+                        total={stats.total}
+                        icon={AlertTriangle}
+                        barColor="bg-amber-400"
+                        valueColor={hasValidated && stats.warnings > 0 ? 'text-amber-600' : 'text-foreground'}
+                        isActive={activeFilter === 'warning'}
+                        onClick={() => toggleFilter('warning')}
+                      />
+                      <StatCard
+                        label="Failed"
+                        value={stats.failed}
+                        total={stats.total}
+                        icon={XCircle}
+                        barColor="bg-red-500"
+                        valueColor={hasValidated && stats.failed > 0 ? 'text-red-500' : 'text-foreground'}
+                        isActive={activeFilter === 'failed'}
+                        onClick={() => toggleFilter('failed')}
+                      />
+                      <StatCard
+                        label="Info"
+                        value={stats.infos}
+                        total={stats.total}
+                        icon={InfoIcon}
+                        barColor="bg-sky-400"
+                        valueColor={hasValidated && stats.infos > 0 ? 'text-sky-600' : 'text-foreground'}
+                        isActive={activeFilter === 'info'}
+                        onClick={() => toggleFilter('info')}
+                      />
+                    </div>
+                    {/* ── Top Horizontal Category Navigation Tabs ─────────────────────────────────── */}
+                    {(() => {
+                      const getCategoryTabBadgeStyle = (isTabActive: boolean) => {
+                        if (activeFilter === 'failed') {
+                          return isTabActive
+                            ? 'bg-red-500/20 text-red-600 dark:text-red-400 font-bold border border-red-500/30'
+                            : 'bg-red-500/10 text-red-600 dark:text-red-400 font-bold';
+                        }
+                        if (activeFilter === 'passed') {
+                          return isTabActive
+                            ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-500/30'
+                            : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold';
+                        }
+                        if (activeFilter === 'warning') {
+                          return isTabActive
+                            ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 font-bold border border-amber-500/30'
+                            : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 font-bold';
+                        }
+                        if (activeFilter === 'info') {
+                          return isTabActive
+                            ? 'bg-sky-500/20 text-sky-600 dark:text-sky-400 font-bold border border-sky-500/30'
+                            : 'bg-sky-500/10 text-sky-600 dark:text-sky-400 font-bold';
+                        }
+                        if (activeFilter === 'pending') {
+                          return isTabActive
+                            ? 'bg-slate-500/20 text-slate-600 dark:text-slate-400 font-bold border border-slate-500/30'
+                            : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 font-bold';
+                        }
+                        // Default normal / clear filter state -> Chapter / Primary theme color for ALL category counts!
+                        return isTabActive
+                          ? 'bg-primary/20 text-primary font-bold border border-primary/30'
+                          : 'bg-primary/10 text-primary/80 font-semibold';
+                      };
+
+                      return (
+                        <div className="flex items-center gap-2 border-b border-border/80 pb-px font-sans overflow-x-auto scrollbar-none">
+                          {frontMatterFiles.length > 0 && (
+                            <button
+                              onClick={() => setActiveCategoryTab('front_matter')}
+                              className={cn(
+                                'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
+                                activeCategoryTab === 'front_matter'
+                                  ? 'border-orange-500 text-orange-600 dark:text-orange-400 bg-orange-500/10 shadow-xs'
+                                  : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                              )}
+                            >
+                              <BookOpen className="w-4 h-4 text-orange-500 shrink-0" />
+                              <span>Front Matter</span>
+                              <span
                                 className={cn(
-                                  'flex items-start gap-2.5 rounded-lg px-3 py-2 text-xs border',
-                                  isError
-                                    ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800/40 text-red-700 dark:text-red-300'
-                                    : isInfo
-                                    ? 'bg-sky-50 dark:bg-sky-950/30 border-sky-200 dark:border-sky-800/40 text-sky-700 dark:text-sky-300'
-                                    : 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/40 text-amber-700 dark:text-amber-300',
+                                  'px-2 py-0.5 rounded-full text-[10px] font-mono transition-colors',
+                                  getCategoryTabBadgeStyle(activeCategoryTab === 'front_matter')
                                 )}
                               >
-                                {isError ? (
-                                  <XCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-red-500" />
-                                ) : isInfo ? (
-                                  <InfoIcon className="w-3.5 h-3.5 shrink-0 mt-0.5 text-sky-500" />
-                                ) : (
-                                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-500" />
+                                {visibleFrontMatterFiles.length}
+                              </span>
+                            </button>
+                          )}
+
+                          {chapterFiles.length > 0 && (
+                            <button
+                              onClick={() => setActiveCategoryTab('chapters')}
+                              className={cn(
+                                'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
+                                activeCategoryTab === 'chapters'
+                                  ? 'border-primary text-primary bg-primary/10 shadow-xs'
+                                  : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                              )}
+                            >
+                              <BookOpen className="w-4 h-4 text-primary shrink-0" />
+                              <span>Chapters</span>
+                              <span
+                                className={cn(
+                                  'px-2 py-0.5 rounded-full text-[10px] font-mono transition-colors',
+                                  getCategoryTabBadgeStyle(activeCategoryTab === 'chapters')
                                 )}
-                                <span className="leading-relaxed font-sans">{issue.message}</span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-
-                {/* ── 6-stat summary row ─────────────────────────────────────────── */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 font-sans">
-                  <StatCard
-                    label="Total Files"
-                    value={stats.total}
-                    total={stats.total}
-                    icon={BookOpen}
-                    barColor="bg-primary"
-                    valueColor="text-foreground"
-                  />
-                  <StatCard
-                    label="Pending"
-                    value={stats.pending}
-                    total={stats.total}
-                    icon={Clock}
-                    barColor="bg-slate-400"
-                    valueColor={stats.pending > 0 ? 'text-slate-500' : 'text-foreground'}
-                    isActive={activeFilter === 'pending'}
-                    onClick={() => toggleFilter('pending')}
-                  />
-                  <StatCard
-                    label="Passed"
-                    value={stats.passed}
-                    total={stats.total}
-                    icon={CheckCircle2}
-                    barColor="bg-emerald-500"
-                    valueColor={hasValidated ? 'text-emerald-600' : 'text-foreground'}
-                    isActive={activeFilter === 'passed'}
-                    onClick={() => toggleFilter('passed')}
-                  />
-                  <StatCard
-                    label="Warnings"
-                    value={stats.warnings}
-                    total={stats.total}
-                    icon={AlertTriangle}
-                    barColor="bg-amber-400"
-                    valueColor={hasValidated && stats.warnings > 0 ? 'text-amber-600' : 'text-foreground'}
-                    isActive={activeFilter === 'warning'}
-                    onClick={() => toggleFilter('warning')}
-                  />
-                  <StatCard
-                    label="Failed"
-                    value={stats.failed}
-                    total={stats.total}
-                    icon={XCircle}
-                    barColor="bg-red-500"
-                    valueColor={hasValidated && stats.failed > 0 ? 'text-red-500' : 'text-foreground'}
-                    isActive={activeFilter === 'failed'}
-                    onClick={() => toggleFilter('failed')}
-                  />
-                  <StatCard
-                    label="Info"
-                    value={stats.infos}
-                    total={stats.total}
-                    icon={InfoIcon}
-                    barColor="bg-sky-400"
-                    valueColor={hasValidated && stats.infos > 0 ? 'text-sky-600' : 'text-foreground'}
-                    isActive={activeFilter === 'info'}
-                    onClick={() => toggleFilter('info')}
-                  />
-                </div>
-                {/* ── Top Horizontal Category Navigation Tabs ─────────────────────────────────── */}
-                {(() => {
-                  const getCategoryTabBadgeStyle = (isTabActive: boolean) => {
-                    if (activeFilter === 'failed') {
-                      return isTabActive
-                        ? 'bg-red-500/20 text-red-600 dark:text-red-400 font-bold border border-red-500/30'
-                        : 'bg-red-500/10 text-red-600 dark:text-red-400 font-bold';
-                    }
-                    if (activeFilter === 'passed') {
-                      return isTabActive
-                        ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-500/30'
-                        : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold';
-                    }
-                    if (activeFilter === 'warning') {
-                      return isTabActive
-                        ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 font-bold border border-amber-500/30'
-                        : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 font-bold';
-                    }
-                    if (activeFilter === 'info') {
-                      return isTabActive
-                        ? 'bg-sky-500/20 text-sky-600 dark:text-sky-400 font-bold border border-sky-500/30'
-                        : 'bg-sky-500/10 text-sky-600 dark:text-sky-400 font-bold';
-                    }
-                    if (activeFilter === 'pending') {
-                      return isTabActive
-                        ? 'bg-slate-500/20 text-slate-600 dark:text-slate-400 font-bold border border-slate-500/30'
-                        : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 font-bold';
-                    }
-                    // Default normal / clear filter state -> Chapter / Primary theme color for ALL category counts!
-                    return isTabActive
-                      ? 'bg-primary/20 text-primary font-bold border border-primary/30'
-                      : 'bg-primary/10 text-primary/80 font-semibold';
-                  };
-
-                  return (
-                    <div className="flex items-center gap-2 border-b border-border/80 pb-px font-sans overflow-x-auto scrollbar-none">
-                      {frontMatterFiles.length > 0 && (
-                        <button
-                          onClick={() => setActiveCategoryTab('front_matter')}
-                          className={cn(
-                            'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
-                            activeCategoryTab === 'front_matter'
-                              ? 'border-orange-500 text-orange-600 dark:text-orange-400 bg-orange-500/10 shadow-xs'
-                              : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                              >
+                                {visibleChapterFiles.length}
+                              </span>
+                            </button>
                           )}
-                        >
-                          <BookOpen className="w-4 h-4 text-orange-500 shrink-0" />
-                          <span>Front Matter</span>
-                          <span
-                            className={cn(
-                              'px-2 py-0.5 rounded-full text-[10px] font-mono transition-colors',
-                              getCategoryTabBadgeStyle(activeCategoryTab === 'front_matter')
-                            )}
-                          >
-                            {visibleFrontMatterFiles.length}
-                          </span>
-                        </button>
-                      )}
 
-                      {chapterFiles.length > 0 && (
-                        <button
-                          onClick={() => setActiveCategoryTab('chapters')}
-                          className={cn(
-                            'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
-                            activeCategoryTab === 'chapters'
-                              ? 'border-primary text-primary bg-primary/10 shadow-xs'
-                              : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                          {backMatterFiles.length > 0 && (
+                            <button
+                              onClick={() => setActiveCategoryTab('back_matter')}
+                              className={cn(
+                                'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
+                                activeCategoryTab === 'back_matter'
+                                  ? 'border-fuchsia-500 text-fuchsia-600 dark:text-fuchsia-400 bg-fuchsia-500/10 shadow-xs'
+                                  : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                              )}
+                            >
+                              <BookOpen className="w-4 h-4 text-fuchsia-500 shrink-0" />
+                              <span>Back Matter</span>
+                              <span
+                                className={cn(
+                                  'px-2 py-0.5 rounded-full text-[10px] font-mono transition-colors',
+                                  getCategoryTabBadgeStyle(activeCategoryTab === 'back_matter')
+                                )}
+                              >
+                                {visibleBackMatterFiles.length}
+                              </span>
+                            </button>
                           )}
-                        >
-                          <BookOpen className="w-4 h-4 text-primary shrink-0" />
-                          <span>Chapters</span>
-                          <span
-                            className={cn(
-                              'px-2 py-0.5 rounded-full text-[10px] font-mono transition-colors',
-                              getCategoryTabBadgeStyle(activeCategoryTab === 'chapters')
-                            )}
-                          >
-                            {visibleChapterFiles.length}
-                          </span>
-                        </button>
-                      )}
 
-                      {backMatterFiles.length > 0 && (
-                        <button
-                          onClick={() => setActiveCategoryTab('back_matter')}
-                          className={cn(
-                            'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
-                            activeCategoryTab === 'back_matter'
-                              ? 'border-fuchsia-500 text-fuchsia-600 dark:text-fuchsia-400 bg-fuchsia-500/10 shadow-xs'
-                              : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
-                          )}
-                        >
-                          <BookOpen className="w-4 h-4 text-fuchsia-500 shrink-0" />
-                          <span>Back Matter</span>
-                          <span
-                            className={cn(
-                              'px-2 py-0.5 rounded-full text-[10px] font-mono transition-colors',
-                              getCategoryTabBadgeStyle(activeCategoryTab === 'back_matter')
-                            )}
-                          >
-                            {visibleBackMatterFiles.length}
-                          </span>
-                        </button>
-                      )}
-
-                      <button
-                        onClick={() => setActiveCategoryTab('css')}
-                        className={cn(
-                          'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
-                          activeCategoryTab === 'css'
-                            ? 'border-violet-500 text-violet-600 dark:text-violet-400 bg-violet-500/10 shadow-xs'
-                            : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
-                        )}
-                      >
-                        <Braces className="w-4 h-4 text-violet-500 shrink-0" />
-                        <span>CSS</span>
-                        <span
-                          className={cn(
-                            'px-2 py-0.5 rounded-full text-[10px] font-mono transition-colors',
-                            getCategoryTabBadgeStyle(activeCategoryTab === 'css')
-                          )}
-                        >
-                          {visibleCssFiles.length}
-                        </span>
-                      </button>
-
-                      <button
-                        onClick={() => setActiveCategoryTab('images')}
-                        className={cn(
-                          'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
-                          activeCategoryTab === 'images'
-                            ? 'border-blue-500 text-blue-600 dark:text-blue-400 bg-blue-500/10 shadow-xs'
-                            : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
-                        )}
-                      >
-                        <ImageIcon className="w-4 h-4 text-blue-500 shrink-0" />
-                        <span>Images</span>
-                        <span
-                          className={cn(
-                            'px-2 py-0.5 rounded-full text-[10px] font-mono transition-colors',
-                            getCategoryTabBadgeStyle(activeCategoryTab === 'images')
-                          )}
-                        >
-                          {visibleImageFiles.length}
-                        </span>
-                      </button>
-
-                      {fontFiles.length > 0 && (
-                        <button
-                          onClick={() => setActiveCategoryTab('fonts')}
-                          className={cn(
-                            'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
-                            activeCategoryTab === 'fonts'
-                              ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 shadow-xs'
-                              : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
-                          )}
-                        >
-                          <Type className="w-4 h-4 text-indigo-500 shrink-0" />
-                          <span>Fonts</span>
-                          <span
-                            className={cn(
-                              'px-2 py-0.5 rounded-full text-[10px] font-mono transition-colors',
-                              getCategoryTabBadgeStyle(activeCategoryTab === 'fonts')
-                            )}
-                          >
-                            {visibleFontFiles.length}
-                          </span>
-                        </button>
-                      )}
-
-                      <button
-                        onClick={() => setActiveCategoryTab('other')}
-                        className={cn(
-                          'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
-                          activeCategoryTab === 'other'
-                            ? 'border-cyan-500 text-cyan-600 dark:text-cyan-400 bg-cyan-500/10 shadow-xs'
-                            : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
-                        )}
-                      >
-                        <FileCode2 className="w-4 h-4 text-cyan-500 shrink-0" />
-                        <span>Metadata Files</span>
-                        <span
-                          className={cn(
-                            'px-2 py-0.5 rounded-full text-[10px] font-mono transition-colors',
-                            getCategoryTabBadgeStyle(activeCategoryTab === 'other')
-                          )}
-                        >
-                          {visibleOtherFiles.length}
-                        </span>
-                      </button>
-
-                      <button
-                        onClick={() => setActiveCategoryTab('all')}
-                        className={cn(
-                          'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg sm:ml-auto',
-                          activeCategoryTab === 'all'
-                            ? 'border-foreground text-foreground bg-muted shadow-xs font-bold'
-                            : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
-                        )}
-                      >
-                        <span>All Files</span>
-                        <span
-                          className={cn(
-                            'px-2 py-0.5 rounded-full text-[10px] font-mono transition-colors',
-                            getCategoryTabBadgeStyle(activeCategoryTab === 'all')
-                          )}
-                        >
-                          {allBackendFiles.length}
-                        </span>
-                      </button>
-                    </div>
-                  );
-                })()}
-
-                {(activeFilter || selectedRuleFilter) && (
-                  <div className="flex items-center justify-between text-xs text-muted-foreground font-sans bg-muted/40 px-3 py-2 rounded-lg border border-border/50">
-                    <span>
-                      Showing <span className="font-semibold text-foreground">{totalVisibleCount}</span> file{totalVisibleCount !== 1 ? 's' : ''}
-                      {activeFilter && <span> matching status <span className="font-semibold text-foreground">{activeFilter}</span></span>}
-                      {selectedRuleFilter && (
-                        <span>
-                          {' '}matching rule{' '}
-                          <span className="font-semibold text-primary">
-                            {[...ruleSummary.general, ...ruleSummary.customer].find((r) => (r.rule_id || r.rule_name) === selectedRuleFilter)?.rule_name || selectedRuleFilter}
-                          </span>
-                        </span>
-                      )}
-                    </span>
-                    <button
-                      onClick={() => { setActiveFilter(null); setSelectedRuleFilter(null); }}
-                      className="text-xs text-primary hover:underline font-semibold"
-                    >
-                      Clear filter
-                    </button>
-                  </div>
-                )}
-
-                {/* ── Scrollable Files List Area ───────────────────────────────── */}
-                <div className="flex-1 overflow-y-auto max-h-[calc(100vh-17rem)] min-h-[350px] pr-2 space-y-6 scrollbar-thin scrollbar-thumb-border font-sans pb-4">
-                  
-                  {/* ── 0. Summary Tab View ────────────────────────────────────────── */}
-                  {activeCategoryTab === 'summary' && (
-                    <div className="space-y-6">
-                      <div className="flex items-center justify-between border-b border-border/60 pb-2">
-                        <div className="flex items-center gap-2">
-                          <BookMarked className="w-4 h-4 text-primary" />
-                          <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
-                            Job Analysis Report
-                          </h2>
-                        </div>
-                        <div className="flex items-center gap-2">
                           <button
-                            onClick={() => setShowFilenames(!showFilenames)}
-                            className={`flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-medium transition-colors ${showFilenames ? 'bg-primary/10 text-primary border border-primary/20' : 'bg-muted/50 text-muted-foreground border border-transparent hover:bg-muted'}`}
-                          >
-                            <Eye className="w-3 h-3 shrink-0" />
-                            <span className="whitespace-nowrap">{showFilenames ? 'Hide Filenames' : 'Show Filenames'}</span>
-                          </button>
-                          <button
-                            onClick={handleRefreshSummary}
-                            disabled={refreshSummaryMutation.isPending || isFetchingSummary || isLoadingSummary}
-                            className="flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-medium transition-colors bg-white text-primary border border-primary/20 hover:bg-primary/10 disabled:opacity-50"
-                          >
-                            <RefreshCcw className={`w-3 h-3 shrink-0 ${refreshSummaryMutation.isPending || isFetchingSummary || isLoadingSummary ? 'animate-spin' : ''}`} />
-                            <span className="whitespace-nowrap">{refreshSummaryMutation.isPending || isFetchingSummary || isLoadingSummary ? 'Refreshing...' : 'Refresh Report'}</span>
-                          </button>
-                        </div>
-                      </div>
-                      
-                      {isLoadingSummary ? (
-                        <div className="flex items-center justify-center p-12">
-                          <Loader2 className="w-6 h-6 animate-spin text-primary" />
-                          <span className="ml-2 text-sm text-muted-foreground">Generating summary...</span>
-                        </div>
-                      ) : summaryData?.error ? (
-                        <div className="p-4 bg-red-50 text-red-600 rounded-lg text-sm border border-red-200">
-                          {summaryData.error}
-                        </div>
-                      ) : (
-                        <div className="space-y-6">
-                          {/* Top Metric Cards */}
-                          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-                            <Card 
-                              className={`shadow-none cursor-pointer transition-all ${activeReportTab === 'chapters' ? 'border-primary bg-primary/10 ring-1 ring-primary/20' : 'border-primary/20 bg-primary/5 hover:bg-primary/10'}`}
-                              onClick={() => setActiveReportTab('chapters')}
-                            >
-                              <CardBody className="p-3 flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <BookOpen className="w-4 h-4 text-primary/70" />
-                                  <div className="text-[11px] font-bold text-primary/90 uppercase tracking-wider">Chapters</div>
-                                </div>
-                                <div className="text-lg font-black text-primary">{summaryData?.total_chapters || 0}</div>
-                              </CardBody>
-                            </Card>
-                            <Card 
-                              className={`shadow-none cursor-pointer transition-all ${activeReportTab === 'parts' ? 'border-amber-500 bg-amber-500/10 ring-1 ring-amber-500/20' : 'border-amber-500/20 bg-amber-500/5 hover:bg-amber-500/10'}`}
-                              onClick={() => setActiveReportTab('parts')}
-                            >
-                              <CardBody className="p-3 flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <Bookmark className="w-4 h-4 text-amber-600/70" />
-                                  <div className="text-[11px] font-bold text-amber-600/90 uppercase tracking-wider">Parts</div>
-                                </div>
-                                <div className="text-lg font-black text-amber-600">{summaryData?.total_parts || 0}</div>
-                              </CardBody>
-                            </Card>
-                            <Card 
-                              className={`shadow-none cursor-pointer transition-all ${activeReportTab === 'sections' ? 'border-purple-500 bg-purple-500/10 ring-1 ring-purple-500/20' : 'border-purple-500/20 bg-purple-500/5 hover:bg-purple-500/10'}`}
-                              onClick={() => setActiveReportTab('sections')}
-                            >
-                              <CardBody className="p-3 flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <FileText className="w-4 h-4 text-purple-600/70" />
-                                  <div className="text-[11px] font-bold text-purple-600/90 uppercase tracking-wider">Sections</div>
-                                </div>
-                                <div className="text-lg font-black text-purple-600">{summaryData?.total_sections || 0}</div>
-                              </CardBody>
-                            </Card>
-                            <Card 
-                              className={`shadow-none cursor-pointer transition-all ${activeReportTab === 'figures' ? 'border-emerald-500 bg-emerald-500/10 ring-1 ring-emerald-500/20' : 'border-emerald-500/20 bg-emerald-500/5 hover:bg-emerald-500/10'}`}
-                              onClick={() => setActiveReportTab('figures')}
-                            >
-                              <CardBody className="p-3 flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <ImageIcon className="w-4 h-4 text-emerald-500/70" />
-                                  <div className="text-[11px] font-bold text-emerald-600/90 uppercase tracking-wider">Figures</div>
-                                </div>
-                                <div className="text-lg font-black text-emerald-600">{summaryData?.total_figures || 0}</div>
-                              </CardBody>
-                            </Card>
-                            <Card 
-                              className={`shadow-none cursor-pointer transition-all ${activeReportTab === 'tables' ? 'border-blue-500 bg-blue-500/10 ring-1 ring-blue-500/20' : 'border-blue-500/20 bg-blue-500/5 hover:bg-blue-500/10'}`}
-                              onClick={() => setActiveReportTab('tables')}
-                            >
-                              <CardBody className="p-3 flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <LayoutGrid className="w-4 h-4 text-blue-500/70" />
-                                  <div className="text-[11px] font-bold text-blue-600/90 uppercase tracking-wider">Tables</div>
-                                </div>
-                                <div className="text-lg font-black text-blue-600">{summaryData?.total_tables || 0}</div>
-                              </CardBody>
-                            </Card>
-                          </div>
-
-                          {/* Figure Labels List */}
-                          {activeReportTab === 'figures' && (
-                            <Card className="shadow-sm border-border/50 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                              <div className="px-4 py-3 border-b border-border/50 bg-muted/20">
-                                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                                  <List className="w-4 h-4 text-emerald-500" />
-                                  Figure Label List
-                                </h3>
-                              </div>
-                              <CardBody className="p-0">
-                                {sortedFigureLabels.length > 0 ? (
-                                  <ul className="divide-y divide-border/50 max-h-[500px] overflow-y-auto">
-                                    {sortedFigureLabels.map((label, idx) => {
-                                      const match = label.match(/^\s*\[(.*?)\]\s*([\s\S]*)$/);
-                                      const filename = match ? match[1] : null;
-                                      const text = match ? match[2] : label;
-                                      
-                                      return (
-                                        <li key={idx} className="px-4 py-2.5 text-sm hover:bg-muted/30 transition-colors flex items-start gap-3">
-                                          <span className="text-muted-foreground font-mono text-xs w-6 text-right shrink-0">{idx + 1}.</span>
-                                          <span className="text-foreground leading-snug break-words">
-                                            {showFilenames && filename && (
-                                              <span className="text-muted-foreground mr-2 font-mono text-[10.5px] bg-muted/50 px-1 py-0.5 rounded border border-border/50">[{filename}]</span>
-                                            )}
-                                            {text}
-                                          </span>
-                                        </li>
-                                      );
-                                    })}
-                                  </ul>
-                                ) : (
-                                  <div className="p-8 text-center text-muted-foreground text-sm italic">
-                                    No figure labels found.
-                                  </div>
-                                )}
-                              </CardBody>
-                            </Card>
-                          )}
-
-                          {/* Chapter Labels List */}
-                          {activeReportTab === 'chapters' && (
-                            <Card className="shadow-sm border-border/50 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                              <div className="px-4 py-3 border-b border-border/50 bg-muted/20">
-                                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                                  <BookOpen className="w-4 h-4 text-primary" />
-                                  Chapter List
-                                </h3>
-                              </div>
-                              <CardBody className="p-0">
-                                {sortedChapterLabels.length > 0 ? (
-                                  <ul className="divide-y divide-border/50 max-h-[500px] overflow-y-auto">
-                                    {sortedChapterLabels.map((label, idx) => (
-                                      <li key={idx} className="px-4 py-2.5 text-sm hover:bg-muted/30 transition-colors flex items-start gap-3">
-                                        <span className="text-muted-foreground font-mono text-xs w-6 text-right shrink-0">{idx + 1}.</span>
-                                        <span className="text-foreground leading-snug break-words">
-                                          {showFilenames ? label : label.replace(/\.(xhtml|html)$/i, '')}
-                                        </span>
-                                      </li>
-                                    ))}
-                                  </ul>
-                                ) : (
-                                  <div className="p-8 text-center text-muted-foreground text-sm italic">
-                                    No chapter labels found.
-                                  </div>
-                                )}
-                              </CardBody>
-                            </Card>
-                          )}
-
-                          {/* Table Labels List */}
-                          {activeReportTab === 'tables' && (
-                            <Card className="shadow-sm border-border/50 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                              <div className="px-4 py-3 border-b border-border/50 bg-muted/20">
-                                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                                  <LayoutGrid className="w-4 h-4 text-blue-500" />
-                                  Table Label List
-                                </h3>
-                              </div>
-                              <CardBody className="p-0">
-                                {sortedTableLabels.length > 0 ? (
-                                  <ul className="divide-y divide-border/50 max-h-[500px] overflow-y-auto">
-                                    {sortedTableLabels.map((label, idx) => {
-                                      const match = label.match(/^\s*\[(.*?)\]\s*([\s\S]*)$/);
-                                      const filename = match ? match[1] : null;
-                                      const text = match ? match[2] : label;
-                                      
-                                      return (
-                                        <li key={idx} className="px-4 py-2.5 text-sm hover:bg-muted/30 transition-colors flex items-start gap-3">
-                                          <span className="text-muted-foreground font-mono text-xs w-6 text-right shrink-0">{idx + 1}.</span>
-                                          <span className="text-foreground leading-snug break-words">
-                                            {showFilenames && filename && (
-                                              <span className="text-muted-foreground mr-2 font-mono text-[10.5px] bg-muted/50 px-1 py-0.5 rounded border border-border/50">[{filename}]</span>
-                                            )}
-                                            {text}
-                                          </span>
-                                        </li>
-                                      );
-                                    })}
-                                  </ul>
-                                ) : (
-                                  <div className="p-8 text-center text-muted-foreground text-sm italic">
-                                    No table labels found.
-                                  </div>
-                                )}
-                              </CardBody>
-                            </Card>
-                          )}
-
-                          {/* Parts List */}
-                          {activeReportTab === 'parts' && (
-                            <Card className="shadow-sm border-border/50 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                              <div className="px-4 py-3 border-b border-border/50 bg-muted/20">
-                                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                                  <Bookmark className="w-4 h-4 text-amber-500" />
-                                  Part List
-                                </h3>
-                              </div>
-                              <CardBody className="p-0">
-                                {sortedPartLabels.length > 0 ? (
-                                  <ul className="divide-y divide-border/50 max-h-[500px] overflow-y-auto">
-                                    {sortedPartLabels.map((label, idx) => (
-                                      <li key={idx} className="px-4 py-2.5 text-sm hover:bg-muted/30 transition-colors flex items-start gap-3">
-                                        <span className="text-muted-foreground font-mono text-xs w-6 text-right shrink-0">{idx + 1}.</span>
-                                        <span className="text-foreground leading-snug break-words">
-                                          {showFilenames ? label : label.replace(/\.(xhtml|html)$/i, '')}
-                                        </span>
-                                      </li>
-                                    ))}
-                                  </ul>
-                                ) : (
-                                  <div className="p-8 text-center text-muted-foreground text-sm italic">
-                                    No part labels found.
-                                  </div>
-                                )}
-                              </CardBody>
-                            </Card>
-                          )}
-
-                          {/* Sections List */}
-                          {activeReportTab === 'sections' && (
-                            <Card className="shadow-sm border-border/50 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                              <div className="px-4 py-3 border-b border-border/50 bg-muted/20">
-                                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                                  <FileText className="w-4 h-4 text-purple-500" />
-                                  Section List
-                                </h3>
-                              </div>
-                              <CardBody className="p-0">
-                                {sortedSectionLabels.length > 0 ? (
-                                  <ul className="divide-y divide-border/50 max-h-[500px] overflow-y-auto">
-                                    {sortedSectionLabels.map((label, idx) => (
-                                      <li key={idx} className="px-4 py-2.5 text-sm hover:bg-muted/30 transition-colors flex items-start gap-3">
-                                        <span className="text-muted-foreground font-mono text-xs w-6 text-right shrink-0">{idx + 1}.</span>
-                                        <span className="text-foreground leading-snug break-words">
-                                          {showFilenames ? label : label.replace(/\.(xhtml|html)$/i, '')}
-                                        </span>
-                                      </li>
-                                    ))}
-                                  </ul>
-                                ) : (
-                                  <div className="p-8 text-center text-muted-foreground text-sm italic">
-                                    No section labels found.
-                                  </div>
-                                )}
-                              </CardBody>
-                            </Card>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* ── Front Matter Tab View ────────────────────────────────── */}
-                  {(activeCategoryTab === 'front_matter' || activeCategoryTab === 'all') && visibleFrontMatterFiles.length > 0 && (
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between border-b border-border/60 pb-2">
-                        <div className="flex items-center gap-2">
-                          <BookOpen className="w-4 h-4 text-orange-500" />
-                          <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
-                            Front Matter
-                          </h2>
-                          <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleFrontMatterFiles.length})</span>
-                        </div>
-                      </div>
-                      <motion.div
-                        className={cn(
-                          layoutMode === 'grid'
-                            ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
-                            : 'space-y-2.5',
-                        )}
-                        variants={containerVariants}
-                        initial="hidden"
-                        animate="show"
-                      >
-                        {visibleFrontMatterFiles.map((file, i) => {
-                          const status = getFileStatus(file.file_name);
-                          const agg = fileIssues.get(file.file_name);
-                          return (
-                            <motion.div key={`front-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
-                              <XHTMLCard
-                                file={file}
-                                variant="xhtml"
-                                layoutMode={layoutMode}
-                                status={status}
-                                errors={agg?.errors ?? 0}
-                                warnings={agg?.warnings ?? 0}
-                                infos={agg?.infos ?? 0}
-                                isValidating={validatingFiles.has(file.file_name)}
-                                onValidate={() => handleValidateFile(file.file_name)}
-                                onOpen={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
-                                onPreview={() => { setModalAllowedTabs(undefined); setModalInitialTab('preview'); setSelectedFile(file); }}
-                                index={i}
-                              />
-                            </motion.div>
-                          );
-                        })}
-                      </motion.div>
-                    </div>
-                  )}
-
-                  {/* ── Chapters Tab View ────────────────────────────────── */}
-                  {(activeCategoryTab === 'chapters' || activeCategoryTab === 'all') && visibleChapterFiles.length > 0 && (
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between border-b border-border/60 pb-2">
-                        <div className="flex items-center gap-2">
-                          <BookOpen className="w-4 h-4 text-primary" />
-                          <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
-                            Chapters
-                          </h2>
-                          <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleChapterFiles.length})</span>
-                        </div>
-                      </div>
-                      <motion.div
-                        className={cn(
-                          layoutMode === 'grid'
-                            ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
-                            : 'space-y-2.5',
-                        )}
-                        variants={containerVariants}
-                        initial="hidden"
-                        animate="show"
-                      >
-                        {visibleChapterFiles.map((file, i) => {
-                          const status = getFileStatus(file.file_name);
-                          const agg = fileIssues.get(file.file_name);
-                          return (
-                            <motion.div key={`chapter-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
-                              <XHTMLCard
-                                file={file}
-                                variant="xhtml"
-                                layoutMode={layoutMode}
-                                status={status}
-                                errors={agg?.errors ?? 0}
-                                warnings={agg?.warnings ?? 0}
-                                infos={agg?.infos ?? 0}
-                                isValidating={validatingFiles.has(file.file_name)}
-                                onValidate={() => handleValidateFile(file.file_name)}
-                                onOpen={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
-                                onPreview={() => { setModalAllowedTabs(undefined); setModalInitialTab('preview'); setSelectedFile(file); }}
-                                index={i}
-                              />
-                            </motion.div>
-                          );
-                        })}
-                      </motion.div>
-                    </div>
-                  )}
-
-                  {/* ── Back Matter Tab View ────────────────────────────────── */}
-                  {(activeCategoryTab === 'back_matter' || activeCategoryTab === 'all') && visibleBackMatterFiles.length > 0 && (
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between border-b border-border/60 pb-2">
-                        <div className="flex items-center gap-2">
-                          <BookOpen className="w-4 h-4 text-rose-500" />
-                          <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
-                            Back Matter
-                          </h2>
-                          <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleBackMatterFiles.length})</span>
-                        </div>
-                      </div>
-                      <motion.div
-                        className={cn(
-                          layoutMode === 'grid'
-                            ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
-                            : 'space-y-2.5',
-                        )}
-                        variants={containerVariants}
-                        initial="hidden"
-                        animate="show"
-                      >
-                        {visibleBackMatterFiles.map((file, i) => {
-                          const status = getFileStatus(file.file_name);
-                          const agg = fileIssues.get(file.file_name);
-                          return (
-                            <motion.div key={`back-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
-                              <XHTMLCard
-                                file={file}
-                                variant="xhtml"
-                                layoutMode={layoutMode}
-                                status={status}
-                                errors={agg?.errors ?? 0}
-                                warnings={agg?.warnings ?? 0}
-                                infos={agg?.infos ?? 0}
-                                isValidating={validatingFiles.has(file.file_name)}
-                                onValidate={() => handleValidateFile(file.file_name)}
-                                onOpen={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
-                                onPreview={() => { setModalAllowedTabs(undefined); setModalInitialTab('preview'); setSelectedFile(file); }}
-                                index={i}
-                              />
-                            </motion.div>
-                          );
-                        })}
-                      </motion.div>
-                    </div>
-                  )}
-
-                  {/* ── 2. CSS Tab View ────────────────────────────────────── */}
-                  {(activeCategoryTab === 'css' || activeCategoryTab === 'all') && (
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between border-b border-border/60 pb-2">
-                        <div className="flex items-center gap-2">
-                          <Braces className="w-4 h-4 text-violet-500" />
-                          <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
-                            CSS
-                          </h2>
-                          <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleCssFiles.length})</span>
-                        </div>
-                      </div>
-                      {visibleCssFiles.length === 0 ? (
-                        <p className="text-xs text-muted-foreground italic py-1">No CSS files in this section.</p>
-                      ) : (
-                        <motion.div
-                          className={cn(
-                            layoutMode === 'grid'
-                              ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
-                              : 'space-y-2.5',
-                          )}
-                          variants={containerVariants}
-                          initial="hidden"
-                          animate="show"
-                        >
-                          {visibleCssFiles.map((file, i) => {
-                            const agg = fileIssues.get(file.file_name) ?? { errors: 0, warnings: 0, infos: 0 };
-                            return (
-                            <motion.div key={`css-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
-                              <XHTMLCard
-                                file={file}
-                                variant="css"
-                                layoutMode={layoutMode}
-                                status={getFileStatus(file.file_name)}
-                                errors={agg.errors}
-                                warnings={agg.warnings}
-                                infos={agg.infos}
-                                onOpen={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
-                                index={i}
-                              />
-                            </motion.div>
-                            );
-                          })}
-                        </motion.div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* ── 3. Images Tab View ────────────────────────────────────────── */}
-                  {(activeCategoryTab === 'images' || activeCategoryTab === 'all') && (
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between border-b border-border/60 pb-2">
-                        <div className="flex items-center gap-2">
-                          <ImageIcon className="w-4 h-4 text-emerald-500" />
-                          <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
-                            Images
-                          </h2>
-                          <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleImageFiles.length})</span>
-                        </div>
-                        {visibleImageFiles.length > 0 && (
-                          <button
-                            className="inline-flex flex-row items-center justify-center gap-1.5 px-3.5 py-1.5 h-8.5 text-xs font-semibold rounded-lg bg-primary text-white hover:bg-primary/90 transition-all shadow-xs disabled:opacity-50 shrink-0 whitespace-nowrap"
-                            onClick={() => {
-                              visibleImageFiles.forEach(f => {
-                                if (!validatingFiles.has(f.file_name)) {
-                                  handleValidateFile(f.file_name);
-                                }
-                              });
-                            }}
-                            disabled={visibleImageFiles.every(f => validatingFiles.has(f.file_name))}
-                          >
-                            {visibleImageFiles.some(f => validatingFiles.has(f.file_name)) ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0 text-white" />
-                            ) : (
-                              <Play className="w-3.5 h-3.5 shrink-0 text-white fill-white" />
+                            onClick={() => setActiveCategoryTab('css')}
+                            className={cn(
+                              'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
+                              activeCategoryTab === 'css'
+                                ? 'border-violet-500 text-violet-600 dark:text-violet-400 bg-violet-500/10 shadow-xs'
+                                : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
                             )}
-                            <span className="whitespace-nowrap text-white">
-                              {visibleImageFiles.some(f => validatingFiles.has(f.file_name)) ? 'Validating…' : 'Validate all'}
+                          >
+                            <Braces className="w-4 h-4 text-violet-500 shrink-0" />
+                            <span>CSS</span>
+                            <span
+                              className={cn(
+                                'px-2 py-0.5 rounded-full text-[10px] font-mono transition-colors',
+                                getCategoryTabBadgeStyle(activeCategoryTab === 'css')
+                              )}
+                            >
+                              {visibleCssFiles.length}
                             </span>
                           </button>
-                        )}
-                      </div>
-                      {visibleImageFiles.length === 0 ? (
-                        <p className="text-xs text-muted-foreground italic py-1">No image files in this section.</p>
-                      ) : (
-                        <motion.div
-                          className={cn(
-                            layoutMode === 'grid'
-                              ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
-                              : 'space-y-2.5',
+
+                          <button
+                            onClick={() => setActiveCategoryTab('images')}
+                            className={cn(
+                              'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
+                              activeCategoryTab === 'images'
+                                ? 'border-blue-500 text-blue-600 dark:text-blue-400 bg-blue-500/10 shadow-xs'
+                                : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                            )}
+                          >
+                            <ImageIcon className="w-4 h-4 text-blue-500 shrink-0" />
+                            <span>Images</span>
+                            <span
+                              className={cn(
+                                'px-2 py-0.5 rounded-full text-[10px] font-mono transition-colors',
+                                getCategoryTabBadgeStyle(activeCategoryTab === 'images')
+                              )}
+                            >
+                              {visibleImageFiles.length}
+                            </span>
+                          </button>
+
+                          {fontFiles.length > 0 && (
+                            <button
+                              onClick={() => setActiveCategoryTab('fonts')}
+                              className={cn(
+                                'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
+                                activeCategoryTab === 'fonts'
+                                  ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 shadow-xs'
+                                  : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                              )}
+                            >
+                              <Type className="w-4 h-4 text-indigo-500 shrink-0" />
+                              <span>Fonts</span>
+                              <span
+                                className={cn(
+                                  'px-2 py-0.5 rounded-full text-[10px] font-mono transition-colors',
+                                  getCategoryTabBadgeStyle(activeCategoryTab === 'fonts')
+                                )}
+                              >
+                                {visibleFontFiles.length}
+                              </span>
+                            </button>
                           )}
-                          variants={containerVariants}
-                          initial="hidden"
-                          animate="show"
+
+                          <button
+                            onClick={() => setActiveCategoryTab('other')}
+                            className={cn(
+                              'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg',
+                              activeCategoryTab === 'other'
+                                ? 'border-cyan-500 text-cyan-600 dark:text-cyan-400 bg-cyan-500/10 shadow-xs'
+                                : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                            )}
+                          >
+                            <FileCode2 className="w-4 h-4 text-cyan-500 shrink-0" />
+                            <span>Metadata Files</span>
+                            <span
+                              className={cn(
+                                'px-2 py-0.5 rounded-full text-[10px] font-mono transition-colors',
+                                getCategoryTabBadgeStyle(activeCategoryTab === 'other')
+                              )}
+                            >
+                              {visibleOtherFiles.length}
+                            </span>
+                          </button>
+
+                          <button
+                            onClick={() => setActiveCategoryTab('all')}
+                            className={cn(
+                              'flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all shrink-0 rounded-t-lg sm:ml-auto',
+                              activeCategoryTab === 'all'
+                                ? 'border-foreground text-foreground bg-muted shadow-xs font-bold'
+                                : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                            )}
+                          >
+                            <span>All Files</span>
+                            <span
+                              className={cn(
+                                'px-2 py-0.5 rounded-full text-[10px] font-mono transition-colors',
+                                getCategoryTabBadgeStyle(activeCategoryTab === 'all')
+                              )}
+                            >
+                              {allBackendFiles.length}
+                            </span>
+                          </button>
+                        </div>
+                      );
+                    })()}
+
+                    {(activeFilter || selectedRuleFilter) && (
+                      <div className="flex items-center justify-between text-xs text-muted-foreground font-sans bg-muted/40 px-3 py-2 rounded-lg border border-border/50">
+                        <span>
+                          Showing <span className="font-semibold text-foreground">{totalVisibleCount}</span> file{totalVisibleCount !== 1 ? 's' : ''}
+                          {activeFilter && <span> matching status <span className="font-semibold text-foreground">{activeFilter}</span></span>}
+                          {selectedRuleFilter && (
+                            <span>
+                              {' '}matching rule{' '}
+                              <span className="font-semibold text-primary">
+                                {[...ruleSummary.general, ...ruleSummary.customer].find((r) => (r.rule_id || r.rule_name) === selectedRuleFilter)?.rule_name || selectedRuleFilter}
+                              </span>
+                            </span>
+                          )}
+                        </span>
+                        <button
+                          onClick={() => { setActiveFilter(null); setSelectedRuleFilter(null); }}
+                          className="text-xs text-primary hover:underline font-semibold"
                         >
-                          {visibleImageFiles.map((file, i) => {
-                            const agg = fileIssues.get(file.file_name) ?? { errors: 0, warnings: 0, infos: 0 };
-                            return (
-                            <motion.div key={`img-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
-                              <XHTMLCard
-                                file={file}
-                                variant="image"
-                                layoutMode={layoutMode}
-                                status={getFileStatus(file.file_name)}
-                                errors={agg.errors}
-                                warnings={agg.warnings}
-                                infos={agg.infos}
-                                isValidating={validatingFiles.has(file.file_name)}
-                                onValidate={() => handleValidateFile(file.file_name)}
-                                onOpen={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
-                                onPreview={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
-                                index={i}
-                              />
+                          Clear filter
+                        </button>
+                      </div>
+                    )}
+
+                    {/* ── Scrollable Files List Area ───────────────────────────────── */}
+                    <div className="flex-1 overflow-y-auto max-h-[calc(100vh-17rem)] min-h-[350px] pr-2 space-y-6 scrollbar-thin scrollbar-thumb-border font-sans pb-4">
+
+                      {/* ── 0. Summary Tab View ────────────────────────────────────────── */}
+                      {activeCategoryTab === 'summary' && (
+                        <div className="space-y-6">
+                          <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                            <div className="flex items-center gap-2">
+                              <BookMarked className="w-4 h-4 text-primary" />
+                              <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
+                                Job Analysis Report
+                              </h2>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => setShowFilenames(!showFilenames)}
+                                className={`flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-medium transition-colors ${showFilenames ? 'bg-primary/10 text-primary border border-primary/20' : 'bg-muted/50 text-muted-foreground border border-transparent hover:bg-muted'}`}
+                              >
+                                <Eye className="w-3 h-3 shrink-0" />
+                                <span className="whitespace-nowrap">{showFilenames ? 'Hide Filenames' : 'Show Filenames'}</span>
+                              </button>
+                              <button
+                                onClick={handleRefreshSummary}
+                                disabled={refreshSummaryMutation.isPending || isFetchingSummary || isLoadingSummary}
+                                className="flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-medium transition-colors bg-white text-primary border border-primary/20 hover:bg-primary/10 disabled:opacity-50"
+                              >
+                                <RefreshCcw className={`w-3 h-3 shrink-0 ${refreshSummaryMutation.isPending || isFetchingSummary || isLoadingSummary ? 'animate-spin' : ''}`} />
+                                <span className="whitespace-nowrap">{refreshSummaryMutation.isPending || isFetchingSummary || isLoadingSummary ? 'Refreshing...' : 'Refresh Report'}</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {isLoadingSummary ? (
+                            <div className="flex items-center justify-center p-12">
+                              <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                              <span className="ml-2 text-sm text-muted-foreground">Generating summary...</span>
+                            </div>
+                          ) : summaryData?.error ? (
+                            <div className="p-4 bg-red-50 text-red-600 rounded-lg text-sm border border-red-200">
+                              {summaryData.error}
+                            </div>
+                          ) : (
+                            <div className="space-y-6">
+                              {/* Top Metric Cards */}
+                              <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                                <Card
+                                  className={`shadow-none cursor-pointer transition-all ${activeReportTab === 'chapters' ? 'border-primary bg-primary/10 ring-1 ring-primary/20' : 'border-primary/20 bg-primary/5 hover:bg-primary/10'}`}
+                                  onClick={() => setActiveReportTab('chapters')}
+                                >
+                                  <CardBody className="p-3 flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                      <BookOpen className="w-4 h-4 text-primary/70" />
+                                      <div className="text-[11px] font-bold text-primary/90 uppercase tracking-wider">Chapters</div>
+                                    </div>
+                                    <div className="text-lg font-black text-primary">{summaryData?.total_chapters || 0}</div>
+                                  </CardBody>
+                                </Card>
+                                <Card
+                                  className={`shadow-none cursor-pointer transition-all ${activeReportTab === 'parts' ? 'border-amber-500 bg-amber-500/10 ring-1 ring-amber-500/20' : 'border-amber-500/20 bg-amber-500/5 hover:bg-amber-500/10'}`}
+                                  onClick={() => setActiveReportTab('parts')}
+                                >
+                                  <CardBody className="p-3 flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                      <Bookmark className="w-4 h-4 text-amber-600/70" />
+                                      <div className="text-[11px] font-bold text-amber-600/90 uppercase tracking-wider">Parts</div>
+                                    </div>
+                                    <div className="text-lg font-black text-amber-600">{summaryData?.total_parts || 0}</div>
+                                  </CardBody>
+                                </Card>
+                                <Card
+                                  className={`shadow-none cursor-pointer transition-all ${activeReportTab === 'sections' ? 'border-purple-500 bg-purple-500/10 ring-1 ring-purple-500/20' : 'border-purple-500/20 bg-purple-500/5 hover:bg-purple-500/10'}`}
+                                  onClick={() => setActiveReportTab('sections')}
+                                >
+                                  <CardBody className="p-3 flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                      <FileText className="w-4 h-4 text-purple-600/70" />
+                                      <div className="text-[11px] font-bold text-purple-600/90 uppercase tracking-wider">Sections</div>
+                                    </div>
+                                    <div className="text-lg font-black text-purple-600">{summaryData?.total_sections || 0}</div>
+                                  </CardBody>
+                                </Card>
+                                <Card
+                                  className={`shadow-none cursor-pointer transition-all ${activeReportTab === 'figures' ? 'border-emerald-500 bg-emerald-500/10 ring-1 ring-emerald-500/20' : 'border-emerald-500/20 bg-emerald-500/5 hover:bg-emerald-500/10'}`}
+                                  onClick={() => setActiveReportTab('figures')}
+                                >
+                                  <CardBody className="p-3 flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                      <ImageIcon className="w-4 h-4 text-emerald-500/70" />
+                                      <div className="text-[11px] font-bold text-emerald-600/90 uppercase tracking-wider">Figures</div>
+                                    </div>
+                                    <div className="text-lg font-black text-emerald-600">{summaryData?.total_figures || 0}</div>
+                                  </CardBody>
+                                </Card>
+                                <Card
+                                  className={`shadow-none cursor-pointer transition-all ${activeReportTab === 'tables' ? 'border-blue-500 bg-blue-500/10 ring-1 ring-blue-500/20' : 'border-blue-500/20 bg-blue-500/5 hover:bg-blue-500/10'}`}
+                                  onClick={() => setActiveReportTab('tables')}
+                                >
+                                  <CardBody className="p-3 flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                      <LayoutGrid className="w-4 h-4 text-blue-500/70" />
+                                      <div className="text-[11px] font-bold text-blue-600/90 uppercase tracking-wider">Tables</div>
+                                    </div>
+                                    <div className="text-lg font-black text-blue-600">{summaryData?.total_tables || 0}</div>
+                                  </CardBody>
+                                </Card>
+                              </div>
+
+                              {/* Figure Labels List */}
+                              {activeReportTab === 'figures' && (
+                                <Card className="shadow-sm border-border/50 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                  <div className="px-4 py-3 border-b border-border/50 bg-muted/20">
+                                    <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                                      <List className="w-4 h-4 text-emerald-500" />
+                                      Figure Label List
+                                    </h3>
+                                  </div>
+                                  <CardBody className="p-0">
+                                    {sortedFigureLabels.length > 0 ? (
+                                      <ul className="divide-y divide-border/50 max-h-[500px] overflow-y-auto">
+                                        {sortedFigureLabels.map((label, idx) => {
+                                          const match = label.match(/^\s*\[(.*?)\]\s*([\s\S]*)$/);
+                                          const filename = match ? match[1] : null;
+                                          const text = match ? match[2] : label;
+
+                                          return (
+                                            <li key={idx} className="px-4 py-2.5 text-sm hover:bg-muted/30 transition-colors flex items-start gap-3">
+                                              <span className="text-muted-foreground font-mono text-xs w-6 text-right shrink-0">{idx + 1}.</span>
+                                              <span className="text-foreground leading-snug break-words">
+                                                {showFilenames && filename && (
+                                                  <span className="text-muted-foreground mr-2 font-mono text-[10.5px] bg-muted/50 px-1 py-0.5 rounded border border-border/50">[{filename}]</span>
+                                                )}
+                                                {text}
+                                              </span>
+                                            </li>
+                                          );
+                                        })}
+                                      </ul>
+                                    ) : (
+                                      <div className="p-8 text-center text-muted-foreground text-sm italic">
+                                        No figure labels found.
+                                      </div>
+                                    )}
+                                  </CardBody>
+                                </Card>
+                              )}
+
+                              {/* Chapter Labels List */}
+                              {activeReportTab === 'chapters' && (
+                                <Card className="shadow-sm border-border/50 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                  <div className="px-4 py-3 border-b border-border/50 bg-muted/20">
+                                    <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                                      <BookOpen className="w-4 h-4 text-primary" />
+                                      Chapter List
+                                    </h3>
+                                  </div>
+                                  <CardBody className="p-0">
+                                    {sortedChapterLabels.length > 0 ? (
+                                      <ul className="divide-y divide-border/50 max-h-[500px] overflow-y-auto">
+                                        {sortedChapterLabels.map((label, idx) => (
+                                          <li key={idx} className="px-4 py-2.5 text-sm hover:bg-muted/30 transition-colors flex items-start gap-3">
+                                            <span className="text-muted-foreground font-mono text-xs w-6 text-right shrink-0">{idx + 1}.</span>
+                                            <span className="text-foreground leading-snug break-words">
+                                              {showFilenames ? label : label.replace(/\.(xhtml|html)$/i, '')}
+                                            </span>
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    ) : (
+                                      <div className="p-8 text-center text-muted-foreground text-sm italic">
+                                        No chapter labels found.
+                                      </div>
+                                    )}
+                                  </CardBody>
+                                </Card>
+                              )}
+
+                              {/* Table Labels List */}
+                              {activeReportTab === 'tables' && (
+                                <Card className="shadow-sm border-border/50 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                  <div className="px-4 py-3 border-b border-border/50 bg-muted/20">
+                                    <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                                      <LayoutGrid className="w-4 h-4 text-blue-500" />
+                                      Table Label List
+                                    </h3>
+                                  </div>
+                                  <CardBody className="p-0">
+                                    {sortedTableLabels.length > 0 ? (
+                                      <ul className="divide-y divide-border/50 max-h-[500px] overflow-y-auto">
+                                        {sortedTableLabels.map((label, idx) => {
+                                          const match = label.match(/^\s*\[(.*?)\]\s*([\s\S]*)$/);
+                                          const filename = match ? match[1] : null;
+                                          const text = match ? match[2] : label;
+
+                                          return (
+                                            <li key={idx} className="px-4 py-2.5 text-sm hover:bg-muted/30 transition-colors flex items-start gap-3">
+                                              <span className="text-muted-foreground font-mono text-xs w-6 text-right shrink-0">{idx + 1}.</span>
+                                              <span className="text-foreground leading-snug break-words">
+                                                {showFilenames && filename && (
+                                                  <span className="text-muted-foreground mr-2 font-mono text-[10.5px] bg-muted/50 px-1 py-0.5 rounded border border-border/50">[{filename}]</span>
+                                                )}
+                                                {text}
+                                              </span>
+                                            </li>
+                                          );
+                                        })}
+                                      </ul>
+                                    ) : (
+                                      <div className="p-8 text-center text-muted-foreground text-sm italic">
+                                        No table labels found.
+                                      </div>
+                                    )}
+                                  </CardBody>
+                                </Card>
+                              )}
+
+                              {/* Parts List */}
+                              {activeReportTab === 'parts' && (
+                                <Card className="shadow-sm border-border/50 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                  <div className="px-4 py-3 border-b border-border/50 bg-muted/20">
+                                    <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                                      <Bookmark className="w-4 h-4 text-amber-500" />
+                                      Part List
+                                    </h3>
+                                  </div>
+                                  <CardBody className="p-0">
+                                    {sortedPartLabels.length > 0 ? (
+                                      <ul className="divide-y divide-border/50 max-h-[500px] overflow-y-auto">
+                                        {sortedPartLabels.map((label, idx) => (
+                                          <li key={idx} className="px-4 py-2.5 text-sm hover:bg-muted/30 transition-colors flex items-start gap-3">
+                                            <span className="text-muted-foreground font-mono text-xs w-6 text-right shrink-0">{idx + 1}.</span>
+                                            <span className="text-foreground leading-snug break-words">
+                                              {showFilenames ? label : label.replace(/\.(xhtml|html)$/i, '')}
+                                            </span>
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    ) : (
+                                      <div className="p-8 text-center text-muted-foreground text-sm italic">
+                                        No part labels found.
+                                      </div>
+                                    )}
+                                  </CardBody>
+                                </Card>
+                              )}
+
+                              {/* Sections List */}
+                              {activeReportTab === 'sections' && (
+                                <Card className="shadow-sm border-border/50 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                  <div className="px-4 py-3 border-b border-border/50 bg-muted/20">
+                                    <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                                      <FileText className="w-4 h-4 text-purple-500" />
+                                      Section List
+                                    </h3>
+                                  </div>
+                                  <CardBody className="p-0">
+                                    {sortedSectionLabels.length > 0 ? (
+                                      <ul className="divide-y divide-border/50 max-h-[500px] overflow-y-auto">
+                                        {sortedSectionLabels.map((label, idx) => (
+                                          <li key={idx} className="px-4 py-2.5 text-sm hover:bg-muted/30 transition-colors flex items-start gap-3">
+                                            <span className="text-muted-foreground font-mono text-xs w-6 text-right shrink-0">{idx + 1}.</span>
+                                            <span className="text-foreground leading-snug break-words">
+                                              {showFilenames ? label : label.replace(/\.(xhtml|html)$/i, '')}
+                                            </span>
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    ) : (
+                                      <div className="p-8 text-center text-muted-foreground text-sm italic">
+                                        No section labels found.
+                                      </div>
+                                    )}
+                                  </CardBody>
+                                </Card>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* ── Front Matter Tab View ────────────────────────────────── */}
+                      {(activeCategoryTab === 'front_matter' || activeCategoryTab === 'all') && visibleFrontMatterFiles.length > 0 && (
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                            <div className="flex items-center gap-2">
+                              <BookOpen className="w-4 h-4 text-orange-500" />
+                              <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
+                                Front Matter
+                              </h2>
+                              <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleFrontMatterFiles.length})</span>
+                            </div>
+                          </div>
+                          <motion.div
+                            className={cn(
+                              layoutMode === 'grid'
+                                ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
+                                : 'space-y-2.5',
+                            )}
+                            variants={containerVariants}
+                            initial="hidden"
+                            animate="show"
+                          >
+                            {visibleFrontMatterFiles.map((file, i) => {
+                              const status = getFileStatus(file.file_name);
+                              const agg = fileIssues.get(file.file_name);
+                              return (
+                                <motion.div key={`front-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
+                                  <XHTMLCard
+                                    file={file}
+                                    variant="xhtml"
+                                    layoutMode={layoutMode}
+                                    status={status}
+                                    errors={agg?.errors ?? 0}
+                                    warnings={agg?.warnings ?? 0}
+                                    infos={agg?.infos ?? 0}
+                                    isValidating={validatingFiles.has(file.file_name)}
+                                    onValidate={() => handleValidateFile(file.file_name)}
+                                    onOpen={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
+                                    onPreview={() => { setModalAllowedTabs(undefined); setModalInitialTab('preview'); setSelectedFile(file); }}
+                                    index={i}
+                                  />
+                                </motion.div>
+                              );
+                            })}
+                          </motion.div>
+                        </div>
+                      )}
+
+                      {/* ── Chapters Tab View ────────────────────────────────── */}
+                      {(activeCategoryTab === 'chapters' || activeCategoryTab === 'all') && visibleChapterFiles.length > 0 && (
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                            <div className="flex items-center gap-2">
+                              <BookOpen className="w-4 h-4 text-primary" />
+                              <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
+                                Chapters
+                              </h2>
+                              <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleChapterFiles.length})</span>
+                            </div>
+                          </div>
+                          <motion.div
+                            className={cn(
+                              layoutMode === 'grid'
+                                ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
+                                : 'space-y-2.5',
+                            )}
+                            variants={containerVariants}
+                            initial="hidden"
+                            animate="show"
+                          >
+                            {visibleChapterFiles.map((file, i) => {
+                              const status = getFileStatus(file.file_name);
+                              const agg = fileIssues.get(file.file_name);
+                              return (
+                                <motion.div key={`chapter-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
+                                  <XHTMLCard
+                                    file={file}
+                                    variant="xhtml"
+                                    layoutMode={layoutMode}
+                                    status={status}
+                                    errors={agg?.errors ?? 0}
+                                    warnings={agg?.warnings ?? 0}
+                                    infos={agg?.infos ?? 0}
+                                    isValidating={validatingFiles.has(file.file_name)}
+                                    onValidate={() => handleValidateFile(file.file_name)}
+                                    onOpen={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
+                                    onPreview={() => { setModalAllowedTabs(undefined); setModalInitialTab('preview'); setSelectedFile(file); }}
+                                    index={i}
+                                  />
+                                </motion.div>
+                              );
+                            })}
+                          </motion.div>
+                        </div>
+                      )}
+
+                      {/* ── Back Matter Tab View ────────────────────────────────── */}
+                      {(activeCategoryTab === 'back_matter' || activeCategoryTab === 'all') && visibleBackMatterFiles.length > 0 && (
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                            <div className="flex items-center gap-2">
+                              <BookOpen className="w-4 h-4 text-rose-500" />
+                              <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
+                                Back Matter
+                              </h2>
+                              <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleBackMatterFiles.length})</span>
+                            </div>
+                          </div>
+                          <motion.div
+                            className={cn(
+                              layoutMode === 'grid'
+                                ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
+                                : 'space-y-2.5',
+                            )}
+                            variants={containerVariants}
+                            initial="hidden"
+                            animate="show"
+                          >
+                            {visibleBackMatterFiles.map((file, i) => {
+                              const status = getFileStatus(file.file_name);
+                              const agg = fileIssues.get(file.file_name);
+                              return (
+                                <motion.div key={`back-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
+                                  <XHTMLCard
+                                    file={file}
+                                    variant="xhtml"
+                                    layoutMode={layoutMode}
+                                    status={status}
+                                    errors={agg?.errors ?? 0}
+                                    warnings={agg?.warnings ?? 0}
+                                    infos={agg?.infos ?? 0}
+                                    isValidating={validatingFiles.has(file.file_name)}
+                                    onValidate={() => handleValidateFile(file.file_name)}
+                                    onOpen={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
+                                    onPreview={() => { setModalAllowedTabs(undefined); setModalInitialTab('preview'); setSelectedFile(file); }}
+                                    index={i}
+                                  />
+                                </motion.div>
+                              );
+                            })}
+                          </motion.div>
+                        </div>
+                      )}
+
+                      {/* ── 2. CSS Tab View ────────────────────────────────────── */}
+                      {(activeCategoryTab === 'css' || activeCategoryTab === 'all') && (
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                            <div className="flex items-center gap-2">
+                              <Braces className="w-4 h-4 text-violet-500" />
+                              <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
+                                CSS
+                              </h2>
+                              <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleCssFiles.length})</span>
+                            </div>
+                          </div>
+                          {visibleCssFiles.length === 0 ? (
+                            <p className="text-xs text-muted-foreground italic py-1">No CSS files in this section.</p>
+                          ) : (
+                            <motion.div
+                              className={cn(
+                                layoutMode === 'grid'
+                                  ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
+                                  : 'space-y-2.5',
+                              )}
+                              variants={containerVariants}
+                              initial="hidden"
+                              animate="show"
+                            >
+                              {visibleCssFiles.map((file, i) => {
+                                const agg = fileIssues.get(file.file_name) ?? { errors: 0, warnings: 0, infos: 0 };
+                                return (
+                                  <motion.div key={`css-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
+                                    <XHTMLCard
+                                      file={file}
+                                      variant="css"
+                                      layoutMode={layoutMode}
+                                      status={getFileStatus(file.file_name)}
+                                      errors={agg.errors}
+                                      warnings={agg.warnings}
+                                      infos={agg.infos}
+                                      onOpen={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
+                                      index={i}
+                                    />
+                                  </motion.div>
+                                );
+                              })}
                             </motion.div>
-                            );
-                          })}
-                        </motion.div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* ── 4. Fonts Tab View ────────────────────────────────── */}
-                  {(activeCategoryTab === 'fonts' || activeCategoryTab === 'all') && (
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between border-b border-border/60 pb-2">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <Type className="w-4 h-4 text-indigo-500" />
-                          <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
-                            Fonts
-                          </h2>
-                          <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleFontFiles.length})</span>
-                        </div>
-                      </div>
-                      {visibleFontFiles.length === 0 ? (
-                        <p className="text-xs text-muted-foreground italic py-1">No font files in this section.</p>
-                      ) : (
-                        <motion.div
-                          className={cn(
-                            layoutMode === 'grid'
-                              ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
-                              : 'space-y-2.5',
                           )}
-                          variants={containerVariants}
-                          initial="hidden"
-                          animate="show"
-                        >
-                          {visibleFontFiles.map((file, i) => {
-                            const status = getFileStatus(file.file_name);
-                            const agg = fileIssues.get(file.file_name);
-                            const canValidate = false; // Fonts typically aren't validated directly
-                            return (
-                              <motion.div key={`font-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
-                                <XHTMLCard
-                                  file={file}
-                                  variant="other"
-                                  layoutMode={layoutMode}
-                                  status={status}
-                                  errors={agg?.errors ?? 0}
-                                  warnings={agg?.warnings ?? 0}
-                                  infos={agg?.infos ?? 0}
-                                  isValidating={validatingFiles.has(file.file_name)}
-                                  onValidate={canValidate ? () => handleValidateFile(file.file_name) : undefined}
-                                  onOpen={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
-                                  onPreview={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
-                                  index={i}
-                                />
-                              </motion.div>
-                            );
-                          })}
-                        </motion.div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* ── 5. Other files Tab View ────────────────────────────────── */}
-                  {(activeCategoryTab === 'other' || activeCategoryTab === 'all') && (
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between border-b border-border/60 pb-2">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <FileCode2 className="w-4 h-4 text-sky-500" />
-                          <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
-                            Metadata Files
-                          </h2>
-                          <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleOtherFiles.length})</span>
                         </div>
-                      </div>
-                      {visibleOtherFiles.length === 0 ? (
-                        <p className="text-xs text-muted-foreground italic py-1">No other files in this section.</p>
-                      ) : (
-                        <motion.div
-                          className={cn(
-                            layoutMode === 'grid'
-                              ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
-                              : 'space-y-2.5',
+                      )}
+
+                      {/* ── 3. Images Tab View ────────────────────────────────────────── */}
+                      {(activeCategoryTab === 'images' || activeCategoryTab === 'all') && (
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                            <div className="flex items-center gap-2">
+                              <ImageIcon className="w-4 h-4 text-emerald-500" />
+                              <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
+                                Images
+                              </h2>
+                              <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleImageFiles.length})</span>
+                            </div>
+                            {visibleImageFiles.length > 0 && (
+                              <button
+                                className="inline-flex flex-row items-center justify-center gap-1.5 px-3.5 py-1.5 h-8.5 text-xs font-semibold rounded-lg bg-primary text-white hover:bg-primary/90 transition-all shadow-xs disabled:opacity-50 shrink-0 whitespace-nowrap"
+                                onClick={() => {
+                                  visibleImageFiles.forEach(f => {
+                                    if (!validatingFiles.has(f.file_name)) {
+                                      handleValidateFile(f.file_name);
+                                    }
+                                  });
+                                }}
+                                disabled={visibleImageFiles.every(f => validatingFiles.has(f.file_name))}
+                              >
+                                {visibleImageFiles.some(f => validatingFiles.has(f.file_name)) ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0 text-white" />
+                                ) : (
+                                  <Play className="w-3.5 h-3.5 shrink-0 text-white fill-white" />
+                                )}
+                                <span className="whitespace-nowrap text-white">
+                                  {visibleImageFiles.some(f => validatingFiles.has(f.file_name)) ? 'Validating…' : 'Validate all'}
+                                </span>
+                              </button>
+                            )}
+                          </div>
+                          {visibleImageFiles.length === 0 ? (
+                            <p className="text-xs text-muted-foreground italic py-1">No image files in this section.</p>
+                          ) : (
+                            <motion.div
+                              className={cn(
+                                layoutMode === 'grid'
+                                  ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
+                                  : 'space-y-2.5',
+                              )}
+                              variants={containerVariants}
+                              initial="hidden"
+                              animate="show"
+                            >
+                              {visibleImageFiles.map((file, i) => {
+                                const agg = fileIssues.get(file.file_name) ?? { errors: 0, warnings: 0, infos: 0 };
+                                return (
+                                  <motion.div key={`img-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
+                                    <XHTMLCard
+                                      file={file}
+                                      variant="image"
+                                      layoutMode={layoutMode}
+                                      status={getFileStatus(file.file_name)}
+                                      errors={agg.errors}
+                                      warnings={agg.warnings}
+                                      infos={agg.infos}
+                                      isValidating={validatingFiles.has(file.file_name)}
+                                      onValidate={() => handleValidateFile(file.file_name)}
+                                      onOpen={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
+                                      onPreview={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
+                                      index={i}
+                                    />
+                                  </motion.div>
+                                );
+                              })}
+                            </motion.div>
                           )}
-                          variants={containerVariants}
-                          initial="hidden"
-                          animate="show"
-                        >
-                          {visibleOtherFiles.map((file, i) => {
-                            const status = getFileStatus(file.file_name);
-                            const agg = fileIssues.get(file.file_name);
-                            const canValidate = file.file_name.endsWith('.xml') || file.file_name.endsWith('.opf') || file.file_name.endsWith('.ncx') || file.file_name.endsWith('.xhtml') || file.file_name.endsWith('.html');
-                            return (
-                              <motion.div key={`other-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
-                                <XHTMLCard
-                                  file={file}
-                                  variant="other"
-                                  layoutMode={layoutMode}
-                                  status={status}
-                                  errors={agg?.errors ?? 0}
-                                  warnings={agg?.warnings ?? 0}
-                                  infos={agg?.infos ?? 0}
-                                  isValidating={validatingFiles.has(file.file_name)}
-                                  onValidate={canValidate ? () => handleValidateFile(file.file_name) : undefined}
-                                  onOpen={() => { 
-                                    const isNav = isNavFile(file.file_name, file.path);
-                                    setModalAllowedTabs(isNav ? undefined : ['result']); 
-                                    setModalInitialTab('result'); 
-                                    setSelectedFile(file); 
-                                  }}
-                                  onPreview={() => { 
-                                    const isNav = isNavFile(file.file_name, file.path);
-                                    setModalAllowedTabs(isNav ? undefined : ['result']); 
-                                    setModalInitialTab(isNav ? 'preview' : 'result'); 
-                                    setSelectedFile(file); 
-                                  }}
-                                  index={i}
-                                />
-                              </motion.div>
-                            );
-                          })}
-                        </motion.div>
+                        </div>
+                      )}
+
+                      {/* ── 4. Fonts Tab View ────────────────────────────────── */}
+                      {(activeCategoryTab === 'fonts' || activeCategoryTab === 'all') && (
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Type className="w-4 h-4 text-indigo-500" />
+                              <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
+                                Fonts
+                              </h2>
+                              <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleFontFiles.length})</span>
+                            </div>
+                          </div>
+                          {visibleFontFiles.length === 0 ? (
+                            <p className="text-xs text-muted-foreground italic py-1">No font files in this section.</p>
+                          ) : (
+                            <motion.div
+                              className={cn(
+                                layoutMode === 'grid'
+                                  ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
+                                  : 'space-y-2.5',
+                              )}
+                              variants={containerVariants}
+                              initial="hidden"
+                              animate="show"
+                            >
+                              {visibleFontFiles.map((file, i) => {
+                                const status = getFileStatus(file.file_name);
+                                const agg = fileIssues.get(file.file_name);
+                                const canValidate = false; // Fonts typically aren't validated directly
+                                return (
+                                  <motion.div key={`font-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
+                                    <XHTMLCard
+                                      file={file}
+                                      variant="other"
+                                      layoutMode={layoutMode}
+                                      status={status}
+                                      errors={agg?.errors ?? 0}
+                                      warnings={agg?.warnings ?? 0}
+                                      infos={agg?.infos ?? 0}
+                                      isValidating={validatingFiles.has(file.file_name)}
+                                      onValidate={canValidate ? () => handleValidateFile(file.file_name) : undefined}
+                                      onOpen={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
+                                      onPreview={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
+                                      index={i}
+                                    />
+                                  </motion.div>
+                                );
+                              })}
+                            </motion.div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* ── 5. Other files Tab View ────────────────────────────────── */}
+                      {(activeCategoryTab === 'other' || activeCategoryTab === 'all') && (
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <FileCode2 className="w-4 h-4 text-sky-500" />
+                              <h2 className="text-xs font-bold text-foreground uppercase tracking-wider font-serif">
+                                Metadata Files
+                              </h2>
+                              <span className="text-xs text-muted-foreground font-mono font-semibold">({visibleOtherFiles.length})</span>
+                            </div>
+                          </div>
+                          {visibleOtherFiles.length === 0 ? (
+                            <p className="text-xs text-muted-foreground italic py-1">No other files in this section.</p>
+                          ) : (
+                            <motion.div
+                              className={cn(
+                                layoutMode === 'grid'
+                                  ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4'
+                                  : 'space-y-2.5',
+                              )}
+                              variants={containerVariants}
+                              initial="hidden"
+                              animate="show"
+                            >
+                              {visibleOtherFiles.map((file, i) => {
+                                const status = getFileStatus(file.file_name);
+                                const agg = fileIssues.get(file.file_name);
+                                const canValidate = file.file_name.endsWith('.xml') || file.file_name.endsWith('.opf') || file.file_name.endsWith('.ncx') || file.file_name.endsWith('.xhtml') || file.file_name.endsWith('.html');
+                                return (
+                                  <motion.div key={`other-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
+                                    <XHTMLCard
+                                      file={file}
+                                      variant="other"
+                                      layoutMode={layoutMode}
+                                      status={status}
+                                      errors={agg?.errors ?? 0}
+                                      warnings={agg?.warnings ?? 0}
+                                      infos={agg?.infos ?? 0}
+                                      isValidating={validatingFiles.has(file.file_name)}
+                                      onValidate={canValidate ? () => handleValidateFile(file.file_name) : undefined}
+                                      onOpen={() => {
+                                        const isNav = isNavFile(file.file_name, file.path);
+                                        setModalAllowedTabs(isNav ? undefined : ['result']);
+                                        setModalInitialTab('result');
+                                        setSelectedFile(file);
+                                      }}
+                                      onPreview={() => {
+                                        const isNav = isNavFile(file.file_name, file.path);
+                                        setModalAllowedTabs(isNav ? undefined : ['result']);
+                                        setModalInitialTab(isNav ? 'preview' : 'result');
+                                        setSelectedFile(file);
+                                      }}
+                                      index={i}
+                                    />
+                                  </motion.div>
+                                );
+                              })}
+                            </motion.div>
+                          )}
+                        </div>
                       )}
                     </div>
-                  )}
+                  </div>
                 </div>
-              </div>
-            </div>
+              )}
+            </>
           )}
-          </>
-        )}
-      </div>
-    </motion.div>
-  </>
+        </div>
+      </motion.div>
+    </>
   );
 }
