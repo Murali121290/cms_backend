@@ -26,6 +26,7 @@ import { cn } from '@/utils/epubValidatorUtils';
 import { getFileContent, getPdfPage, saveFileContent, ValidationProgress, renameEpubFile } from '@/api/epubValidator';
 import { SourceEditor } from './SourceEditor';
 import type { XHTMLFile, ValidationFileEntry, ValidationIssue } from '@/types/epubValidator';
+import { ignoreIssue, unignoreIssue, type IgnoreIssuePayload } from '@/api/epubValidator';
 
 interface Props {
   file: XHTMLFile;
@@ -41,11 +42,16 @@ interface Props {
   onRenameSuccess?: (newName: string) => void;
   isRefreshingAnalysis?: boolean;
   onRefreshAnalysis?: () => void;
+  onValidationDataChange?: () => void;
 }
 
 export type Tab = 'result' | 'preview' | 'pdf' | 'analysis';
 
-type DisplayIssue = ValidationIssue & { _ruleName: string };
+type DisplayIssue = ValidationIssue & { 
+  _ruleName: string;
+  _ruleId: string;
+  _fileName: string;
+};
 
 // ─── Rule row in left sidebar ────────────────────────────────────────────────
 
@@ -62,13 +68,14 @@ function RuleRow({
   onClick: () => void;
   onSubRuleClick: (name: string) => void;
 }) {
-  const errors = entry.result.issues.filter(i => (i.category ?? '').toLowerCase() === 'error').length;
-  const warnings = entry.result.issues.filter(i => (i.category ?? '').toLowerCase() === 'warning').length;
-  const infos = entry.result.issues.filter(i => (i.category ?? '').toLowerCase() === 'info').length;
+  const activeIssues = entry.result.issues.filter(i => !i.is_ignored);
+  const errors = activeIssues.filter(i => (i.category ?? '').toLowerCase() === 'error').length;
+  const warnings = activeIssues.filter(i => (i.category ?? '').toLowerCase() === 'warning').length;
+  const infos = activeIssues.filter(i => (i.category ?? '').toLowerCase() === 'info').length;
   const passed = errors === 0 && warnings === 0;
 
   const subRuleNames = [...new Set(
-    entry.result.issues.map(i => i.rule_name).filter((n): n is string => !!n)
+    activeIssues.map(i => i.rule_name).filter((n): n is string => !!n)
   )];
 
   return (
@@ -134,9 +141,9 @@ function RuleRow({
       {subRuleNames.length > 0 && (
         <div className="ml-3 pl-2 border-l border-border/40 mt-0.5 mb-1 space-y-0.5">
           {subRuleNames.map(name => {
-            const subErrors = entry.result.issues.filter(i => i.rule_name === name && (i.category ?? '').toLowerCase() === 'error').length;
-            const subWarnings = entry.result.issues.filter(i => i.rule_name === name && (i.category ?? '').toLowerCase() === 'warning').length;
-            const subInfos = entry.result.issues.filter(i => i.rule_name === name && (i.category ?? '').toLowerCase() === 'info').length;
+            const subErrors = activeIssues.filter(i => i.rule_name === name && (i.category ?? '').toLowerCase() === 'error').length;
+            const subWarnings = activeIssues.filter(i => i.rule_name === name && (i.category ?? '').toLowerCase() === 'warning').length;
+            const subInfos = activeIssues.filter(i => i.rule_name === name && (i.category ?? '').toLowerCase() === 'info').length;
             const isSubSelected = isSelected && selectedSubRuleName === name;
             return (
               <button
@@ -216,7 +223,17 @@ const URL_PATTERN = /https?:\/\/[^\s<>"\']*|www\.[^\s<>"\']+\.[^\s<>"\']{2,}|\b(
 
 // ─── Issue row in right panel ────────────────────────────────────────────────
 
-function IssueRow({ issue, onClick }: { issue: DisplayIssue; onClick?: () => void }) {
+function IssueRow({ 
+  issue, 
+  onClick,
+  onIgnore,
+  onUnignore
+}: { 
+  issue: DisplayIssue; 
+  onClick?: () => void;
+  onIgnore?: (e: React.MouseEvent) => void;
+  onUnignore?: (e: React.MouseEvent) => void;
+}) {
   const cat = (issue.category ?? '').toLowerCase();
   const isError = cat === 'error';
   const isInfo = cat === 'info';
@@ -299,6 +316,23 @@ function IssueRow({ issue, onClick }: { issue: DisplayIssue; onClick?: () => voi
                 >
                   Line {issue.line_number} →
                 </span>
+              )}
+              {issue.is_ignored ? (
+                <button
+                  onClick={onUnignore}
+                  className="flex items-center justify-center p-1 rounded text-muted-foreground hover:text-foreground hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors"
+                  title="Unignore issue"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                </button>
+              ) : (
+                <button
+                  onClick={onIgnore}
+                  className="flex items-center justify-center p-1 rounded text-muted-foreground hover:text-foreground hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors"
+                  title="Ignore issue"
+                >
+                  <EyeOff className="w-3.5 h-3.5" />
+                </button>
               )}
               <span className={cn(
                 'px-1.5 py-0.5 rounded text-[9px] font-mono font-bold border uppercase shrink-0',
@@ -444,7 +478,7 @@ const getInjectedHtml = (html: string, baseUrl: string) => {
 
 // ─── Modal ───────────────────────────────────────────────────────────────────
 
-export function ValidationDetailModal({ file, folderName, entries, summaryData, isRevalidating = false, validationProgress, initialTab = 'result', allowedTabs, onClose, onRevalidate, onRenameSuccess, isRefreshingAnalysis, onRefreshAnalysis }: Props) {
+export function ValidationDetailModal({ file, folderName, entries, summaryData, isRevalidating = false, validationProgress, initialTab = 'result', allowedTabs, onClose, onRevalidate, onRenameSuccess, isRefreshingAnalysis, onRefreshAnalysis, onValidationDataChange }: Props) {
   const isImageFile = useMemo(() => {
     const name = (file.file_name || '').toLowerCase();
     return /\.(png|jpe?g|gif|svg|webp|bmp|ico|tif?f)$/i.test(name);
@@ -694,33 +728,89 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
   }, [activeTab, folderName, filePath, previewUrl, previewLoading]);
 
   const totalErrors = useMemo(
-    () => entries.reduce((sum, e) => sum + e.result.issues.filter(i => (i.category ?? '').toLowerCase() === 'error').length, 0),
+    () => entries.reduce((sum, e) => sum + e.result.issues.filter(i => (i.category ?? '').toLowerCase() === 'error' && !i.is_ignored).length, 0),
     [entries],
   );
   const totalWarnings = useMemo(
-    () => entries.reduce((sum, e) => sum + e.result.issues.filter(i => (i.category ?? '').toLowerCase() === 'warning').length, 0),
+    () => entries.reduce((sum, e) => sum + e.result.issues.filter(i => (i.category ?? '').toLowerCase() === 'warning' && !i.is_ignored).length, 0),
     [entries],
   );
   const totalInfos = useMemo(
-    () => entries.reduce((sum, e) => sum + e.result.issues.filter(i => (i.category ?? '').toLowerCase() === 'info').length, 0),
+    () => entries.reduce((sum, e) => sum + e.result.issues.filter(i => (i.category ?? '').toLowerCase() === 'info' && !i.is_ignored).length, 0),
     [entries],
   );
 
   const [issueFilter, setIssueFilter] = useState<'all' | 'error' | 'warning' | 'info'>('all');
   const [ruleNameFilter, setRuleNameFilter] = useState<string | null>(null);
+  
+  const [localIgnoredKeys, setLocalIgnoredKeys] = useState<Set<string>>(new Set());
+  const [localUnignoredKeys, setLocalUnignoredKeys] = useState<Set<string>>(new Set());
+
+  const handleIgnore = async (issue: DisplayIssue, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const key = `${issue._ruleId}|${issue._fileName}|${issue.snippet || issue.message}`;
+    setLocalIgnoredKeys(prev => new Set(prev).add(key));
+    setLocalUnignoredKeys(prev => { const s = new Set(prev); s.delete(key); return s; });
+    try {
+      await ignoreIssue(folderName, {
+        rule_id: String(issue._ruleId || ''),
+        file_name: issue._fileName || '',
+        snippet: issue.snippet || issue.message || '',
+      });
+      onValidationDataChange?.();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleUnignore = async (issue: DisplayIssue, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const key = `${issue._ruleId}|${issue._fileName}|${issue.snippet || issue.message}`;
+    setLocalUnignoredKeys(prev => new Set(prev).add(key));
+    setLocalIgnoredKeys(prev => { const s = new Set(prev); s.delete(key); return s; });
+    try {
+      await unignoreIssue(folderName, {
+        rule_id: String(issue._ruleId || ''),
+        file_name: issue._fileName || '',
+        snippet: issue.snippet || issue.message || '',
+      });
+      onValidationDataChange?.();
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   const toggleIssueFilter = (f: 'error' | 'warning' | 'info') =>
     setIssueFilter((prev) => (prev === f ? 'all' : f));
 
   const allIssues = useMemo<DisplayIssue[]>(() => {
+    let raw: DisplayIssue[] = [];
     if (selectedRuleId) {
       const entry = entries.find(e => e.rule_id === selectedRuleId);
-      return (entry?.result.issues ?? []).map(i => ({ ...i, _ruleName: entry?.rule_name ?? '' }));
+      raw = (entry?.result.issues ?? []).map(i => ({ 
+        ...i, 
+        _ruleName: entry?.rule_name ?? '',
+        _ruleId: entry?.rule_id ?? '',
+        _fileName: entry?.file_details?.relative_path ?? entry?.file_details?.file_name ?? ''
+      }));
+    } else {
+      raw = entries.flatMap(e =>
+        e.result.issues.map(i => ({ 
+          ...i, 
+          _ruleName: e.rule_name,
+          _ruleId: e.rule_id,
+          _fileName: e.file_details?.relative_path ?? e.file_details?.file_name ?? ''
+        })),
+      );
     }
-    return entries.flatMap(e =>
-      e.result.issues.map(i => ({ ...i, _ruleName: e.rule_name })),
-    );
-  }, [entries, selectedRuleId]);
+
+    return raw.map(issue => {
+      const key = `${issue._ruleId}|${issue._fileName}|${issue.snippet || issue.message}`;
+      if (localIgnoredKeys.has(key)) return { ...issue, is_ignored: true };
+      if (localUnignoredKeys.has(key)) return { ...issue, is_ignored: false };
+      return issue;
+    });
+  }, [entries, selectedRuleId, localIgnoredKeys, localUnignoredKeys]);
 
   const displayedIssues = useMemo<DisplayIssue[]>(() => {
     let issues = allIssues;
@@ -740,9 +830,9 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
     return issues;
   }, [allIssues, issueFilter, ruleNameFilter, sortOrder]);
 
-  const errorCount = useMemo(() => allIssues.filter(i => (i.category ?? '').toLowerCase() === 'error').length, [allIssues]);
-  const warningCount = useMemo(() => allIssues.filter(i => (i.category ?? '').toLowerCase() === 'warning').length, [allIssues]);
-  const infoCount = useMemo(() => allIssues.filter(i => (i.category ?? '').toLowerCase() === 'info').length, [allIssues]);
+  const errorCount = useMemo(() => allIssues.filter(i => (i.category ?? '').toLowerCase() === 'error' && !i.is_ignored).length, [allIssues]);
+  const warningCount = useMemo(() => allIssues.filter(i => (i.category ?? '').toLowerCase() === 'warning' && !i.is_ignored).length, [allIssues]);
+  const infoCount = useMemo(() => allIssues.filter(i => (i.category ?? '').toLowerCase() === 'info' && !i.is_ignored).length, [allIssues]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -1163,16 +1253,29 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                         })()}
 
                         <div className="flex-1 overflow-y-auto p-3 space-y-2">
-                          {displayedIssues.length === 0 ? (
+                          {displayedIssues.filter(i => !i.is_ignored).length === 0 ? (
                             <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
                               <CheckCircle2 className="w-8 h-8 text-emerald-500 mb-2" />
                               <p className="text-xs font-semibold text-foreground font-serif">No issues found</p>
                               <p className="text-[11px] text-muted-foreground mt-1">All validation checks passed for this file.</p>
                             </div>
                           ) : (
-                            displayedIssues.map((issue, i) => (
-                              <IssueRow key={i} issue={issue} onClick={() => handleIssueClick(issue)} />
+                            displayedIssues.filter(i => !i.is_ignored).map((issue, i) => (
+                              <IssueRow key={i} issue={issue} onClick={() => handleIssueClick(issue)} onIgnore={(e) => handleIgnore(issue, e)} onUnignore={(e) => handleUnignore(issue, e)} />
                             ))
+                          )}
+                          
+                          {displayedIssues.filter(i => i.is_ignored).length > 0 && (
+                            <div className="pt-4 mt-4 border-t border-border">
+                              <h3 className="text-xs font-semibold text-muted-foreground mb-2 px-1 flex items-center gap-2">
+                                <EyeOff className="w-4 h-4" /> Ignored Issues ({displayedIssues.filter(i => i.is_ignored).length})
+                              </h3>
+                              <div className="space-y-2 opacity-75 grayscale-[0.2]">
+                                {displayedIssues.filter(i => i.is_ignored).map((issue, i) => (
+                                  <IssueRow key={i} issue={issue} onClick={() => handleIssueClick(issue)} onIgnore={(e) => handleIgnore(issue, e)} onUnignore={(e) => handleUnignore(issue, e)} />
+                                ))}
+                              </div>
+                            </div>
                           )}
                         </div>
                       </div>

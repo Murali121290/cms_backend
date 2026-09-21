@@ -156,8 +156,8 @@ def validate_toc_merge(file_details, rule_config=None):
                             "category": "Error",
                             "line_number": line_no,
                             "extract": x_line_norm,
-                            "expected_text": matched_text.strip(),
-                            "actual_text": x_line_norm,
+                            # "expected_text": matched_text.strip(),
+                            # "actual_text": x_line_norm,
                         })
                 else:
                     closest_matches = difflib.get_close_matches(x_line_norm, pdf_raw_lines, n=1, cutoff=0.3)

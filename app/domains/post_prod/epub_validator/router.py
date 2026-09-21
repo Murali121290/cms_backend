@@ -588,7 +588,42 @@ def get_latest_validation(
     run = ev_projects_db.get_latest_validation_run(db, filename)
     if not run:
         return {"status": False, "message": "No validation run history found."}
+    
+    # Flag ignored issues in the stored result
+    run = _flag_ignored_issues(filename, run)
     return run
+
+def _flag_ignored_issues(folder_name: str, validation_result: dict) -> dict:
+    import json
+    import os
+    from app.domains.post_prod.epub_validator.services.upload_service import UPLOAD_DIR
+    ignored_file = os.path.join(UPLOAD_DIR, folder_name, "ignored_issues.json")
+    ignored_set = set()
+    if os.path.exists(ignored_file):
+        try:
+            with open(ignored_file, 'r', encoding='utf-8') as f:
+                ignored_list = json.load(f)
+                for item in ignored_list:
+                    key = f"{item.get('rule_id')}|{item.get('file_name')}|{item.get('snippet')}"
+                    ignored_set.add(key)
+        except Exception:
+            pass
+
+    files = validation_result.get("files", [])
+    for file_entry in files:
+        rule_id = file_entry.get("rule_id")
+        file_details = file_entry.get("file_details", {})
+        file_name = file_details.get("relative_path") or file_details.get("file_name")
+        
+        issues = file_entry.get("result", {}).get("issues", [])
+        for issue in issues:
+            key = f"{rule_id}|{file_name}|{issue.get('snippet') or issue.get('message')}"
+            if key in ignored_set:
+                issue["is_ignored"] = True
+            else:
+                issue["is_ignored"] = False
+            
+    return validation_result
 
 
 @router.get("/validate/{filename}")
@@ -631,8 +666,78 @@ async def validate_file(
             )
             ev_projects_db.update_project_status(db, filename, "completed", error=None)
 
+    # Flag ignored issues before returning
+    if isinstance(result, dict):
+        result = _flag_ignored_issues(filename, result)
+
     return {"status": True, "result": result}
 
+
+class IgnoreIssueRequest(BaseModel):
+    rule_id: str
+    file_name: str
+    snippet: str
+
+@router.post("/projects/{folder_name}/ignore_issue")
+def ignore_issue(folder_name: str, payload: IgnoreIssueRequest):
+    import json
+    import os
+    from app.domains.post_prod.epub_validator.services.upload_service import UPLOAD_DIR
+    ignored_file = os.path.join(UPLOAD_DIR, folder_name, "ignored_issues.json")
+    
+    ignored_list = []
+    if os.path.exists(ignored_file):
+        try:
+            with open(ignored_file, 'r', encoding='utf-8') as f:
+                ignored_list = json.load(f)
+        except Exception:
+            pass
+            
+    # Check if already ignored
+    for item in ignored_list:
+        if item.get("rule_id") == payload.rule_id and \
+           item.get("file_name") == payload.file_name and \
+           item.get("snippet") == payload.snippet:
+            return {"status": True, "message": "Already ignored"}
+            
+    ignored_list.append(payload.model_dump())
+    
+    os.makedirs(os.path.dirname(ignored_file), exist_ok=True)
+    with open(ignored_file, 'w', encoding='utf-8') as f:
+        json.dump(ignored_list, f, indent=2)
+        
+    return {"status": True, "message": "Issue ignored"}
+
+
+@router.post("/projects/{folder_name}/unignore_issue")
+def unignore_issue(folder_name: str, payload: IgnoreIssueRequest):
+    import json
+    import os
+    from app.domains.post_prod.epub_validator.services.upload_service import UPLOAD_DIR
+    ignored_file = os.path.join(UPLOAD_DIR, folder_name, "ignored_issues.json")
+    
+    if not os.path.exists(ignored_file):
+        return {"status": True, "message": "Nothing to unignore"}
+        
+    try:
+        with open(ignored_file, 'r', encoding='utf-8') as f:
+            ignored_list = json.load(f)
+    except Exception:
+        ignored_list = []
+        
+    print("UNIGNORE PAYLOAD:", payload.dict())
+    print("CURRENT IGNORED LIST:", ignored_list)
+        
+    new_list = [item for item in ignored_list if not (
+        item.get("rule_id") == payload.rule_id and 
+        item.get("file_name") == payload.file_name and 
+        item.get("snippet") == payload.snippet
+    )]
+    
+    with open(ignored_file, 'w', encoding='utf-8') as f:
+        json.dump(new_list, f, indent=2)
+        
+    return {"status": True, "message": "Issue unignored"}
 
 @router.post("/export/{folder_name}")
 async def export_epub(

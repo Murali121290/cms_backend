@@ -18,6 +18,7 @@ import {
   ShieldCheck,
   CheckSquare,
   Eye,
+  EyeOff,
   User,
   LayoutGrid,
   List,
@@ -616,15 +617,19 @@ export function PostProdEpubValidatorFiles() {
 
   // ── Aggregate issues per file ───────────────────────────────────────────────
   const fileIssues = useMemo(() => {
-    const map = new Map<string, { errors: number; warnings: number; infos: number }>();
+    const map = new Map<string, { errors: number; warnings: number; infos: number; ignored: number }>();
     if (!validationData) return map;
 
     for (const entry of validationData.files) {
       const name = entry.file_details.file_name;
       // Skip book-level entries — they are shown in the Book Overview Panel, not on file cards
       if (!name || name === '[book-level]' || name === '') continue;
-      const agg = map.get(name) ?? { errors: 0, warnings: 0, infos: 0 };
+      const agg = map.get(name) ?? { errors: 0, warnings: 0, infos: 0, ignored: 0 };
       for (const issue of entry.result.issues) {
+        if (issue.is_ignored) {
+          agg.ignored++;
+          continue;
+        }
         const cat = (issue.category ?? '').toLowerCase();
         if (cat === 'error') agg.errors++;
         else if (cat === 'warning') agg.warnings++;
@@ -660,7 +665,7 @@ export function PostProdEpubValidatorFiles() {
   const stats = useMemo(() => {
     const allFiles = allBackendFiles;
     const total = allFiles.length;
-    let passed = 0, warnings = 0, failed = 0, pending = 0, infos = 0;
+    let passed = 0, warnings = 0, failed = 0, pending = 0, infos = 0, ignored = 0;
     for (const f of allFiles) {
       const status = getFileStatus(f.file_name);
       if (status === 'passed') passed++;
@@ -669,21 +674,22 @@ export function PostProdEpubValidatorFiles() {
       else pending++;
 
       const agg = fileIssues.get(f.file_name);
-      if (agg && agg.infos > 0) {
-        infos += agg.infos;
+      if (agg) {
+        if (agg.infos > 0) infos += agg.infos;
+        if (agg.ignored > 0) ignored += agg.ignored;
       }
     }
-    return { total, passed, warnings, failed, pending, infos };
+    return { total, passed, warnings, failed, pending, infos, ignored };
   }, [allBackendFiles, fileIssues, validationData]);
 
   const hasValidated = validationData !== null;
 
   // ── Category Tab & Status & Rule filters ─────────────────────────────────────
   const [activeCategoryTab, setActiveCategoryTab] = useState<'summary' | 'front_matter' | 'chapters' | 'back_matter' | 'css' | 'images' | 'fonts' | 'other' | 'all'>('all');
-  const [activeFilter, setActiveFilter] = useState<XHTMLFileStatus | 'info' | null>(null);
+  const [activeFilter, setActiveFilter] = useState<XHTMLFileStatus | 'info' | 'ignored' | null>(null);
   const [selectedRuleFilter, setSelectedRuleFilter] = useState<string | null>(null);
 
-  const toggleFilter = (status: XHTMLFileStatus | 'info') => {
+  const toggleFilter = (status: XHTMLFileStatus | 'info' | 'ignored') => {
     setSelectedRuleFilter(null);
     setActiveFilter((prev) => (prev === status ? null : status));
   };
@@ -714,6 +720,7 @@ export function PostProdEpubValidatorFiles() {
       category: string;
       errors: number;
       warnings: number;
+      ignored: number;
       files: Set<string>;
       hasFileEntries: boolean; // true if at least one non-book-level entry exists
     };
@@ -743,6 +750,7 @@ export function PostProdEpubValidatorFiles() {
         category: (entry as any).category || 'General Check',
         errors: 0,
         warnings: 0,
+        ignored: 0,
         files: new Set<string>(),
         hasFileEntries: false,
       };
@@ -751,6 +759,10 @@ export function PostProdEpubValidatorFiles() {
       let entryHasWarnings = false;
 
       for (const issue of entry.result.issues) {
+        if (issue.is_ignored) {
+          item.ignored++;
+          continue;
+        }
         const cat = (issue.category ?? '').toLowerCase();
         if (cat === 'error') {
           item.errors++;
@@ -807,6 +819,9 @@ export function PostProdEpubValidatorFiles() {
       if (activeFilter === 'info') {
         return xhtmlFiles.filter((f) => (fileIssues.get(f.file_name)?.infos ?? 0) > 0);
       }
+      if (activeFilter === 'ignored') {
+        return xhtmlFiles.filter((f) => (fileIssues.get(f.file_name)?.ignored ?? 0) > 0);
+      }
       return xhtmlFiles.filter((f) => getFileStatus(f.file_name) === activeFilter);
     }
     return xhtmlFiles;
@@ -824,6 +839,9 @@ export function PostProdEpubValidatorFiles() {
       if (activeFilter === 'info') {
         return cssFiles.filter((f) => (fileIssues.get(f.file_name)?.infos ?? 0) > 0);
       }
+      if (activeFilter === 'ignored') {
+        return cssFiles.filter((f) => (fileIssues.get(f.file_name)?.ignored ?? 0) > 0);
+      }
       return cssFiles.filter((f) => getFileStatus(f.file_name) === activeFilter);
     }
     return cssFiles;
@@ -836,6 +854,9 @@ export function PostProdEpubValidatorFiles() {
     if (activeFilter) {
       if (activeFilter === 'info') {
         return imageFiles.filter((f) => (fileIssues.get(f.file_name)?.infos ?? 0) > 0);
+      }
+      if (activeFilter === 'ignored') {
+        return imageFiles.filter((f) => (fileIssues.get(f.file_name)?.ignored ?? 0) > 0);
       }
       return imageFiles.filter((f) => getFileStatus(f.file_name) === activeFilter);
     }
@@ -850,6 +871,9 @@ export function PostProdEpubValidatorFiles() {
       if (activeFilter === 'info') {
         return fontFiles.filter((f) => (fileIssues.get(f.file_name)?.infos ?? 0) > 0);
       }
+      if (activeFilter === 'ignored') {
+        return fontFiles.filter((f) => (fileIssues.get(f.file_name)?.ignored ?? 0) > 0);
+      }
       return fontFiles.filter((f) => getFileStatus(f.file_name) === activeFilter);
     }
     return fontFiles;
@@ -862,6 +886,9 @@ export function PostProdEpubValidatorFiles() {
     if (activeFilter) {
       if (activeFilter === 'info') {
         return otherFiles.filter((f) => (fileIssues.get(f.file_name)?.infos ?? 0) > 0);
+      }
+      if (activeFilter === 'ignored') {
+        return otherFiles.filter((f) => (fileIssues.get(f.file_name)?.ignored ?? 0) > 0);
       }
       return otherFiles.filter((f) => getFileStatus(f.file_name) === activeFilter);
     }
@@ -972,6 +999,7 @@ export function PostProdEpubValidatorFiles() {
           const categoryRules = grouped[cat];
           const hasErrors = categoryRules.some(r => r.errors > 0);
           const hasWarnings = categoryRules.some(r => r.warnings > 0);
+          const hasIgnored = categoryRules.some(r => r.ignored > 0);
 
           return (
             <details key={cat} className="group space-y-1.5">
@@ -985,6 +1013,7 @@ export function PostProdEpubValidatorFiles() {
                   {hasErrors && <XCircle className="w-3 h-3 text-red-500" />}
                   {hasWarnings && !hasErrors && <AlertTriangle className="w-3 h-3 text-amber-500" />}
                   {!hasErrors && !hasWarnings && <CheckCircle2 className="w-3 h-3 text-emerald-500" />}
+                  {hasIgnored && !hasErrors && !hasWarnings && <EyeOff className="w-3 h-3 text-slate-400" />}
                 </div>
               </summary>
               <div className="space-y-1 pl-1">
@@ -1033,7 +1062,13 @@ export function PostProdEpubValidatorFiles() {
                             {r.warnings}
                           </span>
                         )}
-                        {r.errors === 0 && r.warnings === 0 && (
+                        {r.ignored > 0 && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-500/10 text-slate-500 dark:text-slate-400" title={`${r.ignored} ignored`}>
+                            <EyeOff className="w-3 h-3" />
+                            {r.ignored}
+                          </span>
+                        )}
+                        {r.errors === 0 && r.warnings === 0 && r.ignored === 0 && (
                           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
                         )}
                       </div>
@@ -1095,6 +1130,9 @@ export function PostProdEpubValidatorFiles() {
             }}
             onRefreshAnalysis={() => refreshSummaryMutation.mutate()}
             isRefreshingAnalysis={refreshSummaryMutation.isPending || isFetchingSummary || isLoadingSummary}
+            onValidationDataChange={() => {
+              getLatestValidation(folderName).then((res) => { if (res) setValidationData(res); }).catch(() => undefined);
+            }}
           />
         )}
       </AnimatePresence>
@@ -1667,7 +1705,7 @@ export function PostProdEpubValidatorFiles() {
                       const bookRule = [...ruleSummary.generalBook, ...ruleSummary.customer].find(
                         (r) => (r.rule_id || r.rule_name) === selectedBookRuleId
                       );
-                      const allIssues = bookEntries.flatMap((e) => e.result.issues);
+                      const allIssues = bookEntries.flatMap((e) => e.result.issues).filter(i => !i.is_ignored);
                       return (
                         <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 p-4 shadow-sm font-sans">
                           {/* Header */}
@@ -1743,8 +1781,8 @@ export function PostProdEpubValidatorFiles() {
                       );
                     })()}
 
-                    {/* ── 6-stat summary row ─────────────────────────────────────────── */}
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 font-sans">
+                    {/* ── 7-stat summary row ─────────────────────────────────────────── */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 font-sans">
                       <StatCard
                         label="Total Files"
                         value={stats.total}
@@ -1803,6 +1841,16 @@ export function PostProdEpubValidatorFiles() {
                         isActive={activeFilter === 'info'}
                         onClick={() => toggleFilter('info')}
                       />
+                      <StatCard
+                        label="Ignored"
+                        value={stats.ignored}
+                        total={stats.total}
+                        icon={EyeOff}
+                        barColor="bg-slate-400"
+                        valueColor={hasValidated && stats.ignored > 0 ? 'text-slate-600' : 'text-foreground'}
+                        isActive={activeFilter === 'ignored'}
+                        onClick={() => toggleFilter('ignored')}
+                      />
                     </div>
                     {/* ── Top Horizontal Category Navigation Tabs ─────────────────────────────────── */}
                     {(() => {
@@ -1826,6 +1874,11 @@ export function PostProdEpubValidatorFiles() {
                           return isTabActive
                             ? 'bg-sky-500/20 text-sky-600 dark:text-sky-400 font-bold border border-sky-500/30'
                             : 'bg-sky-500/10 text-sky-600 dark:text-sky-400 font-bold';
+                        }
+                        if (activeFilter === 'ignored') {
+                          return isTabActive
+                            ? 'bg-slate-500/20 text-slate-600 dark:text-slate-400 font-bold border border-slate-500/30'
+                            : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 font-bold';
                         }
                         if (activeFilter === 'pending') {
                           return isTabActive
@@ -2355,6 +2408,7 @@ export function PostProdEpubValidatorFiles() {
                                     errors={agg?.errors ?? 0}
                                     warnings={agg?.warnings ?? 0}
                                     infos={agg?.infos ?? 0}
+                                    ignored={agg?.ignored ?? 0}
                                     isValidating={validatingFiles.has(file.file_name)}
                                     onValidate={() => handleValidateFile(file.file_name)}
                                     onOpen={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
@@ -2403,6 +2457,7 @@ export function PostProdEpubValidatorFiles() {
                                     errors={agg?.errors ?? 0}
                                     warnings={agg?.warnings ?? 0}
                                     infos={agg?.infos ?? 0}
+                                    ignored={agg?.ignored ?? 0}
                                     isValidating={validatingFiles.has(file.file_name)}
                                     onValidate={() => handleValidateFile(file.file_name)}
                                     onOpen={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
@@ -2451,6 +2506,7 @@ export function PostProdEpubValidatorFiles() {
                                     errors={agg?.errors ?? 0}
                                     warnings={agg?.warnings ?? 0}
                                     infos={agg?.infos ?? 0}
+                                    ignored={agg?.ignored ?? 0}
                                     isValidating={validatingFiles.has(file.file_name)}
                                     onValidate={() => handleValidateFile(file.file_name)}
                                     onOpen={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
@@ -2490,7 +2546,7 @@ export function PostProdEpubValidatorFiles() {
                               animate="show"
                             >
                               {visibleCssFiles.map((file, i) => {
-                                const agg = fileIssues.get(file.file_name) ?? { errors: 0, warnings: 0, infos: 0 };
+                                const agg = fileIssues.get(file.file_name) ?? { errors: 0, warnings: 0, infos: 0, ignored: 0 };
                                 return (
                                   <motion.div key={`css-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
                                     <XHTMLCard
@@ -2501,6 +2557,7 @@ export function PostProdEpubValidatorFiles() {
                                       errors={agg.errors}
                                       warnings={agg.warnings}
                                       infos={agg.infos}
+                                      ignored={agg.ignored}
                                       onOpen={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
                                       index={i}
                                     />
@@ -2560,7 +2617,7 @@ export function PostProdEpubValidatorFiles() {
                               animate="show"
                             >
                               {visibleImageFiles.map((file, i) => {
-                                const agg = fileIssues.get(file.file_name) ?? { errors: 0, warnings: 0, infos: 0 };
+                                const agg = fileIssues.get(file.file_name) ?? { errors: 0, warnings: 0, infos: 0, ignored: 0 };
                                 return (
                                   <motion.div key={`img-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
                                     <XHTMLCard
@@ -2571,6 +2628,7 @@ export function PostProdEpubValidatorFiles() {
                                       errors={agg.errors}
                                       warnings={agg.warnings}
                                       infos={agg.infos}
+                                      ignored={agg.ignored}
                                       isValidating={validatingFiles.has(file.file_name)}
                                       onValidate={() => handleValidateFile(file.file_name)}
                                       onOpen={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
@@ -2624,6 +2682,7 @@ export function PostProdEpubValidatorFiles() {
                                       errors={agg?.errors ?? 0}
                                       warnings={agg?.warnings ?? 0}
                                       infos={agg?.infos ?? 0}
+                                    ignored={agg?.ignored ?? 0}
                                       isValidating={validatingFiles.has(file.file_name)}
                                       onValidate={canValidate ? () => handleValidateFile(file.file_name) : undefined}
                                       onOpen={() => { setModalAllowedTabs(['result']); setModalInitialTab('result'); setSelectedFile(file); }}
@@ -2677,6 +2736,7 @@ export function PostProdEpubValidatorFiles() {
                                       errors={agg?.errors ?? 0}
                                       warnings={agg?.warnings ?? 0}
                                       infos={agg?.infos ?? 0}
+                                    ignored={agg?.ignored ?? 0}
                                       isValidating={validatingFiles.has(file.file_name)}
                                       onValidate={canValidate ? () => handleValidateFile(file.file_name) : undefined}
                                       onOpen={() => {

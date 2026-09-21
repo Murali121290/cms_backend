@@ -2,6 +2,22 @@ import axios from 'axios';
 import api, { getApiErrorMessage } from './client';
 import type { AceReport, Book, FilesResponse, UploadResponse, ValidationApiResponse } from '../types/epubValidator';
 
+export interface IgnoreIssuePayload {
+  rule_id: string;
+  file_name: string;
+  snippet: string;
+}
+
+export async function ignoreIssue(folderName: string, payload: IgnoreIssuePayload) {
+  const { data } = await api.post(`/post-prod/epub-validator/projects/${folderName}/ignore_issue`, payload);
+  return data;
+}
+
+export async function unignoreIssue(folderName: string, payload: IgnoreIssuePayload) {
+  const { data } = await api.post(`/post-prod/epub-validator/projects/${folderName}/unignore_issue`, payload);
+  return data;
+}
+
 export async function uploadFile(
   file: File,
   onProgress?: (pct: number) => void,
