@@ -113,3 +113,12 @@ export async function trimProjectPDF(projectId: number, config: TrimConfig): Pro
     throw new Error(getApiErrorMessage(err, 'Failed to trim PDF file'));
   }
 }
+
+export async function generateBookmarks(projectId: number, includeSubheadings: boolean = true): Promise<any> {
+  try {
+    const { data } = await api.post(`/post-prod/web-pdf-processor/projects/${projectId}/generate-bookmarks?include_subheadings=${includeSubheadings}`);
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to generate bookmarks'));
+  }
+}

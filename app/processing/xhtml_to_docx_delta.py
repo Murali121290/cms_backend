@@ -696,7 +696,6 @@ class XhtmlToDocxDeltaEngine:
         except Exception as fmt_err:
             logger.warning(f"Failed to apply final document formatting in delta: {fmt_err}")
 
-<<<<<<< HEAD
         # Strip synthetic bookmarks before saving clean DOCX output
         try:
             removed_bms = strip_synthetic_bookmarks(doc)
@@ -704,7 +703,7 @@ class XhtmlToDocxDeltaEngine:
                 logger.info(f"Stripped {removed_bms} legacy synthetic bookmark XML tags before saving DOCX.")
         except Exception as bm_err:
             logger.warning(f"Failed to strip synthetic bookmarks: {bm_err}")
-=======
+
         # Guarantee every citation/bibliography character style referenced by
         # the just-rebuilt runs has a highlight fill in styles.xml. Without
         # this, spans authored in the editor (e.g. class="cite_bib") emit a
@@ -717,7 +716,6 @@ class XhtmlToDocxDeltaEngine:
             ensure_reference_char_style_highlights(doc)
         except Exception as ref_err:
             logger.warning(f"Failed to ensure reference char style highlights: {ref_err}")
->>>>>>> 2a6eb55 (Citation workflow: AQ comments, highlights, per-work needles, APA author counts)
 
         # Save atomically
         tmp_path = out_docx_path + ".delta.tmp"

@@ -1,6 +1,6 @@
 import os
 from typing import Optional, Any
-from fastapi import APIRouter, Depends, Form, UploadFile, File, HTTPException
+from fastapi import APIRouter, Depends, Form, UploadFile, File, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -278,8 +278,10 @@ def get_merged_pdf(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # If the project has been trimmed, serve the trimmed version. Otherwise serve the merged one.
-    if project.get("status") == "Trimmed":
+    # Serve the correct version based on project status
+    if project.get("status") == "Bookmarked":
+        pdf_path = os.path.join(project["folder_name"], "bookmarked.pdf")
+    elif project.get("status") == "Trimmed":
         pdf_path = os.path.join(project["folder_name"], "trimmed.pdf")
     else:
         pdf_path = os.path.join(project["folder_name"], "merged.pdf")
@@ -390,3 +392,47 @@ def check_security_status(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+from .services import toc_service
+
+@router.post("/projects/{project_id}/generate-bookmarks")
+def generate_bookmarks(
+    project_id: int,
+    include_subheadings: bool = Query(True),
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """Generate Bookmarks based on TOC and subheadings."""
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    base_dir = project["folder_name"]
+    
+    # Use trimmed file if it exists, else use merged
+    merged_pdf_path = os.path.join(base_dir, "merged.pdf")
+    trimmed_pdf_path = os.path.join(base_dir, "trimmed.pdf")
+    
+    if os.path.exists(trimmed_pdf_path):
+        target_pdf = trimmed_pdf_path
+    elif os.path.exists(merged_pdf_path):
+        target_pdf = merged_pdf_path
+    else:
+        raise HTTPException(status_code=404, detail="No PDF file available to check.")
+        
+    output_pdf = os.path.join(base_dir, "bookmarked.pdf")
+
+    try:
+        result = toc_service.generate_bookmarks_for_pdf(target_pdf, output_pdf, include_subheadings=include_subheadings)
+        if not result.get("success"):
+            raise HTTPException(status_code=500, detail=result.get("error", "Unknown error generating bookmarks"))
+            
+        # Update project status
+        project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
+        if project_obj:
+            project_obj.status = "Bookmarked"
+            db.commit()
+            
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

@@ -30,6 +30,7 @@ import {
   listProjectFiles,
   mergeProjectFiles,
   trimProjectPDF,
+  generateBookmarks,
   type WebPdfProject,
   type ProjectFile,
 } from '@/api/webPdfProcessor';
@@ -225,6 +226,12 @@ export function PostProdWebPdfProcessor() {
   const [fontsStatus, setFontsStatus] = useState<any>(null);
   const [checkingSecurity, setCheckingSecurity] = useState(false);
   const [securityStatus, setSecurityStatus] = useState<any>(null);
+  
+  // Bookmarks
+  const [generatingBookmarks, setGeneratingBookmarks] = useState(false);
+  const [includeSubheadings, setIncludeSubheadings] = useState(true);
+  const [bookmarksStatus, setBookmarksStatus] = useState<any>(null);
+
   const [pdfRefreshKey, setPdfRefreshKey] = useState(Date.now());
 
   // Modals
@@ -466,6 +473,26 @@ export function PostProdWebPdfProcessor() {
     }
   };
 
+  const handleGenerateBookmarks = async () => {
+    if (!selectedProject) return;
+    setGeneratingBookmarks(true);
+    setBookmarksStatus(null);
+    try {
+      const data = await generateBookmarks(selectedProject.id, includeSubheadings);
+      setBookmarksStatus(data);
+      toast.success('Bookmarks generated successfully!');
+      
+      // Update selected project state
+      setSelectedProject(prev => prev ? { ...prev, status: 'Bookmarked' } : prev);
+      setPdfRefreshKey(Date.now());
+      fetchProjects();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to generate bookmarks.');
+    } finally {
+      setGeneratingBookmarks(false);
+    }
+  };
+
   const handleCheckFonts = async () => {
     if (!selectedProject) return;
     setCheckingFonts(true);
@@ -574,8 +601,8 @@ export function PostProdWebPdfProcessor() {
           <div className="flex flex-col p-6 overflow-hidden bg-background">
             <h2 className="text-sm font-bold text-text mb-3 flex items-center gap-2 shrink-0">
               <FileText size={16} className="text-primary" />
-              Merged PDF Preview
-              {(selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed') && (
+              {selectedProject ? `${selectedProject.status === 'Bookmarked' ? 'Bookmarked' : selectedProject.status === 'Trimmed' ? 'Trimmed' : 'Merged'} PDF Preview` : 'PDF Preview'}
+              {(selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed' || selectedProject.status === 'Bookmarked') && (
                 <span className="ml-auto text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
                   ✓ {selectedProject.status}
                 </span>
@@ -583,12 +610,12 @@ export function PostProdWebPdfProcessor() {
             </h2>
 
             <div className="flex-1 rounded-xl overflow-hidden bg-card border border-border relative">
-              {selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed' ? (
+              {selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed' || selectedProject.status === 'Bookmarked' ? (
                 <iframe
                   key={`${selectedProject.id}-${selectedProject.status}-${pdfRefreshKey}`} // force reload if status or key changes
-                  src={`/api/v2/post-prod/web-pdf-processor/projects/${selectedProject.id}/merged-pdf?t=${pdfRefreshKey}`}
+                  src={`/api/v2/post-prod/web-pdf-processor/projects/${selectedProject.id}/merged-pdf?t=${pdfRefreshKey}${selectedProject.status === 'Bookmarked' ? '#pagemode=bookmarks' : ''}`}
                   className="w-full h-full border-0"
-                  title="Merged PDF Preview"
+                  title={`${selectedProject.status} PDF Preview`}
                 />
               ) : (
                 <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center">
@@ -989,6 +1016,90 @@ export function PostProdWebPdfProcessor() {
                               {securityStatus.is_encrypted && <li>File is Encrypted.</li>}
                               {securityStatus.error && <li className="text-red-500">{securityStatus.error}</li>}
                             </ul>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Step 5: Generate Bookmarks */}
+              <div className={`border border-border rounded-xl overflow-hidden bg-background transition-colors ${activeStep === 5 ? 'ring-1 ring-primary border-primary/50' : ''}`}>
+                <button
+                  onClick={() => {
+                    if (selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed' || selectedProject.status === 'Bookmarked') {
+                      setActiveStep(5);
+                    }
+                  }}
+                  disabled={selectedProject.status !== 'Merged' && selectedProject.status !== 'Trimmed' && selectedProject.status !== 'Bookmarked'}
+                  className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                      bookmarksStatus && bookmarksStatus.success
+                      ? 'bg-emerald-500/20 text-emerald-600'
+                      : activeStep === 5 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                    }`}>
+                      {bookmarksStatus ? (
+                        bookmarksStatus.success ? <CheckCircle2 size={14} /> : <XCircle size={14} />
+                      ) : '5'}
+                    </div>
+                    <h2 className="text-sm font-bold text-text m-0">Step 5 — Generate Bookmarks</h2>
+                  </div>
+                  {activeStep === 5 ? <ChevronUp size={18} className="text-muted" /> : <ChevronDown size={18} className="text-muted" />}
+                </button>
+
+                {activeStep === 5 && (
+                  <div className="p-4 border-t border-border flex flex-col gap-4">
+                    <div className="flex items-start justify-between shrink-0 gap-3">
+                      <div className="flex flex-col gap-3">
+                        <p className="text-[11px] text-muted m-0">
+                          Automatically scan for Table of Contents, extract headings, and generate PDF bookmarks.
+                        </p>
+                        <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-text">
+                          <input
+                            type="checkbox"
+                            checked={includeSubheadings}
+                            onChange={(e) => setIncludeSubheadings(e.target.checked)}
+                            className="rounded border-border bg-background focus:ring-primary accent-primary w-3.5 h-3.5"
+                          />
+                          Include Chapter Subheadings (H3)
+                        </label>
+                      </div>
+                      <Button
+                        onClick={handleGenerateBookmarks}
+                        disabled={generatingBookmarks}
+                        className="text-xs font-semibold h-8 px-4 flex items-center gap-1.5 shrink-0"
+                      >
+                        {generatingBookmarks ? <RefreshCw size={14} className="animate-spin" /> : <FileText size={14} />}
+                        {generatingBookmarks ? 'Generating...' : 'Generate'}
+                      </Button>
+                    </div>
+
+                    {bookmarksStatus && (
+                      <div className={`p-4 rounded-lg border ${bookmarksStatus.success ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600' : 'bg-amber-500/10 border-amber-500/20 text-amber-700'}`}>
+                        <div className="flex items-center gap-2 mb-2">
+                          {bookmarksStatus.success ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+                          <h4 className="font-bold text-sm m-0">
+                            {bookmarksStatus.success ? 'Bookmarks Generated' : 'Error Generating Bookmarks'}
+                          </h4>
+                        </div>
+                        
+                        {bookmarksStatus.success ? (
+                          <div className="bg-background/50 p-3 rounded border border-emerald-500/20 mt-3 flex items-center gap-4 text-xs font-medium">
+                            <div className="flex flex-col gap-1">
+                              <span className="text-muted-foreground">TOC Detected</span>
+                              <span className="text-text">{bookmarksStatus.toc_entries_detected} entries</span>
+                            </div>
+                            <div className="flex flex-col gap-1">
+                              <span className="text-muted-foreground">Bookmarks Created</span>
+                              <span className="text-text">{bookmarksStatus.bookmarks_generated} items</span>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="bg-background/50 p-3 rounded border border-amber-500/20 mt-3 text-xs text-red-500">
+                            {bookmarksStatus.error || "Unknown error"}
                           </div>
                         )}
                       </div>
