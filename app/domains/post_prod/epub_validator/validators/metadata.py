@@ -951,7 +951,7 @@ def validate_a11y_metadata_presence(book_details, rule_config=None):
 
 # ── Aspen accessibility metadata strict-value assertions ──────────────────
 
-_REQUIRED_HAZARDS = {"noSoundHazard", "noMotionSimulationHazard", "none"}
+_REQUIRED_HAZARDS = {"none"}
 _REQUIRED_ACCESS_MODES = {"textual", "visual"}
 _REQUIRED_ACCESS_MODE_SUFFICIENT = {"textual,visual", "textual"}
 
@@ -1168,7 +1168,7 @@ def validate_dcterms_modified(book_details, rule_config=None):
 
 
 _A11Y_FEATURE_MAP = {
-    "displaytransformability": "displayTransformability",
+   
     "printpagenumbers": "printPageNumbers",
     "readingorder": "readingOrder",
     "structuralnavigation": "structuralNavigation",
