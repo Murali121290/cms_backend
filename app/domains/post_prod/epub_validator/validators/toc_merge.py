@@ -25,8 +25,8 @@ def get_xhtml_lines(xhtml_file):
     xhtml_lines = []
     for match in elements:
         inner_html = match.group(2)
-        # Remove formatting tags that shouldn't break words (like Post-<i>Chaplinsky</i>)
-        inner_html = re.sub(r'</?(i|em|b|strong)\b[^>]*>', '', inner_html, flags=re.IGNORECASE)
+        # Remove formatting tags that shouldn't break words (like Post-<i>Chaplinsky</i>) and anchors
+        inner_html = re.sub(r'</?(i|em|b|strong|a)\b[^>]*>', '', inner_html, flags=re.IGNORECASE)
         # Unwrap Smallcaps spans specifically without adding spaces (e.g. S<span class="Smallcaps">ummary</span>)
         inner_html = re.sub(r'<span\b[^>]*class=["\'][^"\']*\bSmallcaps\b[^"\']*["\'][^>]*>(.*?)</span\s*>', r'\1', inner_html, flags=re.IGNORECASE | re.DOTALL)
         # Unwrap spans containing only punctuation (e.g. <span class="C1947">.</span>) without adding spaces

@@ -876,7 +876,7 @@ def validate_bare_url_text(file_details, rule_config=None):
     url_pattern = re.compile(
         r'https?://[^\s<>"\']*|'
         r'www\.[^\s<>"\']+\.[^\s<>"\']{2,}|'
-        r'\b(?:[a-zA-Z0-9-]+\.)+(?:com|in|org|net|edu|gov|co|io|us|uk|ca|de|jp|fr|au|info|biz|me|app|dev|store|tech|ai|online|site|xyz)\b(?:/[^\s<>"\']*)?',
+        r'\b(?:[a-zA-Z0-9-]+\.)+(?:com|in|org|net|edu|gov|co|io|us|uk|ca|de|jp|fr|au|info|biz|me|dev|store|tech|ai|online|site|xyz)\b(?:/[^\s<>"\']*)?',
         re.IGNORECASE
     )
 
@@ -884,8 +884,8 @@ def validate_bare_url_text(file_details, rule_config=None):
         soup = BeautifulSoup(f.read(), "html.parser")
 
     for text_node in soup.find_all(string=True):
-        # Skip if this text is inside an <a>, <script>, <style> or <title>
-        if text_node.find_parent(["a", "script", "style", "title"]):
+        # Skip if this text is inside an <a>, <script>, <style>, <title> or heading tags (h1-h7)
+        if text_node.find_parent(["a", "script", "style", "title", "h1", "h2", "h3", "h4", "h5", "h6", "h7"]):
             continue
         parent = text_node.parent
         if parent is None:

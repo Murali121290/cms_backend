@@ -62,10 +62,10 @@ function RuleRow({
   onClick: () => void;
   onSubRuleClick: (name: string) => void;
 }) {
-  const errors   = entry.result.issues.filter(i => (i.category ?? '').toLowerCase() === 'error').length;
+  const errors = entry.result.issues.filter(i => (i.category ?? '').toLowerCase() === 'error').length;
   const warnings = entry.result.issues.filter(i => (i.category ?? '').toLowerCase() === 'warning').length;
-  const infos    = entry.result.issues.filter(i => (i.category ?? '').toLowerCase() === 'info').length;
-  const passed   = errors === 0 && warnings === 0;
+  const infos = entry.result.issues.filter(i => (i.category ?? '').toLowerCase() === 'info').length;
+  const passed = errors === 0 && warnings === 0;
 
   const subRuleNames = [...new Set(
     entry.result.issues.map(i => i.rule_name).filter((n): n is string => !!n)
@@ -119,7 +119,7 @@ function RuleRow({
         {!passed && (
           <p className="text-[10px] text-muted-foreground mt-1 leading-none font-sans opacity-75">
             {[
-              errors   > 0 && `${errors} error${errors !== 1 ? 's' : ''}`,
+              errors > 0 && `${errors} error${errors !== 1 ? 's' : ''}`,
               warnings > 0 && `${warnings} warning${warnings !== 1 ? 's' : ''}`,
             ].filter(Boolean).join(' · ')}
           </p>
@@ -134,9 +134,9 @@ function RuleRow({
       {subRuleNames.length > 0 && (
         <div className="ml-3 pl-2 border-l border-border/40 mt-0.5 mb-1 space-y-0.5">
           {subRuleNames.map(name => {
-            const subErrors   = entry.result.issues.filter(i => i.rule_name === name && (i.category ?? '').toLowerCase() === 'error').length;
+            const subErrors = entry.result.issues.filter(i => i.rule_name === name && (i.category ?? '').toLowerCase() === 'error').length;
             const subWarnings = entry.result.issues.filter(i => i.rule_name === name && (i.category ?? '').toLowerCase() === 'warning').length;
-            const subInfos    = entry.result.issues.filter(i => i.rule_name === name && (i.category ?? '').toLowerCase() === 'info').length;
+            const subInfos = entry.result.issues.filter(i => i.rule_name === name && (i.category ?? '').toLowerCase() === 'info').length;
             const isSubSelected = isSelected && selectedSubRuleName === name;
             return (
               <button
@@ -166,9 +166,9 @@ function RuleRow({
                 </div>
                 <p className="text-[10px] text-muted-foreground mt-0.5 leading-none font-sans opacity-75">
                   {[
-                    subErrors   > 0 && `${subErrors} error${subErrors !== 1 ? 's' : ''}`,
+                    subErrors > 0 && `${subErrors} error${subErrors !== 1 ? 's' : ''}`,
                     subWarnings > 0 && `${subWarnings} warning${subWarnings !== 1 ? 's' : ''}`,
-                    subInfos    > 0 && `${subInfos} info item${subInfos !== 1 ? 's' : ''}`,
+                    subInfos > 0 && `${subInfos} info item${subInfos !== 1 ? 's' : ''}`,
                   ].filter(Boolean).join(' · ')}
                 </p>
               </button>
@@ -190,7 +190,7 @@ function DiffText({ expected, actual, type }: { expected: string; actual: string
   }
 
   const differences = diffChars(expected, actual);
-  
+
   return (
     <span className="font-mono leading-relaxed break-words">
       {differences.map((part, i) => {
@@ -212,7 +212,7 @@ function DiffText({ expected, actual, type }: { expected: string; actual: string
   );
 }
 
-const URL_PATTERN = /https?:\/\/[^\s<>"\']*|www\.[^\s<>"\']+\.[^\s<>"\']{2,}|\b(?:[a-zA-Z0-9-]+\.)+(?:com|in|org|net|edu|gov|co|io|us|uk|ca|de|jp|fr|au|info|biz|me|app|dev|store|tech|ai|online|site|xyz)\b(?:\/[^\s<>"\']*)?/i;
+const URL_PATTERN = /https?:\/\/[^\s<>"\']*|www\.[^\s<>"\']+\.[^\s<>"\']{2,}|\b(?:[a-zA-Z0-9-]+\.)+(?:com|in|org|net|edu|gov|co|io|us|uk|ca|de|jp|fr|au|info|biz|me|dev|store|tech|ai|online|site|xyz)\b(?:\/[^\s<>"\']*)?/i;
 
 // ─── Issue row in right panel ────────────────────────────────────────────────
 
@@ -263,8 +263,8 @@ function IssueRow({ issue, onClick }: { issue: DisplayIssue; onClick?: () => voi
         isError
           ? 'bg-red-50/80 border-red-100 dark:bg-red-950/20 dark:border-red-900/30'
           : isInfo
-          ? 'bg-sky-50/80 border-sky-100 dark:bg-sky-950/20 dark:border-sky-900/30'
-          : 'bg-amber-50/80 border-amber-100 dark:bg-amber-950/20 dark:border-amber-900/30',
+            ? 'bg-sky-50/80 border-sky-100 dark:bg-sky-950/20 dark:border-sky-900/30'
+            : 'bg-amber-50/80 border-amber-100 dark:bg-amber-950/20 dark:border-amber-900/30',
       )}
     >
       {/* Main row */}
@@ -305,8 +305,8 @@ function IssueRow({ issue, onClick }: { issue: DisplayIssue; onClick?: () => voi
                 isError
                   ? 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20'
                   : isInfo
-                  ? 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20'
-                  : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20',
+                    ? 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20'
+                    : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20',
               )}>
                 {isError ? 'ERROR' : isInfo ? 'INFO' : 'WARNING'}
               </span>
@@ -371,7 +371,7 @@ function IssueRow({ issue, onClick }: { issue: DisplayIssue; onClick?: () => voi
 
 function resolveRelative(filePath: string, href: string): string {
   const base = filePath.replace(/\\/g, '/');
-  const dir  = base.includes('/') ? base.slice(0, base.lastIndexOf('/') + 1) : '';
+  const dir = base.includes('/') ? base.slice(0, base.lastIndexOf('/') + 1) : '';
   try {
     return new URL(href, `http://x/${dir}`).pathname.slice(1);
   } catch {
@@ -381,7 +381,7 @@ function resolveRelative(filePath: string, href: string): string {
 
 const getInjectedHtml = (html: string, baseUrl: string) => {
   if (!html) return '';
-  
+
   // Fix XHTML self-closing tags that break HTML parsing
   const fixedHtml = html.replace(/<(a|span|div|p|strong|em|h[1-6])\b([^>]*?)\/>/gi, '<$1$2></$1>');
 
@@ -453,7 +453,7 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
   const visibleTabs: Tab[] = isImageFile
     ? ['result']
     : (allowedTabs ?? ['result', 'preview']);
-  const [activeTab, setActiveTab]       = useState<Tab>(initialTab);
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab);
   const [showAnalysisSidebar, setShowAnalysisSidebar] = useState(false);
   const [showFilenamesInAnalysis, setShowFilenamesInAnalysis] = useState(false);
   const [showValidationFindings, setShowValidationFindings] = useState(true);
@@ -494,17 +494,17 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
   // ── Source fetch ─────────────────────────────────────────────────────────────
   const [sourceContent, setSourceContent] = useState<string | null>(null);
   const [sourceLoading, setSourceLoading] = useState(false);
-  const [sourceError, setSourceError]     = useState<string | null>(null);
+  const [sourceError, setSourceError] = useState<string | null>(null);
 
   // ── Source editing ────────────────────────────────────────────────────────────
-  const [editedContent, setEditedContent]   = useState<string | null>(null);
-  const [isSaving, setIsSaving]             = useState(false);
-  const [saveSuccess, setSaveSuccess]       = useState(false);
-  const [saveError, setSaveError]           = useState<string | null>(null);
+  const [editedContent, setEditedContent] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [showCloseWarning, setShowCloseWarning] = useState(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const isDirty       = editedContent !== null && editedContent !== sourceContent;
+  const isDirty = editedContent !== null && editedContent !== sourceContent;
   const displayContent = editedContent ?? sourceContent ?? '';
 
   const handleIssueClick = (issue: DisplayIssue) => {
@@ -563,20 +563,20 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
         if (!textToFind) return;
 
         const lines = (displayContent || '').split('\n');
-        
+
         let index = lines.findIndex(line => {
-           const noTags = line.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
-           if (!noTags) return false;
-           // Basic decoding for entities
-           const textArea = document.createElement('textarea');
-           textArea.innerHTML = noTags;
-           const decodedLine = textArea.value;
-           return decodedLine.includes(textToFind) || textToFind.includes(decodedLine);
+          const noTags = line.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+          if (!noTags) return false;
+          // Basic decoding for entities
+          const textArea = document.createElement('textarea');
+          textArea.innerHTML = noTags;
+          const decodedLine = textArea.value;
+          return decodedLine.includes(textToFind) || textToFind.includes(decodedLine);
         });
 
         // Fallback: search raw HTML string if not found
         if (index === -1) {
-           index = lines.findIndex(line => line.includes(textToFind));
+          index = lines.findIndex(line => line.includes(textToFind));
         }
 
         if (index !== -1 && sourceEditorRef.current) {
@@ -606,8 +606,8 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
   }, [activeTab, folderName, filePath, sourceContent, sourceLoading]);
 
   // ── PDF page lookup ───────────────────────────────────────────────────────────
-  const [pdfPage, setPdfPage]             = useState<number | null>(null);
-  const [pdfEndPage, setPdfEndPage]       = useState<number | null>(null);
+  const [pdfPage, setPdfPage] = useState<number | null>(null);
+  const [pdfEndPage, setPdfEndPage] = useState<number | null>(null);
   const [pdfPageLoading, setPdfPageLoading] = useState(false);
 
   useEffect(() => {
@@ -621,9 +621,9 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
   }, [activeTab, folderName, file.file_name, pdfPage, pdfPageLoading]);
 
   // ── Preview (rendered iframe with inlined CSS + fixed image URLs) ─────────────
-  const [previewUrl, setPreviewUrl]         = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewError, setPreviewError]     = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const previewBlobRef = useRef<string | null>(null);
 
   // Revoke blob URL on unmount
@@ -642,7 +642,7 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
         let html = await getFileContent(folderName, filePath);
 
         const norm = filePath.replace(/\\/g, '/');
-        const dir  = norm.includes('/') ? norm.slice(0, norm.lastIndexOf('/') + 1) : '';
+        const dir = norm.includes('/') ? norm.slice(0, norm.lastIndexOf('/') + 1) : '';
 
         // ── 1. Collect all CSS hrefs from <link> tags ─────────────────────
         const cssHrefs = new Set<string>();
@@ -724,11 +724,11 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
 
   const displayedIssues = useMemo<DisplayIssue[]>(() => {
     let issues = allIssues;
-    if (issueFilter === 'error')   issues = issues.filter(i => (i.category ?? '').toLowerCase() === 'error');
+    if (issueFilter === 'error') issues = issues.filter(i => (i.category ?? '').toLowerCase() === 'error');
     if (issueFilter === 'warning') issues = issues.filter(i => (i.category ?? '').toLowerCase() === 'warning');
-    if (issueFilter === 'info')    issues = issues.filter(i => (i.category ?? '').toLowerCase() === 'info');
-    if (ruleNameFilter)            issues = issues.filter(i => i.rule_name === ruleNameFilter);
-    
+    if (issueFilter === 'info') issues = issues.filter(i => (i.category ?? '').toLowerCase() === 'info');
+    if (ruleNameFilter) issues = issues.filter(i => i.rule_name === ruleNameFilter);
+
     if (sortOrder === 'line') {
       issues = [...issues].sort((a, b) => {
         const lineA = a.line_number ?? 0;
@@ -736,13 +736,13 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
         return lineA - lineB;
       });
     }
-    
+
     return issues;
   }, [allIssues, issueFilter, ruleNameFilter, sortOrder]);
 
-  const errorCount   = useMemo(() => allIssues.filter(i => (i.category ?? '').toLowerCase() === 'error').length,   [allIssues]);
+  const errorCount = useMemo(() => allIssues.filter(i => (i.category ?? '').toLowerCase() === 'error').length, [allIssues]);
   const warningCount = useMemo(() => allIssues.filter(i => (i.category ?? '').toLowerCase() === 'warning').length, [allIssues]);
-  const infoCount    = useMemo(() => allIssues.filter(i => (i.category ?? '').toLowerCase() === 'info').length,    [allIssues]);
+  const infoCount = useMemo(() => allIssues.filter(i => (i.category ?? '').toLowerCase() === 'info').length, [allIssues]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -938,91 +938,91 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
 
           {/* Left sidebar — only on Validation Result tab */}
           {activeTab === 'result' && (
-          <div className="w-56 flex-shrink-0 border-r border-border flex flex-col">
-            <div className="px-3 pt-3 pb-1.5">
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground px-2">
-                Validation Rules
-              </p>
-            </div>
-
-            <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-0.5">
-              {/* All-issues shortcut */}
-              <button
-                onClick={() => { setSelectedRule(null); setRuleNameFilter(null); }}
-                className={cn(
-                  'w-full text-left px-3 py-2 rounded-lg transition-colors text-xs font-semibold font-serif',
-                  selectedRuleId === null
-                    ? 'bg-primary/10 text-primary'
-                    : 'hover:bg-muted text-muted-foreground',
-                )}
-              >
-                All issues
-                {(totalErrors + totalWarnings + totalInfos) > 0 && (
-                  <span className="ml-1 text-[10px] opacity-70 font-mono">({totalErrors + totalWarnings + totalInfos})</span>
-                )}
-              </button>
-
-              {entries.length === 0 ? (
-                <p className="px-3 py-2 text-xs text-muted-foreground/60 italic font-sans">
-                  No validation data yet.
+            <div className="w-56 flex-shrink-0 border-r border-border flex flex-col">
+              <div className="px-3 pt-3 pb-1.5">
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground px-2">
+                  Validation Rules
                 </p>
-              ) : (
-                (() => {
-                  // v2 responses tag each entry with origin. If none of the entries
-                  // carry the tag we're on legacy — render as a flat list.
-                  const hasOrigin = entries.some((e) => e.origin !== undefined);
-                  if (!hasOrigin) {
-                    return entries.map((entry) => (
-                      <RuleRow
-                        key={`${entry.rule_id}-${entry.file_details.file_name}`}
-                        entry={entry}
-                        isSelected={selectedRuleId === entry.rule_id}
-                        selectedSubRuleName={selectedRuleId === entry.rule_id ? ruleNameFilter : null}
-                        onClick={() => { setSelectedRule(entry.rule_id); setRuleNameFilter(null); }}
-                        onSubRuleClick={(name) => { setSelectedRule(entry.rule_id); setRuleNameFilter(name); }}
-                      />
-                    ));
-                  }
-                  const generalEntries = entries.filter((e) => e.origin !== 'customer');
-                  const customerEntries = entries.filter((e) => e.origin === 'customer');
-                  const customerLabel = customerEntries[0]?.customer
-                    ? `${customerEntries[0].customer!.charAt(0).toUpperCase()}${customerEntries[0].customer!.slice(1)} Rules`
-                    : 'Customer Rules';
-                  const renderEntries = (list: ValidationFileEntry[]) =>
-                    list.map((entry) => (
-                      <RuleRow
-                        key={`${entry.rule_id}-${entry.file_details.file_name}`}
-                        entry={entry}
-                        isSelected={selectedRuleId === entry.rule_id}
-                        selectedSubRuleName={selectedRuleId === entry.rule_id ? ruleNameFilter : null}
-                        onClick={() => { setSelectedRule(entry.rule_id); setRuleNameFilter(null); }}
-                        onSubRuleClick={(name) => { setSelectedRule(entry.rule_id); setRuleNameFilter(name); }}
-                      />
-                    ));
-                  return (
-                    <>
-                      {generalEntries.length > 0 && (
-                        <>
-                          <p className="px-2 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/80">
-                            General
-                          </p>
-                          {renderEntries(generalEntries)}
-                        </>
-                      )}
-                      {customerEntries.length > 0 && (
-                        <>
-                          <p className="px-2 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-primary/80">
-                            {customerLabel}
-                          </p>
-                          {renderEntries(customerEntries)}
-                        </>
-                      )}
-                    </>
-                  );
-                })()
-              )}
+              </div>
+
+              <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-0.5">
+                {/* All-issues shortcut */}
+                <button
+                  onClick={() => { setSelectedRule(null); setRuleNameFilter(null); }}
+                  className={cn(
+                    'w-full text-left px-3 py-2 rounded-lg transition-colors text-xs font-semibold font-serif',
+                    selectedRuleId === null
+                      ? 'bg-primary/10 text-primary'
+                      : 'hover:bg-muted text-muted-foreground',
+                  )}
+                >
+                  All issues
+                  {(totalErrors + totalWarnings + totalInfos) > 0 && (
+                    <span className="ml-1 text-[10px] opacity-70 font-mono">({totalErrors + totalWarnings + totalInfos})</span>
+                  )}
+                </button>
+
+                {entries.length === 0 ? (
+                  <p className="px-3 py-2 text-xs text-muted-foreground/60 italic font-sans">
+                    No validation data yet.
+                  </p>
+                ) : (
+                  (() => {
+                    // v2 responses tag each entry with origin. If none of the entries
+                    // carry the tag we're on legacy — render as a flat list.
+                    const hasOrigin = entries.some((e) => e.origin !== undefined);
+                    if (!hasOrigin) {
+                      return entries.map((entry) => (
+                        <RuleRow
+                          key={`${entry.rule_id}-${entry.file_details.file_name}`}
+                          entry={entry}
+                          isSelected={selectedRuleId === entry.rule_id}
+                          selectedSubRuleName={selectedRuleId === entry.rule_id ? ruleNameFilter : null}
+                          onClick={() => { setSelectedRule(entry.rule_id); setRuleNameFilter(null); }}
+                          onSubRuleClick={(name) => { setSelectedRule(entry.rule_id); setRuleNameFilter(name); }}
+                        />
+                      ));
+                    }
+                    const generalEntries = entries.filter((e) => e.origin !== 'customer');
+                    const customerEntries = entries.filter((e) => e.origin === 'customer');
+                    const customerLabel = customerEntries[0]?.customer
+                      ? `${customerEntries[0].customer!.charAt(0).toUpperCase()}${customerEntries[0].customer!.slice(1)} Rules`
+                      : 'Customer Rules';
+                    const renderEntries = (list: ValidationFileEntry[]) =>
+                      list.map((entry) => (
+                        <RuleRow
+                          key={`${entry.rule_id}-${entry.file_details.file_name}`}
+                          entry={entry}
+                          isSelected={selectedRuleId === entry.rule_id}
+                          selectedSubRuleName={selectedRuleId === entry.rule_id ? ruleNameFilter : null}
+                          onClick={() => { setSelectedRule(entry.rule_id); setRuleNameFilter(null); }}
+                          onSubRuleClick={(name) => { setSelectedRule(entry.rule_id); setRuleNameFilter(name); }}
+                        />
+                      ));
+                    return (
+                      <>
+                        {generalEntries.length > 0 && (
+                          <>
+                            <p className="px-2 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/80">
+                              General
+                            </p>
+                            {renderEntries(generalEntries)}
+                          </>
+                        )}
+                        {customerEntries.length > 0 && (
+                          <>
+                            <p className="px-2 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-primary/80">
+                              {customerLabel}
+                            </p>
+                            {renderEntries(customerEntries)}
+                          </>
+                        )}
+                      </>
+                    );
+                  })()
+                )}
+              </div>
             </div>
-          </div>
           )}
 
           {/* Right panel */}
@@ -1042,7 +1042,7 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                 >
                   {tab === 'result' ? (<>Validation Result{isDirty && <span className="ml-1 text-amber-500">●</span>}</>)
                     : tab === 'preview' ? 'Preview'
-                    : 'PDF'}
+                      : 'PDF'}
                 </button>
               ))}
             </div>
@@ -1059,122 +1059,122 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                     transition={{ duration: 0.12 }}
                     className="h-full flex overflow-hidden font-sans"
                   >
-                      {/* Left Column: Validation Findings List for ALL files */}
-                      {showValidationFindings && (
-                        <div className="w-5/12 h-full border-r border-border flex flex-col min-w-[320px] max-w-[480px]">
-                          <div className="px-3.5 py-2.5 border-b border-border bg-muted/30 flex flex-col gap-2 shrink-0 font-sans">
-                            {/* Row 1: Validation Findings Title, Sort Toggle & Close Icon */}
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-2 min-w-0">
-                                <span className="text-xs font-bold text-foreground font-serif uppercase tracking-wider truncate">
-                                  Validation Findings ({displayedIssues.length})
-                                </span>
-                                <button
-                                  onClick={() => setSortOrder(prev => prev === 'rule' ? 'line' : 'rule')}
-                                  className={cn(
-                                    'px-2 py-0.5 rounded text-[10px] font-bold border transition-all flex items-center gap-1 shrink-0',
-                                    sortOrder === 'line'
-                                      ? 'bg-primary text-primary-foreground border-primary shadow-xs'
-                                      : 'bg-background text-muted-foreground border-border hover:bg-muted'
-                                  )}
-                                  title="Toggle Sort Order"
-                                >
-                                  <ArrowUpDown className="w-3 h-3" />
-                                  {sortOrder === 'rule' ? 'Sort: Rule' : 'Sort: Line'}
-                                </button>
-                              </div>
-                              <button 
-                                onClick={() => setShowValidationFindings(false)}
-                                className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded hover:bg-muted shrink-0"
-                                title="Hide Findings"
+                    {/* Left Column: Validation Findings List for ALL files */}
+                    {showValidationFindings && (
+                      <div className="w-5/12 h-full border-r border-border flex flex-col min-w-[320px] max-w-[480px]">
+                        <div className="px-3.5 py-2.5 border-b border-border bg-muted/30 flex flex-col gap-2 shrink-0 font-sans">
+                          {/* Row 1: Validation Findings Title, Sort Toggle & Close Icon */}
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="text-xs font-bold text-foreground font-serif uppercase tracking-wider truncate">
+                                Validation Findings ({displayedIssues.length})
+                              </span>
+                              <button
+                                onClick={() => setSortOrder(prev => prev === 'rule' ? 'line' : 'rule')}
+                                className={cn(
+                                  'px-2 py-0.5 rounded text-[10px] font-bold border transition-all flex items-center gap-1 shrink-0',
+                                  sortOrder === 'line'
+                                    ? 'bg-primary text-primary-foreground border-primary shadow-xs'
+                                    : 'bg-background text-muted-foreground border-border hover:bg-muted'
+                                )}
+                                title="Toggle Sort Order"
                               >
-                                <PanelLeftClose className="w-4 h-4" />
+                                <ArrowUpDown className="w-3 h-3" />
+                                {sortOrder === 'rule' ? 'Sort: Rule' : 'Sort: Line'}
                               </button>
                             </div>
-
-                            {/* Row 2: Category Filter Buttons (Full Width 3-Column Grid) */}
-                            <div className="grid grid-cols-3 gap-1.5 w-full">
-                              <button
-                                onClick={() => toggleIssueFilter('error')}
-                                className={cn(
-                                  'w-full py-1 px-2 rounded text-[10px] font-bold border transition-all text-center truncate',
-                                  issueFilter === 'error'
-                                    ? 'bg-red-500 text-white border-red-500 shadow-xs'
-                                    : 'bg-red-500/10 text-red-600 border-red-500/20 hover:bg-red-500/20',
-                                )}
-                              >
-                                Errors ({errorCount})
-                              </button>
-                              <button
-                                onClick={() => toggleIssueFilter('warning')}
-                                className={cn(
-                                  'w-full py-1 px-2 rounded text-[10px] font-bold border transition-all text-center truncate',
-                                  issueFilter === 'warning'
-                                    ? 'bg-amber-500 text-white border-amber-500 shadow-xs'
-                                    : 'bg-amber-500/10 text-amber-600 border-amber-500/20 hover:bg-amber-500/20',
-                                )}
-                              >
-                                Warnings ({warningCount})
-                              </button>
-                              <button
-                                onClick={() => toggleIssueFilter('info')}
-                                className={cn(
-                                  'w-full py-1 px-2 rounded text-[10px] font-bold border transition-all text-center truncate',
-                                  issueFilter === 'info'
-                                    ? 'bg-sky-500 text-white border-sky-500 shadow-xs'
-                                    : 'bg-sky-500/10 text-sky-600 border-sky-500/20 hover:bg-sky-500/20',
-                                )}
-                              >
-                                Info ({infoCount})
-                              </button>
-                            </div>
+                            <button
+                              onClick={() => setShowValidationFindings(false)}
+                              className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded hover:bg-muted shrink-0"
+                              title="Hide Findings"
+                            >
+                              <PanelLeftClose className="w-4 h-4" />
+                            </button>
                           </div>
 
-                      {/* Selected Rule Banner Info Card */}
-                      {(() => {
-                        const activeEntry = entries.find(e => e.rule_id === selectedRuleId);
-                        if (!activeEntry) return null;
-                        const isPass = activeEntry.result.issues.length === 0;
-                        return (
-                          <div className="px-3.5 py-2.5 bg-card border-b border-border shadow-xs">
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-1.5 min-w-0">
-                                {activeEntry.rule_id && (
-                                  <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 shrink-0">
-                                    {activeEntry.rule_id}
+                          {/* Row 2: Category Filter Buttons (Full Width 3-Column Grid) */}
+                          <div className="grid grid-cols-3 gap-1.5 w-full">
+                            <button
+                              onClick={() => toggleIssueFilter('error')}
+                              className={cn(
+                                'w-full py-1 px-2 rounded text-[10px] font-bold border transition-all text-center truncate',
+                                issueFilter === 'error'
+                                  ? 'bg-red-500 text-white border-red-500 shadow-xs'
+                                  : 'bg-red-500/10 text-red-600 border-red-500/20 hover:bg-red-500/20',
+                              )}
+                            >
+                              Errors ({errorCount})
+                            </button>
+                            <button
+                              onClick={() => toggleIssueFilter('warning')}
+                              className={cn(
+                                'w-full py-1 px-2 rounded text-[10px] font-bold border transition-all text-center truncate',
+                                issueFilter === 'warning'
+                                  ? 'bg-amber-500 text-white border-amber-500 shadow-xs'
+                                  : 'bg-amber-500/10 text-amber-600 border-amber-500/20 hover:bg-amber-500/20',
+                              )}
+                            >
+                              Warnings ({warningCount})
+                            </button>
+                            <button
+                              onClick={() => toggleIssueFilter('info')}
+                              className={cn(
+                                'w-full py-1 px-2 rounded text-[10px] font-bold border transition-all text-center truncate',
+                                issueFilter === 'info'
+                                  ? 'bg-sky-500 text-white border-sky-500 shadow-xs'
+                                  : 'bg-sky-500/10 text-sky-600 border-sky-500/20 hover:bg-sky-500/20',
+                              )}
+                            >
+                              Info ({infoCount})
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Selected Rule Banner Info Card */}
+                        {(() => {
+                          const activeEntry = entries.find(e => e.rule_id === selectedRuleId);
+                          if (!activeEntry) return null;
+                          const isPass = activeEntry.result.issues.length === 0;
+                          return (
+                            <div className="px-3.5 py-2.5 bg-card border-b border-border shadow-xs">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  {activeEntry.rule_id && (
+                                    <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 shrink-0">
+                                      {activeEntry.rule_id}
+                                    </span>
+                                  )}
+                                  <span className="text-xs font-bold text-foreground font-serif truncate" title={activeEntry.rule_name}>
+                                    {activeEntry.rule_name}
+                                  </span>
+                                </div>
+                                {isPass ? (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 shrink-0">
+                                    Passed <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red-600 bg-red-500/10 px-2 py-0.5 rounded-full border border-red-500/20 shrink-0">
+                                    {displayedIssues.length} issue{displayedIssues.length !== 1 ? 's' : ''}
                                   </span>
                                 )}
-                                <span className="text-xs font-bold text-foreground font-serif truncate" title={activeEntry.rule_name}>
-                                  {activeEntry.rule_name}
-                                </span>
                               </div>
-                              {isPass ? (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 shrink-0">
-                                  Passed <CheckCircle2 className="w-3 h-3 text-emerald-500" />
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red-600 bg-red-500/10 px-2 py-0.5 rounded-full border border-red-500/20 shrink-0">
-                                  {displayedIssues.length} issue{displayedIssues.length !== 1 ? 's' : ''}
-                                </span>
-                              )}
                             </div>
-                          </div>
-                        );
-                      })()}
+                          );
+                        })()}
 
-                      <div className="flex-1 overflow-y-auto p-3 space-y-2">
-                        {displayedIssues.length === 0 ? (
-                          <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
-                            <CheckCircle2 className="w-8 h-8 text-emerald-500 mb-2" />
-                            <p className="text-xs font-semibold text-foreground font-serif">No issues found</p>
-                            <p className="text-[11px] text-muted-foreground mt-1">All validation checks passed for this file.</p>
-                          </div>
-                        ) : (
-                          displayedIssues.map((issue, i) => (
-                            <IssueRow key={i} issue={issue} onClick={() => handleIssueClick(issue)} />
-                          ))
-                        )}
-                      </div>
+                        <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                          {displayedIssues.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
+                              <CheckCircle2 className="w-8 h-8 text-emerald-500 mb-2" />
+                              <p className="text-xs font-semibold text-foreground font-serif">No issues found</p>
+                              <p className="text-[11px] text-muted-foreground mt-1">All validation checks passed for this file.</p>
+                            </div>
+                          ) : (
+                            displayedIssues.map((issue, i) => (
+                              <IssueRow key={i} issue={issue} onClick={() => handleIssueClick(issue)} />
+                            ))
+                          )}
+                        </div>
                       </div>
                     )}
 
@@ -1200,8 +1200,8 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                               onClick={() => setShowHtmlPreview(!showHtmlPreview)}
                               className={cn(
                                 "flex items-center gap-1.5 px-2 py-1 rounded transition-colors font-sans font-semibold border border-transparent",
-                                showHtmlPreview 
-                                  ? "bg-primary/10 text-primary border-primary/20" 
+                                showHtmlPreview
+                                  ? "bg-primary/10 text-primary border-primary/20"
                                   : "text-muted-foreground hover:text-foreground hover:bg-muted"
                               )}
                               title="Toggle HTML Preview"
@@ -1215,8 +1215,8 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                               onClick={() => setShowAnalysisSidebar(!showAnalysisSidebar)}
                               className={cn(
                                 "flex items-center gap-1.5 px-2 py-1 rounded transition-colors font-sans font-semibold border border-transparent",
-                                showAnalysisSidebar 
-                                  ? "bg-primary/10 text-primary border-primary/20" 
+                                showAnalysisSidebar
+                                  ? "bg-primary/10 text-primary border-primary/20"
                                   : "text-muted-foreground hover:text-foreground hover:bg-muted"
                               )}
                               title="Toggle Analysis Report"
@@ -1306,7 +1306,7 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                                 <span className="text-xs font-bold text-foreground font-serif uppercase tracking-wider">
                                   HTML Preview
                                 </span>
-                                <button 
+                                <button
                                   onClick={() => setShowHtmlPreview(false)}
                                   className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-sm hover:bg-muted"
                                   title="Close Preview"
@@ -1315,9 +1315,9 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                                 </button>
                               </div>
                               <div className="flex-1 bg-white dark:bg-zinc-100 overflow-hidden relative">
-                                <iframe 
+                                <iframe
                                   ref={iframeRef}
-                                  srcDoc={getInjectedHtml(displayContent, baseUrl)} 
+                                  srcDoc={getInjectedHtml(displayContent, baseUrl)}
                                   className="w-full h-full border-none absolute inset-0"
                                   sandbox="allow-same-origin allow-scripts"
                                   title="HTML Preview"
@@ -1343,8 +1343,8 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                                     Analysis
                                   </h3>
                                   <div className="flex items-center gap-1">
-                                    <button 
-                                      onClick={() => setShowFilenamesInAnalysis(!showFilenamesInAnalysis)} 
+                                    <button
+                                      onClick={() => setShowFilenamesInAnalysis(!showFilenamesInAnalysis)}
                                       className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-sm hover:bg-muted"
                                       title={showFilenamesInAnalysis ? "Hide filenames" : "Show filenames"}
                                     >
