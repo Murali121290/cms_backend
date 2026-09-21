@@ -13,7 +13,8 @@
           "cover.jpeg",
           "cover.png"
         ]
-      }
+      },
+      "category": "Image Check"
     },
     {
       "id": "IMG-002",
@@ -29,7 +30,8 @@
           "header",
           "aside"
         ]
-      }
+      },
+      "category": "Image Check"
     }
   ]
 }

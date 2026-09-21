@@ -5,7 +5,8 @@
       "name": "XHTML Syntax Check",
       "target_path": "OEBPS/xhtml",
       "file_name_pattern": "*.xhtml",
-      "enabled": true
+      "enabled": true,
+      "category": "XHTML Check"
     },
     {
       "id": "XHTML002",
@@ -98,7 +99,8 @@
             "tag": "section"
           }
         ]
-      }
+      },
+      "category": "XHTML Check"
     },
     {
       "id": "XHTML003",
@@ -108,27 +110,31 @@
       "enabled": true,
       "rule_config": {
         "expected_lang": "en"
-      }
+      },
+      "category": "XHTML Check"
     },
     {
       "id": "XHTML004",
       "name": "<title> element is unique per page",
       "scope": "book",
-      "enabled": true
+      "enabled": true,
+      "category": "XHTML Check"
     },
     {
       "id": "XHTML005",
       "name": "No <br/> allowed inside headings",
       "target_path": "OEBPS/xhtml",
       "file_name_pattern": "*.xhtml",
-      "enabled": true
+      "enabled": true,
+      "category": "XHTML Check"
     },
     {
       "id": "XHTML006",
       "name": "Single <h1> per page and no adjacent headings",
       "target_path": "OEBPS/xhtml",
       "file_name_pattern": "*.xhtml",
-      "enabled": true
+      "enabled": true,
+      "category": "XHTML Check"
     }
   ]
 }

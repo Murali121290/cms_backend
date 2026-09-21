@@ -208,6 +208,21 @@ def delete_project(
     return {"status": True, "message": "Project deleted"}
 
 
+@router.get("/categories")
+def get_available_categories(customer: str = Query(None, description="Customer code to fetch rules for")):
+    """Return a list of unique rule categories available for the given customer (plus general rules)."""
+    from .engine import loader
+    general_rules = loader.load_general()
+    customer_rules = loader.load_customer(customer) if customer else []
+    
+    categories = set()
+    for rule in general_rules + customer_rules:
+        if rule.get("enabled", True):
+            categories.add(rule.get("category", "General Check"))
+            
+    return {"status": True, "categories": sorted(list(categories))}
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # 2.  Validator workspace  (keyed by folder_name — unchanged contract)
 # ════════════════════════════════════════════════════════════════════════════
@@ -481,6 +496,7 @@ async def start_validation(
     filename: str,
     file: str = Query(None),
     customer: str = Query(None, description="Override customer / client_code"),
+    category: str = Query(None, description="Category of rules to validate"),
     db: Session = Depends(get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -508,6 +524,7 @@ async def start_validation(
         epub_folder=epub_folder,
         target_file=file,
         customer=resolved_customer,
+        category=category,
         user_id=user_id,
         username=username,
     )
