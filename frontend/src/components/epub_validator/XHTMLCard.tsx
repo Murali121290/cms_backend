@@ -12,6 +12,7 @@ import {
   XCircle,
   Loader2,
   Info as InfoIcon,
+  EyeOff
 } from 'lucide-react';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -97,6 +98,7 @@ interface XHTMLCardProps {
   errors?: number;
   warnings?: number;
   infos?: number;
+  ignored?: number;
   isValidating?: boolean;
   onValidate?: () => void;
   onPreview?: () => void;
@@ -112,6 +114,7 @@ export function XHTMLCard({
   errors = 0,
   warnings = 0,
   infos = 0,
+  ignored = 0,
   isValidating = false,
   onValidate,
   onPreview,
@@ -189,6 +192,12 @@ export function XHTMLCard({
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-600 dark:text-sky-400 font-bold text-[11px]">
                   <InfoIcon className="w-3.5 h-3.5" />
                   {infos} {infos === 1 ? 'Info' : 'Infos'}
+                </span>
+              )}
+              {ignored > 0 && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-500/10 border border-slate-500/20 text-slate-500 dark:text-slate-400 font-bold text-[11px]" title={`${ignored} ignored`}>
+                  <EyeOff className="w-3.5 h-3.5" />
+                  {ignored} {ignored === 1 ? 'Ignored' : 'Ignored'}
                 </span>
               )}
               {errors === 0 && warnings === 0 && status === 'passed' && (
