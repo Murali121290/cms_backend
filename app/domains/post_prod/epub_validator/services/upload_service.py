@@ -3,6 +3,7 @@ import zipfile
 from pathlib import Path
 import shutil
 from typing import Optional
+import re
 
 from fastapi import UploadFile
 from fastapi.responses import JSONResponse
@@ -72,6 +73,24 @@ async def process_upload(
             epub_entry = epub_names[0]
             pdf_entry = pdf_names[0]
 
+            from app.domains.post_prod.epub_validator.engine.loader import load_customer_config
+            customer_key = client_code if client_code else client
+            client_config = load_customer_config(customer_key)
+            filename_format = client_config.get("upload", {}).get("filename_format")
+
+            if filename_format:
+                # Convert '{eisbn}' placeholder to a regex matching 10-13 digits
+                pattern = re.escape(filename_format).replace(r'\{eisbn\}', r'\d{10,13}')
+                regex = f"^{pattern}$"
+                
+                if not re.match(regex, os.path.basename(epub_entry), re.IGNORECASE):
+                    zip_ref.close()
+                    shutil.rmtree(upload_folder, ignore_errors=True)
+                    return {
+                        "status": False,
+                        "message": f"EPUB filename in ZIP must strictly follow the format '{filename_format}' (where eisbn is 10-13 digits).",
+                    }
+
             os.makedirs(extract_folder)
             for member in zip_ref.infolist():
                 if member.is_dir():
@@ -99,6 +118,11 @@ async def process_upload(
 
         total_files = sum(len(files) for _, _, files in os.walk(epub_extract_path))
 
+        eisbn_extracted = None
+        m = re.search(r'(\d{10,13})', actual_epub_file)
+        if m:
+            eisbn_extracted = m.group(1)
+
         return {
             "status": True,
             "message": "Upload successful",
@@ -108,6 +132,7 @@ async def process_upload(
             "epub_file": epub_path,
             "pdf_file": pdf_path,
             "total_files": total_files,
+            "eisbn_extracted": eisbn_extracted,
         }
 
     except zipfile.BadZipFile:

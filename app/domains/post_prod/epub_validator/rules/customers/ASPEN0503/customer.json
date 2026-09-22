@@ -161,6 +161,14 @@
       "category": "General Check"
     },
     {
+      "id": "ASP-FILE-002",
+      "name": "Aspen: OPF unique-identifier matches eISBN from DB",
+      "target_path": "OEBPS",
+      "file_name_pattern": "*.opf",
+      "enabled": true,
+      "category": "General Check"
+    },
+    {
       "id": "ASP-NAV-001",
       "name": "Aspen: Cover and Front Matter present in NAV",
       "target_path": "",
@@ -529,6 +537,9 @@
     }
   ],
   "export": {
+    "filename_format": "{eisbn}_EPUB.epub"
+  },
+  "upload": {
     "filename_format": "{eisbn}_EPUB.epub"
   },
   "category_order": [

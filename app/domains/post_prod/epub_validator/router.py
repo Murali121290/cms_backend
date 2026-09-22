@@ -147,7 +147,7 @@ async def create_project(
         epub_path=result["epub_extract_path"],
         total_files=result.get("total_files", 0),
         user_id=user.id if user else None,
-        eisbn=eisbn,
+        eisbn=result.get("eisbn_extracted") or eisbn,
         copyright_year=copyright_year,
     )
     return {"message": "Project created successfully", "project": project}
