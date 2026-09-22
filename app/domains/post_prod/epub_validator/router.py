@@ -604,7 +604,7 @@ def _flag_ignored_issues(folder_name: str, validation_result: dict) -> dict:
             with open(ignored_file, 'r', encoding='utf-8') as f:
                 ignored_list = json.load(f)
                 for item in ignored_list:
-                    key = f"{item.get('rule_id')}|{item.get('file_name')}|{item.get('snippet')}"
+                    key = f"{item.get('rule_id')}|{item.get('file_name')}|{item.get('snippet')}|{item.get('line_number', '')}"
                     ignored_set.add(key)
         except Exception:
             pass
@@ -617,7 +617,7 @@ def _flag_ignored_issues(folder_name: str, validation_result: dict) -> dict:
         
         issues = file_entry.get("result", {}).get("issues", [])
         for issue in issues:
-            key = f"{rule_id}|{file_name}|{issue.get('snippet') or issue.get('message')}"
+            key = f"{rule_id}|{file_name}|{issue.get('snippet') or issue.get('extract') or issue.get('message')}|{issue.get('line_number', '')}"
             if key in ignored_set:
                 issue["is_ignored"] = True
             else:
@@ -677,6 +677,7 @@ class IgnoreIssueRequest(BaseModel):
     rule_id: str
     file_name: str
     snippet: str
+    line_number: Optional[int] = None
 
 @router.post("/projects/{folder_name}/ignore_issue")
 def ignore_issue(folder_name: str, payload: IgnoreIssueRequest):
@@ -693,11 +694,11 @@ def ignore_issue(folder_name: str, payload: IgnoreIssueRequest):
         except Exception:
             pass
             
-    # Check if already ignored
     for item in ignored_list:
         if item.get("rule_id") == payload.rule_id and \
            item.get("file_name") == payload.file_name and \
-           item.get("snippet") == payload.snippet:
+           item.get("snippet") == payload.snippet and \
+           item.get("line_number") == payload.line_number:
             return {"status": True, "message": "Already ignored"}
             
     ignored_list.append(payload.model_dump())
@@ -731,7 +732,8 @@ def unignore_issue(folder_name: str, payload: IgnoreIssueRequest):
     new_list = [item for item in ignored_list if not (
         item.get("rule_id") == payload.rule_id and 
         item.get("file_name") == payload.file_name and 
-        item.get("snippet") == payload.snippet
+        item.get("snippet") == payload.snippet and
+        item.get("line_number") == payload.line_number
     )]
     
     with open(ignored_file, 'w', encoding='utf-8') as f:

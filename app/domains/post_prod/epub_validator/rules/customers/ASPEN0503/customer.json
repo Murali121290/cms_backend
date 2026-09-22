@@ -469,7 +469,7 @@
       "name": "Aspen: First <p> tag following each <h1..h6> heading must use a consistent class name",
       "target_path": "OEBPS/xhtml",
       "file_name_pattern": "*.xhtml",
-      "enabled": true,
+      "enabled": false,
       "category": "Text Formatting Check"
     },
     {
