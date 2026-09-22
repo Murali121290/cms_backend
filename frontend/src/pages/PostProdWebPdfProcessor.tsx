@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { toast } from '@/store/useToastStore';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
+import { useSessionStore } from '@/stores/sessionStore';
 import {
   listProjects,
   createProject,
@@ -81,6 +82,25 @@ interface ProjectCardProps {
 }
 
 function ProjectCard({ project, users, onDelete, onEdit, onRefresh, onSelect }: ProjectCardProps) {
+  const viewer = useSessionStore((s) => s.viewer);
+  const myUsername = (viewer?.username || '').trim().toLowerCase();
+
+  const handleCardClick = () => {
+    const assigned = (project.assignee || '').trim().toLowerCase();
+
+    if (!assigned) {
+      toast.error('This project is not assigned to anyone. Assign it to open it.');
+      return;
+    }
+
+    if (assigned && myUsername && assigned !== myUsername) {
+      toast.error(`This project is assigned to ${project.assignee}. You cannot open it.`);
+      return;
+    }
+
+    onSelect(project);
+  };
+
   const handleAssigneeChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     e.stopPropagation();
     const newAssignee = e.target.value;
@@ -95,7 +115,7 @@ function ProjectCard({ project, users, onDelete, onEdit, onRefresh, onSelect }: 
 
   return (
     <div
-      onClick={() => onSelect(project)}
+      onClick={handleCardClick}
       className="p-4 rounded-xl border bg-card border-border cursor-pointer shadow-sm hover:shadow-md hover:border-primary/40 transition-all duration-300 flex flex-col justify-between group"
     >
       <div>
@@ -132,18 +152,18 @@ function ProjectCard({ project, users, onDelete, onEdit, onRefresh, onSelect }: 
         </div>
 
         {/* Assignee + Status badge row */}
-        <div className="mt-3 flex items-center justify-between text-[11px]">
-          <div className="flex items-center gap-1 text-muted" onClick={(e) => e.stopPropagation()}>
-            <UserIcon size={12} className="text-muted/70" />
+        <div className="mt-3 flex items-center justify-between text-[11px] gap-2">
+          <div className="flex items-center gap-1 text-muted min-w-0 flex-1" onClick={(e) => e.stopPropagation()}>
+            <UserIcon size={12} className="text-muted/70 shrink-0" />
             <select
               value={project.assignee || ''}
               onChange={handleAssigneeChange}
-              className="bg-transparent border-0 text-primary font-medium focus:ring-0 focus:outline-none cursor-pointer p-0 text-[11px] hover:text-primary-hover"
+              className="bg-transparent border-0 text-primary font-medium focus:ring-0 focus:outline-none cursor-pointer p-0 text-[11px] hover:text-primary-hover w-full truncate"
             >
               <option value="" className="text-text bg-card">Unassigned</option>
               {users.filter((u) => u.active_status).map((u) => (
                 <option key={u.id} value={u.user_name} className="text-text bg-card">
-                  {u.user_name}
+                  {u.first_name || u.last_name ? `${u.first_name || ''} ${u.last_name || ''}`.trim() : u.user_name}
                 </option>
               ))}
             </select>
