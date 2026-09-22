@@ -646,7 +646,7 @@ export function PostProdEpubValidatorFiles() {
     const agg = fileIssues.get(fileName);
 
     // mimetype and container.xml are validated at book-level by STRUCT validators
-    if ((fileName === 'mimetype' || fileName === 'container.xml') && agg === undefined && validationData) {
+    if ((fileName === 'mimetype' || fileName === 'container.xml' || fileName === 'META-INF/container.xml') && agg === undefined && validationData) {
       // Check if structure validators passed (STRUCT001, STRUCT002)
       const structValidations = validationData.files.filter(f =>
         (f.rule_id === 'STRUCT001' || f.rule_id === 'STRUCT002') &&

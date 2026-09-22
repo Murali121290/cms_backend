@@ -318,6 +318,7 @@ def _roman_to_int(s: str) -> int | None:
 
 
 _CHAPTER_NUMS_CACHE: dict[str, set[str]] = {}
+_PART_NUMS_CACHE: dict[str, set[str]] = {}
 
 def _epub_chapter_numbers(epub: str) -> set[str]:
     if epub in _CHAPTER_NUMS_CACHE:
@@ -326,8 +327,8 @@ def _epub_chapter_numbers(epub: str) -> set[str]:
     nums: set[str] = set()
     for xhtml in glob.glob(os.path.join(epub, "**", "*.xhtml"), recursive=True):
         basename = os.path.basename(xhtml).lower()
-        # Match base chapter numbers in filenames like ch110.xhtml, chapter-11.xhtml, or Chapter_IV
-        m = re.search(r'(?:ch|chapter|c|part|sec(?:tion)?)[_-]?(\d+|[ivxlcdm]+)', basename)
+        # Match base chapter numbers in filenames like ch110.xhtml, chapter-11.xhtml, or c_IV
+        m = re.search(r'(?:ch|chapter|c)[_-]?(\d+|[ivxlcdm]+)', basename)
         if m:
             raw = m.group(1).lstrip("0") or "0"
             nums.add(raw)
@@ -336,8 +337,28 @@ def _epub_chapter_numbers(epub: str) -> set[str]:
             if arabic is not None:
                 nums.add(str(arabic))
 
-
     _CHAPTER_NUMS_CACHE[epub] = nums
+    return nums
+
+
+def _epub_part_numbers(epub: str) -> set[str]:
+    if epub in _PART_NUMS_CACHE:
+        return _PART_NUMS_CACHE[epub]
+
+    nums: set[str] = set()
+    for xhtml in glob.glob(os.path.join(epub, "**", "*.xhtml"), recursive=True):
+        basename = os.path.basename(xhtml).lower()
+        # Match base part numbers in filenames like part_02.xhtml or partI.xhtml
+        m = re.search(r'part[_-]?(\d+|[ivxlcdm]+)', basename)
+        if m:
+            raw = m.group(1).lstrip("0") or "0"
+            nums.add(raw)
+            # Also store Arabic equivalent if the captured value is a Roman numeral
+            arabic = _roman_to_int(raw)
+            if arabic is not None:
+                nums.add(str(arabic))
+
+    _PART_NUMS_CACHE[epub] = nums
     return nums
 
 
@@ -528,6 +549,32 @@ def validate_page_citation_links(file_details, rule_config=None):
                 # Skip statutory / external legal references (e.g. Section 307 of SOX / Code / Act / U.S.C.)
                 remainder = str(text_node)[m.end():m.end() + 50]
                 if re.match(r'^\s+(?:of\s+(?:sox|erisa|title\s+\d+|the\s+(?:code|act|statute|rules?|constitution|dodd|false\s+claims))|codified|§|\(?\d+\s+u\.s\.c|\(?\d+\s+c\.f\.r)', remainder, re.IGNORECASE):
+                    continue
+
+            # If it is a Part citation (Group 10), only validate if the base part exists in this book
+            is_part = m.group(10) is not None if len(m.groups()) >= 10 else False
+            if is_part:
+                if summary_labels.get("total_parts") == 0:
+                    continue
+                if epub:
+                    part_num_full = m.group(10).lstrip("0") or "0"
+                    base_match = re.match(r'^(\d+|[IVXLCDMivxlcdm]+)', part_num_full)
+                    base_part = base_match.group(1) if base_match else part_num_full
+                    
+                    available_parts = _epub_part_numbers(epub)
+                    if available_parts:
+                        part_lower = base_part.lower()
+                        arabic_equiv = _roman_to_int(base_part)
+                        arabic_str = str(arabic_equiv) if arabic_equiv else None
+                        word_equiv = _word_to_int(base_part)
+                        word_str = str(word_equiv) if word_equiv else None
+                        if part_lower not in available_parts and (arabic_str is None or arabic_str not in available_parts) and (word_str is None or word_str not in available_parts):
+                            continue
+            # If it is a Box citation (Group 8), skip P.O. Boxes (which are not cross-references)
+            is_box = m.group(8) is not None if len(m.groups()) >= 8 else False
+            if is_box:
+                preceding = str(text_node)[:m.start()].strip()
+                if re.search(r'\b(?:P\.?\s*O\.?|Post\s+Office)\s*$', preceding, re.IGNORECASE):
                     continue
 
             msg = f"Citation '{m.group(0)}' is not wrapped in a link."
