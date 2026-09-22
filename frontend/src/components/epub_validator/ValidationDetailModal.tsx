@@ -47,7 +47,7 @@ interface Props {
 
 export type Tab = 'result' | 'preview' | 'pdf' | 'analysis';
 
-type DisplayIssue = ValidationIssue & { 
+type DisplayIssue = ValidationIssue & {
   _ruleName: string;
   _ruleId: string;
   _fileName: string;
@@ -223,13 +223,13 @@ const URL_PATTERN = /https?:\/\/[^\s<>"\']*|www\.[^\s<>"\']+\.[^\s<>"\']{2,}|\b(
 
 // ─── Issue row in right panel ────────────────────────────────────────────────
 
-function IssueRow({ 
-  issue, 
+function IssueRow({
+  issue,
   onClick,
   onIgnore,
   onUnignore
-}: { 
-  issue: DisplayIssue; 
+}: {
+  issue: DisplayIssue;
   onClick?: () => void;
   onIgnore?: (e: React.MouseEvent) => void;
   onUnignore?: (e: React.MouseEvent) => void;
@@ -742,7 +742,7 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
 
   const [issueFilter, setIssueFilter] = useState<'all' | 'error' | 'warning' | 'info' | 'ignored'>('all');
   const [ruleNameFilter, setRuleNameFilter] = useState<string | null>(null);
-  
+
   const [localIgnoredKeys, setLocalIgnoredKeys] = useState<Set<string>>(new Set());
   const [localUnignoredKeys, setLocalUnignoredKeys] = useState<Set<string>>(new Set());
 
@@ -789,9 +789,9 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
     let raw: DisplayIssue[] = [];
     if (selectedRuleId) {
       const matchingEntries = entries.filter(e => e.rule_id === selectedRuleId);
-      raw = matchingEntries.flatMap(entry => 
-        (entry.result.issues ?? []).map(i => ({ 
-          ...i, 
+      raw = matchingEntries.flatMap(entry =>
+        (entry.result.issues ?? []).map(i => ({
+          ...i,
           _ruleName: entry.rule_name ?? '',
           _ruleId: entry.rule_id ?? '',
           _fileName: entry.file_details?.relative_path ?? entry.file_details?.file_name ?? ''
@@ -799,8 +799,8 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
       );
     } else {
       raw = entries.flatMap(e =>
-        e.result.issues.map(i => ({ 
-          ...i, 
+        e.result.issues.map(i => ({
+          ...i,
           _ruleName: e.rule_name,
           _ruleId: e.rule_id,
           _fileName: e.file_details?.relative_path ?? e.file_details?.file_name ?? ''
@@ -956,7 +956,7 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                 disabled={isRevalidating}
               >
                 <RotateCw className={cn('w-3.5 h-3.5 shrink-0', isRevalidating && 'animate-spin')} />
-                <span>{isRevalidating ? 'Validating…' : 'Revalidate'}</span>
+                <span>{isRevalidating ? 'Validating…' : 'Validate'}</span>
               </button>
             )}
             <Button variant="ghost" size="sm" onClick={handleClose} className="ml-1 p-1 h-8 w-8 rounded-md">
@@ -1223,7 +1223,7 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                                   : 'bg-sky-500/10 text-sky-600 border-sky-500/20 hover:bg-sky-500/20',
                               )}
                             >
-                              Info ({infoCount})
+                              Revalidate ({infoCount})
                             </button>
                             <button
                               onClick={() => toggleIssueFilter('ignored')}
