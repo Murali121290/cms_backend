@@ -824,7 +824,7 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
     else if (issueFilter === 'info') issues = issues.filter(i => (i.category ?? '').toLowerCase() === 'info' && !i.is_ignored);
     else issues = issues.filter(i => !i.is_ignored);
 
-    if (ruleNameFilter) issues = issues.filter(i => i._ruleName === ruleNameFilter);
+    if (ruleNameFilter) issues = issues.filter(i => i._ruleName === ruleNameFilter || i.rule_name === ruleNameFilter);
 
     if (sortOrder === 'line') {
       issues = [...issues].sort((a, b) => {

@@ -129,9 +129,8 @@ def validate_unique_identifier_matches_db(file_details, rule_config=None):
         return {"issues_count": len(issues), "issues": issues}
         
     unique_id = package.get("unique-identifier")
-    expected_id = f"p{db_eisbn}"
     
-    if unique_id != expected_id:
+    if unique_id not in (db_eisbn, f"p{db_eisbn}", f"EPUB-{db_eisbn}"):
         # Find line number roughly
         lines = content.splitlines()
         from ..validators.metadata import _find_line
