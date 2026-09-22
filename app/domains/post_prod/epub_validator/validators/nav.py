@@ -9,6 +9,7 @@ from ._common import find_opf, read_text
 _HALFTITLE_RE = re.compile(r"\bhalf[\s\-]?title\b", re.IGNORECASE)
 # Match "and" as a word between two author-name-ish tokens.
 _AUTHOR_AND_RE = re.compile(r"\band\b", re.IGNORECASE)
+_OXFORD_COMMA_RE = re.compile(r",\s*and\b", re.IGNORECASE)
 
 
 @rule("ASP-NAV-001")
@@ -271,6 +272,37 @@ def validate_author_separator(book_details):
                 "message": f"Could not parse NCX: {e}",
                 "category": "Warning",
             })
+
+    return {"issues_count": len(issues), "issues": issues}
+
+
+@rule("ASP-NAV-004")
+def validate_author_oxford_comma(file_details, rule_config=None):
+    """In NCX (docAuthor), multiple authors must not use
+    an comma before 'and' (e.g. 'A, B and C' is correct, 'A, B, and C' is invalid).
+    """
+    file_path = file_details["full_path"]
+    issues = []
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            ncx_soup = BeautifulSoup(f.read(), "xml")
+        for author in ncx_soup.find_all(["docAuthor", "docauthor"]):
+            text = author.get_text(strip=True)
+            if _OXFORD_COMMA_RE.search(text):
+                issues.append({
+                    "type": "author_uses_oxford_comma",
+                    "message": f'docAuthor uses an comma before "and" in NCX: "{text}"',
+                    "category": "Error",
+                    "line_number": author.sourceline,
+                    "extract": text
+                })
+    except Exception as e:  # noqa: BLE001
+        issues.append({
+            "type": "ncx_parse_failed",
+            "message": f"Could not parse NCX: {e}",
+            "category": "Warning",
+        })
 
     return {"issues_count": len(issues), "issues": issues}
 

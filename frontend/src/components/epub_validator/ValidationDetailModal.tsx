@@ -788,13 +788,15 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
   const allIssues = useMemo<DisplayIssue[]>(() => {
     let raw: DisplayIssue[] = [];
     if (selectedRuleId) {
-      const entry = entries.find(e => e.rule_id === selectedRuleId);
-      raw = (entry?.result.issues ?? []).map(i => ({ 
-        ...i, 
-        _ruleName: entry?.rule_name ?? '',
-        _ruleId: entry?.rule_id ?? '',
-        _fileName: entry?.file_details?.relative_path ?? entry?.file_details?.file_name ?? ''
-      }));
+      const matchingEntries = entries.filter(e => e.rule_id === selectedRuleId);
+      raw = matchingEntries.flatMap(entry => 
+        (entry.result.issues ?? []).map(i => ({ 
+          ...i, 
+          _ruleName: entry.rule_name ?? '',
+          _ruleId: entry.rule_id ?? '',
+          _fileName: entry.file_details?.relative_path ?? entry.file_details?.file_name ?? ''
+        }))
+      );
     } else {
       raw = entries.flatMap(e =>
         e.result.issues.map(i => ({ 
@@ -822,7 +824,7 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
     else if (issueFilter === 'info') issues = issues.filter(i => (i.category ?? '').toLowerCase() === 'info' && !i.is_ignored);
     else issues = issues.filter(i => !i.is_ignored);
 
-    if (ruleNameFilter) issues = issues.filter(i => i.rule_name === ruleNameFilter);
+    if (ruleNameFilter) issues = issues.filter(i => i._ruleName === ruleNameFilter);
 
     if (sortOrder === 'line') {
       issues = [...issues].sort((a, b) => {
@@ -1241,7 +1243,7 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                         {(() => {
                           const activeEntry = entries.find(e => e.rule_id === selectedRuleId);
                           if (!activeEntry) return null;
-                          const isPass = activeEntry.result.issues.length === 0;
+                          const isPass = displayedIssues.length === 0;
                           return (
                             <div className="px-3.5 py-2.5 bg-card border-b border-border shadow-xs">
                               <div className="flex items-center justify-between gap-2">

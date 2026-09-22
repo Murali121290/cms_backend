@@ -187,6 +187,14 @@
       "category": "Navigation Check"
     },
     {
+      "id": "ASP-NAV-004",
+      "name": "Aspen: Authors must not use an comma before 'and' in NCX",
+      "target_path": "",
+      "file_name_pattern": "toc.ncx",
+      "enabled": true,
+      "category": "Metadata Check"
+    },
+    {
       "id": "ASP-COPY-001",
       "name": "Aspen: Copyright page must not contain 'Printed'",
       "target_path": "OEBPS/xhtml",
@@ -346,7 +354,7 @@
     },
     {
       "id": "ASP-META-014",
-      "name": "Aspen: <dc:creator> count matches Front Matter author count",
+      "name": "Aspen: <dc:creator> count matches NCX docAuthor count",
       "target_path": "OEBPS",
       "file_name_pattern": [
         "*.opf"
