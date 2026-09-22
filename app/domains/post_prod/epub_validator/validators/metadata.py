@@ -975,7 +975,6 @@ def validate_accessibility_hazards_strict(book_details, rule_config=None):
     return {"issues_count": 1, "issues": [{
         "type": "accessibility_hazard_values_missing",
         "message": (
-            "All 3 accessibility hazard tags are mandatory: 'noSoundHazard', 'noMotionSimulationHazard', and 'none'. "
             f"Missing tag(s): {missing_tags}"
         ),
         "category": "Error",
@@ -1085,9 +1084,29 @@ def _count_authors_in_front_matter(path: str) -> int | None:
     return None
 
 
+def _count_authors_in_ncx(ncx_path: str) -> int | None:
+    try:
+        with open(ncx_path, "r", encoding="utf-8") as f:
+            soup = BeautifulSoup(f.read(), "xml")
+    except Exception:
+        return None
+    
+    authors = soup.find_all(["docAuthor", "docauthor"])
+    if not authors:
+        return 0
+        
+    total = 0
+    import re
+    for author in authors:
+        text = author.get_text(strip=True)
+        parts = re.split(r",|\band\b", text, flags=re.IGNORECASE)
+        total += sum(1 for p in parts if p.strip())
+        
+    return total
+
 @rule("ASP-META-014")
-def validate_creator_count_matches_front_matter(book_details, rule_config=None):
-    """Count of <dc:creator> in OPF should equal number of authors on the Front Matter page."""
+def validate_creator_count_matches_ncx(book_details, rule_config=None):
+    """Count of <dc:creator> in OPF should equal number of authors in NCX <docAuthor>."""
     epub = book_details.get("epub_path") or book_details.get("epub_root") or ""
     if not epub and "full_path" in book_details:
         p = book_details["full_path"]
@@ -1111,27 +1130,29 @@ def validate_creator_count_matches_front_matter(book_details, rule_config=None):
             "extract": "<metadata",
         }]}
 
-    fm_path = _find_front_matter_file(epub)
-    if not fm_path:
+    import glob
+    ncx_files = glob.glob(f"{epub}/**/toc.ncx", recursive=True)
+    if not ncx_files:
         return {"issues_count": 0, "issues": []}
 
-    fm_name = os.path.basename(fm_path)
-    fm_count = _count_authors_in_front_matter(fm_path)
+    ncx_path = ncx_files[0]
+    ncx_name = os.path.basename(ncx_path)
+    ncx_count = _count_authors_in_ncx(ncx_path)
     lines = _load_opf_info(book_details)[2] if soup else []
 
-    if fm_count is None:
+    if ncx_count is None:
         return {"issues_count": 1, "issues": [{
             "type": "creator_count_unverifiable",
-            "message": f"Front Matter file '{fm_name}' was found, but no author names could be detected to verify against OPF <dc:creator> count ({opf_count}).",
+            "message": f"Could not read {ncx_name} to verify author count against OPF <dc:creator> count ({opf_count}).",
             "category": "Warning",
             "line_number": _find_line(lines, "dc:creator") or _find_line(lines, "<metadata"),
             "extract": "dc:creator",
         }]}
 
-    if opf_count != fm_count:
+    if opf_count != ncx_count:
         return {"issues_count": 1, "issues": [{
             "type": "creator_count_mismatch",
-            "message": f"OPF declares {opf_count} <dc:creator> tag(s), but Front Matter page ({fm_name}) lists {fm_count} author(s).",
+            "message": f"OPF declares {opf_count} <dc:creator> tag(s), but NCX ({ncx_name}) lists {ncx_count} author(s).",
             "category": "Error",
             "line_number": _find_line(lines, "dc:creator") or _find_line(lines, "<metadata"),
             "extract": "dc:creator",
@@ -1194,7 +1215,6 @@ def validate_accessibility_features(book_details, rule_config=None):
     return {"issues_count": 1, "issues": [{
         "type": "accessibility_feature_missing",
         "message": (
-            "All 5 accessibility feature tags are mandatory: 'displayTransformability', 'printPageNumbers', 'readingOrder', 'structuralNavigation', and 'tableOfContents'. "
             f"Missing tag(s): {missing_tags}"
         ),
         "category": "Error",

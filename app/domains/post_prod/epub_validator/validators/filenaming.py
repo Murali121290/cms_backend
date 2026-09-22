@@ -86,6 +86,67 @@ def validate_epub_filename(book_details):
     return {"issues_count": len(issues), "issues": issues}
 
 
+@rule("ASP-FILE-002")
+def validate_unique_identifier_matches_db(file_details, rule_config=None):
+    """OPF <package unique-identifier> must match 'p' + eISBN (from DB)."""
+    full_path = file_details["full_path"]
+    folder_name = file_details["folder_name"]
+    
+    # Query DB for project eisbn
+    from app.database import SessionLocal
+    from app.domains.post_prod.epub_validator.services import ev_projects_db
+    db = SessionLocal()
+    try:
+        project = ev_projects_db.get_project_by_folder(db, folder_name)
+        db_eisbn = project.eisbn if project else None
+    finally:
+        db.close()
+        
+    issues = []
+    if not db_eisbn:
+        issues.append({
+            "type": "db_eisbn_missing",
+            "message": "Cannot validate OPF unique-identifier because project eISBN is missing in the database.",
+            "category": "Warning"
+        })
+        return {"issues_count": len(issues), "issues": issues}
+
+    try:
+        with open(full_path, "r", encoding="utf-8") as f:
+            content = f.read()
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(content, "xml")
+    except Exception:
+        return {"issues_count": 0, "issues": []}
+
+    package = soup.find("package")
+    if not package:
+        issues.append({
+            "type": "package_missing",
+            "message": "<package> tag missing in OPF.",
+            "category": "Error"
+        })
+        return {"issues_count": len(issues), "issues": issues}
+        
+    unique_id = package.get("unique-identifier")
+    expected_id = f"p{db_eisbn}"
+    
+    if unique_id != expected_id:
+        # Find line number roughly
+        lines = content.splitlines()
+        from ..validators.metadata import _find_line
+        issues.append({
+            "type": "unique_identifier_mismatch",
+            "message": f"Input EPUB eISBN ({db_eisbn}) and OPF mentioned unique-identifier ({unique_id}) mismatch.",
+            "category": "Error",
+            "line_number": _find_line(lines, "<package"),
+            "extract": f'unique-identifier="{unique_id}"' if unique_id else "<package"
+        })
+        
+    return {"issues_count": len(issues), "issues": issues}
+
+
+
 _BACK_COVER_NAMES = ("backcover", "back_cover", "back-cover", "bcover")
 
 

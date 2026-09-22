@@ -694,18 +694,9 @@ export function PostProdEpubValidatorFiles() {
     setActiveFilter((prev) => (prev === status ? null : status));
   };
 
-  const [selectedBookRuleId, setSelectedBookRuleId] = useState<string | null>(null);
-
   const toggleRuleFilter = (ruleKey: string) => {
     setActiveFilter(null);
-    setSelectedBookRuleId(null);
     setSelectedRuleFilter((prev) => (prev === ruleKey ? null : ruleKey));
-  };
-
-  const toggleBookRule = (ruleKey: string) => {
-    setActiveFilter(null);
-    setSelectedRuleFilter(null);
-    setSelectedBookRuleId((prev) => (prev === ruleKey ? null : ruleKey));
   };
 
   // Aggregate rules across all validation data entries
@@ -959,9 +950,9 @@ export function PostProdEpubValidatorFiles() {
 
   const renderGroupedRules = (
     rules: typeof ruleSummary.generalBook,
-    getToggleFn: (r: typeof ruleSummary.generalBook[0], isBookOnlyRule: boolean) => () => void,
-    getIsSelected: (r: typeof ruleSummary.generalBook[0], ruleKey: string, isBookOnlyRule: boolean) => boolean,
-    getSubtext: (r: typeof ruleSummary.generalBook[0], isBookOnlyRule: boolean) => string,
+    getToggleFn: (r: typeof ruleSummary.generalBook[0]) => () => void,
+    getIsSelected: (r: typeof ruleSummary.generalBook[0], ruleKey: string) => boolean,
+    getSubtext: (r: typeof ruleSummary.generalBook[0]) => string,
     activeColorClass: string,
     hoverColorClass: string,
     badgeColorClass: string,
@@ -1018,14 +1009,13 @@ export function PostProdEpubValidatorFiles() {
               </summary>
               <div className="space-y-1 pl-1">
                 {categoryRules.map(r => {
-                  const isBookOnlyRule = !r.hasFileEntries && (r.errors > 0 || r.warnings > 0);
                   const ruleKey = r.rule_id || r.rule_name;
-                  const isSelected = getIsSelected(r, ruleKey, isBookOnlyRule);
+                  const isSelected = getIsSelected(r, ruleKey);
 
                   return (
                     <button
                       key={ruleKey}
-                      onClick={getToggleFn(r, isBookOnlyRule)}
+                      onClick={getToggleFn(r)}
                       className={cn(
                         'w-full text-left p-2.5 rounded-xl transition-all border text-xs flex items-start justify-between gap-2.5',
                         isSelected
@@ -1045,7 +1035,7 @@ export function PostProdEpubValidatorFiles() {
                           </p>
                         </div>
                         <p className="text-[10px] text-muted-foreground mt-1 font-mono">
-                          {getSubtext(r, isBookOnlyRule)}
+                          {getSubtext(r)}
                         </p>
                       </div>
                       {/* Icons */}
@@ -1591,9 +1581,9 @@ export function PostProdEpubValidatorFiles() {
                             Click a rule to explore issues
                           </p>
                         </div>
-                        {(selectedRuleFilter || selectedBookRuleId) && (
+                        {selectedRuleFilter && (
                           <button
-                            onClick={() => { setSelectedRuleFilter(null); setSelectedBookRuleId(null); }}
+                            onClick={() => setSelectedRuleFilter(null)}
                             className="text-[11px] text-primary hover:underline font-semibold"
                           >
                             Reset
@@ -1620,8 +1610,8 @@ export function PostProdEpubValidatorFiles() {
                             <div className="space-y-1">
                               {renderGroupedRules(
                                 ruleSummary.generalBook,
-                                (r) => () => toggleBookRule(r.rule_id || r.rule_name),
-                                (r, ruleKey) => selectedBookRuleId === ruleKey,
+                                (r) => () => toggleRuleFilter(r.rule_id || r.rule_name),
+                                (r, ruleKey) => selectedRuleFilter === ruleKey,
                                 () => 'Book-scope rule',
                                 'bg-slate-500/10 border-slate-500/40 ring-1 ring-slate-500/30 text-slate-700 dark:text-slate-300 font-bold shadow-xs',
                                 'hover:bg-slate-500/5 hover:border-slate-500/30',
@@ -1678,9 +1668,9 @@ export function PostProdEpubValidatorFiles() {
                             <div className="space-y-1">
                               {renderGroupedRules(
                                 ruleSummary.customer,
-                                (r, isBookOnlyRule) => () => isBookOnlyRule ? toggleBookRule(r.rule_id || r.rule_name) : toggleRuleFilter(r.rule_id || r.rule_name),
-                                (r, ruleKey, isBookOnlyRule) => isBookOnlyRule ? selectedBookRuleId === ruleKey : selectedRuleFilter === ruleKey,
-                                (r, isBookOnlyRule) => isBookOnlyRule ? 'Book-scope rule' : `${r.files.size} file${r.files.size !== 1 ? 's' : ''} affected`,
+                                (r) => () => toggleRuleFilter(r.rule_id || r.rule_name),
+                                (r, ruleKey) => selectedRuleFilter === ruleKey,
+                                (r) => r.hasFileEntries ? `${r.files.size} file${r.files.size !== 1 ? 's' : ''} affected` : 'Book-scope rule',
                                 'bg-primary/10 border-primary/40 ring-1 ring-primary/30 text-primary font-bold shadow-xs',
                                 'hover:bg-primary/5 hover:border-primary/30 hover:text-primary',
                                 'text-primary/80 bg-primary/10'
@@ -1695,17 +1685,29 @@ export function PostProdEpubValidatorFiles() {
                   {/* Main Right Area: Summary Stats + Top Category Tabs on top, Files below */}
                   <div className="flex-1 min-w-0 space-y-6">
 
-                    {/* ── Book Overview Panel (shown when a General Book or customer book-scope rule is selected) ─── */}
-                    {selectedBookRuleId && (() => {
+                    {/* ── Book Overview Panel (shown when a rule with book-scope issues is selected) ─── */}
+                    {selectedRuleFilter && (() => {
                       const bookEntries = validationData?.files.filter(
-                        (e) => (e.rule_id || e.rule_name) === selectedBookRuleId &&
-                          (!e.file_details.file_name || e.file_details.file_name === '[book-level]' || e.file_details.file_name === '')
+                        (e) => {
+                          if ((e.rule_id || e.rule_name) !== selectedRuleFilter) return false;
+                          const fname = e.file_details.file_name;
+                          if (!fname || fname === '[book-level]' || fname === '') return true;
+                          // If it's mapped to a specific file, check if that file exists in the EPUB.
+                          // If the file doesn't exist, we treat it as a book-level issue (e.g. missing file).
+                          const relPath = e.file_details.relative_path;
+                          const existsInEpub = allBackendFiles.some(bf => bf.path === relPath || bf.file_name === fname);
+                          return !existsInEpub;
+                        }
                       ) ?? [];
-                      // Look up rule metadata from both generalBook and customer lists
-                      const bookRule = [...ruleSummary.generalBook, ...ruleSummary.customer].find(
-                        (r) => (r.rule_id || r.rule_name) === selectedBookRuleId
-                      );
+                      
                       const allIssues = bookEntries.flatMap((e) => e.result.issues).filter(i => !i.is_ignored);
+                      if (allIssues.length === 0) return null; // Don't show panel if no book-scope issues exist
+
+                      // Look up rule metadata from all lists
+                      const bookRule = [...ruleSummary.generalBook, ...ruleSummary.general, ...ruleSummary.customer].find(
+                        (r) => (r.rule_id || r.rule_name) === selectedRuleFilter
+                      );
+
                       return (
                         <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 p-4 shadow-sm font-sans">
                           {/* Header */}
@@ -1714,9 +1716,9 @@ export function PostProdEpubValidatorFiles() {
                               <BookMarked className="w-4 h-4 text-slate-500 shrink-0" />
                               <div className="min-w-0">
                                 <p className="text-sm font-bold text-foreground font-serif truncate">
-                                  {bookRule?.rule_name ?? selectedBookRuleId}
+                                  {bookRule?.rule_name ?? selectedRuleFilter}
                                 </p>
-                                <p className="text-[11px] font-mono text-slate-500 mt-0.5">{selectedBookRuleId} · Book-scope</p>
+                                <p className="text-[11px] font-mono text-slate-500 mt-0.5">{selectedRuleFilter} · Book-scope issues</p>
                               </div>
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
@@ -1731,7 +1733,7 @@ export function PostProdEpubValidatorFiles() {
                                 </span>
                               )}
                               <button
-                                onClick={() => setSelectedBookRuleId(null)}
+                                onClick={() => setSelectedRuleFilter(null)}
                                 className="ml-1 p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 hover:text-foreground transition-colors"
                                 title="Close"
                               >
