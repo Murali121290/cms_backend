@@ -975,7 +975,6 @@ def validate_accessibility_hazards_strict(book_details, rule_config=None):
     return {"issues_count": 1, "issues": [{
         "type": "accessibility_hazard_values_missing",
         "message": (
-            "All 3 accessibility hazard tags are mandatory: 'noSoundHazard', 'noMotionSimulationHazard', and 'none'. "
             f"Missing tag(s): {missing_tags}"
         ),
         "category": "Error",
@@ -1194,7 +1193,6 @@ def validate_accessibility_features(book_details, rule_config=None):
     return {"issues_count": 1, "issues": [{
         "type": "accessibility_feature_missing",
         "message": (
-            "All 5 accessibility feature tags are mandatory: 'displayTransformability', 'printPageNumbers', 'readingOrder', 'structuralNavigation', and 'tableOfContents'. "
             f"Missing tag(s): {missing_tags}"
         ),
         "category": "Error",
