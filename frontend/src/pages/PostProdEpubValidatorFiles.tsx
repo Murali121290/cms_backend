@@ -1834,7 +1834,7 @@ export function PostProdEpubValidatorFiles() {
                         onClick={() => toggleFilter('failed')}
                       />
                       <StatCard
-                        label="Info"
+                        label="Revalidate"
                         value={stats.infos}
                         total={stats.total}
                         icon={InfoIcon}
