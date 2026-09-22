@@ -1,0 +1,46 @@
+{
+  "name": "US English House Style",
+  "description": "Standard American English spelling and style rules",
+  "variant_to_canonical": {
+    "colour": "color",
+    "colours": "colors",
+    "organise": "organize",
+    "organised": "organized",
+    "organisation": "organization",
+    "analyse": "analyze",
+    "analysed": "analyzed",
+    "centre": "center",
+    "centred": "centered",
+    "behaviour": "behavior",
+    "favour": "favor",
+    "labelled": "labeled",
+    "modelling": "modeling",
+    "email": "e-mail"
+  },
+  "rules": [
+    {
+      "id": "GP001", "category": "grammar", "type": "regex", "pattern": " {2,}", "replacement": " ", "message": "Collapse multiple spaces to one.", "severity": "error", "enabled": true
+    },
+    {
+      "id": "GP002", "category": "grammar", "type": "regex", "pattern": "\\s+([,;:.!?])", "replacement": "\\1", "message": "Remove space before punctuation.", "severity": "error", "enabled": true
+    },
+    {
+      "id": "GP003", "category": "grammar", "type": "regex", "pattern": "([,;:])(?=[^\\s\\d])", "replacement": "\\1 ", "message": "Add a space after punctuation.", "severity": "error", "enabled": true
+    },
+    {
+      "id": "SP000", "category": "spelling", "type": "dictionary", "message": "Standardise to US house style.", "enabled": true
+    },
+    {
+      "id": "SL001", "category": "sentence", "type": "function", "function": "max_sentence_length", "params": { "limit": 40 }, "enabled": true
+    },
+    {
+      "id": "SL002", "category": "sentence", "type": "function", "function": "terminal_punctuation", "enabled": true
+    },
+    {
+      "id": "SL003", "category": "sentence", "type": "function", "function": "start_capital", "enabled": true
+    },
+    {
+      "id": "SL004", "category": "sentence", "type": "function", "function": "wordiness", "enabled": true
+    }
+  ]
+}

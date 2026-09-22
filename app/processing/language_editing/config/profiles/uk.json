@@ -1,0 +1,174 @@
+{
+  "name": "UK English House Style",
+  "description": "Standard British English spelling, citation, and punctuation rules",
+  "variant_to_canonical": {
+    "color": "colour",
+    "colors": "colours",
+    "organize": "organise",
+    "organized": "organised",
+    "organization": "organisation",
+    "analyze": "analyse",
+    "analyzed": "analysed",
+    "center": "centre",
+    "centered": "centred",
+    "behavior": "behaviour",
+    "favor": "favour",
+    "labeled": "labelled",
+    "modeling": "modelling",
+    "e-mail": "email",
+    "e-mails": "emails",
+    "healthcare": "healthcare"
+  },
+  "rules": [
+    {
+      "id": "GP001",
+      "category": "grammar",
+      "type": "regex",
+      "pattern": " {2,}",
+      "replacement": " ",
+      "message": "Collapse multiple spaces to one.",
+      "severity": "error",
+      "enabled": true
+    },
+    {
+      "id": "GP002",
+      "category": "grammar",
+      "type": "regex",
+      "pattern": "\\s+([,;:.!?])",
+      "replacement": "\\1",
+      "message": "Remove space before punctuation.",
+      "severity": "error",
+      "enabled": true
+    },
+    {
+      "id": "GP003",
+      "category": "grammar",
+      "type": "regex",
+      "pattern": "([,;:])(?=[^\\s\\d])",
+      "replacement": "\\1 ",
+      "message": "Add a space after punctuation.",
+      "severity": "error",
+      "enabled": true
+    },
+    {
+      "id": "GP004",
+      "category": "grammar",
+      "type": "regex",
+      "pattern": "([.!?])([A-Z])",
+      "replacement": "\\1 \\2",
+      "message": "Add a space after sentence punctuation.",
+      "severity": "error",
+      "enabled": true
+    },
+    {
+      "id": "GP005",
+      "category": "grammar",
+      "type": "regex",
+      "pattern": "\\b(\\w+)\\s+\\1\\b",
+      "replacement": "\\1",
+      "message": "Repeated word.",
+      "severity": "warning",
+      "flags": ["IGNORECASE"],
+      "enabled": true
+    },
+    {
+      "id": "GP006",
+      "category": "grammar",
+      "type": "regex",
+      "pattern": "\\ba\\s+(?=[aeiouAEIOU])",
+      "replacement": "an ",
+      "message": "Use 'an' before a vowel sound.",
+      "severity": "warning",
+      "enabled": true
+    },
+    {
+      "id": "GP007",
+      "category": "grammar",
+      "type": "regex",
+      "pattern": "\\.{2,}",
+      "replacement": ".",
+      "message": "Use a single full stop.",
+      "severity": "warning",
+      "enabled": true
+    },
+    {
+      "id": "GP008",
+      "category": "grammar",
+      "type": "regex",
+      "pattern": "(?<=[a-z])--(?=[a-z])",
+      "replacement": "—",
+      "message": "Use an em dash.",
+      "severity": "suggestion",
+      "enabled": true
+    },
+    {
+      "id": "SP000",
+      "category": "spelling",
+      "type": "dictionary",
+      "message": "Standardise to house-style spelling.",
+      "enabled": true
+    },
+    {
+      "id": "SP010",
+      "category": "spelling",
+      "type": "regex",
+      "pattern": "\\bweb\\s?site\\b",
+      "replacement": "website",
+      "message": "House style: 'website'.",
+      "severity": "suggestion",
+      "flags": ["IGNORECASE"],
+      "enabled": true
+    },
+    {
+      "id": "SP011",
+      "category": "spelling",
+      "type": "regex",
+      "pattern": "\\bet\\.?\\s*al\\.?",
+      "replacement": "et al.",
+      "message": "Standardise citation to 'et al.'.",
+      "severity": "warning",
+      "enabled": true
+    },
+    {
+      "id": "SL001",
+      "category": "sentence",
+      "type": "function",
+      "function": "max_sentence_length",
+      "params": { "limit": 40 },
+      "severity": "suggestion",
+      "enabled": true
+    },
+    {
+      "id": "SL002",
+      "category": "sentence",
+      "type": "function",
+      "function": "terminal_punctuation",
+      "severity": "warning",
+      "enabled": true
+    },
+    {
+      "id": "SL003",
+      "category": "sentence",
+      "type": "function",
+      "function": "start_capital",
+      "severity": "warning",
+      "enabled": true
+    },
+    {
+      "id": "SL004",
+      "category": "sentence",
+      "type": "function",
+      "function": "wordiness",
+      "severity": "suggestion",
+      "enabled": true
+    },
+    {
+      "id": "SL005",
+      "category": "sentence",
+      "type": "function",
+      "function": "passive_voice",
+      "severity": "suggestion",
+      "enabled": true
+    }
+  ]
+}

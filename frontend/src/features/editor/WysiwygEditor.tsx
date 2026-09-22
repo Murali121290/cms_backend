@@ -2590,11 +2590,20 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           position: relative;
           word-wrap: break-word;
           white-space: normal;
+          color: #0f172a !important;
         }
-        .ProseMirror p {
-          margin: 0;
-          padding: 0;
-          line-height: 2;
+        .ProseMirror p,
+        .ProseMirror div,
+        .ProseMirror h1,
+        .ProseMirror h2,
+        .ProseMirror h3,
+        .ProseMirror h4,
+        .ProseMirror h5,
+        .ProseMirror h6,
+        .ProseMirror li,
+        .ProseMirror td,
+        .ProseMirror th {
+          color: #0f172a;
         }
         .ProseMirror p.is-editor-empty:first-child::before {
           color: #adb5bd;

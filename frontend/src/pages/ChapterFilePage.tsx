@@ -33,6 +33,8 @@ import { ReferenceCheckModal } from '@/features/projects/components/ReferenceChe
 import { TagSetSelectModal } from '@/features/projects/components/TagSetSelectModal'
 import { XmlToIndesignModal } from '@/components/XmlToIndesignModal'
 import { ArtValidationModal } from '@/components/ArtValidationModal'
+import { LanguageEditReviewModal } from '@/features/language_edit/LanguageEditReviewModal'
+
 import {
   startLanguageEdit,
   startPpdGeneration, startPermissionsCheck, startCreditExtraction,
@@ -276,17 +278,19 @@ function IconTooltipButton({
 }
 
 function ProcessingActionsMenu({
-  row, onOpenReferenceCheck, onOpenXmlToIndesign, onOpenArtValidation, stageName, isAssigned, projectId, chapterId,
+  row, onOpenReferenceCheck, onOpenXmlToIndesign, onOpenArtValidation, onOpenLanguageEdit, stageName, isAssigned, projectId, chapterId,
 }: {
   row: FileRow | null
   onOpenReferenceCheck: (file: FileRecord) => void
   onOpenXmlToIndesign: (fileId: number, fileName: string) => void
   onOpenArtValidation: (fileId: number, fileName: string) => void
+  onOpenLanguageEdit?: (fileId: number, fileName: string) => void
   stageName: string
   isAssigned: boolean
   projectId: number
   chapterId: number
 }) {
+
   const navigate = useNavigate()
   const [confirmStep, setConfirmStep] = useState<ConfirmStep | null>(null)
   const [tagSetModalOpen, setTagSetModalOpen] = useState(false)
@@ -384,11 +388,14 @@ function ProcessingActionsMenu({
           <button
             disabled={!fid}
             className={btnCls}
-            onClick={() => fid && void fire('Language Edit', () => startLanguageEdit(fid))}
+            onClick={() => fid && navigate(uiPaths.languageReview(projectId, chapterId, fid))}
           >
             <Languages size={12} /> Language Edit
           </button>
         )}
+
+
+
 
         {showAction('technicalEdit') && (
           <button
@@ -727,6 +734,8 @@ export function ChapterFilePage({
   const queryClient = useQueryClient()
   const [xmlToIndesignFile, setXmlToIndesignFile] = useState<{ id: number; name: string } | null>(null)
   const [artValidationFile, setArtValidationFile] = useState<{ id: number; name: string } | null>(null)
+  const [langEditFile, setLangEditFile] = useState<{ id: number; name: string } | null>(null)
+
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({
     template: true,
   })
@@ -1566,11 +1575,13 @@ export function ChapterFilePage({
                   onOpenReferenceCheck={setRefCheckFile}
                   onOpenXmlToIndesign={(fileId, fileName) => setXmlToIndesignFile({ id: fileId, name: fileName })}
                   onOpenArtValidation={(fileId, fileName) => setArtValidationFile({ id: fileId, name: fileName })}
+                  onOpenLanguageEdit={(fileId, fileName) => setLangEditFile({ id: fileId, name: fileName })}
                   stageName={resolvedStageName}
                   isAssigned={resolvedIsAssigned}
                   projectId={pid}
                   chapterId={cid}
                 />
+
               )}
             </div>
 
@@ -1751,6 +1762,18 @@ export function ChapterFilePage({
           fileName={artValidationFile.name}
         />
       )}
+
+      {/* ── Language Edit Human Validation Modal ──────────────────────────── */}
+      {langEditFile && (
+        <LanguageEditReviewModal
+          isOpen={langEditFile !== null}
+          onClose={() => setLangEditFile(null)}
+          fileId={langEditFile.id}
+          fileName={langEditFile.name}
+          projectId={pid}
+        />
+      )}
     </div>
   )
 }
+

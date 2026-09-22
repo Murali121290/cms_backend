@@ -1,0 +1,118 @@
+{
+  "name": "Stedman's / Medical & Pharmaceutical Style",
+  "description": "Comprehensive medical, pharmaceutical, anatomical terminology and drug name standardisations (AMA / Stedman's style)",
+  "variant_to_canonical": {
+    "anaemia": "anemia",
+    "anaemic": "anemic",
+    "orthopaedics": "orthopedics",
+    "orthopaedic": "orthopedic",
+    "oedema": "edema",
+    "foetus": "fetus",
+    "foetal": "fetal",
+    "haemorrhage": "hemorrhage",
+    "haemorrhagic": "hemorrhagic",
+    "paediatrics": "pediatrics",
+    "paediatric": "pediatric",
+    "oesophagus": "esophagus",
+    "oesophageal": "esophageal",
+    "haemoglobin": "hemoglobin",
+    "leukocyte": "leukocyte",
+    "leucocyte": "leukocyte",
+    "paracetamol": "acetaminophen",
+    "salbutamol": "albuterol",
+    "adrenaline": "epinephrine",
+    "noradrenaline": "norepinephrine",
+    "coagulopathy": "coagulopathy",
+    "electrocardiogram": "electrocardiogram",
+    "electrocardiograph": "electrocardiograph",
+    "echocardiogram": "echocardiogram",
+    "sphygmomanometer": "sphygmomanometer",
+    "thrombocytopenia": "thrombocytopenia",
+    "hyperglycemia": "hyperglycemia",
+    "hypoglycemia": "hypoglycemia",
+    "hyperkalemia": "hyperkalemia",
+    "hypokalemia": "hypokalemia",
+    "hyponatremia": "hyponatremia",
+    "hypernatremia": "hypernatremia"
+  },
+  "rules": [
+    {
+      "id": "MED001",
+      "category": "spelling",
+      "type": "dictionary",
+      "message": "Standardise medical & pharmaceutical terms (Stedman's / AMA style).",
+      "severity": "suggestion",
+      "enabled": true
+    },
+    {
+      "id": "MED002",
+      "category": "grammar",
+      "type": "regex",
+      "pattern": "\\b(\\d+)\\s*(mg|mcg|g|kg|mL|L|mmol|mEq|mmHg|IU)\\b",
+      "replacement": "\\1 \\2",
+      "message": "Standardise medical unit dosage formatting with a space.",
+      "severity": "warning",
+      "enabled": true
+    },
+    {
+      "id": "MED003",
+      "category": "spelling",
+      "type": "regex",
+      "pattern": "\\b(iv|i\\.v\\.|i\\.v)\\b",
+      "replacement": "IV",
+      "message": "Capitalize intravenous route abbreviation to 'IV'.",
+      "severity": "warning",
+      "flags": ["IGNORECASE"],
+      "enabled": true
+    },
+    {
+      "id": "MED004",
+      "category": "spelling",
+      "type": "regex",
+      "pattern": "\\b(im|i\\.m\\.|i\\.m)\\b",
+      "replacement": "IM",
+      "message": "Capitalize intramuscular route abbreviation to 'IM'.",
+      "severity": "warning",
+      "flags": ["IGNORECASE"],
+      "enabled": true
+    },
+    {
+      "id": "MED005",
+      "category": "spelling",
+      "type": "regex",
+      "pattern": "\\b(po|p\\.o\\.|p\\.o)\\b",
+      "replacement": "PO",
+      "message": "Capitalize oral administration route abbreviation to 'PO'.",
+      "severity": "warning",
+      "flags": ["IGNORECASE"],
+      "enabled": true
+    },
+    {
+      "id": "GP001",
+      "category": "grammar",
+      "type": "regex",
+      "pattern": " {2,}",
+      "replacement": " ",
+      "message": "Collapse multiple spaces to one.",
+      "severity": "error",
+      "enabled": true
+    },
+    {
+      "id": "SL001",
+      "category": "sentence",
+      "type": "function",
+      "function": "max_sentence_length",
+      "params": { "limit": 30 },
+      "severity": "suggestion",
+      "enabled": true
+    },
+    {
+      "id": "SL005",
+      "category": "sentence",
+      "type": "function",
+      "function": "passive_voice",
+      "severity": "suggestion",
+      "enabled": true
+    }
+  ]
+}

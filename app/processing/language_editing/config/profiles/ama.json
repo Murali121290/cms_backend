@@ -1,0 +1,19 @@
+{
+  "name": "AMA Manual of Style",
+  "description": "AMA (American Medical Association) 11th Edition style rules",
+  "variant_to_canonical": {
+    "colour": "color",
+    "organise": "organize",
+    "organisation": "organization",
+    "analyse": "analyze",
+    "centre": "center",
+    "behaviour": "behavior"
+  },
+  "rules": [
+    { "id": "GP001", "category": "grammar", "type": "regex", "pattern": " {2,}", "replacement": " ", "message": "AMA: Single space between sentences.", "severity": "error", "enabled": true },
+    { "id": "SP000", "category": "spelling", "type": "dictionary", "message": "AMA US medical spelling.", "enabled": true },
+    { "id": "SP011", "category": "spelling", "type": "regex", "pattern": "\\bet\\.?\\s*al\\.?", "replacement": "et al", "message": "AMA style: 'et al' (no period after al).", "severity": "warning", "enabled": true },
+    { "id": "SL001", "category": "sentence", "type": "function", "function": "max_sentence_length", "params": { "limit": 30 }, "enabled": true },
+    { "id": "SL005", "category": "sentence", "type": "function", "function": "passive_voice", "enabled": true }
+  ]
+}

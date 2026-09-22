@@ -30,7 +30,10 @@ app.add_middleware(
 app.include_router(routers_web.router, tags=["Web UI"])
 
 # API Routers
+from app.routers import language_edit
+app.include_router(language_edit.router)
 app.include_router(api_v2.router, prefix="/api/v2", tags=["API v2"])
+
 app.include_router(users.router, prefix=f"{settings.API_V1_STR}/users", tags=["Users"])
 app.include_router(projects.router, prefix=f"{settings.API_V1_STR}/projects", tags=["Projects"])
 app.include_router(files.router, prefix=f"{settings.API_V1_STR}/files", tags=["Files"])

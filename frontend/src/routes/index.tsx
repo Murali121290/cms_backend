@@ -26,10 +26,15 @@ import { Placeholder } from '@/pages/Placeholder'
 import { ProjectsPage } from '@/pages/ProjectsPage'
 import { ChapterFilePage } from '@/pages/ChapterFilePage'
 import { ChapterDetailPage } from '@/pages/ChapterDetailPage'
+
 import { TechnicalReviewPage } from '@/pages/TechnicalReviewPage'
 import { TechnicalEditorPage } from '@/pages/TechnicalEditorPage'
 import { StructuringReviewPage } from '@/pages/StructuringReviewPage'
+import { LanguageReviewPage } from '@/pages/LanguageReviewPage'
 import { ReferenceValidationReviewPage } from '@/pages/ReferenceValidationReviewPage'
+
+
+
 import { UnifiedReviewEditorPage } from '@/pages/UnifiedReviewEditorPage'
 import { FileEditorPage } from '@/pages/FileEditorPage'
 import { DocxEditorPage } from '@/pages/DocxEditorPage'
@@ -147,6 +152,7 @@ const router = createBrowserRouter([
       { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/wysiwyg', element: <DocxEditorPage /> },
       { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/review', element: <LegacyFileReviewRedirect /> },
       { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/structuring-review', element: <StructuringReviewPage /> },
+      { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/language-review', element: <LanguageReviewPage /> },
       { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/technical-review', element: <TechnicalReviewPage /> },
       { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/technical-editor', element: <TechnicalEditorPage /> },
       { path: 'projects/:projectId/chapters/:chapterId/files/:fileId/reference-review', element: <ReferenceTabRedirect /> },
@@ -157,7 +163,9 @@ const router = createBrowserRouter([
       { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/wysiwyg', element: <DocxEditorPage /> },
       { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/review', element: <LegacyFileReviewRedirect /> },
       { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/structuring-review', element: <StructuringReviewPage /> },
+      { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/language-review', element: <LanguageReviewPage /> },
       { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/technical-review', element: <TechnicalReviewPage /> },
+
       { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/technical-editor', element: <TechnicalEditorPage /> },
       { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/reference-review', element: <ReferenceTabRedirect /> },
       { path: 'clients/:clientId/projects/:projectId/chapters/:chapterId/files/:fileId/unified-review', element: <UnifiedReviewEditorPage /> },

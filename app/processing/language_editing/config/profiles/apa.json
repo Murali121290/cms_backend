@@ -1,0 +1,20 @@
+{
+  "name": "APA Publication Style",
+  "description": "APA (American Psychological Association) 7th Edition style rules",
+  "variant_to_canonical": {
+    "colour": "color",
+    "organise": "organize",
+    "organisation": "organization",
+    "analyse": "analyze",
+    "centre": "center",
+    "behaviour": "behavior"
+  },
+  "rules": [
+    { "id": "GP001", "category": "grammar", "type": "regex", "pattern": " {2,}", "replacement": " ", "message": "APA: One space after punctuation.", "severity": "error", "enabled": true },
+    { "id": "SP000", "category": "spelling", "type": "dictionary", "message": "APA US spelling standard.", "enabled": true },
+    { "id": "SP011", "category": "spelling", "type": "regex", "pattern": "\\bet\\.?\\s*al\\.?", "replacement": "et al.", "message": "APA citation: 'et al.' (no italic, with period).", "severity": "warning", "enabled": true },
+    { "id": "SL001", "category": "sentence", "type": "function", "function": "max_sentence_length", "params": { "limit": 35 }, "enabled": true },
+    { "id": "SL004", "category": "sentence", "type": "function", "function": "wordiness", "enabled": true },
+    { "id": "SL005", "category": "sentence", "type": "function", "function": "passive_voice", "enabled": true }
+  ]
+}
