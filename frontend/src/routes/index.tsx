@@ -58,6 +58,7 @@ import { JournalArticleEditorPage } from '@/pages/JournalArticleEditorPage'
 import { BodInternalPage } from '@/pages/books_on_demand/BodInternalPage'
 import { BodInternalJobPage } from '@/pages/books_on_demand/BodInternalJobPage'
 import { BodCustomerReportPage } from '@/pages/books_on_demand/BodCustomerReportPage'
+import { PostProdWebPdfProcessor } from '@/pages/PostProdWebPdfProcessor'
 import { ROLE_PERMISSIONS } from '@/config/rbacConfig'
 import { useRBAC } from '@/hooks/useRBAC'
 
@@ -195,6 +196,7 @@ const router = createBrowserRouter([
       { path: 'bod/internal', element: <BodInternalPage /> },
       { path: 'bod/internal/:jobId', element: <BodInternalJobPage /> },
       { path: 'bod/report', element: <BodCustomerReportPage /> },
+      { path: 'post-production/web-pdf-processor', element: <PostProdGuard><PostProdWebPdfProcessor /></PostProdGuard> },
       { path: 'reports', element: <ReportsPage /> },
       { path: 'reports/schedule', element: <ScheduleReport /> },
       { path: 'reports/today-schedule', element: <TodaySchedule /> },
