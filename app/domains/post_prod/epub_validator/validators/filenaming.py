@@ -130,7 +130,7 @@ def validate_unique_identifier_matches_db(file_details, rule_config=None):
         
     unique_id = package.get("unique-identifier")
     
-    if unique_id not in (db_eisbn, f"p{db_eisbn}", f"EPUB-{db_eisbn}"):
+    if unique_id not in (db_eisbn, f"p{db_eisbn}", f"EPUB-{db_eisbn}", f"Epub-{db_eisbn}"):
         # Find line number roughly
         lines = content.splitlines()
         from ..validators.metadata import _find_line
