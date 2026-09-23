@@ -20,6 +20,9 @@ import {
   ArrowUpDown,
   ChevronDown,
   ExternalLink,
+  Download,
+  Upload,
+  RefreshCw,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/utils/epubValidatorUtils';
@@ -227,17 +230,68 @@ function IssueRow({
   issue,
   onClick,
   onIgnore,
-  onUnignore
+  onUnignore,
+  folderName,
+  onRefresh,
 }: {
   issue: DisplayIssue;
   onClick?: () => void;
   onIgnore?: (e: React.MouseEvent) => void;
   onUnignore?: (e: React.MouseEvent) => void;
+  folderName?: string;
+  onRefresh?: () => void;
 }) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isUploading, setIsUploading] = useState(false);
   const cat = (issue.category ?? '').toLowerCase();
   const isError = cat === 'error';
   const isInfo = cat === 'info';
   const hasDiff = issue.expected_text || issue.actual_text;
+
+  const isCoverSizeError = issue.rule_name === 'Aspen: Cover height is 1100 pixels' || (issue.message && issue.message.includes('Cover height is'));
+
+  const handleDownloadCover = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!folderName || !issue.file_path) return;
+    const url = `/api/v2/post-prod/epub-validator/file-data/${encodeURIComponent(folderName)}/${encodeURIComponent(issue.file_path)}`;
+    window.open(url, '_blank');
+  };
+
+  const handleReplaceCover = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    e.stopPropagation();
+    const file = e.target.files?.[0];
+    if (!file || !folderName || !issue.file_path) return;
+
+    const reason = window.prompt("Please provide a reason for replacing this cover image (this will be logged in history):");
+    if (!reason) {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('reason', reason);
+
+      const res = await fetch(`/api/v2/post-prod/epub-validator/replace-file/${encodeURIComponent(folderName)}/${encodeURIComponent(issue.file_path)}`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Failed to replace file');
+      }
+      alert('Cover image replaced successfully. Please refresh the report to see the updated status.');
+      onRefresh?.();
+    } catch (err: any) {
+      alert(`Failed to upload replacement image: ${err.message}`);
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
 
   const targetUrl = useMemo(() => {
     if (issue.href && (issue.href.startsWith('http://') || issue.href.startsWith('https://'))) {
@@ -525,6 +579,64 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
     }
   }
 
+  // ── Replace Image ─────────────────────────────────────────────────────────────
+  const [showReplaceModal, setShowReplaceModal] = useState(false);
+  const [replaceFile, setReplaceFile] = useState<File | null>(null);
+  const [replaceReason, setReplaceReason] = useState('');
+  const [isReplacing, setIsReplacing] = useState(false);
+  const replaceFileInputRef = useRef<HTMLInputElement>(null);
+  const [replacementPreviewUrl, setReplacementPreviewUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (replaceFile) {
+      const url = URL.createObjectURL(replaceFile);
+      setReplacementPreviewUrl(url);
+      return () => URL.revokeObjectURL(url);
+    } else {
+      setReplacementPreviewUrl(null);
+    }
+  }, [replaceFile]);
+
+  const handleDownloadImage = () => {
+    if (!folderName || !filePath) return;
+    const url = `/api/v2/post-prod/epub-validator/file-data/${encodeURIComponent(folderName)}/${encodeURIComponent(filePath)}`;
+    window.open(url, '_blank');
+  };
+
+  const [lastUploadedPreviewUrl, setLastUploadedPreviewUrl] = useState<string | null>(null);
+
+  const handleReplaceSubmit = async () => {
+    if (!replaceFile || !replaceReason || !folderName || !filePath) return;
+    setIsReplacing(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', replaceFile);
+      formData.append('reason', replaceReason);
+
+      const res = await fetch(`/api/v2/post-prod/epub-validator/replace-file/${encodeURIComponent(folderName)}/${encodeURIComponent(filePath)}`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Failed to replace file');
+      }
+      
+      // Store the local URL so the image instantly updates in the UI
+      setLastUploadedPreviewUrl(URL.createObjectURL(replaceFile));
+      
+      setShowReplaceModal(false);
+      setReplaceFile(null);
+      setReplaceReason('');
+      setImageVersion(Date.now());
+    } catch (err: any) {
+      alert(`Failed to replace image: ${err.message}`);
+    } finally {
+      setIsReplacing(false);
+    }
+  };
+
   // ── Source fetch ─────────────────────────────────────────────────────────────
   const [sourceContent, setSourceContent] = useState<string | null>(null);
   const [sourceLoading, setSourceLoading] = useState(false);
@@ -622,11 +734,13 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
     return () => window.removeEventListener('message', handleMessage);
   }, [displayContent]);
 
+  const [imageVersion, setImageVersion] = useState(Date.now());
+
   const imageUrl = useMemo(() => {
     if (!isImageFile || !folderName || !filePath) return null;
     const encoded = encodeURIComponent(filePath.replace(/\\/g, '/'));
-    return `/api/v2/post-prod/epub-validator/file-data/${folderName}/${encoded}`;
-  }, [isImageFile, folderName, filePath]);
+    return `/api/v2/post-prod/epub-validator/file-data/${folderName}/${encoded}?v=${imageVersion}`;
+  }, [isImageFile, folderName, filePath, imageVersion]);
 
   useEffect(() => {
     if (activeTab !== 'result') return;
@@ -1280,7 +1394,7 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                             </div>
                           ) : (
                             displayedIssues.map((issue, i) => (
-                              <IssueRow key={i} issue={issue} onClick={() => handleIssueClick(issue)} onIgnore={(e) => handleIgnore(issue, e)} onUnignore={(e) => handleUnignore(issue, e)} />
+                              <IssueRow key={i} issue={issue} onClick={() => handleIssueClick(issue)} onIgnore={(e) => handleIgnore(issue, e)} onUnignore={(e) => handleUnignore(issue, e)} folderName={folderName} onRefresh={onRevalidate} />
                             ))
                           )}
                         </div>
@@ -1303,6 +1417,37 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                           <span className="font-semibold text-foreground truncate">{filePath}</span>
                         </div>
                         <div className="flex items-center gap-3">
+                          {isImageFile && (
+                            <>
+                              <button
+                                onClick={() => {
+                                  setLastUploadedPreviewUrl(null);
+                                  setImageVersion(Date.now());
+                                }}
+                                className="flex items-center gap-1.5 px-2 py-1 rounded transition-colors font-sans font-semibold border border-transparent text-muted-foreground hover:text-foreground hover:bg-muted"
+                                title="Refresh Image"
+                              >
+                                <RefreshCw className="w-3.5 h-3.5" />
+                                <span className="hidden sm:inline">Refresh</span>
+                              </button>
+                              <button
+                                onClick={handleDownloadImage}
+                                className="flex items-center gap-1.5 px-2 py-1 rounded transition-colors font-sans font-semibold border border-transparent text-muted-foreground hover:text-foreground hover:bg-muted"
+                                title="Download Image"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                                <span className="hidden sm:inline">Download</span>
+                              </button>
+                              <button
+                                onClick={() => setShowReplaceModal(true)}
+                                className="flex items-center gap-1.5 px-2 py-1 rounded transition-colors font-sans font-semibold bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20"
+                                title="Replace Image"
+                              >
+                                <Upload className="w-3.5 h-3.5" />
+                                <span className="hidden sm:inline">Replace</span>
+                              </button>
+                            </>
+                          )}
                           {!isImageFile && isDirty && <span className="text-[10px] font-bold text-amber-500 uppercase font-sans">Unsaved Changes</span>}
                           {!isImageFile && (
                             <button
@@ -1341,11 +1486,12 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                         <div className="flex-1 overflow-hidden relative">
                           {isImageFile ? (
                             <div className="h-full flex flex-col items-center justify-center p-6 bg-muted/10 overflow-auto">
-                              {imageUrl ? (
+                              {imageUrl || replacementPreviewUrl ? (
                                 <div className="flex flex-col items-center justify-center gap-3.5 max-w-full">
                                   <div className="p-3 rounded-2xl bg-card border border-border shadow-sm max-w-full overflow-hidden flex items-center justify-center bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] dark:bg-[radial-gradient(#1f2937_1px,transparent_1px)] [background-size:16px_16px]">
                                     <img
-                                      src={imageUrl}
+                                      key={`img-${imageVersion}`}
+                                      src={lastUploadedPreviewUrl || replacementPreviewUrl || imageUrl || ''}
                                       alt={file.file_name}
                                       className="max-h-[60vh] max-w-full object-contain rounded-lg shadow-xs"
                                       onError={(e) => {
@@ -1723,7 +1869,154 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* ── Image Replace Modal ─────────────────────────────────────────────── */}
+        <ImageReplaceModal
+          isOpen={showReplaceModal}
+          onClose={() => setShowReplaceModal(false)}
+          folderName={folderName}
+          filePath={filePath}
+          onSuccess={() => onRevalidate?.()}
+        />
       </motion.div>
+    </div>
+  );
+}
+
+// ── Image Replace Modal Component ─────────────────────────────────────────────
+
+function ImageReplaceModal({
+  isOpen,
+  onClose,
+  folderName,
+  filePath,
+  onSuccess,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  folderName: string;
+  filePath: string;
+  onSuccess: () => void;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [reason, setReason] = useState('');
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  if (!isOpen) return null;
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const droppedFile = e.dataTransfer.files?.[0];
+    if (droppedFile && droppedFile.type.startsWith('image/')) {
+      setFile(droppedFile);
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0];
+    if (selectedFile) setFile(selectedFile);
+  };
+
+  const handleSubmit = async () => {
+    if (!file || !reason) return;
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('reason', reason);
+
+      const res = await fetch(`/api/v2/post-prod/epub-validator/replace-file/${encodeURIComponent(folderName)}/${encodeURIComponent(filePath)}`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Failed to replace file');
+      }
+      onSuccess();
+      onClose();
+      setFile(null);
+      setReason('');
+    } catch (err: any) {
+      alert(`Failed to upload replacement image: ${err.message}`);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
+      <div className="bg-background rounded-[14px] shadow-2xl w-full max-w-[500px] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+        <div className="px-6 pt-6 pb-4">
+          <div className="flex items-start justify-between mb-1">
+            <h2 className="font-bold text-2xl text-foreground tracking-tight">Replace Image</h2>
+            <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors rounded-full focus:outline-none">
+              <div className="border-[1.5px] border-current rounded-full p-0.5">
+                <X className="w-4 h-4" strokeWidth={2.5} />
+              </div>
+            </button>
+          </div>
+          <p className="text-[13px] text-muted-foreground">Upload a new image to replace the current one</p>
+        </div>
+        
+        <div className="px-6">
+          <div className="h-[1px] w-full bg-border"></div>
+        </div>
+        
+        <div className="p-6 flex flex-col gap-6">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+              UPLOAD IMAGE FILE
+            </label>
+            <div
+              className={cn(
+                "border-[1.5px] border-dashed rounded-xl p-8 flex flex-col items-center justify-center cursor-pointer transition-all duration-200",
+                file 
+                  ? "border-primary bg-primary/5" 
+                  : "border-border hover:border-primary hover:bg-accent/50"
+              )}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleFileChange} />
+              <Upload className={cn("w-6 h-6 mb-3", file ? "text-primary" : "text-muted-foreground")} strokeWidth={1.5} />
+              {file ? (
+                <div className="text-center">
+                  <span className="text-[15px] font-bold text-foreground">{file.name}</span>
+                  <p className="text-[13px] text-muted-foreground mt-1">Click or drag to change file</p>
+                </div>
+              ) : (
+                <div className="text-center">
+                  <p className="text-[15px] font-bold text-foreground">Click to choose Image File</p>
+                  <p className="text-[13px] text-muted-foreground mt-1">Supports .jpg, .png, .webp files</p>
+                </div>
+              )}
+            </div>
+          </div>
+          
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+              REASON FOR REPLACEMENT <span className="text-destructive opacity-70">(REQUIRED)</span>
+            </label>
+            <textarea
+              className="w-full text-[14px] p-3 rounded-lg border border-input bg-background resize-none h-[88px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all"
+              placeholder="e.g. Fixed cover height issue..."
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
+          </div>
+        </div>
+        
+        <div className="px-6 py-5 flex justify-end gap-3 pt-2">
+          <Button variant="outline" className="px-5 shadow-sm rounded-lg text-foreground font-semibold h-10 hover:bg-accent" onClick={onClose} disabled={isUploading}>
+            Cancel
+          </Button>
+          <Button className="px-5 shadow-sm rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground font-semibold h-10 border-none disabled:opacity-50" onClick={handleSubmit} disabled={!file || !reason.trim() || isUploading}>
+            {isUploading ? 'Replacing...' : 'Replace Image'}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
