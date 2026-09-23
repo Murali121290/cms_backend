@@ -13,6 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File as FastAPIFile, Fo
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from pathlib import Path
 from jose import JWTError, jwt
+from pydantic import BaseModel
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -4560,9 +4561,72 @@ def api_v2_start_batch_jobs(
     }
 
 
+class CombineBookRequest(BaseModel):
+    chapter_ids: List[int] | None = None
+
+
+@router.get("/projects/{project_id}/final-delivery-files", response_model=schemas_v2.FinalDeliveryFilesResponse)
+def api_v2_list_final_delivery_files(
+    project_id: int,
+    db: Session = Depends(database.get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    viewer = _require_cookie_user(user)
+    if not viewer:
+        return _error_response(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            code="AUTH_REQUIRED",
+            message="Not authenticated",
+        )
+
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        return _error_response(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="PROJECT_NOT_FOUND",
+            message="Project not found.",
+        )
+
+    from app.services.file_service import UPLOAD_DIR
+
+    chapters = db.query(models.ChapterInfo).filter(models.ChapterInfo.project == project.project_code).all()
+
+    items = []
+    for chapter in chapters:
+        if chapter.chapters.lower() == "final files":
+            continue
+
+        for f in chapter.files:
+            if f.category == "Misc" and f.path:
+                ext = os.path.splitext(f.filename)[1].lower()
+                if ext in (".xml", ".epub") and not f.filename.endswith(".log"):
+                    abs_path = os.path.join(UPLOAD_DIR, f.path) if not os.path.isabs(f.path) else f.path
+                    size_bytes = None
+                    if os.path.exists(abs_path):
+                        try:
+                            size_bytes = os.path.getsize(abs_path)
+                        except Exception:
+                            pass
+                    items.append(schemas_v2.FinalDeliveryFileItem(
+                        id=f.id,
+                        chapter_id=chapter.id,
+                        chapter_number=chapter.chapters,
+                        chapter_title=chapter.chapter_title,
+                        filename=f.filename,
+                        extension=ext,
+                        size_bytes=size_bytes,
+                        uploaded_at=f.uploaded_at,
+                    ))
+
+    items.sort(key=lambda item: (item.chapter_number, item.filename))
+
+    return schemas_v2.FinalDeliveryFilesResponse(files=items)
+
+
 @router.post("/projects/{project_id}/combine-book")
 def api_v2_combine_project_book(
     project_id: int,
+    payload: CombineBookRequest | None = None,
     db: Session = Depends(database.get_db),
     user=Depends(get_current_user_from_cookie),
 ):
@@ -4584,8 +4648,11 @@ def api_v2_combine_project_book(
         )
 
     # Gather chapter-wise XML and ePUB files from the "Misc" category
-    chapters = db.query(models.ChapterInfo).filter(models.ChapterInfo.project == project.project_code).all()
-    
+    chapters_query = db.query(models.ChapterInfo).filter(models.ChapterInfo.project == project.project_code)
+    if payload and payload.chapter_ids:
+        chapters_query = chapters_query.filter(models.ChapterInfo.id.in_(payload.chapter_ids))
+    chapters = chapters_query.all()
+
     files_to_package = []
     for chapter in chapters:
         # Avoid including files from "Final files" chapter itself to prevent infinite loop of merging merges

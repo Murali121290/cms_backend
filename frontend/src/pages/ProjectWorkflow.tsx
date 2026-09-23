@@ -31,6 +31,15 @@ import { uploadChapterFiles } from '@/api/files'
 import { useRBAC } from '@/hooks/useRBAC'
 import { ROLE_PERMISSIONS } from '@/config/rbacConfig'
 
+interface FinalDeliveryFile {
+  id: number
+  chapter_id: number
+  chapter_number: string
+  chapter_title: string | null
+  filename: string
+  extension: string
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function sortChapters(a: { chapters: string }, b: { chapters: string }) {
@@ -502,6 +511,9 @@ export function ProjectWorkflow() {
   const [stageRolesMap, setStageRolesMap] = useState<Map<string, string[]>>(new Map())
   const [combineConfirmOpen, setCombineConfirmOpen] = useState(false)
   const [combining, setCombining] = useState(false)
+  const [finalDeliveryFiles, setFinalDeliveryFiles] = useState<FinalDeliveryFile[]>([])
+  const [loadingFinalDeliveryFiles, setLoadingFinalDeliveryFiles] = useState(false)
+  const [combineSelectedChapterIds, setCombineSelectedChapterIds] = useState<Set<number>>(new Set())
   const [users, setUsers] = useState<AppUser[]>([])
   const [plannedDueDates, setPlannedDueDates] = useState<Map<string, StageInfo>>(new Map())
   // Maps WMS chapter number (e.g. "01") → CMS chapter DB id for correct navigation
@@ -705,6 +717,19 @@ export function ProjectWorkflow() {
     }
     return manuscriptChapters
   }, [manuscriptChapters, filterStage])
+
+  const combineChapterGroups = useMemo(() => {
+    const groups = new Map<number, { chapter_id: number; chapter_number: string; chapter_title: string | null; files: FinalDeliveryFile[] }>()
+    for (const f of finalDeliveryFiles) {
+      const existing = groups.get(f.chapter_id)
+      if (existing) {
+        existing.files.push(f)
+      } else {
+        groups.set(f.chapter_id, { chapter_id: f.chapter_id, chapter_number: f.chapter_number, chapter_title: f.chapter_title, files: [f] })
+      }
+    }
+    return Array.from(groups.values()).sort((a, b) => sortChapters({ chapters: a.chapter_number }, { chapters: b.chapter_number }))
+  }, [finalDeliveryFiles])
 
   // Select active track chapters
   const activeChapters = useMemo(() => {
@@ -1123,11 +1148,32 @@ export function ProjectWorkflow() {
     navigate(`${clientId ? `/clients/${clientId}/projects/${projectId}` : `/projects/${projectId}`}/chapters/${cmsId}`)
   }
 
+  async function handleOpenCombineModal() {
+    setCombineConfirmOpen(true)
+    setLoadingFinalDeliveryFiles(true)
+    try {
+      const response = await fetch(`/api/v2/projects/${id}/final-delivery-files`)
+      if (!response.ok) throw new Error('Failed to load Final delivery files.')
+      const data = await response.json()
+      const files: FinalDeliveryFile[] = data.files ?? []
+      setFinalDeliveryFiles(files)
+      setCombineSelectedChapterIds(new Set(files.map(f => f.chapter_id)))
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to load Final delivery files.')
+      setFinalDeliveryFiles([])
+      setCombineSelectedChapterIds(new Set())
+    } finally {
+      setLoadingFinalDeliveryFiles(false)
+    }
+  }
+
   async function handleCombineBook() {
     setCombining(true)
     try {
       const response = await fetch(`/api/v2/projects/${id}/combine-book`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chapter_ids: Array.from(combineSelectedChapterIds) }),
       })
       if (!response.ok) {
         const errorText = await response.text()
@@ -1486,9 +1532,7 @@ export function ProjectWorkflow() {
                 </>
               )}
               <button
-                onClick={() => {
-                  setCombineConfirmOpen(true)
-                }}
+                onClick={handleOpenCombineModal}
                 className="text-xs font-medium px-3 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white transition-colors"
               >
                 Combine Book
@@ -2227,7 +2271,7 @@ export function ProjectWorkflow() {
         isOpen={combineConfirmOpen}
         onClose={() => { if (!combining) setCombineConfirmOpen(false) }}
         title="Combine Project Book"
-        description="This will gather all XML and ePUB files from the Final delivery folders of all chapters and merge them into a single book XML and ePUB. The combined files will be uploaded to a new 'Final files' chapter folder."
+        description="Select which chapters' Final delivery files to merge. Their XML and ePUB files will be combined into a single book XML and ePUB, uploaded to a new 'Final files' chapter folder."
         footer={
           <div className="flex gap-3 justify-end items-center">
             <button
@@ -2239,7 +2283,7 @@ export function ProjectWorkflow() {
             </button>
             <button
               onClick={handleCombineBook}
-              disabled={combining}
+              disabled={combining || loadingFinalDeliveryFiles || combineSelectedChapterIds.size === 0}
               className="text-xs font-semibold px-4 py-2.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white transition-colors flex items-center gap-1.5 disabled:opacity-50"
             >
               {combining && <Spinner size="sm" />}
@@ -2248,13 +2292,95 @@ export function ProjectWorkflow() {
           </div>
         }
       >
-        <div className="py-4 text-xs text-muted flex flex-col gap-2">
-          <p>The merge scripts will be executed on the Windows Conversion Server:</p>
-          <ul className="list-disc pl-5 space-y-1">
-            <li>XML Merge: <code className="bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 px-1.5 py-0.5 rounded font-mono border border-gray-200 dark:border-gray-700">book_xml.pl</code></li>
-            <li>ePUB Merge: <code className="bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 px-1.5 py-0.5 rounded font-mono border border-gray-200 dark:border-gray-700">book_epub.pl</code></li>
-          </ul>
-          <p className="mt-2 text-amber-600 font-medium">⚠️ Note: Make sure chapters have XML and ePUB files uploaded in their Final delivery folder before running the combine process.</p>
+        <div className="py-4 text-xs text-muted flex flex-col gap-3">
+          {loadingFinalDeliveryFiles ? (
+            <div className="flex items-center justify-center py-8">
+              <Spinner size="sm" />
+            </div>
+          ) : combineChapterGroups.length === 0 ? (
+            <p className="text-center text-muted py-6">
+              No Final delivery XML/ePUB files found in any chapter.
+            </p>
+          ) : (
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-medium text-muted">
+                  Chapters ({combineSelectedChapterIds.size}/{combineChapterGroups.length} selected)
+                </label>
+                <div className="flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setCombineSelectedChapterIds(new Set())}
+                    className="text-[11px] text-primary hover:underline font-medium transition-colors"
+                  >
+                    Deselect all
+                  </button>
+                  <span className="text-border">|</span>
+                  <button
+                    type="button"
+                    onClick={() => setCombineSelectedChapterIds(new Set(combineChapterGroups.map(c => c.chapter_id)))}
+                    className="text-[11px] text-primary hover:underline font-medium transition-colors"
+                  >
+                    Select all
+                  </button>
+                </div>
+              </div>
+
+              <div className="max-h-64 overflow-y-auto border border-border rounded-lg divide-y divide-border">
+                {combineChapterGroups.map(ch => {
+                  const isSelected = combineSelectedChapterIds.has(ch.chapter_id)
+                  return (
+                    <label
+                      key={ch.chapter_id}
+                      className={`flex items-start gap-3 px-3 py-2 hover:bg-surface transition-colors cursor-pointer select-none ${isSelected ? 'bg-amber-50/20' : ''
+                        }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => {
+                          setCombineSelectedChapterIds(prev => {
+                            const next = new Set(prev)
+                            if (next.has(ch.chapter_id)) {
+                              next.delete(ch.chapter_id)
+                            } else {
+                              next.add(ch.chapter_id)
+                            }
+                            return next
+                          })
+                        }}
+                        className="mt-0.5 rounded border-border text-primary focus:ring-primary/40 cursor-pointer"
+                      />
+                      <div className="flex flex-col gap-1 min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-primary text-xs uppercase flex-shrink-0">
+                            Ch {ch.chapter_number.padStart(2, '0')}
+                          </span>
+                          <span className="truncate text-text font-medium">
+                            {ch.chapter_title || `Chapter ${ch.chapter_number}`}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {ch.files.map(f => (
+                            <code
+                              key={f.id}
+                              className={`text-[10px] px-1.5 py-0.5 rounded border font-mono ${f.extension === '.xml'
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800'
+                                : 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800'
+                                }`}
+                            >
+                              {f.filename}
+                            </code>
+                          ))}
+                        </div>
+                      </div>
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
         </div>
       </Modal>
 

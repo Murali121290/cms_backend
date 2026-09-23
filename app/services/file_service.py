@@ -91,15 +91,44 @@ def upload_chapter_files(
     uploaded_results = []
     skipped_results = []
 
+    # Normalize category string (e.g., "Final delivery", "misc", "miscellaneous" -> "Misc")
+    cat_lower = (category or "").strip().lower()
+    if cat_lower in ("misc", "final delivery", "final_delivery", "miscellaneous"):
+        normalized_category = "Misc"
+    elif cat_lower in ("xml",):
+        normalized_category = "XML"
+    elif cat_lower in ("proof",):
+        normalized_category = "Proof"
+    elif cat_lower in ("indesign", "design"):
+        normalized_category = "InDesign"
+    elif cat_lower in ("manuscript",):
+        normalized_category = "Manuscript"
+    elif cat_lower in ("art",):
+        normalized_category = "Art"
+    else:
+        normalized_category = category
+
     for upload in files:
         if not upload.filename:
             continue
 
-        file_category = category
-        if upload.filename.lower().endswith((".xml", ".log")):
-            file_category = "XML"
+        is_delivery_xml = any(upload.filename.lower().endswith(s) for s in ["epub.xml", "_epub.xml", "_final.xml", "_final.log", "_layout.html"])
 
-        if upload.filename.lower().endswith(".zip") and any(c in category for c in ["Design", "Art", "InDesign", "template"]):
+        if normalized_category in ("Misc", "Proof", "InDesign", "Manuscript", "Art"):
+            if is_delivery_xml and normalized_category == "Misc":
+                file_category = "Misc"
+            elif upload.filename.lower().endswith((".xml", ".log")) and normalized_category not in ("Misc", "Proof", "InDesign"):
+                file_category = "XML"
+            else:
+                file_category = normalized_category
+        elif is_delivery_xml:
+            file_category = "Misc"
+        elif upload.filename.lower().endswith((".xml", ".log")):
+            file_category = "XML"
+        else:
+            file_category = normalized_category
+
+        if upload.filename.lower().endswith(".zip") and any(c in (category or "") for c in ["Design", "Art", "InDesign", "template"]):
             import zipfile
             import io
             try:
@@ -111,9 +140,20 @@ def upload_chapter_files(
                         if not fname or member.endswith("/") or "__MACOSX" in member or fname.startswith("."):
                             continue
 
-                        member_category = file_category
-                        if fname.lower().endswith((".xml", ".log")):
+                        is_member_delivery = any(fname.lower().endswith(s) for s in ["epub.xml", "_epub.xml", "_final.xml", "_final.log", "_layout.html"])
+                        if normalized_category in ("Misc", "Proof", "InDesign"):
+                            if is_member_delivery and normalized_category == "Misc":
+                                member_category = "Misc"
+                            elif fname.lower().endswith((".xml", ".log")) and normalized_category not in ("Misc", "Proof", "InDesign"):
+                                member_category = "XML"
+                            else:
+                                member_category = normalized_category
+                        elif is_member_delivery:
+                            member_category = "Misc"
+                        elif fname.lower().endswith((".xml", ".log")):
                             member_category = "XML"
+                        else:
+                            member_category = normalized_category
 
                         member_safe_cat = member_category.replace(" ", "_")
                         member_base_path = f"{upload_dir}/{project.code}/{chapter.number}/{member_safe_cat}"

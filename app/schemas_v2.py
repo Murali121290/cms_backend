@@ -271,6 +271,21 @@ class ChapterFilesResponse(BaseModel):
     viewer: Viewer
 
 
+class FinalDeliveryFileItem(BaseModel):
+    id: int
+    chapter_id: int
+    chapter_number: str
+    chapter_title: str | None = None
+    filename: str
+    extension: str
+    size_bytes: int | None = None
+    uploaded_at: datetime
+
+
+class FinalDeliveryFilesResponse(BaseModel):
+    files: list[FinalDeliveryFileItem]
+
+
 class NotificationItem(BaseModel):
     id: str
     type: Literal["file_upload"]

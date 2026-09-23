@@ -455,14 +455,22 @@ async def save_folder_file(
         models.File.filename == file_name
     ).first()
 
-    if file_name.lower().endswith((".xml", ".log")) and not any(file_name.lower().endswith(x) for x in ("_final.xml", "_final.log", "_finalxml.xml")):
+    is_misc_delivery = any(file_name.lower().endswith(x) for x in ("epub.xml", "_epub.xml", "_final.xml", "_final.log", "_finalxml.xml", "_layout.html")) or (subfolder and subfolder.lower() in ("misc", "final delivery", "final_delivery", "miscellaneous"))
+
+    if is_misc_delivery:
+        misc_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "Misc")
+        file_path = os.path.join(misc_dir, file_name)
+        if file_record:
+            file_record.category = "Misc"
+            file_record.path = file_path
+    elif file_name.lower().endswith((".xml", ".log")):
         xml_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "XML")
         file_path = os.path.join(xml_dir, file_name)
         if file_record:
             file_record.category = "XML"
             file_record.path = file_path
     elif file_record:
-        file_path = os.path.join(UPLOAD_DIR, file_record.path)
+        file_path = file_record.path if os.path.isabs(file_record.path) else os.path.join(UPLOAD_DIR, file_record.path)
     else:
         resolved_subfolder = subfolder
         chapter_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters)
@@ -598,19 +606,34 @@ async def save_folder_file(
             html_content = XMLEngine.generate_layout_html(db, file_path, project, chapter)
             xml_dir = os.path.dirname(file_path)
             base_name = os.path.splitext(file_name)[0]
-            layout_html_path = os.path.join(xml_dir, f"{base_name}_layout.html")
-            
+
+            is_misc_layout = (
+                (file_record and file_record.category == "Misc")
+                or any(base_name.lower().endswith(x) for x in ("_final", "_epub", "epub", "final"))
+                or "misc" in xml_dir.replace("\\", "/").lower().split("/")
+            )
+
+            if is_misc_layout:
+                target_layout_dir = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "Misc")
+                layout_cat = "Misc"
+            else:
+                target_layout_dir = xml_dir
+                layout_cat = "XML"
+
+            os.makedirs(target_layout_dir, exist_ok=True)
+            layout_html_path = os.path.join(target_layout_dir, f"{base_name}_layout.html")
+
             with open(layout_html_path, "w", encoding="utf-8") as out_h:
                 out_h.write(html_content)
-                
-            # Register or update layout HTML record in DB under XML category
+
+            # Register or update layout HTML record in DB
             layout_filename = os.path.basename(layout_html_path)
             db_layout = db.query(models.File).filter(
                 models.File.project_id == project_id,
                 models.File.chapter_id == chapter.id,
                 models.File.filename == layout_filename
             ).first()
-            
+
             rel_layout_path = os.path.relpath(layout_html_path, UPLOAD_DIR).replace("\\", "/")
             if not db_layout:
                 db_layout = models.File(
@@ -619,7 +642,7 @@ async def save_folder_file(
                     file_type="text/html",
                     project_id=project_id,
                     chapter_id=chapter.id,
-                    category="XML",
+                    category=layout_cat,
                     version=1,
                     is_original=False
                 )
@@ -627,8 +650,11 @@ async def save_folder_file(
                 db.commit()
             else:
                 db_layout.path = rel_layout_path
-                db_layout.category = "XML"
+                db_layout.category = layout_cat
                 db_layout.uploaded_at = datetime.utcnow()
+                if user:
+                    db_layout.uploaded_by_id = user.id
+                db.commit()
                 if user:
                     db_layout.uploaded_by_id = user.id
                 db.commit()

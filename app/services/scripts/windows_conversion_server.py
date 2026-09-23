@@ -1373,7 +1373,7 @@ def view_proof(file: UploadFile = File(...)):
         logger.error(f"[{session_id}] ZIP extraction failed: {str(zip_ex)}")
         raise HTTPException(status_code=400, detail=f"Failed to extract ZIP archive: {str(zip_ex)}")
 
-    # Find the .xhtml and .indt files recursively
+    # Find the .xhtml and .indt/.indd files recursively
     xhtml_path = None
     indt_path = None
     for root, _, filenames in os.walk(temp_dir):
@@ -1382,11 +1382,13 @@ def view_proof(file: UploadFile = File(...)):
                 xhtml_path = os.path.abspath(os.path.join(root, fname))
             elif fname.lower().endswith(".indt"):
                 indt_path = os.path.abspath(os.path.join(root, fname))
+            elif fname.lower().endswith(".indd") and not indt_path:
+                indt_path = os.path.abspath(os.path.join(root, fname))
                 
     if not xhtml_path:
-        raise HTTPException(status_code=400, detail="No XHTML file (.xhtml) found in zip package")
+        raise HTTPException(status_code=400, detail="No XHTML file (.xhtml) found in zip package. View Proof conversion requires an .xhtml manuscript file.")
     if not indt_path:
-        raise HTTPException(status_code=400, detail="No InDesign template (.indt) found in zip package")
+        raise HTTPException(status_code=400, detail="No InDesign template (.indt or .indd) found in zip package.")
 
     logger.info(f"[{session_id}] XHTML found: {xhtml_path}")
     logger.info(f"[{session_id}] Template found: {indt_path}")

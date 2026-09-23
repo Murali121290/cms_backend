@@ -33,6 +33,25 @@ def docx_has_changes(path1: str, path2: str) -> bool:
         return True
 
 
+def resolve_physical_file_path(path: str, upload_dir: str) -> str:
+    """Resolve a relative or absolute file path to a verified existing physical file path under upload_dir."""
+    if not path:
+        return path
+    if os.path.isabs(path) and os.path.exists(path):
+        return path
+    cleaned = path.lstrip("/\\")
+    alt1 = os.path.abspath(os.path.join(upload_dir, cleaned))
+    if os.path.exists(alt1):
+        return alt1
+    if cleaned.startswith("app/") or cleaned.startswith("app\\"):
+        alt2 = os.path.abspath(os.path.join(upload_dir, cleaned[4:]))
+        if os.path.exists(alt2):
+            return alt2
+    if not os.path.isabs(path):
+        return alt1
+    return os.path.abspath(path)
+
+
 def _run_via_pph(file_path: str, endpoint: str, extra_data: dict = None, file_field: str = "files") -> list:
     """Submit a single file to a PPH endpoint and return extracted output file paths."""
     from app.integrations.pph.client import PPHClient
@@ -180,7 +199,8 @@ def background_processing_task(
             update_job_status(db, job_id, "failed", "File not found", 100, "File not found in database.")
             return
 
-        file_path = os.path.abspath(file_record.path)
+        from app.services.file_service import UPLOAD_DIR
+        file_path = resolve_physical_file_path(file_record.path, UPLOAD_DIR)
         success_msg = ""
         generated_files = []
 
@@ -955,10 +975,15 @@ def background_processing_task(
                         elif processed_filename.endswith(".xhtml"):
                             mime = "application/xhtml+xml"
 
+                        is_misc_delivery_file = (
+                            any(processed_filename.lower().endswith(x) for x in ("_final_layout.html", "_epub_layout.html", "_final.xml", "_epub.xml", "_final.log", "_epub.log", ".epub"))
+                            or (file_record and file_record.category == "Misc")
+                        )
+
                         new_category = (
                             ("Proof" if processed_filename.lower().endswith((".pdf", ".xhtml", ".css")) else "Misc")
                             if process_type == "indesign_to_xml"
-                            else "Misc" if process_type == "extract_design_css"
+                            else "Misc" if (process_type == "extract_design_css" or is_misc_delivery_file)
                             else "Manuscript" if (process_type in ("style_validation", "style_match_design", "ppd") or processed_filename.lower().endswith(("_dashboard.html", "_style_match_report.html", "_style_match_report.json")))
                             else "XML" if processed_filename.lower().endswith((".xml", ".log", ".html"))
                             else "InDesign" if process_type == "xml_to_indesign"
@@ -1098,10 +1123,7 @@ def start_process(
     if not file_record:
         raise HTTPException(status_code=404, detail="File not found")
 
-    if os.path.isabs(file_record.path):
-        file_path = file_record.path
-    else:
-        file_path = os.path.abspath(os.path.join(upload_dir, file_record.path))
+    file_path = resolve_physical_file_path(file_record.path, upload_dir)
 
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail=f"Physical file missing: {file_path}")

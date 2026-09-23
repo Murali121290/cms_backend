@@ -50,12 +50,83 @@ export interface CommentItem {
   replies?: CommentReply[];
 }
 
+const STRUCTURAL_BLOCK_XML_TAGS = new Set([
+  "book-body",
+  "book-part",
+  "book-part-meta",
+  "body",
+  "disp-quote",
+  "sec",
+  "title-group",
+  "contrib-group",
+  "abstract",
+  "kwd-group",
+  "table-wrap",
+  "fig",
+  "caption",
+  "app-group",
+  "back",
+  "front",
+  "notes",
+  "ack",
+  "ref-list",
+  "author-queries",
+]);
+
+function convertStructuralSpansToDivs(containerNode: Element, doc: Document) {
+  const spans = Array.from(containerNode.querySelectorAll("span[data-xml-tag]"));
+  spans.forEach((span) => {
+    const xmlTag = (span.getAttribute("data-xml-tag") || "").toLowerCase();
+    const hasBlockChildren = span.querySelector("p, div, h1, h2, h3, h4, h5, h6, table, ul, ol, section, article, figure");
+    if (STRUCTURAL_BLOCK_XML_TAGS.has(xmlTag) || hasBlockChildren) {
+      const div = doc.createElement("div");
+      Array.from(span.attributes).forEach((attr) => {
+        div.setAttribute(attr.name, attr.value);
+      });
+      div.setAttribute("data-original-tag", "span");
+      while (span.firstChild) {
+        div.appendChild(span.firstChild);
+      }
+      if (span.parentNode) {
+        span.parentNode.replaceChild(div, span);
+      }
+    }
+  });
+}
+
 export function parseAuthorQueriesToEditorHtml(rawHtml: string, fileId?: string): string {
   if (!rawHtml) return rawHtml;
 
   try {
     const parser = new DOMParser();
-    const doc = parser.parseFromString(rawHtml, "text/html");
+    let doc: Document | null = null;
+
+    // Try XML parsing first to preserve inline span wrappers around block elements without parser splitting
+    try {
+      const xmlDoc = parser.parseFromString(rawHtml, "text/xml");
+      if (!xmlDoc.querySelector("parsererror")) {
+        doc = xmlDoc;
+      }
+    } catch (_) {
+      doc = null;
+    }
+
+    if (!doc) {
+      // String-level pre-replacement fallback for structural XML spans before text/html parsing
+      let preprocessedHtml = rawHtml;
+      STRUCTURAL_BLOCK_XML_TAGS.forEach((tag) => {
+        const regexOpen = new RegExp(`<span(\\s+[^>]*\\bdata-xml-tag="${tag}"[^>]*)>`, "gi");
+        preprocessedHtml = preprocessedHtml.replace(regexOpen, `<div data-original-tag="span"$1>`);
+      });
+      doc = parser.parseFromString(preprocessedHtml, "text/html");
+    }
+
+    if (doc) {
+      const root = doc.body || doc.documentElement;
+      if (root) {
+        convertStructuralSpansToDivs(root, doc);
+      }
+    }
 
     // 1. Transform graphic tags into <img> tags
     const graphicNodes = doc.querySelectorAll('[data-xml-tag="graphic"], graphic');
@@ -64,7 +135,7 @@ export function parseAuthorQueriesToEditorHtml(rawHtml: string, fileId?: string)
       const filename = origHref.split(/[/\\]/).pop() || "";
       const effectiveFileId = fileId || "175";
       const assetUrl = filename
-        ? `/api/v2/files/${effectiveFileId}/asset/${filename}`
+        ? `/api/v2/files/${effectiveFileId}/asset/${encodeURIComponent(filename)}`
         : origHref;
 
       const img = doc.createElement("img");
@@ -80,6 +151,31 @@ export function parseAuthorQueriesToEditorHtml(rawHtml: string, fileId?: string)
           node.parentNode.insertBefore(node.firstChild, node);
         }
         node.parentNode.removeChild(node);
+      }
+    });
+
+    // 1b. Transform standard <img> tags with relative src into backend asset URLs
+    const imgNodes = doc.querySelectorAll("img");
+    imgNodes.forEach((img) => {
+      const currentSrc = img.getAttribute("src") || "";
+      if (!currentSrc) return;
+
+      const effectiveFileId = fileId || "175";
+      const isAssetUrl = currentSrc.includes("/api/v2/files/");
+      const isAbsolute = currentSrc.startsWith("http://") || currentSrc.startsWith("https://") || currentSrc.startsWith("data:");
+
+      if (isAssetUrl) {
+        if (fileId && currentSrc.includes("/api/v2/files/175/asset/")) {
+          const updatedSrc = currentSrc.replace("/api/v2/files/175/asset/", `/api/v2/files/${fileId}/asset/`);
+          img.setAttribute("src", updatedSrc);
+        }
+      } else if (!isAbsolute) {
+        const origSrc = img.getAttribute("data-original-src") || currentSrc;
+        const filename = origSrc.split(/[/\\]/).pop() || "";
+        const assetUrl = `/api/v2/files/${effectiveFileId}/asset/${encodeURIComponent(filename)}`;
+
+        img.setAttribute("data-original-src", origSrc);
+        img.setAttribute("src", assetUrl);
       }
     });
 
@@ -151,6 +247,34 @@ export function serializeEditorHtmlToXhtml(editorHtml: string): string {
 
   let xhtml = editorHtml;
 
+  // Revert <div data-original-tag="span"...> elements back to <span data-xml-tag="...">
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(xhtml, "text/html");
+    const divsToRevert = Array.from(doc.querySelectorAll('[data-original-tag="span"]'));
+
+    divsToRevert.forEach((div) => {
+      const span = doc.createElement("span");
+      Array.from(div.attributes).forEach((attr) => {
+        if (attr.name !== "data-original-tag") {
+          span.setAttribute(attr.name, attr.value);
+        }
+      });
+      while (div.firstChild) {
+        span.appendChild(div.firstChild);
+      }
+      if (div.parentNode) {
+        div.parentNode.replaceChild(span, div);
+      }
+    });
+
+    if (doc.body) {
+      xhtml = doc.body.innerHTML;
+    }
+  } catch (err) {
+    console.error("Error reverting div tags to span tags:", err);
+  }
+
   // Revert <figure> tags back to <span data-xml-tag="fig">
   xhtml = xhtml.replace(
     /<figure\b([^>]*)>([\s\S]*?)<\/figure>/gi,
@@ -171,11 +295,41 @@ export function serializeEditorHtmlToXhtml(editorHtml: string): string {
   xhtml = xhtml.replace(
     /<img\b([^>]*\bdata-xml-tag="graphic"[^>]*)>/gi,
     (_, attrs) => {
-      const origMatch = attrs.match(/data-original-href="([^"]+)"/i);
+      const origMatch = attrs.match(/data-original-href="([^"]+)"/i) || attrs.match(/data-original-src="([^"]+)"/i);
       const srcMatch = attrs.match(/src="([^"]+)"/i);
       let href = origMatch ? origMatch[1] : (srcMatch ? srcMatch[1] : "");
       href = href.replace(/^.*?\/asset\//, "");
+      try {
+        href = decodeURIComponent(href);
+      } catch (_) {}
       return `<span data-xml-tag="graphic" href="${href}"></span>`;
+    }
+  );
+
+  // Revert standard <img> asset URLs back to original relative src
+  xhtml = xhtml.replace(
+    /<img\b([^>]+)>/gi,
+    (fullImg, attrs) => {
+      if (/\bdata-xml-tag="graphic"/i.test(attrs)) {
+        return fullImg;
+      }
+      const origSrcMatch = attrs.match(/data-original-src="([^"]+)"/i);
+      if (origSrcMatch) {
+        const origSrc = origSrcMatch[1];
+        let newAttrs = attrs.replace(/src="[^"]*"/i, `src="${origSrc}"`);
+        newAttrs = newAttrs.replace(/\s*data-original-src="[^"]*"/i, "");
+        return `<img${newAttrs}>`;
+      }
+      if (/src="[^"]*\/api\/v2\/files\/\d+\/asset\/([^"]+)"/i.test(attrs)) {
+        return attrs.replace(/src="[^"]*\/api\/v2\/files\/\d+\/asset\/([^"]+)"/i, (_m: string, fn: string) => {
+          try {
+            return `src="${decodeURIComponent(fn)}"`;
+          } catch (_) {
+            return `src="${fn}"`;
+          }
+        });
+      }
+      return fullImg;
     }
   );
 
@@ -233,6 +387,19 @@ export function serializeEditorHtmlToXhtml(editorHtml: string): string {
     }
   );
 
+  // 8. Convert named HTML entities (like &nbsp;) to numeric XML character references so XHTML is valid XML
+  xhtml = xhtml.replace(/&nbsp;/g, "&#160;");
+  xhtml = xhtml.replace(/&mdash;/g, "&#8212;");
+  xhtml = xhtml.replace(/&ndash;/g, "&#8211;");
+  xhtml = xhtml.replace(/&hellip;/g, "&#8230;");
+  xhtml = xhtml.replace(/&ldquo;/g, "&#8220;");
+  xhtml = xhtml.replace(/&rdquo;/g, "&#8221;");
+  xhtml = xhtml.replace(/&lsquo;/g, "&#8216;");
+  xhtml = xhtml.replace(/&rsquo;/g, "&#8217;");
+  xhtml = xhtml.replace(/&copy;/g, "&#169;");
+  xhtml = xhtml.replace(/&reg;/g, "&#174;");
+  xhtml = xhtml.replace(/&trade;/g, "&#8482;");
+
   return xhtml;
 }
 
@@ -250,6 +417,7 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
       onContentChange,
       styles,
       currentUser = "Compositor",
+      fileId,
       customCss = "",
       leftViewMode,
       onToggleLeftViewMode,
@@ -259,7 +427,7 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
     }: TinyMceEditorProps,
     ref
   ) {
-    const [content, setContent] = useState(() => parseAuthorQueriesToEditorHtml(initialContent || ""));
+    const [content, setContent] = useState(() => parseAuthorQueriesToEditorHtml(initialContent || "", fileId));
     const [tcEnabled, setTcEnabled] = useState(trackChangesEnabled);
     const [isDirty, setIsDirty] = useState(false);
     const [savedAt, setSavedAt] = useState<Date | null>(null);
@@ -314,18 +482,18 @@ export const TinyMceEditor = forwardRef<TinyMceEditorHandle, TinyMceEditorProps>
       contentRef.current = content;
     }, [content]);
 
-    // Handle initialContent changes
+    // Handle initialContent and fileId changes
     useEffect(() => {
-      const processed = parseAuthorQueriesToEditorHtml(initialContent || "");
+      const processed = parseAuthorQueriesToEditorHtml(initialContent || "", fileId);
       setContent(processed);
       setIsDirty(false);
-    }, [initialContent]);
+    }, [initialContent, fileId]);
 
     // Extract comments from HTML content when loaded
     useEffect(() => {
       if (!initialContent) return;
       try {
-        const processed = parseAuthorQueriesToEditorHtml(initialContent);
+        const processed = parseAuthorQueriesToEditorHtml(initialContent, fileId);
         const parser = new DOMParser();
         const doc = parser.parseFromString(processed, "text/html");
         const commentMarks = doc.querySelectorAll("mark.doc-comment");

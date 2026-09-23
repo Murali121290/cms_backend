@@ -1,7 +1,24 @@
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
+import { OrderedList } from "@tiptap/extension-ordered-list";
 import { Bold as TiptapBold } from "@tiptap/extension-bold";
 import { Italic as TiptapItalic } from "@tiptap/extension-italic";
+
+const CustomOrderedList = OrderedList.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      type: {
+        default: null,
+        parseHTML: (element) => element.getAttribute("type"),
+        renderHTML: (attributes) => {
+          if (!attributes.type) return {};
+          return { type: attributes.type };
+        },
+      },
+    };
+  },
+});
 import { Table } from "@tiptap/extension-table";
 import { TableRow } from "@tiptap/extension-table-row";
 import { TableCell } from "@tiptap/extension-table-cell";
@@ -610,11 +627,13 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           heading: false,
           bold: false,
           italic: false,
+          orderedList: false,
           // Underline and Link are registered explicitly below; disable the
           // StarterKit-bundled copies to avoid duplicate-extension warnings.
           link: false,
           underline: false,
         }),
+        CustomOrderedList,
         CustomBold,
         CustomItalic,
         CustomParagraph,
@@ -2791,23 +2810,40 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         }
 
         .ProseMirror ol {
-          list-style-type: decimal !important;
           margin-left: 2rem !important;
           padding-left: 0.5rem !important;
           margin-top: 0.5rem !important;
           margin-bottom: 0.5rem !important;
         }
-        .ProseMirror ol ol {
-          list-style-type: lower-alpha !important;
-        }
-        .ProseMirror ol ol ol {
-          list-style-type: lower-roman !important;
-        }
-        .ProseMirror ol ol ol ol {
+        /* Fallback nested list styles when type attribute is not explicitly set */
+        .ProseMirror ol:not([type]) {
           list-style-type: upper-alpha !important;
         }
-        .ProseMirror ol ol ol ol ol {
+        .ProseMirror ol ol:not([type]) {
+          list-style-type: decimal !important;
+        }
+        .ProseMirror ol ol ol:not([type]) {
+          list-style-type: lower-alpha !important;
+        }
+        .ProseMirror ol ol ol ol:not([type]) {
+          list-style-type: lower-roman !important;
+        }
+
+        /* Pure HTML type attribute selectors (A, 1, a, I, i) */
+        .ProseMirror ol[type="A"] {
+          list-style-type: upper-alpha !important;
+        }
+        .ProseMirror ol[type="1"] {
+          list-style-type: decimal !important;
+        }
+        .ProseMirror ol[type="a"] {
+          list-style-type: lower-alpha !important;
+        }
+        .ProseMirror ol[type="I"] {
           list-style-type: upper-roman !important;
+        }
+        .ProseMirror ol[type="i"] {
+          list-style-type: lower-roman !important;
         }
 
         .ProseMirror li {

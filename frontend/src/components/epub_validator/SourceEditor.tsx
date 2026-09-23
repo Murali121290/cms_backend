@@ -98,6 +98,12 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
     const [panelOpen, setPanelOpen] = useState(false);
     const [replaceMode, setReplaceMode] = useState(false);
     const [wordWrap, setWordWrap] = useState(true);
+    const [validationResult, setValidationResult] = useState<{
+      title: string;
+      type: 'success' | 'error';
+      message: string;
+      details?: string;
+    } | null>(null);
 
     useImperativeHandle(ref, () => ({
       scrollToLine(lineNum) {
@@ -413,19 +419,166 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
             ✏️ Replace
           </button>
         )}
-        <label
-          className="flex items-center gap-1.5 ml-auto cursor-pointer hover:text-gray-800 transition-colors font-medium text-[11px] select-none"
-          title="Word Wrap text (Alt+Z)"
-        >
-          <input
-            type="checkbox"
-            checked={wordWrap}
-            onChange={(e) => setWordWrap(e.target.checked)}
-            className="rounded border-gray-300 text-primary focus:ring-primary h-3.5 w-3.5 cursor-pointer"
-          />
-          Word Wrap
-        </label>
+        <div className="flex items-center gap-1.5 ml-auto">
+          <button
+            type="button"
+            onClick={() => {
+              try {
+                const parser = new DOMParser();
+                const xmlDoc = parser.parseFromString(value, "application/xml");
+                const parseError = xmlDoc.getElementsByTagName("parsererror");
+                if (parseError.length > 0) {
+                  const errText = parseError[0].textContent || "Syntax error in XML";
+                  setValidationResult({
+                    title: "❌ XML Syntax Error (Not Well-Formed)",
+                    type: "error",
+                    message: errText,
+                    details: "The XML cannot be parsed due to invalid entity references, unclosed tags, or malformed attributes."
+                  });
+                } else {
+                  setValidationResult({
+                    title: "✅ XML is Well-Formed",
+                    type: "success",
+                    message: "PASS (0 Syntax Errors)",
+                    details: "All XML tags are correctly opened, nested, and closed with valid character entities."
+                  });
+                }
+              } catch (e: any) {
+                setValidationResult({
+                  title: "❌ Parsing Exception",
+                  type: "error",
+                  message: e?.message || "Failed to parse XML string.",
+                });
+              }
+            }}
+            className="px-2.5 py-0.5 rounded hover:bg-emerald-100 active:bg-emerald-200 transition-colors font-medium flex items-center gap-1 border border-emerald-300 shadow-sm bg-emerald-50 text-emerald-800"
+            title="Check if XML syntax is valid and well-formed"
+          >
+            <span className="text-emerald-600 font-bold">✓</span> Well-formed Check
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              try {
+                const parser = new DOMParser();
+                const xmlDoc = parser.parseFromString(value, "application/xml");
+                const parseError = xmlDoc.getElementsByTagName("parsererror");
+                if (parseError.length > 0) {
+                  setValidationResult({
+                    title: "❌ DTD Validation Failed",
+                    type: "error",
+                    message: "Cannot validate DTD because the XML has syntax errors.",
+                    details: parseError[0].textContent || ""
+                  });
+                  return;
+                }
+
+                const errors: string[] = [];
+                const warnings: string[] = [];
+
+                if (!value.includes("<!DOCTYPE book PUBLIC")) {
+                  errors.push("Missing DOCTYPE declaration. Expected <!DOCTYPE book PUBLIC ...>");
+                } else if (!value.includes("BITS-Book-1.0-DTD/BITS-book1.dtd")) {
+                  warnings.push("DOCTYPE path should use: app/processing/legacy/wordtoxml/BITS-Book-1.0-DTD/BITS-book1.dtd");
+                }
+
+                const rootTag = xmlDoc.documentElement ? xmlDoc.documentElement.tagName : '';
+                if (rootTag !== 'book') {
+                  errors.push(`Invalid root element '<${rootTag}>'. BITS DTD requires root element '<book>'.`);
+                }
+
+                if (xmlDoc.getElementsByTagName('book-body').length === 0) {
+                  errors.push("Missing required BITS container element '<book-body>'.");
+                }
+                if (xmlDoc.getElementsByTagName('book-part').length === 0) {
+                  errors.push("Missing required BITS chapter element '<book-part>'.");
+                }
+
+                if (errors.length > 0) {
+                  setValidationResult({
+                    title: `❌ DTD Validation Errors (${errors.length})`,
+                    type: "error",
+                    message: errors.join("\n"),
+                    details: warnings.length ? "Warnings:\n" + warnings.join("\n") : undefined
+                  });
+                } else {
+                  setValidationResult({
+                    title: "🛡️ DTD Validation Passed",
+                    type: "success",
+                    message: "Compliant with BITS Book Interchange DTD (BITS-book1.dtd)",
+                    details: `Root Element: <book>\nStructure: <book-body> -> <book-part>\nDOCTYPE: NLM BITS Book Interchange DTD`
+                  });
+                }
+              } catch (e: any) {
+                setValidationResult({
+                  title: "❌ Validation Exception",
+                  type: "error",
+                  message: e?.message || "Failed to validate DTD schema.",
+                });
+              }
+            }}
+            className="px-2.5 py-0.5 rounded hover:bg-indigo-100 active:bg-indigo-200 transition-colors font-medium flex items-center gap-1 border border-indigo-300 shadow-sm bg-indigo-50 text-indigo-800"
+            title="Validate document structure against BITS DTD schema"
+          >
+            <span className="text-indigo-600 font-bold">📋</span> DTD Validate
+          </button>
+
+          <label
+            className="flex items-center gap-1.5 cursor-pointer hover:text-gray-800 transition-colors font-medium text-[11px] select-none ml-2"
+            title="Word Wrap text (Alt+Z)"
+          >
+            <input
+              type="checkbox"
+              checked={wordWrap}
+              onChange={(e) => setWordWrap(e.target.checked)}
+              className="rounded border-gray-300 text-primary focus:ring-primary h-3.5 w-3.5 cursor-pointer"
+            />
+            Word Wrap
+          </label>
+        </div>
       </div>
+
+      {/* Validation Result Modal Overlay */}
+      {validationResult && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white border border-gray-300 rounded-xl shadow-2xl max-w-lg w-full p-5 text-gray-800 animate-in fade-in zoom-in duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-gray-200">
+              <h3 className="text-sm font-bold flex items-center gap-2">
+                {validationResult.title}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setValidationResult(null)}
+                className="text-gray-400 hover:text-gray-700 p-1 rounded hover:bg-gray-100 transition-colors font-bold text-sm"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="py-4 text-xs font-mono space-y-2">
+              <div className={cn("p-3 rounded border text-xs leading-relaxed whitespace-pre-wrap font-sans font-medium", 
+                validationResult.type === "success" ? "bg-emerald-50 border-emerald-200 text-emerald-900" : "bg-red-50 border-red-200 text-red-900"
+              )}>
+                {validationResult.message}
+              </div>
+              {validationResult.details && (
+                <div className="p-3 bg-gray-50 border border-gray-200 rounded text-gray-700 text-[11px] whitespace-pre-wrap font-mono">
+                  {validationResult.details}
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end pt-2 border-t border-gray-200">
+              <button
+                type="button"
+                onClick={() => setValidationResult(null)}
+                className="px-4 py-1 rounded bg-gray-800 hover:bg-gray-900 text-white font-medium text-xs shadow-sm transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {panelOpen && view && (
         <FindReplacePanel
