@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '0031_add_reason_column_to_evhistory'
+revision: str = '0031_add_reason_to_evhistory'
 down_revision: Union[str, Sequence[str], None] = '0030_add_language_edit_tables'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
