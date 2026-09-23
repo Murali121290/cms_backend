@@ -1876,7 +1876,10 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
           onClose={() => setShowReplaceModal(false)}
           folderName={folderName}
           filePath={filePath}
-          onSuccess={() => onRevalidate?.()}
+          onSuccess={() => {
+            // Update the cache-busting key so the image instantly refreshes
+            setImageVersion(Date.now());
+          }}
         />
       </motion.div>
     </div>
