@@ -207,7 +207,7 @@ function ChooseScreen({ onBook, onJournal, onGeneral, onPeople }: { onBook: () =
 
   return (
     <div style={{ height: '100vh', fontSize: 20, display: 'flex', color: 'var(--accent-2)', flexDirection: 'column', overflow: 'hidden' }}>
-      <NavBar subtitle="S4C Proprietary Publishing Platform-3P" />
+      <NavBar subtitle="S4C Proprietary Ninja Platform" />
 
       {/* Hero band — spacious */}
       <div style={{ position: 'relative', overflow: 'hidden', background: '#F2F2F2', flexShrink: 0, padding: '48px 36px', minHeight: 200, display: 'flex', alignItems: 'center', borderBottom: '1px solid #E5E5E5' }}>
