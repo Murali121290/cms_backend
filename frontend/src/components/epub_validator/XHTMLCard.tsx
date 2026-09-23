@@ -72,11 +72,11 @@ function statusText(
 ): string {
   if (status === 'pending')  return 'Awaiting validation';
   if (status === 'passed') {
-    return infos > 0 ? `Passed (${infos} info item${infos !== 1 ? 's' : ''})` : 'No issues found';
+    return infos > 0 ? `Passed (${infos} revalidate item${infos !== 1 ? 's' : ''})` : 'No issues found';
   }
   const errStr = `${errors} error${errors !== 1 ? 's' : ''}`;
   const warnStr = `${warnings} warning${warnings !== 1 ? 's' : ''}`;
-  const infoStr = infos > 0 ? `, ${infos} info` : '';
+  const infoStr = infos > 0 ? `, ${infos} revalidate` : '';
   if (status === 'failed') {
     return warnings > 0 ? `${errStr}, ${warnStr}${infoStr}` : `${errStr}${infoStr}`;
   }
@@ -191,7 +191,7 @@ export function XHTMLCard({
               {infos > 0 && (
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-600 dark:text-sky-400 font-bold text-[11px]">
                   <InfoIcon className="w-3.5 h-3.5" />
-                  {infos} {infos === 1 ? 'Info' : 'Infos'}
+                  {infos} Revalidate
                 </span>
               )}
               {ignored > 0 && (

@@ -89,7 +89,7 @@
       "id": "NAV001",
       "name": "NAV TOC Link Check",
       "target_path": "",
-      "enabled": true,
+      "enabled": false,
       "file_name_pattern": "nav.xhtml",
       "category": "Navigation Check"
     },

@@ -646,7 +646,7 @@ export function PostProdEpubValidatorFiles() {
     const agg = fileIssues.get(fileName);
 
     // mimetype and container.xml are validated at book-level by STRUCT validators
-    if ((fileName === 'mimetype' || fileName === 'container.xml') && agg === undefined && validationData) {
+    if ((fileName === 'mimetype' || fileName === 'container.xml' || fileName === 'META-INF/container.xml') && agg === undefined && validationData) {
       // Check if structure validators passed (STRUCT001, STRUCT002)
       const structValidations = validationData.files.filter(f =>
         (f.rule_id === 'STRUCT001' || f.rule_id === 'STRUCT002') &&
@@ -711,6 +711,7 @@ export function PostProdEpubValidatorFiles() {
       category: string;
       errors: number;
       warnings: number;
+      infos: number;
       ignored: number;
       files: Set<string>;
       hasFileEntries: boolean; // true if at least one non-book-level entry exists
@@ -720,6 +721,7 @@ export function PostProdEpubValidatorFiles() {
     const customerMap = new Map<string, RuleAgg>(); // customer rules (both scopes)
     let totalErrors = 0;
     let totalWarnings = 0;
+    let totalInfos = 0;
     let custName: string | null = validationData.customer || null;
 
     for (const entry of validationData.files) {
@@ -741,6 +743,7 @@ export function PostProdEpubValidatorFiles() {
         category: (entry as any).category || 'General Check',
         errors: 0,
         warnings: 0,
+        infos: 0,
         ignored: 0,
         files: new Set<string>(),
         hasFileEntries: false,
@@ -748,6 +751,7 @@ export function PostProdEpubValidatorFiles() {
 
       let entryHasErrors = false;
       let entryHasWarnings = false;
+      let entryHasInfos = false;
 
       for (const issue of entry.result.issues) {
         if (issue.is_ignored) {
@@ -763,10 +767,14 @@ export function PostProdEpubValidatorFiles() {
           item.warnings++;
           totalWarnings++;
           entryHasWarnings = true;
+        } else if (cat === 'info') {
+          item.infos++;
+          totalInfos++;
+          entryHasInfos = true;
         }
       }
 
-      if (!isBookScope && (entry.result.issues.length > 0 || entryHasErrors || entryHasWarnings)) {
+      if (!isBookScope && (entry.result.issues.length > 0 || entryHasErrors || entryHasWarnings || entryHasInfos)) {
         item.files.add(fname);
         item.hasFileEntries = true;
       }
@@ -780,6 +788,7 @@ export function PostProdEpubValidatorFiles() {
       customer: Array.from(customerMap.values()),
       totalErrors,
       totalWarnings,
+      totalInfos,
       customerName: custName,
     };
   }, [validationData]);
@@ -990,6 +999,7 @@ export function PostProdEpubValidatorFiles() {
           const categoryRules = grouped[cat];
           const hasErrors = categoryRules.some(r => r.errors > 0);
           const hasWarnings = categoryRules.some(r => r.warnings > 0);
+          const hasInfos = categoryRules.some(r => r.infos > 0);
           const hasIgnored = categoryRules.some(r => r.ignored > 0);
 
           return (
@@ -1004,6 +1014,7 @@ export function PostProdEpubValidatorFiles() {
                   {hasErrors && <XCircle className="w-3 h-3 text-red-500" />}
                   {hasWarnings && !hasErrors && <AlertTriangle className="w-3 h-3 text-amber-500" />}
                   {!hasErrors && !hasWarnings && <CheckCircle2 className="w-3 h-3 text-emerald-500" />}
+                  {hasInfos && !hasErrors && !hasWarnings && <InfoIcon className="w-3 h-3 text-sky-500" />}
                   {hasIgnored && !hasErrors && !hasWarnings && <EyeOff className="w-3 h-3 text-slate-400" />}
                 </div>
               </summary>
@@ -1052,13 +1063,19 @@ export function PostProdEpubValidatorFiles() {
                             {r.warnings}
                           </span>
                         )}
+                        {r.infos > 0 && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-500/10 text-sky-600 dark:text-sky-400">
+                            <InfoIcon className="w-3 h-3" />
+                            {r.infos}
+                          </span>
+                        )}
                         {r.ignored > 0 && (
                           <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-500/10 text-slate-500 dark:text-slate-400" title={`${r.ignored} ignored`}>
                             <EyeOff className="w-3 h-3" />
                             {r.ignored}
                           </span>
                         )}
-                        {r.errors === 0 && r.warnings === 0 && r.ignored === 0 && (
+                        {r.errors === 0 && r.warnings === 0 && r.infos === 0 && r.ignored === 0 && (
                           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
                         )}
                       </div>
@@ -2077,7 +2094,7 @@ export function PostProdEpubValidatorFiles() {
                       <div className="flex items-center justify-between text-xs text-muted-foreground font-sans bg-muted/40 px-3 py-2 rounded-lg border border-border/50">
                         <span>
                           Showing <span className="font-semibold text-foreground">{totalVisibleCount}</span> file{totalVisibleCount !== 1 ? 's' : ''}
-                          {activeFilter && <span> matching status <span className="font-semibold text-foreground">{activeFilter}</span></span>}
+                          {activeFilter && <span> matching status <span className="font-semibold text-foreground">{activeFilter === 'info' ? 'revalidate' : activeFilter}</span></span>}
                           {selectedRuleFilter && (
                             <span>
                               {' '}matching rule{' '}

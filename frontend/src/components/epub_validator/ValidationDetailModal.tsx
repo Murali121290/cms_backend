@@ -175,7 +175,7 @@ function RuleRow({
                   {[
                     subErrors > 0 && `${subErrors} error${subErrors !== 1 ? 's' : ''}`,
                     subWarnings > 0 && `${subWarnings} warning${subWarnings !== 1 ? 's' : ''}`,
-                    subInfos > 0 && `${subInfos} info item${subInfos !== 1 ? 's' : ''}`,
+                    subInfos > 0 && `${subInfos} revalidate item${subInfos !== 1 ? 's' : ''}`,
                   ].filter(Boolean).join(' · ')}
                 </p>
               </button>
@@ -342,7 +342,7 @@ function IssueRow({
                     ? 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20'
                     : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20',
               )}>
-                {isError ? 'ERROR' : isInfo ? 'INFO' : 'WARNING'}
+                {isError ? 'ERROR' : isInfo ? 'REVALIDATE' : 'WARNING'}
               </span>
             </div>
           </div>
@@ -824,7 +824,7 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
     else if (issueFilter === 'info') issues = issues.filter(i => (i.category ?? '').toLowerCase() === 'info' && !i.is_ignored);
     else issues = issues.filter(i => !i.is_ignored);
 
-    if (ruleNameFilter) issues = issues.filter(i => i._ruleName === ruleNameFilter);
+    if (ruleNameFilter) issues = issues.filter(i => i._ruleName === ruleNameFilter || i.rule_name === ruleNameFilter);
 
     if (sortOrder === 'line') {
       issues = [...issues].sort((a, b) => {
@@ -906,7 +906,7 @@ export function ValidationDetailModal({ file, folderName, entries, summaryData, 
                   <span className="text-amber-500 font-medium">· {totalWarnings} warning{totalWarnings !== 1 ? 's' : ''}</span>
                 )}
                 {totalInfos > 0 && (
-                  <span className="text-sky-500 font-medium">· {totalInfos} info</span>
+                  <span className="text-sky-500 font-medium">· {totalInfos} revalidate</span>
                 )}
                 {totalErrors === 0 && totalWarnings === 0 && entries.length > 0 && (
                   <span className="text-emerald-500 font-medium">· all passed</span>
