@@ -283,6 +283,58 @@ async def save_file_content(
     return {"status": True, "message": "File saved"}
 
 
+@router.post("/replace-file/{folder_name}/{file_path:path}")
+async def replace_file_content(
+    folder_name: str,
+    file_path: str,
+    file: UploadFile = File(...),
+    reason: str = Form(...),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user_from_cookie),
+):
+    from .models import EvProject, EvHistory
+    
+    project = db.query(EvProject).filter(EvProject.folder_name == folder_name).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    base = (Path(UPLOAD_DIR) / folder_name / EXTRACT_DIR / "epub").resolve()
+    target = (base / file_path).resolve()
+    if not str(target).startswith(str(base)):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Original file not found")
+        
+    content = await file.read()
+    await asyncio.to_thread(target.write_bytes, content)
+    
+    # Record history
+    history = EvHistory(
+        project_id=project.id,
+        changed_by_id=user.id,
+        changed_by_username=user.username,
+        result_type="file_replacement",
+        reason=f"Replaced {file_path}: {reason}"
+    )
+    db.add(history)
+    db.commit()
+    
+    # Repack extracted files into .epub zip and save to output directory
+    try:
+        from .services.repack_service import repack_epub
+        await asyncio.to_thread(repack_epub, folder_name)
+    except Exception:
+        pass
+        
+    # Clear the summary cache so it regenerates on next read
+    cache_path = (Path(UPLOAD_DIR) / folder_name / "summary_cache.json").resolve()
+    if cache_path.exists():
+        try:
+            cache_path.unlink()
+        except Exception:
+            pass
+
+    return {"status": True, "message": "File replaced"}
 @router.post("/file-data/{folder_name}/{file_path:path}/rename")
 async def rename_file_content(
     folder_name: str,
