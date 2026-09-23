@@ -109,7 +109,7 @@ function ArrowRight({ size = 12 }: { size?: number }) {
   )
 }
 
-function NavBar({ subtitle }: { subtitle: string }) {
+function NavBar({ subtitle }: { subtitle: React.ReactNode }) {
   return (
     <nav style={{ background: 'var(--n-50)', borderBottom: '1px solid var(--border)', boxShadow: '0 1px 10px rgba(28,26,23,0.04)' }}>
       <div style={{ maxWidth: 1320, margin: '0 auto', padding: '14px 36px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
@@ -120,7 +120,20 @@ function NavBar({ subtitle }: { subtitle: string }) {
             <div style={{ fontFamily: 'Spectral, serif', fontSize: 20, fontWeight: 700, color: 'var(--accent-2)', lineHeight: 1, letterSpacing: '-0.01em' }}>
               <span style={{ color: 'var(--accent)' }}>Ninja</span> Inkflow
             </div>
-            <div style={{ fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--n-muted)', fontWeight: 600, marginTop: 5 }}>{subtitle}</div>
+            <div style={{ fontSize: 13, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--accent-2)', fontWeight: 700, marginTop: 5 }}>
+              {typeof subtitle === 'string' && subtitle.includes('S4C') ? (
+                <>
+                  <span style={{ color: '#F48B29', fontWeight: 800 }}>
+                    {subtitle.substring(0, subtitle.indexOf('S4C') + 3)}
+                  </span>
+                  <span style={{ color: '#1B4F9C', fontWeight: 700 }}>
+                    {subtitle.substring(subtitle.indexOf('S4C') + 3)}
+                  </span>
+                </>
+              ) : (
+                subtitle
+              )}
+            </div>
           </div>
         </div>
         <div style={{ fontFamily: 'Spectral, serif', fontWeight: 700, fontSize: 14, color: 'var(--accent-2)' }}>Streamline. Collaborate. Deliver Excellence.</div>
@@ -193,8 +206,8 @@ function ChooseScreen({ onBook, onJournal, onGeneral, onPeople }: { onBook: () =
   }
 
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <NavBar subtitle="Workflow Management Hubs" />
+    <div style={{ height: '100vh', fontSize: 20, display: 'flex', color: 'var(--accent-2)', flexDirection: 'column', overflow: 'hidden' }}>
+      <NavBar subtitle="S4C Proprietary Publishing Platform-3P" />
 
       {/* Hero band — spacious */}
       <div style={{ position: 'relative', overflow: 'hidden', background: '#F2F2F2', flexShrink: 0, padding: '48px 36px', minHeight: 200, display: 'flex', alignItems: 'center', borderBottom: '1px solid #E5E5E5' }}>
