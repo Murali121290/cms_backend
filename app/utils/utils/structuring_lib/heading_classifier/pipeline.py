@@ -45,7 +45,7 @@ HEADING_TAGS = {"H1", "H2", "H3", "H4", "H5", "H6"}
 # even if the paragraph has large, bold formatting that scores as a heading.
 # Only genuinely "unclassified" generic paragraphs and existing heading
 # tags are eligible for promotion.
-PROMOTION_ELIGIBLE_TAGS = HEADING_TAGS
+PROMOTION_ELIGIBLE_TAGS = HEADING_TAGS | {"TXT", "TXT-FLUSH", "TX", "TXL", "Normal"}
 
 
 def classify_paragraphs(doc: DocxDocument, raw_paragraphs: list[RawParagraph]) -> list[Paragraph]:

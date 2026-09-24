@@ -23,6 +23,9 @@ def run_regex_rule(rule: Rule, text: str) -> list[Finding]:
         return []
     out = []
     for m in rule.rx.finditer(text):
+        # Guard GP005 against legitimate double words: "that that" and "had had"
+        if rule.id == "GP005" and m.group(0).lower() in ("that that", "had had"):
+            continue
         sug = m.expand(rule.replacement) if rule.replacement is not None else m.group(0)
         if sug == m.group(0):
             continue

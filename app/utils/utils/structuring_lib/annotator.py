@@ -310,7 +310,7 @@ def detect_list_kind(text: str, style_name: str = "", is_word_list: bool = False
     # character (Wingdings etc.) at the start of the paragraph.
     if text:
         cat = unicodedata.category(text[0])
-        if cat.startswith('S') or cat == 'Co':
+        if (cat in ('So', 'Co') or cat.startswith('S')) and text[0] not in ('<', '>', '=', '+', '-', '$', '€', '£', '%'):
             return ("bullet", None)
     if re.match(number_pattern, text) or re.match(r"^\s*\d+[\.\)]\s+", text) or "number" in lowered_style:
         return ("number", None)
@@ -343,11 +343,19 @@ def detect_list_kind(text: str, style_name: str = "", is_word_list: bool = False
 
 def parse_leading_style_hint(text: str) -> tuple[Optional[str], Optional[str], str]:
     """
-    Parse a leading explicit tag or [STYLE:] hint.
-    Explicit <Tag> style hint auto-tagging is completely disabled across all tags.
+    Parse a leading explicit tag like <H1>, <NOTE>, </NOTE> or [STYLE:H1] hint.
+    Returns (full_hint, explicit_token, stripped_text).
     """
-    text = text or ""
-    return None, None, text.strip()
+    if not text:
+        return None, None, ""
+    text = text.strip()
+    match = EXPLICIT_STYLE_RE.match(text)
+    if not match:
+        return None, None, text
+    full_hint = match.group(0)
+    explicit_token = match.group(1) or match.group(2)
+    stripped_text = text[match.end():].strip()
+    return full_hint, explicit_token, stripped_text
 
 
 def _resolve_box_keyword(token: Optional[str]) -> Optional[str]:
@@ -403,11 +411,22 @@ def _is_recognized_structural_tag(token: str) -> bool:
 
 def normalize_structural_tag_case(style_name: Optional[str]) -> Optional[str]:
     """Case-insensitively match *style_name* against the structural_tags
-    registry (rules.yaml) and return it stripped, preserving original casing
-    (e.g. "ChapterNumber", "ChapterTitle", "Head1", "Para-FL")."""
+    registry (rules.yaml) and return the canonical upper-case tag name if
+    matched, otherwise return *style_name* unchanged."""
     if not style_name:
         return style_name
-    return style_name.strip()
+    stripped = style_name.strip()
+    upper = stripped.upper()
+    cfg = rules_loader.get_structural_tags()
+    exact = cfg.get("exact", [])
+    for t in exact:
+        if t.upper() == upper:
+            return t
+    prefixes = cfg.get("prefixes", [])
+    for p in prefixes:
+        if upper.startswith(p.upper()):
+            return upper
+    return stripped
 
 
 def _is_known_token(token: str, context_kind: Optional[str] = None) -> bool:
@@ -493,10 +512,6 @@ def classify_explicit_context(token: Optional[str]) -> Optional[str]:
         return "objective" if token.upper() == "BXOBJ" else "box"
     if _resolve_box_keyword(token) is not None:
         return "box"
-
-    keyterm_cfg = rules_loader.get_keyterm_config()
-    if token.upper() in {style.upper() for style in keyterm_cfg.get("explicit_styles", [])}:
-        return "keyterm"
 
     return None
 
@@ -841,9 +856,11 @@ def annotate_document(
                             logger.error(f"Invalid regex in rule '{rule.get('tag', 'unknown')}': {e}")
                 
                 # ===== BLOCK RESET LOGIC (Moved out to run for ALL tags) =====
-                # If we hit a new section heading, exit the current block
+                # If we hit a new section heading, exit the current block and reset any unclosed box context
                 # This now applies to Explicit Tags, Regex matches, or Forced tags
-                if tag in ("H1", "H2", "H3", "H4", "CT", "CN", "OBJ1", "REFH1"):
+                if tag in ("H1", "H2", "H3", "H4", "H5", "H6", "CT", "CN", "CST", "CAU", "OBJ1", "REFH1", "EOC-H1", "APXH1", "H1A", "SP1", "SP2"):
+                    explicit_context_kind = None
+                    current_box_prefix = None
                     if tag == "OBJ1":
                         current_block = "LEARNING_OBJECTIVES_BLOCK"
                         block_item_count = 0
@@ -938,7 +955,7 @@ def annotate_document(
                          style = "EPI"
             
             # Priority 4: TXT-FLUSH Logic
-            if tag == "TXT" and previous_tag in ("H1", "H2", "H3"):
+            if tag == "TXT" and previous_tag in ("H1", "H2", "H3", "H4", "H5", "H6", "CT", "H1A", "APXH1", "EOC-H1", "SP1", "SP2"):
                 tag = "TXT-FLUSH"
                 style = "TXT-FLUSH"
                 logger.debug(f"Para {para_idx}: Changed TXT to TXT-FLUSH (previous: {previous_tag})")

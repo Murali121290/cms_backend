@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -33,6 +33,14 @@ import {
 import { useSessionStore } from "@/stores/sessionStore";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { uiPaths } from "@/utils/appPaths";
+import {
+  listComments,
+  createComment,
+  updateComment,
+  deleteComment,
+  type CommentRecord,
+} from "@/api/comments";
+import { toast } from "@/store/useToastStore";
 import { useStylesheetsQuery } from "@/features/stylesheets/useStylesheetsQuery";
 
 // Subcomponents
@@ -93,7 +101,16 @@ export function TechnicalReviewPage() {
   const [selectedOccurrenceIndex, setSelectedOccurrenceIndex] = useState<number>(0);
   const [appliedKeys, setAppliedKeys] = useState<Set<string>>(new Set());
   const [trackChangesEnabled, setTrackChangesEnabled] = useState(false);
-  const [rightSidebarTab, setRightSidebarTab] = useState<"findings" | "trackedChanges">("findings");
+  const [rightSidebarTab, setRightSidebarTab] = useState<"findings" | "trackedChanges" | "comments">("findings");
+
+  // Comments / Author Queries (AQ) state
+  const [comments, setComments] = useState<CommentRecord[]>([]);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [newCommentText, setNewCommentText] = useState("");
+  const [submittingComment, setSubmittingComment] = useState(false);
+  const [filterUnresolved, setFilterUnresolved] = useState(false);
+  const [selectedEditorText, setSelectedEditorText] = useState<string>("");
+  const [selectedCommentId, setSelectedCommentId] = useState<string | null>(null);
 
   const viewer = useSessionStore((s) => s.viewer);
   const currentUser = viewer?.username;
@@ -123,6 +140,106 @@ export function TechnicalReviewPage() {
       return a.match_start - b.match_start;
     });
   }, [technicalReviewQuery.data]);
+
+  // Fetch comments
+  const fetchComments = useCallback(async () => {
+    if (!editorFileId) return;
+    setCommentsLoading(true);
+    try {
+      const list = await listComments(editorFileId);
+      setComments(list);
+    } catch (err) {
+      console.error("Failed to load comments:", err);
+    } finally {
+      setCommentsLoading(false);
+    }
+  }, [editorFileId]);
+
+  const handleCreateComment = async (customText?: string) => {
+    const textToPost = customText || newCommentText;
+    if (!editorFileId || !textToPost.trim()) return;
+    setSubmittingComment(true);
+    try {
+      const commentUuid = `cm-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      await createComment(editorFileId, commentUuid, textToPost.trim());
+
+      if (selectedEditorText && editorRef.current) {
+        editorRef.current.addCommentToSelection(commentUuid);
+      }
+
+      setNewCommentText("");
+      toast.success("AQ Comment posted!");
+      fetchComments();
+    } catch (err) {
+      toast.error("Failed to post comment.");
+    } finally {
+      setSubmittingComment(false);
+    }
+  };
+
+  const handleToggleResolveComment = async (commentUuid: string, currentResolved: boolean) => {
+    if (!editorFileId) return;
+    try {
+      await updateComment(editorFileId, commentUuid, { resolved: !currentResolved });
+      toast.success(!currentResolved ? "Comment resolved" : "Comment reopened");
+      fetchComments();
+    } catch (err) {
+      toast.error("Failed to update comment status.");
+    }
+  };
+
+  const handleDeleteComment = async (commentUuid: string) => {
+    if (!editorFileId) return;
+    try {
+      await deleteComment(editorFileId, commentUuid);
+      toast.success("Comment deleted");
+      fetchComments();
+    } catch (err) {
+      toast.error("Failed to delete comment.");
+    }
+  };
+
+  useEffect(() => {
+    fetchComments();
+  }, [fetchComments]);
+
+  // Parse XHTML inline comments on load
+  useEffect(() => {
+    if (xhtmlQuery.data?.content) {
+      try {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(xhtmlQuery.data.content, "text/html");
+        const commentNodes = doc.querySelectorAll("span[data-comment-id], span.comment[data-comment], [data-comment-id]");
+        const parsedComments: CommentRecord[] = [];
+
+        commentNodes.forEach((el, idx) => {
+          const uuid = el.getAttribute("data-comment-id") || `xhtml-cm-${idx}`;
+          const commentText = el.getAttribute("data-comment") || el.getAttribute("title") || "Inline XHTML Comment";
+          const quotedText = el.textContent?.trim() || "";
+
+          parsedComments.push({
+            comment_uuid: uuid,
+            author_id: null,
+            author_name: "Author Query",
+            text: commentText + (quotedText ? ` (On: "${quotedText}")` : ""),
+            resolved: false,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          });
+        });
+
+        if (parsedComments.length > 0) {
+          setComments((prev) => {
+            const existingUuids = new Set(prev.map((c) => c.comment_uuid));
+            const newInline = parsedComments.filter((c) => !existingUuids.has(c.comment_uuid));
+            return [...prev, ...newInline];
+          });
+        }
+      } catch (e) {
+        console.error("Failed to parse XHTML comments:", e);
+      }
+    }
+  }, [xhtmlQuery.data?.content, editorFileId]);
 
   // Auto-select the project's active stylesheet on first data load
   useEffect(() => {
@@ -619,6 +736,8 @@ export function TechnicalReviewPage() {
         chapterTitle={`Chapter #${normalizedChapterId}`}
         activeStylesheetName={activeStylesheetName}
         activeTab={activeTab}
+        reviewedCount={appliedKeys.size}
+        totalFindings={findings.length}
         onTabChange={(tab) => {
           if (tab === "reviewer") {
             const hasStylesheet = !!(activeStylesheet || selectedStylesheetId);
@@ -782,36 +901,10 @@ export function TechnicalReviewPage() {
 
                   <div className="h-4 w-px bg-slate-200" />
 
-                  {/* Mode switcher if OnlyOffice is available */}
-                  {onlyoffice_available ? (
-                    <div className="flex items-center bg-slate-100 p-0.5 rounded-md text-xs font-semibold">
-                      <button
-                        onClick={() => setViewMode("local")}
-                        className={`px-2.5 py-1 rounded-sm transition-all ${
-                          viewMode === "local"
-                            ? "bg-white text-slate-900 shadow-xs"
-                            : "text-slate-500 hover:text-slate-700 bg-transparent"
-                        }`}
-                      >
-                        Local WYSIWYG
-                      </button>
-                      <button
-                        onClick={() => setViewMode("onlyoffice")}
-                        className={`px-2.5 py-1 rounded-sm transition-all ${
-                          viewMode === "onlyoffice"
-                            ? "bg-white text-slate-900 shadow-xs"
-                            : "text-slate-500 hover:text-slate-700 bg-transparent"
-                        }`}
-                      >
-                        OnlyOffice
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                      <span>Manuscript Workspace</span>
-                    </div>
-                  )}
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                    <span>Editor</span>
+                  </div>
                 </div>
 
                 {/* Occurrence Quick Stepper in Center Toolbar */}
@@ -864,94 +957,61 @@ export function TechnicalReviewPage() {
 
               {/* Document Editor Area */}
               <div className="flex-1 relative min-h-0 overflow-hidden">
-                {viewMode === "local" ? (
-                  xhtmlQuery.isPending ? (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center p-10 text-center space-y-3 bg-slate-100">
-                      <RefreshCw className="w-8 h-8 text-blue-600 animate-spin" />
-                      <div className="text-sm font-bold text-slate-800">
-                        Loading Document Manuscript...
-                      </div>
-                      <div className="text-xs text-slate-500">
-                        Preparing WYSIWYG document layout
-                      </div>
+                {xhtmlQuery.isPending ? (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center p-10 text-center space-y-3 bg-slate-100">
+                    <RefreshCw className="w-8 h-8 text-blue-600 animate-spin" />
+                    <div className="text-sm font-bold text-slate-800">
+                      Loading Document Manuscript...
                     </div>
-                  ) : xhtmlQuery.isError ? (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center p-10 text-center space-y-3 bg-slate-100">
-                      <AlertTriangle className="w-8 h-8 text-rose-500" />
-                      <div className="text-sm font-bold text-slate-800">
-                        Manuscript View Unavailable
-                      </div>
-                      <div className="text-xs text-slate-500 max-w-sm">
-                        Failed to fetch XHTML document. Verify file conversion status.
-                      </div>
+                    <div className="text-xs text-slate-500">
+                      Preparing WYSIWYG document layout
                     </div>
-                  ) : (
-                    <WysiwygEditor
-                      ref={editorRef}
-                      key={`editor-${editorFileId}-${file.version}`}
-                      initialContent={xhtmlQuery.data?.content ?? ""}
-                      onSave={async (html) => {
-                        const res = await editorSave.save(html);
-                        if (res && res.file_id && res.file_id !== editorFileId) {
-                          setEditorFileId(res.file_id);
-                          navigate(
-                            uiPaths.technicalReview(
-                              normalizedProjectId!,
-                              normalizedChapterId!,
-                              res.file_id,
-                            ),
-                          );
-                        }
-                      }}
-                      isSaving={editorSave.isPending}
-                      saveLabel="Save Edits to DOCX"
-                      documentTitle={file.filename}
-                      height="100%"
-                      occurrences={editorOccurrences}
-                      selectedOccurrenceIndex={selectedOccurrenceIndex}
-                      onOccurrenceClick={(idx) => setSelectedOccurrenceIndex(idx)}
-                      trackChangesEnabled={trackChangesEnabled}
-                      onTrackChangesToggle={setTrackChangesEnabled}
-                      currentUser={currentUser}
-                      fileId={editorFileId?.toString()}
-                    />
-                  )
-                ) : viewMode === "onlyoffice" ? (
-                  <div className="flex-1 flex min-h-0 w-full h-full relative">
-                    {editorFileId !== null && (
-                      <>
-                        <OnlyOfficeSidePanel
-                          connector={onlyofficeRef.current?.connector}
-                          styles={[]}
-                          fileId={editorFileId}
-                          findings={findings}
-                        />
-                        <OnlyOfficeEditor
-                          ref={onlyofficeRef}
-                          fileId={editorFileId}
-                          mode="original"
-                          height="100%"
-                        />
-                      </>
-                    )}
                   </div>
-                ) : collabora_url ? (
-                  <iframe
-                    ref={collaboraIframeRef}
-                    src={collabora_url}
-                    title="Collabora Online editor"
-                    className="w-full h-full border-none absolute inset-0"
-                  />
-                ) : (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center p-10 text-center space-y-3">
-                    <AlertTriangle className="w-10 h-10 text-amber-500" />
-                    <div className="text-sm font-semibold text-slate-800">
-                      Collabora Office Unavailable
+                ) : xhtmlQuery.isError ? (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center p-10 text-center space-y-3 bg-slate-100">
+                    <AlertTriangle className="w-8 h-8 text-rose-500" />
+                    <div className="text-sm font-bold text-slate-800">
+                      Manuscript View Unavailable
                     </div>
                     <div className="text-xs text-slate-500 max-w-sm">
-                      Launch URL was not provided by the server. Please use the Local WYSIWYG mode.
+                      Failed to fetch XHTML document. Verify file conversion status.
                     </div>
                   </div>
+                ) : (
+                  <WysiwygEditor
+                    ref={editorRef}
+                    key={`editor-${editorFileId}-${file.version}`}
+                    initialContent={xhtmlQuery.data?.content ?? ""}
+                    onSave={async (html) => {
+                      const res = await editorSave.save(html);
+                      if (res && res.file_id && res.file_id !== editorFileId) {
+                        setEditorFileId(res.file_id);
+                        navigate(
+                          uiPaths.technicalReview(
+                            normalizedProjectId!,
+                            normalizedChapterId!,
+                            res.file_id,
+                          ),
+                        );
+                      }
+                    }}
+                    isSaving={editorSave.isPending}
+                    saveLabel="Save Edits to DOCX"
+                    documentTitle={file.filename}
+                    height="100%"
+                    occurrences={editorOccurrences}
+                    selectedOccurrenceIndex={selectedOccurrenceIndex}
+                    onOccurrenceClick={(idx) => setSelectedOccurrenceIndex(idx)}
+                    onSelectionChange={(text) => setSelectedEditorText(text)}
+                    onCommentClick={(commentId) => {
+                      setRightSidebarTab("comments");
+                      setSelectedCommentId(commentId);
+                    }}
+                    trackChangesEnabled={trackChangesEnabled}
+                    onTrackChangesToggle={setTrackChangesEnabled}
+                    currentUser={currentUser}
+                    fileId={editorFileId?.toString()}
+                  />
                 )}
               </div>
             </main>
@@ -984,6 +1044,22 @@ export function TechnicalReviewPage() {
               isCollapsed={rightSidebarCollapsed}
               onToggleCollapse={() => setRightSidebarCollapsed(!rightSidebarCollapsed)}
               onReplaceInEditor={handleReplaceInEditor}
+              comments={comments}
+              commentsLoading={commentsLoading}
+              newCommentText={newCommentText}
+              onNewCommentTextChange={setNewCommentText}
+              submittingComment={submittingComment}
+              onPostComment={handleCreateComment}
+              onToggleResolveComment={handleToggleResolveComment}
+              onDeleteComment={handleDeleteComment}
+              filterUnresolved={filterUnresolved}
+              onToggleFilterUnresolved={() => setFilterUnresolved((v) => !v)}
+              selectedEditorText={selectedEditorText}
+              selectedCommentId={selectedCommentId}
+              onSelectCommentId={(uuid) => {
+                setSelectedCommentId(uuid);
+                editorRef.current?.scrollToComment(uuid);
+              }}
             />
           </div>
         )}

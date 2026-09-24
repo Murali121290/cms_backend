@@ -57,6 +57,12 @@ def terminal_punctuation(sent: str, off: int, rule: Rule, params: dict[str, Any]
 
 @register("start_capital")
 def start_capital(sent: str, off: int, rule: Rule, params: dict[str, Any]) -> list[Finding]:
+    stripped = sent.lstrip()
+    if not stripped:
+        return []
+    # Guard against display quotes ("...", “...”, '...', ‘...’) or tags (<...>) at sentence start
+    if stripped[0] in ('"', "'", '“', '‘', '”', '’', '<'):
+        return []
     m = re.search(r"[A-Za-z]", sent)
     if m and sent[m.start()].islower():
         i = off + m.start()

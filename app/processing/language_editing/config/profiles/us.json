@@ -28,6 +28,15 @@
       "id": "GP003", "category": "grammar", "type": "regex", "pattern": "([,;:])(?=[^\\s\\d])", "replacement": "\\1 ", "message": "Add a space after punctuation.", "severity": "error", "enabled": true
     },
     {
+      "id": "GP006", "category": "grammar", "type": "regex", "pattern": "\\ba\\s+(?=[aeiouAEIOU]|EMR\\b|RT\\b|MRI\\b|OAR\\b|CT\\b|ACC\\b|SRT\\b)", "replacement": "an ", "message": "Use 'an' before a vowel sound.", "severity": "warning", "enabled": true
+    },
+    {
+      "id": "GP009", "category": "grammar", "type": "regex", "pattern": "\\b(non|pre|post|anti|multi|sub)-([a-z]+)\\b", "replacement": "\\1\\2", "message": "Remove hyphen in prefix word.", "severity": "suggestion", "flags": ["IGNORECASE"], "enabled": true
+    },
+    {
+      "id": "GP010", "category": "grammar", "type": "regex", "pattern": "\\b(?!(?:early|family|only|likely|daily|weekly|monthly|yearly|ugly|friendly|lively|lonely|holy|silly)\\b)([a-z]+ly)-([a-z]+)\\b", "replacement": "\\1 \\2", "message": "Remove hyphen in '-ly' adverb modifier.", "severity": "warning", "flags": ["IGNORECASE"], "enabled": true
+    },
+    {
       "id": "SP000", "category": "spelling", "type": "dictionary", "message": "Standardise to US house style.", "enabled": true
     },
     {

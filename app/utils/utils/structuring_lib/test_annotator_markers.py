@@ -41,3 +41,28 @@ def test_explicit_heading_level_is_not_downgraded_by_paragraph_regex_rules():
     # declared level, not get silently re-matched and downgraded.
     tags = _tags_for(["<H1>Client Expectations of a Personal Trainer"])
     assert tags == ["H1"]
+
+
+def test_chapter_opener_and_headings_are_not_tagged_as_bullets():
+    texts = [
+        "<Insert Chapter Opener Image>",
+        "<CN><s>Chapter 2</s>",
+        "<CT>Vehicle Rescue Incident Awareness",
+        "<OBJ>KNOWLEDGE OBJECTIVES",
+        "After studying this chapter, you will be able to:",
+        "■ Explain how a risk assessment is used to determine service level needs.",
+        "■ Identify the two types of vehicle rescue incidents.",
+    ]
+    doc = Document()
+    for text in texts:
+        doc.add_paragraph(text)
+    annotations = annotate_document(doc)
+    from app.utils.utils.structuring_lib.list_normalizer import normalize_list_positions
+    annotations = normalize_list_positions(annotations)
+    tags = [a["tag"] for a in annotations]
+    assert tags[0] == "PMI"
+    assert tags[1] == "CN"
+    assert tags[2] == "CT"
+    assert tags[3] == "OBJ1"
+    assert tags[5] == "OBJ-BL-FIRST"
+    assert tags[6] == "OBJ-BL-LAST"

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 
@@ -14,6 +14,14 @@ import { LeftTechnicalSidebarTable } from "@/features/technicalReview/components
 import { OccurrenceInspectorPanel } from "@/features/technicalReview/components/OccurrenceInspectorPanel";
 import { TechnicalApplyConfirmModal } from "@/features/technicalReview/components/TechnicalApplyConfirmModal";
 import { useSessionStore } from "@/stores/sessionStore";
+import {
+  listComments,
+  createComment,
+  updateComment,
+  deleteComment,
+  type CommentRecord,
+} from "@/api/comments";
+import { toast } from "@/store/useToastStore";
 
 interface NewTechnicalReviewPageProps {
   projectId: number;
@@ -57,7 +65,16 @@ export function NewTechnicalReviewPage({ projectId, chapterId, fileId, onComplet
   const [selectedOccurrenceIndex, setSelectedOccurrenceIndex] = useState<number>(0);
   const [appliedKeys, setAppliedKeys] = useState<Set<string>>(new Set());
   const [trackChangesEnabled, setTrackChangesEnabled] = useState(false);
-  const [rightSidebarTab, setRightSidebarTab] = useState<"findings" | "trackedChanges">("findings");
+  const [rightSidebarTab, setRightSidebarTab] = useState<"findings" | "trackedChanges" | "comments">("findings");
+
+  // Comments / Author Queries (AQ) state
+  const [comments, setComments] = useState<CommentRecord[]>([]);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [newCommentText, setNewCommentText] = useState("");
+  const [submittingComment, setSubmittingComment] = useState(false);
+  const [filterUnresolved, setFilterUnresolved] = useState(false);
+  const [selectedEditorText, setSelectedEditorText] = useState<string>("");
+  const [selectedCommentId, setSelectedCommentId] = useState<string | null>(null);
 
   const [applyWarning, setApplyWarning] = useState<string | null>(null);
   const [confirmApply, setConfirmApply] = useState(false);
@@ -75,6 +92,106 @@ export function NewTechnicalReviewPage({ projectId, chapterId, fileId, onComplet
       return a.match_start - b.match_start;
     });
   }, [technicalReviewQuery.data]);
+
+  // Fetch comments
+  const fetchComments = useCallback(async () => {
+    if (!editorFileId) return;
+    setCommentsLoading(true);
+    try {
+      const list = await listComments(editorFileId);
+      setComments(list);
+    } catch (err) {
+      console.error("Failed to load comments:", err);
+    } finally {
+      setCommentsLoading(false);
+    }
+  }, [editorFileId]);
+
+  const handleCreateComment = async (customText?: string) => {
+    const textToPost = customText || newCommentText;
+    if (!editorFileId || !textToPost.trim()) return;
+    setSubmittingComment(true);
+    try {
+      const commentUuid = `cm-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      await createComment(editorFileId, commentUuid, textToPost.trim());
+
+      if (selectedEditorText && editorRef.current) {
+        editorRef.current.addCommentToSelection(commentUuid);
+      }
+
+      setNewCommentText("");
+      toast.success("AQ Comment posted!");
+      fetchComments();
+    } catch (err) {
+      toast.error("Failed to post comment.");
+    } finally {
+      setSubmittingComment(false);
+    }
+  };
+
+  const handleToggleResolveComment = async (commentUuid: string, currentResolved: boolean) => {
+    if (!editorFileId) return;
+    try {
+      await updateComment(editorFileId, commentUuid, { resolved: !currentResolved });
+      toast.success(!currentResolved ? "Comment resolved" : "Comment reopened");
+      fetchComments();
+    } catch (err) {
+      toast.error("Failed to update comment status.");
+    }
+  };
+
+  const handleDeleteComment = async (commentUuid: string) => {
+    if (!editorFileId) return;
+    try {
+      await deleteComment(editorFileId, commentUuid);
+      toast.success("Comment deleted");
+      fetchComments();
+    } catch (err) {
+      toast.error("Failed to delete comment.");
+    }
+  };
+
+  useEffect(() => {
+    fetchComments();
+  }, [fetchComments]);
+
+  // Parse XHTML inline comments on load
+  useEffect(() => {
+    if (xhtmlQuery.data?.content) {
+      try {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(xhtmlQuery.data.content, "text/html");
+        const commentNodes = doc.querySelectorAll("span[data-comment-id], span.comment[data-comment], [data-comment-id]");
+        const parsedComments: CommentRecord[] = [];
+
+        commentNodes.forEach((el, idx) => {
+          const uuid = el.getAttribute("data-comment-id") || `xhtml-cm-${idx}`;
+          const commentText = el.getAttribute("data-comment") || el.getAttribute("title") || "Inline XHTML Comment";
+          const quotedText = el.textContent?.trim() || "";
+
+          parsedComments.push({
+            comment_uuid: uuid,
+            author_id: null,
+            author_name: "Author Query",
+            text: commentText + (quotedText ? ` (On: "${quotedText}")` : ""),
+            resolved: false,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          });
+        });
+
+        if (parsedComments.length > 0) {
+          setComments((prev) => {
+            const existingUuids = new Set(prev.map((c) => c.comment_uuid));
+            const newInline = parsedComments.filter((c) => !existingUuids.has(c.comment_uuid));
+            return [...prev, ...newInline];
+          });
+        }
+      } catch (e) {
+        console.error("Failed to parse XHTML comments:", e);
+      }
+    }
+  }, [xhtmlQuery.data?.content, editorFileId]);
 
   useEffect(() => {
     if (!hasAutoSelectedStylesheet.current && technicalReviewQuery.data?.active_stylesheet?.id) {
@@ -502,6 +619,11 @@ export function NewTechnicalReviewPage({ projectId, chapterId, fileId, onComplet
                 occurrences={editorOccurrences}
                 selectedOccurrenceIndex={selectedOccurrenceIndex}
                 onOccurrenceClick={(idx) => setSelectedOccurrenceIndex(idx)}
+                onSelectionChange={(text) => setSelectedEditorText(text)}
+                onCommentClick={(commentId) => {
+                  setRightSidebarTab("comments");
+                  setSelectedCommentId(commentId);
+                }}
                 trackChangesEnabled={trackChangesEnabled}
                 onTrackChangesToggle={setTrackChangesEnabled}
                 currentUser={currentUser}
@@ -534,6 +656,22 @@ export function NewTechnicalReviewPage({ projectId, chapterId, fileId, onComplet
           isCollapsed={rightSidebarCollapsed}
           onToggleCollapse={() => setRightSidebarCollapsed(!rightSidebarCollapsed)}
           onReplaceInEditor={handleReplaceInEditor}
+          comments={comments}
+          commentsLoading={commentsLoading}
+          newCommentText={newCommentText}
+          onNewCommentTextChange={setNewCommentText}
+          submittingComment={submittingComment}
+          onPostComment={handleCreateComment}
+          onToggleResolveComment={handleToggleResolveComment}
+          onDeleteComment={handleDeleteComment}
+          filterUnresolved={filterUnresolved}
+          onToggleFilterUnresolved={() => setFilterUnresolved((v) => !v)}
+          selectedEditorText={selectedEditorText}
+          selectedCommentId={selectedCommentId}
+          onSelectCommentId={(uuid) => {
+            setSelectedCommentId(uuid);
+            editorRef.current?.scrollToComment(uuid);
+          }}
         />
       </div>
 

@@ -659,7 +659,12 @@ function SelectFilesStep({
     chapters.forEach((c: any, idx: number) => {
       const files = fileQueries[idx]?.data?.files ?? [];
       files
-        .filter(f => f.category === "Manuscript")
+        .filter((f) => {
+          const isManuscriptCategory = f.category === "Manuscript" || f.category === "manuscript";
+          const filename = (f.filename || "").toLowerCase();
+          const isDocFile = filename.endsWith(".docx") || filename.endsWith(".doc");
+          return isManuscriptCategory && isDocFile;
+        })
         .forEach(f => {
           out.push({
             file: f,

@@ -111,6 +111,33 @@ def test_inline_markup_tag_findings_filter():
     assert not any(f.original == " >" or ">" in f.original for f in filtered)
 
 
+def test_ninja_inkflow_spec_rules():
+    from app.processing.language_editing import sentence_checks
+    # 1. Test GP005 repeated words guarding that that and had had
+    rule_gp005 = rules.Rule(id="GP005", category="grammar", type="regex", pattern=r"\b(\w+)\s+\1\b", replacement=r"\1", message="Repeated word", severity="warning", flags=2, enabled=True).compile()
+    text_dup = "He said that that decision was wrong and they had had enough time to met the the deadline."
+    findings_dup = engine.run_regex_rule(rule_gp005, text_dup)
+    origs = [f.original.lower() for f in findings_dup]
+    assert "the the" in origs
+    assert "that that" not in origs
+    assert "had had" not in origs
+
+    # 2. Test SL003 start_capital display quote guard
+    rule_sl003 = rules.Rule(id="SL003", category="sentence", type="function", function="start_capital", severity="warning", enabled=True)
+    sent_quote = '"this is a display quote."'
+    findings_quote = sentence_checks.start_capital(sent_quote, 0, rule_sl003, {})
+    assert len(findings_quote) == 0
+
+    # 3. Test SL004 wordiness phrase replacements
+    rule_sl004 = rules.Rule(id="SL004", category="sentence", type="function", function="wordiness", severity="suggestion", enabled=True)
+    sent_wordy = "The study was conducted in order to test outcomes due to the fact that data was limited."
+    findings_wordy = sentence_checks.wordiness(sent_wordy, 0, rule_sl004, {})
+    suggs = [f.suggestion for f in findings_wordy]
+    assert "to" in suggs
+    assert "because" in suggs
+
+
+
 
 
 

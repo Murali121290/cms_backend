@@ -480,6 +480,8 @@ export interface WysiwygEditorProps {
   // Used when an external panel (e.g. Reference Review's "Save & Export")
   // owns the save action to avoid a duplicate button.
   hideSaveButton?: boolean;
+  onSelectionChange?: (selectedText: string) => void;
+  onCommentClick?: (commentId: string) => void;
 }
 
 const ToolbarButton = ({
@@ -518,6 +520,8 @@ const ToolbarDivider = () => <div className="w-px h-5 bg-slate-700 mx-1" />;
 export interface WysiwygEditorHandle {
   editor: any; // TipTap Editor instance
   triggerCommentDialog: () => void;
+  addCommentToSelection: (commentId: string) => void;
+  scrollToComment: (commentId: string) => void;
   replaceOccurrence: (
     occ: Occurrence,
     replacementText: string,
@@ -553,6 +557,8 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
       hideToolbar = false,
       inlineSaveBar = true,
       hideSaveButton = false,
+      onSelectionChange,
+      onCommentClick,
     }: WysiwygEditorProps,
     ref
   ) {
@@ -682,6 +688,13 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
       onUpdate: () => {
         setIsDirty(true);
         onContentChange?.();
+      },
+      onSelectionUpdate: ({ editor }) => {
+        if (onSelectionChange) {
+          const { from, to } = editor.state.selection;
+          const text = editor.state.doc.textBetween(from, to, " ").trim();
+          onSelectionChange(text);
+        }
       },
     });
 
@@ -998,17 +1011,21 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         if (!target) return;
         const uuid = target.getAttribute("data-comment-id");
         if (!uuid) return;
-        const existing = comments[uuid];
-        setCommentDialog({
-          mode: "edit",
-          commentUuid: uuid,
-          initialText: existing?.text ?? "",
-          quotedText: (target.textContent || "").trim(),
-        });
+        if (onCommentClick) {
+          onCommentClick(uuid);
+        } else {
+          const existing = comments[uuid];
+          setCommentDialog({
+            mode: "edit",
+            commentUuid: uuid,
+            initialText: existing?.text ?? "",
+            quotedText: (target.textContent || "").trim(),
+          });
+        }
       };
       dom.addEventListener("click", handle);
       return () => dom.removeEventListener("click", handle);
-    }, [editor, comments]);
+    }, [editor, comments, onCommentClick]);
 
     const searchResults = (editor?.storage as any)?.searchReplace?.results || [];
     const activeSearchIndex = (editor?.storage as any)?.searchReplace?.activeIndex ?? -1;
@@ -1174,15 +1191,63 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
       [editor, currentUser, onContentChange]
     );
 
+    const addCommentToSelection = useCallback(
+      (commentId: string) => {
+        if (!editor || editor.isDestroyed) return;
+        editor.chain().focus().setMark("comment", { commentId }).run();
+      },
+      [editor]
+    );
+
+    const scrollToComment = useCallback(
+      (commentId: string) => {
+        if (!editor || editor.isDestroyed) return;
+        let targetPos: number | null = null;
+        editor.state.doc.descendants((node, pos) => {
+          if (targetPos === null) {
+            const mark = node.marks.find(
+              (m) => m.type.name === "comment" && m.attrs.commentId === commentId
+            );
+            if (mark) {
+              targetPos = pos;
+            }
+          }
+        });
+
+        let el: HTMLElement | null = null;
+        if (targetPos !== null) {
+          try {
+            const domInfo = editor.view.domAtPos(targetPos);
+            el = (domInfo.node.nodeType === Node.TEXT_NODE ? domInfo.node.parentElement : domInfo.node) as HTMLElement;
+          } catch {
+            /* ignore */
+          }
+        }
+        if (!el) {
+          el = editor.view.dom.querySelector(`span[data-comment-id="${commentId}"]`);
+        }
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          el.classList.add("bg-amber-300", "text-slate-900");
+          setTimeout(() => {
+            el.classList.remove("bg-amber-300", "text-slate-900");
+          }, 2000);
+        }
+      },
+      [editor]
+    );
+
     // Expose editor instance + imperative comment & occurrence triggers to parent via ref
     useImperativeHandle(
       ref,
       () => ({
         editor: editor as any,
         triggerCommentDialog: openCommentDialog,
+        addCommentToSelection,
+        scrollToComment,
         replaceOccurrence,
       }),
-      [editor, openCommentDialog, replaceOccurrence],
+      [editor, openCommentDialog, addCommentToSelection, scrollToComment, replaceOccurrence],
     );
 
     // ── Keyboard shortcuts ───────────────────────────────────────────────────
