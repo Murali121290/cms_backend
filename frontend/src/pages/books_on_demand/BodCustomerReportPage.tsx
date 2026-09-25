@@ -4,6 +4,7 @@ import { Loader2, Search, Calendar, FileText, CheckCircle2, Clock, Download, Lay
 import { useNavigate } from 'react-router-dom'
 import api from '@/api/client'
 import * as XLSX from 'xlsx'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area } from 'recharts'
 
 export function BodCustomerReportPage() {
   const navigate = useNavigate()
@@ -129,6 +130,50 @@ export function BodCustomerReportPage() {
   })
 
   const completionPercentage = totalJobs > 0 ? Math.round((overallCompleted / totalJobs) * 100) : 0
+
+  const chartDataMap = new Map<string, { date: string, inflow: number, due: number, completed: number, delay: number }>()
+
+  const getDateKey = (dateStr: string | null) => {
+    if (!dateStr) return null
+    const hasTz = dateStr.endsWith('Z') || dateStr.includes('+') || !!dateStr.match(/-\d{2}:\d{2}$/)
+    const validStr = hasTz ? dateStr : `${dateStr}Z`
+    const d = new Date(validStr)
+    if (isNaN(d.getTime())) return null
+    return d.toISOString().split('T')[0]
+  }
+
+  filteredReport.forEach(job => {
+    const createdDate = getDateKey(job.created_at)
+    const dueDate = getDateKey(job.due_date)
+    const completedDate = job.status === 'Completed' ? getDateKey(job.updated_at) : null
+    
+    if (createdDate) {
+      if (!chartDataMap.has(createdDate)) chartDataMap.set(createdDate, { date: createdDate, inflow: 0, due: 0, completed: 0, delay: 0 })
+      chartDataMap.get(createdDate)!.inflow += 1
+    }
+
+    if (dueDate) {
+      if (!chartDataMap.has(dueDate)) chartDataMap.set(dueDate, { date: dueDate, inflow: 0, due: 0, completed: 0, delay: 0 })
+      chartDataMap.get(dueDate)!.due += 1
+      
+      let delayed = false
+      if (job.status !== 'Completed') {
+         if (new Date(job.due_date) < new Date()) delayed = true
+      } else {
+         if (job.updated_at && new Date(job.updated_at) > new Date(job.due_date)) delayed = true
+      }
+      if (delayed) {
+        chartDataMap.get(dueDate)!.delay += 1
+      }
+    }
+
+    if (completedDate) {
+      if (!chartDataMap.has(completedDate)) chartDataMap.set(completedDate, { date: completedDate, inflow: 0, due: 0, completed: 0, delay: 0 })
+      chartDataMap.get(completedDate)!.completed += 1
+    }
+  })
+
+  const chartData = Array.from(chartDataMap.values()).sort((a, b) => a.date.localeCompare(b.date))
 
   const downloadReport = () => {
     const headers = [
@@ -300,6 +345,70 @@ export function BodCustomerReportPage() {
             </div>
           </div>
         </div>
+
+        {/* Chart Section */}
+        {chartData.length > 0 && (
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mt-6">
+            {/* Chart 1: Inflow vs Completed (Area) */}
+            <div className="bg-card border border-border/70 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
+              <div className="mb-6">
+                <h3 className="text-lg font-bold font-serif text-text">Production Flow</h3>
+                <p className="text-xs text-muted mt-1">Comparison of new jobs arriving vs jobs being completed.</p>
+              </div>
+              <div className="h-[280px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="colorInflow" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                      </linearGradient>
+                      <linearGradient id="colorCompleted" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="text-border/40" />
+                    <XAxis dataKey="date" stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} dy={10} />
+                    <YAxis stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} allowDecimals={false} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', color: 'hsl(var(--text))', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }} 
+                      itemStyle={{ fontWeight: 600 }}
+                    />
+                    <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }} iconType="circle" />
+                    <Area type="monotone" dataKey="inflow" name="Inflow" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorInflow)" />
+                    <Area type="monotone" dataKey="completed" name="Delivered" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorCompleted)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Chart 2: Due vs Delays (Bar) */}
+            <div className="bg-card border border-border/70 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
+              <div className="mb-6">
+                <h3 className="text-lg font-bold font-serif text-text">Deadlines & Delays</h3>
+                <p className="text-xs text-muted mt-1">Jobs due on a given date vs jobs that were delayed.</p>
+              </div>
+              <div className="h-[280px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="text-border/40" />
+                    <XAxis dataKey="date" stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} dy={10} />
+                    <YAxis stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} allowDecimals={false} />
+                    <Tooltip 
+                      cursor={{ fill: 'hsl(var(--accent))', opacity: 0.4 }}
+                      contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', color: 'hsl(var(--text))', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }} 
+                      itemStyle={{ fontWeight: 600 }}
+                    />
+                    <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }} iconType="circle" />
+                    <Bar dataKey="due" name="Due Jobs" fill="#f59e0b" radius={[6, 6, 6, 6]} barSize={24} />
+                    <Bar dataKey="delay" name="Delayed Jobs" fill="#ef4444" radius={[6, 6, 6, 6]} barSize={24} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Action Bar */}
         <div className="flex items-center gap-2 lg:gap-4 bg-card/50 border border-border/50 p-3 rounded-xl backdrop-blur-md overflow-x-auto hide-scrollbar">

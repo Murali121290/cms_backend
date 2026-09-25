@@ -49,6 +49,7 @@ def upgrade() -> None:
     sa.Column('status', sa.String(length=50), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=True),
     sa.Column('updated_at', sa.DateTime(), nullable=True),
+    sa.Column('due_date', sa.DateTime(), nullable=True),
     sa.Column('stage_history', sa.JSON(), server_default='{}', nullable=False),
     sa.Column('project_name', sa.String(length=255), nullable=True),
     sa.Column('current_assignee', sa.String(length=255), nullable=True),

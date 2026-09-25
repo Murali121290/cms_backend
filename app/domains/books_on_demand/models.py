@@ -40,5 +40,6 @@ class BodJob(Base):
     is_deleted = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    due_date = Column(DateTime, nullable=True)
 
     client_config = relationship("BodClientConfig", back_populates="jobs")

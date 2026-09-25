@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, RefreshCw, ChevronRight, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen, ArrowRight, Trash2 } from 'lucide-react'
+import { Plus, RefreshCw, ChevronRight, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen, ArrowRight, Trash2, LayoutGrid, List } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useRBAC } from '@/hooks/useRBAC'
 import { usersApi } from '@/api/users'
 import { Button } from '@/components/ui/Button'
+import { Dropdown } from '@/components/ui/Dropdown'
 import { toast } from '@/store/useToastStore'
 import api from '@/api/client'
 
@@ -28,6 +29,8 @@ export function BodInternalPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [assigneeFilter, setAssigneeFilter] = useState('all')
+  const [stageFilter, setStageFilter] = useState('all')
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('list')
   
   // Delete Modal states
   const [showDeleteModal, setShowDeleteModal] = useState<number | null>(null)
@@ -150,6 +153,38 @@ export function BodInternalPage() {
     return username
   }
 
+  const getStatusBadgeClass = (job: any) => {
+    if (job.status === 'Completed') return 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+    
+    const now = new Date()
+    now.setHours(0, 0, 0, 0)
+    const tomorrow = new Date(now)
+    tomorrow.setDate(tomorrow.getDate() + 1)
+  
+    if (job.due_date && job.status !== 'Completed') {
+      const dueDate = new Date(job.due_date.endsWith('Z') ? job.due_date : job.due_date + 'Z')
+      dueDate.setHours(0, 0, 0, 0)
+      
+      if (dueDate < now) {
+        return 'bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400'
+      }
+      if (dueDate.getTime() === tomorrow.getTime()) {
+        return 'bg-orange-500/10 border-orange-500/20 text-orange-600 dark:text-orange-400'
+      }
+    }
+    
+    if (job.created_at && job.status !== 'Completed') {
+      const createdDate = new Date(job.created_at.endsWith('Z') ? job.created_at : job.created_at + 'Z')
+      createdDate.setHours(0, 0, 0, 0)
+      if (createdDate.getTime() === now.getTime()) {
+        return 'bg-blue-500/10 border-blue-500/20 text-blue-600 dark:text-blue-400'
+      }
+    }
+  
+    return 'bg-primary/10 border-primary/20 text-primary'
+  }
+
+
   const allAssignees = new Set<string>()
   jobs.forEach(j => {
       if (j.current_assignee) {
@@ -170,14 +205,30 @@ export function BodInternalPage() {
     const matchesAssignee = assigneeFilter === 'all'
       || (assigneeFilter === 'unassigned' ? !currentAssignee : currentAssignee === assigneeFilter)
       
-    return matchesSearch && matchesStatus && matchesAssignee
-  }).sort((a, b) => b.id - a.id) // sort newest first
+    const matchesStage = stageFilter === 'all' || j.current_stage_name === stageFilter
+      
+    return matchesSearch && matchesStatus && matchesAssignee && matchesStage
+  }).sort((a, b) => {
+    const aIsCompleted = a.status === 'Completed'
+    const bIsCompleted = b.status === 'Completed'
+    if (aIsCompleted && !bIsCompleted) return 1
+    if (!aIsCompleted && bIsCompleted) return -1
+    
+    // Both active
+    if (!aIsCompleted && !bIsCompleted) {
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    }
+    
+    // Both completed
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  })
 
-  const hasActiveFilters = searchQuery.trim() !== '' || statusFilter !== 'all' || assigneeFilter !== 'all'
+  const hasActiveFilters = searchQuery.trim() !== '' || statusFilter !== 'all' || assigneeFilter !== 'all' || stageFilter !== 'all'
   const clearFilters = () => {
     setSearchQuery('')
     setStatusFilter('all')
     setAssigneeFilter('all')
+    setStageFilter('all')
   }
 
   return (
@@ -212,7 +263,10 @@ export function BodInternalPage() {
 
       {/* Metrics Row */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
-        <div className="bg-card border border-border/70 rounded-xl p-4 flex items-center gap-3">
+        <div 
+          onClick={clearFilters}
+          className={`bg-card border rounded-xl p-4 flex items-center gap-3 cursor-pointer transition-colors ${!hasActiveFilters ? 'border-primary/50 ring-1 ring-primary/20' : 'border-border/70 hover:border-primary/30'}`}
+        >
           <div className="p-2 bg-primary/10 text-primary rounded-lg">
             <Layers size={18} />
           </div>
@@ -222,7 +276,10 @@ export function BodInternalPage() {
           </div>
         </div>
 
-        <div className="bg-card border border-border/70 rounded-xl p-4 flex items-center gap-3">
+        <div 
+          onClick={() => { clearFilters(); setAssigneeFilter('unassigned') }}
+          className={`bg-card border rounded-xl p-4 flex items-center gap-3 cursor-pointer transition-colors ${assigneeFilter === 'unassigned' ? 'border-rose-500/50 ring-1 ring-rose-500/20' : 'border-border/70 hover:border-rose-500/30'}`}
+        >
           <div className="p-2 bg-rose-500/10 text-rose-600 rounded-lg">
             <User size={18} />
           </div>
@@ -232,7 +289,10 @@ export function BodInternalPage() {
           </div>
         </div>
 
-        <div className="bg-card border border-border/70 rounded-xl p-4 flex items-center gap-3">
+        <div 
+          onClick={() => { clearFilters(); setStageFilter('Add job') }}
+          className={`bg-card border rounded-xl p-4 flex items-center gap-3 cursor-pointer transition-colors ${stageFilter === 'Add job' ? 'border-amber-500/50 ring-1 ring-amber-500/20' : 'border-border/70 hover:border-amber-500/30'}`}
+        >
           <div className="p-2 bg-amber-500/10 text-amber-600 rounded-lg">
             <RefreshCw size={18} />
           </div>
@@ -242,7 +302,10 @@ export function BodInternalPage() {
           </div>
         </div>
         
-        <div className="bg-card border border-border/70 rounded-xl p-4 flex items-center gap-3">
+        <div 
+          onClick={() => { clearFilters(); setStageFilter('QC') }}
+          className={`bg-card border rounded-xl p-4 flex items-center gap-3 cursor-pointer transition-colors ${stageFilter === 'QC' ? 'border-blue-500/50 ring-1 ring-blue-500/20' : 'border-border/70 hover:border-blue-500/30'}`}
+        >
           <div className="p-2 bg-blue-500/10 text-blue-600 rounded-lg">
             <CheckCircle2 size={18} />
           </div>
@@ -252,7 +315,10 @@ export function BodInternalPage() {
           </div>
         </div>
 
-        <div className="bg-card border border-border/70 rounded-xl p-4 flex items-center gap-3">
+        <div 
+          onClick={() => { clearFilters(); setStatusFilter('Completed') }}
+          className={`bg-card border rounded-xl p-4 flex items-center gap-3 cursor-pointer transition-colors ${statusFilter === 'Completed' ? 'border-emerald-500/50 ring-1 ring-emerald-500/20' : 'border-border/70 hover:border-emerald-500/30'}`}
+        >
           <div className="p-2 bg-emerald-500/10 text-emerald-600 rounded-lg">
             <CheckCircle2 size={18} />
           </div>
@@ -279,28 +345,28 @@ export function BodInternalPage() {
 
           <div className="flex items-center gap-2">
             <Filter size={13} className="text-muted shrink-0" />
-            <select
-              value={statusFilter}
-              onChange={e => setStatusFilter(e.target.value)}
-              className="bg-card border border-border rounded-lg px-2.5 py-2 text-xs text-text focus:outline-none focus:border-primary transition-colors"
-            >
-              <option value="all">All statuses</option>
-              {statusOptions.map(s => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
+            <div className="w-[140px]">
+              <Dropdown
+                value={statusFilter}
+                onChange={setStatusFilter}
+                options={[
+                  { value: 'all', label: 'All statuses' },
+                  ...statusOptions.map(s => ({ value: s, label: s }))
+                ]}
+              />
+            </div>
 
-            <select
-              value={assigneeFilter}
-              onChange={e => setAssigneeFilter(e.target.value)}
-              className="bg-card border border-border rounded-lg px-2.5 py-2 text-xs text-text focus:outline-none focus:border-primary transition-colors"
-            >
-              <option value="all">All assignees</option>
-              <option value="unassigned">Unassigned</option>
-              {assigneeOptions.map(assignee => (
-                <option key={assignee} value={assignee}>{getUserDisplayName(assignee)}</option>
-              ))}
-            </select>
+            <div className="w-[150px]">
+              <Dropdown
+                value={assigneeFilter}
+                onChange={setAssigneeFilter}
+                options={[
+                  { value: 'all', label: 'All assignees' },
+                  { value: 'unassigned', label: 'Unassigned' },
+                  ...assigneeOptions.map(a => ({ value: a, label: getUserDisplayName(a) }))
+                ]}
+              />
+            </div>
 
             {hasActiveFilters && (
               <button
@@ -310,6 +376,23 @@ export function BodInternalPage() {
                 Clear filters
               </button>
             )}
+          </div>
+          
+          <div className="flex items-center ml-auto bg-card border border-border rounded-lg p-0.5 shrink-0">
+            <button
+              onClick={() => setViewMode('grid')}
+              className={`p-1.5 rounded-md transition-colors ${viewMode === 'grid' ? 'bg-accent text-primary shadow-sm' : 'text-muted hover:text-text'}`}
+              title="Grid View"
+            >
+              <LayoutGrid size={15} />
+            </button>
+            <button
+              onClick={() => setViewMode('list')}
+              className={`p-1.5 rounded-md transition-colors ${viewMode === 'list' ? 'bg-accent text-primary shadow-sm' : 'text-muted hover:text-text'}`}
+              title="List View"
+            >
+              <List size={15} />
+            </button>
           </div>
         </div>
       )}
@@ -335,11 +418,128 @@ export function BodInternalPage() {
             Clear filters
           </button>
         </div>
+      ) : viewMode === 'list' ? (
+        <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm text-text whitespace-nowrap">
+              <thead className="bg-accent/50 border-b border-border text-xs font-bold text-muted uppercase tracking-wider">
+                <tr>
+                  <th className="px-4 py-3">Job Name</th>
+                  <th className="px-4 py-3">Client</th>
+                  <th className="px-4 py-3">Assignee</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3 min-w-[150px]">Progress</th>
+                  <th className="px-4 py-3">Created</th>
+                  <th className="px-4 py-3">Due Date</th>
+                  <th className="px-4 py-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/60">
+                {filteredJobs.map((job) => {
+                  const percent = job.status === 'Completed' ? 100 : Math.round((job.current_stage_index / 3) * 100)
+                  const currentAssignee = job.current_assignee || null
+                  
+                  const assigneeOptions = [
+                    { value: '', label: 'Unassigned' },
+                    ...users.filter(u => u.active_status).map(u => ({
+                      value: u.user_name,
+                      label: u.first_name ? `${u.first_name} ${u.last_name || ''}`.trim() : u.user_name
+                    }))
+                  ]
+                  if (currentAssignee && !assigneeOptions.some(o => o.value === currentAssignee)) {
+                    assigneeOptions.push({ value: currentAssignee, label: getUserDisplayName(currentAssignee) })
+                  }
+                  
+                  return (
+                    <tr 
+                      key={job.id} 
+                      onClick={() => navigate(`/bod/internal/${job.id}`)}
+                      className="hover:bg-accent/30 cursor-pointer transition-colors"
+                    >
+                      <td className="px-4 py-3 min-w-[200px] max-w-[300px]">
+                        <h3 className="font-semibold text-sm truncate m-0" title={job.pdf_filename}>{job.pdf_filename}</h3>
+                        {job.epub_filename && (
+                          <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium truncate mt-0.5" title={job.epub_filename}>
+                            {job.epub_filename}
+                          </p>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted">
+                        {job.client_name}
+                      </td>
+                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-1.5 text-muted">
+                          <User size={13} className="text-muted/70" />
+                          <Dropdown
+                            variant="inline"
+                            searchable
+                            value={currentAssignee || ''}
+                            onChange={(val) => assignUser(job.id, val)}
+                            className="bg-transparent border-0 text-primary font-medium p-0 hover:text-primary-hover w-full shadow-none h-auto min-h-0 focus:border-transparent focus:ring-0 text-[12px]"
+                            options={assigneeOptions}
+                          />
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`capitalize font-bold px-2.5 py-1 rounded-md text-[10px] border ${getStatusBadgeClass(job)}`}>
+                          {job.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 w-[200px]">
+                        <div className="flex items-center justify-between text-[10px] text-muted font-bold mb-1.5">
+                          <span>{job.current_stage_name}</span>
+                          <span>{percent}%</span>
+                        </div>
+                        <div className="h-1.5 w-full bg-border rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-primary transition-all duration-500 rounded-full"
+                            style={{ width: `${percent}%` }}
+                          />
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-[11px] text-muted font-medium">
+                        {new Date(job.created_at.endsWith('Z') ? job.created_at : job.created_at + 'Z').toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' })}
+                      </td>
+                      <td className="px-4 py-3 text-[11px] text-muted font-medium">
+                        {job.due_date ? new Date(job.due_date.endsWith('Z') ? job.due_date : job.due_date + 'Z').toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' }) : '-'}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          {isAdmin && (
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); setShowDeleteModal(job.id); }} 
+                              className="p-1.5 text-muted hover:text-red-500 hover:bg-red-50 rounded-md transition-colors"
+                              title="Delete Job"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          )}
+                          <ChevronRight size={18} className="text-muted" />
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {filteredJobs.map((job) => {
             const percent = job.status === 'Completed' ? 100 : Math.round((job.current_stage_index / 3) * 100)
             const currentAssignee = job.current_assignee || null
+
+            const assigneeOptions = [
+              { value: '', label: 'Unassigned' },
+              ...users.filter(u => u.active_status).map(u => ({
+                value: u.user_name,
+                label: u.first_name ? `${u.first_name} ${u.last_name || ''}`.trim() : u.user_name
+              }))
+            ]
+            if (currentAssignee && !assigneeOptions.some(o => o.value === currentAssignee)) {
+              assigneeOptions.push({ value: currentAssignee, label: getUserDisplayName(currentAssignee) })
+            }
 
             return (
               <div 
@@ -375,27 +575,17 @@ export function BodInternalPage() {
                   <div className="mt-3 flex items-center justify-between text-[11px]">
                     <div className="flex items-center gap-1 text-muted" onClick={(e) => e.stopPropagation()}>
                       <User size={12} className="text-muted/70" />
-                      <select
-                        value={getUserDisplayName(currentAssignee)}
-                        onChange={(e) => assignUser(job.id, e.target.value)}
-                        className="bg-transparent border-0 text-primary font-medium focus:ring-0 focus:outline-none cursor-pointer p-0 text-[11px] hover:text-primary-hover"
-                      >
-                        <option value="" className="text-text bg-card">Unassigned</option>
-                        {users.filter(u => u.active_status).map(u => {
-                          const displayName = u.first_name ? `${u.first_name} ${u.last_name || ''}`.trim() : u.user_name;
-                          return (
-                            <option key={u.id} value={displayName} className="text-text bg-card">
-                              {displayName}
-                            </option>
-                          )
-                        })}
-                      </select>
+                      <Dropdown
+                        variant="inline"
+                        searchable
+                        value={currentAssignee || ''}
+                        onChange={(val) => assignUser(job.id, val)}
+                        className="bg-transparent border-0 text-primary font-medium p-0 hover:text-primary-hover w-auto shadow-none h-auto min-h-0 focus:border-transparent focus:ring-0 text-[11px]"
+                        dropdownClassName="w-48 text-[11px] font-normal"
+                        options={assigneeOptions}
+                      />
                     </div>
-                    <span className={`capitalize font-bold px-2 py-0.5 rounded-md text-[9px] border ${
-                      job.status === 'Completed'
-                        ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
-                        : 'bg-primary/10 border-primary/20 text-primary'
-                    }`}>
+                    <span className={`capitalize font-bold px-2 py-0.5 rounded-md text-[9px] border ${getStatusBadgeClass(job)}`}>
                       {job.status}
                     </span>
                   </div>
@@ -416,7 +606,10 @@ export function BodInternalPage() {
                 </div>
 
                 <div className="mt-4 pt-2.5 border-t border-border/60 flex items-center justify-between text-[10px] text-muted font-medium">
-                  <span>Created: {new Date(job.created_at.endsWith('Z') ? job.created_at : job.created_at + 'Z').toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' })}</span>
+                  <div className="flex flex-col gap-0.5">
+                    <span>Created: {new Date(job.created_at.endsWith('Z') ? job.created_at : job.created_at + 'Z').toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' })}</span>
+                    <span>Due: {job.due_date ? new Date(job.due_date.endsWith('Z') ? job.due_date : job.due_date + 'Z').toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' }) : '-'}</span>
+                  </div>
                   <span className="flex items-center gap-1 text-primary">View Details <ArrowRight size={10} /></span>
                 </div>
               </div>
@@ -455,17 +648,12 @@ export function BodInternalPage() {
             <form onSubmit={handleAddJob} className="space-y-3.5">
               <div>
                 <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Client Configuration</label>
-                <select 
-                  value={selectedClientId} 
-                  onChange={e => setSelectedClientId(e.target.value)} 
-                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-primary transition-colors"
-                  required
-                >
-                  <option value="">Select Client</option>
-                  {clients.map(c => (
-                    <option key={c.id} value={c.id}>{c.client_name}</option>
-                  ))}
-                </select>
+                <Dropdown
+                  value={selectedClientId}
+                  onChange={setSelectedClientId}
+                  placeholder="Select Client"
+                  options={clients.map(c => ({ value: c.id.toString(), label: c.client_name }))}
+                />
               </div>
 
               <div>

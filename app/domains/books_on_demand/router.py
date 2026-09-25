@@ -53,6 +53,7 @@ def list_jobs(client_id: int = None, status: str = None, db: Session = Depends(g
             "status": job.status,
             "created_at": job.created_at,
             "updated_at": job.updated_at,
+            "due_date": job.due_date,
             "client_name": job.client_config.client_name if job.client_config else "Unknown"
         }
         result.append(job_dict)
@@ -81,6 +82,7 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
         "status": job.status,
         "created_at": job.created_at,
         "updated_at": job.updated_at,
+        "due_date": job.due_date,
         "client_name": job.client_config.client_name if job.client_config else "Unknown"
     }
 
@@ -141,7 +143,8 @@ def get_customer_report(
             "status": job.status,
             "stage_history": job.stage_history,
             "created_at": job.created_at,
-            "updated_at": job.updated_at
+            "updated_at": job.updated_at,
+            "due_date": job.due_date
         })
     return {"jobs": report}
 
@@ -367,7 +370,7 @@ def upload_epub(
     return {"message": "EPUB uploaded and job advanced", "job": job}
 
 
-
+@router.post("/jobs")
 def create_job(
     client_id: int = Form(...),
     file: UploadFile = File(...),
@@ -399,6 +402,9 @@ def create_job(
     first_stage = stages[0]
     
     now_iso = datetime.now(timezone.utc).isoformat()
+    now_utc = datetime.utcnow()
+    from datetime import timedelta
+    
     initial_history = {
         first_stage: {
             "start_time": now_iso
@@ -413,7 +419,9 @@ def create_job(
         current_stage_index=0,
         current_stage_name=first_stage,
         stage_history=initial_history,
-        status="Active"
+        status="Active",
+        created_at=now_utc,
+        due_date=now_utc + timedelta(days=3)
     )
     db.add(new_job)
     db.commit()

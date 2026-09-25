@@ -75,39 +75,48 @@ export function MultiSelect({ label, options, value, onChange, placeholder = 'Se
         </button>
 
         {open && (
-          <div className="absolute z-50 mt-1 w-full bg-card border border-border rounded-xl shadow-lg max-h-48 overflow-y-auto">
+          <div className="absolute z-50 mt-1 w-full min-w-[140px] bg-card border border-border rounded-xl shadow-lg max-h-60 overflow-y-auto p-2 flex flex-col gap-1">
             {options.length > 1 && (
               <button
                 type="button"
                 onClick={toggleAll}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-primary hover:bg-background border-b border-border transition-colors"
+                className={cn(
+                  "w-full flex items-center gap-2 px-3 py-2 text-xs rounded-md transition-colors text-left",
+                  allSelected 
+                    ? "bg-primary/10 text-primary font-medium" 
+                    : "text-text hover:bg-accent/70 hover:text-primary"
+                )}
               >
-                <span className={cn(
-                  'w-4 h-4 rounded border flex items-center justify-center flex-shrink-0',
-                  allSelected ? 'bg-primary border-primary' : 'border-border'
-                )}>
-                  {allSelected && <Check size={10} className="text-white" />}
+                <span className={cn("w-3 flex justify-center shrink-0", allSelected ? "opacity-100" : "opacity-0 group-hover:opacity-50")}>
+                  <Check size={14} className={allSelected ? "text-primary" : "text-muted"} />
                 </span>
-                {allSelected ? 'Deselect All' : 'Select All'}
+                <span className="truncate">{allSelected ? 'Deselect All' : 'Select All'}</span>
               </button>
             )}
+            
+            {options.length > 1 && <div className="h-px w-full bg-border/50 my-0.5"></div>}
+
             {options.map(opt => {
               const v = optVal(opt)
               const l = optLabel(opt)
+              const isSelected = value.includes(v)
+              
               return (
                 <button
                   key={v}
                   type="button"
                   onClick={() => toggle(v)}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text hover:bg-background transition-colors"
+                  className={cn(
+                    "w-full flex items-center gap-2 px-3 py-2 text-xs rounded-md transition-colors text-left",
+                    isSelected 
+                      ? "bg-primary/10 text-primary font-medium" 
+                      : "text-text hover:bg-accent/70 hover:text-primary"
+                  )}
                 >
-                  <span className={cn(
-                    'w-4 h-4 rounded border flex items-center justify-center flex-shrink-0',
-                    value.includes(v) ? 'bg-primary border-primary' : 'border-border'
-                  )}>
-                    {value.includes(v) && <Check size={10} className="text-white" />}
+                  <span className={cn("w-3 flex justify-center shrink-0", isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-50")}>
+                    <Check size={14} className={isSelected ? "text-primary" : "text-muted"} />
                   </span>
-                  {l}
+                  <span className="truncate">{l}</span>
                 </button>
               )
             })}
