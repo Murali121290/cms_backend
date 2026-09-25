@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Clock,
@@ -21,6 +21,122 @@ import {
 import api from '@/api/client'
 import { getApiErrorMessage } from '@/api/client'
 import * as XLSX from 'xlsx'
+import { useUsersStore } from '@/stores/usersStore'
+
+interface WorkspaceAssigneeDropdownProps {
+  value: string
+  onChange: (val: string) => void
+  disabled?: boolean
+  options: { username: string }[]
+}
+
+function WorkspaceAssigneeDropdown({ value, onChange, disabled, options }: WorkspaceAssigneeDropdownProps) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const popoverRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) setIsOpen(false)
+    }
+    if (isOpen) document.addEventListener('mousedown', onClickOutside)
+    if (!isOpen) setSearchQuery('')
+    return () => document.removeEventListener('mousedown', onClickOutside)
+  }, [isOpen])
+
+  const filteredOptions = options.filter(opt => {
+    if (!searchQuery) return true
+    const label = useUsersStore.getState().getUserDisplayNameByUsername(opt.username).toLowerCase()
+    return label.includes(searchQuery.toLowerCase())
+  })
+
+  const currentDisplay = value ? useUsersStore.getState().getUserDisplayNameByUsername(value) : '-- Unassigned --'
+
+  return (
+    <div className="relative flex items-center" ref={popoverRef}>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          if (!disabled) setIsOpen(prev => !prev)
+        }}
+        disabled={disabled}
+        className={`flex items-center justify-between min-w-[130px] max-w-[160px] text-[11px] bg-background border rounded px-2 py-1 focus:outline-none transition-colors shadow-sm ${isOpen ? 'border-primary ring-1 ring-primary/40' : 'border-border'} ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:shadow-md'}`}
+        title={currentDisplay}
+      >
+        <span className="truncate leading-tight block w-full text-left font-semibold">{currentDisplay}</span>
+        <ChevronDown size={12} className={`text-muted-foreground transition-transform ml-1 ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+
+      {isOpen && (
+        <div className="absolute top-[calc(100%+4px)] right-0 w-max min-w-[160px] max-w-[220px] bg-card border border-border shadow-xl rounded-lg py-1 z-[100] max-h-60 flex flex-col backdrop-blur-3xl ring-1 ring-black/5 animate-in fade-in zoom-in-95 duration-200">
+          {options.length > 5 && (
+            <div className="px-1.5 pb-1 mb-1 border-b border-border/50 shrink-0">
+              <div className="relative px-1 py-0.5">
+                <Search size={10} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  type="text"
+                  placeholder="Search..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  onClick={e => e.stopPropagation()}
+                  className="w-full bg-muted/50 border-none text-[10px] rounded-sm pl-5 pr-2 py-1 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="px-1 flex flex-col overflow-y-auto">
+            <button
+              type="button"
+              className="w-full text-left px-2 py-1.5 text-[10px] text-muted-foreground hover:bg-muted/40 hover:text-foreground rounded transition-all flex items-center gap-2 group"
+              onClick={(e) => {
+                e.stopPropagation()
+                setIsOpen(false)
+                if (value !== '') onChange('')
+              }}
+            >
+              <div className={`w-3 h-3 rounded flex items-center justify-center shrink-0 ${!value ? 'text-primary' : 'text-transparent'}`}>
+                {!value && <CheckCircle size={10} strokeWidth={3} />}
+              </div>
+              <span className="group-hover:translate-x-0.5 transition-transform duration-200 font-medium">-- Unassigned --</span>
+            </button>
+
+            {filteredOptions.length === 0 ? (
+              <div className="text-[10px] text-muted-foreground px-2 py-2 text-center">No results</div>
+            ) : (
+              filteredOptions.map(opt => {
+                const isSelected = value === opt.username
+                const label = useUsersStore.getState().getUserDisplayNameByUsername(opt.username)
+                return (
+                  <button
+                    key={opt.username}
+                    type="button"
+                    className={`w-full text-left px-2 py-1.5 text-[10px] transition-all rounded flex items-center gap-2 group ${isSelected
+                      ? 'bg-primary/10 text-primary font-semibold'
+                      : 'text-foreground hover:bg-muted/40 font-medium'
+                      }`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setIsOpen(false)
+                      if (value !== opt.username) onChange(opt.username)
+                    }}
+                  >
+                    <div className={`w-3 h-3 rounded flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'text-primary' : 'text-transparent'
+                      }`}>
+                      {isSelected && <CheckCircle size={10} strokeWidth={3} />}
+                    </div>
+                    <span className={`truncate transition-transform duration-200 ${!isSelected && 'group-hover:translate-x-0.5'}`}>{label}</span>
+                  </button>
+                )
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 interface WorkspaceItem {
   id: number
@@ -99,14 +215,20 @@ interface AssignmentTarget {
 }
 
 export function WorkspacePage() {
+  const { fetchUsers, getUserDisplayNameByUsername, users } = useUsersStore()
+
+  useEffect(() => {
+    fetchUsers()
+  }, [fetchUsers])
+
   const [searchTerm, setSearchTerm] = useState('')
   const [filterStage, setFilterStage] = useState('All')
   const [expandedMember, setExpandedMember] = useState<string | null>(null)
-  
+
   const [tlActiveTab, setTlActiveTab] = useState<'members' | 'chapters'>('members')
   const [mgrActiveTab, setMgrActiveTab] = useState<'members' | 'chapters'>('members')
   const [selectedAssignments, setSelectedAssignments] = useState<AssignmentTarget[]>([])
-  
+
   const [isAssigning, setIsAssigning] = useState(false)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
 
@@ -122,16 +244,16 @@ export function WorkspacePage() {
   const [selectedStages, setSelectedStages] = useState<string[]>([])
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>([])
   const [selectedAssignees, setSelectedAssignees] = useState<string[]>([])
-  
+
   const [activeFilterDropdown, setActiveFilterDropdown] = useState<'client' | 'pm' | 'project' | 'stage' | 'status' | 'assignee' | null>(null)
   const [filterSearchQuery, setFilterSearchQuery] = useState('')
 
   const isAnyExcelFilterActive = selectedClients.length > 0 ||
-                                 selectedPMs.length > 0 ||
-                                 selectedProjects.length > 0 || 
-                                 selectedStages.length > 0 || 
-                                 selectedStatuses.length > 0 || 
-                                 selectedAssignees.length > 0
+    selectedPMs.length > 0 ||
+    selectedProjects.length > 0 ||
+    selectedStages.length > 0 ||
+    selectedStatuses.length > 0 ||
+    selectedAssignees.length > 0
 
   useEffect(() => {
     const handleOutsideClick = (e: MouseEvent) => {
@@ -147,10 +269,10 @@ export function WorkspacePage() {
   const applyExcelFilters = (assignments: any[]) => {
     return assignments.filter(item => {
       // 1. Text Search Term
-      const matchesSearch = item.chapters.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                            item.project.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                            (item.client && item.client.toLowerCase().includes(searchTerm.toLowerCase())) ||
-                            (item.project_manager_name && item.project_manager_name.toLowerCase().includes(searchTerm.toLowerCase()))
+      const matchesSearch = item.chapters.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.project.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (item.client && item.client.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (item.project_manager_name && item.project_manager_name.toLowerCase().includes(searchTerm.toLowerCase()))
       if (!matchesSearch) return false
 
       // 2. Client filter
@@ -251,24 +373,24 @@ export function WorkspacePage() {
       uniqueValues = Array.from(new Set(assignments.map(a => a.current_assignee || 'Unassigned'))).filter(Boolean)
     }
 
-    const selectedList = 
+    const selectedList =
       columnType === 'client' ? selectedClients :
-      columnType === 'pm' ? selectedPMs :
-      columnType === 'project' ? selectedProjects :
-      columnType === 'stage' ? selectedStages :
-      columnType === 'status' ? selectedStatuses :
-      selectedAssignees
+        columnType === 'pm' ? selectedPMs :
+          columnType === 'project' ? selectedProjects :
+            columnType === 'stage' ? selectedStages :
+              columnType === 'status' ? selectedStatuses :
+                selectedAssignees
 
-    const setSelectedList = 
+    const setSelectedList =
       columnType === 'client' ? setSelectedClients :
-      columnType === 'pm' ? setSelectedPMs :
-      columnType === 'project' ? setSelectedProjects :
-      columnType === 'stage' ? setSelectedStages :
-      columnType === 'status' ? setSelectedStatuses :
-      setSelectedAssignees
+        columnType === 'pm' ? setSelectedPMs :
+          columnType === 'project' ? setSelectedProjects :
+            columnType === 'stage' ? setSelectedStages :
+              columnType === 'status' ? setSelectedStatuses :
+                setSelectedAssignees
 
     const isDropdownOpen = activeFilterDropdown === columnType
-    const filteredValues = uniqueValues.filter(val => 
+    const filteredValues = uniqueValues.filter(val =>
       val.toLowerCase().includes(filterSearchQuery.toLowerCase())
     )
 
@@ -292,57 +414,79 @@ export function WorkspacePage() {
             setFilterSearchQuery('')
             setActiveFilterDropdown(activeFilterDropdown === columnType ? null : columnType)
           }}
-          className={`p-0.5 rounded hover:bg-muted transition-colors ${
-            isFiltered ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
-          }`}
+          className={`p-0.5 rounded transition-colors hover:bg-primary-foreground/20 ${isFiltered ? 'text-primary-foreground drop-shadow-[0_0_2px_rgba(255,255,255,0.8)]' : 'text-primary-foreground/60 hover:text-primary-foreground'
+            }`}
           title={`Filter by ${columnLabel}`}
         >
           <Filter size={11} fill={isFiltered ? 'currentColor' : 'none'} />
         </button>
 
         {isDropdownOpen && (
-          <div className="absolute top-full left-0 mt-2 z-50 bg-card border border-border shadow-xl rounded-xl p-3 w-52 font-normal text-xs text-foreground text-left flex flex-col gap-2">
-            <div className="flex items-center justify-between border-b border-border/40 pb-1.5">
-              <span className="font-bold text-[10px] text-muted-foreground uppercase tracking-wide">Filter {columnLabel}</span>
-              <button 
-                type="button" 
-                onClick={() => setActiveFilterDropdown(null)}
-                className="text-muted-foreground hover:text-foreground"
+          <div className="absolute top-full left-0 mt-2 z-50 bg-card/90 backdrop-blur-3xl border border-border/60 shadow-xl rounded-xl p-2 w-52 font-normal text-xs text-slate-800 dark:text-slate-200 text-left flex flex-col gap-2">
+            <div className="flex items-center justify-between border-b border-border/40 pb-1.5 px-1">
+              <span className="font-bold text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wide">Filter {columnLabel}</span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setActiveFilterDropdown(null)
+                }}
+                className="text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
               >
                 <X size={12} />
               </button>
             </div>
 
             {uniqueValues.length > 5 && (
-              <input
-                type="text"
-                placeholder="Search..."
-                value={filterSearchQuery}
-                onChange={e => setFilterSearchQuery(e.target.value)}
-                className="w-full border border-border/80 rounded px-2 py-1 bg-background text-[11px] focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
-              />
+              <div className="px-1">
+                <input
+                  type="text"
+                  placeholder="Search..."
+                  value={filterSearchQuery}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={e => setFilterSearchQuery(e.target.value)}
+                  className="w-full border border-border/80 rounded px-2 py-1.5 bg-background text-slate-800 dark:text-slate-200 text-[11px] focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 placeholder:text-slate-400"
+                />
+              </div>
             )}
 
-            <div className="max-h-36 overflow-y-auto space-y-1">
-              {filteredValues.map(val => (
-                <label key={val} className="flex items-center gap-2 cursor-pointer hover:bg-muted/30 p-1.5 rounded transition-all">
-                  <input
-                    type="checkbox"
-                    checked={selectedList.includes(val)}
-                    onChange={(e) => handleToggle(val, e.target.checked)}
-                    className="w-3.5 h-3.5 border-border rounded focus:ring-primary accent-primary"
-                  />
-                  <span className="truncate max-w-[150px]">{val}</span>
-                </label>
-              ))}
+            <div className="max-h-48 overflow-y-auto space-y-0.5 custom-scrollbar px-1">
+              {filteredValues.map(val => {
+                const isSelected = selectedList.includes(val)
+                const label = columnType === 'assignee' && val !== 'Unassigned' 
+                  ? (getUserDisplayNameByUsername(val) || val)
+                  : val
+                return (
+                  <button
+                    key={val}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleToggle(val, !isSelected)
+                    }}
+                    className={`w-full text-left px-2 py-1.5 text-[10px] transition-all rounded flex items-center gap-2 group ${
+                      isSelected 
+                        ? 'bg-primary/10 text-primary font-semibold' 
+                        : 'text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/50 font-medium'
+                    }`}
+                  >
+                    <div className={`w-3 h-3 rounded flex items-center justify-center shrink-0 transition-colors ${
+                      isSelected ? 'text-primary' : 'text-transparent'
+                    }`}>
+                      {isSelected && <Check size={10} strokeWidth={3} />}
+                    </div>
+                    <span className={`truncate transition-transform duration-200 ${!isSelected ? 'group-hover:translate-x-0.5' : ''}`}>{label}</span>
+                  </button>
+                )
+              })}
               {filteredValues.length === 0 && (
-                <p className="text-center py-2 text-muted-foreground text-[10px]">No matches</p>
+                <p className="text-center py-2 text-slate-500 dark:text-slate-400 text-[10px]">No matches</p>
               )}
             </div>
 
             <div className="flex justify-between border-t border-border/40 pt-2 text-[10px] font-bold">
               <button type="button" className="text-primary hover:underline" onClick={() => setSelectedList(uniqueValues)}>Select All</button>
-              <button type="button" className="text-muted-foreground hover:underline" onClick={() => setSelectedList([])}>Clear</button>
+              <button type="button" className="text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 hover:underline" onClick={() => setSelectedList([])}>Clear</button>
             </div>
           </div>
         )}
@@ -401,7 +545,7 @@ export function WorkspacePage() {
   // 2. Render KRA Circular Progress
   const renderKraProgress = (rate: number) => {
     const strokeDashoffset = 125.6 - (125.6 * rate) / 100
-    const colorClass = rate >= 90 ? 'stroke-emerald-500' : rate >= 80 ? 'stroke-amber-500' : 'stroke-rose-500'
+    const colorClass = rate >= 90 ? 'stroke-emerald-500' : rate >= 80 ? 'stroke-amber-500' : 'stroke-red-500'
     return (
       <div className="flex items-center gap-4 bg-background/50 border border-border/40 rounded-xl px-4 py-3">
         <div className="relative w-12 h-12 flex-shrink-0">
@@ -423,7 +567,7 @@ export function WorkspacePage() {
         </div>
         <div>
           <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">KRA Compliance</div>
-          <div className={`text-sm font-extrabold ${rate >= 90 ? 'text-emerald-500' : rate >= 80 ? 'text-amber-500' : 'text-rose-500'}`}>
+          <div className={`text-sm font-extrabold ${rate >= 90 ? 'text-emerald-500' : rate >= 80 ? 'text-amber-500' : 'text-red-500'}`}>
             {rate >= 90 ? 'On-Track' : rate >= 80 ? 'Warning' : 'Needs Review'}
           </div>
         </div>
@@ -519,11 +663,10 @@ export function WorkspacePage() {
     <div className="space-y-6 pb-20 relative">
       {/* Toast popup */}
       {toast && (
-        <div className={`fixed top-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl border shadow-lg animate-in slide-in-from-top-4 duration-300 ${
-          toast.type === 'success' 
-            ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500' 
-            : 'bg-rose-500/10 border-rose-500/20 text-rose-500'
-        }`}>
+        <div className={`fixed top-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl border shadow-lg animate-in slide-in-from-top-4 duration-300 ${toast.type === 'success'
+          ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500'
+          : 'bg-red-500/10 border-red-500/20 text-red-500'
+          }`}>
           {toast.type === 'success' ? <Check size={16} /> : <AlertCircle size={16} />}
           <span className="text-xs font-bold">{toast.message}</span>
         </div>
@@ -576,10 +719,10 @@ export function WorkspacePage() {
 
         <div className="bg-card border border-border/80 rounded-xl p-4 flex flex-col gap-1 shadow-subtle hover:border-border transition-all">
           <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-            <AlertCircle size={12} className="text-rose-500" />
+            <AlertCircle size={12} className="text-red-500" />
             Delayed Files
           </div>
-          <div className={`text-2xl font-extrabold mt-1 ${stats.delayed_count > 0 ? 'text-rose-500' : 'text-foreground'}`}>
+          <div className={`text-2xl font-extrabold mt-1 ${stats.delayed_count > 0 ? 'text-red-500' : 'text-foreground'}`}>
             {stats.delayed_count}
           </div>
           <p className="text-[10px] text-muted-foreground mt-1">SLA target exceeded</p>
@@ -610,11 +753,10 @@ export function WorkspacePage() {
                 <button
                   key={stage}
                   onClick={() => setFilterStage(stage)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
-                    filterStage === stage
-                      ? 'bg-primary text-sidebar border-primary'
-                      : 'bg-background hover:bg-muted/30 border-border/80'
-                  }`}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${filterStage === stage
+                    ? 'bg-primary text-sidebar border-primary'
+                    : 'bg-background hover:bg-muted/30 border-border/80'
+                    }`}
                 >
                   {stage}
                 </button>
@@ -628,9 +770,8 @@ export function WorkspacePage() {
               .map(item => (
                 <div
                   key={item.id}
-                  className={`flex flex-col sm:flex-row sm:items-center justify-between border rounded-xl p-4 gap-4 transition-all hover:bg-muted/10 ${
-                    item.delayed ? 'border-rose-500/30 bg-rose-500/5' : 'border-border/60'
-                  }`}
+                  className={`flex flex-col sm:flex-row sm:items-center justify-between border rounded-xl p-4 gap-4 transition-all hover:bg-muted/10 ${item.delayed ? 'border-red-500/30 bg-red-500/5' : 'border-border/60'
+                    }`}
                 >
                   <div className="space-y-1.5">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -640,7 +781,7 @@ export function WorkspacePage() {
                         {item.stage_name}
                       </span>
                       {item.delayed && (
-                        <span className="text-[10px] bg-rose-500/10 text-rose-500 border border-rose-500/20 rounded px-1.5 py-0.5 font-bold uppercase tracking-wider animate-pulse">
+                        <span className="text-[10px] bg-red-500/10 text-red-500 border border-red-500/20 rounded px-1.5 py-0.5 font-bold uppercase tracking-wider animate-pulse">
                           Overdue ({item.delay_days}d)
                         </span>
                       )}
@@ -657,7 +798,7 @@ export function WorkspacePage() {
                   <div className="flex items-center gap-4 flex-shrink-0">
                     <div className="text-right">
                       <p className="text-[10px] text-muted-foreground font-semibold">Planned End Date</p>
-                      <p className={`text-xs font-bold ${item.delayed ? 'text-rose-500' : 'text-foreground'}`}>
+                      <p className={`text-xs font-bold ${item.delayed ? 'text-red-500' : 'text-foreground'}`}>
                         {formatDate(item.planned_end_date)}
                       </p>
                     </div>
@@ -686,17 +827,15 @@ export function WorkspacePage() {
               <div className="flex bg-muted/40 p-0.5 rounded-lg border border-border/60">
                 <button
                   onClick={() => { setTlActiveTab('members'); setSelectedAssignments([]) }}
-                  className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${
-                    tlActiveTab === 'members' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                  }`}
+                  className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${tlActiveTab === 'members' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                    }`}
                 >
                   Team Members
                 </button>
                 <button
                   onClick={() => { setTlActiveTab('chapters'); setSelectedAssignments([]) }}
-                  className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${
-                    tlActiveTab === 'chapters' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                  }`}
+                  className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${tlActiveTab === 'chapters' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                    }`}
                 >
                   Projects & Chapters Queue
                 </button>
@@ -734,7 +873,7 @@ export function WorkspacePage() {
                     setSelectedStatuses([])
                     setSelectedAssignees([])
                   }}
-                  className="flex items-center gap-1.5 px-3 py-2 text-[10px] font-bold text-rose-500 bg-rose-500/10 border border-rose-500/20 rounded-lg hover:bg-rose-500/20 transition-all shrink-0"
+                  className="flex items-center gap-1.5 px-3 py-2 text-[10px] font-bold text-red-500 bg-red-500/10 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-all shrink-0"
                 >
                   <X size={10} />
                   Clear Filters
@@ -745,17 +884,17 @@ export function WorkspacePage() {
 
           {/* Tab 1: Members Table */}
           {tlActiveTab === 'members' && (
-            <div className="border border-border/60 rounded-xl overflow-hidden">
-              <table className="w-full border-collapse text-left text-xs">
-                <thead>
-                  <tr className="bg-muted/40 border-b border-border/60">
-                    <th className="p-3 font-bold text-muted-foreground uppercase">Member Name</th>
-                    <th className="p-3 font-bold text-muted-foreground uppercase">Role</th>
-                    <th className="p-3 font-bold text-muted-foreground uppercase">Today</th>
-                    <th className="p-3 font-bold text-muted-foreground uppercase">Yesterday</th>
-                    <th className="p-3 font-bold text-muted-foreground uppercase text-rose-500">Delayed</th>
-                    <th className="p-3 font-bold text-muted-foreground uppercase">Completed</th>
-                    <th className="p-3 font-bold text-muted-foreground uppercase">KRA Rate</th>
+            <div className="border border-border/60 rounded-xl overflow-x-auto max-h-[60vh]">
+              <table className="w-full min-w-[800px] border-collapse text-left text-xs">
+                <thead className="sticky top-0 z-10 bg-primary shadow-sm text-primary-foreground">
+                  <tr className="bg-primary border-b border-primary-foreground/20">
+                    <th className="p-3 font-bold uppercase text-white/90">Member Name</th>
+                    <th className="p-3 font-bold uppercase text-white/90">Role</th>
+                    <th className="p-3 font-bold uppercase text-white/90">Today</th>
+                    <th className="p-3 font-bold uppercase text-white/90">Yesterday</th>
+                    <th className="p-3 font-bold uppercase text-red-400">Delayed</th>
+                    <th className="p-3 font-bold uppercase text-white/90">Completed</th>
+                    <th className="p-3 font-bold uppercase text-white/90">KRA Rate</th>
                     <th className="p-3"></th>
                   </tr>
                 </thead>
@@ -764,7 +903,7 @@ export function WorkspacePage() {
                     .filter(m => m.username.toLowerCase().includes(searchTerm.toLowerCase()))
                     .map(member => {
                       const isExpanded = expandedMember === member.username
-                      const kraColor = member.stats.kra_meet_rate >= 90 ? 'text-emerald-500' : member.stats.kra_meet_rate >= 80 ? 'text-amber-500' : 'text-rose-500'
+                      const kraColor = member.stats.kra_meet_rate >= 90 ? 'text-emerald-500' : member.stats.kra_meet_rate >= 80 ? 'text-amber-500' : 'text-red-500'
                       return (
                         <>
                           <tr
@@ -774,12 +913,12 @@ export function WorkspacePage() {
                           >
                             <td className="p-3 font-bold text-foreground flex items-center gap-2">
                               <span className={`w-2.5 h-2.5 rounded-full ${member.username === 'Unassigned' ? 'bg-amber-500/50' : 'bg-primary/50'}`} />
-                              {member.username}
+                              {getUserDisplayNameByUsername(member.username)}
                             </td>
                             <td className="p-3 text-muted-foreground">{member.username === 'Unassigned' ? '-' : member.role}</td>
                             <td className="p-3 font-semibold">{member.stats.today_assigned}</td>
                             <td className="p-3 font-semibold">{member.stats.yesterday_assigned}</td>
-                            <td className={`p-3 font-bold ${member.stats.delayed_count > 0 ? 'text-rose-500' : ''}`}>
+                            <td className={`p-3 font-bold ${member.stats.delayed_count > 0 ? 'text-red-500' : ''}`}>
                               {member.stats.delayed_count}
                             </td>
                             <td className="p-3 font-semibold">{member.stats.completed_count}</td>
@@ -799,9 +938,8 @@ export function WorkspacePage() {
                                     {member.assignments.map(assign => (
                                       <div
                                         key={assign.id}
-                                        className={`flex items-center justify-between border rounded-lg p-3 text-xs bg-card ${
-                                          assign.delayed ? 'border-rose-500/30' : 'border-border/60'
-                                        }`}
+                                        className={`flex items-center justify-between border rounded-lg p-3 text-xs bg-card ${assign.delayed ? 'border-red-500/30' : 'border-border/60'
+                                          }`}
                                       >
                                         <div className="space-y-1">
                                           <div className="flex items-center gap-2">
@@ -815,20 +953,14 @@ export function WorkspacePage() {
                                           </p>
                                         </div>
                                         <div className="flex items-center gap-4">
-                                          <select
+                                          <WorkspaceAssigneeDropdown
                                             disabled={isAssigning}
                                             value={member.username === 'Unassigned' ? '' : member.username}
-                                            onChange={(e) => handleReassignSingle(assign.project, assign.chapters, assign.stage_name, e.target.value)}
-                                            className="bg-background border border-border text-[11px] font-semibold rounded px-2 py-1 focus:outline-none focus:border-primary"
-                                          >
-                                            <option value="">-- Unassigned --</option>
-                                            {getTLUserOptions().map(opt => (
-                                              <option key={opt.username} value={opt.username}>{opt.username}</option>
-                                            ))}
-                                          </select>
-                                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                                            assign.delayed ? 'bg-rose-500/10 text-rose-500' : 'bg-blue-500/10 text-blue-500'
-                                          }`}>
+                                            onChange={(val) => handleReassignSingle(assign.project, assign.chapters, assign.stage_name, val)}
+                                            options={getTLUserOptions()}
+                                          />
+                                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${assign.delayed ? 'bg-red-500/10 text-red-500' : 'bg-blue-500/10 text-blue-500'
+                                            }`}>
                                             {assign.delayed ? `Overdue (${assign.delay_days}d)` : 'On Schedule'}
                                           </span>
                                         </div>
@@ -854,11 +986,11 @@ export function WorkspacePage() {
 
           {/* Tab 2: Project & Chapters Queue */}
           {tlActiveTab === 'chapters' && (
-            <div className="border border-border/60 rounded-xl overflow-hidden">
-              <table className="w-full border-collapse text-left text-xs">
-                <thead>
-                  <tr className="bg-muted/40 border-b border-border/60">
-                    <th className="p-3 w-10 text-center">
+            <div className="border border-border/60 rounded-xl overflow-x-auto max-h-[60vh]">
+              <table className="w-full min-w-[800px] border-collapse text-left text-xs">
+                <thead className="sticky top-0 z-10 bg-primary shadow-sm text-primary-foreground">
+                  <tr className="bg-primary border-b border-primary-foreground/20">
+                    <th className="p-3 w-10 text-center text-white/90">
                       <input
                         type="checkbox"
                         className="w-4 h-4 rounded border-border focus:ring-primary accent-primary"
@@ -866,17 +998,17 @@ export function WorkspacePage() {
                         onChange={(e) => handleSelectAll(e.target.checked, applyExcelFilters(getTLAssignments()).map(a => ({ project: a.project, chapters: a.chapters, stage_name: a.stage_name })))}
                       />
                     </th>
-                    <th className="p-3 font-bold text-muted-foreground uppercase">{renderColumnFilter('client', 'Client', getTLAssignments())}</th>
-                    <th className="p-3 font-bold text-muted-foreground uppercase">{renderColumnFilter('pm', 'PM', getTLAssignments())}</th>
-                    <th className="p-3 font-bold text-muted-foreground uppercase">{renderColumnFilter('project', 'Project Code', getTLAssignments())}</th>
-                    <th className="p-3 font-bold text-muted-foreground uppercase">Chapter Name</th>
-                    <th className="p-3 font-bold text-muted-foreground uppercase">MSS Pages</th>
-                    <th className="p-3 font-bold text-muted-foreground uppercase">CE Pages</th>
-                    <th className="p-3 font-bold text-muted-foreground uppercase">{renderColumnFilter('stage', 'Stage Name', getTLAssignments())}</th>
-                    <th className="p-3 font-bold text-muted-foreground uppercase">Start Date</th>
-                    <th className="p-3 font-bold text-muted-foreground uppercase">End Date</th>
-                    <th className="p-3 font-bold text-muted-foreground uppercase">{renderColumnFilter('status', 'SLA Status', getTLAssignments())}</th>
-                    <th className="p-3 font-bold text-muted-foreground uppercase">{renderColumnFilter('assignee', 'Current Assignee', getTLAssignments())}</th>
+                    <th className="p-3 font-bold uppercase text-white/90">{renderColumnFilter('client', 'Client', getTLAssignments())}</th>
+                    <th className="p-3 font-bold uppercase text-white/90">{renderColumnFilter('pm', 'PM', getTLAssignments())}</th>
+                    <th className="p-3 font-bold uppercase text-white/90">{renderColumnFilter('project', 'Project Code', getTLAssignments())}</th>
+                    <th className="p-3 font-bold uppercase text-white/90">Chapter Name</th>
+                    <th className="p-3 font-bold uppercase text-white/90">MSS Pages</th>
+                    <th className="p-3 font-bold uppercase text-white/90">CE Pages</th>
+                    <th className="p-3 font-bold uppercase text-white/90">{renderColumnFilter('stage', 'Stage Name', getTLAssignments())}</th>
+                    <th className="p-3 font-bold uppercase text-white/90">Start Date</th>
+                    <th className="p-3 font-bold uppercase text-white/90">End Date</th>
+                    <th className="p-3 font-bold uppercase text-white/90">{renderColumnFilter('status', 'SLA Status', getTLAssignments())}</th>
+                    <th className="p-3 font-bold uppercase text-white/90">{renderColumnFilter('assignee', 'Current Assignee', getTLAssignments())}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -884,7 +1016,7 @@ export function WorkspacePage() {
                     .map(assign => {
                       const isChecked = selectedAssignments.some(s => s.project === assign.project && s.chapters === assign.chapters && s.stage_name === assign.stage_name)
                       return (
-                        <tr key={assign.id} className={`hover:bg-muted/10 border-b border-border/40 transition-all ${assign.delayed ? 'bg-rose-500/5' : ''}`}>
+                        <tr key={assign.id} className={`hover:bg-muted/10 border-b border-border/40 transition-all ${assign.delayed ? 'bg-red-500/5' : ''}`}>
                           <td className="p-3 text-center">
                             <input
                               type="checkbox"
@@ -907,24 +1039,18 @@ export function WorkspacePage() {
                           <td className="p-3 text-muted-foreground">{formatDate(assign.planned_start_date)}</td>
                           <td className="p-3 text-muted-foreground">{formatDate(assign.planned_end_date)}</td>
                           <td className="p-3">
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                              assign.delayed ? 'bg-rose-500/10 text-rose-500 animate-pulse' : 'bg-emerald-500/10 text-emerald-500'
-                            }`}>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${assign.delayed ? 'bg-red-500/10 text-red-500 animate-pulse' : 'bg-emerald-500/10 text-emerald-500'
+                              }`}>
                               {assign.delayed ? `Delayed (${assign.delay_days}d)` : 'On Schedule'}
                             </span>
                           </td>
                           <td className="p-3">
-                            <select
+                            <WorkspaceAssigneeDropdown
                               disabled={isAssigning}
                               value={assign.current_assignee === 'Unassigned' ? '' : assign.current_assignee}
-                              onChange={(e) => handleReassignSingle(assign.project, assign.chapters, assign.stage_name, e.target.value)}
-                              className="bg-background border border-border text-[11px] font-semibold rounded px-2 py-1 focus:outline-none focus:border-primary"
-                            >
-                              <option value="">-- Unassigned --</option>
-                              {getTLUserOptions().map(opt => (
-                                <option key={opt.username} value={opt.username}>{opt.username}</option>
-                              ))}
-                            </select>
+                              onChange={(val) => handleReassignSingle(assign.project, assign.chapters, assign.stage_name, val)}
+                              options={getTLUserOptions()}
+                            />
                           </td>
                         </tr>
                       )
@@ -958,8 +1084,8 @@ export function WorkspacePage() {
                       <p className="font-bold text-foreground text-sm">{stage.active_count}</p>
                     </div>
                     <div>
-                      <p className="text-rose-500 font-semibold">Delayed</p>
-                      <p className={`font-bold text-sm ${stage.delayed_count > 0 ? 'text-rose-500' : 'text-foreground'}`}>
+                      <p className="text-red-500 font-semibold">Delayed</p>
+                      <p className={`font-bold text-sm ${stage.delayed_count > 0 ? 'text-red-500' : 'text-foreground'}`}>
                         {stage.delayed_count}
                       </p>
                     </div>
@@ -988,17 +1114,15 @@ export function WorkspacePage() {
                 <div className="flex bg-muted/40 p-0.5 rounded-lg border border-border/60">
                   <button
                     onClick={() => { setMgrActiveTab('members'); setSelectedAssignments([]) }}
-                    className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${
-                      mgrActiveTab === 'members' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                    }`}
+                    className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${mgrActiveTab === 'members' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                      }`}
                   >
                     Editor Members
                   </button>
                   <button
                     onClick={() => { setMgrActiveTab('chapters'); setSelectedAssignments([]) }}
-                    className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${
-                      mgrActiveTab === 'chapters' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                    }`}
+                    className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${mgrActiveTab === 'chapters' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                      }`}
                   >
                     Project & Chapters Queue
                   </button>
@@ -1036,7 +1160,7 @@ export function WorkspacePage() {
                       setSelectedStatuses([])
                       setSelectedAssignees([])
                     }}
-                    className="flex items-center gap-1.5 px-3 py-2 text-[10px] font-bold text-rose-500 bg-rose-500/10 border border-rose-500/20 rounded-lg hover:bg-rose-500/20 transition-all shrink-0"
+                    className="flex items-center gap-1.5 px-3 py-2 text-[10px] font-bold text-red-500 bg-red-500/10 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-all shrink-0"
                   >
                     <X size={10} />
                     Clear Filters
@@ -1047,17 +1171,17 @@ export function WorkspacePage() {
 
             {/* Sub-View 1: Editor workloads list */}
             {mgrActiveTab === 'members' && (
-              <div className="border border-border/60 rounded-xl overflow-hidden">
-                <table className="w-full border-collapse text-left text-xs">
-                  <thead>
-                    <tr className="bg-muted/40 border-b border-border/60">
-                      <th className="p-3 font-bold text-muted-foreground uppercase">Member Name</th>
-                      <th className="p-3 font-bold text-muted-foreground uppercase">Role</th>
-                      <th className="p-3 font-bold text-muted-foreground uppercase">Today</th>
-                      <th className="p-3 font-bold text-muted-foreground uppercase">Yesterday</th>
-                      <th className="p-3 font-bold text-muted-foreground uppercase text-rose-500">Delayed</th>
-                      <th className="p-3 font-bold text-muted-foreground uppercase">Completed</th>
-                      <th className="p-3 font-bold text-muted-foreground uppercase">KRA Rate</th>
+              <div className="border border-border/60 rounded-xl overflow-x-auto max-h-[60vh]">
+                <table className="w-full min-w-[800px] border-collapse text-left text-xs">
+                  <thead className="sticky top-0 z-10 bg-primary shadow-sm text-primary-foreground">
+                    <tr className="bg-primary border-b border-primary-foreground/20">
+                      <th className="p-3 font-bold uppercase text-white/90">Member Name</th>
+                      <th className="p-3 font-bold uppercase text-white/90">Role</th>
+                      <th className="p-3 font-bold uppercase text-white/90">Today</th>
+                      <th className="p-3 font-bold uppercase text-white/90">Yesterday</th>
+                      <th className="p-3 font-bold uppercase text-red-400">Delayed</th>
+                      <th className="p-3 font-bold uppercase text-white/90">Completed</th>
+                      <th className="p-3 font-bold uppercase text-white/90">KRA Rate</th>
                       <th className="p-3"></th>
                     </tr>
                   </thead>
@@ -1066,7 +1190,7 @@ export function WorkspacePage() {
                       .filter(m => m.username.toLowerCase().includes(searchTerm.toLowerCase()))
                       .map(member => {
                         const isExpanded = expandedMember === member.username
-                        const kraColor = member.stats.kra_meet_rate >= 90 ? 'text-emerald-500' : member.stats.kra_meet_rate >= 80 ? 'text-amber-500' : 'text-rose-500'
+                        const kraColor = member.stats.kra_meet_rate >= 90 ? 'text-emerald-500' : member.stats.kra_meet_rate >= 80 ? 'text-amber-500' : 'text-red-500'
                         return (
                           <>
                             <tr
@@ -1076,12 +1200,12 @@ export function WorkspacePage() {
                             >
                               <td className="p-3 font-bold text-foreground flex items-center gap-2">
                                 <span className={`w-2.5 h-2.5 rounded-full ${member.username === 'Unassigned' ? 'bg-amber-500/50' : 'bg-primary/50'}`} />
-                                {member.username}
+                                {getUserDisplayNameByUsername(member.username)}
                               </td>
                               <td className="p-3 text-muted-foreground">{member.username === 'Unassigned' ? '-' : member.role}</td>
                               <td className="p-3 font-semibold">{member.stats.today_assigned}</td>
                               <td className="p-3 font-semibold">{member.stats.yesterday_assigned}</td>
-                              <td className={`p-3 font-bold ${member.stats.delayed_count > 0 ? 'text-rose-500' : ''}`}>
+                              <td className={`p-3 font-bold ${member.stats.delayed_count > 0 ? 'text-red-500' : ''}`}>
                                 {member.stats.delayed_count}
                               </td>
                               <td className="p-3 font-semibold">{member.stats.completed_count}</td>
@@ -1101,9 +1225,8 @@ export function WorkspacePage() {
                                       {member.assignments.map(assign => (
                                         <div
                                           key={assign.id}
-                                          className={`flex items-center justify-between border rounded-lg p-3 text-xs bg-card ${
-                                            assign.delayed ? 'border-rose-500/30' : 'border-border/60'
-                                          }`}
+                                          className={`flex items-center justify-between border rounded-lg p-3 text-xs bg-card ${assign.delayed ? 'border-red-500/30' : 'border-border/60'
+                                            }`}
                                         >
                                           <div className="space-y-1">
                                             <div className="flex items-center gap-2">
@@ -1117,20 +1240,14 @@ export function WorkspacePage() {
                                             </p>
                                           </div>
                                           <div className="flex items-center gap-4">
-                                            <select
+                                            <WorkspaceAssigneeDropdown
                                               disabled={isAssigning}
                                               value={member.username === 'Unassigned' ? '' : member.username}
-                                              onChange={(e) => handleReassignSingle(assign.project, assign.chapters, assign.stage_name, e.target.value)}
-                                              className="bg-background border border-border text-[11px] font-semibold rounded px-2 py-1 focus:outline-none focus:border-primary"
-                                            >
-                                              <option value="">-- Unassigned --</option>
-                                              {getMgrUserOptions().map(opt => (
-                                                <option key={opt.username} value={opt.username}>{opt.username}</option>
-                                              ))}
-                                            </select>
-                                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                                              assign.delayed ? 'bg-rose-500/10 text-rose-500' : 'bg-blue-500/10 text-blue-500'
-                                            }`}>
+                                              onChange={(val) => handleReassignSingle(assign.project, assign.chapters, assign.stage_name, val)}
+                                              options={getMgrUserOptions()}
+                                            />
+                                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${assign.delayed ? 'bg-red-500/10 text-red-500' : 'bg-blue-500/10 text-blue-500'
+                                              }`}>
                                               {assign.delayed ? `Overdue (${assign.delay_days}d)` : 'On Schedule'}
                                             </span>
                                           </div>
@@ -1156,11 +1273,11 @@ export function WorkspacePage() {
 
             {/* Sub-View 2: Unified Queue for Manager */}
             {mgrActiveTab === 'chapters' && (
-              <div className="border border-border/60 rounded-xl overflow-hidden">
-                <table className="w-full border-collapse text-left text-xs">
-                  <thead>
-                    <tr className="bg-muted/40 border-b border-border/60">
-                      <th className="p-3 w-10 text-center">
+              <div className="border border-border/60 rounded-xl overflow-x-auto max-h-[60vh]">
+                <table className="w-full min-w-[800px] border-collapse text-left text-xs">
+                  <thead className="sticky top-0 z-10 bg-primary shadow-sm text-primary-foreground">
+                    <tr className="bg-primary border-b border-primary-foreground/20">
+                      <th className="p-3 w-10 text-center text-white/90">
                         <input
                           type="checkbox"
                           className="w-4 h-4 rounded border-border focus:ring-primary accent-primary"
@@ -1168,17 +1285,17 @@ export function WorkspacePage() {
                           onChange={(e) => handleSelectAll(e.target.checked, applyExcelFilters(getMgrAssignments()).map(a => ({ project: a.project, chapters: a.chapters, stage_name: a.stage_name })))}
                         />
                       </th>
-                      <th className="p-3 font-bold text-muted-foreground uppercase">{renderColumnFilter('client', 'Client', getMgrAssignments())}</th>
-                      <th className="p-3 font-bold text-muted-foreground uppercase">{renderColumnFilter('pm', 'PM', getMgrAssignments())}</th>
-                      <th className="p-3 font-bold text-muted-foreground uppercase">{renderColumnFilter('project', 'Project Code', getMgrAssignments())}</th>
-                      <th className="p-3 font-bold text-muted-foreground uppercase">Chapter Name</th>
-                      <th className="p-3 font-bold text-muted-foreground uppercase">MSS Pages</th>
-                      <th className="p-3 font-bold text-muted-foreground uppercase">CE Pages</th>
-                      <th className="p-3 font-bold text-muted-foreground uppercase">{renderColumnFilter('stage', 'Stage Name', getMgrAssignments())}</th>
-                      <th className="p-3 font-bold text-muted-foreground uppercase">Start Date</th>
-                      <th className="p-3 font-bold text-muted-foreground uppercase">End Date</th>
-                      <th className="p-3 font-bold text-muted-foreground uppercase">{renderColumnFilter('status', 'SLA Status', getMgrAssignments())}</th>
-                      <th className="p-3 font-bold text-muted-foreground uppercase">{renderColumnFilter('assignee', 'Current Assignee', getMgrAssignments())}</th>
+                      <th className="p-3 font-bold uppercase text-white/90">{renderColumnFilter('client', 'Client', getMgrAssignments())}</th>
+                      <th className="p-3 font-bold uppercase text-white/90">{renderColumnFilter('pm', 'PM', getMgrAssignments())}</th>
+                      <th className="p-3 font-bold uppercase text-white/90">{renderColumnFilter('project', 'Project Code', getMgrAssignments())}</th>
+                      <th className="p-3 font-bold uppercase text-white/90">Chapter Name</th>
+                      <th className="p-3 font-bold uppercase text-white/90">MSS Pages</th>
+                      <th className="p-3 font-bold uppercase text-white/90">CE Pages</th>
+                      <th className="p-3 font-bold uppercase text-white/90">{renderColumnFilter('stage', 'Stage Name', getMgrAssignments())}</th>
+                      <th className="p-3 font-bold uppercase text-white/90">Start Date</th>
+                      <th className="p-3 font-bold uppercase text-white/90">End Date</th>
+                      <th className="p-3 font-bold uppercase text-white/90">{renderColumnFilter('status', 'SLA Status', getMgrAssignments())}</th>
+                      <th className="p-3 font-bold uppercase text-white/90">{renderColumnFilter('assignee', 'Current Assignee', getMgrAssignments())}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1186,7 +1303,7 @@ export function WorkspacePage() {
                       .map(assign => {
                         const isChecked = selectedAssignments.some(s => s.project === assign.project && s.chapters === assign.chapters && s.stage_name === assign.stage_name)
                         return (
-                          <tr key={assign.id} className={`hover:bg-muted/10 border-b border-border/40 transition-all ${assign.delayed ? 'bg-rose-500/5' : ''}`}>
+                          <tr key={assign.id} className={`hover:bg-muted/10 border-b border-border/40 transition-all ${assign.delayed ? 'bg-red-500/5' : ''}`}>
                             <td className="p-3 text-center">
                               <input
                                 type="checkbox"
@@ -1209,24 +1326,18 @@ export function WorkspacePage() {
                             <td className="p-3 text-muted-foreground">{formatDate(assign.planned_start_date)}</td>
                             <td className="p-3 text-muted-foreground">{formatDate(assign.planned_end_date)}</td>
                             <td className="p-3">
-                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                                assign.delayed ? 'bg-rose-500/10 text-rose-500 animate-pulse' : 'bg-emerald-500/10 text-emerald-500'
-                              }`}>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${assign.delayed ? 'bg-red-500/10 text-red-500 animate-pulse' : 'bg-emerald-500/10 text-emerald-500'
+                                }`}>
                                 {assign.delayed ? `Delayed (${assign.delay_days}d)` : 'On Schedule'}
                               </span>
                             </td>
                             <td className="p-3">
-                              <select
+                              <WorkspaceAssigneeDropdown
                                 disabled={isAssigning}
                                 value={assign.current_assignee === 'Unassigned' ? '' : assign.current_assignee}
-                                onChange={(e) => handleReassignSingle(assign.project, assign.chapters, assign.stage_name, e.target.value)}
-                                className="bg-background border border-border text-[11px] font-semibold rounded px-2 py-1 focus:outline-none focus:border-primary"
-                              >
-                                <option value="">-- Unassigned --</option>
-                                {getMgrUserOptions().map(opt => (
-                                  <option key={opt.username} value={opt.username}>{opt.username}</option>
-                                ))}
-                              </select>
+                                onChange={(val) => handleReassignSingle(assign.project, assign.chapters, assign.stage_name, val)}
+                                options={getMgrUserOptions()}
+                              />
                             </td>
                           </tr>
                         )
@@ -1249,18 +1360,14 @@ export function WorkspacePage() {
             <span className="text-white text-xs font-bold">chapters selected for assignment</span>
           </div>
           <div className="flex items-center gap-3">
-            <select
-              disabled={isAssigning}
-              onChange={(e) => handleReassignBulk(e.target.value)}
-              className="bg-card border border-border text-xs font-bold rounded-lg px-3 py-2 text-foreground focus:outline-none focus:border-primary"
-            >
-              <option value="">Assign selected to...</option>
-              <option value="">-- Unassigned --</option>
-              {role === 'teamlead' 
-                ? getTLUserOptions().map(opt => <option key={opt.username} value={opt.username}>{opt.username}</option>)
-                : getMgrUserOptions().map(opt => <option key={opt.username} value={opt.username}>{opt.username}</option>)
-              }
-            </select>
+            <div className="w-56">
+              <WorkspaceAssigneeDropdown
+                disabled={isAssigning}
+                value=""
+                onChange={(val) => handleReassignBulk(val)}
+                options={role === 'teamlead' ? getTLUserOptions() : getMgrUserOptions()}
+              />
+            </div>
           </div>
         </div>
       )}
