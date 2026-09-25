@@ -287,7 +287,7 @@ function AssigneeSelect({ value, users, onChange, disabled, widthCls = 'w-28', c
           const fn = (u.first_name || '').trim()
           const ln = (u.last_name || '').trim()
           const fullName = `${fn} ${ln}`.trim()
-          const label = fullName ? `${fullName} (${u.user_name})` : u.user_name
+          const label = fullName || u.user_name
           return (
             <option key={u.id} value={u.user_name}>{label}</option>
           )
@@ -328,7 +328,7 @@ function ChapterCard({ chapter, users, plannedDueDates, stageRolesMap, onAssigne
   }
 
   return (
-    <div className={`bg-card rounded-xl border border-border shadow-sm flex flex-col overflow-hidden transition-shadow hover:shadow-md ${cardBorderCls(chapter)}`}>
+    <div className={`bg-card rounded-xl border border-border shadow-sm flex flex-col transition-shadow hover:shadow-md ${cardBorderCls(chapter)}`}>
 
       {/* Header */}
       <div className="px-4 pt-3.5 pb-2.5">

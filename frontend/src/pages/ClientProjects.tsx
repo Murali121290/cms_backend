@@ -18,6 +18,7 @@ import { Badge, statusToBadge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Spinner, FullPageSpinner } from '@/components/ui/Spinner'
 import { ProjectInfoModal } from './ProjectInfoModal'
+import { useUsersStore } from '@/stores/usersStore'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -614,7 +615,7 @@ export function ClientProjects() {
                     )}
                     <div className="flex items-center justify-between text-xs text-muted mt-auto pt-1 border-t border-border">
                       {project.project_manager
-                        ? <span className="truncate">PM: {project.project_manager}</span>
+                        ? <span className="truncate">PM: {useUsersStore.getState().getUserDisplayNameByUsername(project.project_manager)}</span>
                         : <span className="italic">No PM</span>}
                       {project.due_date && <span className="flex-shrink-0 flex items-center gap-0.5"><CalendarDays size={10} /> {new Date(project.due_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</span>}
                     </div>
@@ -642,7 +643,7 @@ export function ClientProjects() {
                     </div>
                     {project.status && <Badge variant={statusV} className="flex-shrink-0">{project.status}</Badge>}
                     <div className="flex items-center gap-4 text-xs text-muted flex-shrink-0">
-                      {project.project_manager && <span>PM: {project.project_manager}</span>}
+                      {project.project_manager && <span>PM: {useUsersStore.getState().getUserDisplayNameByUsername(project.project_manager)}</span>}
                       {project.due_date && <span className="flex items-center gap-1"><CalendarDays size={11} /> {new Date(project.due_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span>}
                     </div>
                     <ChevronRight size={14} className="text-muted flex-shrink-0" />
@@ -675,7 +676,7 @@ export function ClientProjects() {
                         <td className="px-4 py-3 font-semibold text-text max-w-xs truncate">{projectLabel(project)}</td>
                         <td className="px-4 py-3"><Badge variant={statusV}>{project.status ?? '—'}</Badge></td>
                         <td className="px-4 py-3 text-xs text-muted whitespace-nowrap">{project.workflow_name ?? '—'}</td>
-                        <td className="px-4 py-3 text-xs text-muted whitespace-nowrap">{project.project_manager ?? '—'}</td>
+                        <td className="px-4 py-3 text-xs text-muted whitespace-nowrap">{project.project_manager ? useUsersStore.getState().getUserDisplayNameByUsername(project.project_manager) : '—'}</td>
                         <td className="px-4 py-3 text-xs text-muted whitespace-nowrap">
                           {project.due_date ? new Date(project.due_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
                         </td>
