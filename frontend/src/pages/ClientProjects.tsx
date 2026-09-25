@@ -1,8 +1,8 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft, Search, FolderOpen, BookOpen,
-  Layers, Zap, CheckCircle2, Clock, Plus, Info, Edit2, CalendarDays, ChevronRight, AlertCircle, Trash2
+  Layers, Zap, CheckCircle2, Clock, Plus, Info, Edit2, CalendarDays, ChevronRight, AlertCircle, Trash2, User as UserIcon
 } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { ViewSwitcher } from '@/components/ui/ViewSwitcher'
@@ -105,6 +105,131 @@ function StageBreakdown({ chapters }: { chapters: Chapter[] }) {
           </span>
         )
       })}
+    </div>
+  )
+}
+
+// ── Premium PM Dropdown ───────────────────────────────────────────────────────
+
+function PremiumPmDropdown({
+  value,
+  onChange,
+  pmUsers,
+  disabled
+}: {
+  value: string
+  onChange: (val: string) => void
+  pmUsers: User[]
+  disabled?: boolean
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const popoverRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        setIsOpen(false)
+      }
+    }
+    if (isOpen) document.addEventListener('mousedown', onClickOutside)
+    if (!isOpen) setSearchQuery('')
+    return () => document.removeEventListener('mousedown', onClickOutside)
+  }, [isOpen])
+
+  const filteredOptions = pmUsers.filter(u => {
+    if (!searchQuery) return true;
+    const name = getUserDisplayName(u.user_name, pmUsers).toLowerCase()
+    return name.includes(searchQuery.toLowerCase())
+  })
+
+  const currentDisplay = value ? getUserDisplayName(value, pmUsers) : '— Unassigned —'
+
+  return (
+    <div className="relative flex items-center" ref={popoverRef}>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          if (!disabled) setIsOpen(prev => !prev)
+        }}
+        disabled={disabled}
+        className={`flex items-center justify-between min-w-[150px] max-w-[180px] text-xs bg-surface border rounded-md pl-2 pr-6 py-0.5 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 transition-colors ${isOpen ? 'border-primary ring-1 ring-primary/40' : 'border-border'} ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:shadow-sm'}`}
+        title={currentDisplay}
+      >
+        <span className="flex items-center flex-1 min-w-0 overflow-hidden">
+          <span className="truncate leading-tight block w-full text-left">{currentDisplay}</span>
+        </span>
+        <span className="pointer-events-none absolute right-1.5 text-muted transition-transform duration-200 flex-shrink-0 text-[9px]" style={{ transform: isOpen ? 'rotate(180deg)' : 'none' }}>▾</span>
+      </button>
+
+      {isOpen && (
+        <div className="absolute top-[calc(100%+8px)] left-0 min-w-[200px] w-max max-w-[260px] bg-card border border-border shadow-[0_12px_40px_-8px_rgba(0,0,0,0.15)] rounded-xl py-1.5 z-[100] max-h-72 flex flex-col backdrop-blur-3xl ring-1 ring-black/5 animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="px-1.5 pb-1 mb-1 border-b border-border/50 shrink-0 space-y-1">
+            <div className="relative px-1 pt-1 pb-1">
+              <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Search managers..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                onClick={e => e.stopPropagation()}
+                className="w-full bg-muted/50 border-none text-[11px] rounded-md pl-6 pr-2 py-1.5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
+              />
+            </div>
+            <button
+              type="button"
+              className="w-full text-left px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground rounded-md transition-all flex items-center gap-2 group"
+              onClick={(e) => {
+                e.stopPropagation()
+                setIsOpen(false)
+                if (value !== '') onChange('')
+              }}
+            >
+              <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 ${value === '' ? 'text-primary' : 'text-transparent'}`}>
+                {value === '' && <CheckCircle2 size={12} strokeWidth={3} />}
+              </div>
+              <span className="group-hover:translate-x-0.5 transition-transform duration-200">— Unassigned —</span>
+            </button>
+          </div>
+          
+          <div className="px-1.5 flex flex-col gap-0.5 overflow-y-auto">
+            {filteredOptions.length === 0 ? (
+              <div className="text-[11px] text-muted-foreground px-2.5 py-3 text-center">No results found</div>
+            ) : (
+              filteredOptions.map(u => {
+                const label = getUserDisplayName(u.user_name, pmUsers)
+                const isSelected = value === u.user_name
+                
+                return (
+                  <button
+                    key={u.id}
+                    type="button"
+                    className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${
+                      isSelected 
+                        ? 'bg-primary/10 text-primary font-medium' 
+                        : 'text-foreground hover:bg-muted/40'
+                    }`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setIsOpen(false)
+                      if (value !== u.user_name) onChange(u.user_name)
+                    }}
+                  >
+                    <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 transition-colors ${
+                      isSelected ? 'text-primary' : 'text-transparent'
+                    }`}>
+                      {isSelected && <CheckCircle2 size={12} strokeWidth={3} />}
+                      {!isSelected && <UserIcon size={12} strokeWidth={2} className="opacity-0 group-hover:opacity-40 text-muted-foreground transition-opacity" />}
+                    </div>
+                    <span className={`truncate transition-transform duration-200 ${!isSelected && 'group-hover:translate-x-0.5'}`}>{label}</span>
+                  </button>
+                )
+              })
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -270,23 +395,14 @@ function ProjectCard({ project, pmUsers, onProjectUpdate, onViewInfo, onEditInfo
                 {getUserDisplayName(project.project_manager, pmUsers)}
               </span>
             ) : (
-              <div className="relative flex items-center">
-                <select
+              <div className="relative flex items-center gap-1">
+                <PremiumPmDropdown
                   value={project.project_manager ?? ''}
-                  onClick={e => e.stopPropagation()}
-                  onChange={e => handlePmChange(e.target.value)}
+                  onChange={handlePmChange}
+                  pmUsers={pmUsers}
                   disabled={pmLoading}
-                  className="text-xs bg-surface border border-border rounded-md pl-2 pr-6 py-0.5 text-text focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-60 appearance-none cursor-pointer"
-                >
-                  <option value="">— Unassigned —</option>
-                  {pmUsers.map(u => (
-                    <option key={u.id} value={u.user_name}>{getUserDisplayName(u.user_name, pmUsers)}</option>
-                  ))}
-                </select>
-                {pmLoading
-                  ? <Spinner size="sm" />
-                  : <span className="pointer-events-none absolute right-1.5 text-muted text-[9px]">▾</span>
-                }
+                />
+                {pmLoading && <Spinner size="sm" />}
               </div>
             )}
           </div>
