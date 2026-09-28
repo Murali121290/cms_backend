@@ -22,7 +22,7 @@ export function Sidebar() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { clearAuth, isLoggingOut, setLoggingOut } = useAuthStore()
-  
+
   const [logoError, setLogoError] = useState(false)
   const [popoverOpen, setPopoverOpen] = useState(false)
   const popoverRef = useRef<HTMLDivElement>(null)
@@ -79,17 +79,19 @@ export function Sidebar() {
       ? [{ to: '/workspace', icon: Briefcase, label: 'My Workspace' }]
       : []),
     ...(!isAccessibilityUser
-      ? [{ to: '/clients', icon: Users, label: 'Clients' }]
+      ? [{ to: '/clients', icon: Users, label: 'Clients' },
+      { to: '/reports', icon: BarChart3, label: 'Reports' }
+      ]
       : []),
+
     ...((canAccess(ROLE_PERMISSIONS.access_post_production) || isAccessibilityUser)
       ? [{ to: '/post-production', icon: Layers, label: 'Backlist' }]
       : []),
-    ...(!isAccessibilityUser
+    ...((canAccess(ROLE_PERMISSIONS.access_post_production) || isAccessibilityUser)
       ? [
-          { to: '/bod/internal', icon: BookOpen, label: 'Book on Demand' },
-          { to: '/bod/report', icon: BarChart3, label: 'BOD Report (Customer)' },
-          { to: '/reports', icon: BarChart3, label: 'Reports' }
-        ]
+        // { to: '/bod/internal', icon: BookOpen, label: 'Book on Demand' },
+        { to: '/bod/report', icon: BookOpen, label: 'BOD Report' },
+      ]
       : []),
     ...(canAccess(ROLE_PERMISSIONS.access_settings) && !isAccessibilityUser
       ? [{ to: '/settings', icon: Settings, label: 'Settings' }]
@@ -174,7 +176,7 @@ export function Sidebar() {
 
       {/* Footer — User profile card & Sign out */}
       <div className="px-2 py-3 border-t border-white/5 space-y-2 relative" ref={popoverRef}>
-        
+
         {/* Popover Menu (when avatar card clicked) */}
         {popoverOpen && (
           <div className={cn(

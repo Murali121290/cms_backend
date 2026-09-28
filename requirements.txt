@@ -35,3 +35,4 @@ cssutils
 pdfminer.six
 Pillow
 python-pptx
+langdetect

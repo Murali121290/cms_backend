@@ -53,18 +53,30 @@ def watch_ftp_for_new_pdfs():
                             
                             page_count = None
                             pdf_type = None
+                            pdf_language = "None"
                             try:
                                 import fitz
                                 doc = fitz.open(local_path)
                                 page_count = doc.page_count
                                 
-                                # Determine PDF type
+                                # Determine PDF type and language
                                 pdf_type = "Image PDF"
+                                text_content = ""
                                 for i in range(min(5, doc.page_count)):
                                     page = doc[i]
-                                    if page.get_text().strip():
+                                    text = page.get_text().strip()
+                                    if text:
                                         pdf_type = "Text PDF"
-                                        break
+                                        text_content += text + " "
+                                
+                                if text_content:
+                                    try:
+                                        from langdetect import detect
+                                        code = detect(text_content)
+                                        from app.core.config import LANGUAGE_MAP
+                                        pdf_language = LANGUAGE_MAP.get(code, code.upper())
+                                    except Exception:
+                                        pass
                                         
                                 doc.close()
                             except Exception as e:
@@ -86,6 +98,7 @@ def watch_ftp_for_new_pdfs():
                                 pdf_filepath=local_path,
                                 pdf_page_count=page_count,
                                 pdf_type=pdf_type,
+                                pdf_language=pdf_language,
                                 current_stage_index=0,
                                 current_stage_name=initial_stage_name,
                                 stage_history=initial_history,

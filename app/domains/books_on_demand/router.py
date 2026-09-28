@@ -45,6 +45,7 @@ def list_jobs(client_id: int = None, status: str = None, db: Session = Depends(g
             "pdf_filepath": job.pdf_filepath,
             "pdf_page_count": job.pdf_page_count,
             "pdf_type": job.pdf_type,
+            "pdf_language": job.pdf_language,
             "epub_filename": job.epub_filename,
             "epub_filepath": job.epub_filepath,
             "current_stage_index": job.current_stage_index,
@@ -74,6 +75,9 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
         "client_id": job.client_id,
         "pdf_filename": job.pdf_filename,
         "pdf_filepath": job.pdf_filepath,
+        "pdf_page_count": job.pdf_page_count,
+        "pdf_type": job.pdf_type,
+        "pdf_language": job.pdf_language,
         "epub_filename": job.epub_filename,
         "epub_filepath": job.epub_filepath,
         "current_stage_index": job.current_stage_index,
@@ -141,6 +145,7 @@ def get_customer_report(
             "client_name": job.client_config.client_name if job.client_config else "Unknown",
             "pdf_filename": job.pdf_filename,
             "pdf_type": job.pdf_type,
+            "pdf_language": job.pdf_language,
             "pdf_page_count": job.pdf_page_count,
             "epub_filename": job.epub_filename,
             "current_stage": job.current_stage_name,
@@ -404,18 +409,30 @@ def create_job(
         
     page_count = None
     pdf_type = None
+    pdf_language = "Unknown"
     try:
         import fitz
         doc = fitz.open(local_path)
         page_count = doc.page_count
         
-        # Determine PDF type
+        # Determine PDF type and language
         pdf_type = "Image PDF"
+        text_content = ""
         for i in range(min(5, doc.page_count)):
             page = doc[i]
-            if page.get_text().strip():
+            text = page.get_text().strip()
+            if text:
                 pdf_type = "Text PDF"
-                break
+                text_content += text + " "
+        
+        if text_content:
+            try:
+                from langdetect import detect
+                code = detect(text_content)
+                from app.core.config import LANGUAGE_MAP
+                pdf_language = LANGUAGE_MAP.get(code, code.upper())
+            except Exception:
+                pass
         
         doc.close()
     except Exception as e:
@@ -441,6 +458,7 @@ def create_job(
         pdf_filepath=local_path,
         pdf_page_count=page_count,
         pdf_type=pdf_type,
+        pdf_language=pdf_language,
         current_stage_index=0,
         current_stage_name=first_stage,
         stage_history=initial_history,

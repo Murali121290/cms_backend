@@ -51,6 +51,7 @@ def upgrade() -> None:
         sa.Column('pdf_filepath', sa.String(length=1024), nullable=True),
         sa.Column('pdf_page_count', sa.Integer(), nullable=True),
         sa.Column('pdf_type', sa.String(length=50), nullable=True),
+        sa.Column('pdf_language', sa.String(length=50), nullable=True),
         sa.Column('epub_filename', sa.String(length=255), nullable=True),
         sa.Column('epub_filepath', sa.String(length=1024), nullable=True),
         sa.Column('current_stage_index', sa.Integer(), nullable=False),
@@ -73,6 +74,8 @@ def upgrade() -> None:
             op.add_column('bod_jobs', sa.Column('pdf_page_count', sa.Integer(), nullable=True))
         if 'pdf_type' not in columns:
             op.add_column('bod_jobs', sa.Column('pdf_type', sa.String(length=50), nullable=True))
+        if 'pdf_language' not in columns:
+            op.add_column('bod_jobs', sa.Column('pdf_language', sa.String(length=50), nullable=True))
 
 
 def downgrade() -> None:

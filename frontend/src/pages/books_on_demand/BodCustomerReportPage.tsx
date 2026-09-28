@@ -186,6 +186,7 @@ export function BodCustomerReportPage() {
       'Client',
       'Source PDF',
       'PDF Type',
+      'PDF Language',
       'PDF Page Count',
       'Target EPUB',
       'Job Created Date',
@@ -213,6 +214,7 @@ export function BodCustomerReportPage() {
         job.client_name || '',
         job.pdf_filename || '',
         job.pdf_type || '-',
+        job.pdf_language || '-',
         job.pdf_page_count || '-',
         job.epub_filename || '',
         formatDateTime(job.created_at),
@@ -522,6 +524,7 @@ export function BodCustomerReportPage() {
                   <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Job</th>
                   <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Pages</th>
                   <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Type</th>
+                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Language</th>
                   <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Created At</th>
                   <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Due Date</th>
                   <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Production</th>
@@ -588,6 +591,9 @@ export function BodCustomerReportPage() {
                         </td>
                         <td className="px-2 py-3 text-[10px] font-medium text-muted">
                           {job.pdf_type || '-'}
+                        </td>
+                        <td className="px-2 py-3 text-[10px] font-medium text-muted">
+                          {job.pdf_language || '-'}
                         </td>
                         <td className="px-2 py-3 text-[10px] text-muted whitespace-nowrap">
                           <div className="flex items-center gap-1.5">

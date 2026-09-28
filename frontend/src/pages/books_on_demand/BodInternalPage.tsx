@@ -250,7 +250,7 @@ export function BodInternalPage() {
   }
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto p-6 text-text">
+    <div className="space-y-6 w-full mx-auto p-6 text-text">
       {/* Header */}
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-4">
@@ -445,6 +445,7 @@ export function BodInternalPage() {
                   <th className="px-4 py-3">Job Name</th>
                   <th className="px-4 py-3">Pages</th>
                   <th className="px-4 py-3">Type</th>
+                  <th className="px-4 py-3">Language</th>
                   <th className="px-4 py-3">Assignee</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3 min-w-[150px]">Progress</th>
@@ -488,6 +489,9 @@ export function BodInternalPage() {
                       </td>
                       <td className="px-4 py-3 text-xs text-muted font-medium">
                         {job.pdf_type ? job.pdf_type : '-'}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted font-medium">
+                        {job.pdf_language ? job.pdf_language : '-'}
                       </td>
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1.5 text-muted">
@@ -578,10 +582,13 @@ export function BodInternalPage() {
                           {job.epub_filename}
                         </p>
                       )}
-                      <p className="text-[11px] text-muted mt-0.5 flex items-center">
+                      <p className="text-[11px] text-muted mt-0.5 flex items-center flex-wrap gap-2">
                         {job.pdf_page_count ? `${job.pdf_page_count} Pages` : 'No Pages Info'}
                         {job.pdf_type && (
-                          <span className="ml-2">({job.pdf_type})</span>
+                          <span>({job.pdf_type})</span>
+                        )}
+                        {job.pdf_language && (
+                          <span className="bg-primary/10 text-primary px-1.5 py-0.5 rounded text-[10px] font-bold">{job.pdf_language}</span>
                         )}
                       </p>
                     </div>
