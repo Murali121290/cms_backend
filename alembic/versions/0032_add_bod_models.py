@@ -1,7 +1,7 @@
 """Add BOD models
 
-Revision ID: 0030_add_bod_models
-Revises: 0029_add_first_name_last_name
+Revision ID: 0032_add_bod_models
+Revises: 0031_add_reason_to_evhistory
 Create Date: 2026-09-03 12:00:00.000000
 
 """
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '0030_add_bod_models'
-down_revision: Union[str, Sequence[str], None] = '0029_add_first_name_last_name'
+revision: str = '0032_add_bod_models'
+down_revision: Union[str, Sequence[str], None] = '0031_add_reason_to_evhistory'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
