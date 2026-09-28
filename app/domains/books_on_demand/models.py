@@ -29,6 +29,8 @@ class BodJob(Base):
     project_name = Column(String(255), nullable=True)
     pdf_filename = Column(String(255), nullable=False)
     pdf_filepath = Column(String(1024), nullable=True)
+    pdf_page_count = Column(Integer, nullable=True)
+    pdf_type = Column(String(50), nullable=True)
     epub_filename = Column(String(255), nullable=True)
     epub_filepath = Column(String(1024), nullable=True)
     current_stage_index = Column(Integer, default=0, nullable=False)

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Plus, RefreshCw, ChevronRight, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen, ArrowRight, Trash2, LayoutGrid, List } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useRBAC } from '@/hooks/useRBAC'
+import { useSessionStore } from '@/stores/sessionStore'
 import { usersApi } from '@/api/users'
 import { Button } from '@/components/ui/Button'
 import { Dropdown } from '@/components/ui/Dropdown'
@@ -13,11 +14,12 @@ export function BodInternalPage() {
   useDocumentTitle('Book on Demand — S4Carlisle CMS')
   const navigate = useNavigate()
   const { isAdmin } = useRBAC()
+  const viewer = useSessionStore(s => s.viewer)
 
   const [jobs, setJobs] = useState<any[]>([])
   const [clients, setClients] = useState<any[]>([])
   const [users, setUsers] = useState<any[]>([])
-  
+
   // Form states
   const [showAddJobModal, setShowAddJobModal] = useState(false)
   const [selectedClientId, setSelectedClientId] = useState('')
@@ -31,7 +33,7 @@ export function BodInternalPage() {
   const [assigneeFilter, setAssigneeFilter] = useState('all')
   const [stageFilter, setStageFilter] = useState('all')
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list')
-  
+
   // Delete Modal states
   const [showDeleteModal, setShowDeleteModal] = useState<number | null>(null)
 
@@ -71,6 +73,22 @@ export function BodInternalPage() {
     }, 5000)
     return () => clearInterval(timer)
   }, [])
+  const handleJobClick = (job: any) => {
+    const assigned = (job.current_assignee || '').trim().toLowerCase()
+    const myUsername = (viewer?.username || '').trim().toLowerCase()
+
+    if (!assigned) {
+      toast.error('This job is not assigned to anyone. Assign it to open it.')
+      return
+    }
+
+    if (assigned && myUsername && assigned !== myUsername) {
+      toast.error(`This job is assigned to ${getUserDisplayName(job.current_assignee)}. You cannot open it.`)
+      return
+    }
+
+    navigate(`/bod/internal/${job.id}`)
+  }
 
   const handleAddJob = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -87,7 +105,7 @@ export function BodInternalPage() {
         headers: { 'Content-Type': 'multipart/form-data' }
       })
       toast.success("Job created successfully")
-      
+
       setSelectedClientId('')
       setPdfFile(null)
       setShowAddJobModal(false)
@@ -126,23 +144,23 @@ export function BodInternalPage() {
   const totalJobs = jobs.length
   const completedJobs = jobs.filter(j => j.status === 'Completed').length
   const activeJobs = jobs.filter(j => j.status === 'Active')
-  
+
   const unassignedJobs = activeJobs.filter(j => !j.current_assignee).length
   const addJobStageJobs = activeJobs.filter(j => j.current_stage_name === 'Add job').length
   const qcStageJobs = activeJobs.filter(j => j.current_stage_name === 'QC').length
-  
+
   // Progress calculations: assume 4 stages (0,1,2,3). If completed, 100%
   let totalProgressStages = jobs.length * 3
   let completedProgressStages = jobs.reduce((acc, job) => {
-      if (job.status === 'Completed') return acc + 3
-      return acc + Math.min(job.current_stage_index, 3)
+    if (job.status === 'Completed') return acc + 3
+    return acc + Math.min(job.current_stage_index, 3)
   }, 0)
-  
+
   const completionPercentage = totalProgressStages > 0 ? Math.round((completedProgressStages / totalProgressStages) * 100) : 0
 
   // Filter options
   const statusOptions = Array.from(new Set(jobs.map(j => j.status))).sort()
-  
+
   const getUserDisplayName = (username: string | null | undefined) => {
     if (!username) return ''
     if (!users || users.length === 0) return username
@@ -155,16 +173,16 @@ export function BodInternalPage() {
 
   const getStatusBadgeClass = (job: any) => {
     if (job.status === 'Completed') return 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
-    
+
     const now = new Date()
     now.setHours(0, 0, 0, 0)
     const tomorrow = new Date(now)
     tomorrow.setDate(tomorrow.getDate() + 1)
-  
+
     if (job.due_date && job.status !== 'Completed') {
       const dueDate = new Date(job.due_date.endsWith('Z') ? job.due_date : job.due_date + 'Z')
       dueDate.setHours(0, 0, 0, 0)
-      
+
       if (dueDate < now) {
         return 'bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400'
       }
@@ -172,7 +190,7 @@ export function BodInternalPage() {
         return 'bg-orange-500/10 border-orange-500/20 text-orange-600 dark:text-orange-400'
       }
     }
-    
+
     if (job.created_at && job.status !== 'Completed') {
       const createdDate = new Date(job.created_at.endsWith('Z') ? job.created_at : job.created_at + 'Z')
       createdDate.setHours(0, 0, 0, 0)
@@ -180,16 +198,16 @@ export function BodInternalPage() {
         return 'bg-blue-500/10 border-blue-500/20 text-blue-600 dark:text-blue-400'
       }
     }
-  
+
     return 'bg-primary/10 border-primary/20 text-primary'
   }
 
 
   const allAssignees = new Set<string>()
   jobs.forEach(j => {
-      if (j.current_assignee) {
-          allAssignees.add(j.current_assignee)
-      }
+    if (j.current_assignee) {
+      allAssignees.add(j.current_assignee)
+    }
   })
   const assigneeOptions = Array.from(allAssignees).sort()
 
@@ -198,27 +216,27 @@ export function BodInternalPage() {
     const matchesSearch = !query
       || j.pdf_filename.toLowerCase().includes(query)
       || (j.client_name && j.client_name.toLowerCase().includes(query))
-      
+
     const matchesStatus = statusFilter === 'all' || j.status === statusFilter
-    
+
     const currentAssignee = j.current_assignee || null
     const matchesAssignee = assigneeFilter === 'all'
       || (assigneeFilter === 'unassigned' ? !currentAssignee : currentAssignee === assigneeFilter)
-      
+
     const matchesStage = stageFilter === 'all' || j.current_stage_name === stageFilter
-      
+
     return matchesSearch && matchesStatus && matchesAssignee && matchesStage
   }).sort((a, b) => {
     const aIsCompleted = a.status === 'Completed'
     const bIsCompleted = b.status === 'Completed'
     if (aIsCompleted && !bIsCompleted) return 1
     if (!aIsCompleted && bIsCompleted) return -1
-    
+
     // Both active
     if (!aIsCompleted && !bIsCompleted) {
       return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
     }
-    
+
     // Both completed
     return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   })
@@ -236,8 +254,8 @@ export function BodInternalPage() {
       {/* Header */}
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-4">
-          <button 
-            onClick={() => navigate('/bod/report')} 
+          <button
+            onClick={() => navigate('/bod/report')}
             className="p-1.5 text-muted hover:text-text hover:bg-white/5 rounded-md transition-colors"
           >
             <ArrowLeft size={18} />
@@ -263,7 +281,7 @@ export function BodInternalPage() {
 
       {/* Metrics Row */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
-        <div 
+        <div
           onClick={clearFilters}
           className={`bg-card border rounded-xl p-4 flex items-center gap-3 cursor-pointer transition-colors ${!hasActiveFilters ? 'border-primary/50 ring-1 ring-primary/20' : 'border-border/70 hover:border-primary/30'}`}
         >
@@ -276,7 +294,7 @@ export function BodInternalPage() {
           </div>
         </div>
 
-        <div 
+        <div
           onClick={() => { clearFilters(); setAssigneeFilter('unassigned') }}
           className={`bg-card border rounded-xl p-4 flex items-center gap-3 cursor-pointer transition-colors ${assigneeFilter === 'unassigned' ? 'border-rose-500/50 ring-1 ring-rose-500/20' : 'border-border/70 hover:border-rose-500/30'}`}
         >
@@ -289,7 +307,7 @@ export function BodInternalPage() {
           </div>
         </div>
 
-        <div 
+        <div
           onClick={() => { clearFilters(); setStageFilter('Add job') }}
           className={`bg-card border rounded-xl p-4 flex items-center gap-3 cursor-pointer transition-colors ${stageFilter === 'Add job' ? 'border-amber-500/50 ring-1 ring-amber-500/20' : 'border-border/70 hover:border-amber-500/30'}`}
         >
@@ -301,8 +319,8 @@ export function BodInternalPage() {
             <span className="text-lg font-bold text-text">{addJobStageJobs}</span>
           </div>
         </div>
-        
-        <div 
+
+        <div
           onClick={() => { clearFilters(); setStageFilter('QC') }}
           className={`bg-card border rounded-xl p-4 flex items-center gap-3 cursor-pointer transition-colors ${stageFilter === 'QC' ? 'border-blue-500/50 ring-1 ring-blue-500/20' : 'border-border/70 hover:border-blue-500/30'}`}
         >
@@ -315,7 +333,7 @@ export function BodInternalPage() {
           </div>
         </div>
 
-        <div 
+        <div
           onClick={() => { clearFilters(); setStatusFilter('Completed') }}
           className={`bg-card border rounded-xl p-4 flex items-center gap-3 cursor-pointer transition-colors ${statusFilter === 'Completed' ? 'border-emerald-500/50 ring-1 ring-emerald-500/20' : 'border-border/70 hover:border-emerald-500/30'}`}
         >
@@ -377,7 +395,7 @@ export function BodInternalPage() {
               </button>
             )}
           </div>
-          
+
           <div className="flex items-center ml-auto bg-card border border-border rounded-lg p-0.5 shrink-0">
             <button
               onClick={() => setViewMode('grid')}
@@ -425,7 +443,8 @@ export function BodInternalPage() {
               <thead className="bg-accent/50 border-b border-border text-xs font-bold text-muted uppercase tracking-wider">
                 <tr>
                   <th className="px-4 py-3">Job Name</th>
-                  <th className="px-4 py-3">Client</th>
+                  <th className="px-4 py-3">Pages</th>
+                  <th className="px-4 py-3">Type</th>
                   <th className="px-4 py-3">Assignee</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3 min-w-[150px]">Progress</th>
@@ -438,7 +457,7 @@ export function BodInternalPage() {
                 {filteredJobs.map((job) => {
                   const percent = job.status === 'Completed' ? 100 : Math.round((job.current_stage_index / 3) * 100)
                   const currentAssignee = job.current_assignee || null
-                  
+
                   const assigneeOptions = [
                     { value: '', label: 'Unassigned' },
                     ...users.filter(u => u.active_status).map(u => ({
@@ -449,11 +468,11 @@ export function BodInternalPage() {
                   if (currentAssignee && !assigneeOptions.some(o => o.value === currentAssignee)) {
                     assigneeOptions.push({ value: currentAssignee, label: getUserDisplayName(currentAssignee) })
                   }
-                  
+
                   return (
-                    <tr 
-                      key={job.id} 
-                      onClick={() => navigate(`/bod/internal/${job.id}`)}
+                    <tr
+                      key={job.id}
+                      onClick={() => handleJobClick(job)}
                       className="hover:bg-accent/30 cursor-pointer transition-colors"
                     >
                       <td className="px-4 py-3 min-w-[200px] max-w-[300px]">
@@ -464,8 +483,11 @@ export function BodInternalPage() {
                           </p>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-xs text-muted">
-                        {job.client_name}
+                      <td className="px-4 py-3 text-xs text-muted font-mono">
+                        {job.pdf_page_count || '-'}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted font-medium">
+                        {job.pdf_type ? job.pdf_type : '-'}
                       </td>
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1.5 text-muted">
@@ -506,8 +528,8 @@ export function BodInternalPage() {
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-2">
                           {isAdmin && (
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); setShowDeleteModal(job.id); }} 
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setShowDeleteModal(job.id); }}
                               className="p-1.5 text-muted hover:text-red-500 hover:bg-red-50 rounded-md transition-colors"
                               title="Delete Job"
                             >
@@ -542,9 +564,9 @@ export function BodInternalPage() {
             }
 
             return (
-              <div 
+              <div
                 key={job.id}
-                onClick={() => navigate(`/bod/internal/${job.id}`)}
+                onClick={() => handleJobClick(job)}
                 className="p-4 rounded-xl border bg-card border-border shadow-sm flex flex-col justify-between cursor-pointer hover:border-primary/50 transition-colors"
               >
                 <div>
@@ -556,12 +578,17 @@ export function BodInternalPage() {
                           {job.epub_filename}
                         </p>
                       )}
-                      <p className="text-[11px] text-muted mt-0.5">{job.client_name}</p>
+                      <p className="text-[11px] text-muted mt-0.5 flex items-center">
+                        {job.pdf_page_count ? `${job.pdf_page_count} Pages` : 'No Pages Info'}
+                        {job.pdf_type && (
+                          <span className="ml-2">({job.pdf_type})</span>
+                        )}
+                      </p>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       {isAdmin && (
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); setShowDeleteModal(job.id); }} 
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setShowDeleteModal(job.id); }}
                           className="p-1.5 text-muted hover:text-red-500 hover:bg-red-50 rounded transition-colors"
                           title="Delete Job"
                         >
@@ -627,7 +654,7 @@ export function BodInternalPage() {
                 <h3 className="text-base font-bold text-text m-0">Add New Job</h3>
                 <p className="text-[10px] text-muted mt-0.5">Upload a PDF for Book on Demand</p>
               </div>
-              <button 
+              <button
                 onClick={() => {
                   setShowAddJobModal(false)
                   setErrorMsg(null)
@@ -659,11 +686,11 @@ export function BodInternalPage() {
               <div>
                 <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Upload PDF Document</label>
                 <div className="border border-dashed border-border hover:border-primary/60 rounded-lg p-5 text-center cursor-pointer transition-colors bg-background/50">
-                  <input 
-                    type="file" 
-                    accept=".pdf" 
+                  <input
+                    type="file"
+                    accept=".pdf"
                     onChange={e => e.target.files && setPdfFile(e.target.files[0])}
-                    className="hidden" 
+                    className="hidden"
                     id="pdf-upload"
                     required
                   />
@@ -676,8 +703,8 @@ export function BodInternalPage() {
                 {pdfFile && (
                   <div className="mt-2 bg-background border border-border rounded-lg p-2 text-xs text-muted flex items-center justify-between">
                     <span className="truncate max-w-[280px] font-medium text-text">{pdfFile.name}</span>
-                    <button 
-                      type="button" 
+                    <button
+                      type="button"
                       onClick={() => setPdfFile(null)}
                       className="text-red-600 hover:text-red-500 font-bold text-[10px]"
                     >
@@ -722,14 +749,14 @@ export function BodInternalPage() {
                   Confirm Deletion
                 </h3>
               </div>
-              <button 
+              <button
                 onClick={() => setShowDeleteModal(null)}
                 className="text-muted hover:text-text transition-colors p-1"
               >
                 <XCircle size={18} />
               </button>
             </div>
-            
+
             <p className="text-sm text-muted">
               Are you sure you want to delete this job and its files? This action cannot be undone.
             </p>

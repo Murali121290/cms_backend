@@ -17,7 +17,7 @@ export function BodCustomerReportPage() {
   const [dateRange, setDateRange] = useState('today') // all, today, week, month, custom
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
-  
+
   const [prodStatusFilter, setProdStatusFilter] = useState('all')
   const [qcStatusFilter, setQcStatusFilter] = useState('all')
   const [finalStatusFilter, setFinalStatusFilter] = useState('all')
@@ -45,12 +45,12 @@ export function BodCustomerReportPage() {
       } else if (dateRange === 'custom') {
         if (fromDate) {
           const start = new Date(fromDate)
-          start.setHours(0,0,0,0)
+          start.setHours(0, 0, 0, 0)
           params.append('start_date', start.toISOString())
         }
         if (toDate) {
           const end = new Date(toDate)
-          end.setHours(23,59,59,999)
+          end.setHours(23, 59, 59, 999)
           params.append('end_date', end.toISOString())
         }
       }
@@ -99,8 +99,8 @@ export function BodCustomerReportPage() {
 
   const filteredReport = report.filter(job => {
     const textMatch = job.pdf_filename.toLowerCase().includes(search.toLowerCase()) ||
-                      (job.client_name && job.client_name.toLowerCase().includes(search.toLowerCase()))
-    
+      (job.client_name && job.client_name.toLowerCase().includes(search.toLowerCase()))
+
     const { finalStatus, prodStatus, qcStatus } = getJobStatuses(job)
 
     const prodMatch = prodStatusFilter === 'all' || prodStatus === prodStatusFilter
@@ -124,7 +124,7 @@ export function BodCustomerReportPage() {
     if (prodStatus === 'Completed') prodCompleted++
     else if (prodStatus === 'In-progress') prodInProgress++
     else if (prodStatus === 'YTS') prodPending++
-    
+
     if (qcStatus === 'Completed') qcCompleted++
     else if (qcStatus === 'In-progress') qcInProgress++
   })
@@ -146,7 +146,7 @@ export function BodCustomerReportPage() {
     const createdDate = getDateKey(job.created_at)
     const dueDate = getDateKey(job.due_date)
     const completedDate = job.status === 'Completed' ? getDateKey(job.updated_at) : null
-    
+
     if (createdDate) {
       if (!chartDataMap.has(createdDate)) chartDataMap.set(createdDate, { date: createdDate, inflow: 0, due: 0, completed: 0, delay: 0 })
       chartDataMap.get(createdDate)!.inflow += 1
@@ -155,12 +155,12 @@ export function BodCustomerReportPage() {
     if (dueDate) {
       if (!chartDataMap.has(dueDate)) chartDataMap.set(dueDate, { date: dueDate, inflow: 0, due: 0, completed: 0, delay: 0 })
       chartDataMap.get(dueDate)!.due += 1
-      
+
       let delayed = false
       if (job.status !== 'Completed') {
-         if (new Date(job.due_date) < new Date()) delayed = true
+        if (new Date(job.due_date) < new Date()) delayed = true
       } else {
-         if (job.updated_at && new Date(job.updated_at) > new Date(job.due_date)) delayed = true
+        if (job.updated_at && new Date(job.updated_at) > new Date(job.due_date)) delayed = true
       }
       if (delayed) {
         chartDataMap.get(dueDate)!.delay += 1
@@ -193,7 +193,7 @@ export function BodCustomerReportPage() {
 
     filteredReport.forEach(job => {
       const { finalStatus, prodStatus, qcStatus, prodData, qcData } = getJobStatuses(job)
-      
+
       const prodStart = prodData.start_time ? formatDateTime(prodData.start_time) : '-'
       const prodEnd = prodData.end_time ? formatDateTime(prodData.end_time) : '-'
 
@@ -218,7 +218,7 @@ export function BodCustomerReportPage() {
     const wb = XLSX.utils.book_new()
     const ws = XLSX.utils.aoa_to_sheet(data)
     XLSX.utils.book_append_sheet(wb, ws, "Report")
-    
+
     const now = new Date()
     const todayStr = now.toISOString().split('T')[0]
     let filename = `report_all_time.xlsx`
@@ -238,7 +238,7 @@ export function BodCustomerReportPage() {
       const end = toDate || todayStr
       filename = `report_${start}_to_${end}.xlsx`
     }
-    
+
     XLSX.writeFile(wb, filename)
   }
 
@@ -276,7 +276,7 @@ export function BodCustomerReportPage() {
               <p className="text-muted text-sm mt-1">Real-time status and historical timeline of all books.</p>
             </div>
           </div>
-          
+
           <div className="flex items-center gap-3">
             <button
               onClick={() => navigate('/bod/internal')}
@@ -293,19 +293,19 @@ export function BodCustomerReportPage() {
         {/* Metrics Row */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
           <div className="bg-card border border-border/70 rounded-xl p-4 flex flex-col justify-center gap-1 shadow-sm">
-            <span className="text-[11px] text-muted font-bold uppercase tracking-wider flex items-center gap-1.5"><Layers size={14} className="text-primary"/> Total Books</span>
+            <span className="text-[11px] text-muted font-bold uppercase tracking-wider flex items-center gap-1.5"><Layers size={14} className="text-primary" /> Total Books</span>
             <span className="text-2xl font-bold text-text">{totalJobs}</span>
           </div>
 
           <div className="bg-card border border-border/70 rounded-xl p-4 flex flex-col justify-center gap-2 shadow-sm">
-            <span className="text-[11px] text-muted font-bold uppercase tracking-wider flex items-center gap-1.5"><Clock size={14} className="text-muted-foreground"/> Yet to start</span>
+            <span className="text-[11px] text-muted font-bold uppercase tracking-wider flex items-center gap-1.5"><Clock size={14} className="text-muted-foreground" /> Yet to start</span>
             <div className="flex flex-col">
               <span className="text-2xl font-bold text-text leading-tight">{prodPending}</span>
             </div>
           </div>
 
           <div className="bg-card border border-border/70 rounded-xl p-4 flex flex-col justify-center gap-2 shadow-sm">
-            <span className="text-[11px] text-muted font-bold uppercase tracking-wider flex items-center gap-1.5"><Clock size={14} className="text-amber-500"/> Production</span>
+            <span className="text-[11px] text-muted font-bold uppercase tracking-wider flex items-center gap-1.5"><Clock size={14} className="text-amber-500" /> Production</span>
             <div className="flex gap-4">
               <div className="flex flex-col">
                 <span className="text-lg font-bold text-emerald-500 leading-tight">{prodCompleted}</span>
@@ -319,7 +319,7 @@ export function BodCustomerReportPage() {
           </div>
 
           <div className="bg-card border border-border/70 rounded-xl p-4 flex flex-col justify-center gap-2 shadow-sm">
-            <span className="text-[11px] text-muted font-bold uppercase tracking-wider flex items-center gap-1.5"><CheckCircle2 size={14} className="text-blue-500"/> Quality Control</span>
+            <span className="text-[11px] text-muted font-bold uppercase tracking-wider flex items-center gap-1.5"><CheckCircle2 size={14} className="text-blue-500" /> Quality Control</span>
             <div className="flex gap-4">
               <div className="flex flex-col">
                 <span className="text-lg font-bold text-emerald-500 leading-tight">{qcCompleted}</span>
@@ -333,7 +333,7 @@ export function BodCustomerReportPage() {
           </div>
 
           <div className="bg-card border border-border/70 rounded-xl p-4 flex flex-col justify-center gap-2 shadow-sm">
-            <span className="text-[11px] text-muted font-bold uppercase tracking-wider flex items-center gap-1.5"><RefreshCw size={14} className="text-primary"/> Overall Final</span>
+            <span className="text-[11px] text-muted font-bold uppercase tracking-wider flex items-center gap-1.5"><RefreshCw size={14} className="text-primary" /> Overall Final</span>
             <div className="flex items-end justify-between">
               <div className="flex flex-col">
                 <span className="text-lg font-bold text-emerald-500 leading-tight">{overallCompleted}</span>
@@ -360,19 +360,19 @@ export function BodCustomerReportPage() {
                   <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                     <defs>
                       <linearGradient id="colorInflow" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
-                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
                       </linearGradient>
                       <linearGradient id="colorCompleted" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
-                        <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="text-border/40" />
                     <XAxis dataKey="date" stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} dy={10} />
                     <YAxis stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} allowDecimals={false} />
-                    <Tooltip 
-                      contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', color: 'hsl(var(--text))', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }} 
+                    <Tooltip
+                      contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', color: 'hsl(var(--text))', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
                       itemStyle={{ fontWeight: 600 }}
                     />
                     <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }} iconType="circle" />
@@ -395,9 +395,9 @@ export function BodCustomerReportPage() {
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="text-border/40" />
                     <XAxis dataKey="date" stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} dy={10} />
                     <YAxis stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} allowDecimals={false} />
-                    <Tooltip 
+                    <Tooltip
                       cursor={{ fill: 'hsl(var(--accent))', opacity: 0.4 }}
-                      contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', color: 'hsl(var(--text))', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }} 
+                      contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', color: 'hsl(var(--text))', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
                       itemStyle={{ fontWeight: 600 }}
                     />
                     <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }} iconType="circle" />
@@ -479,7 +479,7 @@ export function BodCustomerReportPage() {
                 <option value="custom">Custom Date</option>
               </select>
             </div>
-            
+
             {dateRange === 'custom' && (
               <div className="flex items-center gap-2 animate-in fade-in slide-in-from-right-2 duration-300">
                 <input
@@ -506,7 +506,7 @@ export function BodCustomerReportPage() {
             <table className="w-full text-left border-collapse whitespace-nowrap">
               <thead className="sticky top-0 z-10 shadow-sm bg-card">
                 <tr className="bg-muted/30 border-b border-border/50 backdrop-blur-md">
-                  <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider">Job / Client</th>
+                  <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider">Job</th>
                   <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider">Created At</th>
                   <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider">Production</th>
                   <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider">Production Timing</th>

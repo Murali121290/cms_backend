@@ -51,6 +51,25 @@ def watch_ftp_for_new_pdfs():
                             local_path = os.path.join(project_dir, pdf_name)
                             ftp.download_file(pdf_name, local_path)
                             
+                            page_count = None
+                            pdf_type = None
+                            try:
+                                import fitz
+                                doc = fitz.open(local_path)
+                                page_count = doc.page_count
+                                
+                                # Determine PDF type
+                                pdf_type = "Image PDF"
+                                for i in range(min(5, doc.page_count)):
+                                    page = doc[i]
+                                    if page.get_text().strip():
+                                        pdf_type = "Text PDF"
+                                        break
+                                        
+                                doc.close()
+                            except Exception as e:
+                                logger.error(f"Failed to extract page count and type for {pdf_name}: {e}")
+                            
                             # Create Job
                             initial_stage_name = config.custom_stages[0] if config.custom_stages else "Add job"
                             now_iso = datetime.now(timezone.utc).isoformat()
@@ -65,6 +84,8 @@ def watch_ftp_for_new_pdfs():
                                 project_name=project_name,
                                 pdf_filename=pdf_name,
                                 pdf_filepath=local_path,
+                                pdf_page_count=page_count,
+                                pdf_type=pdf_type,
                                 current_stage_index=0,
                                 current_stage_name=initial_stage_name,
                                 stage_history=initial_history,

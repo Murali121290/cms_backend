@@ -43,6 +43,8 @@ def list_jobs(client_id: int = None, status: str = None, db: Session = Depends(g
             "client_id": job.client_id,
             "pdf_filename": job.pdf_filename,
             "pdf_filepath": job.pdf_filepath,
+            "pdf_page_count": job.pdf_page_count,
+            "pdf_type": job.pdf_type,
             "epub_filename": job.epub_filename,
             "epub_filepath": job.epub_filepath,
             "current_stage_index": job.current_stage_index,
@@ -398,6 +400,25 @@ def create_job(
     with open(local_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
         
+    page_count = None
+    pdf_type = None
+    try:
+        import fitz
+        doc = fitz.open(local_path)
+        page_count = doc.page_count
+        
+        # Determine PDF type
+        pdf_type = "Image PDF"
+        for i in range(min(5, doc.page_count)):
+            page = doc[i]
+            if page.get_text().strip():
+                pdf_type = "Text PDF"
+                break
+        
+        doc.close()
+    except Exception as e:
+        logger.error(f"Failed to extract page count and type for {file.filename}: {e}")
+        
     stages = config.custom_stages if config.custom_stages else ["Add job", "Production", "QC", "Archive"]
     first_stage = stages[0]
     
@@ -416,6 +437,8 @@ def create_job(
         project_name=project_name,
         pdf_filename=file.filename,
         pdf_filepath=local_path,
+        pdf_page_count=page_count,
+        pdf_type=pdf_type,
         current_stage_index=0,
         current_stage_name=first_stage,
         stage_history=initial_history,
