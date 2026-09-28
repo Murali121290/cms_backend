@@ -41,6 +41,8 @@ def upgrade() -> None:
     sa.Column('client_id', sa.Integer(), nullable=False),
     sa.Column('pdf_filename', sa.String(length=255), nullable=False),
     sa.Column('pdf_filepath', sa.String(length=1024), nullable=True),
+    sa.Column('pdf_page_count', sa.Integer(), nullable=True),
+    sa.Column('pdf_type', sa.String(length=50), nullable=True),
     sa.Column('epub_filename', sa.String(length=255), nullable=True),
     sa.Column('epub_filepath', sa.String(length=1024), nullable=True),
     sa.Column('current_stage_index', sa.Integer(), nullable=False),
