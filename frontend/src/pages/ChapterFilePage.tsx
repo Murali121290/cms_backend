@@ -48,6 +48,7 @@ import apiClient from '@/api/client'
 import { toast } from '@/store/useToastStore'
 import type { FileRecord } from '@/types/api'
 import { useRBAC } from '@/hooks/useRBAC'
+import { useUsersStore } from '@/stores/usersStore'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -1032,7 +1033,7 @@ export function ChapterFilePage({
     }),
     col.accessor('uploaded_by', {
       header: 'Uploaded By',
-      cell: i => <span className="text-muted text-[11px] truncate block max-w-[120px]">{i.getValue() || '—'}</span>,
+      cell: i => <span className="text-muted text-[11px] truncate block max-w-[120px]">{useUsersStore.getState().getUserDisplayNameByUsername(i.getValue()) || '—'}</span>,
     }),
     col.accessor('uploaded_on', {
       header: 'Uploaded On',

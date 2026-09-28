@@ -862,14 +862,14 @@ export function CreateProjectPage() {
               label="Project Manager"
               value={form.project_manager ?? ''}
               onChange={e => set('project_manager', e.target.value || null)}
-              options={pmUsers.map(u => ({ value: u.user_name, label: u.user_name }))}
+              options={pmUsers.map(u => ({ value: u.user_name, label: u.first_name || u.last_name ? `${u.first_name || ''} ${u.last_name || ''}`.trim() : u.user_name }))}
               placeholder="Select project manager"
             />
             <Select
               label="Sales Person"
               value={form.sales_person ?? ''}
               onChange={e => set('sales_person', e.target.value || null)}
-              options={salesUsers.map(u => ({ value: u.user_name, label: u.user_name }))}
+              options={salesUsers.map(u => ({ value: u.user_name, label: u.first_name || u.last_name ? `${u.first_name || ''} ${u.last_name || ''}`.trim() : u.user_name }))}
               placeholder="Select sales person"
             />
 

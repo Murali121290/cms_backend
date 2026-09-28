@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Spinner, FullPageSpinner } from '@/components/ui/Spinner'
+import { useUsersStore } from '@/stores/usersStore'
 
 interface ProcessingJob {
   id: number
@@ -238,7 +239,7 @@ export function QueueManagement() {
                       <td className="px-4 py-3">
                         {job.username ? (
                           <div className="flex flex-col">
-                            <span className="text-text font-semibold">{job.username}</span>
+                            <span className="text-text font-semibold">{useUsersStore.getState().getUserDisplayNameByUsername(job.username)}</span>
                             <span className="text-xs text-muted font-medium">{job.user_role || '—'}</span>
                           </div>
                         ) : (
