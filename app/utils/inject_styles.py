@@ -102,6 +102,7 @@ PUBLISHER_STYLES = [
     "QUES-NL-FIRST", "QUES-NL-MID", "QUES-SUB-FIRST", "QUES-SUB-MID",
     "QUES-SUB-LAST", "QUO", "QUOA",
     "REF-N", "REF-N-FIRST", "REF-U", "REF-H1", "REF-H2",
+    "Reference-Alphabetical", "Reference-Numbered", "ReferenceAlphabetical", "ReferenceNumbered",
     "RHR", "RHV",
     "RQ-H1", "RQ-H2", "RQ-NL-FIRST", "RQ-NL-MID", "RQ-NL-LAST",
     "SAU", "SBBL-FIRST", "SBBL-LAST", "SBBL-MID",

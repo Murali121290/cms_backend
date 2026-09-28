@@ -132,6 +132,30 @@ def _css_color_to_hex(val: str) -> str | None:
         return f"{r:02X}{g:02X}{b:02X}"
     return None
 
+def _ensure_paragraph_style(doc, style_name: str) -> None:
+    """Ensure a paragraph style exists in doc.styles so Word recognizes it in styles.xml."""
+    if not style_name or style_name in ("Normal", "MsoNormal"):
+        return
+    try:
+        _ = doc.styles[style_name]
+        return
+    except KeyError:
+        pass
+
+    for s in doc.styles:
+        if s.name == style_name or s.style_id == style_name:
+            return
+
+    try:
+        from docx.enum.style import WD_STYLE_TYPE
+        new_style = doc.styles.add_style(style_name, WD_STYLE_TYPE.PARAGRAPH)
+        try:
+            new_style.base_style = doc.styles['Normal']
+        except Exception:
+            pass
+    except Exception as e:
+        logger.warning(f"Could not create paragraph style '{style_name}': {e}")
+
 
 # ─── Lookup Helpers ───────────────────────────────────────────────────────────
 
@@ -633,9 +657,11 @@ class XhtmlToDocxDeltaEngine:
 
             # 2. Update paragraph-level style if changed
             try:
-                if para.style.name != new_style:
+                _ensure_paragraph_style(doc, new_style)
+                if not para.style or para.style.name != new_style:
                     para.style = new_style
-            except Exception:
+            except Exception as style_err:
+                logger.warning(f"Could not apply style '{new_style}' via python-docx, forcing XML: {style_err}")
                 try:
                     # Fallback to direct XML injection if style name is missing in document template
                     pPr = para._p.get_or_add_pPr()

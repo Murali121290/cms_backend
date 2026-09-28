@@ -2836,11 +2836,9 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
           box-shadow: 0 1px 3px rgba(0,0,0,0.06) !important;
         }
 
-        /* Suppress empty/Normal style margin badges */
+        /* Fallback badge text for elements missing data-style-label */
         .ProseMirror p:not([data-style-label])::after,
         .ProseMirror p[data-style-label=""]::after,
-        .ProseMirror p[data-style-label="Normal"]::after,
-        .ProseMirror p[data-style-label="MsoNormal"]::after,
         .ProseMirror h1:not([data-style-label])::after,
         .ProseMirror h1[data-style-label=""]::after,
         .ProseMirror h2:not([data-style-label])::after,
@@ -2853,7 +2851,7 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         .ProseMirror h5[data-style-label=""]::after,
         .ProseMirror h6:not([data-style-label])::after,
         .ProseMirror h6[data-style-label=""]::after {
-          display: none !important;
+          content: "Normal" !important;
         }
 
         /* Bullet & Numbered List Styling */
