@@ -411,6 +411,18 @@ def background_processing_task(
                         logger.error(f"Manual structuring failed: {error_msg}")
                         raise Exception(f"Manual structuring failed: {error_msg}")
                     generated_files = [output_path]
+                    try:
+                        from app.processing.docx_to_xhtml_runs import DocxToXhtmlRunsEngine
+                        xhtml_dir = os.path.join(dir_name, "xhtml")
+                        os.makedirs(xhtml_dir, exist_ok=True)
+                        xhtml_path = os.path.join(xhtml_dir, f"{name_only}_Processed.html")
+                        content = DocxToXhtmlRunsEngine().convert(output_path)
+                        with open(xhtml_path, "w", encoding="utf-8") as f:
+                            f.write(content)
+                        generated_files.append(xhtml_path)
+                        logger.info(f"Auto-generated XHTML for manual structuring: {xhtml_path}")
+                    except Exception as xe:
+                        logger.warning(f"Could not auto-generate XHTML for manual structuring: {xe}")
                     success_msg = f"Manual structuring completed (mode: {mode})"
                 else:
                     update_job_status(db, job_id, "processing", "Offloading document to AI Structuring...", 30)
