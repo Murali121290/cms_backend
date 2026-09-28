@@ -140,6 +140,8 @@ def get_customer_report(
             "id": job.id,
             "client_name": job.client_config.client_name if job.client_config else "Unknown",
             "pdf_filename": job.pdf_filename,
+            "pdf_type": job.pdf_type,
+            "pdf_page_count": job.pdf_page_count,
             "epub_filename": job.epub_filename,
             "current_stage": job.current_stage_name,
             "status": job.status,

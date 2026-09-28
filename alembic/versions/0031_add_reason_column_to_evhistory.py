@@ -18,9 +18,15 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+from sqlalchemy.engine.reflection import Inspector
+
 def upgrade() -> None:
     """Upgrade schema."""
-    op.add_column('post_prod_ev_history', sa.Column('reason', sa.String(), nullable=True))
+    conn = op.get_bind()
+    inspector = Inspector.from_engine(conn)
+    columns = [c['name'] for c in inspector.get_columns('post_prod_ev_history')]
+    if 'reason' not in columns:
+        op.add_column('post_prod_ev_history', sa.Column('reason', sa.String(), nullable=True))
 
 
 def downgrade() -> None:

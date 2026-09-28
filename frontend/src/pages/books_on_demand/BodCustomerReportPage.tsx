@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Card } from '@/components/ui/Card'
-import { Loader2, Search, Calendar, FileText, CheckCircle2, Clock, Download, Layers, RefreshCw, BarChart2 } from 'lucide-react'
+import { Loader2, Search, Calendar, FileText, CheckCircle2, Clock, Download, Layers, RefreshCw, BarChart2, AlertCircle } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import api from '@/api/client'
 import * as XLSX from 'xlsx'
@@ -83,8 +83,14 @@ export function BodCustomerReportPage() {
   const getJobStatuses = (job: any) => {
     const history = job.stage_history || {}
     let finalStatus = 'YTS'
-    if (job.status === 'Completed' || job.current_stage === 'Archive') finalStatus = 'Completed'
-    else if (job.current_stage === 'Production' || job.current_stage === 'QC') finalStatus = 'In-progress'
+    if (job.status === 'Completed' || job.current_stage === 'Archive') {
+      finalStatus = 'Completed'
+    } else {
+      if (job.current_stage === 'Production' || job.current_stage === 'QC') finalStatus = 'In-progress'
+      if (job.due_date && new Date(job.due_date) < new Date()) {
+        finalStatus = 'Overdue'
+      }
+    }
 
     const prodData = history['Production'] || {}
     let prodStatus = 'YTS'
@@ -179,8 +185,11 @@ export function BodCustomerReportPage() {
     const headers = [
       'Client',
       'Source PDF',
+      'PDF Type',
+      'PDF Page Count',
       'Target EPUB',
       'Job Created Date',
+      'Due Date',
       'Production Status',
       'Production Start Time',
       'Production End Time',
@@ -203,8 +212,11 @@ export function BodCustomerReportPage() {
       data.push([
         job.client_name || '',
         job.pdf_filename || '',
+        job.pdf_type || '-',
+        job.pdf_page_count || '-',
         job.epub_filename || '',
         formatDateTime(job.created_at),
+        job.due_date ? formatDateTime(job.due_date) : '-',
         prodStatus,
         prodStart,
         prodEnd,
@@ -261,7 +273,7 @@ export function BodCustomerReportPage() {
 
   return (
     <div className="min-h-screen bg-background/50 p-6">
-      <div className="max-w-7xl mx-auto space-y-6">
+      <div className="w-full space-y-6">
 
         {/* Header Section */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -401,8 +413,8 @@ export function BodCustomerReportPage() {
                       itemStyle={{ fontWeight: 600 }}
                     />
                     <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }} iconType="circle" />
-                    <Bar dataKey="due" name="Due Jobs" fill="#f59e0b" radius={[6, 6, 6, 6]} barSize={24} />
-                    <Bar dataKey="delay" name="Delayed Jobs" fill="#ef4444" radius={[6, 6, 6, 6]} barSize={24} />
+                    <Bar dataKey="due" name="Total Due" fill="#f59e0b" radius={[6, 6, 6, 6]} barSize={24} />
+                    <Bar dataKey="delay" name="Due but not delivered" fill="#ef4444" radius={[6, 6, 6, 6]} barSize={24} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -457,6 +469,7 @@ export function BodCustomerReportPage() {
               <option value="all">Final: All</option>
               <option value="Completed">Final: Completed</option>
               <option value="In-progress">Final: In-progress</option>
+              <option value="Overdue">Final: Overdue</option>
               <option value="YTS">Final: YTS</option>
             </select>
           </div>
@@ -503,22 +516,25 @@ export function BodCustomerReportPage() {
         {/* Data Table */}
         <Card className="overflow-hidden border-border/50 shadow-sm bg-card/80 backdrop-blur-xl">
           <div className="overflow-auto max-h-[calc(100vh-350px)] min-h-[400px]">
-            <table className="w-full text-left border-collapse whitespace-nowrap">
+            <table className="w-full text-left border-collapse">
               <thead className="sticky top-0 z-10 shadow-sm bg-card">
                 <tr className="bg-muted/30 border-b border-border/50 backdrop-blur-md">
-                  <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider">Job</th>
-                  <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider">Created At</th>
-                  <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider">Production</th>
-                  <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider">Production Timing</th>
-                  <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider">QC</th>
-                  <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider">QC Timing</th>
-                  <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider">Final Status</th>
+                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Job</th>
+                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Pages</th>
+                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Type</th>
+                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Created At</th>
+                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Due Date</th>
+                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Production</th>
+                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Production Timing</th>
+                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">QC</th>
+                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">QC Timing</th>
+                  <th className="px-2 py-3 text-[10px] font-semibold text-muted uppercase tracking-wider">Final Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/50">
                 {loading ? (
                   <tr>
-                    <td colSpan={7} className="px-6 py-12 text-center">
+                    <td colSpan={10} className="px-6 py-12 text-center">
                       <div className="flex flex-col items-center justify-center text-muted">
                         <Loader2 className="h-8 w-8 animate-spin mb-2 text-primary" />
                         <p>Loading report data...</p>
@@ -527,7 +543,7 @@ export function BodCustomerReportPage() {
                   </tr>
                 ) : filteredReport.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-6 py-12 text-center text-muted">
+                    <td colSpan={10} className="px-6 py-12 text-center text-muted">
                       No matching records found.
                     </td>
                   </tr>
@@ -538,22 +554,23 @@ export function BodCustomerReportPage() {
                     const getStatusColor = (s: string) => {
                       if (s === 'Completed') return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
                       if (s === 'In-progress') return 'bg-amber-500/10 text-amber-600 border-amber-500/20'
+                      if (s === 'Overdue') return 'bg-red-500/10 text-red-600 border-red-500/20'
                       return 'bg-muted/10 text-muted-foreground border-border/50'
                     }
 
                     return (
                       <tr key={job.id} className="hover:bg-muted/5 transition-colors group">
-                        <td className="px-4 py-4">
-                          <div className="font-medium text-text truncate max-w-[200px]" title={job.pdf_filename}>
+                        <td className="px-2 py-3">
+                          <div className="font-medium text-text truncate max-w-[150px]" title={job.pdf_filename}>
                             {job.pdf_filename}
                           </div>
-                          <div className="text-xs text-muted mt-0.5 flex items-center gap-1.5 truncate max-w-[200px]">
+                          <div className="text-[10px] text-muted mt-0.5 flex items-center gap-1.5 truncate max-w-[150px]">
                             <div className="w-1.5 h-1.5 rounded-full bg-primary/40"></div>
                             {job.client_name}
                           </div>
                           {job.epub_filename && (
                             <div className="flex items-center gap-1.5 mt-2 bg-emerald-500/5 py-1 px-2 rounded-md w-fit border border-emerald-500/10">
-                              <div className="text-[10px] text-emerald-600 font-medium truncate max-w-[150px]">
+                              <div className="text-[10px] text-emerald-600 font-medium truncate max-w-[120px]">
                                 {job.epub_filename}
                               </div>
                               <button
@@ -566,54 +583,67 @@ export function BodCustomerReportPage() {
                             </div>
                           )}
                         </td>
-                        <td className="px-4 py-4 text-[11px] text-muted">
+                        <td className="px-2 py-3 text-[10px] text-muted">
+                          {job.pdf_page_count || '-'}
+                        </td>
+                        <td className="px-2 py-3 text-[10px] font-medium text-muted">
+                          {job.pdf_type || '-'}
+                        </td>
+                        <td className="px-2 py-3 text-[10px] text-muted whitespace-nowrap">
                           <div className="flex items-center gap-1.5">
-                            <Calendar size={12} className="text-muted-foreground/60" />
+                            <Calendar size={10} className="text-muted-foreground/60" />
                             {job.created_at ? formatDateTime(job.created_at) : '-'}
                           </div>
                         </td>
-                        <td className="px-4 py-4">
-                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold border ${getStatusColor(prodStatus)}`}>
-                            {prodStatus === 'Completed' && <CheckCircle2 size={10} className="mr-1" />}
-                            {prodStatus === 'In-progress' && <Clock size={10} className="mr-1" />}
+                        <td className="px-2 py-3 text-[10px] text-muted whitespace-nowrap">
+                          <div className="flex items-center gap-1.5">
+                            <Calendar size={10} className="text-amber-500/80" />
+                            {job.due_date ? formatDateTime(job.due_date) : '-'}
+                          </div>
+                        </td>
+                        <td className="px-2 py-3 whitespace-nowrap">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-semibold border ${getStatusColor(prodStatus)}`}>
+                            {prodStatus === 'Completed' && <CheckCircle2 size={8} className="mr-1" />}
+                            {prodStatus === 'In-progress' && <Clock size={8} className="mr-1" />}
                             {prodStatus}
                           </span>
                         </td>
-                        <td className="px-4 py-4 text-[11px]">
-                          <div className="flex flex-col gap-1.5">
-                            <div className="flex items-center gap-2 text-muted">
-                              <Clock size={12} className="text-primary/60" />
+                        <td className="px-2 py-3 text-[10px] whitespace-nowrap">
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-1.5 text-muted">
+                              <Clock size={10} className="text-primary/60" />
                               <span className="text-text">{prodData.start_time ? formatDateTime(prodData.start_time) : '-'}</span>
                             </div>
-                            <div className="flex items-center gap-2 text-muted">
-                              <CheckCircle2 size={12} className="text-emerald-500/60" />
+                            <div className="flex items-center gap-1.5 text-muted">
+                              <CheckCircle2 size={10} className="text-emerald-500/60" />
                               <span className="text-text">{prodData.end_time ? formatDateTime(prodData.end_time) : '-'}</span>
                             </div>
                           </div>
                         </td>
-                        <td className="px-4 py-4">
-                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold border ${getStatusColor(qcStatus)}`}>
-                            {qcStatus === 'Completed' && <CheckCircle2 size={10} className="mr-1" />}
-                            {qcStatus === 'In-progress' && <Clock size={10} className="mr-1" />}
+                        <td className="px-2 py-3 whitespace-nowrap">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-semibold border ${getStatusColor(qcStatus)}`}>
+                            {qcStatus === 'Completed' && <CheckCircle2 size={8} className="mr-1" />}
+                            {qcStatus === 'In-progress' && <Clock size={8} className="mr-1" />}
                             {qcStatus}
                           </span>
                         </td>
-                        <td className="px-4 py-4 text-[11px]">
-                          <div className="flex flex-col gap-1.5">
-                            <div className="flex items-center gap-2 text-muted">
-                              <Clock size={12} className="text-primary/60" />
+                        <td className="px-2 py-3 text-[10px] whitespace-nowrap">
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-1.5 text-muted">
+                              <Clock size={10} className="text-primary/60" />
                               <span className="text-text">{qcData.start_time ? formatDateTime(qcData.start_time) : '-'}</span>
                             </div>
-                            <div className="flex items-center gap-2 text-muted">
-                              <CheckCircle2 size={12} className="text-emerald-500/60" />
+                            <div className="flex items-center gap-1.5 text-muted">
+                              <CheckCircle2 size={10} className="text-emerald-500/60" />
                               <span className="text-text">{qcData.end_time ? formatDateTime(qcData.end_time) : '-'}</span>
                             </div>
                           </div>
                         </td>
-                        <td className="px-4 py-4">
+                        <td className="px-2 py-3 whitespace-nowrap">
                           <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold border shadow-sm ${getStatusColor(finalStatus)}`}>
                             {finalStatus === 'Completed' && <CheckCircle2 size={10} className="mr-1" />}
                             {finalStatus === 'In-progress' && <RefreshCw size={10} className="mr-1 animate-spin-slow" />}
+                            {finalStatus === 'Overdue' && <AlertCircle size={10} className="mr-1" />}
                             {finalStatus}
                           </span>
                         </td>
