@@ -51,6 +51,8 @@ import { PostProdCssMatcher } from '@/pages/PostProdCssMatcher'
 import { PostProdEpubValidator } from '@/pages/PostProdEpubValidator'
 import { PostProdEpubValidatorFiles } from '@/pages/PostProdEpubValidatorFiles'
 import { PostProdSlideFormatter } from '@/pages/PostProdSlideFormatter'
+import { JournalProductionPage } from '@/pages/JournalProductionPage'
+import { JournalArticleEditorPage } from '@/pages/JournalArticleEditorPage'
 import { ROLE_PERMISSIONS } from '@/config/rbacConfig'
 import { useRBAC } from '@/hooks/useRBAC'
 
@@ -117,6 +119,7 @@ const router = createBrowserRouter([
       { path: 'workspace', element: <WorkspacePage /> },
 
       { path: 'clients', element: <Clients /> },
+      { path: 'journal-production', element: <JournalProductionPage /> },
       { path: 'clients/:clientId/projects', element: <ClientProjects /> },
       { path: 'clients/:clientId/projects/new', element: <CreateProjectPage /> },
 
@@ -179,6 +182,9 @@ const router = createBrowserRouter([
       { path: 'post-production/epub-validator', element: <PostProdGuard><PostProdEpubValidator /></PostProdGuard> },
       { path: 'post-production/epub-validator/:projectId', element: <PostProdGuard><PostProdEpubValidatorFiles /></PostProdGuard> },
       { path: 'post-production/slide-formatter', element: <PostProdGuard><PostProdSlideFormatter /></PostProdGuard> },
+      { path: 'journal-production', element: <JournalProductionPage /> },
+      { path: 'journal-article-editor', element: <JournalArticleEditorPage /> },
+      { path: 'journal-article-editor/:articleId', element: <JournalArticleEditorPage /> },
       { path: 'reports', element: <ReportsPage /> },
       { path: 'reports/schedule', element: <ScheduleReport /> },
       { path: 'reports/today-schedule', element: <TodaySchedule /> },

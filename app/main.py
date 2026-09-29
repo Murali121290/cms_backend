@@ -81,6 +81,12 @@ app.include_router(epub_validator, prefix="/api/v2", tags=["EPUB Validator"])
 from app.domains.post_prod.ppt_builder import router as ppt_builder
 app.include_router(ppt_builder, prefix="/api/v2", tags=["PPT Builder"])
 
+# Journal Production Router
+from app.domains.journals.router import router as journals_router
+app.include_router(journals_router, prefix="/api/v2", tags=["Journal Production"])
+app.include_router(journals_router, prefix="/api", tags=["Journal Production"])
+app.include_router(journals_router, prefix="/api/v2/api", tags=["Journal Production"])
+
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the Publishing CMS API"}
@@ -132,7 +138,11 @@ def init_data():
         except Exception:
             db.rollback()
 
-        Base.metadata.create_all(bind=engine)
+        try:
+            Base.metadata.create_all(bind=engine)
+        except Exception as e:
+            # Table already created by concurrent worker process
+            pass
             
         # Define all required roles in RolesMaster
         roles = [

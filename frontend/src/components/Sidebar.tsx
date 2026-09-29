@@ -81,6 +81,9 @@ export function Sidebar() {
     ...(!isAccessibilityUser
       ? [{ to: '/clients', icon: Users, label: 'Clients' }]
       : []),
+    ...(!isAccessibilityUser
+      ? [{ to: '/journal-production', icon: Briefcase, label: 'Journal Production' }]
+      : []),
     ...((canAccess(ROLE_PERMISSIONS.access_post_production) || isAccessibilityUser)
       ? [{ to: '/post-production', icon: Layers, label: 'Backlist' }]
       : []),
