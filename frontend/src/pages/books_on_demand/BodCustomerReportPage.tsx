@@ -321,7 +321,7 @@ export function BodCustomerReportPage() {
             </div>
             <input
               type="text"
-              placeholder="Search by filename or client..."
+              placeholder="Search by Job name"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-9 pr-4 py-2 bg-background border-border border rounded-lg text-sm text-text placeholder:text-muted focus:ring-1 focus:ring-primary focus:border-primary outline-none transition-all"

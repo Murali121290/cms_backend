@@ -71,29 +71,40 @@ export function Sidebar() {
     Boolean(viewer?.role && String(viewer.role).toLowerCase().includes('accessibility')) ||
     Boolean(viewer?.roles && viewer.roles.some((r: any) => String(typeof r === 'string' ? r : r.name).toLowerCase().includes('accessibility')))
 
+  const isCustomerUser =
+    viewer?.team === 'Customer Team' ||
+    Boolean((viewer as any)?.role && String((viewer as any).role).toLowerCase().includes('customer')) ||
+    Boolean(viewer?.roles && (viewer.roles as any[]).some((r: any) => String(typeof r === 'string' ? r : r.name).toLowerCase().includes('customer')))
+
+  const hasBodCustomerAccess = Boolean(
+    (viewer as any)?.customer_access && 
+    Array.isArray((viewer as any).customer_access) && 
+    (viewer as any).customer_access.includes('BOD')
+  )
+
   const navItems = [
-    ...(!isAccessibilityUser
+    ...(!isAccessibilityUser && !isCustomerUser
       ? [{ to: '/', icon: LayoutDashboard, label: 'Dashboard' }]
       : []),
-    ...(!isAccessibilityUser
+    ...(!isAccessibilityUser && !isCustomerUser
       ? [{ to: '/workspace', icon: Briefcase, label: 'My Workspace' }]
       : []),
-    ...(!isAccessibilityUser
+    ...(!isAccessibilityUser && !isCustomerUser
       ? [{ to: '/clients', icon: Users, label: 'Clients' },
       { to: '/reports', icon: BarChart3, label: 'Reports' }
       ]
       : []),
 
-    ...((canAccess(ROLE_PERMISSIONS.access_post_production) || isAccessibilityUser)
+    ...((canAccess(ROLE_PERMISSIONS.access_post_production) || isAccessibilityUser || !isCustomerUser)
       ? [{ to: '/post-production', icon: Layers, label: 'Backlist' }]
       : []),
-    ...((canAccess(ROLE_PERMISSIONS.access_post_production) || isAccessibilityUser)
+    ...((canAccess(ROLE_PERMISSIONS.access_post_production) || isAccessibilityUser || (isCustomerUser && hasBodCustomerAccess))
       ? [
         // { to: '/bod/internal', icon: BookOpen, label: 'Books on Demand' },
         { to: '/bod/report', icon: BookOpen, label: 'BOD Report' },
       ]
       : []),
-    ...(canAccess(ROLE_PERMISSIONS.access_settings) && !isAccessibilityUser
+    ...(canAccess(ROLE_PERMISSIONS.access_settings) && !isAccessibilityUser && !isCustomerUser
       ? [{ to: '/settings', icon: Settings, label: 'Settings' }]
       : []),
   ]
