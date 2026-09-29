@@ -180,3 +180,49 @@ class JournalDelivery(Base):
     exported_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     article = relationship("JournalArticle", back_populates="deliveries")
+
+
+class JournalCheckRun(Base):
+    """One execution of a validation check (structuring, references, technical, language, xml) on an article"""
+    __tablename__ = "journal_check_runs"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    article_id = Column(BigInteger, ForeignKey("journal_articles.id", ondelete="CASCADE"), nullable=False, index=True)
+    module = Column(String(50), nullable=False, index=True)
+    stage_number = Column(Integer, nullable=False)
+    rule_set_version = Column(String(100), nullable=True) # e.g. JAIS_Style_v2
+    status = Column(String(30), default="Completed", nullable=False) # Completed, Failed
+    rules_total = Column(Integer, default=0, nullable=False)
+    rules_passed = Column(Integer, default=0, nullable=False)
+    error_message = Column(Text, nullable=True)
+    run_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+
+    issues = relationship("JournalIssue", back_populates="run")
+
+
+class JournalIssue(Base):
+    """A single finding raised by a validation check. Open errors block stage advancement."""
+    __tablename__ = "journal_issues"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    article_id = Column(BigInteger, ForeignKey("journal_articles.id", ondelete="CASCADE"), nullable=False, index=True)
+    run_id = Column(BigInteger, ForeignKey("journal_check_runs.id", ondelete="SET NULL"), nullable=True, index=True)
+    module = Column(String(50), nullable=False, index=True)
+    rule_id = Column(String(100), nullable=False) # e.g. REF-X01, JAIS-ST-22, DTD-IDREF
+    severity = Column(String(20), nullable=False) # error, warning, info
+    title = Column(String(255), nullable=False)
+    message = Column(Text, nullable=True)
+    location = Column(JSON, nullable=True) # {"block_id": .., "start": .., "end": ..} or {"xml_line": ..}
+    context_snippet = Column(Text, nullable=True)
+    suggestion = Column(JSON, nullable=True) # {"type": "replace"|"retag"|"html"|"relink", "to": ...}
+    fingerprint = Column(String(255), nullable=False, index=True) # stable across re-runs; keeps ignore decisions
+    source_issue_id = Column(BigInteger, ForeignKey("journal_issues.id", ondelete="SET NULL"), nullable=True)
+    status = Column(String(20), default="open", nullable=False, index=True) # open, fixed, ignored, superseded
+    resolution = Column(String(50), nullable=True) # accepted_fix, manual_edit, ignored
+    resolved_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    run = relationship("JournalCheckRun", back_populates="issues")

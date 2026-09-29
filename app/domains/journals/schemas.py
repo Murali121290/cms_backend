@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List, Any, Dict
+from typing import Optional, List, Any, Dict, Literal
 from datetime import datetime
 
 
@@ -100,3 +100,84 @@ class StageAdvanceRequest(BaseModel):
     article_id: int
     current_stage: str
     remarks: Optional[str] = None
+
+
+class StageAdvanceBody(BaseModel):
+    remarks: Optional[str] = None
+
+
+# Journal Style Sheet / Grammar Sheet Schemas
+class JournalStylesheetCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    style_rules: Dict[str, Any] = Field(default_factory=dict)
+    is_active: bool = True
+
+
+class JournalStylesheetResponse(JournalStylesheetCreate):
+    id: int
+    journal_id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class JournalGrammarsheetCreate(BaseModel):
+    name: str
+    language_variant: str = "US_English"
+    grammar_rules: Dict[str, Any] = Field(default_factory=dict)
+    is_active: bool = True
+
+
+class JournalGrammarsheetResponse(JournalGrammarsheetCreate):
+    id: int
+    journal_id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# Validation Check Schemas
+class JournalCheckRunResponse(BaseModel):
+    id: int
+    article_id: int
+    module: str
+    stage_number: int
+    status: str
+    rule_set_version: Optional[str] = None
+    rules_total: int
+    rules_passed: int
+    started_at: datetime
+    finished_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class JournalIssueResponse(BaseModel):
+    id: int
+    article_id: int
+    run_id: Optional[int] = None
+    module: str
+    rule_id: str
+    severity: str
+    title: str
+    message: Optional[str] = None
+    location: Optional[Dict[str, Any]] = None
+    context_snippet: Optional[str] = None
+    suggestion: Optional[Dict[str, Any]] = None
+    source_issue_id: Optional[int] = None
+    status: str
+    resolution: Optional[str] = None
+    resolved_by_id: Optional[int] = None
+    resolved_at: Optional[datetime] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class JournalIssueAction(BaseModel):
+    action: Literal["accept", "ignore", "reopen"]

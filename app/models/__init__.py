@@ -154,5 +154,5 @@ class ProcessingJob(Base):
 
 
 from app.domains.processing.language_edit_models import LanguageEditJob, LanguageEditFinding
-from app.domains.journals.models import JournalClient, Journal, JournalArticle, JournalStageDetail, JournalStylesheet, JournalGrammarsheet, JournalFile, JournalDelivery
+from app.domains.journals.models import JournalClient, Journal, JournalArticle, JournalStageDetail, JournalStylesheet, JournalGrammarsheet, JournalFile, JournalDelivery, JournalCheckRun, JournalIssue
 

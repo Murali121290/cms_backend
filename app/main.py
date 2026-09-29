@@ -1,6 +1,8 @@
 from app.core.paths import ensure_runtime_dirs
 ensure_runtime_dirs()
 
+import logging
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -84,8 +86,7 @@ app.include_router(ppt_builder, prefix="/api/v2", tags=["PPT Builder"])
 # Journal Production Router
 from app.domains.journals.router import router as journals_router
 app.include_router(journals_router, prefix="/api/v2", tags=["Journal Production"])
-app.include_router(journals_router, prefix="/api", tags=["Journal Production"])
-app.include_router(journals_router, prefix="/api/v2/api", tags=["Journal Production"])
+
 # Books on Demand Router
 from app.domains.books_on_demand.router import router as bod_router
 app.include_router(bod_router, prefix="/api/v2/bod", tags=["Books on Demand"])
@@ -144,8 +145,8 @@ def init_data():
         try:
             Base.metadata.create_all(bind=engine)
         except Exception as e:
-            # Table already created by concurrent worker process
-            pass
+            # Another worker may have created the tables first; log anything else instead of hiding it.
+            logging.getLogger(__name__).warning("create_all failed during startup: %s", e)
             
         # Define all required roles in RolesMaster
         roles = [
