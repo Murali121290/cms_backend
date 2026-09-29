@@ -13,6 +13,7 @@ from app.processing.local_reference_fallback import (
     wrap_bib_bookmarks_with_hyperlinks,
 )
 from app.processing.reference_char_style_applicator import apply_reference_char_styles
+from app.processing.reference_qa_analyzer import generate_reference_qa_report_html
 
 # Legacy imports
 try:
@@ -143,6 +144,47 @@ class ReferencesEngine:
                                 "wrap_bib_bookmarks_with_hyperlinks failed on PPH output %s: %s",
                                 os.path.basename(full_path), hl_err,
                             )
+
+        # Generate Reference QA Reports for all produced process logs
+        try:
+            conversion_log = next((p for p in generated_files if p.endswith("_conversion_log.txt")), None)
+            num_log = next((p for p in generated_files if p.endswith("_result.html") or (p.endswith("_log.txt") and not p.endswith("_conversion_log.txt"))), None)
+            apa_log = next((p for p in generated_files if "apa" in os.path.basename(p).lower() and p.endswith(".txt")), None)
+
+            log_targets = []
+            if (run_conversion or run_structuring) and conversion_log:
+                log_targets.append((conversion_log, "reference_conversion"))
+
+            if run_num_validation and num_log:
+                log_targets.append((num_log, "reference_number_validation"))
+
+            if run_apa_validation and apa_log:
+                log_targets.append((apa_log, "reference_apa_validation"))
+
+            # If no specific flags matched, fallback to available logs
+            if not log_targets:
+                if conversion_log:
+                    log_targets.append((conversion_log, "reference_conversion"))
+                if num_log:
+                    log_targets.append((num_log, "reference_number_validation"))
+                if apa_log:
+                    log_targets.append((apa_log, "reference_apa_validation"))
+
+            # If multiple processes ran, combine into a single Reference QA Report
+            if len(log_targets) > 1:
+                primary_log = num_log or conversion_log or log_targets[0][0]
+                qa_report_path = generate_reference_qa_report_html(file_path, primary_log, process_type="combined")
+                if qa_report_path and os.path.exists(qa_report_path) and qa_report_path not in generated_files:
+                    generated_files.append(qa_report_path)
+            else:
+                for lf, p_type in log_targets:
+                    qa_report_path = generate_reference_qa_report_html(file_path, lf, process_type=p_type)
+                    if qa_report_path and os.path.exists(qa_report_path) and qa_report_path not in generated_files:
+                        generated_files.append(qa_report_path)
+
+        except Exception as qa_err:
+            engine_logger.warning("Failed to generate Reference QA Report in PPH run: %s", qa_err)
+
         return generated_files
 
     # ------------------------------------------------------------------
@@ -213,4 +255,14 @@ class ReferencesEngine:
             os.path.basename(processed_path),
             stats["ref_count"], stats["bib_matched"], stats["bib_unmatched"],
         )
+
+        qa_report_path = None
+        try:
+            qa_report_path = generate_reference_qa_report_html(file_path, log_path, process_type="local_fallback")
+        except Exception as qa_err:
+            engine_logger.warning("Failed to generate Reference QA Report in local fallback: %s", qa_err)
+
+        if qa_report_path and os.path.exists(qa_report_path):
+            return [processed_path, log_path, qa_report_path]
+
         return [processed_path, log_path]

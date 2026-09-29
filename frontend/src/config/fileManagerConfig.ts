@@ -135,7 +135,7 @@ export function getFolderConfigForChapter(chapterName: string): Record<string, F
 export const PROCESSING_ACTIONS: Record<string, string[]> = {
   initiation:   ['Structure Tag','Metadata Check','File Integrity'],
   design:   ['Structure Tag'],
-  editing:      ['Structure Tag','Reference Check','Accessibility Validation','AI QC'],
+  editing:      ['Structure Tag','Run QA Report','Reference Check','Accessibility Validation','AI QC'],
   copyediting:  ['Technical Editor','Grammar Check','Style Consistency','Reference Validation'],
   production:   ['Generate EPUB','Validate XML','Generate PDF','Package InDesign'],
   qc:           ['QC Checklist','Validation Check','Missing Elements'],
@@ -161,7 +161,7 @@ export function getProcessingActions(stageName: string): string[] {
 // reference that key via `isProcessingActionVisibleForStage(key, stageName)` when rendering
 // the corresponding <DropdownMenu.Item> in ChapterFilePage.tsx — no other code changes needed.
 export type ProcessingActionKey =
-  | 'structuring' | 'referenceValidation' | 'referenceReview'
+  | 'structuring' | 'structuringQa' | 'referenceValidation' | 'referenceReview'
   | 'languageEdit' | 'technicalEdit' | 'unifiedReview'
   | 'manuscriptAnalysis'
   | 'permissionsCheck' | 'aiCreditExtraction' | 'biasScan' | 'wordToXml'
@@ -171,6 +171,7 @@ const PRODUCTION_STAGES = ['XML Conversion', 'Typesetting', 'Proofreading']
 
 export const PROCESSING_ACTION_STAGE_MAP: Record<ProcessingActionKey, string[] | '*'> = {
   structuring:          ['Pre-editing','Pre-editing QA'],
+  structuringQa:        ['Pre-editing','Pre-editing QA'],
   referenceValidation:  ['Pre-editing','Pre-editing QA'],
   referenceReview:      ['Pre-editing','Pre-editing QA'],
   styleValidation:      ['Pre-editing', 'Pre-editing QA', 'XML Conversion', 'Non-XML Processing', 'Non-XML Conversion', 'Manuscript Analysis'],

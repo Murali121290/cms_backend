@@ -11,6 +11,7 @@ import {
   Copy,
   ExternalLink,
   Lock,
+  ShieldCheck,
   Trash2,
   Unlock,
   Zap,
@@ -578,6 +579,22 @@ export function FileDetailsPanel({
     }
   }
 
+  async function handleRunStructuringQA() {
+    addToast({ title: "QA Analysis started", description: file.filename, variant: "info" });
+    try {
+      await startProcessingJob(file.id, "structuring_qa", "style");
+      addToast({ title: "QA Analysis complete", description: file.filename, variant: "success" });
+      void queryClient.invalidateQueries({ queryKey: ["processing-status", file.id, "structuring_qa"] });
+    } catch (err) {
+      addToast({
+        title: "QA Analysis failed",
+        description: getApiErrorMessage(err, "Unexpected error"),
+        variant: "error",
+        duration: 6000,
+      });
+    }
+  }
+
   return (
     <div style={{
       backgroundColor: "#FAFAF8",
@@ -660,6 +677,22 @@ export function FileDetailsPanel({
           >
             <Zap size={13} />
             Run Structuring
+          </button>
+
+          <span style={{ color: "#D4CFC9" }}>·</span>
+
+          {/* Run QA Report */}
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); void handleRunStructuringQA(); }}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: "4px",
+              fontSize: "12px", color: "#166534",
+              background: "none", border: "none", cursor: "pointer", padding: 0,
+            }}
+          >
+            <ShieldCheck size={13} />
+            Run QA Report
           </button>
 
           <span style={{ color: "#D4CFC9" }}>·</span>

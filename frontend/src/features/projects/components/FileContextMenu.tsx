@@ -749,6 +749,12 @@ export function FileContextMenu({
                   onClick={() => setConfirmStep({ processType: "structuring", mode: "style", actionName: "Structuring", isStructuringChoice: true })}
                 />
                 <MenuItem
+                  icon={ShieldCheck}
+                  label="Run QA Report"
+                  iconStyle={ICON_GOLD}
+                  onClick={() => setConfirmStep({ processType: "structuring_qa", mode: "style", actionName: "Run QA Report" })}
+                />
+                <MenuItem
                   icon={Languages}
                   label="Language Edit"
                   onClick={() => setConfirmStep({ processType: "language", mode: "style", actionName: "Language Edit" })}

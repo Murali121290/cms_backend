@@ -36,6 +36,7 @@ import { ArtValidationModal } from '@/components/ArtValidationModal'
 import { LanguageEditReviewModal } from '@/features/language_edit/LanguageEditReviewModal'
 
 import {
+  startProcessingJob,
   startLanguageEdit,
   startPpdGeneration, startPermissionsCheck, startCreditExtraction,
   startBiasScan, startWordToXml, getProcessingStatus, startIndesignToXml, startExtractDesignCss, startExtractDesignStyle, startStyleValidation, startStyleMatchDesign, startViewProof,
@@ -370,8 +371,28 @@ function ProcessingActionsMenu({
     <>
       <div className="flex items-center gap-1.5 flex-wrap">
         {showAction('structuring') && (
-          <button disabled={!fid} className={btnCls} onClick={() => setTagSetModalOpen(true)}>
+          <button disabled={!fid || !fname.endsWith('.docx')} className={btnCls} onClick={() => setTagSetModalOpen(true)}>
             <Layers size={12} className="text-amber-500" /> Structuring
+          </button>
+        )}
+
+        {(showAction('structuring') || showAction('structuringQa')) && (
+          <button
+            disabled={!fid || !fname.endsWith('.docx')}
+            className={btnCls}
+            onClick={async () => {
+              if (!fid || !fname.endsWith('.docx')) return
+              try {
+                toast.info('Running QA Report...')
+                await startProcessingJob(fid, 'structuring_qa', 'style')
+                toast.success('QA Report generated successfully')
+                void invalidateFiles()
+              } catch (e: any) {
+                toast.error(`QA Report failed: ${e.message || 'Error running QA'}`)
+              }
+            }}
+          >
+            <ShieldCheck size={12} className="text-emerald-600" /> Run QA Report
           </button>
         )}
 
@@ -387,7 +408,7 @@ function ProcessingActionsMenu({
 
         {showAction('languageEdit') && (
           <button
-            disabled={!fid}
+            disabled={!fid || !fname.endsWith('.docx')}
             className={btnCls}
             onClick={() => fid && navigate(uiPaths.languageReview(projectId, chapterId, fid))}
           >
@@ -395,12 +416,9 @@ function ProcessingActionsMenu({
           </button>
         )}
 
-
-
-
         {showAction('technicalEdit') && (
           <button
-            disabled={!fid}
+            disabled={!fid || !fname.endsWith('.docx')}
             className={btnCls}
             onClick={() => fid && navigate(uiPaths.technicalReview(projectId, chapterId, fid))}
           >
@@ -410,7 +428,7 @@ function ProcessingActionsMenu({
 
         {showAction('unifiedReview') && (
           <button
-            disabled={!fid}
+            disabled={!fid || !fname.endsWith('.docx')}
             className={btnCls}
             onClick={() => fid && navigate(uiPaths.unifiedReview(projectId, chapterId, fid))}
           >
@@ -420,7 +438,7 @@ function ProcessingActionsMenu({
 
         {showAction('referenceValidation') && (
           <button
-            disabled={!fid || !row}
+            disabled={!fid || !fname.endsWith('.docx') || !row}
             className={btnCls}
             onClick={() => row && fid && onOpenReferenceCheck({
               id: fid,
@@ -439,25 +457,9 @@ function ProcessingActionsMenu({
           </button>
         )}
 
-        {/* <button
-          disabled={!fid || !fname.endsWith('.indd')}
-          className={btnCls}
-          onClick={() => void handleConvert('indesign-to-word', 'InDesign file')}
-        >
-          <FileOutput size={12} className="text-amber-500" /> InDesign to Word
-        </button>
-
-        <button
-          disabled={!fid || !fname.endsWith('.pdf')}
-          className={btnCls}
-          onClick={() => void handleConvert('pdf-to-word', 'PDF file')}
-        >
-          <FileOutput size={12} className="text-amber-500" /> PDF to Word
-        </button> */}
-
         {showAction('manuscriptAnalysis') && (
           <button
-            disabled={!fid}
+            disabled={!fid || !fname.endsWith('.docx')}
             className={btnCls}
             onClick={() => fid && setConfirmStep({ actionName: 'Manuscript Analysis', jobFn: () => startPpdGeneration(fid), pollFileId: fid, pollProcessType: 'ppd' })}
           >
@@ -467,7 +469,7 @@ function ProcessingActionsMenu({
 
         {showAction('permissionsCheck') && (
           <button
-            disabled={!fid}
+            disabled={!fid || !fname.endsWith('.docx')}
             className={btnCls}
             onClick={() => fid && setConfirmStep({ actionName: 'Permissions Check', jobFn: () => startPermissionsCheck(fid) })}
           >
@@ -477,7 +479,7 @@ function ProcessingActionsMenu({
 
         {showAction('aiCreditExtraction') && (
           <button
-            disabled={!fid}
+            disabled={!fid || !fname.endsWith('.docx')}
             className={btnCls}
             onClick={() => fid && setConfirmStep({ actionName: 'AI Credit Extraction', jobFn: () => startCreditExtraction(fid), pollFileId: fid, pollProcessType: 'credit_extractor_ai' })}
           >
@@ -487,7 +489,7 @@ function ProcessingActionsMenu({
 
         {showAction('biasScan') && (
           <button
-            disabled={!fid}
+            disabled={!fid || !fname.endsWith('.docx')}
             className={btnCls}
             onClick={() => fid && setConfirmStep({ actionName: 'Bias Scan', jobFn: () => startBiasScan(fid), pollFileId: fid, pollProcessType: 'bias_scan' })}
           >
@@ -497,7 +499,7 @@ function ProcessingActionsMenu({
 
         {showAction('wordToXml') && row?.subfolder?.toLowerCase() === 'manuscript' && (
           <button
-            disabled={!fid}
+            disabled={!fid || !fname.endsWith('.docx')}
             className={btnCls}
             onClick={() => fid && setConfirmStep({ actionName: 'Word to XML', jobFn: () => startWordToXml(fid), pollFileId: fid, pollProcessType: 'word_to_xml' })}
           >
@@ -508,7 +510,7 @@ function ProcessingActionsMenu({
         {showAction('styleValidation') && row?.subfolder?.toLowerCase() === 'manuscript' && (
           <>
             <button
-              disabled={!fid}
+              disabled={!fid || !fname.endsWith('.docx')}
               type="button"
               className={btnCls}
               onClick={() => fid && setConfirmStep({
@@ -521,7 +523,7 @@ function ProcessingActionsMenu({
               <ShieldCheck size={12} /> Style Match Design
             </button>
             <button
-              disabled={!fid}
+              disabled={!fid || !fname.endsWith('.docx')}
               type="button"
               className={btnCls}
               onClick={() => fid && setConfirmStep({
@@ -538,7 +540,7 @@ function ProcessingActionsMenu({
 
         {showAction('artValidation') && row?.subfolder?.toLowerCase() === 'manuscript' && (
           <button
-            disabled={!fid}
+            disabled={!fid || !fname.endsWith('.docx')}
             type="button"
             className={btnCls}
             onClick={() => fid && onOpenArtValidation(fid, row?.file_name || '')}
@@ -757,6 +759,7 @@ export function ChapterFilePage({
 
     if (filesQuery.data?.files?.length) {
       const inFolder = filesQuery.data.files
+        .filter(f => !f.filename.toLowerCase().endsWith('_processed.html'))
         .filter(f => fileToFolderKey(f, resolvedChapterName) === activeFolder)
 
       // Nesting: group derived files under their source. A row whose
@@ -813,16 +816,18 @@ export function ChapterFilePage({
     }
 
     if (!chapterFolderData) return []
-    return (chapterFolderData.files[sfLabel] ?? []).map(f => ({
-      id: `${sfLabel}::${f.file_name}`,
-      subfolder: sfLabel,
-      file_name: f.file_name,
-      file_size: f.file_size,
-      size_bytes: f.size_bytes,
-      uploaded_by: f.uploaded_by,
-      uploaded_on: f.uploaded_on,
-      path: f.path,
-    }))
+    return (chapterFolderData.files[sfLabel] ?? [])
+      .filter(f => !f.file_name.toLowerCase().endsWith('_processed.html'))
+      .map(f => ({
+        id: `${sfLabel}::${f.file_name}`,
+        subfolder: sfLabel,
+        file_name: f.file_name,
+        file_size: f.file_size,
+        size_bytes: f.size_bytes,
+        uploaded_by: f.uploaded_by,
+        uploaded_on: f.uploaded_on,
+        path: f.path,
+      }))
   }, [filesQuery.data, chapterFolderData, activeFolder, activeFolderConfig, resolvedChapterName, expandedSources])
 
   // ── File counts per folder tab ───────────────────────────────────────────
@@ -830,9 +835,12 @@ export function ChapterFilePage({
     const m: Record<string, number> = {}
     FOLDER_KEYS.forEach(k => {
       if (filesQuery.data?.files)
-        m[k] = filesQuery.data.files.filter(f => fileToFolderKey(f, resolvedChapterName) === k).length
+        m[k] = filesQuery.data.files
+          .filter(f => !f.filename.toLowerCase().endsWith('_processed.html'))
+          .filter(f => fileToFolderKey(f, resolvedChapterName) === k).length
       else if (chapterFolderData)
-        m[k] = chapterFolderData.files[activeFolderConfig[k]?.label || k]?.length ?? 0
+        m[k] = (chapterFolderData.files[activeFolderConfig[k]?.label || k] ?? [])
+          .filter(f => !f.file_name.toLowerCase().endsWith('_processed.html')).length
       else
         m[k] = 0
     })
