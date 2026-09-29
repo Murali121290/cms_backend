@@ -85,6 +85,11 @@ app.include_router(ppt_builder, prefix="/api/v2", tags=["PPT Builder"])
 from app.domains.post_prod.xml_conversion.router import router as xml_conversion_router
 app.include_router(xml_conversion_router, prefix="/api/v2/post-prod", tags=["XML Conversion"])
 
+# Journal Production Router
+from app.domains.journals.router import router as journals_router
+app.include_router(journals_router, prefix="/api/v2", tags=["Journal Production"])
+app.include_router(journals_router, prefix="/api", tags=["Journal Production"])
+app.include_router(journals_router, prefix="/api/v2/api", tags=["Journal Production"])
 # Books on Demand Router
 from app.domains.books_on_demand.router import router as bod_router
 app.include_router(bod_router, prefix="/api/v2/bod", tags=["Books on Demand"])
@@ -140,7 +145,11 @@ def init_data():
         except Exception:
             db.rollback()
 
-        Base.metadata.create_all(bind=engine)
+        try:
+            Base.metadata.create_all(bind=engine)
+        except Exception as e:
+            # Table already created by concurrent worker process
+            pass
             
         # Define all required roles in RolesMaster
         roles = [

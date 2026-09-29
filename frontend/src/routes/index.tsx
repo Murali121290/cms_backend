@@ -53,6 +53,8 @@ import { PostProdEpubValidatorFiles } from '@/pages/PostProdEpubValidatorFiles'
 import { PostProdSlideFormatter } from '@/pages/PostProdSlideFormatter'
 import { PostProdXmlConversion } from '@/pages/PostProdXmlConversion'
 import { PostProdXmlConversionEditor } from '@/pages/PostProdXmlConversionEditor'
+import { JournalProductionPage } from '@/pages/JournalProductionPage'
+import { JournalArticleEditorPage } from '@/pages/JournalArticleEditorPage'
 import { BodInternalPage } from '@/pages/books_on_demand/BodInternalPage'
 import { BodInternalJobPage } from '@/pages/books_on_demand/BodInternalJobPage'
 import { BodCustomerReportPage } from '@/pages/books_on_demand/BodCustomerReportPage'
@@ -122,6 +124,7 @@ const router = createBrowserRouter([
       { path: 'workspace', element: <WorkspacePage /> },
 
       { path: 'clients', element: <Clients /> },
+      { path: 'journal-production', element: <JournalProductionPage /> },
       { path: 'clients/:clientId/projects', element: <ClientProjects /> },
       { path: 'clients/:clientId/projects/new', element: <CreateProjectPage /> },
 
@@ -186,6 +189,9 @@ const router = createBrowserRouter([
       { path: 'post-production/slide-formatter', element: <PostProdGuard><PostProdSlideFormatter /></PostProdGuard> },
       { path: 'post-production/xml-conversion', element: <PostProdGuard><PostProdXmlConversion /></PostProdGuard> },
       { path: 'post-production/xml-conversion/:projectId', element: <PostProdGuard><PostProdXmlConversionEditor /></PostProdGuard> },
+      { path: 'journal-production', element: <JournalProductionPage /> },
+      { path: 'journal-article-editor', element: <JournalArticleEditorPage /> },
+      { path: 'journal-article-editor/:articleId', element: <JournalArticleEditorPage /> },
       { path: 'bod/internal', element: <BodInternalPage /> },
       { path: 'bod/internal/:jobId', element: <BodInternalJobPage /> },
       { path: 'bod/report', element: <BodCustomerReportPage /> },
