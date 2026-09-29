@@ -703,6 +703,9 @@ export function ChapterEditorPage() {
           cleaned = cleaned.replace(/(<(?:span|ins)[^>]*class="[^"]*tc-insert[^"]*"[^>]*>)(.*?)<\/(?:span|ins)>\s*<(?:span|ins)[^>]*class="[^"]*tc-insert[^"]*"[^>]*>(.*?)<\/(?:span|ins)>/gi, '$1$2$3</span>');
         }
 
+        // Clean raw MS Word HYPERLINK bookmark field instruction codes (e.g., HYPERLINK \l "ref_4")
+        cleaned = cleaned.replace(/HYPERLINK\s+(?:\\[a-zA-Z0-9_-]+\s*)*(?:"[^"]*"|'[^']*'|[^\s<>()]+)\s*/gi, "");
+
         // Transform InDesign XML tables with direct child cell spans into valid HTML table rows and cells
         const transformInDesignTables = (html: string): string => {
           const tableRegex = /(<table[^>]*>)([\s\S]*?)(<\/table>)/gi;

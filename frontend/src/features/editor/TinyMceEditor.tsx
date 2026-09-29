@@ -97,6 +97,9 @@ function convertStructuralSpansToDivs(containerNode: Element, doc: Document) {
 export function parseAuthorQueriesToEditorHtml(rawHtml: string, fileId?: string): string {
   if (!rawHtml) return rawHtml;
 
+  // Clean raw MS Word HYPERLINK bookmark field instruction codes (e.g., HYPERLINK \l "ref_4")
+  rawHtml = rawHtml.replace(/HYPERLINK\s+(?:\\[a-zA-Z0-9_-]+\s*)*(?:"[^"]*"|'[^']*'|[^\s<>()]+)\s*/gi, "");
+
   try {
     const parser = new DOMParser();
     let doc: Document | null = null;
