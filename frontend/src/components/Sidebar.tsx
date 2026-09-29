@@ -94,6 +94,10 @@ export function Sidebar() {
       { to: '/reports', icon: BarChart3, label: 'Reports' }
       ]
       : []),
+    ...(!isAccessibilityUser
+      ? [{ to: '/journal-production', icon: Briefcase, label: 'Journal Production' }]
+      : []),
+    ...((canAccess(ROLE_PERMISSIONS.access_post_production) || isAccessibilityUser)
 
     ...((canAccess(ROLE_PERMISSIONS.access_post_production) || isAccessibilityUser || !isCustomerUser)
       ? [{ to: '/post-production', icon: Layers, label: 'Backlist' }]

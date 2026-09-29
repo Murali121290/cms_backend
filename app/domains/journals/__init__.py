@@ -1,0 +1,1 @@
+# Journal (JATS) Domain Package
