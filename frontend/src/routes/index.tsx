@@ -53,6 +53,9 @@ import { PostProdEpubValidatorFiles } from '@/pages/PostProdEpubValidatorFiles'
 import { PostProdSlideFormatter } from '@/pages/PostProdSlideFormatter'
 import { JournalProductionPage } from '@/pages/JournalProductionPage'
 import { JournalArticleEditorPage } from '@/pages/JournalArticleEditorPage'
+import { BodInternalPage } from '@/pages/books_on_demand/BodInternalPage'
+import { BodInternalJobPage } from '@/pages/books_on_demand/BodInternalJobPage'
+import { BodCustomerReportPage } from '@/pages/books_on_demand/BodCustomerReportPage'
 import { ROLE_PERMISSIONS } from '@/config/rbacConfig'
 import { useRBAC } from '@/hooks/useRBAC'
 
@@ -185,6 +188,9 @@ const router = createBrowserRouter([
       { path: 'journal-production', element: <JournalProductionPage /> },
       { path: 'journal-article-editor', element: <JournalArticleEditorPage /> },
       { path: 'journal-article-editor/:articleId', element: <JournalArticleEditorPage /> },
+      { path: 'bod/internal', element: <BodInternalPage /> },
+      { path: 'bod/internal/:jobId', element: <BodInternalJobPage /> },
+      { path: 'bod/report', element: <BodCustomerReportPage /> },
       { path: 'reports', element: <ReportsPage /> },
       { path: 'reports/schedule', element: <ScheduleReport /> },
       { path: 'reports/today-schedule', element: <TodaySchedule /> },
