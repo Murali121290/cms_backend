@@ -97,8 +97,6 @@ export function Sidebar() {
     ...(!isAccessibilityUser
       ? [{ to: '/journal-production', icon: Briefcase, label: 'Journal Production' }]
       : []),
-    ...((canAccess(ROLE_PERMISSIONS.access_post_production) || isAccessibilityUser)
-
     ...((canAccess(ROLE_PERMISSIONS.access_post_production) || isAccessibilityUser || !isCustomerUser)
       ? [{ to: '/post-production', icon: Layers, label: 'Backlist' }]
       : []),
