@@ -48,7 +48,7 @@ export function JournalProductionPage() {
   // 1. Fetch Journal Clients from Backend API
   async function fetchClients() {
     try {
-      const data = await journalsApi.getCclients()
+      const data = await journalsApi.getClients()
       setClients(data)
       if (data.length > 0 && !activeClientId) {
         setActiveClientId(data[0].id)

@@ -185,7 +185,6 @@ const router = createBrowserRouter([
       { path: 'post-production/epub-validator', element: <PostProdGuard><PostProdEpubValidator /></PostProdGuard> },
       { path: 'post-production/epub-validator/:projectId', element: <PostProdGuard><PostProdEpubValidatorFiles /></PostProdGuard> },
       { path: 'post-production/slide-formatter', element: <PostProdGuard><PostProdSlideFormatter /></PostProdGuard> },
-      { path: 'journal-production', element: <JournalProductionPage /> },
       { path: 'journal-article-editor', element: <JournalArticleEditorPage /> },
       { path: 'journal-article-editor/:articleId', element: <JournalArticleEditorPage /> },
       { path: 'bod/internal', element: <BodInternalPage /> },

@@ -1,12 +1,7 @@
-import os
-import zipfile
 from datetime import datetime
 from typing import Optional, Dict, Any
 from sqlalchemy.orm import Session
-from app.domains.journals.models import (
-    JournalClient, Journal, JournalArticle, JournalStageDetail,
-    JournalStylesheet, JournalGrammarsheet, JournalFile, JournalDelivery
-)
+from app.domains.journals.models import JournalArticle, JournalStageDetail
 
 STAGE_PIPELINE = [
     "1. Pre-Editing (XHTML)",
@@ -18,36 +13,6 @@ STAGE_PIPELINE = [
     "7. View Proof",
     "8. Final Delivery"
 ]
-
-
-def extract_docx_metadata(file_path: str) -> Dict[str, Any]:
-    """Parse manuscript DOCX to extract Title, DOI, Authors, Abstract, Keywords."""
-    metadata = {
-        "article_title": "Untitled Article",
-        "article_doi": None,
-        "lead_author": None,
-        "abstract": None,
-        "keywords": []
-    }
-    # Basic DOCX parsing fallback
-    try:
-        import docx
-        if os.path.exists(file_path):
-            doc = docx.Document(file_path)
-            paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
-            if paragraphs:
-                metadata["article_title"] = paragraphs[0]
-            for p in paragraphs:
-                if "doi:" in p.lower() or "10." in p:
-                    metadata["article_doi"] = p.split("doi:")[-1].strip() if "doi:" in p.lower() else p
-                if "author:" in p.lower() or "by " in p.lower():
-                    metadata["lead_author"] = p
-                if "abstract" in p.lower() and not metadata["abstract"]:
-                    metadata["abstract"] = p
-    except Exception:
-        pass
-
-    return metadata
 
 
 def initialize_article_stages(db: Session, article: JournalArticle):

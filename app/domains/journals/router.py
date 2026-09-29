@@ -5,19 +5,48 @@ import shutil
 import os
 import tempfile
 
+from datetime import datetime
+
 from app.database import get_db
-from app.domains.journals.models import JournalClient, Journal, JournalArticle, JournalStageDetail
+from app.domains.auth.security import get_current_user_from_cookie
+from app.domains.journals.checks import CHECK_STAGES, REGISTRY, CheckNotImplemented, blocking_issues, run_check
+from app.domains.journals.models import (
+    JournalClient, Journal, JournalArticle, JournalStageDetail, JournalStylesheet, JournalGrammarsheet,
+    JournalCheckRun, JournalIssue
+)
 from app.domains.journals.schemas import (
     JournalClientCreate, JournalClientResponse,
     JournalCreate, JournalResponse,
     JournalArticleCreate, JournalArticleResponse,
-    StageAssignmentRequest, StageAdvanceRequest
+    StageAssignmentRequest, StageAdvanceBody,
+    JournalStylesheetCreate, JournalStylesheetResponse,
+    JournalGrammarsheetCreate, JournalGrammarsheetResponse,
+    JournalCheckRunResponse, JournalIssueResponse, JournalIssueAction
 )
-from app.domains.journals.service import (
-    extract_docx_metadata, initialize_article_stages, advance_article_stage, STAGE_PIPELINE
-)
+from app.domains.journals.service import initialize_article_stages, advance_article_stage
 
-router = APIRouter(prefix="/journals", tags=["Journal Production"])
+
+def require_journal_user(user=Depends(get_current_user_from_cookie)):
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sign in to use Journal Production")
+    return user
+
+
+router = APIRouter(prefix="/journals", tags=["Journal Production"], dependencies=[Depends(require_journal_user)])
+
+
+def _get_article(db: Session, article_id: int) -> JournalArticle:
+    article = db.query(JournalArticle).filter(JournalArticle.id == article_id).first()
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+    return article
+
+
+def _get_journal(db: Session, journal_id: int) -> Journal:
+    journal = db.query(Journal).filter(Journal.id == journal_id).first()
+    if not journal:
+        raise HTTPException(status_code=404, detail="Journal not found")
+    return journal
 
 
 # --- Journal Clients ---
@@ -82,7 +111,17 @@ def create_journal_article(article_in: JournalArticleCreate, db: Session = Depen
 
 # --- Article Stage Advancement & Assignment ---
 @router.post("/articles/{article_id}/advance-stage")
-def advance_stage(article_id: int, req: Optional[StageAdvanceRequest] = None, db: Session = Depends(get_db)):
+def advance_stage(article_id: int, req: Optional[StageAdvanceBody] = None, db: Session = Depends(get_db)):
+    article = _get_article(db, article_id)
+    blocking = blocking_issues(db, article)
+    if blocking:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": f"{len(blocking)} open error(s) must be fixed before leaving {article.current_stage}",
+                "blocking_issues": [JournalIssueResponse.model_validate(i).model_dump(mode="json") for i in blocking],
+            },
+        )
     remarks = req.remarks if req else None
     try:
         res = advance_article_stage(db, article_id, remarks)
@@ -93,23 +132,23 @@ def advance_stage(article_id: int, req: Optional[StageAdvanceRequest] = None, db
 
 @router.post("/articles/assign-stage")
 def assign_stage(req: StageAssignmentRequest, db: Session = Depends(get_db)):
-    article = db.query(JournalArticle).filter(JournalArticle.id == req.article_id).first()
-    if not article:
-        raise HTTPException(status_code=404, detail="Article not found")
-
-    article.current_assignee_id = req.assignee_id
-    article.complexity_level = req.complexity_level
-    
+    article = _get_article(db, req.article_id)
     stage_detail = db.query(JournalStageDetail).filter(
         JournalStageDetail.article_id == req.article_id,
         JournalStageDetail.stage_name == req.target_stage
     ).first()
+    if not stage_detail:
+        raise HTTPException(status_code=400, detail=f"Unknown stage '{req.target_stage}' for this article")
+    if req.planned_start_date and req.planned_end_date and req.planned_end_date < req.planned_start_date:
+        raise HTTPException(status_code=400, detail="Planned end date must be on or after the planned start date")
 
-    if stage_detail:
-        stage_detail.assignee_id = req.assignee_id
-        stage_detail.planned_start_date = req.planned_start_date
-        stage_detail.planned_end_date = req.planned_end_date
-        stage_detail.sla_hours = req.sla_hours
+    stage_detail.assignee_id = req.assignee_id
+    stage_detail.planned_start_date = req.planned_start_date
+    stage_detail.planned_end_date = req.planned_end_date
+    stage_detail.sla_hours = req.sla_hours
+    if req.target_stage == article.current_stage:
+        article.current_assignee_id = req.assignee_id
+        article.complexity_level = req.complexity_level
 
     db.commit()
     return {"status": "success", "message": "Workflow assignment saved"}
@@ -297,10 +336,11 @@ def process_pre_editing_xhtml(article_id: int, db: Session = Depends(get_db)):
     if not docx_file_path or not os.path.exists(docx_file_path):
         docx_file = db.query(JournalFile).filter(
             JournalFile.article_id == article_id,
-            JournalFile.file_type == "manuscript"
+            JournalFile.category == "Manuscript",
+            JournalFile.file_type == "docx"
         ).first()
-        if docx_file and os.path.exists(docx_file.file_path):
-            docx_file_path = docx_file.file_path
+        if docx_file and os.path.exists(docx_file.path):
+            docx_file_path = docx_file.path
 
     xhtml_content = None
     structuring_status = "PASS"
@@ -350,17 +390,13 @@ def process_pre_editing_xhtml(article_id: int, db: Session = Depends(get_db)):
 </body>
 </html>"""
 
-    # Update article stage status
-    article.current_stage = "1. Pre-Editing (XHTML)"
-    
-    # Update stage 1 detail record if exists
+    # Record the result on stage 1; completing the stage goes through advance-stage and its error gate.
     stage1 = db.query(JournalStageDetail).filter(
         JournalStageDetail.article_id == article_id,
         JournalStageDetail.stage_number == 1
     ).first()
     if stage1:
-        stage1.status = "Completed"
-        stage1.notes = f"Structuring: {structuring_status}, Reference Validation: {ref_validation_status}"
+        stage1.remarks = f"Structuring: {structuring_status}, Reference Validation: {ref_validation_status}"
 
     db.commit()
 
@@ -371,3 +407,131 @@ def process_pre_editing_xhtml(article_id: int, db: Session = Depends(get_db)):
         "reference_validation_status": ref_validation_status,
         "xhtml_content": xhtml_content
     }
+
+
+# --- Journal Style Sheets & Grammar Sheets ---
+@router.get("/{journal_id}/stylesheets", response_model=List[JournalStylesheetResponse])
+def list_stylesheets(journal_id: int, db: Session = Depends(get_db)):
+    _get_journal(db, journal_id)
+    return db.query(JournalStylesheet).filter(JournalStylesheet.journal_id == journal_id).order_by(JournalStylesheet.id).all()
+
+
+@router.post("/{journal_id}/stylesheets", response_model=JournalStylesheetResponse, status_code=status.HTTP_201_CREATED)
+def create_stylesheet(journal_id: int, sheet_in: JournalStylesheetCreate, db: Session = Depends(get_db)):
+    _get_journal(db, journal_id)
+    sheet = JournalStylesheet(journal_id=journal_id, **sheet_in.model_dump())
+    db.add(sheet)
+    db.commit()
+    db.refresh(sheet)
+    return sheet
+
+
+@router.get("/{journal_id}/grammarsheets", response_model=List[JournalGrammarsheetResponse])
+def list_grammarsheets(journal_id: int, db: Session = Depends(get_db)):
+    _get_journal(db, journal_id)
+    return db.query(JournalGrammarsheet).filter(JournalGrammarsheet.journal_id == journal_id).order_by(JournalGrammarsheet.id).all()
+
+
+@router.post("/{journal_id}/grammarsheets", response_model=JournalGrammarsheetResponse, status_code=status.HTTP_201_CREATED)
+def create_grammarsheet(journal_id: int, sheet_in: JournalGrammarsheetCreate, db: Session = Depends(get_db)):
+    _get_journal(db, journal_id)
+    sheet = JournalGrammarsheet(journal_id=journal_id, **sheet_in.model_dump())
+    db.add(sheet)
+    db.commit()
+    db.refresh(sheet)
+    return sheet
+
+
+# --- Validation Checks & Issues ---
+@router.get("/checks")
+def list_checks():
+    """The check modules, the stage each belongs to, and whether it is implemented yet."""
+    return [
+        {"key": key, "name": check.name, "stage_number": CHECK_STAGES[key], "implemented": check.implemented}
+        for key, check in REGISTRY.items()
+    ]
+
+
+@router.post("/articles/{article_id}/checks/run-all")
+def run_all_checks(article_id: int, db: Session = Depends(get_db), user=Depends(require_journal_user)):
+    article = _get_article(db, article_id)
+    runs, skipped = [], []
+    for key, check in REGISTRY.items():
+        if not check.implemented:
+            skipped.append(key)
+            continue
+        runs.append(JournalCheckRunResponse.model_validate(run_check(db, article, key, user.id)).model_dump(mode="json"))
+    return {"runs": runs, "not_implemented": skipped}
+
+
+@router.post("/articles/{article_id}/checks/{module}/run", response_model=JournalCheckRunResponse)
+def run_single_check(article_id: int, module: str, db: Session = Depends(get_db), user=Depends(require_journal_user)):
+    article = _get_article(db, article_id)
+    try:
+        return run_check(db, article, module, user.id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Unknown check '{module}'. Known checks: {', '.join(REGISTRY)}")
+    except CheckNotImplemented:
+        raise HTTPException(status_code=501, detail=f"The '{module}' check is not implemented yet")
+
+
+@router.get("/articles/{article_id}/check-runs", response_model=List[JournalCheckRunResponse])
+def list_check_runs(article_id: int, module: Optional[str] = None, db: Session = Depends(get_db)):
+    _get_article(db, article_id)
+    query = db.query(JournalCheckRun).filter(JournalCheckRun.article_id == article_id)
+    if module:
+        query = query.filter(JournalCheckRun.module == module)
+    return query.order_by(JournalCheckRun.id.desc()).all()
+
+
+@router.get("/articles/{article_id}/issues", response_model=List[JournalIssueResponse])
+def list_issues(
+    article_id: int,
+    module: Optional[str] = None,
+    severity: Optional[str] = None,
+    issue_status: Optional[str] = None,
+    include_superseded: bool = False,
+    db: Session = Depends(get_db),
+):
+    _get_article(db, article_id)
+    query = db.query(JournalIssue).filter(JournalIssue.article_id == article_id)
+    if module:
+        query = query.filter(JournalIssue.module == module)
+    if severity:
+        query = query.filter(JournalIssue.severity == severity)
+    if issue_status:
+        query = query.filter(JournalIssue.status == issue_status)
+    elif not include_superseded:
+        query = query.filter(JournalIssue.status != "superseded")
+    return query.order_by(JournalIssue.id).all()
+
+
+@router.patch("/articles/{article_id}/issues/{issue_id}", response_model=JournalIssueResponse)
+def update_issue(
+    article_id: int,
+    issue_id: int,
+    body: JournalIssueAction,
+    db: Session = Depends(get_db),
+    user=Depends(require_journal_user),
+):
+    issue = db.query(JournalIssue).filter(JournalIssue.id == issue_id, JournalIssue.article_id == article_id).first()
+    if not issue:
+        raise HTTPException(status_code=404, detail="Issue not found")
+    if issue.status == "superseded":
+        raise HTTPException(status_code=409, detail="This issue was replaced by a newer check run")
+
+    if body.action == "reopen":
+        issue.status, issue.resolution, issue.resolved_by_id, issue.resolved_at = "open", None, None, None
+    elif body.action == "ignore":
+        if issue.severity == "error":
+            raise HTTPException(status_code=422, detail="Errors cannot be ignored. Fix the issue or accept its suggested fix.")
+        issue.status, issue.resolution = "ignored", "ignored"
+        issue.resolved_by_id, issue.resolved_at = user.id, datetime.utcnow()
+    else:
+        # Applying the suggestion to the XHTML as a tracked change is added with the Week 2 editor.
+        issue.status, issue.resolution = "fixed", "accepted_fix" if issue.suggestion else "manual_edit"
+        issue.resolved_by_id, issue.resolved_at = user.id, datetime.utcnow()
+
+    db.commit()
+    db.refresh(issue)
+    return issue
