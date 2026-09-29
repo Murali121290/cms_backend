@@ -188,3 +188,11 @@ def run_epub_validation_task(
         r.setex(progress_key, 300, json.dumps({"status": "failed", "error": str(e)}))
         raise
 
+@celery_app.task(bind=True, acks_late=True, name="app.core.worker.run_xml_conversion_celery_task")
+def run_xml_conversion_celery_task(self, history_id: int):
+    """
+    Background Celery task for XML Conversion.
+    """
+    from app.domains.post_prod.xml_conversion.tasks import run_xml_conversion_pipeline
+    run_xml_conversion_pipeline(history_id)
+    return {"status": "completed", "history_id": history_id}

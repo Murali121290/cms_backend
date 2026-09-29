@@ -27,6 +27,7 @@ interface Props {
   onLogLineClick?: (lineNum: number) => void;
   onLineClick?: (lineNum: number, lineText: string) => void;
   onSave?: () => void;
+  onDtdValidate?: () => Promise<{errors: Array<{line_number: number, message: string, error_type?: string}>}>;
 }
 
 // XML tag auto-closer
@@ -93,7 +94,7 @@ export function formatXmlString(xmlStr: string): string {
  * the app's design system (see FindReplacePanel).
  */
 export const SourceEditor = forwardRef<SourceEditorRef, Props>(
-  ({ value, onChange, className, readOnly = false, errors, onLogLineClick, onLineClick, onSave }, ref) => {
+  ({ value, onChange, className, readOnly = false, errors, onLogLineClick, onLineClick, onSave, onDtdValidate }, ref) => {
     const cmRef = useRef<ReactCodeMirrorRef | null>(null);
     const [panelOpen, setPanelOpen] = useState(false);
     const [replaceMode, setReplaceMode] = useState(false);
@@ -101,9 +102,18 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
     const [validationResult, setValidationResult] = useState<{
       title: string;
       type: 'success' | 'error';
-      message: string;
+      message?: string;
+      errorList?: Array<{line: number, msg: string}>;
       details?: string;
     } | null>(null);
+
+    const [wellFormedStatus, setWellFormedStatus] = useState<'unchecked' | 'passed' | 'error'>('unchecked');
+    const [dtdStatus, setDtdStatus] = useState<'unchecked' | 'passed' | 'error'>('unchecked');
+
+    useEffect(() => {
+      setWellFormedStatus('unchecked');
+      setDtdStatus('unchecked');
+    }, [value]);
 
     useImperativeHandle(ref, () => ({
       scrollToLine(lineNum) {
@@ -428,14 +438,19 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
                 const xmlDoc = parser.parseFromString(value, "application/xml");
                 const parseError = xmlDoc.getElementsByTagName("parsererror");
                 if (parseError.length > 0) {
+                  setWellFormedStatus('error');
                   const errText = parseError[0].textContent || "Syntax error in XML";
+                  const match = errText.match(/line\s+(\d+)/i);
+                  const lineNum = match ? parseInt(match[1], 10) : 0;
                   setValidationResult({
                     title: "❌ XML Syntax Error (Not Well-Formed)",
                     type: "error",
                     message: errText,
+                    errorList: lineNum > 0 ? [{ line: lineNum, msg: errText }] : [],
                     details: "The XML cannot be parsed due to invalid entity references, unclosed tags, or malformed attributes."
                   });
                 } else {
+                  setWellFormedStatus('passed');
                   setValidationResult({
                     title: "✅ XML is Well-Formed",
                     type: "success",
@@ -451,20 +466,53 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
                 });
               }
             }}
-            className="px-2.5 py-0.5 rounded hover:bg-emerald-100 active:bg-emerald-200 transition-colors font-medium flex items-center gap-1 border border-emerald-300 shadow-sm bg-emerald-50 text-emerald-800"
+            className={cn(
+              "px-2.5 py-0.5 rounded transition-colors font-medium flex items-center gap-1 border shadow-sm",
+              wellFormedStatus === 'passed' 
+                ? "hover:bg-emerald-100 active:bg-emerald-200 border-emerald-300 bg-emerald-50 text-emerald-800"
+                : wellFormedStatus === 'error'
+                ? "hover:bg-red-100 active:bg-red-200 border-red-300 bg-red-50 text-red-800"
+                : "hover:bg-blue-100 active:bg-blue-200 border-blue-300 bg-blue-50 text-blue-800"
+            )}
             title="Check if XML syntax is valid and well-formed"
           >
-            <span className="text-emerald-600 font-bold">✓</span> Well-formed Check
+            <span className={wellFormedStatus === 'passed' ? "text-emerald-600 font-bold" : wellFormedStatus === 'error' ? "text-red-600 font-bold" : "text-blue-600 font-bold"}>
+              {wellFormedStatus === 'passed' ? '✓' : wellFormedStatus === 'error' ? '❌' : '✓'}
+            </span> Well-formed Check
           </button>
 
+          {onDtdValidate && (
           <button
             type="button"
-            onClick={() => {
+            onClick={async () => {
               try {
+                if (onDtdValidate) {
+                  setValidationResult({ title: "Validating...", type: "success", message: "Running backend DTD validation..." });
+                  const result = await onDtdValidate();
+                  
+                  if (result.errors && result.errors.length > 0) {
+                    setDtdStatus('error');
+                    setValidationResult({
+                      title: `❌ DTD Validation Errors (${result.errors.length})`,
+                      type: "error",
+                      errorList: result.errors.map((e: any) => ({ line: e.line_number, msg: e.message }))
+                    });
+                  } else {
+                    setDtdStatus('passed');
+                    setValidationResult({
+                      title: "🛡️ DTD Validation Passed",
+                      type: "success",
+                      message: "The document is compliant with the DTD schema."
+                    });
+                  }
+                  return;
+                }
+
                 const parser = new DOMParser();
                 const xmlDoc = parser.parseFromString(value, "application/xml");
                 const parseError = xmlDoc.getElementsByTagName("parsererror");
                 if (parseError.length > 0) {
+                  setDtdStatus('error');
                   setValidationResult({
                     title: "❌ DTD Validation Failed",
                     type: "error",
@@ -496,6 +544,7 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
                 }
 
                 if (errors.length > 0) {
+                  setDtdStatus('error');
                   setValidationResult({
                     title: `❌ DTD Validation Errors (${errors.length})`,
                     type: "error",
@@ -503,6 +552,7 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
                     details: warnings.length ? "Warnings:\n" + warnings.join("\n") : undefined
                   });
                 } else {
+                  setDtdStatus('passed');
                   setValidationResult({
                     title: "🛡️ DTD Validation Passed",
                     type: "success",
@@ -518,11 +568,21 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
                 });
               }
             }}
-            className="px-2.5 py-0.5 rounded hover:bg-indigo-100 active:bg-indigo-200 transition-colors font-medium flex items-center gap-1 border border-indigo-300 shadow-sm bg-indigo-50 text-indigo-800"
+            className={cn(
+              "px-2.5 py-0.5 rounded transition-colors font-medium flex items-center gap-1 border shadow-sm",
+              dtdStatus === 'passed' 
+                ? "hover:bg-emerald-100 active:bg-emerald-200 border-emerald-300 bg-emerald-50 text-emerald-800"
+                : dtdStatus === 'error'
+                ? "hover:bg-red-100 active:bg-red-200 border-red-300 bg-red-50 text-red-800"
+                : "hover:bg-blue-100 active:bg-blue-200 border-blue-300 bg-blue-50 text-blue-800"
+            )}
             title="Validate document structure against BITS DTD schema"
           >
-            <span className="text-indigo-600 font-bold">📋</span> DTD Validate
+            <span className={dtdStatus === 'passed' ? "text-emerald-600 font-bold" : dtdStatus === 'error' ? "text-red-600 font-bold" : "text-blue-600 font-bold"}>
+              {dtdStatus === 'passed' ? '🛡️' : dtdStatus === 'error' ? '❌' : '🛡️'}
+            </span> DTD Validate
           </button>
+          )}
 
           <label
             className="flex items-center gap-1.5 cursor-pointer hover:text-gray-800 transition-colors font-medium text-[11px] select-none ml-2"
@@ -539,78 +599,100 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
         </div>
       </div>
 
-      {/* Validation Result Modal Overlay */}
-      {validationResult && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white border border-gray-300 rounded-xl shadow-2xl max-w-lg w-full p-5 text-gray-800 animate-in fade-in zoom-in duration-150">
-            <div className="flex items-center justify-between pb-3 border-b border-gray-200">
+      {/* Editor Body and Validation Panel Side-by-Side */}
+      <div className="flex-1 min-h-0 flex overflow-hidden relative">
+        <div className="flex-1 min-h-0 overflow-hidden relative">
+          {panelOpen && view && (
+            <FindReplacePanel
+              view={view}
+              showReplace={replaceMode}
+              onToggleReplace={() => setReplaceMode((m) => !m)}
+              onClose={() => setPanelOpen(false)}
+            />
+          )}
+          <CodeMirror
+            ref={cmRef}
+            value={value}
+            onChange={onChange}
+            extensions={extensions}
+            readOnly={readOnly}
+            height="100%"
+            style={{ height: '100%' }}
+            basicSetup={{
+              lineNumbers: true,
+              highlightActiveLine: true,
+              highlightActiveLineGutter: true,
+              foldGutter: true,
+              bracketMatching: true,
+              closeBrackets: true,
+              autocompletion: false,
+              highlightSelectionMatches: true,
+              // Disable the default search panel + keymap — we render our own.
+              searchKeymap: false,
+              history: true,
+            }}
+          />
+        </div>
+
+        {/* Validation Result Right Side Panel */}
+        {validationResult && (
+          <div className="w-80 bg-white border-l border-gray-300 shadow-xl z-50 flex flex-col flex-shrink-0 animate-in slide-in-from-right-4 duration-200">
+            <div className="flex items-center justify-between p-3 border-b border-gray-200 bg-gray-50">
               <h3 className="text-sm font-bold flex items-center gap-2">
                 {validationResult.title}
               </h3>
               <button
                 type="button"
                 onClick={() => setValidationResult(null)}
-                className="text-gray-400 hover:text-gray-700 p-1 rounded hover:bg-gray-100 transition-colors font-bold text-sm"
+                className="text-gray-400 hover:text-gray-700 p-1 rounded hover:bg-gray-200 transition-colors font-bold text-sm"
               >
                 ✕
               </button>
             </div>
-            <div className="py-4 text-xs font-mono space-y-2">
-              <div className={cn("p-3 rounded border text-xs leading-relaxed whitespace-pre-wrap font-sans font-medium", 
-                validationResult.type === "success" ? "bg-emerald-50 border-emerald-200 text-emerald-900" : "bg-red-50 border-red-200 text-red-900"
-              )}>
-                {validationResult.message}
-              </div>
+            <div className="p-3 overflow-y-auto flex-1 text-xs space-y-3">
+              {validationResult.message && (
+                <div className={cn("p-3 rounded border text-xs leading-relaxed whitespace-pre-wrap font-sans font-medium", 
+                  validationResult.type === "success" ? "bg-emerald-50 border-emerald-200 text-emerald-900" : "bg-red-50 border-red-200 text-red-900"
+                )}>
+                  {validationResult.message}
+                </div>
+              )}
+              
+              {validationResult.errorList && validationResult.errorList.length > 0 && (
+                <div className="space-y-2">
+                  {validationResult.errorList.map((err, i) => (
+                    <button
+                      key={i}
+                      onClick={() => {
+                        if (err.line > 0) {
+                          const view = cmRef.current?.view;
+                          if (view && err.line <= view.state.doc.lines) {
+                            const lineObj = view.state.doc.line(err.line);
+                            view.dispatch({
+                              effects: EditorView.scrollIntoView(lineObj.from, { y: 'center' }),
+                              selection: { anchor: lineObj.from }
+                            });
+                            view.focus();
+                          }
+                        }
+                      }}
+                      className="w-full text-left p-2 rounded bg-red-50 border border-red-100 hover:bg-red-100 hover:border-red-300 transition-colors flex items-start gap-2 group"
+                    >
+                      <span className="bg-red-200 text-red-800 text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap mt-0.5">Line {err.line}</span>
+                      <span className="text-red-900 leading-tight flex-1">{err.msg}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
               {validationResult.details && (
                 <div className="p-3 bg-gray-50 border border-gray-200 rounded text-gray-700 text-[11px] whitespace-pre-wrap font-mono">
                   {validationResult.details}
                 </div>
               )}
             </div>
-            <div className="flex justify-end pt-2 border-t border-gray-200">
-              <button
-                type="button"
-                onClick={() => setValidationResult(null)}
-                className="px-4 py-1 rounded bg-gray-800 hover:bg-gray-900 text-white font-medium text-xs shadow-sm transition-colors"
-              >
-                Close
-              </button>
-            </div>
           </div>
-        </div>
-      )}
-
-      {panelOpen && view && (
-        <FindReplacePanel
-          view={view}
-          showReplace={replaceMode}
-          onToggleReplace={() => setReplaceMode((m) => !m)}
-          onClose={() => setPanelOpen(false)}
-        />
-      )}
-      <div className="flex-1 min-h-0 overflow-hidden">
-        <CodeMirror
-          ref={cmRef}
-          value={value}
-          onChange={onChange}
-          extensions={extensions}
-          readOnly={readOnly}
-          height="100%"
-          style={{ height: '100%' }}
-          basicSetup={{
-            lineNumbers: true,
-            highlightActiveLine: true,
-            highlightActiveLineGutter: true,
-            foldGutter: true,
-            bracketMatching: true,
-            closeBrackets: true,
-            autocompletion: false,
-            highlightSelectionMatches: true,
-            // Disable the default search panel + keymap — we render our own.
-            searchKeymap: false,
-            history: true,
-          }}
-        />
+        )}
       </div>
     </div>
   );

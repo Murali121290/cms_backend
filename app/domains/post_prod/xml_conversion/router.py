@@ -1,0 +1,312 @@
+import os
+import shutil
+from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi.responses import FileResponse
+from lxml import etree
+from sqlalchemy.orm import Session
+from datetime import datetime
+
+from app import database
+from app.domains.auth.security import get_current_user_from_cookie
+from app.domains.auth.rbac_config import has_post_prod_access
+from app.core.config import get_settings
+from app.domains.post_prod.xml_conversion.models import PostProdXMLConversionProject, PostProdXMLConversionHistory
+from app.core.worker import run_xml_conversion_celery_task
+
+def check_post_prod_access(user=Depends(get_current_user_from_cookie)):
+    if not user or not has_post_prod_access(user):
+        raise HTTPException(status_code=403, detail="Access denied to Post Production / XML Conversion.")
+    return user
+
+router = APIRouter(prefix="/xml-conversion", tags=["XML Conversion"], dependencies=[Depends(check_post_prod_access)])
+
+@router.post("/projects")
+async def create_xml_conversion_project(
+    client_code: str = Form(...),
+    project_name: str = Form(...),
+    target_format: str = Form("JATS"),
+    file: UploadFile = File(...),
+    db: Session = Depends(database.get_db),
+    current_user: dict = Depends(get_current_user_from_cookie)
+):
+    """
+    Creates a new XML conversion project and uploads the source PDF file.
+    """
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported for XML conversion.")
+        
+    existing_project = db.query(PostProdXMLConversionProject).filter(PostProdXMLConversionProject.project_name == project_name).first()
+    if existing_project:
+        raise HTTPException(status_code=400, detail="Project name already exists. Please choose a different project name.")
+        
+    # Save uploaded file
+    settings = get_settings()
+    project_dir = os.path.join(settings.UPLOAD_FOLDER, "post_prod", "xml_conversion", client_code, project_name)
+    os.makedirs(project_dir, exist_ok=True)
+    
+    filepath = os.path.join(project_dir, file.filename)
+    with open(filepath, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    project = PostProdXMLConversionProject(
+        client_code=client_code,
+        project_name=project_name,
+        target_format=target_format,
+        status="Active",
+        filename=file.filename,
+        filepath=filepath,
+        conversion_status="YTS"
+    )
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+    
+    history = PostProdXMLConversionHistory(
+        project_id=project.id,
+        action="Project Created",
+        details={
+            "assigned_by": current_user.username if current_user else "System",
+            "file": file.filename,
+            "message": f"Project initialized with file {file.filename}"
+        }
+    )
+    db.add(history)
+    db.commit()
+    
+    return {"message": "Project created successfully", "project_id": project.id}
+
+@router.get("/projects")
+def list_projects(db: Session = Depends(database.get_db)):
+    projects = db.query(PostProdXMLConversionProject).all()
+    return projects
+
+@router.put("/projects/{project_id}")
+async def update_project(project_id: int, project_data: dict, db: Session = Depends(database.get_db), current_user: dict = Depends(get_current_user_from_cookie)):
+    """Update project fields (e.g., assignee)."""
+    project = db.query(PostProdXMLConversionProject).filter(PostProdXMLConversionProject.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    if "assignee" in project_data:
+        old_assignee = project.assignee
+        project.assignee = project_data["assignee"]
+        
+        # Change status to In-progress if it was YTS
+        if project.assignee and project.conversion_status == "YTS":
+            project.conversion_status = "In-progress"
+            
+        history = PostProdXMLConversionHistory(
+            project_id=project.id,
+            action="Assignee Changed",
+            details={
+                "user_id": current_user.id if current_user else None,
+                "assigned_by": current_user.username if current_user else "System",
+                "old_assignee": old_assignee,
+                "new_assignee": project.assignee,
+                "time": datetime.utcnow().isoformat()
+            }
+        )
+        db.add(history)
+        
+    db.commit()
+    return {"message": "Project updated successfully"}
+
+@router.post("/projects/{project_id}/convert")
+def trigger_conversion(project_id: int, db: Session = Depends(database.get_db), current_user: dict = Depends(get_current_user_from_cookie)):
+    """
+    Triggers the Celery background task to process the PDF -> XML conversion.
+    """
+    project = db.query(PostProdXMLConversionProject).filter(PostProdXMLConversionProject.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    project.conversion_status = "Pending"
+    
+    history = PostProdXMLConversionHistory(
+        project_id=project.id,
+        action="Conversion Started",
+        details={
+            "message": "XML Conversion background task triggered",
+            "triggered_by": current_user.username if current_user else "System"
+        }
+    )
+    db.add(history)
+    db.commit()
+    
+    run_xml_conversion_celery_task.delay(project.id)
+    return {"message": "Conversion started", "project_id": project.id}
+
+@router.get("/projects/{project_id}/download")
+def download_xml(project_id: int, db: Session = Depends(database.get_db)):
+    project = db.query(PostProdXMLConversionProject).filter(PostProdXMLConversionProject.id == project_id).first()
+    if not project or not project.result_filepath or not os.path.exists(project.result_filepath):
+        raise HTTPException(status_code=404, detail="Converted file not found")
+        
+    return FileResponse(project.result_filepath, filename=os.path.basename(project.result_filepath))
+
+@router.get("/projects/{project_id}/source-pdf")
+def get_source_pdf(project_id: int, db: Session = Depends(database.get_db)):
+    project = db.query(PostProdXMLConversionProject).filter(PostProdXMLConversionProject.id == project_id).first()
+    if not project or not project.filepath or not os.path.exists(project.filepath):
+        raise HTTPException(status_code=404, detail="Source PDF not found")
+    return FileResponse(project.filepath, media_type="application/pdf")
+
+@router.post("/projects/{project_id}/s4c-convert")
+def s4c_convert(project_id: int, db: Session = Depends(database.get_db)):
+    project = db.query(PostProdXMLConversionProject).filter(PostProdXMLConversionProject.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    # Mocking S4C XML for UI demonstration
+    xml_content = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<s4c_xml>\n  <title>S4C Intermediate XML</title>\n  <content>This is the extracted content from PDF.</content>\n</s4c_xml>"
+    
+    out_dir = os.path.dirname(project.filepath)
+    base_name = os.path.splitext(os.path.basename(project.filepath))[0]
+    s4c_filepath = os.path.join(out_dir, f"{base_name}_s4c.xml")
+    
+    with open(s4c_filepath, "w", encoding="utf-8") as f:
+        f.write(xml_content)
+        
+    project.s4c_xml_status = "Completed"
+    if project.conversion_status == "YTS":
+        project.conversion_status = "In-progress"
+    db.commit()
+    
+    return {"xml": xml_content, "s4c_filepath": s4c_filepath}
+
+@router.post("/projects/{project_id}/target-convert")
+def target_convert(project_id: int, db: Session = Depends(database.get_db)):
+    project = db.query(PostProdXMLConversionProject).filter(PostProdXMLConversionProject.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    # Mocking Target XML for UI demonstration
+    xml_content = f"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<{project.target_format.lower()}>\n  <article-title>Target Format ({project.target_format})</article-title>\n  <body>\n    <p>This is the final converted target XML.</p>\n  </body>\n</{project.target_format.lower()}>"
+    
+    out_dir = os.path.dirname(project.filepath)
+    base_name = os.path.splitext(os.path.basename(project.filepath))[0]
+    final_filepath = os.path.join(out_dir, f"{base_name}_final.xml")
+    
+    with open(final_filepath, "w", encoding="utf-8") as f:
+        f.write(xml_content)
+        
+    project.final_xml_status = "Completed"
+    project.result_filepath = final_filepath
+    db.commit()
+    
+    return {"xml": xml_content, "final_filepath": final_filepath}
+
+from app.domains.post_prod.xml_conversion.validators.dtd_validator import validate_xml
+
+@router.post("/projects/{project_id}/validate")
+def run_dtd_validation(project_id: int, db: Session = Depends(database.get_db)):
+    project = db.query(PostProdXMLConversionProject).filter(PostProdXMLConversionProject.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    final_filepath = project.result_filepath
+    if not final_filepath or not os.path.exists(final_filepath):
+        # Fallback to reconstructing the path
+        out_dir = os.path.dirname(project.filepath) if project.filepath else ""
+        if out_dir:
+            base_name = os.path.splitext(os.path.basename(project.filepath))[0]
+            final_filepath = os.path.join(out_dir, f"{base_name}_final.xml")
+            
+    if not final_filepath or not os.path.exists(final_filepath):
+        raise HTTPException(status_code=400, detail="Final XML file not found. Save the XML first.")
+        
+    format_name = project.target_format or "JATS"
+    errors = validate_xml(final_filepath, format=format_name)
+    return {"errors": errors}
+
+@router.get("/projects/{project_id}/xml")
+def get_xml_content(project_id: int, db: Session = Depends(database.get_db)):
+    project = db.query(PostProdXMLConversionProject).filter(PostProdXMLConversionProject.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    # Check if final exists first
+    out_dir = os.path.dirname(project.filepath) if project.filepath else ""
+    if out_dir:
+        base_name = os.path.splitext(os.path.basename(project.filepath))[0]
+        final_filepath = os.path.join(out_dir, f"{base_name}_final.xml")
+        s4c_filepath = os.path.join(out_dir, f"{base_name}_s4c.xml")
+        
+        if os.path.exists(final_filepath):
+            with open(final_filepath, "r", encoding="utf-8") as f:
+                return {"xml": f.read()}
+        elif os.path.exists(s4c_filepath):
+            with open(s4c_filepath, "r", encoding="utf-8") as f:
+                return {"xml": f.read()}
+                
+    return {"xml": ""}
+
+class XMLUpdateRequest(BaseModel):
+    xml: str
+
+@router.post("/projects/{project_id}/xml")
+def save_xml_content(project_id: int, request: XMLUpdateRequest, db: Session = Depends(database.get_db)):
+    project = db.query(PostProdXMLConversionProject).filter(PostProdXMLConversionProject.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    out_dir = os.path.dirname(project.filepath) if project.filepath else ""
+    if not out_dir:
+        raise HTTPException(status_code=400, detail="Invalid project path")
+        
+    base_name = os.path.splitext(os.path.basename(project.filepath))[0]
+    final_filepath = os.path.join(out_dir, f"{base_name}_final.xml")
+    
+    with open(final_filepath, "w", encoding="utf-8") as f:
+        f.write(request.xml)
+        
+    project.result_filepath = final_filepath
+    db.commit()
+    return {"message": "XML saved successfully"}
+
+@router.get("/projects/{project_id}/html")
+def get_html_preview(project_id: int, db: Session = Depends(database.get_db)):
+    project = db.query(PostProdXMLConversionProject).filter(PostProdXMLConversionProject.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    out_dir = os.path.dirname(project.filepath) if project.filepath else ""
+    if out_dir:
+        base_name = os.path.splitext(os.path.basename(project.filepath))[0]
+        final_filepath = os.path.join(out_dir, f"{base_name}_final.xml")
+        
+        if os.path.exists(final_filepath):
+            try:
+                import re
+                from saxonche import PySaxonProcessor
+                xslt_path = os.path.join(os.path.dirname(__file__), "xml_preview.xsl")
+                
+                # Strip DOCTYPE to bypass JAXP entity expansion limits
+                with open(final_filepath, "r", encoding="utf-8") as f:
+                    xml_data = f.read()
+                xml_data_no_dtd = re.sub(r"<!DOCTYPE[^>]+>", "", xml_data, flags=re.IGNORECASE)
+                
+                with PySaxonProcessor(license=False) as proc:
+                    xsltproc = proc.new_xslt30_processor()
+                    executable = xsltproc.compile_stylesheet(stylesheet_file=xslt_path)
+                    
+                    # Create an XDM node directly from string to avoid writing temp file
+                    builder = proc.new_document_builder()
+                    xdm_node = builder.parse_xml(xml_text=xml_data_no_dtd)
+                    html_str = str(executable.transform_to_string(xdm_node=xdm_node))
+                    
+                    # Inline CSS
+                    css_path = os.path.join(os.path.dirname(__file__), "preview.css")
+                    if os.path.exists(css_path):
+                        with open(css_path, "r") as css_f:
+                            css_content = css_f.read()
+                        
+                        import re
+                        html_str = re.sub(r'<link[^>]*href=["\']?preview\.css["\']?[^>]*>', f'<style>{css_content}</style>', html_str)
+                    
+                return {"html": html_str}
+            except Exception as e:
+                return {"html": f"<div style='color:red; padding: 20px;'>Error generating preview: {str(e)}</div>"}
+                
+    return {"html": "<div style='color:gray; padding: 20px;'>No final XML available for preview.</div>"}

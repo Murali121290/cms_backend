@@ -42,5 +42,12 @@ export const POST_PROD_SERVICES: PostProdService[] = [
     description: 'Upload ZIP packages, run comprehensive XHTML checks, edit markup/CSS in the browser, check PDF parity, and export clean EPUBs.',
     icon: 'FileCheck',
     enabled: true,
+  },
+  {
+    id: 'xml-conversion',
+    title: 'XML Conversion',
+    description: 'Upload PDFs and convert them into structured JATS or BITS XML formats with DTD validation.',
+    icon: 'FileText',
+    enabled: true,
   }
 ];

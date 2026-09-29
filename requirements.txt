@@ -36,3 +36,4 @@ pdfminer.six
 Pillow
 python-pptx
 langdetect
+saxonche
