@@ -35,7 +35,8 @@ def get_peoplehub_engine():
                 engine = create_engine(
                     candidate_url,
                     pool_pre_ping=True,
-                    execution_options={"read_only": True}
+                    execution_options={"read_only": True},
+                    connect_args={"connect_timeout": 3}
                 )
                 with engine.connect() as conn:
                     pass
@@ -49,7 +50,8 @@ def get_peoplehub_engine():
         _peoplehub_engine = create_engine(
             candidates[0],
             pool_pre_ping=True,
-            execution_options={"read_only": True}
+            execution_options={"read_only": True},
+            connect_args={"connect_timeout": 3}
         )
     return _peoplehub_engine
 

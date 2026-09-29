@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Users, BarChart3,
-  Settings, ChevronLeft, ChevronRight, Layers, Briefcase, LogOut, Loader2
+  Settings, ChevronLeft, ChevronRight, Layers, Briefcase, LogOut, Loader2, BookOpen
 } from 'lucide-react'
 import { useSidebarStore } from '@/store/useSidebarStore'
 import { useAuthStore } from '@/store/useAuthStore'
@@ -22,7 +22,7 @@ export function Sidebar() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { clearAuth, isLoggingOut, setLoggingOut } = useAuthStore()
-  
+
   const [logoError, setLogoError] = useState(false)
   const [popoverOpen, setPopoverOpen] = useState(false)
   const popoverRef = useRef<HTMLDivElement>(null)
@@ -71,23 +71,40 @@ export function Sidebar() {
     Boolean(viewer?.role && String(viewer.role).toLowerCase().includes('accessibility')) ||
     Boolean(viewer?.roles && viewer.roles.some((r: any) => String(typeof r === 'string' ? r : r.name).toLowerCase().includes('accessibility')))
 
+  const isCustomerUser =
+    viewer?.team === 'Customer Team' ||
+    Boolean((viewer as any)?.role && String((viewer as any).role).toLowerCase().includes('customer')) ||
+    Boolean(viewer?.roles && (viewer.roles as any[]).some((r: any) => String(typeof r === 'string' ? r : r.name).toLowerCase().includes('customer')))
+
+  const hasBodCustomerAccess = Boolean(
+    (viewer as any)?.customer_access && 
+    Array.isArray((viewer as any).customer_access) && 
+    (viewer as any).customer_access.includes('BOD')
+  )
+
   const navItems = [
-    ...(!isAccessibilityUser
+    ...(!isAccessibilityUser && !isCustomerUser
       ? [{ to: '/', icon: LayoutDashboard, label: 'Dashboard' }]
       : []),
-    ...(!isAccessibilityUser
+    ...(!isAccessibilityUser && !isCustomerUser
       ? [{ to: '/workspace', icon: Briefcase, label: 'My Workspace' }]
       : []),
-    ...(!isAccessibilityUser
-      ? [{ to: '/clients', icon: Users, label: 'Clients' }]
+    ...(!isAccessibilityUser && !isCustomerUser
+      ? [{ to: '/clients', icon: Users, label: 'Clients' },
+      { to: '/reports', icon: BarChart3, label: 'Reports' }
+      ]
       : []),
-    ...((canAccess(ROLE_PERMISSIONS.access_post_production) || isAccessibilityUser)
+
+    ...((canAccess(ROLE_PERMISSIONS.access_post_production) || isAccessibilityUser || !isCustomerUser)
       ? [{ to: '/post-production', icon: Layers, label: 'Backlist' }]
       : []),
-    ...(!isAccessibilityUser
-      ? [{ to: '/reports', icon: BarChart3, label: 'Reports' }]
+    ...((canAccess(ROLE_PERMISSIONS.access_post_production) || isAccessibilityUser || (isCustomerUser && hasBodCustomerAccess))
+      ? [
+        // { to: '/bod/internal', icon: BookOpen, label: 'Books on Demand' },
+        { to: '/bod/report', icon: BookOpen, label: 'BOD Report' },
+      ]
       : []),
-    ...(canAccess(ROLE_PERMISSIONS.access_settings) && !isAccessibilityUser
+    ...(canAccess(ROLE_PERMISSIONS.access_settings) && !isAccessibilityUser && !isCustomerUser
       ? [{ to: '/settings', icon: Settings, label: 'Settings' }]
       : []),
   ]
@@ -103,19 +120,19 @@ export function Sidebar() {
         collapsed ? 'justify-center' : 'gap-2'
       )}>
         {collapsed ? (
-          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center flex-shrink-0 text-sidebar font-bold text-[14px] font-serif">
+          <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center flex-shrink-0 text-primary font-bold text-[14px] font-serif">
             S4C
           </div>
         ) : !logoError ? (
           <img
             src="/logo.png"
             alt="S4Carlisle"
-            className="h-10 w-auto object-contain"
+            className="w-full h-auto max-h-12 object-contain bg-white py-1.5 px-3 rounded-lg"
             onError={() => setLogoError(true)}
           />
         ) : (
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center flex-shrink-0 text-sidebar font-bold text-[14px] font-serif">
+            <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center flex-shrink-0 text-primary font-bold text-[14px] font-serif">
               S4C
             </div>
             <div className="leading-tight">
@@ -170,7 +187,7 @@ export function Sidebar() {
 
       {/* Footer — User profile card & Sign out */}
       <div className="px-2 py-3 border-t border-white/5 space-y-2 relative" ref={popoverRef}>
-        
+
         {/* Popover Menu (when avatar card clicked) */}
         {popoverOpen && (
           <div className={cn(
