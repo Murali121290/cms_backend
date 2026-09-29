@@ -86,6 +86,9 @@ from app.domains.journals.router import router as journals_router
 app.include_router(journals_router, prefix="/api/v2", tags=["Journal Production"])
 app.include_router(journals_router, prefix="/api", tags=["Journal Production"])
 app.include_router(journals_router, prefix="/api/v2/api", tags=["Journal Production"])
+# Books on Demand Router
+from app.domains.books_on_demand.router import router as bod_router
+app.include_router(bod_router, prefix="/api/v2/bod", tags=["Books on Demand"])
 
 @app.get("/")
 def read_root():
