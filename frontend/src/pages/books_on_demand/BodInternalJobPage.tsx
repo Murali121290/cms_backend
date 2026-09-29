@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Download, Upload, ArrowRight, User, CheckCircle2, Clock, Layers } from 'lucide-react'
+import { ArrowLeft, Download, Upload, ArrowRight, User, CheckCircle2, Clock, Layers, Calendar } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useRBAC } from '@/hooks/useRBAC'
 import { usersApi } from '@/api/users'
@@ -20,7 +20,7 @@ export function BodInternalJobPage() {
   const [loading, setLoading] = useState(true)
   const [isAdvancing, setIsAdvancing] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
-  const [activeTab, setActiveTab] = useState<'stage' | 'assignment'>('stage')
+  const [activeTab, setActiveTab] = useState<'stage' | 'assignment' | 'duedate'>('stage')
 
   const formatDateTime = (dateStr: string | null) => {
     if (!dateStr) return ''
@@ -233,8 +233,10 @@ export function BodInternalJobPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Files Panel */}
-        <div className="bg-card border border-border rounded-xl p-5 shadow-sm space-y-4">
-          <h3 className="text-sm font-bold border-b border-border pb-2">Files</h3>
+        <div className="bg-card border border-border rounded-xl p-5 shadow-sm flex flex-col h-[500px]">
+          <h3 className="text-sm font-bold border-b border-border pb-2 shrink-0">Files</h3>
+
+          <div className="space-y-4 flex-1 overflow-y-auto pt-4 pr-1">
 
           <div className="bg-background border border-border rounded-lg p-3 flex items-center justify-between">
             <div className="min-w-0">
@@ -257,11 +259,12 @@ export function BodInternalJobPage() {
               </Button>
             </div>
           )}
+          </div>
         </div>
 
         {/* Combined History Panel */}
-        <div className="bg-card border border-border rounded-xl p-5 shadow-sm lg:col-span-1">
-          <div className="flex items-center gap-4 border-b border-border mb-4">
+        <div className="bg-card border border-border rounded-xl p-5 shadow-sm lg:col-span-1 flex flex-col h-[500px]">
+          <div className="flex items-center gap-4 border-b border-border mb-4 shrink-0 overflow-x-auto hide-scrollbar">
             <button
               onClick={() => setActiveTab('stage')}
               className={`pb-2 text-sm font-bold transition-colors border-b-2 ${
@@ -280,9 +283,20 @@ export function BodInternalJobPage() {
                 Assignment History
               </button>
             )}
+            {job.due_date_history && Array.isArray(job.due_date_history) && job.due_date_history.length > 0 && (
+              <button
+                onClick={() => setActiveTab('duedate')}
+                className={`pb-2 text-sm font-bold transition-colors border-b-2 ${
+                  activeTab === 'duedate' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                }`}
+              >
+                Due Date History
+              </button>
+            )}
           </div>
 
-          {activeTab === 'stage' && (
+          <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+            {activeTab === 'stage' && (
             <div className="space-y-4">
               {Object.keys(job.stage_history || {}).map((stageName, idx) => {
                 const data = job.stage_history[stageName]
@@ -351,6 +365,29 @@ export function BodInternalJobPage() {
               ))}
             </div>
           )}
+
+          {activeTab === 'duedate' && job.due_date_history && Array.isArray(job.due_date_history) && job.due_date_history.length > 0 && (
+            <div className="space-y-3">
+              {job.due_date_history.map((historyItem: any, idx: number) => (
+                <div key={idx} className="flex items-start justify-between bg-background border border-border rounded-lg p-3 gap-4">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 bg-primary/10 text-primary rounded-lg shrink-0 mt-0.5">
+                      <Calendar size={14} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-text m-0">Changed Due Date to: {new Date(historyItem.date).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium' })}</p>
+                      <p className="text-xs text-text/80 mt-1 mb-0 break-words">Reason: {historyItem.reason}</p>
+                      <p className="text-[10px] text-muted m-0 mt-1">Changed By: {historyItem.changed_by}</p>
+                    </div>
+                  </div>
+                  <div className="text-xs text-muted font-medium shrink-0 pt-1 text-right">
+                    {formatDateTime(historyItem.timestamp)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          </div>
         </div>
       </div>
     </div>

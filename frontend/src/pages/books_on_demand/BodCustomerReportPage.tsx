@@ -123,10 +123,18 @@ export function BodCustomerReportPage() {
   let qcCompleted = 0
   let qcInProgress = 0
   let overallCompleted = 0
+  let overallInProgress = 0
+  let overallOverdue = 0
+  let overallYts = 0
 
   filteredReport.forEach(job => {
     const { finalStatus, prodStatus, qcStatus } = getJobStatuses(job)
+
     if (finalStatus === 'Completed') overallCompleted++
+    else if (finalStatus === 'In-progress') overallInProgress++
+    else if (finalStatus === 'Overdue') overallOverdue++
+    else if (finalStatus === 'YTS') overallYts++
+
     if (prodStatus === 'Completed') prodCompleted++
     else if (prodStatus === 'In-progress') prodInProgress++
     else if (prodStatus === 'YTS') prodPending++
@@ -304,126 +312,6 @@ export function BodCustomerReportPage() {
           </div>
         </div>
 
-        {/* Metrics Row */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-          <div className="bg-card border border-border/70 rounded-xl p-4 flex flex-col justify-center gap-1 shadow-sm">
-            <span className="text-[11px] text-muted font-bold uppercase tracking-wider flex items-center gap-1.5"><Layers size={14} className="text-primary" /> Total Books</span>
-            <span className="text-2xl font-bold text-text">{totalJobs}</span>
-          </div>
-
-          <div className="bg-card border border-border/70 rounded-xl p-4 flex flex-col justify-center gap-2 shadow-sm">
-            <span className="text-[11px] text-muted font-bold uppercase tracking-wider flex items-center gap-1.5"><Clock size={14} className="text-muted-foreground" /> Yet to start</span>
-            <div className="flex flex-col">
-              <span className="text-2xl font-bold text-text leading-tight">{prodPending}</span>
-            </div>
-          </div>
-
-          <div className="bg-card border border-border/70 rounded-xl p-4 flex flex-col justify-center gap-2 shadow-sm">
-            <span className="text-[11px] text-muted font-bold uppercase tracking-wider flex items-center gap-1.5"><Clock size={14} className="text-amber-500" /> Production</span>
-            <div className="flex gap-4">
-              <div className="flex flex-col">
-                <span className="text-lg font-bold text-emerald-500 leading-tight">{prodCompleted}</span>
-                <span className="text-[10px] text-muted uppercase">Completed</span>
-              </div>
-              <div className="flex flex-col">
-                <span className="text-lg font-bold text-amber-500 leading-tight">{prodInProgress}</span>
-                <span className="text-[10px] text-muted uppercase">In-Progress</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-card border border-border/70 rounded-xl p-4 flex flex-col justify-center gap-2 shadow-sm">
-            <span className="text-[11px] text-muted font-bold uppercase tracking-wider flex items-center gap-1.5"><CheckCircle2 size={14} className="text-blue-500" /> Quality Control</span>
-            <div className="flex gap-4">
-              <div className="flex flex-col">
-                <span className="text-lg font-bold text-emerald-500 leading-tight">{qcCompleted}</span>
-                <span className="text-[10px] text-muted uppercase">Completed</span>
-              </div>
-              <div className="flex flex-col">
-                <span className="text-lg font-bold text-amber-500 leading-tight">{qcInProgress}</span>
-                <span className="text-[10px] text-muted uppercase">In-Progress</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-card border border-border/70 rounded-xl p-4 flex flex-col justify-center gap-2 shadow-sm">
-            <span className="text-[11px] text-muted font-bold uppercase tracking-wider flex items-center gap-1.5"><RefreshCw size={14} className="text-primary" /> Overall Final</span>
-            <div className="flex items-end justify-between">
-              <div className="flex flex-col">
-                <span className="text-lg font-bold text-emerald-500 leading-tight">{overallCompleted}</span>
-                <span className="text-[10px] text-muted uppercase">Completed</span>
-              </div>
-              <div className="flex flex-col items-end">
-                <span className="text-2xl font-bold text-text leading-none">{completionPercentage}%</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Chart Section */}
-        {chartData.length > 0 && (
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mt-6">
-            {/* Chart 1: Inflow vs Completed (Area) */}
-            <div className="bg-card border border-border/70 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
-              <div className="mb-6">
-                <h3 className="text-lg font-bold font-serif text-text">Production Flow</h3>
-                <p className="text-xs text-muted mt-1">Comparison of new jobs arriving vs jobs being completed.</p>
-              </div>
-              <div className="h-[280px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="colorInflow" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                      </linearGradient>
-                      <linearGradient id="colorCompleted" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="text-border/40" />
-                    <XAxis dataKey="date" stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} dy={10} />
-                    <YAxis stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} allowDecimals={false} />
-                    <Tooltip
-                      contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', color: 'hsl(var(--text))', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
-                      itemStyle={{ fontWeight: 600 }}
-                    />
-                    <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }} iconType="circle" />
-                    <Area type="monotone" dataKey="inflow" name="Inflow" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorInflow)" />
-                    <Area type="monotone" dataKey="completed" name="Delivered" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorCompleted)" />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            {/* Chart 2: Due vs Delays (Bar) */}
-            <div className="bg-card border border-border/70 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
-              <div className="mb-6">
-                <h3 className="text-lg font-bold font-serif text-text">Deadlines & Delays</h3>
-                <p className="text-xs text-muted mt-1">Jobs due on a given date vs jobs that were delayed.</p>
-              </div>
-              <div className="h-[280px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="text-border/40" />
-                    <XAxis dataKey="date" stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} dy={10} />
-                    <YAxis stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} allowDecimals={false} />
-                    <Tooltip
-                      cursor={{ fill: 'hsl(var(--accent))', opacity: 0.4 }}
-                      contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', color: 'hsl(var(--text))', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
-                      itemStyle={{ fontWeight: 600 }}
-                    />
-                    <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }} iconType="circle" />
-                    <Bar dataKey="due" name="Total Due" fill="#f59e0b" radius={[6, 6, 6, 6]} barSize={24} />
-                    <Bar dataKey="delay" name="Due but not delivered" fill="#ef4444" radius={[6, 6, 6, 6]} barSize={24} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Action Bar */}
         <div className="flex items-center gap-2 lg:gap-4 bg-card/50 border border-border/50 p-3 rounded-xl backdrop-blur-md overflow-x-auto hide-scrollbar">
           {/* Search */}
@@ -515,6 +403,132 @@ export function BodCustomerReportPage() {
           </div>
         </div>
 
+        {/* Metrics Row */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-card border border-border/70 rounded-xl p-4 flex flex-col justify-center gap-1 shadow-sm">
+            <span className="text-[11px] text-muted font-bold uppercase tracking-wider flex items-center gap-1.5"><Layers size={14} className="text-primary" /> Total Books</span>
+            <span className="text-2xl font-bold text-text">{totalJobs}</span>
+          </div>
+
+          <div className="bg-card border border-border/70 rounded-xl p-4 flex flex-col justify-center gap-2 shadow-sm">
+            <span className="text-[11px] text-muted font-bold uppercase tracking-wider flex items-center gap-1.5"><Clock size={14} className="text-amber-500" /> Production</span>
+            <div className="flex gap-4">
+              <div className="flex flex-col">
+                <span className="text-lg font-bold text-emerald-500 leading-tight">{prodCompleted}</span>
+                <span className="text-[10px] text-muted uppercase">Completed</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-lg font-bold text-amber-500 leading-tight">{prodInProgress}</span>
+                <span className="text-[10px] text-muted uppercase">In-Progress</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-card border border-border/70 rounded-xl p-4 flex flex-col justify-center gap-2 shadow-sm">
+            <span className="text-[11px] text-muted font-bold uppercase tracking-wider flex items-center gap-1.5"><CheckCircle2 size={14} className="text-blue-500" /> Quality Control</span>
+            <div className="flex gap-4">
+              <div className="flex flex-col">
+                <span className="text-lg font-bold text-emerald-500 leading-tight">{qcCompleted}</span>
+                <span className="text-[10px] text-muted uppercase">Completed</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-lg font-bold text-amber-500 leading-tight">{qcInProgress}</span>
+                <span className="text-[10px] text-muted uppercase">In-Progress</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-card border border-border/70 rounded-xl p-4 flex flex-col justify-center gap-2 shadow-sm">
+            <div className="flex justify-between items-start">
+              <span className="text-[11px] text-muted font-bold uppercase tracking-wider flex items-center gap-1.5"><RefreshCw size={14} className="text-primary" /> Overall Final</span>
+              <span className="text-xl font-bold text-text leading-none">{completionPercentage}%</span>
+            </div>
+            <div className="flex gap-4">
+              <div className="flex flex-col">
+                <span className="text-lg font-bold text-muted-foreground leading-tight">{overallYts}</span>
+                <span className="text-[10px] text-muted uppercase">YTS</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-lg font-bold text-amber-500 leading-tight">{overallInProgress}</span>
+                <span className="text-[10px] text-muted uppercase">In-Progress</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-lg font-bold text-red-500 leading-tight">{overallOverdue}</span>
+                <span className="text-[10px] text-muted uppercase">Overdue</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-lg font-bold text-emerald-500 leading-tight">{overallCompleted}</span>
+                <span className="text-[10px] text-muted uppercase">Completed</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Chart Section */}
+        {chartData.length > 0 && (
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mt-6">
+            {/* Chart 1: Inflow vs Completed (Area) */}
+            <div className="bg-card border border-border/70 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
+              <div className="mb-6">
+                <h3 className="text-lg font-bold font-serif text-text">Production Flow</h3>
+                <p className="text-xs text-muted mt-1">Comparison of new jobs arriving vs jobs being completed.</p>
+              </div>
+              <div className="h-[280px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="colorInflow" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="colorCompleted" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="text-border/40" />
+                    <XAxis dataKey="date" stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} dy={10} />
+                    <YAxis stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} allowDecimals={false} />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', color: 'hsl(var(--text))', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
+                      itemStyle={{ fontWeight: 600 }}
+                    />
+                    <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }} iconType="circle" />
+                    <Area type="monotone" dataKey="inflow" name="Inflow" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorInflow)" />
+                    <Area type="monotone" dataKey="completed" name="Delivered" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorCompleted)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Chart 2: Due vs Delays (Bar) */}
+            <div className="bg-card border border-border/70 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
+              <div className="mb-6">
+                <h3 className="text-lg font-bold font-serif text-text">Deadlines & Delays</h3>
+                <p className="text-xs text-muted mt-1">Jobs due on a given date vs jobs that were delayed.</p>
+              </div>
+              <div className="h-[280px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="text-border/40" />
+                    <XAxis dataKey="date" stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} dy={10} />
+                    <YAxis stroke="currentColor" className="text-muted text-xs" tickLine={false} axisLine={false} allowDecimals={false} />
+                    <Tooltip
+                      cursor={{ fill: 'hsl(var(--accent))', opacity: 0.4 }}
+                      contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '12px', color: 'hsl(var(--text))', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
+                      itemStyle={{ fontWeight: 600 }}
+                    />
+                    <Legend wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }} iconType="circle" />
+                    <Bar dataKey="due" name="Total Due" fill="#f59e0b" radius={[6, 6, 6, 6]} barSize={24} />
+                    <Bar dataKey="delay" name="Due but not delivered" fill="#ef4444" radius={[6, 6, 6, 6]} barSize={24} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
+        )}
+
+
         {/* Data Table */}
         <Card className="overflow-hidden border-border/50 shadow-sm bg-card/80 backdrop-blur-xl">
           <div className="overflow-auto max-h-[calc(100vh-350px)] min-h-[400px]">
@@ -564,7 +578,7 @@ export function BodCustomerReportPage() {
                     return (
                       <tr key={job.id} className="hover:bg-muted/5 transition-colors group">
                         <td className="px-2 py-3">
-                          <div className="font-medium text-text truncate max-w-[150px]" title={job.pdf_filename}>
+                          <div className="font-medium text-text break-all whitespace-normal max-w-[180px]" title={job.pdf_filename}>
                             {job.pdf_filename}
                           </div>
                           <div className="text-[10px] text-muted mt-0.5 flex items-center gap-1.5 truncate max-w-[150px]">
@@ -572,13 +586,13 @@ export function BodCustomerReportPage() {
                             {job.client_name}
                           </div>
                           {job.epub_filename && (
-                            <div className="flex items-center gap-1.5 mt-2 bg-emerald-500/5 py-1 px-2 rounded-md w-fit border border-emerald-500/10">
-                              <div className="text-[10px] text-emerald-600 font-medium truncate max-w-[120px]">
+                            <div className="flex items-start gap-1.5 mt-2 bg-emerald-500/5 py-1 px-2 rounded-md w-fit border border-emerald-500/10 max-w-[180px]">
+                              <div className="text-[10px] text-emerald-600 font-medium break-all whitespace-normal flex-1">
                                 {job.epub_filename}
                               </div>
                               <button
                                 onClick={(e) => handleDownloadEpub(e, job.id, job.epub_filename)}
-                                className="text-emerald-500 hover:text-emerald-600 transition-colors p-0.5 rounded-full hover:bg-emerald-500/20"
+                                className="text-emerald-500 hover:text-emerald-600 transition-colors p-0.5 rounded-full hover:bg-emerald-500/20 shrink-0 mt-0.5"
                                 title="Download EPUB"
                               >
                                 <Download size={12} />

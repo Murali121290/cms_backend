@@ -89,7 +89,7 @@ export function Sidebar() {
       : []),
     ...((canAccess(ROLE_PERMISSIONS.access_post_production) || isAccessibilityUser)
       ? [
-        // { to: '/bod/internal', icon: BookOpen, label: 'Book on Demand' },
+        // { to: '/bod/internal', icon: BookOpen, label: 'Books on Demand' },
         { to: '/bod/report', icon: BookOpen, label: 'BOD Report' },
       ]
       : []),
@@ -109,19 +109,19 @@ export function Sidebar() {
         collapsed ? 'justify-center' : 'gap-2'
       )}>
         {collapsed ? (
-          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center flex-shrink-0 text-sidebar font-bold text-[14px] font-serif">
+          <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center flex-shrink-0 text-primary font-bold text-[14px] font-serif">
             S4C
           </div>
         ) : !logoError ? (
           <img
             src="/logo.png"
             alt="S4Carlisle"
-            className="h-10 w-auto object-contain"
+            className="w-full h-auto max-h-12 object-contain bg-white py-1.5 px-3 rounded-lg"
             onError={() => setLogoError(true)}
           />
         ) : (
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center flex-shrink-0 text-sidebar font-bold text-[14px] font-serif">
+            <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center flex-shrink-0 text-primary font-bold text-[14px] font-serif">
               S4C
             </div>
             <div className="leading-tight">

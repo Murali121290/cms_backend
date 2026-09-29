@@ -38,11 +38,11 @@ def send_email(to_email: str, subject: str, text_body: str, html_body: str = Non
 
 
 def send_bod_new_job_email(manager_email: str, project_name: str, pdf_filename: str):
-    subject = f"Action Required: New Book on Demand Project [{project_name}]"
+    subject = f"Action Required: New Books on Demand Project [{project_name}]"
     
     text_body = f"""Hello,
 
-A new Book on Demand project has been successfully ingested into the system and requires assignment.
+A new Books on Demand project has been successfully ingested into the system and requires assignment.
 
 Project Details:
 - Project Name: {project_name}
@@ -59,7 +59,7 @@ S4Carlisle Inkflow Automated System
       <body style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; max-width: 600px; margin: 0 auto; padding: 20px;">
         <h2 style="color: #2c3e50;">New Project Assignment Required</h2>
         <p>Hello,</p>
-        <p>A new Book on Demand project has been successfully ingested into the system and requires assignment.</p>
+        <p>A new Books on Demand project has been successfully ingested into the system and requires assignment.</p>
         
         <div style="background-color: #f8f9fa; border-left: 4px solid #0056b3; padding: 15px; margin: 20px 0;">
             <p style="margin: 0 0 10px 0;"><strong>Project Name:</strong> {project_name}</p>
@@ -77,11 +77,11 @@ S4Carlisle Inkflow Automated System
 
 
 def send_bod_qc_ready_email(manager_email: str, project_name: str, epub_filename: str):
-    subject = f"Action Required: Book on Demand Project Ready for QC [{project_name}]"
+    subject = f"Action Required: Books on Demand Project Ready for QC [{project_name}]"
     
     text_body = f"""Hello,
 
-The Production stage for the following Book on Demand project has been completed. The generated EPUB is now ready for Quality Control (QC).
+The Production stage for the following Books on Demand project has been completed. The generated EPUB is now ready for Quality Control (QC).
 
 Project Details:
 - Project Name: {project_name}
@@ -98,7 +98,7 @@ S4Carlisle Inkflow Automated System
       <body style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; max-width: 600px; margin: 0 auto; padding: 20px;">
         <h2 style="color: #2c3e50;">Project Ready for QC</h2>
         <p>Hello,</p>
-        <p>The Production stage for the following Book on Demand project has been completed. The generated EPUB is now ready for Quality Control (QC).</p>
+        <p>The Production stage for the following Books on Demand project has been completed. The generated EPUB is now ready for Quality Control (QC).</p>
         
         <div style="background-color: #f8f9fa; border-left: 4px solid #28a745; padding: 15px; margin: 20px 0;">
             <p style="margin: 0 0 10px 0;"><strong>Project Name:</strong> {project_name}</p>
@@ -116,11 +116,11 @@ S4Carlisle Inkflow Automated System
 
 
 def send_bod_job_completed_email(manager_email: str, project_name: str, epub_filename: str):
-    subject = f"Book on Demand Project Completed [{project_name}]"
+    subject = f"Books on Demand Project Completed [{project_name}]"
     
     text_body = f"""Hello,
 
-The Book on Demand project has successfully passed Quality Control (QC) and is now marked as Completed (Archived). The final EPUB has been scheduled for FTP delivery.
+The Books on Demand project has successfully passed Quality Control (QC) and is now marked as Completed (Archived). The final EPUB has been scheduled for FTP delivery.
 
 Project Details:
 - Project Name: {project_name}
@@ -137,7 +137,7 @@ S4Carlisle Inkflow Automated System
       <body style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; max-width: 600px; margin: 0 auto; padding: 20px;">
         <h2 style="color: #2c3e50;">Project Completed</h2>
         <p>Hello,</p>
-        <p>The Book on Demand project has successfully passed Quality Control (QC) and is now marked as Completed (Archived). The final EPUB has been scheduled for FTP delivery.</p>
+        <p>The Books on Demand project has successfully passed Quality Control (QC) and is now marked as Completed (Archived). The final EPUB has been scheduled for FTP delivery.</p>
         
         <div style="background-color: #f8f9fa; border-left: 4px solid #17a2b8; padding: 15px; margin: 20px 0;">
             <p style="margin: 0 0 10px 0;"><strong>Project Name:</strong> {project_name}</p>

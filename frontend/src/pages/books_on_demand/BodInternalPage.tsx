@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, RefreshCw, ChevronRight, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen, ArrowRight, Trash2, LayoutGrid, List } from 'lucide-react'
+import { Plus, RefreshCw, ChevronRight, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen, ArrowRight, Trash2, LayoutGrid, List, Clock } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useRBAC } from '@/hooks/useRBAC'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -11,9 +11,9 @@ import { toast } from '@/store/useToastStore'
 import api from '@/api/client'
 
 export function BodInternalPage() {
-  useDocumentTitle('Book on Demand — S4Carlisle CMS')
+  useDocumentTitle('Books on Demand — S4Carlisle CMS')
   const navigate = useNavigate()
-  const { isAdmin } = useRBAC()
+  const { isAdmin, isManager } = useRBAC()
   const viewer = useSessionStore(s => s.viewer)
 
   const [jobs, setJobs] = useState<any[]>([])
@@ -36,6 +36,12 @@ export function BodInternalPage() {
 
   // Delete Modal states
   const [showDeleteModal, setShowDeleteModal] = useState<number | null>(null)
+
+  // Edit Due Date Modal states
+  const [showEditDueDateModal, setShowEditDueDateModal] = useState<any>(null)
+  const [newDueDate, setNewDueDate] = useState('')
+  const [dueDateReason, setDueDateReason] = useState('')
+  const [savingDueDate, setSavingDueDate] = useState(false)
 
   const fetchJobs = async () => {
     try {
@@ -140,6 +146,29 @@ export function BodInternalPage() {
     }
   }
 
+  const updateDueDate = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!showEditDueDateModal || !newDueDate || !dueDateReason) return
+    setSavingDueDate(true)
+    try {
+      // Create a local date at 23:59:59, then convert to UTC ISO string
+      const localDate = new Date(`${newDueDate}T23:59:59`)
+      const finalDate = localDate.toISOString()
+
+      await api.put(`/bod/jobs/${showEditDueDateModal.id}/due-date`, {
+        due_date: finalDate,
+        reason: dueDateReason
+      })
+      toast.success("Due date updated")
+      setShowEditDueDateModal(null)
+      fetchJobs()
+    } catch (err) {
+      toast.error("Failed to update due date")
+    } finally {
+      setSavingDueDate(false)
+    }
+  }
+
   // Calculate metrics
   const totalJobs = jobs.length
   const completedJobs = jobs.filter(j => j.status === 'Completed').length
@@ -147,7 +176,25 @@ export function BodInternalPage() {
 
   const unassignedJobs = activeJobs.filter(j => !j.current_assignee).length
   const addJobStageJobs = activeJobs.filter(j => j.current_stage_name === 'Add job').length
+  const productionStageJobs = activeJobs.filter(j => j.current_stage_name === 'Production').length
   const qcStageJobs = activeJobs.filter(j => j.current_stage_name === 'QC').length
+
+  const now = new Date()
+  now.setHours(0, 0, 0, 0)
+  const tomorrow = new Date(now)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+
+  let overdueJobs = 0
+  let dueSoonJobs = 0
+
+  activeJobs.forEach(job => {
+    if (job.due_date) {
+      const dueDate = new Date(job.due_date.endsWith('Z') ? job.due_date : job.due_date + 'Z')
+      dueDate.setHours(0, 0, 0, 0)
+      if (dueDate < now) overdueJobs++
+      else if (dueDate.getTime() === tomorrow.getTime()) dueSoonJobs++
+    }
+  })
 
   // Progress calculations: assume 4 stages (0,1,2,3). If completed, 100%
   let totalProgressStages = jobs.length * 3
@@ -159,7 +206,7 @@ export function BodInternalPage() {
   const completionPercentage = totalProgressStages > 0 ? Math.round((completedProgressStages / totalProgressStages) * 100) : 0
 
   // Filter options
-  const statusOptions = Array.from(new Set(jobs.map(j => j.status))).sort()
+  const statusOptions = ['Active', 'In-Progress', 'YTS', 'Due Soon', 'Overdue', 'Completed']
 
   const getUserDisplayName = (username: string | null | undefined) => {
     if (!username) return ''
@@ -202,6 +249,41 @@ export function BodInternalPage() {
     return 'bg-primary/10 border-primary/20 text-primary'
   }
 
+  const getStatusText = (job: any) => {
+    if (job.status === 'Completed') return 'Completed'
+
+    const now = new Date()
+    now.setHours(0, 0, 0, 0)
+    const tomorrow = new Date(now)
+    tomorrow.setDate(tomorrow.getDate() + 1)
+
+    if (job.due_date && job.status !== 'Completed') {
+      const dueDate = new Date(job.due_date.endsWith('Z') ? job.due_date : job.due_date + 'Z')
+      dueDate.setHours(0, 0, 0, 0)
+
+      if (dueDate < now) {
+        return 'Overdue'
+      }
+      if (dueDate.getTime() === tomorrow.getTime()) {
+        return 'Due Soon'
+      }
+    }
+
+    if (job.created_at && job.status !== 'Completed') {
+      const createdDate = new Date(job.created_at.endsWith('Z') ? job.created_at : job.created_at + 'Z')
+      createdDate.setHours(0, 0, 0, 0)
+      if (createdDate.getTime() === now.getTime()) {
+        return 'Active'
+      }
+    }
+
+    if (!job.current_assignee) {
+      return 'YTS'
+    }
+
+    return 'In-Progress'
+  }
+
 
   const allAssignees = new Set<string>()
   jobs.forEach(j => {
@@ -217,7 +299,10 @@ export function BodInternalPage() {
       || j.pdf_filename.toLowerCase().includes(query)
       || (j.client_name && j.client_name.toLowerCase().includes(query))
 
-    const matchesStatus = statusFilter === 'all' || j.status === statusFilter
+    let matchesStatus = true
+    if (statusFilter !== 'all') {
+      matchesStatus = getStatusText(j) === statusFilter
+    }
 
     const currentAssignee = j.current_assignee || null
     const matchesAssignee = assigneeFilter === 'all'
@@ -265,7 +350,7 @@ export function BodInternalPage() {
               <FolderOpen size={20} className="text-primary" />
             </div>
             <div>
-              <h1 className="text-xl font-bold font-serif text-text m-0">Book on Demand</h1>
+              <h1 className="text-xl font-bold font-serif text-text m-0">Books on Demand</h1>
               <p className="text-sm text-muted">
                 {totalJobs} job{totalJobs !== 1 ? 's' : ''}
               </p>
@@ -280,16 +365,16 @@ export function BodInternalPage() {
       </div>
 
       {/* Metrics Row */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-4">
         <div
           onClick={clearFilters}
           className={`bg-card border rounded-xl p-4 flex items-center gap-3 cursor-pointer transition-colors ${!hasActiveFilters ? 'border-primary/50 ring-1 ring-primary/20' : 'border-border/70 hover:border-primary/30'}`}
         >
-          <div className="p-2 bg-primary/10 text-primary rounded-lg">
+          <div className="p-2 bg-primary/10 text-primary rounded-lg hidden xl:block">
             <Layers size={18} />
           </div>
           <div>
-            <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Total Jobs</span>
+            <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Total</span>
             <span className="text-lg font-bold text-text">{totalJobs}</span>
           </div>
         </div>
@@ -298,7 +383,7 @@ export function BodInternalPage() {
           onClick={() => { clearFilters(); setAssigneeFilter('unassigned') }}
           className={`bg-card border rounded-xl p-4 flex items-center gap-3 cursor-pointer transition-colors ${assigneeFilter === 'unassigned' ? 'border-rose-500/50 ring-1 ring-rose-500/20' : 'border-border/70 hover:border-rose-500/30'}`}
         >
-          <div className="p-2 bg-rose-500/10 text-rose-600 rounded-lg">
+          <div className="p-2 bg-rose-500/10 text-rose-600 rounded-lg hidden xl:block">
             <User size={18} />
           </div>
           <div>
@@ -311,12 +396,25 @@ export function BodInternalPage() {
           onClick={() => { clearFilters(); setStageFilter('Add job') }}
           className={`bg-card border rounded-xl p-4 flex items-center gap-3 cursor-pointer transition-colors ${stageFilter === 'Add job' ? 'border-amber-500/50 ring-1 ring-amber-500/20' : 'border-border/70 hover:border-amber-500/30'}`}
         >
-          <div className="p-2 bg-amber-500/10 text-amber-600 rounded-lg">
+          <div className="p-2 bg-amber-500/10 text-amber-600 rounded-lg hidden xl:block">
             <RefreshCw size={18} />
           </div>
           <div>
-            <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Add Job Stage</span>
+            <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Add Job</span>
             <span className="text-lg font-bold text-text">{addJobStageJobs}</span>
+          </div>
+        </div>
+
+        <div
+          onClick={() => { clearFilters(); setStageFilter('Production') }}
+          className={`bg-card border rounded-xl p-4 flex items-center gap-3 cursor-pointer transition-colors ${stageFilter === 'Production' ? 'border-purple-500/50 ring-1 ring-purple-500/20' : 'border-border/70 hover:border-purple-500/30'}`}
+        >
+          <div className="p-2 bg-purple-500/10 text-purple-600 rounded-lg hidden xl:block">
+            <RefreshCw size={18} />
+          </div>
+          <div>
+            <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">Production</span>
+            <span className="text-lg font-bold text-text">{productionStageJobs}</span>
           </div>
         </div>
 
@@ -324,12 +422,38 @@ export function BodInternalPage() {
           onClick={() => { clearFilters(); setStageFilter('QC') }}
           className={`bg-card border rounded-xl p-4 flex items-center gap-3 cursor-pointer transition-colors ${stageFilter === 'QC' ? 'border-blue-500/50 ring-1 ring-blue-500/20' : 'border-border/70 hover:border-blue-500/30'}`}
         >
-          <div className="p-2 bg-blue-500/10 text-blue-600 rounded-lg">
+          <div className="p-2 bg-blue-500/10 text-blue-600 rounded-lg hidden xl:block">
             <CheckCircle2 size={18} />
           </div>
           <div>
-            <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">QC Stage</span>
+            <span className="text-[10px] text-muted font-bold uppercase tracking-wider block">QC</span>
             <span className="text-lg font-bold text-text">{qcStageJobs}</span>
+          </div>
+        </div>
+
+        <div
+          onClick={() => { clearFilters(); setStatusFilter('Overdue') }}
+          className={`bg-card border rounded-xl p-4 flex items-center gap-3 cursor-pointer transition-colors ${statusFilter === 'Overdue' ? 'border-red-500/50 ring-1 ring-red-500/20' : 'border-border/70 hover:border-red-500/30'}`}
+        >
+          <div className="p-2 bg-red-500/10 text-red-600 rounded-lg hidden xl:block">
+            <Clock size={18} />
+          </div>
+          <div>
+            <span className="text-[10px] text-red-500 font-bold uppercase tracking-wider block">Overdue</span>
+            <span className="text-lg font-bold text-text">{overdueJobs}</span>
+          </div>
+        </div>
+
+        <div
+          onClick={() => { clearFilters(); setStatusFilter('Due Soon') }}
+          className={`bg-card border rounded-xl p-4 flex items-center gap-3 cursor-pointer transition-colors ${statusFilter === 'Due Soon' ? 'border-orange-500/50 ring-1 ring-orange-500/20' : 'border-border/70 hover:border-orange-500/30'}`}
+        >
+          <div className="p-2 bg-orange-500/10 text-orange-600 rounded-lg hidden xl:block">
+            <Clock size={18} />
+          </div>
+          <div>
+            <span className="text-[10px] text-orange-500 font-bold uppercase tracking-wider block">Due Soon</span>
+            <span className="text-lg font-bold text-text">{dueSoonJobs}</span>
           </div>
         </div>
 
@@ -337,7 +461,7 @@ export function BodInternalPage() {
           onClick={() => { clearFilters(); setStatusFilter('Completed') }}
           className={`bg-card border rounded-xl p-4 flex items-center gap-3 cursor-pointer transition-colors ${statusFilter === 'Completed' ? 'border-emerald-500/50 ring-1 ring-emerald-500/20' : 'border-border/70 hover:border-emerald-500/30'}`}
         >
-          <div className="p-2 bg-emerald-500/10 text-emerald-600 rounded-lg">
+          <div className="p-2 bg-emerald-500/10 text-emerald-600 rounded-lg hidden xl:block">
             <CheckCircle2 size={18} />
           </div>
           <div>
@@ -508,7 +632,7 @@ export function BodInternalPage() {
                       </td>
                       <td className="px-4 py-3">
                         <span className={`capitalize font-bold px-2.5 py-1 rounded-md text-[10px] border ${getStatusBadgeClass(job)}`}>
-                          {job.status}
+                          {getStatusText(job)}
                         </span>
                       </td>
                       <td className="px-4 py-3 w-[200px]">
@@ -526,8 +650,18 @@ export function BodInternalPage() {
                       <td className="px-4 py-3 text-[11px] text-muted font-medium">
                         {new Date(job.created_at.endsWith('Z') ? job.created_at : job.created_at + 'Z').toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' })}
                       </td>
-                      <td className="px-4 py-3 text-[11px] text-muted font-medium">
-                        {job.due_date ? new Date(job.due_date.endsWith('Z') ? job.due_date : job.due_date + 'Z').toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' }) : '-'}
+                      <td
+                        className={`px-4 py-3 text-[11px] font-medium ${isManager ? 'text-primary hover:underline cursor-pointer' : 'text-muted'}`}
+                        onClick={(e) => {
+                          if (isManager) {
+                            e.stopPropagation()
+                            setShowEditDueDateModal(job)
+                            setNewDueDate(job.due_date ? new Date(job.due_date.endsWith('Z') ? job.due_date : job.due_date + 'Z').toISOString().slice(0, 10) : '')
+                            setDueDateReason('')
+                          }
+                        }}
+                      >
+                        {job.due_date ? new Date(job.due_date.endsWith('Z') ? job.due_date : job.due_date + 'Z').toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' }) : (isManager ? 'Set Date' : '-')}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-2">
@@ -620,7 +754,7 @@ export function BodInternalPage() {
                       />
                     </div>
                     <span className={`capitalize font-bold px-2 py-0.5 rounded-md text-[9px] border ${getStatusBadgeClass(job)}`}>
-                      {job.status}
+                      {getStatusText(job)}
                     </span>
                   </div>
 
@@ -642,7 +776,19 @@ export function BodInternalPage() {
                 <div className="mt-4 pt-2.5 border-t border-border/60 flex items-center justify-between text-[10px] text-muted font-medium">
                   <div className="flex flex-col gap-0.5">
                     <span>Created: {new Date(job.created_at.endsWith('Z') ? job.created_at : job.created_at + 'Z').toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' })}</span>
-                    <span>Due: {job.due_date ? new Date(job.due_date.endsWith('Z') ? job.due_date : job.due_date + 'Z').toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' }) : '-'}</span>
+                    <span
+                      className={isManager ? 'text-primary hover:underline cursor-pointer' : ''}
+                      onClick={(e) => {
+                        if (isManager) {
+                          e.stopPropagation()
+                          setShowEditDueDateModal(job)
+                          setNewDueDate(job.due_date ? new Date(job.due_date.endsWith('Z') ? job.due_date : job.due_date + 'Z').toISOString().slice(0, 10) : '')
+                          setDueDateReason('')
+                        }
+                      }}
+                    >
+                      Due: {job.due_date ? new Date(job.due_date.endsWith('Z') ? job.due_date : job.due_date + 'Z').toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' }) : (isManager ? 'Set Date' : '-')}
+                    </span>
                   </div>
                   <span className="flex items-center gap-1 text-primary">View Details <ArrowRight size={10} /></span>
                 </div>
@@ -659,7 +805,7 @@ export function BodInternalPage() {
             <div className="flex justify-between items-start border-b border-border/60 pb-2">
               <div>
                 <h3 className="text-base font-bold text-text m-0">Add New Job</h3>
-                <p className="text-[10px] text-muted mt-0.5">Upload a PDF for Book on Demand</p>
+                <p className="text-[10px] text-muted mt-0.5">Upload a PDF for Books on Demand</p>
               </div>
               <button
                 onClick={() => {
@@ -782,6 +928,67 @@ export function BodInternalPage() {
                 Delete Job
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Due Date Modal */}
+      {showEditDueDateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-card w-full max-w-sm rounded-xl shadow-xl border border-border flex flex-col p-5 gap-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-text text-sm">Update Due Date</h3>
+              <button
+                onClick={() => setShowEditDueDateModal(null)}
+                className="text-muted hover:text-text transition-colors p-1"
+              >
+                <XCircle size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={updateDueDate} className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-muted">New Due Date</label>
+                <div className="relative">
+                  <input
+                    type="date"
+                    required
+                    value={newDueDate}
+                    onChange={(e) => setNewDueDate(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-background border border-border rounded-xl text-sm text-text focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all shadow-sm appearance-none cursor-pointer [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-50 hover:[&::-webkit-calendar-picker-indicator]:opacity-100"
+                    style={{ colorScheme: 'light dark' }}
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-muted">Reason for Change</label>
+                <textarea
+                  required
+                  value={dueDateReason}
+                  onChange={(e) => setDueDateReason(e.target.value)}
+                  placeholder="Why is the date changing?"
+                  className="px-3 py-2 bg-background border border-border rounded-lg text-sm text-text focus:outline-none focus:border-primary transition-colors min-h-[80px] resize-none"
+                />
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setShowEditDueDateModal(null)}
+                  className="px-3.5 py-1.5 bg-background border border-border hover:bg-accent text-text font-bold rounded-lg transition-colors text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingDueDate}
+                  className="px-3.5 py-1.5 bg-primary text-white font-bold rounded-lg hover:bg-primary/90 transition-colors text-xs disabled:opacity-70"
+                >
+                  {savingDueDate ? 'Saving...' : 'Save Date'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

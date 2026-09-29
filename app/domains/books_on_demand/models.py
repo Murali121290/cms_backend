@@ -44,5 +44,6 @@ class BodJob(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     due_date = Column(DateTime, nullable=True)
+    due_date_history = Column(JSON, nullable=False, default=list) # [{"date": "...", "reason": "...", "changed_by": "...", "timestamp": "..."}]
 
     client_config = relationship("BodClientConfig", back_populates="jobs")

@@ -61,6 +61,7 @@ def upgrade() -> None:
         sa.Column('created_at', sa.DateTime(), nullable=True),
         sa.Column('updated_at', sa.DateTime(), nullable=True),
         sa.Column('due_date', sa.DateTime(), nullable=True),
+        sa.Column('due_date_history', sa.JSON(), server_default='[]', nullable=False),
         sa.Column('stage_history', sa.JSON(), server_default='{}', nullable=False),
         sa.Column('project_name', sa.String(length=255), nullable=True),
         sa.Column('current_assignee', sa.String(length=255), nullable=True),
@@ -76,6 +77,8 @@ def upgrade() -> None:
             op.add_column('bod_jobs', sa.Column('pdf_type', sa.String(length=50), nullable=True))
         if 'pdf_language' not in columns:
             op.add_column('bod_jobs', sa.Column('pdf_language', sa.String(length=50), nullable=True))
+        if 'due_date_history' not in columns:
+            op.add_column('bod_jobs', sa.Column('due_date_history', sa.JSON(), server_default='[]', nullable=False))
 
 
 def downgrade() -> None:

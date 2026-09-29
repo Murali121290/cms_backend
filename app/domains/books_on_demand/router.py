@@ -11,6 +11,7 @@ from app.database import get_db, SessionLocal
 from app.domains.books_on_demand.models import BodJob, BodClientConfig
 from app.domains.books_on_demand.services.ftp_service import BodFtpService
 from app.domains.notifications.email_service import send_bod_qc_ready_email, send_bod_new_job_email, send_bod_job_completed_email
+from pydantic import BaseModel
 from app.domains.auth.security import get_current_user_from_cookie
 from app.core.config import get_settings
 
@@ -27,7 +28,7 @@ def list_configs(db: Session = Depends(get_db)):
 
 @router.get("/jobs")
 def list_jobs(client_id: int = None, status: str = None, db: Session = Depends(get_db)):
-    """List all Book on Demand jobs with optional filtering."""
+    """List all Books on Demand jobs with optional filtering."""
     query = db.query(BodJob).filter(BodJob.is_deleted == False)
     if client_id:
         query = query.filter(BodJob.client_id == client_id)
@@ -57,6 +58,7 @@ def list_jobs(client_id: int = None, status: str = None, db: Session = Depends(g
             "created_at": job.created_at,
             "updated_at": job.updated_at,
             "due_date": job.due_date,
+            "due_date_history": job.due_date_history,
             "client_name": job.client_config.client_name if job.client_config else "Unknown"
         }
         result.append(job_dict)
@@ -89,6 +91,7 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
         "created_at": job.created_at,
         "updated_at": job.updated_at,
         "due_date": job.due_date,
+        "due_date_history": job.due_date_history,
         "client_name": job.client_config.client_name if job.client_config else "Unknown"
     }
 
@@ -189,6 +192,48 @@ def delete_job(job_id: int, db: Session = Depends(get_db), current_user = Depend
     return {"status": "success"}
 
 
+class BodDueDateRequest(BaseModel):
+    due_date: str | None
+    reason: str
+
+@router.put("/jobs/{job_id}/due-date")
+def update_due_date(
+    job_id: int, 
+    payload: BodDueDateRequest, 
+    db: Session = Depends(get_db), 
+    current_user = Depends(get_current_user_from_cookie)
+):
+    """Update due date of a BOD job (Manager only)."""
+    job = db.query(BodJob).filter(BodJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+        
+    new_date = None
+    if payload.due_date:
+        try:
+            from datetime import datetime
+            new_date = datetime.fromisoformat(payload.due_date.replace('Z', '+00:00'))
+            new_date = new_date.replace(tzinfo=None) # Store as naive UTC matching other dates
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date format")
+
+    history_entry = {
+        "date": payload.due_date,
+        "reason": payload.reason,
+        "changed_by": current_user.username if hasattr(current_user, 'username') else (current_user.user_name if hasattr(current_user, 'user_name') else "Unknown"),
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    
+    history = list(job.due_date_history) if job.due_date_history else []
+    history.append(history_entry)
+    
+    job.due_date = new_date
+    job.due_date_history = history
+    db.commit()
+    
+    return {"status": "success"}
+
+
 @router.post("/jobs/{job_id}/assign")
 def assign_job(
     job_id: int, 
@@ -204,8 +249,30 @@ def assign_job(
 
     user_id = payload.get("user_id")
     assigned_by = current_user.username if current_user else "System"
+
     if not user_id:
-        raise HTTPException(status_code=400, detail="user_id is required")
+        job.current_assignee = None
+        
+        history_list = job.assigned_users if isinstance(job.assigned_users, list) else []
+        new_history = list(history_list)
+        new_history.append({
+            "user_id": None,
+            "stage": job.current_stage_name,
+            "time": datetime.now(timezone.utc).isoformat(),
+            "assigned_by": assigned_by,
+            "action": "Unassigned"
+        })
+        job.assigned_users = new_history
+        
+        history = dict(job.stage_history)
+        stage_data = history.get(job.current_stage_name, {})
+        stage_data["assignee"] = None
+        history[job.current_stage_name] = stage_data
+        job.stage_history = history
+        
+        db.commit()
+        db.refresh(job)
+        return {"message": "User unassigned successfully", "job": job}
 
     job.current_assignee = user_id
 
@@ -385,7 +452,7 @@ def create_job(
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
-    """Manually upload a PDF to create a Book on Demand job via the UI."""
+    """Manually upload a PDF to create a Books on Demand job via the UI."""
     config = db.query(BodClientConfig).filter(BodClientConfig.id == client_id).first()
     if not config:
         raise HTTPException(status_code=404, detail="Client not found")

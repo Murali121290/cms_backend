@@ -12,7 +12,7 @@ logger = logging.getLogger("app.worker.bod")
 
 @celery_app.task(acks_late=True)
 def watch_ftp_for_new_pdfs():
-    logger.info("Starting FTP watch for Book on Demand PDFs...")
+    logger.info("Starting FTP watch for Books on Demand PDFs...")
     db = SessionLocal()
     settings = get_settings()
     upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
