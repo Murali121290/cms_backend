@@ -138,8 +138,11 @@ def trim_crop_engine(pdf_path, mode, margins=None, standardize_size=False, remov
             page.clean_contents()
             
     num_pages = len(doc)
-    doc.save(output_path, garbage=4, deflate=True) # garbage=4 aggressive optimization
+    # Save to temp file first, then replace original (avoids "save to original must be incremental" error)
+    temp_path = output_path.replace('.pdf', '_temp.pdf')
+    doc.save(temp_path, incremental=False, garbage=4, deflate=True)
     doc.close()
+    os.replace(temp_path, output_path)
     
     print(f"✅ Successfully cropped {num_pages} pages.")
     print(f"Saved to: {output_path}")
