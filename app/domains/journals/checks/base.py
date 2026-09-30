@@ -13,12 +13,16 @@ SEVERITIES = ("error", "warning", "info")
 
 # Check key -> stage number the check belongs to. Stage gates block on open
 # errors from checks at or before the article's current stage.
+# Stage 1 (Pre-Editing) runs its four checks as gated steps, in this order (pre_editing.STEPS).
 CHECK_STAGES: Dict[str, int] = {
     "structuring": 1,
     "references": 1,
-    "technical": 2,
-    "language": 3,
-    "xml": 4,
+    "ia_rules": 1,
+    "technical": 1,
+    "language": 2,
+    "xml": 3,
+    "indesign_qc": 5,
+    "proof": 6,
 }
 
 
@@ -33,8 +37,9 @@ class IssueDraft:
     suggestion: Optional[Dict[str, Any]] = None
     # Identifies the same finding across re-runs, so an "ignored" decision sticks.
     fingerprint: Optional[str] = None
-    # Fingerprint of an issue in an earlier check that caused this one (e.g. DTD IDREF -> missing reference).
+    # The earlier issue that caused this one (e.g. DTD IDREF -> missing reference), by fingerprint or id.
     source_fingerprint: Optional[str] = None
+    source_issue_id: Optional[int] = None
 
     def __post_init__(self):
         if self.severity not in SEVERITIES:
@@ -60,6 +65,9 @@ class JournalCheck:
     key: str = ""
     name: str = ""
     implemented: bool = True
+    # Runs only as part of a pipeline step (e.g. after InDesign generation); a manual
+    # re-run would reset sign-offs such as passed QC items.
+    auto_only: bool = False
 
     def run(self, article: JournalArticle, db) -> CheckResult:  # pragma: no cover - interface
         raise NotImplementedError

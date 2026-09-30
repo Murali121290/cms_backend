@@ -64,7 +64,9 @@ def run_check(db: Session, article: JournalArticle, key: str, user_id: Optional[
     db.flush()
 
     for issue, draft in by_fingerprint.values():
-        if draft.source_fingerprint:
+        if draft.source_issue_id:
+            issue.source_issue_id = draft.source_issue_id
+        elif draft.source_fingerprint:
             source = db.query(JournalIssue).filter(
                 JournalIssue.article_id == article.id,
                 JournalIssue.fingerprint == draft.source_fingerprint,
@@ -80,6 +82,22 @@ def run_check(db: Session, article: JournalArticle, key: str, user_id: Optional[
     db.commit()
     db.refresh(run)
     return run
+
+
+# Output a stage must have produced before the article can leave it.
+STAGE_OUTPUTS = {
+    1: ("xhtml_path", "Run pre-editing to convert the manuscript to XHTML"),
+    3: ("jats_xml_path", "Convert the article to JATS XML"),
+    4: ("indesign_path", "Generate the InDesign layout"),
+    6: ("proof_pdf_path", "Generate a proof PDF"),
+}
+
+
+def missing_output(article: JournalArticle) -> Optional[str]:
+    need = STAGE_OUTPUTS.get(stage_number(article.current_stage))
+    if need and not getattr(article, need[0]):
+        return need[1]
+    return None
 
 
 def blocking_issues(db: Session, article: JournalArticle) -> List[JournalIssue]:

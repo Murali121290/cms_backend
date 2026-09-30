@@ -23,6 +23,23 @@ class JournalClient(Base):
     journals = relationship("Journal", back_populates="client", cascade="all, delete-orphan")
 
 
+class JournalWorkflow(Base):
+    """A named selection of the 8 journal production stages, chosen per journal.
+
+    Stage numbers (not names) are stored because the stage gates, checks and
+    required outputs are keyed on them.
+    """
+    __tablename__ = "journal_workflows"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    name = Column(String(150), unique=True, nullable=False)
+    description = Column(Text, nullable=True)
+    stage_numbers = Column(JSON, nullable=False) # e.g. [1, 2, 3, 4, 8]
+    is_default = Column(Boolean, default=False, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class Journal(Base):
     """Journal Publication Title (equivalent to Book / Project entity)"""
     __tablename__ = "journals"
@@ -36,11 +53,17 @@ class Journal(Base):
     volume = Column(String(50), nullable=True)
     issue = Column(String(50), nullable=True)
     journal_manager = Column(String(150), ForeignKey("users.username", ondelete="SET NULL", onupdate="CASCADE"), nullable=True)
+    workflow_id = Column(BigInteger, ForeignKey("journal_workflows.id", ondelete="SET NULL"), nullable=True, index=True)
     status = Column(String(50), default="Active", nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     client = relationship("JournalClient", back_populates="journals")
+    workflow = relationship("JournalWorkflow")
+
+    @property
+    def workflow_name(self):
+        return self.workflow.name if self.workflow else None
     articles = relationship("JournalArticle", back_populates="journal", cascade="all, delete-orphan")
     stylesheets = relationship("JournalStylesheet", back_populates="journal", cascade="all, delete-orphan")
     grammarsheets = relationship("JournalGrammarsheet", back_populates="journal", cascade="all, delete-orphan")
@@ -65,7 +88,7 @@ class JournalArticle(Base):
     word_count = Column(Integer, nullable=True)
     
     # Workflow Status & Assignee
-    current_stage = Column(String(100), default="1. Pre-Editing (XHTML)", nullable=False)
+    current_stage = Column(String(100), default="1. Pre-Editing", nullable=False)
     current_assignee_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     status = Column(String(30), default="In-progress", nullable=False) # In-progress, Completed, Hold
     priority = Column(String(30), default="Normal", nullable=False)
@@ -80,6 +103,9 @@ class JournalArticle(Base):
     indesign_path = Column(String(500), nullable=True)
     proof_pdf_path = Column(String(500), nullable=True)
     final_delivery_path = Column(String(500), nullable=True)
+    # Shadow row in the book `files` table (under a hidden per-journal project) that lets the book
+    # Structuring / Technical / Language review pages open this article's working copy.
+    review_file_id = Column(Integer, ForeignKey("files.id", ondelete="SET NULL"), nullable=True)
 
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
@@ -92,13 +118,15 @@ class JournalArticle(Base):
 
 
 class JournalStageDetail(Base):
-    """Detail tracking per stage (Stages 1 through 8) for an article"""
+    """Detail tracking per stage (Stages 1 through 7) for an article"""
     __tablename__ = "journal_stage_details"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     article_id = Column(BigInteger, ForeignKey("journal_articles.id", ondelete="CASCADE"), nullable=False, index=True)
-    stage_number = Column(Integer, nullable=False) # 1 through 8
-    stage_name = Column(String(100), nullable=False) # 1. Pre-Editing (XHTML), ..., 8. Final Delivery
+    stage_number = Column(Integer, nullable=False) # 1 through 7
+    stage_name = Column(String(100), nullable=False) # 1. Pre-Editing, ..., 7. Final Delivery
+    # Pre-Editing only: state of its four gated steps, e.g. {"structuring": {"status": "finished", ...}}.
+    step_state = Column(JSON, nullable=True)
     assignee_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     planned_start_date = Column(DateTime(timezone=True), nullable=True)
     planned_end_date = Column(DateTime(timezone=True), nullable=True)
@@ -160,8 +188,27 @@ class JournalFile(Base):
     uploaded_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     version = Column(Integer, default=1, nullable=False)
     is_original = Column(Boolean, default=True, nullable=False)
+    figure_number = Column(Integer, nullable=True)  # art file linked to "Figure N" of the article
+    uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)  # None = produced by the system
 
     article = relationship("JournalArticle", back_populates="files")
+
+
+class JournalAsset(Base):
+    """Journal-level design files (InDesign template, fonts, libraries, logo, preview CSS), versioned."""
+    __tablename__ = "journal_assets"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    journal_id = Column(BigInteger, ForeignKey("journals.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind = Column(String(30), nullable=False, index=True)  # template, font, library, logo, css
+    filename = Column(String(255), nullable=False)
+    path = Column(String(500), nullable=False)
+    version = Column(Integer, default=1, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    note = Column(Text, nullable=True)
+    size_bytes = Column(BigInteger, nullable=True)
+    uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    uploaded_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 class JournalDelivery(Base):

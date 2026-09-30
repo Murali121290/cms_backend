@@ -10,7 +10,7 @@ def api(auth_cookie_client, admin_user):
 
 
 @pytest.fixture()
-def article(api):
+def article(api, db_session):
     client = api.post("/api/v2/journals/clients", json={"client_code": "ELSA-01", "publisher_name": "Elsevier"})
     assert client.status_code == 201, client.text
     journal = api.post("/api/v2/journals", json={
@@ -23,7 +23,20 @@ def article(api):
         "article_doi": "10.1016/j.jais.2026.04.003",
     })
     assert art.status_code == 201, art.text
+    # These tests exercise the issue gate, so mark Stage 1's XHTML output as produced.
+    from app.domains.journals.models import JournalArticle
+    db_session.get(JournalArticle, art.json()["id"]).xhtml_path = "preedited.xhtml"
+    db_session.commit()
     return art.json()
+
+
+def test_stage1_requires_xhtml_before_advancing(api, db_session):
+    client = api.post("/api/v2/journals/clients", json={"client_code": "C9", "publisher_name": "P"}).json()
+    journal = api.post("/api/v2/journals", json={"client_id": client["id"], "journal_code": "J9", "journal_title": "J"}).json()
+    art = api.post("/api/v2/journals/articles", json={"journal_id": journal["id"], "article_title": "Raw"}).json()
+    res = api.post(f"/api/v2/journals/articles/{art['id']}/advance-stage", json={})
+    assert res.status_code == 409
+    assert res.json()["detail"]["message"].startswith("Run pre-editing")
 
 
 class FakeReferencesCheck(JournalCheck):
@@ -79,10 +92,21 @@ def test_stylesheet_and_grammarsheet_crud(api, article):
     assert api.get("/api/v2/journals/99999/stylesheets").status_code == 404
 
 
-def test_unimplemented_check_returns_501(api, article):
-    res = api.post(f"/api/v2/journals/articles/{article['id']}/checks/structuring/run")
+def test_unimplemented_check_returns_501(api, article, monkeypatch):
+    class Pending(JournalCheck):
+        key, name, implemented = "technical", "Technical editing", False
+    monkeypatch.setitem(REGISTRY, "technical", Pending())
+    res = api.post(f"/api/v2/journals/articles/{article['id']}/checks/technical/run")
     assert res.status_code == 501
     assert api.post(f"/api/v2/journals/articles/{article['id']}/checks/nope/run").status_code == 404
+
+
+def test_check_without_manuscript_returns_400(api, article):
+    res = api.post(f"/api/v2/journals/articles/{article['id']}/checks/structuring/run")
+    assert res.status_code == 400
+    assert "No manuscript DOCX" in res.json()["detail"]
+    runs = api.get(f"/api/v2/journals/articles/{article['id']}/check-runs").json()
+    assert runs[0]["status"] == "Failed"
 
 
 def test_open_error_blocks_stage_advance_until_fixed(api, article, fake_references):
@@ -107,9 +131,11 @@ def test_open_error_blocks_stage_advance_until_fixed(api, article, fake_referenc
     assert fixed.json()["status"] == "fixed"
     assert fixed.json()["resolution"] == "accepted_fix"
 
-    advanced = api.post(f"/api/v2/journals/articles/{aid}/advance-stage", json={"remarks": "Refs clean"})
-    assert advanced.status_code == 200, advanced.text
-    assert advanced.json()["new_stage"] == "2. Technical Editing"
+    # With the errors fixed, Pre-Editing still needs its four steps finished.
+    gated = api.post(f"/api/v2/journals/articles/{aid}/advance-stage", json={"remarks": "Refs clean"})
+    assert gated.status_code == 409, gated.text
+    assert gated.json()["detail"]["message"] == "Pre-Editing step 1 (Structuring) is not finished"
+    assert gated.json()["detail"]["step"] == "structuring"
 
 
 def test_rerun_supersedes_open_issues_and_keeps_ignored_decisions(api, article, fake_references):
@@ -130,7 +156,8 @@ def test_rerun_supersedes_open_issues_and_keeps_ignored_decisions(api, article, 
     assert stale.status_code == 409
 
 
-def test_later_stage_checks_do_not_block_earlier_stage(api, article, monkeypatch):
+def test_later_stage_checks_do_not_block_earlier_stage(api, article, monkeypatch, db_session):
+    from app.domains.journals.models import JournalArticle
     class FakeXml(JournalCheck):
         key, name = "xml", "XML & DTD validation"
 
@@ -139,8 +166,12 @@ def test_later_stage_checks_do_not_block_earlier_stage(api, article, monkeypatch
 
     monkeypatch.setitem(REGISTRY, "xml", FakeXml())
     aid = article["id"]
+    db_session.expire_all()
+    a = db_session.get(JournalArticle, aid)
+    a.current_stage = STAGE_PIPELINE[1]  # Language Editing
+    db_session.commit()
     api.post(f"/api/v2/journals/articles/{aid}/checks/xml/run")
-    # The article is at Stage 1, so a Stage 4 error does not block it yet.
+    # The article is at Language Editing, so an XML Conversion error does not block it yet.
     assert api.post(f"/api/v2/journals/articles/{aid}/advance-stage", json={}).status_code == 200
 
 

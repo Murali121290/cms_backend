@@ -51,8 +51,13 @@ import { PostProdCssMatcher } from '@/pages/PostProdCssMatcher'
 import { PostProdEpubValidator } from '@/pages/PostProdEpubValidator'
 import { PostProdEpubValidatorFiles } from '@/pages/PostProdEpubValidatorFiles'
 import { PostProdSlideFormatter } from '@/pages/PostProdSlideFormatter'
-import { JournalProductionPage } from '@/pages/JournalProductionPage'
 import { JournalArticleEditorPage } from '@/pages/JournalArticleEditorPage'
+import { JournalClientsPage } from '@/pages/journals/JournalClientsPage'
+import { JournalClientPage } from '@/pages/journals/JournalClientPage'
+import { CreateJournalPage } from '@/pages/journals/CreateJournalPage'
+import { JournalArticlesPage } from '@/pages/journals/JournalArticlesPage'
+import { JournalArticleFilesPage } from '@/pages/journals/JournalArticleFilesPage'
+import { JournalSettingsPage } from '@/pages/journals/JournalSettingsPage'
 import { BodInternalPage } from '@/pages/books_on_demand/BodInternalPage'
 import { BodInternalJobPage } from '@/pages/books_on_demand/BodInternalJobPage'
 import { BodCustomerReportPage } from '@/pages/books_on_demand/BodCustomerReportPage'
@@ -122,7 +127,16 @@ const router = createBrowserRouter([
       { path: 'workspace', element: <WorkspacePage /> },
 
       { path: 'clients', element: <Clients /> },
-      { path: 'journal-production', element: <JournalProductionPage /> },
+      { path: 'journal-production', element: <JournalClientsPage /> },
+      { path: 'journal-production/clients/:clientId', element: <JournalClientPage /> },
+      { path: 'journal-production/clients/:clientId/journals/new', element: <CreateJournalPage /> },
+      { path: 'journal-production/journals/:journalId', element: <JournalArticlesPage /> },
+      { path: 'journal-production/journals/:journalId/settings', element: <JournalSettingsPage /> },
+      { path: 'journal-production/articles/:articleId', element: <JournalArticleFilesPage /> },
+      // Book review pages on a journal article's shadow file (?journalArticle=<id>, see useJournalReviewMode)
+      { path: 'journal-production/review/structuring/:projectId/:fileId', element: <StructuringReviewPage /> },
+      { path: 'journal-production/review/technical/:projectId/:fileId', element: <TechnicalReviewPage /> },
+      { path: 'journal-production/review/language/:projectId/:fileId', element: <LanguageReviewPage /> },
       { path: 'clients/:clientId/projects', element: <ClientProjects /> },
       { path: 'clients/:clientId/projects/new', element: <CreateProjectPage /> },
 

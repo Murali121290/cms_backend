@@ -27,6 +27,9 @@ interface Props {
   onLogLineClick?: (lineNum: number) => void;
   onLineClick?: (lineNum: number, lineText: string) => void;
   onSave?: () => void;
+  /** Replaces the built-in BITS book check behind "DTD Validate" (e.g. the journal JATS 1.3 DTD on the server). */
+  onDtdValidate?: () => void;
+  dtdLabel?: string;
 }
 
 // XML tag auto-closer
@@ -93,7 +96,7 @@ export function formatXmlString(xmlStr: string): string {
  * the app's design system (see FindReplacePanel).
  */
 export const SourceEditor = forwardRef<SourceEditorRef, Props>(
-  ({ value, onChange, className, readOnly = false, errors, onLogLineClick, onLineClick, onSave }, ref) => {
+  ({ value, onChange, className, readOnly = false, errors, onLogLineClick, onLineClick, onSave, onDtdValidate, dtdLabel }, ref) => {
     const cmRef = useRef<ReactCodeMirrorRef | null>(null);
     const [panelOpen, setPanelOpen] = useState(false);
     const [replaceMode, setReplaceMode] = useState(false);
@@ -254,6 +257,9 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
                   });
                 }
               }
+            } else if (line.to > line.from) {
+              // No extract (e.g. a DTD error reported by line only): mark the whole line.
+              diagnostics.push({ from, to, severity: 'error', message: err.message });
             }
           } catch (e) {
             console.error("Failed to add lint highlight:", e);
@@ -460,6 +466,10 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
           <button
             type="button"
             onClick={() => {
+              if (onDtdValidate) {
+                onDtdValidate();
+                return;
+              }
               try {
                 const parser = new DOMParser();
                 const xmlDoc = parser.parseFromString(value, "application/xml");
@@ -519,9 +529,9 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
               }
             }}
             className="px-2.5 py-0.5 rounded hover:bg-indigo-100 active:bg-indigo-200 transition-colors font-medium flex items-center gap-1 border border-indigo-300 shadow-sm bg-indigo-50 text-indigo-800"
-            title="Validate document structure against BITS DTD schema"
+            title={dtdLabel ? `Validate against the ${dtdLabel}` : "Validate document structure against BITS DTD schema"}
           >
-            <span className="text-indigo-600 font-bold">📋</span> DTD Validate
+            <span className="text-indigo-600 font-bold">📋</span> {dtdLabel ? `${dtdLabel} Validate` : 'DTD Validate'}
           </button>
 
           <label

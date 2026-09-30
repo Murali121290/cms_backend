@@ -221,7 +221,8 @@ def _get_filtered_projects_query(db: Session, user: models.User):
     from app.domains.clients.models import Client
     from app.domains.auth.rbac_config import has_permission
 
-    query = db.query(Project)
+    # Soft-deleted projects (and the hidden JRNL-* projects that hold journal review files) stay out of lists.
+    query = db.query(Project).filter(Project.is_deleted != True)  # noqa: E712
 
     # Filter projects based on user.customer_access for non-Admin users
     if not _has_admin_role(user) and getattr(user, "customer_access", None):
@@ -5407,96 +5408,14 @@ def api_v2_technical_scan(
         ).first()
 
         if selected_stylesheet:
-            # Build set of (element, subtype, pattern) tuples from stylesheet
-            stylesheet_ia_rows = set()
             import json
+            from app.processing.manuscript_core.ia_selection import annotate_with_stylesheet
             try:
                 selected_rows = json.loads(selected_stylesheet.selected_ia_rows)
-                for row in selected_rows:
-                    stylesheet_ia_rows.add((row.get("element"), row.get("subtype"), row.get("pattern")))
             except (json.JSONDecodeError, TypeError):
-                pass
-
-            # Build category-level set for fallback matching
-            try:
-                selected_rows_list = json.loads(selected_stylesheet.selected_ia_rows)
-            except (json.JSONDecodeError, TypeError):
-                selected_rows_list = []
-            stylesheet_subtypes = {
-                row.get("subtype", "").lower()
-                for row in selected_rows_list
-                if row.get("subtype")
-            }
-
-            # Use rule_id_to_ia already embedded in cached scan result (no import needed)
-            rule_id_to_ia = raw_scan.get("ia_report", {}).get("rule_id_to_ia", {})
-
-            # Fall back to module import only if not in cached result
-            if not rule_id_to_ia:
-                try:
-                    from app.processing.manuscript_core.ia_mapping import RULE_ID_TO_IA as rule_id_to_ia
-                except ImportError:
-                    try:
-                        from manuscript_core.ia_mapping import RULE_ID_TO_IA as rule_id_to_ia
-                    except ImportError:
-                        rule_id_to_ia = {}
-
-            # Annotate in_stylesheet for each finding
-            for finding in findings:
-                rule_id = finding.get("rule_id")
-                matched = False
-                if rule_id and rule_id in rule_id_to_ia:
-                    ia_row = rule_id_to_ia[rule_id]
-                    if isinstance(ia_row, (tuple, list)) and len(ia_row) >= 3:
-                        matched = (ia_row[0], ia_row[1], ia_row[2]) in stylesheet_ia_rows
-                if not matched:
-                    # Fallback: category-level match (finding.category == ia_row.subtype)
-                    cat = finding.get("category", "").lower()
-                    matched = bool(cat and cat in stylesheet_subtypes)
-                finding["in_stylesheet"] = matched
-
-            # Apply dynamic replacement overrides for range and thousand-separator rules
-            import re as regex_module
-            preferred_patterns: dict = {}
-            for row in selected_rows_list:
-                el = row.get("element", "")
-                pat = row.get("pattern", "")
-                if el and pat:
-                    preferred_patterns.setdefault(el, set()).add(pat)
-
-            range_rule_ids = {"range_to", "range_endash", "range_hyphen"}
-            thous_rule_ids = {"thous_sep_missing", "thous_sep_comma", "thous_sep_space", "thous_sep_nbsp"}
-
-            for finding in findings:
-                rule_id = finding.get("rule_id", "")
-                surface = finding.get("surface", "")
-
-                if rule_id in range_rule_ids:
-                    prefs = preferred_patterns.get("Ranges", set())
-                    if prefs:
-                        pref = next(iter(prefs))
-                        nums = regex_module.findall(r'\d+', surface)
-                        if len(nums) >= 2:
-                            if "to" in pref.lower():
-                                finding["replacement"] = f"{nums[0]} to {nums[1]}"
-                            elif "en dash" in pref.lower():
-                                finding["replacement"] = f"{nums[0]}–{nums[1]}"
-                            elif "hyphen" in pref.lower():
-                                finding["replacement"] = f"{nums[0]}-{nums[1]}"
-
-                elif rule_id in thous_rule_ids:
-                    prefs = preferred_patterns.get("Thousand separator (use/non-use)", set())
-                    if prefs:
-                        pref = next(iter(prefs))
-                        clean = regex_module.sub(r'[,\s ]', '', surface)
-                        try:
-                            n = int(clean)
-                            if "comma" in pref.lower() and "no comma" not in pref.lower():
-                                finding["replacement"] = f"{n:,}"
-                            elif "no comma" in pref.lower():
-                                finding["replacement"] = clean
-                        except ValueError:
-                            pass
+                selected_rows = []
+            # rule_id_to_ia is embedded in the cached scan result; the helper imports it otherwise.
+            annotate_with_stylesheet(findings, selected_rows, raw_scan.get("ia_report", {}).get("rule_id_to_ia"))
 
     # Ensure inconsistencies is a dict (convert list to dict if needed)
     inconsistencies_data = raw_scan.get("inconsistencies", {})

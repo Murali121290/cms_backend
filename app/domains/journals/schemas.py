@@ -36,6 +36,7 @@ class JournalBase(BaseModel):
     issue: Optional[str] = None
     journal_manager: Optional[str] = None
     status: str = "Active"
+    workflow_id: Optional[int] = None
 
 
 class JournalCreate(JournalBase):
@@ -44,10 +45,84 @@ class JournalCreate(JournalBase):
 
 class JournalResponse(JournalBase):
     id: int
+    workflow_name: Optional[str] = None
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+
+# Journal Workflow Schemas
+class JournalWorkflowCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=150)
+    description: Optional[str] = None
+    stage_numbers: List[int] = Field(min_length=1)
+    is_default: bool = False
+
+
+class JournalWorkflowResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    stage_numbers: List[int]
+    stages: List[str]
+    is_default: bool
+    is_active: bool
+
+
+# Overview rows for the client -> journal -> article pages
+class ArticleCounts(BaseModel):
+    total: int = 0
+    in_progress: int = 0
+    completed: int = 0
+    delayed: int = 0
+
+
+class JournalClientOverview(JournalClientResponse):
+    journal_count: int = 0
+    articles: ArticleCounts = Field(default_factory=ArticleCounts)
+
+
+class JournalSetupStatus(BaseModel):
+    template: Optional[str] = None       # active InDesign template file name
+    template_version: Optional[int] = None
+    fonts: int = 0
+    stylesheet: Optional[str] = None     # active style sheet name
+    grammarsheet: Optional[str] = None   # active grammar sheet name
+
+
+class JournalOverview(JournalResponse):
+    client_code: Optional[str] = None
+    publisher_name: Optional[str] = None
+    stages: List[str] = Field(default_factory=list)
+    articles: ArticleCounts = Field(default_factory=ArticleCounts)
+    setup: JournalSetupStatus = Field(default_factory=JournalSetupStatus)
+
+
+class ArticleStageStatus(BaseModel):
+    stage_number: int
+    stage_name: str
+    stage_status: str
+    assignee_id: Optional[int] = None
+    planned_end_date: Optional[datetime] = None
+
+
+class JournalArticleRow(BaseModel):
+    id: int
+    article_doi: Optional[str] = None
+    article_title: str
+    article_type: str
+    lead_author: Optional[str] = None
+    current_stage: str
+    status: str
+    priority: str
+    due_date: Optional[datetime] = None
+    current_assignee_id: Optional[int] = None
+    current_assignee_name: Optional[str] = None
+    delayed: bool = False
+    open_errors: int = 0
+    stages: List[ArticleStageStatus] = Field(default_factory=list)
+    created_at: datetime
 
 
 # Journal Article Schemas
