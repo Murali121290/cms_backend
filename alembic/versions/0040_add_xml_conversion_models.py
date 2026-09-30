@@ -13,8 +13,8 @@ from sqlalchemy.engine.reflection import Inspector
 
 
 # revision identifiers, used by Alembic.
-revision: str = '0033_add_xml_conversion_models'
-down_revision: Union[str, Sequence[str], None] = '0032_add_bod_models'
+revision: str = '0040_add_xml_conversion_models'
+down_revision: Union[str, Sequence[str], None] = '0038_journal_file_uploader'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
