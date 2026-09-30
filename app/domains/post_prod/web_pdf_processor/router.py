@@ -165,6 +165,16 @@ class MergeFile(BaseModel):
 class MergeRequest(BaseModel):
     files: list[MergeFile]
 
+class LinkRequest(BaseModel):
+    link_type: str = "one_way"
+    analyze_only: bool = False
+
+class ManualLinkRequest(BaseModel):
+    type: str
+    title: str
+    source_page: int
+    target_page: int
+
 
 class TrimRequest(BaseModel):
     mode: str
@@ -488,3 +498,73 @@ def update_bookmarks(
         raise HTTPException(status_code=500, detail="Failed to update bookmarks in PDF")
         
     return {"success": True, "message": "Bookmarks updated successfully"}
+
+
+@router.post("/projects/{project_id}/generate-links")
+def generate_links(
+    project_id: int,
+    request: LinkRequest,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """Generate internal links (TOC -> Chapter)"""
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    base_dir = project["folder_name"]
+    bookmarked_pdf_path = os.path.join(base_dir, "bookmarked.pdf")
+    
+    if not os.path.exists(bookmarked_pdf_path):
+        # Fallback to trimmed or merged
+        trimmed_pdf_path = os.path.join(base_dir, "trimmed.pdf")
+        merged_pdf_path = os.path.join(base_dir, "merged.pdf")
+        if os.path.exists(trimmed_pdf_path):
+            bookmarked_pdf_path = trimmed_pdf_path
+        elif os.path.exists(merged_pdf_path):
+            bookmarked_pdf_path = merged_pdf_path
+        else:
+            raise HTTPException(status_code=404, detail="No PDF file available to link.")
+            
+    try:
+        result = toc_service.create_links_in_pdf(bookmarked_pdf_path, request.link_type, request.analyze_only)
+        return {"success": True, **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/projects/{project_id}/generate-links/manual")
+def generate_link_manual(
+    project_id: int,
+    request: ManualLinkRequest,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """Manually create a single link"""
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    base_dir = project["folder_name"]
+    bookmarked_pdf_path = os.path.join(base_dir, "bookmarked.pdf")
+    
+    if not os.path.exists(bookmarked_pdf_path):
+        trimmed_pdf_path = os.path.join(base_dir, "trimmed.pdf")
+        merged_pdf_path = os.path.join(base_dir, "merged.pdf")
+        if os.path.exists(trimmed_pdf_path):
+            bookmarked_pdf_path = trimmed_pdf_path
+        elif os.path.exists(merged_pdf_path):
+            bookmarked_pdf_path = merged_pdf_path
+        else:
+            raise HTTPException(status_code=404, detail="No PDF file available to link.")
+            
+    try:
+        success = toc_service.create_manual_link(
+            bookmarked_pdf_path, 
+            request.source_page, 
+            request.target_page
+        )
+        if not success:
+            raise HTTPException(status_code=400, detail="Invalid page numbers")
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

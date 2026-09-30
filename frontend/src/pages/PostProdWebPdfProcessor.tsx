@@ -34,6 +34,8 @@ import {
   generateBookmarks,
   getBookmarks,
   updateBookmarks,
+  generateLinks,
+  generateLinkManual,
   type BookmarkItem,
   type WebPdfProject,
   type ProjectFile,
@@ -260,6 +262,13 @@ export function PostProdWebPdfProcessor() {
   const [generatingBookmarks, setGeneratingBookmarks] = useState(false);
   const [includeSubheadings, setIncludeSubheadings] = useState(true);
   const [bookmarksStatus, setBookmarksStatus] = useState<any>(null);
+
+  // TOC Links (Step 6)
+  const [generatingLinks, setGeneratingLinks] = useState(false);
+  const [analyzingLinks, setAnalyzingLinks] = useState(false);
+  const [linkType, setLinkType] = useState<'one_way' | 'two_way' | 'none'>('one_way');
+  const [linksStatus, setLinksStatus] = useState<any>(null);
+  const [linksAnalysisStatus, setLinksAnalysisStatus] = useState<any>(null);
 
   const [pdfRefreshKey, setPdfRefreshKey] = useState(Date.now());
 
@@ -597,6 +606,60 @@ export function PostProdWebPdfProcessor() {
       page: sourceBm ? sourceBm.page : 1
     });
     setEditingBookmarksList(list);
+  };
+
+  const handleAnalyzeLinks = async () => {
+    if (!selectedProject) return;
+    setAnalyzingLinks(true);
+    setLinksAnalysisStatus(null);
+    setLinksStatus(null);
+    try {
+      const result = await generateLinks(selectedProject.id, linkType === 'none' ? 'one_way' : linkType, true);
+      setLinksAnalysisStatus(result);
+      toast.success('Link analysis complete');
+    } catch (err: any) {
+      setLinksAnalysisStatus({ success: false, error: err.message });
+      toast.error(err.message || 'Failed to analyze links');
+    } finally {
+      setAnalyzingLinks(false);
+    }
+  };
+
+  const handleApplyLinks = async () => {
+    if (!selectedProject) return;
+    setGeneratingLinks(true);
+    setLinksStatus(null);
+    try {
+      const result = await generateLinks(selectedProject.id, linkType === 'none' ? 'one_way' : linkType, false);
+      setLinksStatus(result);
+      setPdfRefreshKey((prev) => prev + 1);
+      toast.success(`Successfully generated ${result.total_links} internal links`);
+      // Re-run analysis automatically
+      handleAnalyzeLinks();
+    } catch (err: any) {
+      setLinksStatus({ success: false, error: err.message });
+      toast.error(err.message || 'Failed to generate links');
+    } finally {
+      setGeneratingLinks(false);
+    }
+  };
+
+  const handleManualLink = async (link: any, index: number) => {
+    if (!selectedProject) return;
+    try {
+      await generateLinkManual(selectedProject.id, link.type, link.title, link.source_page, link.target_page);
+      toast.success('Link created manually');
+      
+      // Update UI optimistically
+      const updatedStatus = { ...linksAnalysisStatus };
+      if (updatedStatus.details) {
+        updatedStatus.details[index].is_linked = true;
+      }
+      setLinksAnalysisStatus(updatedStatus);
+      setPdfRefreshKey((prev) => prev + 1);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to manually link');
+    }
   };
 
   const handleCheckFonts = async () => {
@@ -1317,6 +1380,156 @@ export function PostProdWebPdfProcessor() {
                             </div>
                           </>
                         )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Step 6: Generate TOC Links */}
+              <div className={`border border-border rounded-xl overflow-hidden bg-background transition-colors ${activeStep === 6 ? 'ring-1 ring-primary border-primary/50' : ''}`}>
+                <button
+                  onClick={() => {
+                    if (selectedProject.status === 'Bookmarked') setActiveStep(6);
+                  }}
+                  disabled={selectedProject.status !== 'Bookmarked'}
+                  className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                      linksStatus && linksStatus.success
+                      ? 'bg-emerald-500/20 text-emerald-600'
+                      : activeStep === 6 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                    }`}>
+                      {linksStatus ? (
+                        <CheckCircle2 size={14} className="text-emerald-500" />
+                      ) : (
+                        "6"
+                      )}
+                    </div>
+                    <h3 className={`font-bold m-0 text-left ${activeStep === 6 ? 'text-primary' : 'text-text'}`}>
+                      Generate TOC Links
+                    </h3>
+                  </div>
+                  {activeStep === 6 ? <ChevronUp size={20} className="text-muted" /> : <ChevronDown size={20} className="text-muted" />}
+                </button>
+
+                {activeStep === 6 && (
+                  <div className="p-4 border-t border-border space-y-4">
+                    <p className="text-sm text-muted">
+                      Automatically create clickable links in the PDF from the Table of Contents to the corresponding chapters.
+                    </p>
+                    
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-muted uppercase tracking-wider block">Link Type</label>
+                      
+                      <div className="flex flex-col gap-2">
+                        <label className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted/10 p-2 rounded transition-colors">
+                          <input type="radio" name="link_type" value="none" checked={linkType === 'none'} onChange={() => setLinkType('none')} className="text-primary accent-primary" />
+                          <span className={linkType === 'none' ? 'font-medium' : ''}>No Links</span>
+                        </label>
+                        <label className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted/10 p-2 rounded transition-colors">
+                          <input type="radio" name="link_type" value="one_way" checked={linkType === 'one_way'} onChange={() => setLinkType('one_way')} className="text-primary accent-primary" />
+                          <div>
+                            <span className={linkType === 'one_way' ? 'font-medium block' : 'block'}>One-Way Links</span>
+                            <span className="text-xs text-muted block">Table of Contents entries link to the respective chapters.</span>
+                          </div>
+                        </label>
+                        <label className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted/10 p-2 rounded transition-colors">
+                          <input type="radio" name="link_type" value="two_way" checked={linkType === 'two_way'} onChange={() => setLinkType('two_way')} className="text-primary accent-primary" />
+                          <div>
+                            <span className={linkType === 'two_way' ? 'font-medium block' : 'block'}>Two-Way Links</span>
+                            <span className="text-xs text-muted block">TOC links to chapters AND chapter titles link back to the TOC.</span>
+                          </div>
+                        </label>
+                      </div>
+                    </div>
+                    
+                    {linksAnalysisStatus && linksAnalysisStatus.success && (
+                      <div className="p-3 bg-blue-500/10 border border-blue-500/20 text-blue-700 rounded text-sm mt-3 mb-2 space-y-1">
+                        <p className="font-bold">Analysis Report:</p>
+                        <ul className="list-disc pl-5">
+                          <li>One-Way Links to create: {linksAnalysisStatus.one_way_links}</li>
+                          {linkType === 'two_way' && <li>Two-Way (Back) Links to create: {linksAnalysisStatus.two_way_links}</li>}
+                          <li className="font-medium">Total Links: {linksAnalysisStatus.total_links}</li>
+                        </ul>
+                        
+                        {linksAnalysisStatus.details && linksAnalysisStatus.details.length > 0 && (
+                          <div className="mt-3 pt-3 border-t border-blue-500/20 max-h-48 overflow-y-auto">
+                            <table className="w-full text-xs text-left">
+                              <thead className="sticky top-0 bg-blue-50/90 text-blue-800">
+                                <tr>
+                                  <th className="pb-1">Title</th>
+                                  <th className="pb-1 w-16">Type</th>
+                                  <th className="pb-1 w-12 text-center">From</th>
+                                  <th className="pb-1 w-12 text-center">To</th>
+                                  <th className="pb-1 w-16 text-center">Status</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {linksAnalysisStatus.details.map((link: any, i: number) => (
+                                  <tr key={i} className="border-b border-blue-500/10 last:border-0">
+                                    <td className="py-1 truncate max-w-[150px] pr-2" title={link.title}>{link.title}</td>
+                                    <td className="py-1">{link.type === 'one_way' ? 'TOC→Ch' : 'Ch→TOC'}</td>
+                                    <td className="py-1 text-center">{link.source_page}</td>
+                                    <td className="py-1 text-center">{link.target_page}</td>
+                                    <td className="py-1 text-center">
+                                      {link.is_linked ? (
+                                        <span className="text-emerald-600 font-bold" title="Already linked">✓</span>
+                                      ) : (
+                                        <button 
+                                          onClick={() => handleManualLink(link, i)}
+                                          className="text-xs px-2 py-0.5 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+                                          title="Fix / Link manually"
+                                        >
+                                          Link
+                                        </button>
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="flex gap-3 mt-4">
+                      <Button 
+                        onClick={handleAnalyzeLinks} 
+                        disabled={analyzingLinks || generatingLinks || linkType === 'none'}
+                        variant={linksAnalysisStatus ? 'outline' : 'primary'}
+                        className="flex-1 flex items-center justify-center gap-2"
+                      >
+                        {analyzingLinks ? (
+                          <><RefreshCw size={16} className="animate-spin" /> Analyzing...</>
+                        ) : (
+                          <><FileText size={16} /> Analyze Links</>
+                        )}
+                      </Button>
+                      
+                      <Button 
+                        onClick={handleApplyLinks} 
+                        disabled={generatingLinks || analyzingLinks || !linksAnalysisStatus || linkType === 'none'}
+                        className="flex-1 flex items-center justify-center gap-2"
+                      >
+                        {generatingLinks ? (
+                          <><RefreshCw size={16} className="animate-spin" /> Applying Links...</>
+                        ) : (
+                          <><Play size={16} /> Apply / Fix</>
+                        )}
+                      </Button>
+                    </div>
+                    
+                    {linksStatus && linksStatus.error && (
+                      <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-600 rounded text-sm mt-3">
+                        {linksStatus.error}
+                      </div>
+                    )}
+                    {linksAnalysisStatus && linksAnalysisStatus.error && (
+                      <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-600 rounded text-sm mt-3">
+                        {linksAnalysisStatus.error}
                       </div>
                     )}
                   </div>

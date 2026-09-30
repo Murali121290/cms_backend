@@ -145,3 +145,49 @@ export async function updateBookmarks(projectId: number, bookmarks: BookmarkItem
     throw new Error(getApiErrorMessage(err, 'Failed to update bookmarks'));
   }
 }
+
+export async function generateLinks(
+  projectId: number,
+  linkType: 'one_way' | 'two_way',
+  analyzeOnly: boolean = false
+): Promise<{ 
+  success: boolean; 
+  total_links: number; 
+  one_way_links: number; 
+  two_way_links: number;
+  details?: { type: string; title: string; source_page: number; target_page: number; is_linked: boolean; rect_found?: boolean }[];
+}> {
+  try {
+    const { data } = await api.post<{ 
+      success: boolean; 
+      total_links: number; 
+      one_way_links: number; 
+      two_way_links: number;
+      details?: { type: string; title: string; source_page: number; target_page: number; is_linked: boolean; rect_found?: boolean }[];
+    }>(
+      `/post-prod/web-pdf-processor/projects/${projectId}/generate-links`,
+      { link_type: linkType, analyze_only: analyzeOnly },
+    );
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to generate links'));
+  }
+}
+
+export async function generateLinkManual(
+  projectId: number,
+  type: string,
+  title: string,
+  sourcePage: number,
+  targetPage: number
+): Promise<{ success: boolean }> {
+  try {
+    const { data } = await api.post<{ success: boolean }>(
+      `/post-prod/web-pdf-processor/projects/${projectId}/generate-links/manual`,
+      { type, title, source_page: sourcePage, target_page: targetPage }
+    );
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to manually create link'));
+  }
+}

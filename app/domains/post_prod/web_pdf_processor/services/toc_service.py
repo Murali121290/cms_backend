@@ -28,12 +28,31 @@ def update_bookmarks_in_pdf(pdf_path: str, bookmarks: list) -> bool:
         print(f"Error updating bookmarks: {e}")
         return False
 
+def roman_to_int(s):
+    """Convert a Roman numeral string to integer, or return None if invalid."""
+    s = s.lower().strip()
+    vals = {'i': 1, 'v': 5, 'x': 10, 'l': 50, 'c': 100, 'd': 500, 'm': 1000}
+    if not s or not all(c in vals for c in s):
+        return None
+    result = 0
+    prev = 0
+    for ch in reversed(s):
+        cur = vals[ch]
+        if cur < prev:
+            result -= cur
+        else:
+            result += cur
+        prev = cur
+    return result if result > 0 else None
+
 def build_page_map(doc):
     """
-    Builds a dictionary mapping printed page numbers to physical page indices
-    by calculating the most common offset across the entire document.
+    Builds a dictionary mapping printed page numbers (arabic) to physical page indices
+    by calculating the most common offset. Also adds Roman numeral front-matter pages.
     """
     offsets = []
+    roman_map = {}  # roman numeral printed string -> physical idx
+    
     for p_idx in range(len(doc)):
         page = doc[p_idx]
         blocks = page.get_text("blocks")
@@ -61,10 +80,15 @@ def build_page_map(doc):
                         match = re.match(r'^(\d+)\s+', line)
                         if match:
                             num = int(match.group(1))
-                            
+                
                 if num is not None:
                     offsets.append(p_idx - num)
-                    
+                else:
+                    # Check for Roman numeral page labels in front matter
+                    rv = roman_to_int(line)
+                    if rv is not None and rv < 20 and p_idx < 30:
+                        roman_map[line.lower()] = p_idx
+                            
     page_map = {}
     if offsets:
         counter = collections.Counter(offsets)
@@ -74,7 +98,10 @@ def build_page_map(doc):
             printed_page = p_idx - most_common_offset
             if printed_page > 0:
                 page_map[printed_page] = p_idx
-                
+    
+    # Also store roman numeral mappings under their integer values (negative to avoid collision)
+    # Store them as strings for TOC lookup
+    page_map['_roman'] = roman_map
     return page_map
 
 def find_toc_entries(doc):
@@ -112,10 +139,48 @@ def find_toc_entries(doc):
                     i += 1
                     continue
                 
-                if line_text.lower() in ('introduction', 'preface', 'foreword', 'prologue'):
-                    if len(toc_entries) > 5:
-                        in_contents = False
-                        break
+                # Handle front-matter TOC entries: "Introduction  v", "Preface  iii" etc.
+                # These have a Roman numeral page number inline
+                front_matter_match = re.match(
+                    r'^(introduction|preface|foreword|prologue|about the authors?|acknowledgements?|index)\s+([\u2002\u2003\s]*?)([ivxlcdm]+)$',
+                    line_text.lower().strip()
+                )
+                if not front_matter_match:
+                    # Also try pattern where the whole line is "Title   roman_numeral"
+                    front_matter_match = re.match(
+                        r'^(.*?)\s{2,}([ivxlcdm]+)$',
+                        line_text.strip()
+                    )
+                    if front_matter_match:
+                        rv = roman_to_int(front_matter_match.group(2))
+                        if rv is None or rv > 20:
+                            front_matter_match = None
+                
+                if front_matter_match:
+                    roman_str = front_matter_match.group(len(front_matter_match.groups())).lower()
+                    rv = roman_to_int(roman_str)
+                    if rv is not None:
+                        title = line_text.strip().rsplit(None, 1)[0].strip()
+                        # Clean up title from unicode spaces
+                        title = re.sub(r'[\u2002\u2003\t]+', ' ', title).strip()
+                        toc_entries.append({
+                            'title': title,
+                            'printed_page': roman_str,  # store roman string as key
+                            'source_page': p_idx,
+                            'rect': rect,
+                            'x0': rect.x0,
+                            'is_part': False,
+                            'linked': False,
+                            'is_roman': True
+                        })
+                        toc_matches_on_page += 1
+                        i += 1
+                        continue
+                
+                # Check for bare front-matter keyword (no page number) - skip, don't break
+                if line_text.lower().strip() in ('introduction', 'preface', 'foreword', 'prologue') and len(toc_entries) > 5:
+                    in_contents = False
+                    break
                         
                 # 1. Part Title handling
                 if re.match(r'^part\s+[ivxlcdm]+$', line_text.lower().strip()):
@@ -330,25 +395,24 @@ def find_title_on_page(page, title):
     words = title.split()
     if not words: return None
     
+    # Try exact match
     rects = page.search_for(title)
     if rects: return rects[0]
     
+    # Try first 2-3 words
     search_str = " ".join(words[:min(3, len(words))])
     rects = page.search_for(search_str)
     if rects: return rects[0]
     
+    # Try words 2 and 3
     if len(words) >= 3:
         search_str = " ".join(words[1:3])
         rects = page.search_for(search_str)
         if rects: return rects[0]
         
-    blocks = page.get_text("blocks")
-    top_blocks = [b for b in blocks if b[4].strip() and b[1] < page.rect.height * 0.5]
-    if top_blocks:
-        top_blocks.sort(key=lambda b: (b[2]-b[0]) * (b[3]-b[1]), reverse=True)
-        return fitz.Rect(top_blocks[0][:4])
-        
-    return None
+    # If text search fails, return a generic header rectangle (top 20% of page)
+    # This guarantees the user can click the top area to go back.
+    return fitz.Rect(0, 0, page.rect.width, page.rect.height * 0.2)
 
 def determine_hierarchy(toc_entries):
     """
@@ -601,3 +665,141 @@ def generate_bookmarks_for_pdf(pdf_path: str, output_path: str = None, include_s
         "bookmarks_generated": len(sanitized_bookmarks),
         "output_path": output_path
     }
+
+def create_links_in_pdf(pdf_path: str, link_type: str = "one_way", analyze_only: bool = False) -> dict:
+    """
+    Creates internal links based on the Table of Contents.
+    link_type: "one_way" (TOC -> Chapter) or "two_way" (TOC <-> Chapter)
+    Returns a dict with link counts.
+    """
+    doc = fitz.open(pdf_path)
+    page_map = build_page_map(doc)
+    toc_entries = find_toc_entries(doc)
+    
+    one_way_count = 0
+    two_way_count = 0
+    link_details = []
+    
+    for entry in toc_entries:
+        if entry['printed_page'] == -1:
+            continue
+            
+        printed_page = entry['printed_page']
+        
+        # Handle Roman numeral pages (front-matter like Introduction v, Preface iii)
+        if isinstance(printed_page, str) and entry.get('is_roman'):
+            roman_map = page_map.get('_roman', {})
+            if printed_page.lower() not in roman_map:
+                continue
+            target_page_idx = roman_map[printed_page.lower()]
+        elif printed_page not in page_map:
+            continue
+        else:
+            target_page_idx = page_map[printed_page]
+        source_page_idx = entry['source_page']
+        rect = entry['rect']
+        
+        # 1. One-way link: TOC -> Chapter
+        source_page = doc[source_page_idx]
+        
+        # Check if one-way link already exists (same target page)
+        existing_links = source_page.get_links()
+        old_one_way = [l for l in existing_links if l.get('kind') == fitz.LINK_GOTO and l.get('page') == target_page_idx]
+        one_way_exists = len(old_one_way) > 0
+        
+        if not analyze_only:
+            # Remove any old stale link to this target first, then insert fresh with correct rect
+            for old_link in old_one_way:
+                source_page.delete_link(old_link)
+            link_dict = {
+                "kind": fitz.LINK_GOTO,
+                "from": rect,
+                "page": target_page_idx
+            }
+            source_page.insert_link(link_dict)
+        one_way_count += 1
+        link_details.append({
+            "type": "one_way",
+            "title": entry['title'],
+            "source_page": source_page_idx + 1,
+            "target_page": target_page_idx + 1,
+            "is_linked": one_way_exists or not analyze_only
+        })
+        
+        # 2. Two-way link: Chapter -> TOC
+        if link_type == "two_way":
+            target_page = doc[target_page_idx]
+            title_rect = find_title_on_page(target_page, entry['title'])
+            
+            # Check if two-way link already exists (any link back to source/TOC page)
+            existing_target_links = target_page.get_links()
+            old_two_way = [l for l in existing_target_links if l.get('kind') == fitz.LINK_GOTO and l.get('page') == source_page_idx]
+            two_way_exists = len(old_two_way) > 0
+
+            if not analyze_only:
+                # Remove old stale back-links then insert fresh
+                for old_link in old_two_way:
+                    target_page.delete_link(old_link)
+                back_link_dict = {
+                    "kind": fitz.LINK_GOTO,
+                    "from": title_rect,
+                    "page": source_page_idx
+                }
+                target_page.insert_link(back_link_dict)
+            two_way_count += 1
+            link_details.append({
+                "type": "two_way",
+                "title": entry['title'],
+                "source_page": target_page_idx + 1,
+                "target_page": source_page_idx + 1,
+                "is_linked": two_way_exists or not analyze_only,
+                "rect_found": title_rect is not None
+            })
+                
+    if not analyze_only and (one_way_count > 0 or two_way_count > 0):
+        temp_path = pdf_path.replace('.pdf', '_temp.pdf')
+        doc.save(temp_path, incremental=False, garbage=3, deflate=True)
+        doc.close()
+        import os
+        os.replace(temp_path, pdf_path)
+    else:
+        doc.close()
+        
+    return {
+        "one_way_links": one_way_count,
+        "two_way_links": two_way_count,
+        "total_links": one_way_count + two_way_count,
+        "details": link_details
+    }
+
+def create_manual_link(pdf_path: str, source_page: int, target_page: int) -> bool:
+    """
+    Manually creates a link at the top of source_page pointing to target_page.
+    Pages are 1-indexed.
+    """
+    doc = fitz.open(pdf_path)
+    source_idx = source_page - 1
+    target_idx = target_page - 1
+    
+    if source_idx < 0 or source_idx >= len(doc) or target_idx < 0 or target_idx >= len(doc):
+        doc.close()
+        return False
+        
+    page = doc[source_idx]
+    
+    # Create a generic link at the top 15% of the page
+    rect = fitz.Rect(0, 0, page.rect.width, page.rect.height * 0.15)
+    link_dict = {
+        "kind": fitz.LINK_GOTO,
+        "from": rect,
+        "page": target_idx
+    }
+    page.insert_link(link_dict)
+    
+    temp_path = pdf_path.replace('.pdf', '_temp.pdf')
+    doc.save(temp_path, incremental=False, garbage=3, deflate=True)
+    doc.close()
+    
+    import os
+    os.replace(temp_path, pdf_path)
+    return True
