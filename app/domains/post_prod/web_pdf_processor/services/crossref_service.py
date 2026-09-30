@@ -161,21 +161,11 @@ def _find_targets(doc) -> dict:
     """
     Find link targets: figure captions, table titles, chapters.
     Matches captions at line start (avoids mid-sentence mentions).
-    Excludes TOC and bibliography pages (only use actual chapter headers in body content).
     Returns: {identifier -> {"page_idx": idx, "page": physical_page, "type": type}}
     """
     targets = {}
 
-    # Identify pages to skip (TOC, bibliography) so we don't match headers there
-    toc_pages = _identify_toc_section(doc)
-    bibliography_pages = _identify_bibliography_sections(doc)
-    skip_pages = toc_pages | bibliography_pages
-
     for page_idx in range(len(doc)):
-        # Skip TOC and bibliography pages when finding targets
-        if page_idx in skip_pages:
-            continue
-
         page = doc[page_idx]
         physical_page = page_idx + 1
         blocks = page.get_text("dict")["blocks"]
@@ -215,7 +205,6 @@ def _find_targets(doc) -> dict:
                         logger.debug(f"Found table target {table_id} on page {physical_page}")
 
                 # Detect chapter headers: "Chapter 4", "CHAPTER 4", "Ch. 4"
-                # Only match in body content, not in TOC/bibliography
                 chapter_match = re.search(r'(?:Chapter|Ch\.?|CHAPTER|CH\.?)\s+(\d+)', line_text, re.IGNORECASE)
                 if chapter_match:
                     ch_id = f"chapter_{chapter_match.group(1)}"
