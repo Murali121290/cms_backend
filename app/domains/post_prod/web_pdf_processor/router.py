@@ -18,6 +18,7 @@ from .services.merge_service import categorize_file, merge_pdfs
 from .services.trim_service import trim_crop_engine
 from .services import toc_service
 from .services import url_service
+from .services import email_service
 
 
 def check_post_prod_access(user=Depends(get_current_user_from_cookie)):
@@ -603,6 +604,42 @@ def generate_url_links(
 
     try:
         result = url_service.find_urls_in_pdf(bookmarked_pdf_path, request.analyze_only)
+        return {"success": True, **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class EmailLinkRequest(BaseModel):
+    analyze_only: bool = True
+
+
+@router.post("/projects/{project_id}/generate-email-links")
+def generate_email_links(
+    project_id: int,
+    request: EmailLinkRequest,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """Scan PDF for plain-text email addresses and optionally hyperlink them."""
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    base_dir = project["folder_name"]
+    bookmarked_pdf_path = os.path.join(base_dir, "bookmarked.pdf")
+
+    if not os.path.exists(bookmarked_pdf_path):
+        trimmed_pdf_path = os.path.join(base_dir, "trimmed.pdf")
+        merged_pdf_path = os.path.join(base_dir, "merged.pdf")
+        if os.path.exists(trimmed_pdf_path):
+            bookmarked_pdf_path = trimmed_pdf_path
+        elif os.path.exists(merged_pdf_path):
+            bookmarked_pdf_path = merged_pdf_path
+        else:
+            raise HTTPException(status_code=404, detail="No PDF file available.")
+
+    try:
+        result = email_service.find_emails_in_pdf(bookmarked_pdf_path, request.analyze_only)
         return {"success": True, **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

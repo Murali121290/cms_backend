@@ -37,7 +37,9 @@ import {
   generateLinks,
   generateLinkManual,
   generateUrlLinks,
+  generateEmailLinks,
   type UrlLinkDetail,
+  type EmailLinkDetail,
   type BookmarkItem,
   type WebPdfProject,
   type ProjectFile,
@@ -276,6 +278,11 @@ export function PostProdWebPdfProcessor() {
   const [urlLinksAnalysis, setUrlLinksAnalysis] = useState<any>(null);
   const [analyzingUrlLinks, setAnalyzingUrlLinks] = useState(false);
   const [applyingUrlLinks, setApplyingUrlLinks] = useState(false);
+
+  // Email Links (Step 8)
+  const [emailLinksAnalysis, setEmailLinksAnalysis] = useState<any>(null);
+  const [analyzingEmailLinks, setAnalyzingEmailLinks] = useState(false);
+  const [applyingEmailLinks, setApplyingEmailLinks] = useState(false);
 
   const [pdfRefreshKey, setPdfRefreshKey] = useState(Date.now());
 
@@ -695,6 +702,36 @@ export function PostProdWebPdfProcessor() {
       toast.error(err.message || 'Failed to apply URL links');
     } finally {
       setApplyingUrlLinks(false);
+    }
+  };
+
+  const handleAnalyzeEmailLinks = async () => {
+    if (!selectedProject) return;
+    setAnalyzingEmailLinks(true);
+    setEmailLinksAnalysis(null);
+    try {
+      const result = await generateEmailLinks(selectedProject.id, true);
+      setEmailLinksAnalysis(result);
+      toast.success('Email scan complete');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to analyze emails');
+    } finally {
+      setAnalyzingEmailLinks(false);
+    }
+  };
+
+  const handleApplyEmailLinks = async () => {
+    if (!selectedProject) return;
+    setApplyingEmailLinks(true);
+    try {
+      const result = await generateEmailLinks(selectedProject.id, false);
+      setEmailLinksAnalysis(result);
+      setPdfRefreshKey((prev) => prev + 1);
+      toast.success(`Hyperlinked ${result.not_linked} email(s) successfully`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to apply email links');
+    } finally {
+      setApplyingEmailLinks(false);
     }
   };
 
@@ -1679,6 +1716,135 @@ export function PostProdWebPdfProcessor() {
                         className="flex-1 flex items-center justify-center gap-2"
                       >
                         {applyingUrlLinks ? (
+                          <><RefreshCw size={16} className="animate-spin" /> Applying...</>
+                        ) : (
+                          <><Play size={16} /> Apply / Fix</>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Step 8: Email Hyperlinking */}
+              <div className="border border-border/40 rounded-xl overflow-hidden">
+                <button
+                  className="w-full flex items-center justify-between p-4 hover:bg-muted/20 transition-colors"
+                  onClick={() => setActiveStep(activeStep === 8 ? 0 : 8)}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">8</div>
+                    <span className="font-medium text-sm">Email Hyperlinking</span>
+                    {emailLinksAnalysis && (
+                      <span className="text-xs bg-purple-500/10 text-purple-600 px-2 py-0.5 rounded-full">
+                        {emailLinksAnalysis.total_emails} Emails · {emailLinksAnalysis.not_linked} unlinked
+                      </span>
+                    )}
+                  </div>
+                  <ChevronDown size={16} className={`transition-transform ${activeStep === 8 ? 'rotate-180' : ''}`} />
+                </button>
+
+                {activeStep === 8 && (
+                  <div className="p-4 border-t border-border/30 space-y-4">
+                    <p className="text-xs text-muted">
+                      Scan the PDF for plain-text email addresses and convert them into active mailto: hyperlinks.
+                    </p>
+
+                    {/* Status Legend */}
+                    <div className="p-3 bg-purple-500/5 border border-purple-500/20 rounded-lg text-xs space-y-1">
+                      <p className="font-semibold text-purple-800">Status Guide:</p>
+                      <div className="space-y-1 ml-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-emerald-600 font-bold">✓ Linked</span>
+                          <span className="text-muted">= Already a clickable mailto: hyperlink in PDF</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-red-500 font-bold">✗ Not linked</span>
+                          <span className="text-muted">= Plain text email, needs "Apply/Fix" to make it clickable</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Summary */}
+                    {emailLinksAnalysis && (
+                      <div className="p-3 bg-purple-500/5 border border-purple-500/20 rounded-lg space-y-1 text-sm text-purple-800">
+                        <p className="font-semibold">Email Report:</p>
+                        <ul className="list-disc list-inside space-y-0.5">
+                          <li>Total emails found: <strong>{emailLinksAnalysis.total_emails}</strong></li>
+                          <li className="text-emerald-700">Already linked: <strong>{emailLinksAnalysis.already_linked}</strong></li>
+                          <li className="text-red-600">Not linked (needs fix): <strong>{emailLinksAnalysis.not_linked}</strong></li>
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Email Table */}
+                    {emailLinksAnalysis?.details?.length > 0 && (
+                      <div className="max-h-72 overflow-y-auto rounded border border-purple-200 text-xs">
+                        <table className="w-full border-collapse">
+                          <thead className="sticky top-0 bg-purple-50/90 text-purple-800">
+                            <tr>
+                              <th className="text-left p-2 border-b border-purple-200">Email Address</th>
+                              <th className="p-2 border-b border-purple-200 w-12 text-center">Page</th>
+                              <th className="p-2 border-b border-purple-200 text-center">
+                                <div className="flex flex-col items-center gap-1">
+                                  <span>Link Status</span>
+                                  <span className="font-normal text-purple-600 text-[9px]">(Clickable?)</span>
+                                </div>
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {emailLinksAnalysis.details.map((item: EmailLinkDetail, i: number) => (
+                              <tr key={i} className="border-b border-purple-100 last:border-0 hover:bg-purple-50/30">
+                                <td className="p-2 max-w-[200px]">
+                                  <span className="truncate block text-purple-700" title={item.email}>{item.email}</span>
+                                </td>
+                                <td className="p-2 text-center text-muted">{item.page}</td>
+                                <td className="p-2 text-center">
+                                  {item.is_linked ? (
+                                    <div className="flex flex-col items-center gap-0.5">
+                                      <span className="text-emerald-600 font-bold">✓ Linked</span>
+                                      <span className="text-[9px] text-emerald-600/70">Clickable</span>
+                                    </div>
+                                  ) : (
+                                    <div className="flex flex-col items-center gap-0.5">
+                                      <span className="text-red-500 font-bold">✗ Not linked</span>
+                                      <span className="text-[9px] text-red-500/70">Needs fix</span>
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {emailLinksAnalysis?.total_emails === 0 && (
+                      <p className="text-sm text-muted text-center py-2">No email addresses found in the PDF.</p>
+                    )}
+
+                    {/* Buttons */}
+                    <div className="flex gap-3 mt-2">
+                      <Button
+                        onClick={handleAnalyzeEmailLinks}
+                        disabled={analyzingEmailLinks || applyingEmailLinks}
+                        variant={emailLinksAnalysis ? 'outline' : 'primary'}
+                        className="flex-1 flex items-center justify-center gap-2"
+                      >
+                        {analyzingEmailLinks ? (
+                          <><RefreshCw size={16} className="animate-spin" /> Analyzing...</>
+                        ) : (
+                          <><FileText size={16} /> Analyze Emails</>
+                        )}
+                      </Button>
+
+                      <Button
+                        onClick={handleApplyEmailLinks}
+                        disabled={applyingEmailLinks || analyzingEmailLinks || !emailLinksAnalysis || emailLinksAnalysis.not_linked === 0}
+                        className="flex-1 flex items-center justify-center gap-2"
+                      >
+                        {applyingEmailLinks ? (
                           <><RefreshCw size={16} className="animate-spin" /> Applying...</>
                         ) : (
                           <><Play size={16} /> Apply / Fix</>

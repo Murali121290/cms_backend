@@ -223,3 +223,31 @@ export async function generateUrlLinks(
     throw new Error(getApiErrorMessage(err, 'Failed to generate URL links'));
   }
 }
+
+export interface EmailLinkDetail {
+  email: string;
+  page: number;
+  is_linked: boolean;
+  rect: number[] | null;
+}
+
+export async function generateEmailLinks(
+  projectId: number,
+  analyzeOnly: boolean = true
+): Promise<{
+  success: boolean;
+  total_emails: number;
+  already_linked: number;
+  not_linked: number;
+  details: EmailLinkDetail[];
+}> {
+  try {
+    const { data } = await api.post(
+      `/post-prod/web-pdf-processor/projects/${projectId}/generate-email-links`,
+      { analyze_only: analyzeOnly }
+    );
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to generate email links'));
+  }
+}

@@ -39,7 +39,7 @@ def _check_url_status(href: str):
     except requests.exceptions.Timeout:
         return None, 'Timeout'
     except Exception as e:
-        return None, f'Error: {str(e)[:40]}'
+        return None, f'Error: {str(e)}'
 
 
 def _status_description(code: int) -> str:
