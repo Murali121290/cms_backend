@@ -275,11 +275,20 @@ def _find_references(doc, targets: dict, skip_pages: set) -> list:
                                     "target_info": targets[table_id],
                                 })
 
-                # Find chapter references in text
+                # Find chapter references in text (skip section headers, only match body text)
                 for ch_match in re.finditer(r'\b(?:see|See|refer\s+to|Refer\s+to|read|Read)?\s*(?:Chapter|Ch\.?|CHAPTER|CH\.?)\s+(\d+)', line_text, re.IGNORECASE):
                     ch_id = f"chapter_{ch_match.group(1)}"
                     if ch_id in targets:
-                        if line.get("spans"):
+                        target_chapter = targets[ch_id]
+
+                        # Skip if this looks like a chapter header or section header
+                        # - Chapter header: on same page as target, starts the line
+                        # - Section header: short line (< 50 chars), typically standalone
+                        is_chapter_header = (page_idx == target_chapter["page_idx"] and
+                                           line_text.startswith(ch_match.group(0).lstrip()))
+                        is_section_header = len(line_text) < 50  # Section headers are short
+
+                        if not is_chapter_header and not is_section_header and line.get("spans"):
                             rect = fitz.Rect(line["spans"][0]["bbox"])
                             references.append({
                                 "page_idx": page_idx,
@@ -287,7 +296,7 @@ def _find_references(doc, targets: dict, skip_pages: set) -> list:
                                 "rect": rect,
                                 "type": "chapter",
                                 "text": ch_match.group(0),
-                                "target_info": targets[ch_id],
+                                "target_info": target_chapter,
                             })
 
                 # Find page references: "page 42", "p. 42", "pp. 100-105"
