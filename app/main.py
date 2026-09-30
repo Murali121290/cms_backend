@@ -81,6 +81,10 @@ app.include_router(epub_validator, prefix="/api/v2", tags=["EPUB Validator"])
 from app.domains.post_prod.ppt_builder import router as ppt_builder
 app.include_router(ppt_builder, prefix="/api/v2", tags=["PPT Builder"])
 
+# XML Conversion Router
+from app.domains.post_prod.xml_conversion.router import router as xml_conversion_router
+app.include_router(xml_conversion_router, prefix="/api/v2/post-prod", tags=["XML Conversion"])
+
 # Journal Production Router
 from app.domains.journals.router import router as journals_router
 app.include_router(journals_router, prefix="/api/v2", tags=["Journal Production"])
