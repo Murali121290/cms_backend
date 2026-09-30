@@ -86,12 +86,18 @@ def find_urls_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
         # This handles cases like "http://sports\n.yahoo.com" where a newline breaks a URL
         import re as re_module
         normalized_text = page_text
-        # Replace newlines that are preceded by non-whitespace and followed by a dot/char
-        # (likely URL continuations like "sports\n.yahoo.com")
-        normalized_text = re_module.sub(r'([^\s])\n+(?=\.|\w)', r'\1', normalized_text)
-        # Also handle cases where newline is between protocol and domain
-        normalized_text = re_module.sub(r'://\n+', '://', normalized_text)
-        # Clean up any remaining single newlines with space
+
+        # Handle various line break scenarios within URLs:
+        # 1. "word\n.domain" → "word.domain" (most common)
+        normalized_text = re_module.sub(r'(\S)\s*\n\s*(?=\.)', r'\1', normalized_text)
+        # 2. "word\n/path" → "word/path" (word followed by newline then slash)
+        normalized_text = re_module.sub(r'(\S)\s*\n\s*(?=/)', r'\1', normalized_text)
+        # 3. "://\n" → "://" (protocol followed by newline)
+        normalized_text = re_module.sub(r'://\s*\n\s*', '://', normalized_text)
+        # 4. "www\n.example" → "www.example"
+        normalized_text = re_module.sub(r'(www)\s*\n\s*(?=\.)', r'\1', normalized_text)
+
+        # Clean up any remaining newlines with space
         normalized_text = normalized_text.replace('\n', ' ').replace('\r', ' ')
         # Clean up multiple spaces
         normalized_text = ' '.join(normalized_text.split())
