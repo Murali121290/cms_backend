@@ -20,14 +20,16 @@ def find_crossrefs_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
     doc = fitz.open(pdf_path)
     ref_entries = []
 
-    # Step 0: Identify which pages are part of bibliography/notes/references sections
+    # Step 0: Identify which pages to skip (TOC, bibliography, notes)
+    toc_pages = _identify_toc_section(doc)
     bibliography_pages = _identify_bibliography_sections(doc)
+    skip_pages = toc_pages | bibliography_pages  # Combine both sets
 
     # Step 1: Extract all potential reference targets (figures, tables, chapters, pages)
     targets = _find_targets(doc)
 
-    # Step 2: Find cross-reference text that mentions these targets (excluding bibliography pages)
-    references = _find_references(doc, targets, bibliography_pages)
+    # Step 2: Find cross-reference text that mentions these targets (excluding TOC/bibliography pages)
+    references = _find_references(doc, targets, skip_pages)
 
     # Step 3: Match references to targets and create links
     matched_count = 0
@@ -80,6 +82,41 @@ def find_crossrefs_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
         "not_linked": not_linked_count,
         "details": ref_entries,
     }
+
+
+def _identify_toc_section(doc) -> set:
+    """
+    Identify pages that are part of the Table of Contents.
+    TOC pages list chapters/figures/tables but aren't actual content.
+    Returns set of page indices to exclude from cross-reference detection.
+    """
+    toc_pages = set()
+    toc_start = None
+
+    # Find TOC start page
+    for page_idx in range(min(20, len(doc))):  # TOC is usually in first 20 pages
+        page = doc[page_idx]
+        text = page.get_text()
+
+        # Look for Table of Contents header
+        if re.search(r'\b(Table\s+of\s+Contents|Contents|TOC)\b', text, re.IGNORECASE):
+            toc_start = page_idx
+            logger.debug(f"Table of Contents found at page {page_idx + 1}")
+            break
+
+    # If TOC found, mark pages until main content starts (usually first chapter)
+    if toc_start is not None:
+        for page_idx in range(toc_start, min(toc_start + 15, len(doc))):  # TOC typically 1-15 pages
+            page = doc[page_idx]
+            text = page.get_text()
+
+            # Stop when we hit actual chapter content (Chapter 1, Chapter 2, etc. as main header)
+            if re.match(r'^\s*(?:CHAPTER|Chapter)\s+1\b', text, re.IGNORECASE):
+                break
+
+            toc_pages.add(page_idx)
+
+    return toc_pages
 
 
 def _identify_bibliography_sections(doc) -> set:
@@ -183,17 +220,17 @@ def _find_targets(doc) -> dict:
     return targets
 
 
-def _find_references(doc, targets: dict, bibliography_pages: set) -> list:
+def _find_references(doc, targets: dict, skip_pages: set) -> list:
     """
     Find cross-reference text that mentions the targets.
-    Excludes references found in bibliography/notes/references sections.
+    Excludes references found in TOC, bibliography, or notes sections.
     Returns list of {page_idx, page, rect, type, text, target_info}
     """
     references = []
 
     for page_idx in range(len(doc)):
-        # Skip bibliography/notes/references pages (external references)
-        skip_external_refs = page_idx in bibliography_pages
+        # Skip TOC, bibliography, notes/references pages (not actual content)
+        skip_external_refs = page_idx in skip_pages
 
         page = doc[page_idx]
         physical_page = page_idx + 1
