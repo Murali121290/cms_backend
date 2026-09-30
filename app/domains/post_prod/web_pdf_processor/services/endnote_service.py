@@ -61,21 +61,40 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
                         logger.debug(f"Found superscript note {note_num} on page {physical_page}, chapter {chapter_id}")
 
     # Step 3: Find endnote definitions (ALL occurrences for multi-definition notes)
-    # Only detect in notes/endnotes sections, not in body content (to avoid matching numbered lists)
+    # First, locate the notes section to avoid matching numbered lists in body content
     note_definitions_all = defaultdict(list)  # note_number -> list of definitions
-    in_notes_section = False
+    notes_section_found = False
+    notes_section_page = None
 
+    # First pass: find notes section header
     for page_idx in range(len(doc)):
+        page = doc[page_idx]
+        page_text = page.get_text()
+
+        # Look for dedicated Notes/Endnotes/Bibliography section at page start
+        if re.match(r'^\s*(Notes|Endnotes|Notes\s+and\s+References|Bibliography|Works\s+Cited)',
+                   page_text, re.IGNORECASE):
+            notes_section_found = True
+            notes_section_page = page_idx
+            logger.debug(f"Notes section found at page {page_idx + 1}")
+            break
+
+    # If no notes section found, this PDF doesn't have endnotes
+    if not notes_section_found:
+        logger.debug("No notes/endnotes/bibliography section found in PDF")
+        doc.close()
+        return {
+            "total_notes": 0,
+            "linked": 0,
+            "not_linked": 0,
+            "details": [],
+        }
+
+    # Second pass: extract endnote definitions from notes section only
+    for page_idx in range(notes_section_page, len(doc)):
         page = doc[page_idx]
         physical_page = page_idx + 1
         blocks = page.get_text("dict")["blocks"]
-
-        # Detect if we're in a notes section (after page 100 is notes/endnotes area)
-        if page_idx >= 100:
-            page_text = page.get_text()
-            if re.search(r'(^|\n)(Notes|Endnotes|Notes\s+and\s+References|Bibliography)',
-                        page_text, re.IGNORECASE | re.MULTILINE):
-                in_notes_section = True
 
         for block in blocks:
             if block["type"] != 0:
@@ -83,10 +102,6 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
 
             for line in block.get("lines", []):
                 line_text = "".join(s.get("text", "") for s in line.get("spans", [])).strip()
-
-                # Only match endnotes in confirmed notes sections (skip body content numbered lists)
-                if not in_notes_section:
-                    continue
 
                 # Match endnotes like "1.", "2)", "3:" but avoid page headers
                 # Reject if number followed by 2+ spaces (page header format like "220    Wolf Land")
