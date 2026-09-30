@@ -210,7 +210,7 @@ def merge_project_files(
 
     # Extract absolute paths for merge operation
     file_paths = [f.absolute_path for f in body.files]
-    merged_output_path = os.path.join(project_obj.folder_name, "merged.pdf")
+    merged_output_path = os.path.join(project_obj.folder_name, "output.pdf")
 
     # Perform merge
     result = merge_pdfs(file_paths, merged_output_path)
@@ -236,7 +236,7 @@ def merge_project_files(
         project_obj.status = "Merged"
         project_obj.validation_status = "pass"
         db.commit()
-        return {"message": "PDF files merged successfully", "merged_path": merged_output_path}
+        return {"message": "PDF files merged successfully", "output_path": merged_output_path}
     else:
         web_pdf_projects_db.record_merge_history(
             db,
@@ -263,19 +263,17 @@ def trim_project_pdf(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
         
-    merged_path = os.path.join(project["folder_name"], "merged.pdf")
-    if not os.path.exists(merged_path):
-        raise HTTPException(status_code=400, detail="Merged PDF not found. Please merge files first.")
-        
-    trimmed_output_path = os.path.join(project["folder_name"], "trimmed.pdf")
-    
+    output_pdf = os.path.join(project["folder_name"], "output.pdf")
+    if not os.path.exists(output_pdf):
+        raise HTTPException(status_code=400, detail="Output PDF not found. Please merge files first.")
+
     success, result_msg = trim_crop_engine(
-        pdf_path=merged_path,
+        pdf_path=output_pdf,
         mode=body.mode,
         margins=body.margins,
         standardize_size=body.standardize_size,
         remove_marks=body.remove_marks,
-        output_path=trimmed_output_path
+        output_path=output_pdf
     )
     
     if not success:
@@ -283,10 +281,10 @@ def trim_project_pdf(
         
     project_obj = db.query(WebPdfProject).filter(WebPdfProject.id == project_id).first()
     if project_obj:
-        project_obj.status = "Trimmed"
+        project_obj.status = "Processing"
         db.commit()
-        
-    return {"message": "PDF trimmed successfully", "trimmed_path": trimmed_output_path}
+
+    return {"message": "PDF trimmed successfully", "output_path": output_pdf}
 
 
 @router.get("/projects/{project_id}/merged-pdf")
@@ -301,11 +299,11 @@ def get_merged_pdf(
 
     # Serve the correct version based on project status
     if project.get("status") == "Bookmarked":
-        pdf_path = os.path.join(project["folder_name"], "bookmarked.pdf")
+        pdf_path = os.path.join(project["folder_name"], "output.pdf")
     elif project.get("status") == "Trimmed":
-        pdf_path = os.path.join(project["folder_name"], "trimmed.pdf")
+        pdf_path = os.path.join(project["folder_name"], "output.pdf")
     else:
-        pdf_path = os.path.join(project["folder_name"], "merged.pdf")
+        pdf_path = os.path.join(project["folder_name"], "output.pdf")
         
     if not os.path.exists(pdf_path):
         raise HTTPException(status_code=404, detail="PDF not found. Please merge files first.")
@@ -365,19 +363,13 @@ def check_fonts_status(
     settings = get_settings()
     base_dir = project["folder_name"]
     
-    # Use trimmed file if it exists, else use merged
-    merged_pdf_path = os.path.join(base_dir, "merged.pdf")
-    trimmed_pdf_path = os.path.join(base_dir, "trimmed.pdf")
-    
-    if os.path.exists(trimmed_pdf_path):
-        target_pdf = trimmed_pdf_path
-    elif os.path.exists(merged_pdf_path):
-        target_pdf = merged_pdf_path
-    else:
-        raise HTTPException(status_code=404, detail="No PDF file available to check.")
+    output_pdf = os.path.join(base_dir, "output.pdf")
+
+    if not os.path.exists(output_pdf):
+        raise HTTPException(status_code=404, detail="Output PDF not found. Please merge files first.")
 
     try:
-        font_status = font_service.check_fonts_embedded(target_pdf)
+        font_status = font_service.check_fonts_embedded(output_pdf)
         return font_status
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -396,19 +388,13 @@ def check_security_status(
     settings = get_settings()
     base_dir = project["folder_name"]
     
-    # Use trimmed file if it exists, else use merged
-    merged_pdf_path = os.path.join(base_dir, "merged.pdf")
-    trimmed_pdf_path = os.path.join(base_dir, "trimmed.pdf")
     
-    if os.path.exists(trimmed_pdf_path):
-        target_pdf = trimmed_pdf_path
-    elif os.path.exists(merged_pdf_path):
-        target_pdf = merged_pdf_path
-    else:
-        raise HTTPException(status_code=404, detail="No PDF file available to check.")
+    output_pdf = os.path.join(base_dir, "output.pdf")
+    if not os.path.exists(output_pdf):
+        raise HTTPException(status_code=404, detail="Output PDF not found. Please merge files first.")
 
     try:
-        security_status = security_service.check_pdf_security(target_pdf)
+        security_status = security_service.check_pdf_security(output_pdf)
         return security_status
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -430,21 +416,13 @@ def generate_bookmarks(
 
     base_dir = project["folder_name"]
     
-    # Use trimmed file if it exists, else use merged
-    merged_pdf_path = os.path.join(base_dir, "merged.pdf")
-    trimmed_pdf_path = os.path.join(base_dir, "trimmed.pdf")
-    
-    if os.path.exists(trimmed_pdf_path):
-        target_pdf = trimmed_pdf_path
-    elif os.path.exists(merged_pdf_path):
-        target_pdf = merged_pdf_path
-    else:
-        raise HTTPException(status_code=404, detail="No PDF file available to check.")
-        
-    output_pdf = os.path.join(base_dir, "bookmarked.pdf")
+    output_pdf = os.path.join(base_dir, "output.pdf")
+
+    if not os.path.exists(output_pdf):
+        raise HTTPException(status_code=404, detail="Output PDF not found. Please merge files first.")
 
     try:
-        result = toc_service.generate_bookmarks_for_pdf(target_pdf, output_pdf, include_subheadings=include_subheadings)
+        result = toc_service.generate_bookmarks_for_pdf(output_pdf, output_pdf, include_subheadings=include_subheadings)
         if not result.get("success"):
             raise HTTPException(status_code=500, detail=result.get("error", "Unknown error generating bookmarks"))
             
@@ -470,7 +448,7 @@ def get_bookmarks(
         raise HTTPException(status_code=404, detail="Project not found")
         
     base_dir = project["folder_name"]
-    bookmarked_pdf_path = os.path.join(base_dir, "bookmarked.pdf")
+    bookmarked_pdf_path = os.path.join(base_dir, "output.pdf")
     
     if not os.path.exists(bookmarked_pdf_path):
         raise HTTPException(status_code=404, detail="Bookmarked PDF not found")
@@ -491,7 +469,7 @@ def update_bookmarks(
         raise HTTPException(status_code=404, detail="Project not found")
         
     base_dir = project["folder_name"]
-    bookmarked_pdf_path = os.path.join(base_dir, "bookmarked.pdf")
+    bookmarked_pdf_path = os.path.join(base_dir, "output.pdf")
     
     if not os.path.exists(bookmarked_pdf_path):
         raise HTTPException(status_code=404, detail="Bookmarked PDF not found")
@@ -518,21 +496,13 @@ def generate_links(
         raise HTTPException(status_code=404, detail="Project not found")
 
     base_dir = project["folder_name"]
-    bookmarked_pdf_path = os.path.join(base_dir, "bookmarked.pdf")
-    
-    if not os.path.exists(bookmarked_pdf_path):
-        # Fallback to trimmed or merged
-        trimmed_pdf_path = os.path.join(base_dir, "trimmed.pdf")
-        merged_pdf_path = os.path.join(base_dir, "merged.pdf")
-        if os.path.exists(trimmed_pdf_path):
-            bookmarked_pdf_path = trimmed_pdf_path
-        elif os.path.exists(merged_pdf_path):
-            bookmarked_pdf_path = merged_pdf_path
-        else:
-            raise HTTPException(status_code=404, detail="No PDF file available to link.")
+    output_pdf = os.path.join(base_dir, "output.pdf")
+
+    if not os.path.exists(output_pdf):
+        raise HTTPException(status_code=404, detail="Output PDF not found. Please merge files first.")
             
     try:
-        result = toc_service.create_links_in_pdf(bookmarked_pdf_path, request.link_type, request.analyze_only)
+        result = toc_service.create_links_in_pdf(output_pdf, request.link_type, request.analyze_only)
         return {"success": True, **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -550,11 +520,11 @@ def generate_link_manual(
         raise HTTPException(status_code=404, detail="Project not found")
 
     base_dir = project["folder_name"]
-    bookmarked_pdf_path = os.path.join(base_dir, "bookmarked.pdf")
+    bookmarked_pdf_path = os.path.join(base_dir, "output.pdf")
     
     if not os.path.exists(bookmarked_pdf_path):
-        trimmed_pdf_path = os.path.join(base_dir, "trimmed.pdf")
-        merged_pdf_path = os.path.join(base_dir, "merged.pdf")
+        trimmed_pdf_path = os.path.join(base_dir, "output.pdf")
+        merged_pdf_path = os.path.join(base_dir, "output.pdf")
         if os.path.exists(trimmed_pdf_path):
             bookmarked_pdf_path = trimmed_pdf_path
         elif os.path.exists(merged_pdf_path):
@@ -592,11 +562,11 @@ def generate_url_links(
         raise HTTPException(status_code=404, detail="Project not found")
 
     base_dir = project["folder_name"]
-    bookmarked_pdf_path = os.path.join(base_dir, "bookmarked.pdf")
+    bookmarked_pdf_path = os.path.join(base_dir, "output.pdf")
 
     if not os.path.exists(bookmarked_pdf_path):
-        trimmed_pdf_path = os.path.join(base_dir, "trimmed.pdf")
-        merged_pdf_path = os.path.join(base_dir, "merged.pdf")
+        trimmed_pdf_path = os.path.join(base_dir, "output.pdf")
+        merged_pdf_path = os.path.join(base_dir, "output.pdf")
         if os.path.exists(trimmed_pdf_path):
             bookmarked_pdf_path = trimmed_pdf_path
         elif os.path.exists(merged_pdf_path):
@@ -628,11 +598,11 @@ def generate_email_links(
         raise HTTPException(status_code=404, detail="Project not found")
 
     base_dir = project["folder_name"]
-    bookmarked_pdf_path = os.path.join(base_dir, "bookmarked.pdf")
+    bookmarked_pdf_path = os.path.join(base_dir, "output.pdf")
 
     if not os.path.exists(bookmarked_pdf_path):
-        trimmed_pdf_path = os.path.join(base_dir, "trimmed.pdf")
-        merged_pdf_path = os.path.join(base_dir, "merged.pdf")
+        trimmed_pdf_path = os.path.join(base_dir, "output.pdf")
+        merged_pdf_path = os.path.join(base_dir, "output.pdf")
         if os.path.exists(trimmed_pdf_path):
             bookmarked_pdf_path = trimmed_pdf_path
         elif os.path.exists(merged_pdf_path):
@@ -668,11 +638,11 @@ def generate_endnote_links(
         raise HTTPException(status_code=404, detail="Project not found")
 
     base_dir = project["folder_name"]
-    bookmarked_pdf_path = os.path.join(base_dir, "bookmarked.pdf")
+    bookmarked_pdf_path = os.path.join(base_dir, "output.pdf")
 
     if not os.path.exists(bookmarked_pdf_path):
-        trimmed_pdf_path = os.path.join(base_dir, "trimmed.pdf")
-        merged_pdf_path = os.path.join(base_dir, "merged.pdf")
+        trimmed_pdf_path = os.path.join(base_dir, "output.pdf")
+        merged_pdf_path = os.path.join(base_dir, "output.pdf")
         if os.path.exists(trimmed_pdf_path):
             bookmarked_pdf_path = trimmed_pdf_path
         elif os.path.exists(merged_pdf_path):
@@ -700,11 +670,11 @@ def generate_crossref_links(
         raise HTTPException(status_code=404, detail="Project not found")
 
     base_dir = project["folder_name"]
-    bookmarked_pdf_path = os.path.join(base_dir, "bookmarked.pdf")
+    bookmarked_pdf_path = os.path.join(base_dir, "output.pdf")
 
     if not os.path.exists(bookmarked_pdf_path):
-        trimmed_pdf_path = os.path.join(base_dir, "trimmed.pdf")
-        merged_pdf_path = os.path.join(base_dir, "merged.pdf")
+        trimmed_pdf_path = os.path.join(base_dir, "output.pdf")
+        merged_pdf_path = os.path.join(base_dir, "output.pdf")
         if os.path.exists(trimmed_pdf_path):
             bookmarked_pdf_path = trimmed_pdf_path
         elif os.path.exists(merged_pdf_path):

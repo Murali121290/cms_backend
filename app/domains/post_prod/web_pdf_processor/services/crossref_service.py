@@ -112,7 +112,8 @@ def _identify_bibliography_sections(doc) -> set:
 
 def _find_targets(doc) -> dict:
     """
-    Find all potential link targets: figure captions, table titles, chapters, page headers.
+    Find link targets: figure captions, table titles, chapters.
+    Matches captions at line start (avoids mid-sentence mentions).
     Returns: {identifier -> {"page_idx": idx, "page": physical_page, "type": type}}
     """
     targets = {}
@@ -129,8 +130,9 @@ def _find_targets(doc) -> dict:
             for line in block.get("lines", []):
                 line_text = "".join(s.get("text", "") for s in line.get("spans", [])).strip()
 
-                # Detect figure captions: "Figure 3.2:", "Fig. 3.2", "FIGURE 3.2"
-                fig_match = re.search(r'(?:Figure|Fig\.?|FIGURE|FIG\.?)\s+(\d+(?:\.\d+)?)', line_text, re.IGNORECASE)
+                # Match figure captions at line start: "Figure 3.2" or "Figure 3.2:"
+                # This avoids matching "See Figure 3.2" in the middle of text
+                fig_match = re.match(r'(?:Figure|Fig\.?)\s+(\d+(?:\.\d+)?)', line_text, re.IGNORECASE)
                 if fig_match:
                     fig_id = f"figure_{fig_match.group(1)}"
                     if fig_id not in targets:
@@ -142,8 +144,8 @@ def _find_targets(doc) -> dict:
                         }
                         logger.debug(f"Found figure target {fig_id} on page {physical_page}")
 
-                # Detect table titles: "Table 5.1:", "Tab. 5.1", "TABLE 5.1"
-                table_match = re.search(r'(?:Table|Tab\.?|TABLE|TAB\.?)\s+(\d+(?:\.\d+)?)', line_text, re.IGNORECASE)
+                # Match table titles at line start: "Table 5.1" or "Table 5.1:"
+                table_match = re.match(r'(?:Table|Tab\.?)\s+(\d+(?:\.\d+)?)', line_text, re.IGNORECASE)
                 if table_match:
                     table_id = f"table_{table_match.group(1)}"
                     if table_id not in targets:
