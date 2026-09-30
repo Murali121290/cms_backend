@@ -51,6 +51,8 @@ import { PostProdCssMatcher } from '@/pages/PostProdCssMatcher'
 import { PostProdEpubValidator } from '@/pages/PostProdEpubValidator'
 import { PostProdEpubValidatorFiles } from '@/pages/PostProdEpubValidatorFiles'
 import { PostProdSlideFormatter } from '@/pages/PostProdSlideFormatter'
+import { PostProdXmlConversion } from '@/pages/PostProdXmlConversion'
+import { PostProdXmlConversionEditor } from '@/pages/PostProdXmlConversionEditor'
 import { JournalArticleEditorPage } from '@/pages/JournalArticleEditorPage'
 import { JournalClientsPage } from '@/pages/journals/JournalClientsPage'
 import { JournalClientPage } from '@/pages/journals/JournalClientPage'
@@ -68,7 +70,7 @@ function PostProdGuard({ children }: { children: React.ReactNode }) {
   const { canAccess, viewer } = useRBAC()
   const isAccessUser =
     viewer?.team === 'Accessibility Team' ||
-    Boolean(viewer?.role && String(viewer.role).toLowerCase().includes('accessibility')) ||
+    Boolean((viewer as any)?.role && String((viewer as any).role).toLowerCase().includes('accessibility')) ||
     Boolean((viewer as any)?.roles && (viewer as any).roles.some((r: any) => String(typeof r === 'string' ? r : r.name).toLowerCase().includes('accessibility')))
 
   const hasAccess = canAccess(ROLE_PERMISSIONS.access_post_production) || isAccessUser
@@ -199,6 +201,8 @@ const router = createBrowserRouter([
       { path: 'post-production/epub-validator', element: <PostProdGuard><PostProdEpubValidator /></PostProdGuard> },
       { path: 'post-production/epub-validator/:projectId', element: <PostProdGuard><PostProdEpubValidatorFiles /></PostProdGuard> },
       { path: 'post-production/slide-formatter', element: <PostProdGuard><PostProdSlideFormatter /></PostProdGuard> },
+      { path: 'post-production/xml-conversion', element: <PostProdGuard><PostProdXmlConversion /></PostProdGuard> },
+      { path: 'post-production/xml-conversion/:projectId', element: <PostProdGuard><PostProdXmlConversionEditor /></PostProdGuard> },
       { path: 'journal-article-editor', element: <JournalArticleEditorPage /> },
       { path: 'journal-article-editor/:articleId', element: <JournalArticleEditorPage /> },
       { path: 'bod/internal', element: <BodInternalPage /> },

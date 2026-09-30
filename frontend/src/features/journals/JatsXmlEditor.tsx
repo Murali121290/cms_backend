@@ -103,11 +103,12 @@ export function JatsXmlEditor({ articleId, version, height = 'calc(100vh - 118px
   const errorCount = findings.filter(f => f.severity === 'error').length
   const goToLine = (line: number) => editorRef.current?.scrollToLine(line)
 
-  const validate = async () => {
+  /** Server-side JATS 1.3 DTD check of the unsaved XML. Returns the errors (SourceEditor's DTD button shows them too). */
+  const validate = async (): Promise<{ errors: { line_number: number; message: string; error_type?: string }[] }> => {
     if (!wellFormed.ok) {
       if (wellFormed.line) goToLine(wellFormed.line)
       toast.error('The XML is not well-formed. Fix the syntax error first.')
-      return
+      return { errors: [{ line_number: wellFormed.line ?? 0, message: wellFormed.message ?? 'XML syntax error', error_type: 'XML-WF' }] }
     }
     setValidating(true)
     try {
@@ -115,11 +116,13 @@ export function JatsXmlEditor({ articleId, version, height = 'calc(100vh - 118px
       setFindings(r.findings)
       setShowLog(true)
       setRightTab('log')
-      const errs = r.findings.filter(f => f.severity === 'error').length
-      if (errs) toast.error(`JATS 1.3 DTD: ${errs} error${errs > 1 ? 's' : ''}`)
+      const errors = r.findings.filter(f => f.severity === 'error')
+      if (errors.length) toast.error(`JATS 1.3 DTD: ${errors.length} error${errors.length > 1 ? 's' : ''}`)
       else toast.success(r.findings.length ? `Valid against the JATS 1.3 DTD (${r.findings.length} warning${r.findings.length > 1 ? 's' : ''})` : 'Valid against the JATS 1.3 DTD')
+      return { errors: errors.map(f => ({ line_number: f.line ?? 0, message: `[${f.rule_id}] ${f.title}`, error_type: f.rule_id })) }
     } catch (err) {
       toast.error(getApiErrorMessage(err, 'Validation failed'))
+      throw err
     } finally {
       setValidating(false)
     }
@@ -213,7 +216,7 @@ export function JatsXmlEditor({ articleId, version, height = 'calc(100vh - 118px
               Check Well-Formedness
             </button>
             <button type="button" onClick={format} className={cn(btn, btnOff)}>Format XML</button>
-            <button type="button" onClick={validate} disabled={validating} className={cn(btn, 'bg-indigo-50 text-indigo-800 border-indigo-300 hover:bg-indigo-100 disabled:opacity-50')}>
+            <button type="button" onClick={() => { validate().catch(() => undefined) }} disabled={validating} className={cn(btn, 'bg-indigo-50 text-indigo-800 border-indigo-300 hover:bg-indigo-100 disabled:opacity-50')}>
               {validating ? 'Validating…' : 'Validate (JATS DTD)'}
             </button>
             <button type="button" onClick={() => setShowLog(v => !v)} className={cn(btn, showLog ? btnOff : 'bg-amber-50 text-amber-700 border-amber-200')}>
