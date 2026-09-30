@@ -287,7 +287,7 @@ def trim_project_pdf(
     return {"message": "PDF trimmed successfully", "output_path": output_pdf}
 
 
-@router.get("/projects/{project_id}/merged-pdf")
+@router.get("/projects/{project_id}/final-pdf")
 def get_merged_pdf(
     project_id: int,
     db: Session = Depends(get_db),
