@@ -22,6 +22,7 @@ import { Modal } from '@/components/ui/Modal';
 import { toast } from '@/store/useToastStore';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { useSessionStore } from '@/stores/sessionStore';
+import { useRBAC } from '@/hooks/useRBAC';
 import {
   listProjects,
   createProject,
@@ -201,6 +202,7 @@ interface ProjectCardProps {
 function ProjectCard({ project, users, onDelete, onEdit, onRefresh }: ProjectCardProps) {
   const navigate = useNavigate();
   const viewer = useSessionStore((s) => s.viewer);
+  const { isTeamLead } = useRBAC();
   const myUsername = (viewer?.username || '').trim().toLowerCase();
 
   const handleCardClick = () => {
@@ -275,16 +277,18 @@ function ProjectCard({ project, users, onDelete, onEdit, onRefresh }: ProjectCar
             >
               <Edit size={14} />
             </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(project.id);
-              }}
-              className="text-muted hover:text-red-500 transition-colors p-1 rounded hover:bg-red-50 dark:hover:bg-red-950/30"
-              title="Delete Project"
-            >
-              <Trash2 size={14} />
-            </button>
+            {isTeamLead && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(project.id);
+                }}
+                className="text-muted hover:text-red-500 transition-colors p-1 rounded hover:bg-red-50 dark:hover:bg-red-950/30"
+                title="Delete Project"
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
             <ChevronRight size={16} className="shrink-0 mt-0.5 transition-colors text-muted" />
           </div>
         </div>
@@ -362,6 +366,7 @@ function ProjectCard({ project, users, onDelete, onEdit, onRefresh }: ProjectCar
 export function PostProdEpubValidator() {
   useDocumentTitle('EPUB Validator — S4Carlisle CMS');
   const navigate = useNavigate();
+  const { isTeamLead } = useRBAC();
 
   const [projects, setProjects] = useState<EvProject[]>([]);
   const [clients, setClients] = useState<ClientCompany[]>([]);
@@ -596,9 +601,11 @@ export function PostProdEpubValidator() {
           </div>
         </div>
 
-        <Button onClick={() => setShowAddModal(true)} leftIcon={<Plus size={15} />}>
-          Create Project
-        </Button>
+        {isTeamLead && (
+          <Button onClick={() => setShowAddModal(true)} leftIcon={<Plus size={15} />}>
+            Create Project
+          </Button>
+        )}
       </div>
 
       {/* Metrics */}

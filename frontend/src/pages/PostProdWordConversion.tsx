@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { toast } from '@/store/useToastStore'
 import { useSessionStore } from '@/stores/sessionStore'
+import { useRBAC } from '@/hooks/useRBAC'
 
 // ── Assignee Dropdown ────────────────────────────────────────────────────────
 
@@ -158,6 +159,7 @@ export function PostProdWordConversion() {
   useDocumentTitle('Word Conversion — S4Carlisle CMS')
   const navigate = useNavigate()
   const viewer = useSessionStore((s) => s.viewer)
+  const { isTeamLead } = useRBAC()
   const myUsername = (viewer?.username || '').trim().toLowerCase()
 
   const [projects, setProjects] = useState<PostProdProject[]>([])
@@ -331,9 +333,11 @@ export function PostProdWordConversion() {
             </div>
           </div>
         </div>
-        <Button onClick={() => setShowAddProjectModal(true)} leftIcon={<Plus size={15} />}>
-          Create Project
-        </Button>
+        {isTeamLead && (
+          <Button onClick={() => setShowAddProjectModal(true)} leftIcon={<Plus size={15} />}>
+            Create Project
+          </Button>
+        )}
       </div>
 
       {/* Metrics Row */}
@@ -481,16 +485,18 @@ export function PostProdWordConversion() {
                       <p className="text-[11px] text-muted mt-0.5">{proj.client} {proj.client_code && `(${proj.client_code})`}</p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setProjectToDelete(proj.id)
-                        }}
-                        className="text-muted hover:text-red-500 transition-colors p-1 rounded hover:bg-red-50 dark:hover:bg-red-950/30"
-                        title="Delete Project"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                      {isTeamLead && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setProjectToDelete(proj.id)
+                          }}
+                          className="text-muted hover:text-red-500 transition-colors p-1 rounded hover:bg-red-50 dark:hover:bg-red-950/30"
+                          title="Delete Project"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
                       <ChevronRight size={16} className="shrink-0 mt-0.5 transition-colors text-muted" />
                     </div>
                   </div>

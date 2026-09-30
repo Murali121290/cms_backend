@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, RefreshCw, ChevronRight, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen, Trash2, Play, Download } from 'lucide-react'
+import { Plus, RefreshCw, ChevronRight, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen, Trash2, Download } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { xmlConversionApi } from '@/api/xmlConversion'
 import { usersApi } from '@/api/users'
 import { Button } from '@/components/ui/Button'
 import { toast } from '@/store/useToastStore'
 import { useSessionStore } from '@/stores/sessionStore'
+import { useRBAC } from '@/hooks/useRBAC'
 import { Modal } from '@/components/ui/Modal'
 
 // ── Assignee Dropdown ────────────────────────────────────────────────────────
@@ -132,6 +133,7 @@ export function PostProdXmlConversion() {
   useDocumentTitle('XML Conversion — S4Carlisle CMS')
   const navigate = useNavigate()
   const viewer = useSessionStore((s) => s.viewer)
+  const { isTeamLead } = useRBAC()
 
   const [projects, setProjects] = useState<any[]>([])
   const [clients, setClients] = useState<any[]>([])
@@ -146,6 +148,7 @@ export function PostProdXmlConversion() {
   const [pdfFile, setPdfFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [projectToDelete, setProjectToDelete] = useState<number | null>(null)
 
   // Filter states
   const [searchQuery, setSearchQuery] = useState('')
@@ -224,6 +227,26 @@ export function PostProdXmlConversion() {
       fetchProjects()
     } catch (err) {
       toast.error('Failed to trigger conversion')
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!projectToDelete) return
+    try {
+      const res = await fetch(`/api/v2/post-prod/xml-conversion/projects/${projectToDelete}`, {
+        method: 'DELETE'
+      })
+      if (res.ok) {
+        toast.success('Project deleted successfully')
+        fetchProjects()
+      } else {
+        const data = await res.json()
+        toast.error(data.detail || 'Failed to delete project')
+      }
+    } catch (err) {
+      toast.error('An error occurred while deleting project')
+    } finally {
+      setProjectToDelete(null)
     }
   }
 
@@ -322,9 +345,11 @@ export function PostProdXmlConversion() {
             </div>
           </div>
         </div>
-        <Button onClick={() => setShowAddProjectModal(true)} leftIcon={<Plus size={15} />}>
-          Create Project
-        </Button>
+        {isTeamLead && (
+          <Button onClick={() => setShowAddProjectModal(true)} leftIcon={<Plus size={15} />}>
+            Create Project
+          </Button>
+        )}
       </div>
 
       {/* Metrics Row */}
@@ -482,14 +507,15 @@ export function PostProdXmlConversion() {
                       <p className="text-[11px] text-muted mt-0.5">{proj.client_code} • {proj.target_format}</p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button
-                        onClick={(e) => handleConvert(e, proj.id)}
-                        disabled={isProcessing || isCompleted}
-                        className={`p-1.5 rounded transition-colors ${isProcessing || isCompleted ? 'text-muted/50 cursor-not-allowed' : 'text-primary hover:bg-primary/10'}`}
-                        title="Run Conversion"
-                      >
-                        <Play size={14} />
-                      </button>
+                      {isTeamLead && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setProjectToDelete(proj.id) }}
+                          className="text-muted hover:text-red-500 transition-colors p-1 rounded hover:bg-red-50 dark:hover:bg-red-950/30"
+                          title="Delete Project"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
 
                       {isCompleted && (
                         <button
@@ -698,6 +724,15 @@ export function PostProdXmlConversion() {
           </div>
         </div>
       )}
+
+      <Modal
+        isOpen={projectToDelete !== null}
+        onClose={() => setProjectToDelete(null)}
+        onConfirm={handleDelete}
+        title="Delete Project"
+        description="Are you sure you want to delete this project? This action cannot be undone."
+        confirmLabel="Delete"
+      />
     </div>
   )
 }

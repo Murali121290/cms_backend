@@ -23,6 +23,7 @@ import { Modal } from '@/components/ui/Modal';
 import { toast } from '@/store/useToastStore';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { useSessionStore } from '@/stores/sessionStore';
+import { useRBAC } from '@/hooks/useRBAC';
 import {
   listProjects,
   createProject,
@@ -221,6 +222,7 @@ interface ProjectCardProps {
 
 function ProjectCard({ project, users, onDelete, onEdit, onRefresh, onSelect }: ProjectCardProps) {
   const viewer = useSessionStore((s) => s.viewer);
+  const { isTeamLead } = useRBAC();
   const myUsername = (viewer?.username || '').trim().toLowerCase();
 
   const handleCardClick = () => {
@@ -298,13 +300,15 @@ function ProjectCard({ project, users, onDelete, onEdit, onRefresh, onSelect }: 
             >
               <Edit size={14} />
             </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); onDelete(project.id); }}
-              className="text-muted hover:text-red-500 transition-colors p-1 rounded hover:bg-red-50 dark:hover:bg-red-950/30"
-              title="Delete Project"
-            >
-              <Trash2 size={14} />
-            </button>
+            {isTeamLead && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onDelete(project.id); }}
+                className="text-muted hover:text-red-500 transition-colors p-1 rounded hover:bg-red-50 dark:hover:bg-red-950/30"
+                title="Delete Project"
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
           </div>
         </div>
 
@@ -371,6 +375,7 @@ const CATEGORY_LABELS: Record<string, { label: string; color: string }> = {
 export function PostProdWebPdfProcessor() {
   useDocumentTitle('Web PDF Processor — S4Carlisle CMS');
   const navigate = useNavigate();
+  const { isTeamLead } = useRBAC();
   const { projectId } = useParams<{ projectId: string }>();
 
   const [projects, setProjects] = useState<WebPdfProject[]>([]);
@@ -1040,7 +1045,7 @@ export function PostProdWebPdfProcessor() {
         </div>
 
         <div className="flex items-center gap-2">
-          {!selectedProject && (
+          {!selectedProject && isTeamLead && (
             <Button
               onClick={() => setShowAddModal(true)}
               className="text-xs font-semibold h-9 px-3 flex items-center gap-1.5"

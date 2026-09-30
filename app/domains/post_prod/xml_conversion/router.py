@@ -310,3 +310,29 @@ def get_html_preview(project_id: int, db: Session = Depends(database.get_db)):
                 return {"html": f"<div style='color:red; padding: 20px;'>Error generating preview: {str(e)}</div>"}
                 
     return {"html": "<div style='color:gray; padding: 20px;'>No final XML available for preview.</div>"}
+
+@router.delete("/projects/{project_id}")
+def delete_project(project_id: int, db: Session = Depends(database.get_db), current_user: dict = Depends(get_current_user_from_cookie)):
+    """Delete an XML conversion project and its associated files/folders from disk."""
+    project = db.query(PostProdXMLConversionProject).filter(PostProdXMLConversionProject.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Delete the project folder from disk (contains PDF + any generated XMLs)
+    if project.filepath:
+        project_dir = os.path.dirname(project.filepath)
+        if os.path.exists(project_dir):
+            try:
+                shutil.rmtree(project_dir)
+            except Exception as e:
+                # Log but don't block deletion of DB record
+                print(f"Warning: Could not delete project folder {project_dir}: {e}")
+
+    # Delete history records first (FK constraint)
+    db.query(PostProdXMLConversionHistory).filter(PostProdXMLConversionHistory.project_id == project_id).delete()
+
+    # Delete the project DB record
+    db.delete(project)
+    db.commit()
+
+    return {"message": "Project deleted successfully"}
