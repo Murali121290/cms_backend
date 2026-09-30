@@ -79,53 +79,47 @@ def find_urls_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
                 if rect:
                     existing_link_rects.append((rect, uri))
 
-        # Extract all text words with positions
-        words = page.get_text("words")
+        # Extract all text at once (preserves line continuity info)
+        page_text = page.get_text()
 
-        # Group words into lines by (block_no, line_no)
-        lines: dict = {}
-        for w in words:
-            x0, y0, x1, y1, word, block_no, line_no, word_no = w
-            key = (block_no, line_no)
-            if key not in lines:
-                lines[key] = []
-            lines[key].append((x0, y0, x1, y1, word, word_no))
+        # Find all URLs in the full page text
+        for m in URL_PATTERN.finditer(page_text):
+            raw_url = m.group(0).rstrip('.,;:!?')
 
-        for key, line_words in lines.items():
-            line_words.sort(key=lambda w: w[5])
-            line_text = " ".join(w[4] for w in line_words)
+            # Skip incomplete URLs (e.g., "http://sports" without domain)
+            # A valid URL should have at least one dot after ://
+            if raw_url.startswith('http://') or raw_url.startswith('https://'):
+                if '.' not in raw_url.split('://', 1)[1]:
+                    continue
 
-            for m in URL_PATTERN.finditer(line_text):
-                raw_url = m.group(0).rstrip('.,;:!?')
-                href = raw_url if raw_url.startswith('http') else f'https://{raw_url}'
-                # Compare normalised (protocol-stripped) so http:// and https:// both match
-                norm = _normalise_url(href)
-                url_rect = _find_text_rect(page, raw_url)
+            href = raw_url if raw_url.startswith('http') else f'https://{raw_url}'
+            norm = _normalise_url(href)
+            url_rect = _find_text_rect(page, raw_url)
 
-                # Check if already linked by:
-                # 1. Exact URI match (normalized or raw)
-                # 2. Spatial overlap with existing link rectangles
-                already_linked = (
-                    norm in existing_uris_norm or
-                    href.rstrip('/') in existing_uris_raw or
-                    raw_url.rstrip('/') in existing_uris_raw
-                )
+            # Check if already linked by:
+            # 1. Exact URI match (normalized or raw)
+            # 2. Spatial overlap with existing link rectangles
+            already_linked = (
+                norm in existing_uris_norm or
+                href.rstrip('/') in existing_uris_raw or
+                raw_url.rstrip('/') in existing_uris_raw
+            )
 
-                # If not found by URI match, check spatial overlap
-                if not already_linked and url_rect:
-                    for link_rect, link_uri in existing_link_rects:
-                        if _rects_overlap(url_rect, link_rect):
-                            already_linked = True
-                            break
+            # If not found by URI match, check spatial overlap
+            if not already_linked and url_rect:
+                for link_rect, link_uri in existing_link_rects:
+                    if _rects_overlap(url_rect, link_rect):
+                        already_linked = True
+                        break
 
-                raw_entries.append({
-                    "url": href,
-                    "display_text": raw_url,
-                    "page": physical_page,
-                    "is_linked": already_linked,
-                    "rect": list(url_rect) if url_rect else None,
-                    "page_idx": page_idx,
-                })
+            raw_entries.append({
+                "url": href,
+                "display_text": raw_url,
+                "page": physical_page,
+                "is_linked": already_linked,
+                "rect": list(url_rect) if url_rect else None,
+                "page_idx": page_idx,
+            })
 
     # Check HTTP reachability for each unique URL in parallel
     unique_hrefs = list({e["url"] for e in raw_entries})

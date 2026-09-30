@@ -36,6 +36,8 @@ import {
   updateBookmarks,
   generateLinks,
   generateLinkManual,
+  generateUrlLinks,
+  type UrlLinkDetail,
   type BookmarkItem,
   type WebPdfProject,
   type ProjectFile,
@@ -269,6 +271,11 @@ export function PostProdWebPdfProcessor() {
   const [linkType, setLinkType] = useState<'one_way' | 'two_way' | 'none'>('one_way');
   const [linksStatus, setLinksStatus] = useState<any>(null);
   const [linksAnalysisStatus, setLinksAnalysisStatus] = useState<any>(null);
+
+  // URL Links (Step 7)
+  const [urlLinksAnalysis, setUrlLinksAnalysis] = useState<any>(null);
+  const [analyzingUrlLinks, setAnalyzingUrlLinks] = useState(false);
+  const [applyingUrlLinks, setApplyingUrlLinks] = useState(false);
 
   const [pdfRefreshKey, setPdfRefreshKey] = useState(Date.now());
 
@@ -659,6 +666,35 @@ export function PostProdWebPdfProcessor() {
       setPdfRefreshKey((prev) => prev + 1);
     } catch (err: any) {
       toast.error(err.message || 'Failed to manually link');
+    }
+  };
+
+  const handleAnalyzeUrlLinks = async () => {
+    if (!selectedProject) return;
+    setAnalyzingUrlLinks(true);
+    setUrlLinksAnalysis(null);
+    try {
+      const result = await generateUrlLinks(selectedProject.id, true);
+      setUrlLinksAnalysis(result);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to analyze URL links');
+    } finally {
+      setAnalyzingUrlLinks(false);
+    }
+  };
+
+  const handleApplyUrlLinks = async () => {
+    if (!selectedProject) return;
+    setApplyingUrlLinks(true);
+    try {
+      const result = await generateUrlLinks(selectedProject.id, false);
+      setUrlLinksAnalysis(result);
+      setPdfRefreshKey((prev) => prev + 1);
+      toast.success(`Hyperlinked ${result.not_linked} URL(s) successfully`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to apply URL links');
+    } finally {
+      setApplyingUrlLinks(false);
     }
   };
 
@@ -1532,6 +1568,123 @@ export function PostProdWebPdfProcessor() {
                         {linksAnalysisStatus.error}
                       </div>
                     )}
+                  </div>
+                )}
+              </div>
+
+              {/* Step 7: URL Hyperlinking */}
+              <div className="border border-border/40 rounded-xl overflow-hidden">
+                <button
+                  className="w-full flex items-center justify-between p-4 hover:bg-muted/20 transition-colors"
+                  onClick={() => setActiveStep(activeStep === 7 ? 0 : 7)}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">7</div>
+                    <span className="font-medium text-sm">URL Hyperlinking</span>
+                    {urlLinksAnalysis && (
+                      <span className="text-xs bg-amber-500/10 text-amber-600 px-2 py-0.5 rounded-full">
+                        {urlLinksAnalysis.total_urls} URLs · {urlLinksAnalysis.not_linked} unlinked
+                      </span>
+                    )}
+                  </div>
+                  <ChevronDown size={16} className={`transition-transform ${activeStep === 7 ? 'rotate-180' : ''}`} />
+                </button>
+
+                {activeStep === 7 && (
+                  <div className="p-4 border-t border-border/30 space-y-4">
+                    <p className="text-xs text-muted">
+                      Scan the PDF for plain-text web addresses and convert them into active clickable hyperlinks.
+                    </p>
+
+                    {/* Summary */}
+                    {urlLinksAnalysis && (
+                      <div className="p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg space-y-1 text-sm text-blue-800">
+                        <p className="font-semibold">URL Report:</p>
+                        <ul className="list-disc list-inside space-y-0.5">
+                          <li>Total URLs found: <strong>{urlLinksAnalysis.total_urls}</strong></li>
+                          <li className="text-emerald-700">Already linked: <strong>{urlLinksAnalysis.already_linked}</strong></li>
+                          <li className="text-red-600">Not linked (needs fix): <strong>{urlLinksAnalysis.not_linked}</strong></li>
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* URL Table */}
+                    {urlLinksAnalysis?.details?.length > 0 && (
+                      <div className="max-h-72 overflow-y-auto rounded border border-blue-200 text-xs">
+                        <table className="w-full border-collapse">
+                          <thead className="sticky top-0 bg-blue-50/90 text-blue-800">
+                            <tr>
+                              <th className="text-left p-2 border-b border-blue-200">URL</th>
+                              <th className="p-2 border-b border-blue-200 w-12 text-center">Page</th>
+                              <th className="p-2 border-b border-blue-200 w-20 text-center">PDF Link</th>
+                              <th className="p-2 border-b border-blue-200 w-28 text-center">URL Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {urlLinksAnalysis.details.map((item: UrlLinkDetail, i: number) => (
+                              <tr key={i} className="border-b border-blue-100 last:border-0 hover:bg-blue-50/30">
+                                <td className="p-2 max-w-[160px]">
+                                  <span className="truncate block text-blue-700" title={item.url}>{item.display_text}</span>
+                                </td>
+                                <td className="p-2 text-center text-muted">{item.page}</td>
+                                <td className="p-2 text-center">
+                                  {item.is_linked ? (
+                                    <span className="text-emerald-600 font-bold" title="Hyperlinked in PDF">✓ Linked</span>
+                                  ) : (
+                                    <span className="text-red-500 font-bold" title="Not hyperlinked in PDF">✗ Not linked</span>
+                                  )}
+                                </td>
+                                <td className="p-2 text-center">
+                                  {item.http_ok ? (
+                                    <span className="inline-flex items-center gap-1 text-emerald-600 font-semibold">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
+                                      {item.http_status} {item.http_description}
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 text-red-500 font-semibold" title={item.http_description}>
+                                      <span className="w-1.5 h-1.5 rounded-full bg-red-500 inline-block"></span>
+                                      {item.http_status ? `${item.http_status} ${item.http_description}` : item.http_description}
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {urlLinksAnalysis?.total_urls === 0 && (
+                      <p className="text-sm text-muted text-center py-2">No plain-text URLs found in the PDF.</p>
+                    )}
+
+                    {/* Buttons */}
+                    <div className="flex gap-3 mt-2">
+                      <Button
+                        onClick={handleAnalyzeUrlLinks}
+                        disabled={analyzingUrlLinks || applyingUrlLinks}
+                        variant={urlLinksAnalysis ? 'outline' : 'primary'}
+                        className="flex-1 flex items-center justify-center gap-2"
+                      >
+                        {analyzingUrlLinks ? (
+                          <><RefreshCw size={16} className="animate-spin" /> Analyzing...</>
+                        ) : (
+                          <><FileText size={16} /> Analyze URLs</>
+                        )}
+                      </Button>
+
+                      <Button
+                        onClick={handleApplyUrlLinks}
+                        disabled={applyingUrlLinks || analyzingUrlLinks || !urlLinksAnalysis || urlLinksAnalysis.not_linked === 0}
+                        className="flex-1 flex items-center justify-center gap-2"
+                      >
+                        {applyingUrlLinks ? (
+                          <><RefreshCw size={16} className="animate-spin" /> Applying...</>
+                        ) : (
+                          <><Play size={16} /> Apply / Fix</>
+                        )}
+                      </Button>
+                    </div>
                   </div>
                 )}
               </div>

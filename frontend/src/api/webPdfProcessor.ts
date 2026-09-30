@@ -191,3 +191,35 @@ export async function generateLinkManual(
     throw new Error(getApiErrorMessage(err, 'Failed to manually create link'));
   }
 }
+
+export interface UrlLinkDetail {
+  url: string;
+  display_text: string;
+  page: number;
+  is_linked: boolean;
+  rect: number[] | null;
+  http_status: number | null;
+  http_description: string;
+  http_ok: boolean;
+}
+
+export async function generateUrlLinks(
+  projectId: number,
+  analyzeOnly: boolean = true
+): Promise<{
+  success: boolean;
+  total_urls: number;
+  already_linked: number;
+  not_linked: number;
+  details: UrlLinkDetail[];
+}> {
+  try {
+    const { data } = await api.post(
+      `/post-prod/web-pdf-processor/projects/${projectId}/generate-url-links`,
+      { analyze_only: analyzeOnly }
+    );
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to generate URL links'));
+  }
+}
