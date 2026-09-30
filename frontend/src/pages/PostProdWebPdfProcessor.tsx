@@ -39,9 +39,11 @@ import {
   generateUrlLinks,
   generateEmailLinks,
   generateEndnoteLinks,
+  generateCrossrefLinks,
   type UrlLinkDetail,
   type EmailLinkDetail,
   type EndnoteDetail,
+  type CrossrefDetail,
   type BookmarkItem,
   type WebPdfProject,
   type ProjectFile,
@@ -290,6 +292,11 @@ export function PostProdWebPdfProcessor() {
   const [endnoteLinksAnalysis, setEndnoteLinksAnalysis] = useState<any>(null);
   const [analyzingEndnoteLinks, setAnalyzingEndnoteLinks] = useState(false);
   const [applyingEndnoteLinks, setApplyingEndnoteLinks] = useState(false);
+
+  // Cross-Reference Links (Step 10)
+  const [crossrefLinksAnalysis, setCrossrefLinksAnalysis] = useState<any>(null);
+  const [analyzingCrossrefLinks, setAnalyzingCrossrefLinks] = useState(false);
+  const [applyingCrossrefLinks, setApplyingCrossrefLinks] = useState(false);
 
   const [pdfRefreshKey, setPdfRefreshKey] = useState(Date.now());
 
@@ -769,6 +776,36 @@ export function PostProdWebPdfProcessor() {
       toast.error(err.message || 'Failed to apply endnote links');
     } finally {
       setApplyingEndnoteLinks(false);
+    }
+  };
+
+  const handleAnalyzeCrossrefLinks = async () => {
+    if (!selectedProject) return;
+    setAnalyzingCrossrefLinks(true);
+    setCrossrefLinksAnalysis(null);
+    try {
+      const result = await generateCrossrefLinks(selectedProject.id, true);
+      setCrossrefLinksAnalysis(result);
+      toast.success('Cross-reference scan complete');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to analyze cross-references');
+    } finally {
+      setAnalyzingCrossrefLinks(false);
+    }
+  };
+
+  const handleApplyCrossrefLinks = async () => {
+    if (!selectedProject) return;
+    setApplyingCrossrefLinks(true);
+    try {
+      const result = await generateCrossrefLinks(selectedProject.id, false);
+      setCrossrefLinksAnalysis(result);
+      setPdfRefreshKey((prev) => prev + 1);
+      toast.success(`Created ${result.not_linked} cross-reference link(s) successfully`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to apply cross-reference links');
+    } finally {
+      setApplyingCrossrefLinks(false);
     }
   };
 
@@ -2011,6 +2048,138 @@ export function PostProdWebPdfProcessor() {
                         className="flex-1 flex items-center justify-center gap-2"
                       >
                         {applyingEndnoteLinks ? (
+                          <><RefreshCw size={16} className="animate-spin" /> Applying...</>
+                        ) : (
+                          <><Play size={16} /> Apply / Fix</>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Step 10: Cross-Reference Links */}
+              <div className="border border-border/40 rounded-xl overflow-hidden">
+                <button
+                  className="w-full flex items-center justify-between p-4 hover:bg-muted/20 transition-colors"
+                  onClick={() => setActiveStep(activeStep === 10 ? 0 : 10)}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">10</div>
+                    <span className="font-medium text-sm">Cross-Reference Links</span>
+                    {crossrefLinksAnalysis && (
+                      <span className="text-xs bg-indigo-500/10 text-indigo-600 px-2 py-0.5 rounded-full">
+                        {crossrefLinksAnalysis.total_references} Refs · {crossrefLinksAnalysis.not_linked} unlinked
+                      </span>
+                    )}
+                  </div>
+                  <ChevronDown size={16} className={`transition-transform ${activeStep === 10 ? 'rotate-180' : ''}`} />
+                </button>
+
+                {activeStep === 10 && (
+                  <div className="p-4 border-t border-border/30 space-y-4">
+                    <p className="text-xs text-muted">
+                      Create links for cross-references to Figures, Tables, Chapters, and Pages throughout the document.
+                    </p>
+
+                    {/* Status Legend */}
+                    <div className="p-3 bg-indigo-500/5 border border-indigo-500/20 rounded-lg text-xs space-y-1">
+                      <p className="font-semibold text-indigo-800">Link Status:</p>
+                      <div className="space-y-1 ml-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-emerald-600 font-bold">✓ Linked</span>
+                          <span className="text-muted">= Cross-reference link created (to target)</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-red-500 font-bold">✗ Not linked</span>
+                          <span className="text-muted">= Missing links, needs "Apply/Fix"</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Summary */}
+                    {crossrefLinksAnalysis && (
+                      <div className="p-3 bg-indigo-500/5 border border-indigo-500/20 rounded-lg space-y-1 text-sm text-indigo-800">
+                        <p className="font-semibold">Cross-Reference Report:</p>
+                        <ul className="list-disc list-inside space-y-0.5">
+                          <li>Total references found: <strong>{crossrefLinksAnalysis.total_references}</strong></li>
+                          <li className="text-emerald-700">Already linked: <strong>{crossrefLinksAnalysis.linked}</strong></li>
+                          <li className="text-red-600">Not linked (needs fix): <strong>{crossrefLinksAnalysis.not_linked}</strong></li>
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Cross-Reference Table */}
+                    {crossrefLinksAnalysis?.details?.length > 0 && (
+                      <div className="max-h-72 overflow-y-auto rounded border border-indigo-200 text-xs">
+                        <table className="w-full border-collapse">
+                          <thead className="sticky top-0 bg-indigo-50/90 text-indigo-800">
+                            <tr>
+                              <th className="text-left p-2 border-b border-indigo-200 text-center">Type</th>
+                              <th className="p-2 border-b border-indigo-200">Reference Text</th>
+                              <th className="p-2 border-b border-indigo-200 w-16 text-center">Ref Page</th>
+                              <th className="p-2 border-b border-indigo-200">Target</th>
+                              <th className="p-2 border-b border-indigo-200 w-16 text-center">Target Page</th>
+                              <th className="p-2 border-b border-indigo-200">Link Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {crossrefLinksAnalysis.details.map((item: CrossrefDetail, i: number) => (
+                              <tr key={i} className="border-b border-indigo-100 last:border-0 hover:bg-indigo-50/30">
+                                <td className="p-2 text-center">
+                                  <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded text-[10px] font-medium capitalize">
+                                    {item.type}
+                                  </span>
+                                </td>
+                                <td className="p-2 text-muted truncate">{item.reference_text}</td>
+                                <td className="p-2 text-center text-muted">{item.reference_page || '-'}</td>
+                                <td className="p-2 text-muted truncate">{item.target_identifier}</td>
+                                <td className="p-2 text-center text-muted">{item.target_page || '-'}</td>
+                                <td className="p-2 text-center">
+                                  {item.is_linked ? (
+                                    <div className="flex flex-col items-center gap-0.5">
+                                      <span className="text-emerald-600 font-bold">✓ Linked</span>
+                                      <span className="text-[9px] text-emerald-600/70">Active</span>
+                                    </div>
+                                  ) : (
+                                    <div className="flex flex-col items-center gap-0.5">
+                                      <span className="text-red-500 font-bold">✗ Not linked</span>
+                                      <span className="text-[9px] text-red-500/70">Needs fix</span>
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {crossrefLinksAnalysis?.total_references === 0 && (
+                      <p className="text-sm text-muted text-center py-2">No cross-references found in the PDF.</p>
+                    )}
+
+                    {/* Buttons */}
+                    <div className="flex gap-3 mt-2">
+                      <Button
+                        onClick={handleAnalyzeCrossrefLinks}
+                        disabled={analyzingCrossrefLinks || applyingCrossrefLinks}
+                        variant={crossrefLinksAnalysis ? 'outline' : 'primary'}
+                        className="flex-1 flex items-center justify-center gap-2"
+                      >
+                        {analyzingCrossrefLinks ? (
+                          <><RefreshCw size={16} className="animate-spin" /> Analyzing...</>
+                        ) : (
+                          <><FileText size={16} /> Analyze References</>
+                        )}
+                      </Button>
+
+                      <Button
+                        onClick={handleApplyCrossrefLinks}
+                        disabled={applyingCrossrefLinks || analyzingCrossrefLinks || !crossrefLinksAnalysis || crossrefLinksAnalysis.not_linked === 0}
+                        className="flex-1 flex items-center justify-center gap-2"
+                      >
+                        {applyingCrossrefLinks ? (
                           <><RefreshCw size={16} className="animate-spin" /> Applying...</>
                         ) : (
                           <><Play size={16} /> Apply / Fix</>

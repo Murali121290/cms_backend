@@ -20,6 +20,7 @@ from .services import toc_service
 from .services import url_service
 from .services import email_service
 from .services import endnote_service
+from .services import crossref_service
 
 
 def check_post_prod_access(user=Depends(get_current_user_from_cookie)):
@@ -650,6 +651,10 @@ class EndnoteRequest(BaseModel):
     analyze_only: bool = True
 
 
+class CrossrefRequest(BaseModel):
+    analyze_only: bool = True
+
+
 @router.post("/projects/{project_id}/generate-endnote-links")
 def generate_endnote_links(
     project_id: int,
@@ -677,6 +682,38 @@ def generate_endnote_links(
 
     try:
         result = endnote_service.find_endnotes_in_pdf(bookmarked_pdf_path, request.analyze_only)
+        return {"success": True, **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/projects/{project_id}/generate-crossref-links")
+def generate_crossref_links(
+    project_id: int,
+    request: CrossrefRequest,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """Scan PDF for cross-references (Figures, Tables, Chapters, Pages) and link them."""
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    base_dir = project["folder_name"]
+    bookmarked_pdf_path = os.path.join(base_dir, "bookmarked.pdf")
+
+    if not os.path.exists(bookmarked_pdf_path):
+        trimmed_pdf_path = os.path.join(base_dir, "trimmed.pdf")
+        merged_pdf_path = os.path.join(base_dir, "merged.pdf")
+        if os.path.exists(trimmed_pdf_path):
+            bookmarked_pdf_path = trimmed_pdf_path
+        elif os.path.exists(merged_pdf_path):
+            bookmarked_pdf_path = merged_pdf_path
+        else:
+            raise HTTPException(status_code=404, detail="No PDF file available.")
+
+    try:
+        result = crossref_service.find_crossrefs_in_pdf(bookmarked_pdf_path, request.analyze_only)
         return {"success": True, **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

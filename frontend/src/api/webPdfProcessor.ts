@@ -281,3 +281,34 @@ export async function generateEndnoteLinks(
     throw new Error(getApiErrorMessage(err, 'Failed to generate endnote links'));
   }
 }
+
+export interface CrossrefDetail {
+  type: string;
+  reference_text: string;
+  reference_page: number | null;
+  target_type: string;
+  target_identifier: string;
+  target_page: number | null;
+  is_linked: boolean;
+}
+
+export async function generateCrossrefLinks(
+  projectId: number,
+  analyzeOnly: boolean = true
+): Promise<{
+  success: boolean;
+  total_references: number;
+  linked: number;
+  not_linked: number;
+  details: CrossrefDetail[];
+}> {
+  try {
+    const { data } = await api.post(
+      `/post-prod/web-pdf-processor/projects/${projectId}/generate-crossref-links`,
+      { analyze_only: analyzeOnly }
+    );
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to generate cross-reference links'));
+  }
+}
