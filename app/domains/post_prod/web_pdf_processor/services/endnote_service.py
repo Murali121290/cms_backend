@@ -61,12 +61,21 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
                         logger.debug(f"Found superscript note {note_num} on page {physical_page}, chapter {chapter_id}")
 
     # Step 3: Find endnote definitions (ALL occurrences for multi-definition notes)
+    # Only detect in notes/endnotes sections, not in body content (to avoid matching numbered lists)
     note_definitions_all = defaultdict(list)  # note_number -> list of definitions
+    in_notes_section = False
 
     for page_idx in range(len(doc)):
         page = doc[page_idx]
         physical_page = page_idx + 1
         blocks = page.get_text("dict")["blocks"]
+
+        # Detect if we're in a notes section (after page 100 is notes/endnotes area)
+        if page_idx >= 100:
+            page_text = page.get_text()
+            if re.search(r'(^|\n)(Notes|Endnotes|Notes\s+and\s+References|Bibliography)',
+                        page_text, re.IGNORECASE | re.MULTILINE):
+                in_notes_section = True
 
         for block in blocks:
             if block["type"] != 0:
@@ -74,6 +83,11 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
 
             for line in block.get("lines", []):
                 line_text = "".join(s.get("text", "") for s in line.get("spans", [])).strip()
+
+                # Only match endnotes in notes sections to avoid matching numbered lists in body
+                if not in_notes_section and page_idx < 100:
+                    continue
+
                 # Match endnotes like "1.", "2)", "3:" but avoid page headers
                 # Reject if number followed by 2+ spaces (page header format like "220    Wolf Land")
                 if re.match(r'^(\d{1,3})\s{2,}', line_text):
