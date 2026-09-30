@@ -251,3 +251,33 @@ export async function generateEmailLinks(
     throw new Error(getApiErrorMessage(err, 'Failed to generate email links'));
   }
 }
+
+export interface EndnoteDetail {
+  note_number: number;
+  reference_page: number | null;
+  definition_page: number | null;
+  is_linked: boolean;
+  reference_count?: number;
+  status?: string;
+}
+
+export async function generateEndnoteLinks(
+  projectId: number,
+  analyzeOnly: boolean = true
+): Promise<{
+  success: boolean;
+  total_notes: number;
+  linked: number;
+  not_linked: number;
+  details: EndnoteDetail[];
+}> {
+  try {
+    const { data } = await api.post(
+      `/post-prod/web-pdf-processor/projects/${projectId}/generate-endnote-links`,
+      { analyze_only: analyzeOnly }
+    );
+    return data;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to generate endnote links'));
+  }
+}

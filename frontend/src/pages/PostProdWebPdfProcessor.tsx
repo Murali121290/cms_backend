@@ -38,8 +38,10 @@ import {
   generateLinkManual,
   generateUrlLinks,
   generateEmailLinks,
+  generateEndnoteLinks,
   type UrlLinkDetail,
   type EmailLinkDetail,
+  type EndnoteDetail,
   type BookmarkItem,
   type WebPdfProject,
   type ProjectFile,
@@ -283,6 +285,11 @@ export function PostProdWebPdfProcessor() {
   const [emailLinksAnalysis, setEmailLinksAnalysis] = useState<any>(null);
   const [analyzingEmailLinks, setAnalyzingEmailLinks] = useState(false);
   const [applyingEmailLinks, setApplyingEmailLinks] = useState(false);
+
+  // Endnote Links (Step 9)
+  const [endnoteLinksAnalysis, setEndnoteLinksAnalysis] = useState<any>(null);
+  const [analyzingEndnoteLinks, setAnalyzingEndnoteLinks] = useState(false);
+  const [applyingEndnoteLinks, setApplyingEndnoteLinks] = useState(false);
 
   const [pdfRefreshKey, setPdfRefreshKey] = useState(Date.now());
 
@@ -732,6 +739,36 @@ export function PostProdWebPdfProcessor() {
       toast.error(err.message || 'Failed to apply email links');
     } finally {
       setApplyingEmailLinks(false);
+    }
+  };
+
+  const handleAnalyzeEndnoteLinks = async () => {
+    if (!selectedProject) return;
+    setAnalyzingEndnoteLinks(true);
+    setEndnoteLinksAnalysis(null);
+    try {
+      const result = await generateEndnoteLinks(selectedProject.id, true);
+      setEndnoteLinksAnalysis(result);
+      toast.success('Endnote scan complete');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to analyze endnotes');
+    } finally {
+      setAnalyzingEndnoteLinks(false);
+    }
+  };
+
+  const handleApplyEndnoteLinks = async () => {
+    if (!selectedProject) return;
+    setApplyingEndnoteLinks(true);
+    try {
+      const result = await generateEndnoteLinks(selectedProject.id, false);
+      setEndnoteLinksAnalysis(result);
+      setPdfRefreshKey((prev) => prev + 1);
+      toast.success(`Created ${result.not_linked} endnote link(s) successfully`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to apply endnote links');
+    } finally {
+      setApplyingEndnoteLinks(false);
     }
   };
 
@@ -1845,6 +1882,135 @@ export function PostProdWebPdfProcessor() {
                         className="flex-1 flex items-center justify-center gap-2"
                       >
                         {applyingEmailLinks ? (
+                          <><RefreshCw size={16} className="animate-spin" /> Applying...</>
+                        ) : (
+                          <><Play size={16} /> Apply / Fix</>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Step 9: Endnote Links */}
+              <div className="border border-border/40 rounded-xl overflow-hidden">
+                <button
+                  className="w-full flex items-center justify-between p-4 hover:bg-muted/20 transition-colors"
+                  onClick={() => setActiveStep(activeStep === 9 ? 0 : 9)}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">9</div>
+                    <span className="font-medium text-sm">Endnote Links</span>
+                    {endnoteLinksAnalysis && (
+                      <span className="text-xs bg-blue-500/10 text-blue-600 px-2 py-0.5 rounded-full">
+                        {endnoteLinksAnalysis.total_notes} Notes · {endnoteLinksAnalysis.not_linked} unlinked
+                      </span>
+                    )}
+                  </div>
+                  <ChevronDown size={16} className={`transition-transform ${activeStep === 9 ? 'rotate-180' : ''}`} />
+                </button>
+
+                {activeStep === 9 && (
+                  <div className="p-4 border-t border-border/30 space-y-4">
+                    <p className="text-xs text-muted">
+                      Create bidirectional links between superscript note references and their corresponding endnotes.
+                    </p>
+
+                    {/* Status Legend */}
+                    <div className="p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg text-xs space-y-1">
+                      <p className="font-semibold text-blue-800">Link Status:</p>
+                      <div className="space-y-1 ml-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-emerald-600 font-bold">✓ Linked</span>
+                          <span className="text-muted">= Bidirectional links created (ref ↔ endnote)</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-red-500 font-bold">✗ Not linked</span>
+                          <span className="text-muted">= Missing links, needs "Apply/Fix"</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Summary */}
+                    {endnoteLinksAnalysis && (
+                      <div className="p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg space-y-1 text-sm text-blue-800">
+                        <p className="font-semibold">Endnote Report:</p>
+                        <ul className="list-disc list-inside space-y-0.5">
+                          <li>Total notes found: <strong>{endnoteLinksAnalysis.total_notes}</strong></li>
+                          <li className="text-emerald-700">Already linked: <strong>{endnoteLinksAnalysis.linked}</strong></li>
+                          <li className="text-red-600">Not linked (needs fix): <strong>{endnoteLinksAnalysis.not_linked}</strong></li>
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Endnote Table */}
+                    {endnoteLinksAnalysis?.details?.length > 0 && (
+                      <div className="max-h-72 overflow-y-auto rounded border border-blue-200 text-xs">
+                        <table className="w-full border-collapse">
+                          <thead className="sticky top-0 bg-blue-50/90 text-blue-800">
+                            <tr>
+                              <th className="text-left p-2 border-b border-blue-200 w-12 text-center">Note#</th>
+                              <th className="p-2 border-b border-blue-200 w-20 text-center">Reference Page</th>
+                              <th className="p-2 border-b border-blue-200 w-20 text-center">Definition Page</th>
+                              <th className="p-2 border-b border-blue-200">
+                                <div className="flex flex-col items-center gap-1">
+                                  <span>Link Status</span>
+                                  <span className="font-normal text-blue-600 text-[9px]">(Bidirectional?)</span>
+                                </div>
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {endnoteLinksAnalysis.details.map((item: EndnoteDetail, i: number) => (
+                              <tr key={i} className="border-b border-blue-100 last:border-0 hover:bg-blue-50/30">
+                                <td className="p-2 text-center font-bold text-blue-700">{item.note_number}</td>
+                                <td className="p-2 text-center text-muted">{item.reference_page || '-'}</td>
+                                <td className="p-2 text-center text-muted">{item.definition_page || '-'}</td>
+                                <td className="p-2 text-center">
+                                  {item.is_linked ? (
+                                    <div className="flex flex-col items-center gap-0.5">
+                                      <span className="text-emerald-600 font-bold">✓ Linked</span>
+                                      <span className="text-[9px] text-emerald-600/70">Active</span>
+                                    </div>
+                                  ) : (
+                                    <div className="flex flex-col items-center gap-0.5">
+                                      <span className="text-red-500 font-bold">✗ Not linked</span>
+                                      <span className="text-[9px] text-red-500/70">{item.status || 'Needs fix'}</span>
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {endnoteLinksAnalysis?.total_notes === 0 && (
+                      <p className="text-sm text-muted text-center py-2">No endnotes found in the PDF.</p>
+                    )}
+
+                    {/* Buttons */}
+                    <div className="flex gap-3 mt-2">
+                      <Button
+                        onClick={handleAnalyzeEndnoteLinks}
+                        disabled={analyzingEndnoteLinks || applyingEndnoteLinks}
+                        variant={endnoteLinksAnalysis ? 'outline' : 'primary'}
+                        className="flex-1 flex items-center justify-center gap-2"
+                      >
+                        {analyzingEndnoteLinks ? (
+                          <><RefreshCw size={16} className="animate-spin" /> Analyzing...</>
+                        ) : (
+                          <><FileText size={16} /> Analyze Notes</>
+                        )}
+                      </Button>
+
+                      <Button
+                        onClick={handleApplyEndnoteLinks}
+                        disabled={applyingEndnoteLinks || analyzingEndnoteLinks || !endnoteLinksAnalysis || endnoteLinksAnalysis.not_linked === 0}
+                        className="flex-1 flex items-center justify-center gap-2"
+                      >
+                        {applyingEndnoteLinks ? (
                           <><RefreshCw size={16} className="animate-spin" /> Applying...</>
                         ) : (
                           <><Play size={16} /> Apply / Fix</>
