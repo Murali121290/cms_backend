@@ -8,7 +8,10 @@ import re
 import os
 import fitz  # PyMuPDF
 import requests
+import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+logger = logging.getLogger(__name__)
 
 # Regex to detect URLs in plain text
 URL_PATTERN = re.compile(
@@ -103,15 +106,40 @@ def find_urls_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
         normalized_text = ' '.join(normalized_text.split())
 
         # Find all URLs in the normalized page text
-        for m in URL_PATTERN.finditer(normalized_text):
+        found_urls = []
+
+        # First pass: collect all potential URLs (including incomplete ones)
+        all_matches = list(URL_PATTERN.finditer(normalized_text))
+
+        for i, m in enumerate(all_matches):
             raw_url = m.group(0).rstrip('.,;:!?')
 
-            # Skip incomplete URLs (e.g., "http://sports" without domain)
-            # A valid URL should have at least one dot after ://
+            # Check if this is an incomplete URL (no domain after ://)
             if raw_url.startswith('http://') or raw_url.startswith('https://'):
-                if '.' not in raw_url.split('://', 1)[1]:
+                domain_part = raw_url.split('://', 1)[1]
+                if '.' not in domain_part:
+                    # Incomplete URL - try to find continuation in the next match
+                    if i + 1 < len(all_matches):
+                        next_match = all_matches[i + 1]
+                        next_url = next_match.group(0).rstrip('.,;:!?')
+
+                        # Check if next_url looks like a continuation (starts with . or /)
+                        if next_url.startswith('.') or next_url.startswith('/'):
+                            # Merge them: "http://sports" + ".yahoo.com/..." = "http://sports.yahoo.com/..."
+                            merged_url = raw_url + next_url
+                            if '.' in merged_url.split('://', 1)[1]:
+                                found_urls.append(merged_url)
+                                logger.debug(f"Merged incomplete URL on page {physical_page}: {raw_url} + {next_url} = {merged_url}")
+                                continue
+
+                    logger.debug(f"Skipping incomplete URL on page {physical_page}: {raw_url}")
                     continue
 
+            found_urls.append(raw_url)
+            logger.debug(f"Found URL on page {physical_page}: {raw_url}")
+
+        # Second pass: process all found URLs (including merged ones)
+        for raw_url in found_urls:
             href = raw_url if raw_url.startswith('http') else f'https://{raw_url}'
             norm = _normalise_url(href)
             url_rect = _find_text_rect(page, raw_url)
