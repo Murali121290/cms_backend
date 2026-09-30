@@ -30,6 +30,9 @@ def upgrade() -> None:
     sa.Column('filename', sa.String(), nullable=False),
     sa.Column('filepath', sa.String(), nullable=False),
     sa.Column('conversion_status', sa.String(), nullable=True),
+    sa.Column('s4c_xml_status', sa.String(), nullable=True, server_default='YTS'),
+    sa.Column('final_xml_status', sa.String(), nullable=True, server_default='YTS'),
+    sa.Column('qc_status', sa.String(), nullable=True, server_default='YTS'),
     sa.Column('result_filepath', sa.String(), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=True),
     sa.PrimaryKeyConstraint('id')
