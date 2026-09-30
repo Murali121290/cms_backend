@@ -4,6 +4,30 @@ import collections
 import os
 import traceback
 
+def get_bookmarks_from_pdf(pdf_path: str) -> list:
+    try:
+        doc = fitz.open(pdf_path)
+        toc = doc.get_toc()
+        doc.close()
+        return [{"level": item[0], "title": item[1], "page": item[2]} for item in toc]
+    except Exception as e:
+        return []
+
+def update_bookmarks_in_pdf(pdf_path: str, bookmarks: list) -> bool:
+    try:
+        doc = fitz.open(pdf_path)
+        toc = [[item['level'], item['title'], item['page']] for item in bookmarks]
+        doc.set_toc(toc)
+        # Use incremental save if possible, or save to a temp and replace
+        temp_path = pdf_path + ".tmp.pdf"
+        doc.save(temp_path, garbage=3, deflate=True)
+        doc.close()
+        os.replace(temp_path, pdf_path)
+        return True
+    except Exception as e:
+        print(f"Error updating bookmarks: {e}")
+        return False
+
 def build_page_map(doc):
     """
     Builds a dictionary mapping printed page numbers to physical page indices
@@ -152,8 +176,47 @@ def find_toc_entries(doc):
                             i += 2
                             continue
                 
+                # 1.5. Check for standalone chapter number '1' or 'One', then Title, then '15'
+                num_pattern = r'^(\d+|[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|twenty-one|twenty-two|twenty-three|twenty-four|twenty-five|twenty-six|twenty-seven|twenty-eight|twenty-nine|thirty)$'
+                if re.match(num_pattern, line_text.lower().strip()):
+                    if i + 1 < len(page_lines):
+                        nxt_text, nxt_rect = page_lines[i+1]
+                        nxt_match = re.search(r'^(.*?)\s+(?:[\.\s]+)?(\d+)$', nxt_text)
+                        if nxt_match:
+                            title = f"Chapter {line_text.strip()}: {nxt_match.group(1).replace('. ', '').strip()}"
+                            printed_page = int(nxt_match.group(2))
+                            toc_entries.append({
+                                'title': title,
+                                'printed_page': printed_page,
+                                'source_page': p_idx,
+                                'rect': rect | nxt_rect,
+                                'x0': nxt_rect.x0,
+                                'is_part': False,
+                                'linked': False
+                            })
+                            toc_matches_on_page += 1
+                            i += 2
+                            continue
+                        elif i + 2 < len(page_lines):
+                            nn_text, nn_rect = page_lines[i+2]
+                            if not re.match(r'^\d+$', nxt_text.strip()) and re.match(r'^\d+$', nn_text.strip()):
+                                title = f"Chapter {line_text.strip()}: {nxt_text.strip()}"
+                                printed_page = int(nn_text.strip())
+                                toc_entries.append({
+                                    'title': title,
+                                    'printed_page': printed_page,
+                                    'source_page': p_idx,
+                                    'rect': rect | nxt_rect | nn_rect,
+                                    'x0': nxt_rect.x0,
+                                    'is_part': False,
+                                    'linked': False
+                                })
+                                toc_matches_on_page += 1
+                                i += 3
+                                continue
+
                 # 2. Check for Chapter X on one line and Title on next
-                if i + 1 < len(page_lines) and re.match(r'^chapter\s+\d+$', line_text.lower().strip()):
+                if i + 1 < len(page_lines) and re.match(r'^chapter\s+\d+[:\s]*$', line_text.lower().strip()):
                     nxt_text, nxt_rect = page_lines[i+1]
                     nxt_match = re.search(r'^(.*?)\s+(?:[\.\s]+)?(\d+)$', nxt_text)
                     if nxt_match:
@@ -172,6 +235,25 @@ def find_toc_entries(doc):
                         toc_matches_on_page += 1
                         i += 2
                         continue
+                    elif i + 2 < len(page_lines):
+                        nn_text, nn_rect = page_lines[i+2]
+                        if re.match(r"^([ivxlcdm]+|\d+)$", nn_text.lower().strip()):
+                            title = f"{line_text.strip()} {nxt_text.strip()}"
+                            title = re.sub(r'\s+', ' ', title).strip()
+                            if nn_text.strip().isdigit():
+                                printed_page = int(nn_text.strip())
+                                toc_entries.append({
+                                    'title': title,
+                                    'printed_page': printed_page,
+                                    'source_page': p_idx,
+                                    'rect': rect | nxt_rect,
+                                    'x0': rect.x0,
+                                    'is_part': False,
+                                    'linked': False
+                                })
+                                toc_matches_on_page += 1
+                                i += 3
+                                continue
                         
                 # 3. Normal line with page number at the end
                 match = re.search(r'^(.*?)\s+(?:[\.\s]+)?(\d+)$', line_text)
@@ -196,6 +278,7 @@ def find_toc_entries(doc):
                     toc_matches_on_page += 1
                 else:
                     # 4. Look ahead for page number on next line
+                    matched_lookahead = False
                     if i + 1 < len(page_lines):
                         nxt_text, nxt_rect = page_lines[i+1]
                         if re.match(r"^([ivxlcdm]+|\d+)$", nxt_text.lower()):
@@ -220,6 +303,21 @@ def find_toc_entries(doc):
                                         'linked': False
                                     })
                                     toc_matches_on_page += 1
+                                    matched_lookahead = True
+                                    
+                    if not matched_lookahead:
+                        clean_text = line_text.strip()
+                        if clean_text.isupper() and len(clean_text) > 4:
+                            if clean_text.lower() not in ('contents', 'introduction', 'preface', 'foreword', 'prologue'):
+                                toc_entries.append({
+                                    'title': clean_text,
+                                    'printed_page': -1,
+                                    'source_page': p_idx,
+                                    'rect': rect,
+                                    'x0': rect.x0,
+                                    'is_part': True,
+                                    'linked': False
+                                })
             i += 1
                                     
         if in_contents and len(toc_entries) > 5 and toc_matches_on_page == 0:
@@ -263,7 +361,7 @@ def determine_hierarchy(toc_entries):
     x0_values = [e['x0'] for e in toc_entries if e.get('x0') is not None]
     if not x0_values:
         for e in toc_entries:
-            e['level'] = 2
+            e['level'] = 1
         return toc_entries
         
     # Tolerance for x0 matching
@@ -277,21 +375,25 @@ def determine_hierarchy(toc_entries):
             
     for entry in toc_entries:
         if entry.get('x0') is None:
-            entry['level'] = 2
+            entry['level'] = 1
             continue
             
         # find matching level
-        level = 2
+        level = 1
         for i, bx in enumerate(distinct_x0):
             if abs(entry['x0'] - bx) <= tolerance:
-                level = 2 + i
+                level = 1 + i
                 break
         entry['level'] = level
         
-    # Ensure parts are at least level 2 and push children down if necessary
+    # Ensure parts are at least level 1 and push children down if necessary
     for entry in toc_entries:
         if entry.get('is_part'):
-            entry['level'] = 2
+            entry['level'] = 1
+            
+        title_lower = entry.get('title', '').lower()
+        if any(bm in title_lower for bm in ['about the author', 'about the authors', 'index', 'bibliography', 'references', 'glossary', 'appendix']):
+            entry['level'] = 1
             
     return toc_entries
 
@@ -422,12 +524,12 @@ def generate_bookmarks_for_pdf(pdf_path: str, output_path: str = None, include_s
 
     for fm in fm_order:
         if fm in fm_pages:
-            toc_bookmarks.append((2, fm, fm_pages[fm]))
+            toc_bookmarks.append((1, fm, fm_pages[fm]))
             
     # Add TOC Entries
     for entry in toc_entries:
         if entry.get('linked'):
-            level = entry.get('level', 2)
+            level = entry.get('level', 1)
             toc_bookmarks.append((level, entry['title'], entry['target_p_idx'] + 1))
             
     # Subheadings (H3s)

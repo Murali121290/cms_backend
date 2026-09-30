@@ -11,6 +11,10 @@ def categorize_file(filepath: str) -> Tuple[str, int]:
     """
     basename = os.path.basename(filepath).lower()
     
+    # Check if it's an image file; if so, assume it's the front cover
+    if basename.endswith(('.jpg', '.jpeg', '.png')):
+        return 'FC', 0
+    
     # Check filename first with boundary or underscore delimiters
     if re.search(r'(\b|_)(fc)(\b|_)|^cover|^front[\s_]*cover', basename):
         return 'FC', 0
@@ -88,7 +92,13 @@ def merge_pdfs(input_files: List[str], output_path: str) -> dict:
 
     for cat, filepath in zip(categories, ordered_files):
         try:
-            doc = fitz.open(filepath)
+            if filepath.lower().endswith(('.jpg', '.jpeg', '.png')):
+                img_doc = fitz.open(filepath)
+                pdf_bytes = img_doc.convert_to_pdf()
+                doc = fitz.open("pdf", pdf_bytes)
+                img_doc.close()
+            else:
+                doc = fitz.open(filepath)
 
             # Preserve metadata from FM/TEXT which has the book title
             if not first_metadata and doc.metadata and doc.metadata.get('title'):

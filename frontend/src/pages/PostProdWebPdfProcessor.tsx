@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
   CheckCircle2, Lock, Unlock, ShieldAlert, AlertCircle,
@@ -32,6 +32,9 @@ import {
   mergeProjectFiles,
   trimProjectPDF,
   generateBookmarks,
+  getBookmarks,
+  updateBookmarks,
+  type BookmarkItem,
   type WebPdfProject,
   type ProjectFile,
 } from '@/api/webPdfProcessor';
@@ -221,6 +224,7 @@ const CATEGORY_LABELS: Record<string, { label: string; color: string }> = {
 export function PostProdWebPdfProcessor() {
   useDocumentTitle('Web PDF Processor — S4Carlisle CMS');
   const navigate = useNavigate();
+  const { projectId } = useParams<{ projectId: string }>();
 
   const [projects, setProjects] = useState<WebPdfProject[]>([]);
   const [clients, setClients] = useState<ClientCompany[]>([]);
@@ -246,6 +250,11 @@ export function PostProdWebPdfProcessor() {
   const [fontsStatus, setFontsStatus] = useState<any>(null);
   const [checkingSecurity, setCheckingSecurity] = useState(false);
   const [securityStatus, setSecurityStatus] = useState<any>(null);
+  
+  const [showEditBookmarksModal, setShowEditBookmarksModal] = useState(false);
+  const [editingBookmarksList, setEditingBookmarksList] = useState<BookmarkItem[]>([]);
+  const [loadingBookmarks, setLoadingBookmarks] = useState(false);
+  const [savingBookmarks, setSavingBookmarks] = useState(false);
   
   // Bookmarks
   const [generatingBookmarks, setGeneratingBookmarks] = useState(false);
@@ -303,6 +312,32 @@ export function PostProdWebPdfProcessor() {
     return () => { mounted = false; };
   }, []);
 
+  // Sync selectedProject based on URL param
+  useEffect(() => {
+    if (!projects.length) return;
+    
+    if (projectId) {
+      const p = projects.find(proj => proj.id === Number(projectId));
+      if (p && (!selectedProject || selectedProject.id !== p.id)) {
+        // Load project files when URL changes
+        setSelectedProject(p);
+        setProjectFiles([]);
+        setLoadingFiles(true);
+        listProjectFiles(p.id)
+          .then(files => {
+            setProjectFiles(files.map(f => ({ ...f, selected: true })));
+          })
+          .catch(err => {
+            toast.error(err.message || 'Failed to load project files');
+          })
+          .finally(() => setLoadingFiles(false));
+      }
+    } else {
+      setSelectedProject(null);
+      setProjectFiles([]);
+    }
+  }, [projectId, projects]);
+
   const fetchProjects = useCallback(async () => {
     try {
       const data = await listProjects();
@@ -329,22 +364,7 @@ export function PostProdWebPdfProcessor() {
 
 
   const handleSelectProject = async (p: WebPdfProject) => {
-    setSelectedProject(p);
-    setProjectFiles([]);
-    setLoadingFiles(true);
-    try {
-      const files = await listProjectFiles(p.id);
-      setProjectFiles(
-        files.map((f) => ({
-          ...f,
-          selected: true, // all auto-detected files pre-selected
-        })),
-      );
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to load project files');
-    } finally {
-      setLoadingFiles(false);
-    }
+    navigate(`/post-production/web-pdf-processor/${p.id}`);
   };
 
   const handleCreateProject = async (e: React.FormEvent) => {
@@ -513,6 +533,72 @@ export function PostProdWebPdfProcessor() {
     }
   };
 
+  const handleOpenEditBookmarks = async () => {
+    if (!selectedProject) return;
+    setShowEditBookmarksModal(true);
+    setLoadingBookmarks(true);
+    try {
+      const bm = await getBookmarks(selectedProject.id);
+      setEditingBookmarksList(bm);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to fetch bookmarks');
+      setShowEditBookmarksModal(false);
+    } finally {
+      setLoadingBookmarks(false);
+    }
+  };
+  
+  const handleSaveBookmarks = async () => {
+    if (!selectedProject) return;
+    setSavingBookmarks(true);
+    try {
+      await updateBookmarks(selectedProject.id, editingBookmarksList);
+      toast.success('Bookmarks updated!');
+      setPdfRefreshKey((prev) => prev + 1);
+      setShowEditBookmarksModal(false);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update bookmarks');
+    } finally {
+      setSavingBookmarks(false);
+    }
+  };
+
+  const moveBookmark = (index: number, direction: 'up' | 'down') => {
+    const list = [...editingBookmarksList];
+    if (direction === 'up' && index > 0) {
+      [list[index - 1], list[index]] = [list[index], list[index - 1]];
+    } else if (direction === 'down' && index < list.length - 1) {
+      [list[index + 1], list[index]] = [list[index], list[index + 1]];
+    }
+    setEditingBookmarksList(list);
+  };
+  
+  const changeBookmarkLevel = (index: number, change: number) => {
+    const list = [...editingBookmarksList];
+    const newLevel = list[index].level + change;
+    if (newLevel >= 1 && newLevel <= 6) {
+      list[index].level = newLevel;
+      setEditingBookmarksList(list);
+    }
+  };
+  
+  const removeBookmark = (index: number) => {
+    const list = [...editingBookmarksList];
+    list.splice(index, 1);
+    setEditingBookmarksList(list);
+  };
+
+  const addBookmark = (index: number) => {
+    const list = [...editingBookmarksList];
+    const sourceBm = list[index];
+    list.splice(index + 1, 0, {
+      title: 'New Bookmark',
+      level: sourceBm ? sourceBm.level : 1,
+      page: sourceBm ? sourceBm.page : 1
+    });
+    setEditingBookmarksList(list);
+  };
+
   const handleCheckFonts = async () => {
     if (!selectedProject) return;
     setCheckingFonts(true);
@@ -566,7 +652,7 @@ export function PostProdWebPdfProcessor() {
             variant="ghost"
             onClick={() => {
               if (selectedProject) {
-                setSelectedProject(null);
+                navigate('/post-production/web-pdf-processor');
                 setFontsStatus(null);
                 setActiveStep(1);
               } else {
@@ -1124,6 +1210,115 @@ export function PostProdWebPdfProcessor() {
                         )}
                       </div>
                     )}
+
+                    {selectedProject.status === 'Bookmarked' && !showEditBookmarksModal && (
+                      <div className="mt-2 text-right border-t border-border pt-4">
+                        <Button 
+                          variant="secondary" 
+                          size="sm" 
+                          onClick={handleOpenEditBookmarks}
+                          className="text-xs"
+                        >
+                          <Edit size={14} className="mr-1.5" /> Edit Bookmarks
+                        </Button>
+                      </div>
+                    )}
+
+                    {showEditBookmarksModal && (
+                      <div className="mt-4 pt-4 border-t border-border flex flex-col gap-4">
+                        {loadingBookmarks ? (
+                          <div className="py-12 flex justify-center items-center">
+                            <RefreshCw size={24} className="animate-spin text-primary" />
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex items-center justify-between">
+                              <h4 className="font-bold text-sm text-text m-0">Edit Bookmarks</h4>
+                              <p className="text-[10px] text-muted m-0">
+                                You can manually rename, reorganize, or delete bookmarks.
+                              </p>
+                            </div>
+                            
+                            <div className="flex-1 max-h-[50vh] overflow-y-auto border border-border rounded-lg bg-background p-2 space-y-1">
+                              {editingBookmarksList.length === 0 ? (
+                                <div className="p-8 flex flex-col items-center justify-center border border-dashed border-border rounded-lg bg-card text-center mt-2">
+                                  <p className="text-xs text-muted mb-3">No bookmarks found.</p>
+                                  <Button size="sm" variant="secondary" onClick={() => setEditingBookmarksList([{ title: 'New Bookmark', level: 1, page: 1 }])}>
+                                    <Plus size={14} className="mr-1.5" /> Add Bookmark
+                                  </Button>
+                                </div>
+                              ) : (
+                                editingBookmarksList.map((bm, index) => (
+                                  <div key={index} className="flex items-center gap-2 group hover:bg-muted/10 p-1.5 rounded" style={{ paddingLeft: `${(bm.level - 1) * 1.5 + 0.5}rem` }}>
+                                    <div className="flex flex-col gap-0.5 shrink-0 opacity-20 group-hover:opacity-100 transition-opacity">
+                                      <button onClick={() => moveBookmark(index, 'up')} disabled={index === 0} className="hover:text-primary disabled:opacity-30">
+                                        <ChevronUp size={12} />
+                                      </button>
+                                      <button onClick={() => moveBookmark(index, 'down')} disabled={index === editingBookmarksList.length - 1} className="hover:text-primary disabled:opacity-30">
+                                        <ChevronDown size={12} />
+                                      </button>
+                                    </div>
+                                    
+                                    <div className="flex gap-1 shrink-0 opacity-20 group-hover:opacity-100 transition-opacity mr-2">
+                                      <button onClick={() => changeBookmarkLevel(index, -1)} disabled={bm.level <= 1} className="p-1 hover:bg-muted/20 rounded disabled:opacity-30" title="Outdent (Level Up)">
+                                        <ArrowLeft size={12} />
+                                      </button>
+                                      <button onClick={() => changeBookmarkLevel(index, 1)} disabled={bm.level >= 6} className="p-1 hover:bg-muted/20 rounded disabled:opacity-30 rotate-180" title="Indent (Level Down)">
+                                        <ArrowLeft size={12} />
+                                      </button>
+                                    </div>
+
+                                    <div className="flex-1 flex items-center gap-2">
+                                      <input 
+                                        type="text" 
+                                        value={bm.title} 
+                                        onChange={(e) => {
+                                          const list = [...editingBookmarksList];
+                                          list[index].title = e.target.value;
+                                          setEditingBookmarksList(list);
+                                        }}
+                                        className="flex-1 text-xs px-2 py-1 bg-transparent hover:bg-background border border-transparent hover:border-border rounded focus:border-primary focus:bg-background outline-none transition-colors"
+                                      />
+                                    </div>
+                                    
+                                    <div className="shrink-0 flex items-center gap-2">
+                                      <div className="flex items-center bg-muted/10 rounded px-1 border border-transparent focus-within:border-primary focus-within:bg-background transition-colors">
+                                        <span className="text-[10px] text-muted pr-1 pl-1 font-mono">p.</span>
+                                        <input 
+                                          type="number"
+                                          min="1"
+                                          value={bm.page}
+                                          onChange={(e) => {
+                                            const list = [...editingBookmarksList];
+                                            list[index].page = parseInt(e.target.value) || 1;
+                                            setEditingBookmarksList(list);
+                                          }}
+                                          className="w-10 text-[10px] font-mono text-muted bg-transparent py-0.5 outline-none"
+                                        />
+                                      </div>
+                                      <button onClick={() => addBookmark(index)} className="p-1.5 text-muted hover:text-emerald-500 hover:bg-emerald-500/10 rounded transition-colors opacity-0 group-hover:opacity-100" title="Insert below">
+                                        <Plus size={14} />
+                                      </button>
+                                      <button onClick={() => removeBookmark(index)} className="p-1.5 text-muted hover:text-red-500 hover:bg-red-500/10 rounded transition-colors opacity-0 group-hover:opacity-100" title="Remove">
+                                        <Trash2 size={14} />
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                            
+                            <div className="flex items-center justify-end gap-3 pt-2">
+                              <Button variant="ghost" size="sm" onClick={() => setShowEditBookmarksModal(false)} disabled={savingBookmarks} className="text-xs">Cancel</Button>
+                              <Button size="sm" onClick={handleSaveBookmarks} disabled={savingBookmarks || loadingBookmarks} className="text-xs flex items-center gap-1.5">
+                                {savingBookmarks && <RefreshCw size={14} className="animate-spin" />}
+                                Save Changes
+                              </Button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1371,6 +1566,7 @@ export function PostProdWebPdfProcessor() {
           </div>
         </div>
       </Modal>
+
     </div>
   );
 }

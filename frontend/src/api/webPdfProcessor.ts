@@ -122,3 +122,26 @@ export async function generateBookmarks(projectId: number, includeSubheadings: b
     throw new Error(getApiErrorMessage(err, 'Failed to generate bookmarks'));
   }
 }
+
+export interface BookmarkItem {
+  level: number;
+  title: string;
+  page: number;
+}
+
+export async function getBookmarks(projectId: number): Promise<BookmarkItem[]> {
+  try {
+    const { data } = await api.get<{ bookmarks: BookmarkItem[] }>(`/post-prod/web-pdf-processor/projects/${projectId}/bookmarks`);
+    return data.bookmarks;
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to fetch bookmarks'));
+  }
+}
+
+export async function updateBookmarks(projectId: number, bookmarks: BookmarkItem[]): Promise<void> {
+  try {
+    await api.put(`/post-prod/web-pdf-processor/projects/${projectId}/bookmarks`, bookmarks);
+  } catch (err) {
+    throw new Error(getApiErrorMessage(err, 'Failed to update bookmarks'));
+  }
+}

@@ -138,7 +138,7 @@ def get_project_files(
     files_list = []
     for root, _, files in os.walk(extract_dir):
         for f in files:
-            if f.lower().endswith(".pdf") and not f.startswith("._"):
+            if f.lower().endswith((".pdf", ".jpg", ".jpeg", ".png")) and not f.startswith("._"):
                 full_path = os.path.join(root, f)
                 rel_path = os.path.relpath(full_path, extract_dir)
                 category, order = categorize_file(full_path)
@@ -171,6 +171,12 @@ class TrimRequest(BaseModel):
     margins: Optional[list[float]] = None
     standardize_size: bool = False
     remove_marks: bool = False
+
+
+class BookmarkItem(BaseModel):
+    level: int
+    title: str
+    page: int
 
 
 @router.post("/projects/{project_id}/merge")
@@ -436,3 +442,49 @@ def generate_bookmarks(
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/projects/{project_id}/bookmarks")
+def get_bookmarks(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """Get current bookmarks from the bookmarked PDF."""
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    base_dir = project["folder_name"]
+    bookmarked_pdf_path = os.path.join(base_dir, "bookmarked.pdf")
+    
+    if not os.path.exists(bookmarked_pdf_path):
+        raise HTTPException(status_code=404, detail="Bookmarked PDF not found")
+        
+    bookmarks = toc_service.get_bookmarks_from_pdf(bookmarked_pdf_path)
+    return {"bookmarks": bookmarks}
+
+@router.put("/projects/{project_id}/bookmarks")
+def update_bookmarks(
+    project_id: int,
+    bookmarks: list[BookmarkItem],
+    db: Session = Depends(get_db),
+    user=Depends(check_post_prod_access),
+):
+    """Update bookmarks in the bookmarked PDF."""
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    base_dir = project["folder_name"]
+    bookmarked_pdf_path = os.path.join(base_dir, "bookmarked.pdf")
+    
+    if not os.path.exists(bookmarked_pdf_path):
+        raise HTTPException(status_code=404, detail="Bookmarked PDF not found")
+        
+    bookmarks_dict = [b.dict() for b in bookmarks]
+    success = toc_service.update_bookmarks_in_pdf(bookmarked_pdf_path, bookmarks_dict)
+    
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to update bookmarks in PDF")
+        
+    return {"success": True, "message": "Bookmarks updated successfully"}
