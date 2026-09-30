@@ -59,9 +59,8 @@ function AssigneeDropdown({
       <button
         type="button"
         onClick={(e) => { e.stopPropagation(); setIsOpen((prev) => !prev); }}
-        className={`flex items-center justify-between min-w-[130px] max-w-[200px] text-[11px] bg-transparent border rounded-md pl-2 pr-6 py-0.5 text-primary font-medium focus:outline-none focus:ring-1 focus:ring-primary/40 transition-colors relative ${
-          isOpen ? 'border-primary ring-1 ring-primary/40' : 'border-transparent hover:border-border'
-        } cursor-pointer`}
+        className={`flex items-center justify-between min-w-[130px] max-w-[200px] text-[11px] bg-transparent border rounded-md pl-2 pr-6 py-0.5 text-primary font-medium focus:outline-none focus:ring-1 focus:ring-primary/40 transition-colors relative ${isOpen ? 'border-primary ring-1 ring-primary/40' : 'border-transparent hover:border-border'
+          } cursor-pointer`}
         title={currentLabel}
       >
         <span className="truncate leading-tight block w-full text-left">{currentLabel}</span>
@@ -109,9 +108,8 @@ function AssigneeDropdown({
                   <button
                     key={u.id}
                     type="button"
-                    className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${
-                      isSelected ? 'bg-primary/10 text-primary font-medium' : 'text-foreground hover:bg-muted/40'
-                    }`}
+                    className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${isSelected ? 'bg-primary/10 text-primary font-medium' : 'text-foreground hover:bg-muted/40'
+                      }`}
                     onClick={(e) => { e.stopPropagation(); setIsOpen(false); if (value !== u.user_name) onChange(u.user_name); }}
                   >
                     <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'text-primary' : 'text-transparent'}`}>
@@ -138,7 +136,7 @@ export function PostProdXmlConversion() {
   const [projects, setProjects] = useState<any[]>([])
   const [clients, setClients] = useState<any[]>([])
   const [users, setUsers] = useState<any[]>([])
-  
+
   // Form states
   const [showAddProjectModal, setShowAddProjectModal] = useState(false)
   const [customerName, setCustomerName] = useState('')
@@ -203,7 +201,7 @@ export function PostProdXmlConversion() {
 
     try {
       await xmlConversionApi.createProject(clientCode, projectName, targetFormat, pdfFile)
-      
+
       setCustomerName('')
       setClientCode('')
       setProjectName('')
@@ -253,8 +251,8 @@ export function PostProdXmlConversion() {
       if (res.ok) {
         if (newAssignee) {
           const matchedUser = users.find((u) => u.user_name === newAssignee);
-          const displayName = matchedUser?.first_name || matchedUser?.last_name 
-            ? `${matchedUser.first_name || ''} ${matchedUser.last_name || ''}`.trim() 
+          const displayName = matchedUser?.first_name || matchedUser?.last_name
+            ? `${matchedUser.first_name || ''} ${matchedUser.last_name || ''}`.trim()
             : newAssignee;
           toast.success(`Assigned to ${displayName} successfully`)
         } else {
@@ -285,12 +283,12 @@ export function PostProdXmlConversion() {
       || p.project_name.toLowerCase().includes(query)
       || p.client_code.toLowerCase().includes(query)
       || p.filename?.toLowerCase().includes(query)
-      
+
     const projStatus = p.conversion_status || 'YTS'
     const matchesStatus = statusFilter === 'all' || projStatus === statusFilter
     const matchesAssignee = assigneeFilter === 'all'
       || (assigneeFilter === 'unassigned' ? !p.assignee : p.assignee === assigneeFilter)
-    
+
     return matchesSearch && matchesStatus && matchesAssignee
   })
 
@@ -398,8 +396,8 @@ export function PostProdXmlConversion() {
               <option value="unassigned">Unassigned</option>
               {assigneeOptions.map(a => {
                 const matchedUser = users.find((u) => u.user_name === a);
-                const displayName = matchedUser?.first_name || matchedUser?.last_name 
-                  ? `${matchedUser.first_name || ''} ${matchedUser.last_name || ''}`.trim() 
+                const displayName = matchedUser?.first_name || matchedUser?.last_name
+                  ? `${matchedUser.first_name || ''} ${matchedUser.last_name || ''}`.trim()
                   : a;
                 return (
                   <option key={a} value={a}>
@@ -451,7 +449,7 @@ export function PostProdXmlConversion() {
             const percent = isCompleted ? 100 : (isProcessing ? 50 : 0)
 
             return (
-              <div 
+              <div
                 key={proj.id}
                 onClick={() => {
                   const assigned = (proj.assignee || '').trim().toLowerCase()
@@ -467,8 +465,8 @@ export function PostProdXmlConversion() {
                     )
                     const assigneeName = assignedUser
                       ? ((assignedUser.first_name || assignedUser.last_name)
-                          ? `${assignedUser.first_name || ''} ${assignedUser.last_name || ''}`.trim()
-                          : assignedUser.user_name)
+                        ? `${assignedUser.first_name || ''} ${assignedUser.last_name || ''}`.trim()
+                        : assignedUser.user_name)
                       : proj.assignee
                     toast.error(`This project is assigned to ${assigneeName}. You cannot open it.`)
                     return
@@ -484,7 +482,7 @@ export function PostProdXmlConversion() {
                       <p className="text-[11px] text-muted mt-0.5">{proj.client_code} • {proj.target_format}</p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button 
+                      <button
                         onClick={(e) => handleConvert(e, proj.id)}
                         disabled={isProcessing || isCompleted}
                         className={`p-1.5 rounded transition-colors ${isProcessing || isCompleted ? 'text-muted/50 cursor-not-allowed' : 'text-primary hover:bg-primary/10'}`}
@@ -492,9 +490,9 @@ export function PostProdXmlConversion() {
                       >
                         <Play size={14} />
                       </button>
-                      
+
                       {isCompleted && (
-                        <button 
+                        <button
                           onClick={(e) => handleDownload(e, proj.id, proj.filename, proj.target_format)}
                           className="p-1.5 text-green-600 hover:bg-green-500/10 rounded transition-colors"
                           title="Download XML"
@@ -514,15 +512,14 @@ export function PostProdXmlConversion() {
                         users={users}
                       />
                     </div>
-                    <span className={`capitalize font-bold px-2 py-0.5 rounded-md text-[9px] border ${
-                      isCompleted
+                    <span className={`capitalize font-bold px-2 py-0.5 rounded-md text-[9px] border ${isCompleted
                         ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
                         : isProcessing
-                        ? 'bg-blue-500/10 border-blue-500/20 text-blue-500'
-                        : status === 'Failed'
-                        ? 'bg-red-500/10 border-red-500/20 text-red-500'
-                        : 'bg-primary/10 border-primary/20 text-primary'
-                    }`}>
+                          ? 'bg-blue-500/10 border-blue-500/20 text-blue-500'
+                          : status === 'Failed'
+                            ? 'bg-red-500/10 border-red-500/20 text-red-500'
+                            : 'bg-primary/10 border-primary/20 text-primary'
+                      }`}>
                       {status}
                     </span>
                   </div>
@@ -540,7 +537,7 @@ export function PostProdXmlConversion() {
                       />
                     </div>
                   </div>
-                  
+
                   {status === 'Failed' && (
                     <p className="mt-2 text-[10px] text-red-500 truncate" title="Conversion failed">
                       Conversion failed
@@ -567,7 +564,7 @@ export function PostProdXmlConversion() {
                 <h3 className="text-base font-bold text-text m-0">Add New Project</h3>
                 <p className="text-[10px] text-muted mt-0.5">Upload a PDF file for XML conversion</p>
               </div>
-              <button 
+              <button
                 onClick={() => {
                   setShowAddProjectModal(false)
                   setErrorMsg(null)
@@ -588,8 +585,8 @@ export function PostProdXmlConversion() {
             <form onSubmit={handleAddProject} className="space-y-3.5">
               <div>
                 <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Client Name</label>
-                <select 
-                  value={customerName} 
+                <select
+                  value={customerName}
                   onChange={e => {
                     const selectedVal = e.target.value;
                     setCustomerName(selectedVal);
@@ -599,7 +596,7 @@ export function PostProdXmlConversion() {
                     } else {
                       setClientCode('');
                     }
-                  }} 
+                  }}
                   className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-primary transition-colors"
                   required
                 >
@@ -612,10 +609,10 @@ export function PostProdXmlConversion() {
 
               <div>
                 <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Client Code</label>
-                <input 
-                  type="text" 
-                  value={clientCode} 
-                  onChange={e => setClientCode(e.target.value)} 
+                <input
+                  type="text"
+                  value={clientCode}
+                  onChange={e => setClientCode(e.target.value)}
                   className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-primary transition-colors placeholder:text-muted/40"
                   placeholder="e.g. BIO101"
                   required
@@ -624,10 +621,10 @@ export function PostProdXmlConversion() {
 
               <div>
                 <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Project Name</label>
-                <input 
-                  type="text" 
-                  value={projectName} 
-                  onChange={e => setProjectName(e.target.value)} 
+                <input
+                  type="text"
+                  value={projectName}
+                  onChange={e => setProjectName(e.target.value)}
                   className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-primary transition-colors placeholder:text-muted/40"
                   placeholder="e.g. Biology Vol 2"
                   required
@@ -636,9 +633,9 @@ export function PostProdXmlConversion() {
 
               <div>
                 <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Target Format</label>
-                <select 
-                  value={targetFormat} 
-                  onChange={e => setTargetFormat(e.target.value)} 
+                <select
+                  value={targetFormat}
+                  onChange={e => setTargetFormat(e.target.value)}
                   className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-primary transition-colors"
                   required
                 >
@@ -650,11 +647,11 @@ export function PostProdXmlConversion() {
               <div>
                 <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Upload Source PDF</label>
                 <div className="border border-dashed border-border hover:border-primary/60 rounded-lg p-5 text-center cursor-pointer transition-colors bg-background/50">
-                  <input 
-                    type="file" 
-                    accept=".pdf" 
+                  <input
+                    type="file"
+                    accept=".pdf"
                     onChange={e => e.target.files && setPdfFile(e.target.files[0])}
-                    className="hidden" 
+                    className="hidden"
                     id="pdf-upload"
                     required
                   />
@@ -667,8 +664,8 @@ export function PostProdXmlConversion() {
                 {pdfFile && (
                   <div className="mt-2 bg-background border border-border rounded-lg p-2 text-xs text-muted flex items-center justify-between">
                     <span className="truncate max-w-[280px] font-medium text-text">{pdfFile.name}</span>
-                    <button 
-                      type="button" 
+                    <button
+                      type="button"
                       onClick={() => setPdfFile(null)}
                       className="text-red-600 hover:text-red-500 font-bold text-[10px]"
                     >

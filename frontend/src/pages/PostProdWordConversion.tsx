@@ -58,9 +58,8 @@ function AssigneeDropdown({
       <button
         type="button"
         onClick={(e) => { e.stopPropagation(); setIsOpen((prev) => !prev); }}
-        className={`flex items-center justify-between min-w-[130px] max-w-[200px] text-[11px] bg-transparent border rounded-md pl-2 pr-6 py-0.5 text-primary font-medium focus:outline-none focus:ring-1 focus:ring-primary/40 transition-colors relative ${
-          isOpen ? 'border-primary ring-1 ring-primary/40' : 'border-transparent hover:border-border'
-        } cursor-pointer`}
+        className={`flex items-center justify-between min-w-[130px] max-w-[200px] text-[11px] bg-transparent border rounded-md pl-2 pr-6 py-0.5 text-primary font-medium focus:outline-none focus:ring-1 focus:ring-primary/40 transition-colors relative ${isOpen ? 'border-primary ring-1 ring-primary/40' : 'border-transparent hover:border-border'
+          } cursor-pointer`}
         title={currentLabel}
       >
         <span className="truncate leading-tight block w-full text-left">{currentLabel}</span>
@@ -108,9 +107,8 @@ function AssigneeDropdown({
                   <button
                     key={u.id}
                     type="button"
-                    className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${
-                      isSelected ? 'bg-primary/10 text-primary font-medium' : 'text-foreground hover:bg-muted/40'
-                    }`}
+                    className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${isSelected ? 'bg-primary/10 text-primary font-medium' : 'text-foreground hover:bg-muted/40'
+                      }`}
                     onClick={(e) => { e.stopPropagation(); setIsOpen(false); if (value !== u.user_name) onChange(u.user_name); }}
                   >
                     <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'text-primary' : 'text-transparent'}`}>
@@ -165,7 +163,7 @@ export function PostProdWordConversion() {
   const [projects, setProjects] = useState<PostProdProject[]>([])
   const [clients, setClients] = useState<ClientCompany[]>([])
   const [users, setUsers] = useState<any[]>([])
-  
+
   // Form states
   const [showAddProjectModal, setShowAddProjectModal] = useState(false)
   const [projectToDelete, setProjectToDelete] = useState<number | null>(null)
@@ -245,7 +243,7 @@ export function PostProdWordConversion() {
         const errData = await res.json()
         throw new Error(errData.detail || 'Failed to create project')
       }
-      
+
       setCustomerName('')
       setClientCode('')
       setProjectName('')
@@ -451,7 +449,7 @@ export function PostProdWordConversion() {
             const percent = totalProjChapters > 0 ? Math.round((completedCount / totalProjChapters) * 100) : 0
 
             return (
-              <div 
+              <div
                 key={proj.id}
                 onClick={() => {
                   const assigned = (proj.assignee || '').trim().toLowerCase()
@@ -466,8 +464,8 @@ export function PostProdWordConversion() {
                     )
                     const assigneeName = assignedUser
                       ? ((assignedUser.first_name || assignedUser.last_name)
-                          ? `${assignedUser.first_name || ''} ${assignedUser.last_name || ''}`.trim()
-                          : assignedUser.user_name)
+                        ? `${assignedUser.first_name || ''} ${assignedUser.last_name || ''}`.trim()
+                        : assignedUser.user_name)
                       : proj.assignee
                     toast.error(`This project is assigned to ${assigneeName}. You cannot open it.`)
                     return
@@ -483,7 +481,7 @@ export function PostProdWordConversion() {
                       <p className="text-[11px] text-muted mt-0.5">{proj.client} {proj.client_code && `(${proj.client_code})`}</p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button 
+                      <button
                         onClick={(e) => {
                           e.stopPropagation()
                           setProjectToDelete(proj.id)
@@ -510,20 +508,26 @@ export function PostProdWordConversion() {
                               body: JSON.stringify({ assignee: newAssignee })
                             })
                             if (res.ok) {
+                              const displayName = newAssignee
+                                ? (users.find(u => u.user_name === newAssignee)?.first_name || users.find(u => u.user_name === newAssignee)?.last_name
+                                  ? `${users.find(u => u.user_name === newAssignee)?.first_name || ''} ${users.find(u => u.user_name === newAssignee)?.last_name || ''}`.trim()
+                                  : newAssignee)
+                                : 'Unassigned'
+                              toast.success(`Assigned to ${displayName} successfully`)
                               fetchProjects()
                             }
                           } catch (err) {
                             console.error(err)
+                            toast.error('Failed to update assignee')
                           }
                         }}
                         users={users}
                       />
                     </div>
-                    <span className={`capitalize font-bold px-2 py-0.5 rounded-md text-[9px] border ${
-                      proj.status === 'Completed'
+                    <span className={`capitalize font-bold px-2 py-0.5 rounded-md text-[9px] border ${proj.status === 'Completed'
                         ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
                         : 'bg-primary/10 border-primary/20 text-primary'
-                    }`}>
+                      }`}>
                       {proj.status}
                     </span>
                   </div>
@@ -562,7 +566,7 @@ export function PostProdWordConversion() {
                 <h3 className="text-base font-bold text-text m-0">Add New Project</h3>
                 <p className="text-[10px] text-muted mt-0.5">Upload a ZIP package with chapters</p>
               </div>
-              <button 
+              <button
                 onClick={() => {
                   setShowAddProjectModal(false)
                   setErrorMsg(null)
@@ -583,8 +587,8 @@ export function PostProdWordConversion() {
             <form onSubmit={handleAddProject} className="space-y-3.5">
               <div>
                 <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Client Name</label>
-                <select 
-                  value={customerName} 
+                <select
+                  value={customerName}
                   onChange={e => {
                     const selectedVal = e.target.value;
                     setCustomerName(selectedVal);
@@ -594,7 +598,7 @@ export function PostProdWordConversion() {
                     } else {
                       setClientCode('');
                     }
-                  }} 
+                  }}
                   className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-primary transition-colors"
                   required
                 >
@@ -607,10 +611,10 @@ export function PostProdWordConversion() {
 
               <div>
                 <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Client Code</label>
-                <input 
-                  type="text" 
-                  value={clientCode} 
-                  onChange={e => setClientCode(e.target.value)} 
+                <input
+                  type="text"
+                  value={clientCode}
+                  onChange={e => setClientCode(e.target.value)}
                   className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-primary transition-colors placeholder:text-muted/40"
                   placeholder="e.g. BIO101"
                   required
@@ -619,10 +623,10 @@ export function PostProdWordConversion() {
 
               <div>
                 <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Project Name / Code</label>
-                <input 
-                  type="text" 
-                  value={projectName} 
-                  onChange={e => setProjectName(e.target.value)} 
+                <input
+                  type="text"
+                  value={projectName}
+                  onChange={e => setProjectName(e.target.value)}
                   className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-primary transition-colors placeholder:text-muted/40"
                   placeholder="e.g. Biology Vol 2"
                   required
@@ -632,11 +636,11 @@ export function PostProdWordConversion() {
               <div>
                 <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Upload Chapters ZIP Package</label>
                 <div className="border border-dashed border-border hover:border-primary/60 rounded-lg p-5 text-center cursor-pointer transition-colors bg-background/50">
-                  <input 
-                    type="file" 
-                    accept=".zip" 
+                  <input
+                    type="file"
+                    accept=".zip"
                     onChange={e => e.target.files && setZipFile(e.target.files[0])}
-                    className="hidden" 
+                    className="hidden"
                     id="zip-upload"
                     required
                   />
@@ -649,8 +653,8 @@ export function PostProdWordConversion() {
                 {zipFile && (
                   <div className="mt-2 bg-background border border-border rounded-lg p-2 text-xs text-muted flex items-center justify-between">
                     <span className="truncate max-w-[280px] font-medium text-text">{zipFile.name}</span>
-                    <button 
-                      type="button" 
+                    <button
+                      type="button"
                       onClick={() => setZipFile(null)}
                       className="text-red-600 hover:text-red-500 font-bold text-[10px]"
                     >

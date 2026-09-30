@@ -133,9 +133,8 @@ function AssigneeDropdown({
       <button
         type="button"
         onClick={(e) => { e.stopPropagation(); setIsOpen((prev) => !prev); }}
-        className={`flex items-center justify-between min-w-[130px] max-w-[200px] text-[11px] bg-transparent border rounded-md pl-2 pr-6 py-0.5 text-primary font-medium focus:outline-none focus:ring-1 focus:ring-primary/40 transition-colors relative ${
-          isOpen ? 'border-primary ring-1 ring-primary/40' : 'border-transparent hover:border-border'
-        } cursor-pointer`}
+        className={`flex items-center justify-between min-w-[130px] max-w-[200px] text-[11px] bg-transparent border rounded-md pl-2 pr-6 py-0.5 text-primary font-medium focus:outline-none focus:ring-1 focus:ring-primary/40 transition-colors relative ${isOpen ? 'border-primary ring-1 ring-primary/40' : 'border-transparent hover:border-border'
+          } cursor-pointer`}
         title={currentLabel}
       >
         <span className="truncate leading-tight block w-full text-left">{currentLabel}</span>
@@ -166,7 +165,7 @@ function AssigneeDropdown({
               className="w-full text-left px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground rounded-md transition-all flex items-center gap-2 group"
               onClick={(e) => { e.stopPropagation(); setIsOpen(false); if (value !== '') onChange(''); }}
             >
-              <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 ${ value === '' ? 'text-primary' : 'text-transparent' }`}>
+              <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 ${value === '' ? 'text-primary' : 'text-transparent'}`}>
                 {value === '' && <CheckCircle2 size={12} strokeWidth={3} />}
               </div>
               <span className="group-hover:translate-x-0.5 transition-transform duration-200">— Unassigned —</span>
@@ -187,14 +186,13 @@ function AssigneeDropdown({
                   <button
                     key={u.id}
                     type="button"
-                    className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${
-                      isSelected
-                        ? 'bg-primary/10 text-primary font-medium'
-                        : 'text-foreground hover:bg-muted/40'
-                    }`}
+                    className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${isSelected
+                      ? 'bg-primary/10 text-primary font-medium'
+                      : 'text-foreground hover:bg-muted/40'
+                      }`}
                     onClick={(e) => { e.stopPropagation(); setIsOpen(false); if (value !== u.user_name) onChange(u.user_name); }}
                   >
-                    <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 transition-colors ${ isSelected ? 'text-primary' : 'text-transparent' }`}>
+                    <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'text-primary' : 'text-transparent'}`}>
                       {isSelected && <CheckCircle2 size={12} strokeWidth={3} />}
                       {!isSelected && <UserIcon size={12} strokeWidth={2} className="opacity-0 group-hover:opacity-40 text-muted-foreground transition-opacity" />}
                     </div>
@@ -240,8 +238,8 @@ function ProjectCard({ project, users, onDelete, onEdit, onRefresh, onSelect }: 
       );
       const assigneeName = assignedUser
         ? ((assignedUser.first_name || assignedUser.last_name)
-            ? `${assignedUser.first_name || ''} ${assignedUser.last_name || ''}`.trim()
-            : assignedUser.user_name)
+          ? `${assignedUser.first_name || ''} ${assignedUser.last_name || ''}`.trim()
+          : assignedUser.user_name)
         : project.assignee;
       toast.error(`This project is assigned to ${assigneeName}. You cannot open it.`);
       return;
@@ -253,6 +251,18 @@ function ProjectCard({ project, users, onDelete, onEdit, onRefresh, onSelect }: 
   const handleAssigneeChange = async (newAssignee: string) => {
     try {
       await updateProject(project.id, { assignee: newAssignee });
+      let displayName = 'Unassigned';
+      if (newAssignee) {
+        const user = users.find((u) => u.user_name === newAssignee || String(u.id) === newAssignee);
+        if (user) {
+          displayName = user.first_name || user.last_name
+            ? `${user.first_name || ''} ${user.last_name || ''}`.trim()
+            : user.user_name;
+        } else {
+          displayName = newAssignee;
+        }
+      }
+      toast.success(`Assigned to ${displayName} successfully`);
       onRefresh();
     } catch (err) {
       console.error('Failed to update assignee', err);
@@ -374,26 +384,26 @@ export function PostProdWebPdfProcessor() {
   const [projectFiles, setProjectFiles] = useState<(ProjectFile & { selected: boolean })[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [merging, setMerging] = useState(false);
-  
+
   // Trim
   const [trimMode, setTrimMode] = useState('auto');
   const [trimMargins, setTrimMargins] = useState({ top: 0, right: 0, bottom: 0, left: 0 });
   const [standardizeSize, setStandardizeSize] = useState(false);
   const [removeMarks, setRemoveMarks] = useState(false);
   const [trimming, setTrimming] = useState(false);
-  
+
   // Fonts Check
   const [activeStep, setActiveStep] = useState(1);
   const [checkingFonts, setCheckingFonts] = useState(false);
   const [fontsStatus, setFontsStatus] = useState<any>(null);
   const [checkingSecurity, setCheckingSecurity] = useState(false);
   const [securityStatus, setSecurityStatus] = useState<any>(null);
-  
+
   const [showEditBookmarksModal, setShowEditBookmarksModal] = useState(false);
   const [editingBookmarksList, setEditingBookmarksList] = useState<BookmarkItem[]>([]);
   const [loadingBookmarks, setLoadingBookmarks] = useState(false);
   const [savingBookmarks, setSavingBookmarks] = useState(false);
-  
+
   // Bookmarks
   const [generatingBookmarks, setGeneratingBookmarks] = useState(false);
   const [includeSubheadings, setIncludeSubheadings] = useState(true);
@@ -496,7 +506,7 @@ export function PostProdWebPdfProcessor() {
   // Sync selectedProject based on URL param
   useEffect(() => {
     if (!projects.length) return;
-    
+
     if (projectId) {
       const p = projects.find(proj => proj.id === Number(projectId));
       if (p && (!selectedProject || selectedProject.id !== p.id)) {
@@ -664,7 +674,7 @@ export function PostProdWebPdfProcessor() {
       setPdfRefreshKey(Date.now()); setSelectedProject(prev => prev ? { ...prev, status: "Trimmed" } : prev);
       setPdfRefreshKey(Date.now()); setSelectedProject(prev => prev ? { ...prev, status: "Trimmed" } : prev);
       fetchProjects();
-      
+
       // Force iframe refresh by updating the project slightly or we can just rely on the key/src reload
     } catch (err: any) {
       toast.error(err.message || 'Failed to trim PDF.');
@@ -673,7 +683,7 @@ export function PostProdWebPdfProcessor() {
     }
   };
 
-  
+
   const handleCheckSecurity = async () => {
     if (!selectedProject) return;
     setCheckingSecurity(true);
@@ -702,7 +712,7 @@ export function PostProdWebPdfProcessor() {
       const data = await generateBookmarks(selectedProject.id, includeSubheadings);
       setBookmarksStatus(data);
       toast.success('Bookmarks generated successfully!');
-      
+
       // Update selected project state
       setSelectedProject(prev => prev ? { ...prev, status: 'Bookmarked' } : prev);
       setPdfRefreshKey(Date.now());
@@ -728,7 +738,7 @@ export function PostProdWebPdfProcessor() {
       setLoadingBookmarks(false);
     }
   };
-  
+
   const handleSaveBookmarks = async () => {
     if (!selectedProject) return;
     setSavingBookmarks(true);
@@ -753,7 +763,7 @@ export function PostProdWebPdfProcessor() {
     }
     setEditingBookmarksList(list);
   };
-  
+
   const changeBookmarkLevel = (index: number, change: number) => {
     const list = [...editingBookmarksList];
     const newLevel = list[index].level + change;
@@ -762,7 +772,7 @@ export function PostProdWebPdfProcessor() {
       setEditingBookmarksList(list);
     }
   };
-  
+
   const removeBookmark = (index: number) => {
     const list = [...editingBookmarksList];
     list.splice(index, 1);
@@ -821,7 +831,7 @@ export function PostProdWebPdfProcessor() {
     try {
       await generateLinkManual(selectedProject.id, link.type, link.title, link.source_page, link.target_page);
       toast.success('Link created manually');
-      
+
       // Update UI optimistically
       const updatedStatus = { ...linksAnalysisStatus };
       if (updatedStatus.details) {
@@ -1081,7 +1091,7 @@ export function PostProdWebPdfProcessor() {
           {/* RIGHT — Stepper Panel */}
           <div className="flex flex-col overflow-hidden bg-card border-l border-border/80">
             <div className="flex-1 overflow-y-auto p-6 space-y-4">
-              
+
               {/* Step 1: Merge PDFs */}
               <div className={`border border-border rounded-xl overflow-hidden bg-background transition-colors ${activeStep === 1 ? 'ring-1 ring-primary border-primary/50' : ''}`}>
                 <button
@@ -1089,18 +1099,17 @@ export function PostProdWebPdfProcessor() {
                   className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors"
                 >
                   <div className="flex items-center gap-3">
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                      selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed' 
-                      ? 'bg-emerald-500/20 text-emerald-600' 
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed'
+                      ? 'bg-emerald-500/20 text-emerald-600'
                       : activeStep === 1 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
-                    }`}>
+                      }`}>
                       {selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed' ? <CheckCircle2 size={14} /> : '1'}
                     </div>
                     <h2 className="text-sm font-bold text-text m-0">Step 1 — Merge PDF</h2>
                   </div>
                   {activeStep === 1 ? <ChevronUp size={18} className="text-muted" /> : <ChevronDown size={18} className="text-muted" />}
                 </button>
-                
+
                 {activeStep === 1 && (
                   <div className="p-4 border-t border-border flex flex-col gap-4 h-[500px]">
                     <div className="flex items-start justify-between shrink-0 gap-3">
@@ -1144,9 +1153,8 @@ export function PostProdWebPdfProcessor() {
                             return (
                               <div
                                 key={file.relative_path}
-                                className={`p-3 flex items-center gap-3 text-xs transition-colors ${
-                                  file.selected ? 'bg-card' : 'bg-muted/10'
-                                }`}
+                                className={`p-3 flex items-center gap-3 text-xs transition-colors ${file.selected ? 'bg-card' : 'bg-muted/10'
+                                  }`}
                               >
                                 {/* Checkbox */}
                                 <input
@@ -1219,11 +1227,10 @@ export function PostProdWebPdfProcessor() {
                   className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <div className="flex items-center gap-3">
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                      selectedProject.status === 'Trimmed' 
-                      ? 'bg-emerald-500/20 text-emerald-600' 
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${selectedProject.status === 'Trimmed'
+                      ? 'bg-emerald-500/20 text-emerald-600'
                       : activeStep === 2 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
-                    }`}>
+                      }`}>
                       {selectedProject.status === 'Trimmed' ? <CheckCircle2 size={14} /> : '2'}
                     </div>
                     <h2 className="text-sm font-bold text-text m-0">Step 2 — Trim PDF</h2>
@@ -1345,13 +1352,12 @@ export function PostProdWebPdfProcessor() {
                   className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <div className="flex items-center gap-3">
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                      fontsStatus && fontsStatus.all_embedded 
-                      ? 'bg-emerald-500/20 text-emerald-600' 
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${fontsStatus && fontsStatus.all_embedded
+                      ? 'bg-emerald-500/20 text-emerald-600'
                       : fontsStatus && !fontsStatus.all_embedded
-                      ? 'bg-amber-500/20 text-amber-600'
-                      : activeStep === 3 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
-                    }`}>
+                        ? 'bg-amber-500/20 text-amber-600'
+                        : activeStep === 3 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                      }`}>
                       {fontsStatus ? (
                         fontsStatus.all_embedded ? <CheckCircle2 size={14} /> : <XCircle size={14} />
                       ) : '3'}
@@ -1388,7 +1394,7 @@ export function PostProdWebPdfProcessor() {
                         <p className="text-xs m-0 mb-3 opacity-90">
                           Total Fonts Detected: {fontsStatus.total_fonts}
                         </p>
-                        
+
                         {!fontsStatus.all_embedded && fontsStatus.missing_fonts.length > 0 && (
                           <div className="bg-background/50 p-3 rounded border border-amber-500/20">
                             <h5 className="text-[10px] uppercase tracking-wider font-bold mb-2">Unembedded Fonts</h5>
@@ -1417,13 +1423,12 @@ export function PostProdWebPdfProcessor() {
                   className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <div className="flex items-center gap-3">
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                      securityStatus && securityStatus.is_free_of_protection 
-                      ? 'bg-emerald-500/20 text-emerald-600' 
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${securityStatus && securityStatus.is_free_of_protection
+                      ? 'bg-emerald-500/20 text-emerald-600'
                       : securityStatus && !securityStatus.is_free_of_protection
-                      ? 'bg-amber-500/20 text-amber-600'
-                      : activeStep === 4 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
-                    }`}>
+                        ? 'bg-amber-500/20 text-amber-600'
+                        : activeStep === 4 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                      }`}>
                       {securityStatus ? (
                         securityStatus.is_free_of_protection ? <CheckCircle2 size={14} /> : <XCircle size={14} />
                       ) : '4'}
@@ -1457,7 +1462,7 @@ export function PostProdWebPdfProcessor() {
                             {securityStatus.is_free_of_protection ? 'Free of Password Protection' : 'Security Protection Detected!'}
                           </h4>
                         </div>
-                        
+
                         {!securityStatus.is_free_of_protection && (
                           <div className="bg-background/50 p-3 rounded border border-amber-500/20 mt-3">
                             <ul className="list-disc pl-4 text-xs space-y-1">
@@ -1485,11 +1490,10 @@ export function PostProdWebPdfProcessor() {
                   className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <div className="flex items-center gap-3">
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                      bookmarksStatus && bookmarksStatus.success
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${bookmarksStatus && bookmarksStatus.success
                       ? 'bg-emerald-500/20 text-emerald-600'
                       : activeStep === 5 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
-                    }`}>
+                      }`}>
                       {bookmarksStatus ? (
                         bookmarksStatus.success ? <CheckCircle2 size={14} /> : <XCircle size={14} />
                       ) : '5'}
@@ -1534,7 +1538,7 @@ export function PostProdWebPdfProcessor() {
                             {bookmarksStatus.success ? 'Bookmarks Generated' : 'Error Generating Bookmarks'}
                           </h4>
                         </div>
-                        
+
                         {bookmarksStatus.success ? (
                           <div className="bg-background/50 p-3 rounded border border-emerald-500/20 mt-3 flex items-center gap-4 text-xs font-medium">
                             <div className="flex flex-col gap-1">
@@ -1556,9 +1560,9 @@ export function PostProdWebPdfProcessor() {
 
                     {selectedProject.status === 'Bookmarked' && !showEditBookmarksModal && (
                       <div className="mt-2 text-right border-t border-border pt-4">
-                        <Button 
-                          variant="secondary" 
-                          size="sm" 
+                        <Button
+                          variant="secondary"
+                          size="sm"
                           onClick={handleOpenEditBookmarks}
                           className="text-xs"
                         >
@@ -1581,7 +1585,7 @@ export function PostProdWebPdfProcessor() {
                                 You can manually rename, reorganize, or delete bookmarks.
                               </p>
                             </div>
-                            
+
                             <div className="flex-1 max-h-[50vh] overflow-y-auto border border-border rounded-lg bg-background p-2 space-y-1">
                               {editingBookmarksList.length === 0 ? (
                                 <div className="p-8 flex flex-col items-center justify-center border border-dashed border-border rounded-lg bg-card text-center mt-2">
@@ -1601,7 +1605,7 @@ export function PostProdWebPdfProcessor() {
                                         <ChevronDown size={12} />
                                       </button>
                                     </div>
-                                    
+
                                     <div className="flex gap-1 shrink-0 opacity-20 group-hover:opacity-100 transition-opacity mr-2">
                                       <button onClick={() => changeBookmarkLevel(index, -1)} disabled={bm.level <= 1} className="p-1 hover:bg-muted/20 rounded disabled:opacity-30" title="Outdent (Level Up)">
                                         <ArrowLeft size={12} />
@@ -1612,9 +1616,9 @@ export function PostProdWebPdfProcessor() {
                                     </div>
 
                                     <div className="flex-1 flex items-center gap-2">
-                                      <input 
-                                        type="text" 
-                                        value={bm.title} 
+                                      <input
+                                        type="text"
+                                        value={bm.title}
                                         onChange={(e) => {
                                           const list = [...editingBookmarksList];
                                           list[index].title = e.target.value;
@@ -1623,11 +1627,11 @@ export function PostProdWebPdfProcessor() {
                                         className="flex-1 text-xs px-2 py-1 bg-transparent hover:bg-background border border-transparent hover:border-border rounded focus:border-primary focus:bg-background outline-none transition-colors"
                                       />
                                     </div>
-                                    
+
                                     <div className="shrink-0 flex items-center gap-2">
                                       <div className="flex items-center bg-muted/10 rounded px-1 border border-transparent focus-within:border-primary focus-within:bg-background transition-colors">
                                         <span className="text-[10px] text-muted pr-1 pl-1 font-mono">p.</span>
-                                        <input 
+                                        <input
                                           type="number"
                                           min="1"
                                           value={bm.page}
@@ -1650,7 +1654,7 @@ export function PostProdWebPdfProcessor() {
                                 ))
                               )}
                             </div>
-                            
+
                             <div className="flex items-center justify-end gap-3 pt-2">
                               <Button variant="ghost" size="sm" onClick={() => setShowEditBookmarksModal(false)} disabled={savingBookmarks} className="text-xs">Cancel</Button>
                               <Button size="sm" onClick={handleSaveBookmarks} disabled={savingBookmarks || loadingBookmarks} className="text-xs flex items-center gap-1.5">
@@ -1676,11 +1680,10 @@ export function PostProdWebPdfProcessor() {
                   className="w-full flex items-center justify-between p-4 bg-muted/5 hover:bg-muted/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <div className="flex items-center gap-3">
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                      linksStatus && linksStatus.success
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${linksStatus && linksStatus.success
                       ? 'bg-emerald-500/20 text-emerald-600'
                       : activeStep === 6 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
-                    }`}>
+                      }`}>
                       {linksStatus ? (
                         <CheckCircle2 size={14} className="text-emerald-500" />
                       ) : (
@@ -1699,10 +1702,10 @@ export function PostProdWebPdfProcessor() {
                     <p className="text-sm text-muted">
                       Automatically create clickable links in the PDF from the Table of Contents to the corresponding chapters.
                     </p>
-                    
+
                     <div className="space-y-2">
                       <label className="text-xs font-bold text-muted uppercase tracking-wider block">Link Type</label>
-                      
+
                       <div className="flex flex-col gap-2">
                         <label className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted/10 p-2 rounded transition-colors">
                           <input type="radio" name="link_type" value="none" checked={linkType === 'none'} onChange={() => setLinkType('none')} className="text-primary accent-primary" />
@@ -1724,7 +1727,7 @@ export function PostProdWebPdfProcessor() {
                         </label>
                       </div>
                     </div>
-                    
+
                     {linksAnalysisStatus && linksAnalysisStatus.success && (
                       <div className="p-3 bg-blue-500/10 border border-blue-500/20 text-blue-700 rounded text-sm mt-3 mb-2 space-y-1">
                         <p className="font-bold">Analysis Report:</p>
@@ -1733,7 +1736,7 @@ export function PostProdWebPdfProcessor() {
                           {linkType === 'two_way' && <li>Two-Way (Back) Links to create: {linksAnalysisStatus.two_way_links}</li>}
                           <li className="font-medium">Total Links: {linksAnalysisStatus.total_links}</li>
                         </ul>
-                        
+
                         {linksAnalysisStatus.details && linksAnalysisStatus.details.length > 0 && (
                           <div className="mt-3 pt-3 border-t border-blue-500/20 max-h-48 overflow-y-auto">
                             <table className="w-full text-xs text-left">
@@ -1757,7 +1760,7 @@ export function PostProdWebPdfProcessor() {
                                       {link.is_linked ? (
                                         <span className="text-emerald-600 font-bold" title="Already linked">✓</span>
                                       ) : (
-                                        <button 
+                                        <button
                                           onClick={() => handleManualLink(link, i)}
                                           className="text-xs px-2 py-0.5 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
                                           title="Fix / Link manually"
@@ -1776,8 +1779,8 @@ export function PostProdWebPdfProcessor() {
                     )}
 
                     <div className="flex gap-3 mt-4">
-                      <Button 
-                        onClick={handleAnalyzeLinks} 
+                      <Button
+                        onClick={handleAnalyzeLinks}
                         disabled={analyzingLinks || generatingLinks || linkType === 'none'}
                         variant={linksAnalysisStatus ? 'outline' : 'primary'}
                         className="flex-1 flex items-center justify-center gap-2"
@@ -1788,9 +1791,9 @@ export function PostProdWebPdfProcessor() {
                           <><FileText size={16} /> Analyze Links</>
                         )}
                       </Button>
-                      
-                      <Button 
-                        onClick={handleApplyLinks} 
+
+                      <Button
+                        onClick={handleApplyLinks}
                         disabled={generatingLinks || analyzingLinks || !linksAnalysisStatus || linkType === 'none'}
                         className="flex-1 flex items-center justify-center gap-2"
                       >
@@ -1801,7 +1804,7 @@ export function PostProdWebPdfProcessor() {
                         )}
                       </Button>
                     </div>
-                    
+
                     {linksStatus && linksStatus.error && (
                       <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-600 rounded text-sm mt-3">
                         {linksStatus.error}
@@ -2457,7 +2460,7 @@ export function PostProdWebPdfProcessor() {
           )}
           <div className="space-y-1">
             <label className="text-xs font-semibold text-text block">Client Company *</label>
-              <select
+            <select
               value={customerName}
               onChange={e => {
                 const selectedVal = e.target.value;

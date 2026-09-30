@@ -231,6 +231,12 @@ function ProjectCard({ project, users, onDelete, onEdit, onRefresh }: ProjectCar
   const handleAssigneeChange = async (newAssignee: string) => {
     try {
       await updateProject(project.id, { assignee: newAssignee });
+      const displayName = newAssignee
+        ? (users.find(u => u.user_name === newAssignee)?.first_name || users.find(u => u.user_name === newAssignee)?.last_name
+          ? `${users.find(u => u.user_name === newAssignee)?.first_name || ''} ${users.find(u => u.user_name === newAssignee)?.last_name || ''}`.trim()
+          : newAssignee)
+        : 'Unassigned';
+      toast.success(`Assigned to ${displayName} successfully`);
       onRefresh();
     } catch (err) {
       console.error('Failed to update assignee', err);
