@@ -182,9 +182,8 @@ def _find_references(doc, targets: dict, bibliography_pages: set) -> list:
     references = []
 
     for page_idx in range(len(doc)):
-        # Skip bibliography/notes/references pages for page references
-        # (but still detect figures, tables, chapters in those sections)
-        skip_page_refs = page_idx in bibliography_pages
+        # Skip bibliography/notes/references pages (external references)
+        skip_external_refs = page_idx in bibliography_pages
 
         page = doc[page_idx]
         physical_page = page_idx + 1
@@ -197,35 +196,37 @@ def _find_references(doc, targets: dict, bibliography_pages: set) -> list:
             for line in block.get("lines", []):
                 line_text = "".join(s.get("text", "") for s in line.get("spans", [])).strip()
 
-                # Find figure references in text
-                for fig_match in re.finditer(r'\b(?:see|See|refer\s+to|Refer\s+to|look\s+at|Look\s+at)?\s*(?:Figure|Fig\.?|FIGURE|FIG\.?)\s+(\d+(?:\.\d+)?)', line_text, re.IGNORECASE):
-                    fig_id = f"figure_{fig_match.group(1)}"
-                    if fig_id in targets:
-                        if line.get("spans"):
-                            rect = fitz.Rect(line["spans"][0]["bbox"])
-                            references.append({
-                                "page_idx": page_idx,
-                                "page": physical_page,
-                                "rect": rect,
-                                "type": "figure",
-                                "text": fig_match.group(0),
-                                "target_info": targets[fig_id],
-                            })
+                # Find figure references in text (skip in bibliography/notes sections)
+                if not skip_external_refs:
+                    for fig_match in re.finditer(r'\b(?:see|See|refer\s+to|Refer\s+to|look\s+at|Look\s+at)?\s*(?:Figure|Fig\.?|FIGURE|FIG\.?)\s+(\d+(?:\.\d+)?)', line_text, re.IGNORECASE):
+                        fig_id = f"figure_{fig_match.group(1)}"
+                        if fig_id in targets:
+                            if line.get("spans"):
+                                rect = fitz.Rect(line["spans"][0]["bbox"])
+                                references.append({
+                                    "page_idx": page_idx,
+                                    "page": physical_page,
+                                    "rect": rect,
+                                    "type": "figure",
+                                    "text": fig_match.group(0),
+                                    "target_info": targets[fig_id],
+                                })
 
-                # Find table references in text
-                for table_match in re.finditer(r'\b(?:see|See|refer\s+to|Refer\s+to|look\s+at|Look\s+at)?\s*(?:Table|Tab\.?|TABLE|TAB\.?)\s+(\d+(?:\.\d+)?)', line_text, re.IGNORECASE):
-                    table_id = f"table_{table_match.group(1)}"
-                    if table_id in targets:
-                        if line.get("spans"):
-                            rect = fitz.Rect(line["spans"][0]["bbox"])
-                            references.append({
-                                "page_idx": page_idx,
-                                "page": physical_page,
-                                "rect": rect,
-                                "type": "table",
-                                "text": table_match.group(0),
-                                "target_info": targets[table_id],
-                            })
+                # Find table references in text (skip in bibliography/notes sections)
+                if not skip_external_refs:
+                    for table_match in re.finditer(r'\b(?:see|See|refer\s+to|Refer\s+to|look\s+at|Look\s+at)?\s*(?:Table|Tab\.?|TABLE|TAB\.?)\s+(\d+(?:\.\d+)?)', line_text, re.IGNORECASE):
+                        table_id = f"table_{table_match.group(1)}"
+                        if table_id in targets:
+                            if line.get("spans"):
+                                rect = fitz.Rect(line["spans"][0]["bbox"])
+                                references.append({
+                                    "page_idx": page_idx,
+                                    "page": physical_page,
+                                    "rect": rect,
+                                    "type": "table",
+                                    "text": table_match.group(0),
+                                    "target_info": targets[table_id],
+                                })
 
                 # Find chapter references in text
                 for ch_match in re.finditer(r'\b(?:see|See|refer\s+to|Refer\s+to|read|Read)?\s*(?:Chapter|Ch\.?|CHAPTER|CH\.?)\s+(\d+)', line_text, re.IGNORECASE):
@@ -244,7 +245,7 @@ def _find_references(doc, targets: dict, bibliography_pages: set) -> list:
 
                 # Find page references: "page 42", "p. 42", "pp. 100-105"
                 # Skip page references in bibliography/notes/references sections (external references)
-                if not skip_page_refs:
+                if not skip_external_refs:
                     for page_match in re.finditer(r'\b(?:page|p\.?|pages|pp\.?)\s+(\d+(?:\s*[-–]\s*\d+)?)', line_text, re.IGNORECASE):
                         page_ref = page_match.group(1).split()[0]  # Get first page number
                         try:
