@@ -801,7 +801,7 @@ export function PostProdWebPdfProcessor() {
       const result = await generateCrossrefLinks(selectedProject.id, false);
       setCrossrefLinksAnalysis(result);
       setPdfRefreshKey((prev) => prev + 1);
-      toast.success(`Created ${result.not_linked} cross-reference link(s) successfully`);
+      toast.success(`Applied cross-reference links - ${result.linked} linked, ${result.not_linked} remaining`);
     } catch (err: any) {
       toast.error(err.message || 'Failed to apply cross-reference links');
     } finally {
