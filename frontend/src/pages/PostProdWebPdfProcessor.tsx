@@ -240,6 +240,7 @@ export function PostProdWebPdfProcessor() {
   const [clients, setClients] = useState<ClientCompany[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Workspace state
   const [selectedProject, setSelectedProject] = useState<WebPdfProject | null>(null);
@@ -325,21 +326,37 @@ export function PostProdWebPdfProcessor() {
   useEffect(() => {
     let mounted = true;
 
+    const withTimeout = <T,>(promise: Promise<T>, timeoutMs: number = 10000): Promise<T> => {
+      return Promise.race([
+        promise,
+        new Promise<T>((_, reject) =>
+          setTimeout(() => reject(new Error(`Request timeout after ${timeoutMs}ms`)), timeoutMs)
+        )
+      ]);
+    };
+
     const load = async () => {
       try {
         const [projectsData, clientsRes, usersList] = await Promise.all([
-          listProjects(),
-          fetch('/api/v2/clients/active').then(r => r.ok ? r.json() : null),
-          usersApi.list(),
+          withTimeout(listProjects()),
+          withTimeout(fetch('/api/v2/clients/active').then(r => r.ok ? r.json() : null)),
+          withTimeout(usersApi.list()).catch(() => []),
         ]);
 
         if (mounted) {
-          setProjects(projectsData);
+          setProjects(projectsData || []);
           if (clientsRes) setClients(clientsRes);
-          setUsers(usersList);
+          setUsers(usersList || []);
         }
       } catch (err) {
+        const errMsg = err instanceof Error ? err.message : 'Unknown error';
         console.error('Failed to load data', err);
+        // Set empty defaults so page still shows (just no projects)
+        if (mounted) {
+          setProjects([]);
+          setUsers([]);
+          setLoadError(`Failed to load projects: ${errMsg}`);
+        }
       } finally {
         if (mounted) setLoading(false);
       }
@@ -887,24 +904,13 @@ export function PostProdWebPdfProcessor() {
 
         <div className="flex items-center gap-2">
           {!selectedProject && (
-            <>
-              <Button
-                onClick={() => fetchProjects()}
-                variant="outline"
-                className="text-xs font-semibold h-9 px-3 flex items-center gap-1.5"
-                disabled={loading}
-              >
-                <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-                Refresh
-              </Button>
-              <Button
-                onClick={() => setShowAddModal(true)}
-                className="text-xs font-semibold h-9 px-3 flex items-center gap-1.5"
-                leftIcon={<Plus size={15} />}
-              >
-                Create Project
-              </Button>
-            </>
+            <Button
+              onClick={() => setShowAddModal(true)}
+              className="text-xs font-semibold h-9 px-3 flex items-center gap-1.5"
+              leftIcon={<Plus size={15} />}
+            >
+              Create Project
+            </Button>
           )}
         </div>
       </header>
@@ -929,7 +935,7 @@ export function PostProdWebPdfProcessor() {
               {selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed' || selectedProject.status === 'Bookmarked' ? (
                 <iframe
                   key={`${selectedProject.id}-${selectedProject.status}-${pdfRefreshKey}`} // force reload if status or key changes
-                  src={`/api/v2/post-prod/web-pdf-processor/projects/${selectedProject.id}/merged-pdf?t=${pdfRefreshKey}${selectedProject.status === 'Bookmarked' ? '#pagemode=bookmarks' : ''}`}
+                  src={`/api/v2/post-prod/web-pdf-processor/projects/${selectedProject.id}/final-pdf?t=${pdfRefreshKey}${selectedProject.status === 'Bookmarked' ? '#pagemode=bookmarks' : ''}`}
                   className="w-full h-full border-0"
                   title={`${selectedProject.status} PDF Preview`}
                 />
@@ -2275,6 +2281,18 @@ export function PostProdWebPdfProcessor() {
           {loading ? (
             <div className="h-64 flex items-center justify-center text-xs text-muted">
               <RefreshCw size={20} className="animate-spin mr-2" /> Loading projects...
+            </div>
+          ) : loadError ? (
+            <div className="h-64 flex flex-col items-center justify-center border border-dashed border-red-500/50 rounded-xl bg-red-50 dark:bg-red-950/20 p-6 text-center">
+              <AlertCircle size={36} className="text-red-600 dark:text-red-400 mb-2" />
+              <h4 className="text-sm font-semibold text-red-700 dark:text-red-300 m-0">{loadError}</h4>
+              <Button
+                onClick={() => { setLoadError(null); setLoading(true); fetchProjects(); }}
+                variant="outline"
+                className="text-xs mt-4"
+              >
+                Retry
+              </Button>
             </div>
           ) : filteredProjects.length === 0 ? (
             <div className="h-64 flex flex-col items-center justify-center border border-dashed border-border rounded-xl bg-card p-6 text-center">
