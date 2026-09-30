@@ -85,27 +85,37 @@ def find_crossrefs_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
 def _identify_bibliography_sections(doc) -> set:
     """
     Identify pages that are part of bibliography/notes/references sections.
-    Returns set of page indices that should be excluded from page reference linking.
+    Only marks pages that are clearly after a Bibliography/References/Notes header.
+    Returns set of page indices that should be excluded from cross-references.
     """
     bibliography_pages = set()
-    in_bibliography = False
+
+    # Find the page where bibliography section clearly starts (header at top of page)
+    bibliography_start = None
 
     for page_idx in range(len(doc)):
         page = doc[page_idx]
         text = page.get_text()
 
-        # Detect start of bibliography/notes/references section
-        if re.search(
-            r'(Bibliography|Notes\s+and\s+References|References|Works\s+Cited|'
-            r'Further\s+Reading|Endnotes|Notes|Appendix)',
-            text,
-            re.IGNORECASE
-        ):
-            in_bibliography = True
+        # Look for Bibliography/References/Notes header at START of page
+        # Must be on the first line/header, not just anywhere in the text
+        lines = text.split('\n')
+        first_content = '\n'.join(lines[:3]).strip()  # First 3 lines
 
-        if in_bibliography:
+        if re.match(
+            r'^.*\b(Bibliography|References|Works\s+Cited|Endnotes|Notes\s+and\s+References)\b',
+            first_content,
+            re.IGNORECASE | re.MULTILINE
+        ):
+            bibliography_start = page_idx
+            logger.debug(f"Bibliography section header found at page {page_idx + 1}")
+            break
+
+    # Mark all pages from bibliography start onward
+    if bibliography_start is not None:
+        for page_idx in range(bibliography_start, len(doc)):
             bibliography_pages.add(page_idx)
-            logger.debug(f"Page {page_idx + 1} identified as bibliography/references section")
+            logger.debug(f"Page {page_idx + 1} marked as bibliography/references section")
 
     return bibliography_pages
 
