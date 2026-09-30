@@ -654,9 +654,12 @@ def generate_bookmarks_for_pdf(pdf_path: str, output_path: str = None, include_s
         
     if sanitized_bookmarks:
         doc.set_toc(sanitized_bookmarks)
-    
-    doc.save(output_path, garbage=3, deflate=True)
+
+    # Save to temp file first, then replace original (avoids "save to original must be incremental" error)
+    temp_path = output_path.replace('.pdf', '_temp.pdf')
+    doc.save(temp_path, incremental=False, garbage=3, deflate=True)
     doc.close()
+    os.replace(temp_path, output_path)
     
     return {
         "success": True,
