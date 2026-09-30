@@ -165,7 +165,7 @@ def find_toc_entries(doc):
                         title = re.sub(r'[\u2002\u2003\t]+', ' ', title).strip()
                         toc_entries.append({
                             'title': title,
-                            'printed_page': roman_str,  # store roman string as key
+                            'printed_page': rv,  # store as integer, not string
                             'source_page': p_idx,
                             'rect': rect,
                             'x0': rect.x0,
