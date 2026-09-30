@@ -84,8 +84,8 @@ def find_endnotes_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
             for line in block.get("lines", []):
                 line_text = "".join(s.get("text", "") for s in line.get("spans", [])).strip()
 
-                # Only match endnotes in notes sections to avoid matching numbered lists in body
-                if not in_notes_section and page_idx < 100:
+                # Only match endnotes in confirmed notes sections (skip body content numbered lists)
+                if not in_notes_section:
                     continue
 
                 # Match endnotes like "1.", "2)", "3:" but avoid page headers
