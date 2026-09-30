@@ -360,9 +360,22 @@ def delete_project(project_id: int, db: Session = Depends(database.get_db), user
     project = db.query(PostProdProject).filter(PostProdProject.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    project.is_deleted = True
+
+    # Delete project folder from disk
+    settings = get_settings()
+    project_dir = os.path.join(settings.UPLOAD_FOLDER, "post_prod", project.client_code or "default_client", project.project_name or "default_project")
+    if os.path.exists(project_dir):
+        try:
+            shutil.rmtree(project_dir)
+        except Exception as e:
+            print(f"Warning: Could not delete project folder {project_dir}: {e}")
+
+    # Hard delete: remove chapters then project
+    db.query(PostProdChapter).filter(PostProdChapter.project_id == project_id).delete()
+    db.delete(project)
     db.commit()
-    return {"message": "Project soft deleted successfully"}
+    return {"message": "Project deleted successfully"}
+
 
 @router.post("/projects")
 async def create_project(

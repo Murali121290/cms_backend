@@ -136,6 +136,19 @@ def soft_delete_project(db: Session, *, project_id: int) -> bool:
     return True
 
 
+def hard_delete_project(db: Session, *, project_id: int) -> bool:
+    p = (
+        db.query(WebPdfProject)
+        .filter(WebPdfProject.id == project_id)
+        .first()
+    )
+    if p is None:
+        return False
+    db.delete(p)
+    db.commit()
+    return True
+
+
 def record_merge_history(
     db: Session,
     *,

@@ -1,4 +1,5 @@
 import os
+import shutil
 from typing import Optional, Any
 from fastapi import APIRouter, Depends, Form, UploadFile, File, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -120,7 +121,20 @@ def delete_project(
     db: Session = Depends(get_db),
     user=Depends(check_post_prod_access),
 ):
-    success = web_pdf_projects_db.soft_delete_project(db, project_id=project_id)
+    project = web_pdf_projects_db.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Delete project folder from disk
+    folder = project.get("folder_name") if isinstance(project, dict) else getattr(project, "folder_name", None)
+    if folder and os.path.exists(folder):
+        try:
+            shutil.rmtree(folder)
+        except Exception as e:
+            print(f"Warning: Could not delete project folder {folder}: {e}")
+
+    # Hard delete DB record
+    success = web_pdf_projects_db.hard_delete_project(db, project_id=project_id)
     if not success:
         raise HTTPException(status_code=404, detail="Project not found")
     return {"message": "Project deleted successfully"}
