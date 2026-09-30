@@ -82,8 +82,14 @@ def find_urls_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
         # Extract all text at once (preserves line continuity info)
         page_text = page.get_text()
 
-        # Find all URLs in the full page text
-        for m in URL_PATTERN.finditer(page_text):
+        # Normalize line breaks: replace newlines with spaces
+        # This allows the regex to match URLs split across lines (e.g., http://sports\n.yahoo.com)
+        normalized_text = page_text.replace('\n', ' ').replace('\r', ' ')
+        # Clean up multiple spaces
+        normalized_text = ' '.join(normalized_text.split())
+
+        # Find all URLs in the normalized page text
+        for m in URL_PATTERN.finditer(normalized_text):
             raw_url = m.group(0).rstrip('.,;:!?')
 
             # Skip incomplete URLs (e.g., "http://sports" without domain)
