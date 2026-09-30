@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Plus, RefreshCw, ChevronRight, ArrowLeft, XCircle, Upload, CheckCircle2, Layers, AlertCircle, User, Search, Filter, FolderOpen, Trash2 } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
@@ -6,6 +6,128 @@ import { usersApi } from '@/api/users'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { toast } from '@/store/useToastStore'
+import { useSessionStore } from '@/stores/sessionStore'
+
+// ── Assignee Dropdown ────────────────────────────────────────────────────────
+
+function AssigneeDropdown({
+  value,
+  onChange,
+  users,
+}: {
+  value: string;
+  onChange: (val: string) => void;
+  users: any[];
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    if (isOpen) document.addEventListener('mousedown', onClickOutside);
+    if (!isOpen) setSearchQuery('');
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [isOpen]);
+
+  const activeUsers = users.filter((u) => u.active_status);
+
+  const filteredUsers = activeUsers.filter((u) => {
+    if (!searchQuery) return true;
+    const display = u.first_name || u.last_name
+      ? `${u.first_name || ''} ${u.last_name || ''}`.trim()
+      : u.user_name;
+    return display.toLowerCase().includes(searchQuery.toLowerCase());
+  });
+
+  const currentLabel = (() => {
+    if (!value) return '— Unassigned —';
+    const u = activeUsers.find((u) => u.user_name === value);
+    if (!u) return value;
+    return u.first_name || u.last_name
+      ? `${u.first_name || ''} ${u.last_name || ''}`.trim()
+      : u.user_name;
+  })();
+
+  return (
+    <div className="relative flex items-center" ref={popoverRef}>
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); setIsOpen((prev) => !prev); }}
+        className={`flex items-center justify-between min-w-[130px] max-w-[200px] text-[11px] bg-transparent border rounded-md pl-2 pr-6 py-0.5 text-primary font-medium focus:outline-none focus:ring-1 focus:ring-primary/40 transition-colors relative ${
+          isOpen ? 'border-primary ring-1 ring-primary/40' : 'border-transparent hover:border-border'
+        } cursor-pointer`}
+        title={currentLabel}
+      >
+        <span className="truncate leading-tight block w-full text-left">{currentLabel}</span>
+        <span
+          className="pointer-events-none absolute right-1.5 text-muted transition-transform duration-200 flex-shrink-0 text-[9px]"
+          style={{ transform: isOpen ? 'rotate(180deg)' : 'none' }}
+        >▾</span>
+      </button>
+
+      {isOpen && (
+        <div className="absolute top-[calc(100%+6px)] left-0 min-w-[200px] w-max max-w-[260px] bg-card border border-border shadow-[0_12px_40px_-8px_rgba(0,0,0,0.18)] rounded-xl py-1.5 z-[200] max-h-72 flex flex-col backdrop-blur-3xl ring-1 ring-black/5">
+          <div className="px-1.5 pb-1 mb-1 border-b border-border/50 shrink-0 space-y-1">
+            <div className="relative px-1 pt-1 pb-1">
+              <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Search assignee..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                className="w-full bg-muted/50 border-none text-[11px] rounded-md pl-6 pr-2 py-1.5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
+              />
+            </div>
+            <button
+              type="button"
+              className="w-full text-left px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground rounded-md transition-all flex items-center gap-2 group"
+              onClick={(e) => { e.stopPropagation(); setIsOpen(false); if (value !== '') onChange(''); }}
+            >
+              <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 ${value === '' ? 'text-primary' : 'text-transparent'}`}>
+                {value === '' && <CheckCircle2 size={12} strokeWidth={3} />}
+              </div>
+              <span className="group-hover:translate-x-0.5 transition-transform duration-200">— Unassigned —</span>
+            </button>
+          </div>
+          <div className="px-1.5 flex flex-col gap-0.5 overflow-y-auto">
+            {filteredUsers.length === 0 ? (
+              <div className="text-[11px] text-muted-foreground px-2.5 py-3 text-center">No results found</div>
+            ) : (
+              filteredUsers.map((u) => {
+                const label = u.first_name || u.last_name
+                  ? `${u.first_name || ''} ${u.last_name || ''}`.trim()
+                  : u.user_name;
+                const isSelected = value === u.user_name;
+                return (
+                  <button
+                    key={u.id}
+                    type="button"
+                    className={`w-full text-left px-2.5 py-1.5 text-[11px] transition-all rounded-md flex items-center gap-2 group ${
+                      isSelected ? 'bg-primary/10 text-primary font-medium' : 'text-foreground hover:bg-muted/40'
+                    }`}
+                    onClick={(e) => { e.stopPropagation(); setIsOpen(false); if (value !== u.user_name) onChange(u.user_name); }}
+                  >
+                    <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'text-primary' : 'text-transparent'}`}>
+                      {isSelected && <CheckCircle2 size={12} strokeWidth={3} />}
+                      {!isSelected && <User size={12} strokeWidth={2} className="opacity-0 group-hover:opacity-40 text-muted-foreground transition-opacity" />}
+                    </div>
+                    <span className={`truncate transition-transform duration-200 ${!isSelected && 'group-hover:translate-x-0.5'}`}>{label}</span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface Chapter {
   id: number
@@ -37,6 +159,8 @@ interface ClientCompany {
 export function PostProdWordConversion() {
   useDocumentTitle('Word Conversion — S4Carlisle CMS')
   const navigate = useNavigate()
+  const viewer = useSessionStore((s) => s.viewer)
+  const myUsername = (viewer?.username || '').trim().toLowerCase()
 
   const [projects, setProjects] = useState<PostProdProject[]>([])
   const [clients, setClients] = useState<ClientCompany[]>([])
@@ -329,7 +453,27 @@ export function PostProdWordConversion() {
             return (
               <div 
                 key={proj.id}
-                onClick={() => navigate(`/post-production/word-conversion/${proj.id}`)}
+                onClick={() => {
+                  const assigned = (proj.assignee || '').trim().toLowerCase()
+                  if (!assigned) {
+                    toast.error('This project is not assigned to anyone. Assign it to open it.')
+                    return
+                  }
+                  if (myUsername && assigned !== myUsername) {
+                    const assignedUser = users.find(u =>
+                      (u.user_name || '').toLowerCase() === assigned ||
+                      String(u.id) === assigned
+                    )
+                    const assigneeName = assignedUser
+                      ? ((assignedUser.first_name || assignedUser.last_name)
+                          ? `${assignedUser.first_name || ''} ${assignedUser.last_name || ''}`.trim()
+                          : assignedUser.user_name)
+                      : proj.assignee
+                    toast.error(`This project is assigned to ${assigneeName}. You cannot open it.`)
+                    return
+                  }
+                  navigate(`/post-production/word-conversion/${proj.id}`)
+                }}
                 className="p-4 rounded-xl border bg-card border-border cursor-pointer shadow-sm hover:shadow-md transition-all duration-500 flex flex-col justify-between"
               >
                 <div>
@@ -356,10 +500,9 @@ export function PostProdWordConversion() {
                   <div className="mt-3 flex items-center justify-between text-[11px]">
                     <div className="flex items-center gap-1 text-muted" onClick={(e) => e.stopPropagation()}>
                       <User size={12} className="text-muted/70" />
-                      <select
+                      <AssigneeDropdown
                         value={proj.assignee || ''}
-                        onChange={async (e) => {
-                          const newAssignee = e.target.value
+                        onChange={async (newAssignee) => {
                           try {
                             const res = await fetch(`/api/v2/post-prod/projects/${proj.id}`, {
                               method: 'PUT',
@@ -373,13 +516,8 @@ export function PostProdWordConversion() {
                             console.error(err)
                           }
                         }}
-                        className="bg-transparent border-0 text-primary font-medium focus:ring-0 focus:outline-none cursor-pointer p-0 text-[11px] hover:text-primary-hover"
-                      >
-                        <option value="" className="text-text bg-card">Unassigned</option>
-                        {users.filter(u => u.active_status).map(u => (
-                          <option key={u.id} value={u.user_name} className="text-text bg-card">{u.user_name}</option>
-                        ))}
-                      </select>
+                        users={users}
+                      />
                     </div>
                     <span className={`capitalize font-bold px-2 py-0.5 rounded-md text-[9px] border ${
                       proj.status === 'Completed'
