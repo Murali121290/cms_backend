@@ -82,9 +82,17 @@ def find_urls_in_pdf(pdf_path: str, analyze_only: bool = True) -> dict:
         # Extract all text at once (preserves line continuity info)
         page_text = page.get_text()
 
-        # Normalize line breaks: replace newlines with spaces
-        # This allows the regex to match URLs split across lines (e.g., http://sports\n.yahoo.com)
-        normalized_text = page_text.replace('\n', ' ').replace('\r', ' ')
+        # Smart normalization: only remove newlines that are likely within URLs
+        # This handles cases like "http://sports\n.yahoo.com" where a newline breaks a URL
+        import re as re_module
+        normalized_text = page_text
+        # Replace newlines that are preceded by non-whitespace and followed by a dot/char
+        # (likely URL continuations like "sports\n.yahoo.com")
+        normalized_text = re_module.sub(r'([^\s])\n+(?=\.|\w)', r'\1', normalized_text)
+        # Also handle cases where newline is between protocol and domain
+        normalized_text = re_module.sub(r'://\n+', '://', normalized_text)
+        # Clean up any remaining single newlines with space
+        normalized_text = normalized_text.replace('\n', ' ').replace('\r', ' ')
         # Clean up multiple spaces
         normalized_text = ' '.join(normalized_text.split())
 
