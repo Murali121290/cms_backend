@@ -197,6 +197,7 @@ const router = createBrowserRouter([
       { path: 'bod/internal/:jobId', element: <BodInternalJobPage /> },
       { path: 'bod/report', element: <BodCustomerReportPage /> },
       { path: 'post-production/web-pdf-processor', element: <PostProdGuard><PostProdWebPdfProcessor /></PostProdGuard> },
+      { path: 'post-production/web-pdf-processor/:projectId', element: <PostProdGuard><PostProdWebPdfProcessor /></PostProdGuard> },
       { path: 'reports', element: <ReportsPage /> },
       { path: 'reports/schedule', element: <ScheduleReport /> },
       { path: 'reports/today-schedule', element: <TodaySchedule /> },
