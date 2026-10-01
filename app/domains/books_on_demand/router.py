@@ -349,13 +349,15 @@ def _advance_job_logic(job: BodJob, background_tasks: BackgroundTasks, db: Sessi
         
     # Upload to FTP if moving to Archive and epub exists
     if job.current_stage_name == "Archive" and job.epub_filename and job.epub_filepath:
-        background_tasks.add_task(_upload_to_ftp_task, job.epub_filepath, job.epub_filename)
+        background_tasks.add_task(_upload_to_ftp_task, job.epub_filepath, job.epub_filename, job.ace_report_filepath, job.epubcheck_report_filepath, job.pdf_filename)
 
         
     return {"message": "Job advanced successfully", "job": job}
 
 
-def _upload_to_ftp_task(local_epub_path: str, remote_epub_name: str):
+import zipfile
+
+def _upload_to_ftp_task(local_epub_path: str, remote_epub_name: str, ace_path: str = None, epubcheck_path: str = None, pdf_filename: str = None):
     settings = get_settings()
     if not settings.BOD_FTP_HOST:
         logger.error("BOD FTP host is not configured.")
@@ -367,13 +369,64 @@ def _upload_to_ftp_task(local_epub_path: str, remote_epub_name: str):
         raise ValueError("BOD_FTP_DELIVERY_PATH is missing from environment configuration.")
     
     try:
+        # Create a combined zip file named after the PDF or EPUB
+        if pdf_filename:
+            zip_filename = pdf_filename.replace('.pdf', '.zip')
+        else:
+            zip_filename = remote_epub_name.replace('.epub', '.zip')
+        local_dir = os.path.dirname(local_epub_path)
+        zip_filepath = os.path.join(local_dir, zip_filename)
+        
+        with zipfile.ZipFile(zip_filepath, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            if os.path.exists(local_epub_path):
+                zipf.write(local_epub_path, os.path.basename(local_epub_path))
+            if ace_path and os.path.exists(ace_path):
+                zipf.write(ace_path, os.path.basename(ace_path))
+            if epubcheck_path and os.path.exists(epubcheck_path):
+                zipf.write(epubcheck_path, os.path.basename(epubcheck_path))
+                
         with BodFtpService(settings.BOD_FTP_HOST, settings.BOD_FTP_USERNAME, settings.BOD_FTP_PASSWORD) as ftp:
             ftp.ensure_dir(delivery_dir)
-            ftp.upload_file(local_epub_path, f"{remote_epub_name}")
+            ftp.upload_file(zip_filepath, zip_filename)
     except Exception as e:
         logger.error(f"Failed background FTP upload for {remote_epub_name}: {str(e)}")
 
 
+@router.post("/jobs/{job_id}/upload-qc-reports")
+def upload_qc_reports(
+    job_id: int,
+    ace_report: UploadFile = File(None),
+    epubcheck_report: UploadFile = File(None),
+    db: Session = Depends(get_db)
+):
+    """Upload ACE and Epubcheck reports for a job."""
+    job = db.query(BodJob).filter(BodJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+        
+    settings = get_settings()
+    upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
+    project_dir = os.path.join(upload_dir, "bod", "BOD", job.project_name)
+    os.makedirs(project_dir, exist_ok=True)
+    
+    if ace_report:
+        if not ace_report.filename.endswith("_ace_report.zip"):
+            raise HTTPException(status_code=400, detail="ACE validation report must end with '_ace_report.zip'")
+        ace_path = os.path.join(project_dir, ace_report.filename)
+        with open(ace_path, "wb") as buffer:
+            shutil.copyfileobj(ace_report.file, buffer)
+        job.ace_report_filepath = ace_path
+        
+    if epubcheck_report:
+        if not epubcheck_report.filename.endswith("_log.txt"):
+            raise HTTPException(status_code=400, detail="Epubcheck validation report must end with '_log.txt'")
+        epubcheck_path = os.path.join(project_dir, epubcheck_report.filename)
+        with open(epubcheck_path, "wb") as buffer:
+            shutil.copyfileobj(epubcheck_report.file, buffer)
+        job.epubcheck_report_filepath = epubcheck_path
+        
+    db.commit()
+    return {"message": "Reports uploaded successfully"}
 @router.post("/jobs/{job_id}/upload-epub")
 def upload_epub(
     job_id: int, 

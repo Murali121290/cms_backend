@@ -36,6 +36,8 @@ def upgrade() -> None:
         sa.Column('pdf_language', sa.String(length=50), nullable=True),
         sa.Column('epub_filename', sa.String(length=255), nullable=True),
         sa.Column('epub_filepath', sa.String(length=1024), nullable=True),
+        sa.Column('ace_report_filepath', sa.String(length=1024), nullable=True),
+        sa.Column('epubcheck_report_filepath', sa.String(length=1024), nullable=True),
         sa.Column('current_stage_index', sa.Integer(), nullable=False),
         sa.Column('current_stage_name', sa.String(length=255), nullable=False),
         sa.Column('assigned_users', sa.JSON(), nullable=False),

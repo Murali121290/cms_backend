@@ -21,6 +21,9 @@ export function BodInternalJobPage() {
   const [isAdvancing, setIsAdvancing] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [activeTab, setActiveTab] = useState<'stage' | 'assignment' | 'duedate'>('stage')
+  const [aceFile, setAceFile] = useState<File | null>(null)
+  const [epubcheckFile, setEpubcheckFile] = useState<File | null>(null)
+  const [isUploadingReports, setIsUploadingReports] = useState(false)
 
   const [showQCModal, setShowQCModal] = useState(false)
   const [qcChecks, setQcChecks] = useState({
@@ -75,11 +78,35 @@ export function BodInternalJobPage() {
   }, [jobId])
 
   const advanceStage = async () => {
+    if (!job) return
     setIsAdvancing(true)
+    
+    // If in QC stage, we must upload the reports first
+    if (job.current_stage_name === 'QC') {
+      try {
+        setIsUploadingReports(true)
+        const formData = new FormData()
+        if (aceFile) formData.append('ace_report', aceFile)
+        if (epubcheckFile) formData.append('epubcheck_report', epubcheckFile)
+        
+        await api.post(`/bod/jobs/${job.id}/upload-qc-reports`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        })
+      } catch (err: any) {
+        console.error("Failed to upload reports", err)
+        toast.error(err.response?.data?.detail || "Failed to upload QC reports.")
+        setIsAdvancing(false)
+        return // Stop execution if validation or upload fails
+      } finally {
+        setIsUploadingReports(false)
+      }
+    }
+
     try {
       await api.post(`/bod/jobs/${jobId}/advance`)
       toast.success("QC completed and uploaded to FTP")
       fetchJob()
+      setShowQCModal(false)
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "Failed to advance stage")
     } finally {
@@ -417,11 +444,17 @@ export function BodInternalJobPage() {
                   <div className="w-8 h-8 rounded-full flex items-center justify-center bg-emerald-500/20 text-emerald-500">
                     <CheckCircle size={16} />
                   </div>
-                  <div>
+                  <div className="w-full">
                     <h4 className="font-semibold text-sm">Stage 1: ACE Validation</h4>
-                    <p className="text-xs text-emerald-600 dark:text-emerald-400">
-                      ACE validation done.
+                    <p className="text-xs text-muted mb-2">
+                      Upload the ACE validation report (.zip)
                     </p>
+                    <input 
+                      type="file" 
+                      accept=".zip"
+                      onChange={(e) => setAceFile(e.target.files?.[0] || null)}
+                      className="block w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100 border border-border rounded-md"
+                    />
                   </div>
                 </div>
               </div>
@@ -432,11 +465,17 @@ export function BodInternalJobPage() {
                   <div className="w-8 h-8 rounded-full flex items-center justify-center bg-emerald-500/20 text-emerald-500">
                     <CheckCircle size={16} />
                   </div>
-                  <div>
+                  <div className="w-full">
                     <h4 className="font-semibold text-sm">Stage 2: Epub Check Validation</h4>
-                    <p className="text-xs text-emerald-600 dark:text-emerald-400">
-                      Epub check validation done.
+                    <p className="text-xs text-muted mb-2">
+                      Upload the Epubcheck report (.txt)
                     </p>
+                    <input 
+                      type="file" 
+                      accept=".txt"
+                      onChange={(e) => setEpubcheckFile(e.target.files?.[0] || null)}
+                      className="block w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100 border border-border rounded-md"
+                    />
                   </div>
                 </div>
               </div>
@@ -471,15 +510,12 @@ export function BodInternalJobPage() {
                 Cancel
               </Button>
               <Button 
-                onClick={() => {
-                  setShowQCModal(false)
-                  advanceStage()
-                }}
-                disabled={!qcChecks.manualQC || isAdvancing}
+                onClick={() => advanceStage()}
+                disabled={!qcChecks.manualQC || isAdvancing || isUploadingReports || !aceFile || !epubcheckFile}
                 className="bg-emerald-600 hover:bg-emerald-700 text-white min-w-[140px]"
               >
-                {isAdvancing ? (
-                  <span className="flex items-center gap-2"><Loader2 size={16} className="animate-spin" /> Completing...</span>
+                {(isAdvancing || isUploadingReports) ? (
+                  <span className="flex items-center gap-2"><Loader2 size={16} className="animate-spin" /> {isUploadingReports ? 'Uploading...' : 'Completing...'}</span>
                 ) : (
                   <span className="flex items-center gap-2"><CheckCircle size={16} /> Mark as Complete</span>
                 )}

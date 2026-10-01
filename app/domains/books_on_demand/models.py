@@ -15,6 +15,8 @@ class BodJob(Base):
     pdf_language = Column(String(50), nullable=True)
     epub_filename = Column(String(255), nullable=True)
     epub_filepath = Column(String(1024), nullable=True)
+    ace_report_filepath = Column(String(1024), nullable=True)
+    epubcheck_report_filepath = Column(String(1024), nullable=True)
     current_stage_index = Column(Integer, default=0, nullable=False)
     current_stage_name = Column(String(255), nullable=False)
     current_assignee = Column(String(255), nullable=True)
