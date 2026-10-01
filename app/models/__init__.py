@@ -126,7 +126,7 @@ from app.domains.workflow.models import (  # noqa: F401
 from app.domains.post_prod.epub_validator.models import EvProject, EvHistory  # noqa: F401
 from app.domains.post_prod.word_conversion.models import PostProdProject, PostProdChapter  # noqa: F401
 from app.domains.post_prod.xml_conversion.models import PostProdXMLConversionProject, PostProdXMLConversionHistory  # noqa: F401
-from app.domains.books_on_demand.models import BodClientConfig, BodJob  # noqa: F401
+from app.domains.books_on_demand.models import BodJob  # noqa: F401
 
 Chapter = ChapterInfo
 

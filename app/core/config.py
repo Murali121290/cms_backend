@@ -95,6 +95,15 @@ class Settings(BaseSettings):
     SMTP_USE_TLS: bool = False
     SMTP_USE_SSL: bool = False
 
+    # Books on Demand (BOD) FTP Settings
+    BOD_FTP_HOST: str = ""
+    BOD_FTP_USERNAME: str = ""
+    BOD_FTP_PASSWORD: str = ""
+    BOD_FTP_BASE_PATH: str = "BOD"
+    BOD_FTP_DELIVERY_PATH: str = "/BOD/Delivery"
+    BOD_MANAGER_EMAIL: str = ""
+    BOD_CUSTOM_STAGES: str = "Add job,Production,QC,Archive"
+
     def __init__(self, **values):
         super().__init__(**values)
         # Dynamically append host domain/port to ALLOWED_ORIGINS

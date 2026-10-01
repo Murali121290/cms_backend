@@ -158,34 +158,70 @@ def s4c_convert(project_id: int, db: Session = Depends(database.get_db)):
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     
-    # Mocking S4C XML for UI demonstration
-    xml_content = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<s4c_xml>\n  <title>S4C Intermediate XML</title>\n  <content>This is the extracted content from PDF.</content>\n</s4c_xml>"
+    import requests
+    url = os.environ.get("PDF2XML_API_URL")
+    if not url:
+        raise HTTPException(status_code=500, detail="PDF2XML_API_URL environment variable is not set")
+    params = {
+        "engine": "heuristic",
+        "targets": "json,xml,jats,bits",
+        "return_xml": "rawxml"
+    }
+    
+    with open(project.filepath, 'rb') as f:
+        files = {'file': (os.path.basename(project.filepath), f, 'application/pdf')}
+        response = requests.post(url, params=params, files=files)
+        
+    if response.status_code != 200:
+        raise HTTPException(status_code=500, detail=f"PDF2XML API Error: {response.text}")
+        
+    xml_content = response.text
     
     out_dir = os.path.dirname(project.filepath)
     base_name = os.path.splitext(os.path.basename(project.filepath))[0]
-    s4c_filepath = os.path.join(out_dir, f"{base_name}_s4c.xml")
+    raw_filepath = os.path.join(out_dir, f"{base_name}_raw.xml")
     
-    with open(s4c_filepath, "w", encoding="utf-8") as f:
+    with open(raw_filepath, "w", encoding="utf-8") as f:
         f.write(xml_content)
         
-    project.s4c_xml_status = "Completed"
+    project.raw_xml_status = "Completed"
     if project.conversion_status == "YTS":
         project.conversion_status = "In-progress"
     db.commit()
     
-    return {"xml": xml_content, "s4c_filepath": s4c_filepath}
+    return {"xml": xml_content, "raw_filepath": raw_filepath}
 
 @router.post("/projects/{project_id}/target-convert")
-def target_convert(project_id: int, db: Session = Depends(database.get_db)):
+def target_convert(project_id: int, format: str = "JATS", db: Session = Depends(database.get_db)):
     project = db.query(PostProdXMLConversionProject).filter(PostProdXMLConversionProject.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
         
-    # Mocking Target XML for UI demonstration
-    xml_content = f"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<{project.target_format.lower()}>\n  <article-title>Target Format ({project.target_format})</article-title>\n  <body>\n    <p>This is the final converted target XML.</p>\n  </body>\n</{project.target_format.lower()}>"
-    
+    project.target_format = format
+        
     out_dir = os.path.dirname(project.filepath)
     base_name = os.path.splitext(os.path.basename(project.filepath))[0]
+    import requests
+    url = os.environ.get("PDF2XML_API_URL")
+    if not url:
+        raise HTTPException(status_code=500, detail="PDF2XML_API_URL environment variable is not set")
+    params = {
+        "engine": "heuristic",
+        "targets": "json,xml,jats,bits",
+        "return_xml": format.lower()
+    }
+    
+    try:
+        with open(project.filepath, 'rb') as f:
+            files = {'file': (os.path.basename(project.filepath), f, 'application/pdf')}
+            response = requests.post(url, params=params, files=files)
+            
+        if response.status_code != 200:
+            raise HTTPException(status_code=500, detail=f"PDF2XML API Error: {response.text}")
+            
+        xml_content = response.text
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to convert to target format: {str(e)}")
     final_filepath = os.path.join(out_dir, f"{base_name}_final.xml")
     
     with open(final_filepath, "w", encoding="utf-8") as f:
@@ -197,28 +233,7 @@ def target_convert(project_id: int, db: Session = Depends(database.get_db)):
     
     return {"xml": xml_content, "final_filepath": final_filepath}
 
-from app.domains.post_prod.xml_conversion.validators.dtd_validator import validate_xml
 
-@router.post("/projects/{project_id}/validate")
-def run_dtd_validation(project_id: int, db: Session = Depends(database.get_db)):
-    project = db.query(PostProdXMLConversionProject).filter(PostProdXMLConversionProject.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-        
-    final_filepath = project.result_filepath
-    if not final_filepath or not os.path.exists(final_filepath):
-        # Fallback to reconstructing the path
-        out_dir = os.path.dirname(project.filepath) if project.filepath else ""
-        if out_dir:
-            base_name = os.path.splitext(os.path.basename(project.filepath))[0]
-            final_filepath = os.path.join(out_dir, f"{base_name}_final.xml")
-            
-    if not final_filepath or not os.path.exists(final_filepath):
-        raise HTTPException(status_code=400, detail="Final XML file not found. Save the XML first.")
-        
-    format_name = project.target_format or "JATS"
-    errors = validate_xml(final_filepath, format=format_name)
-    return {"errors": errors}
 
 @router.get("/projects/{project_id}/xml")
 def get_xml_content(project_id: int, db: Session = Depends(database.get_db)):
@@ -231,19 +246,20 @@ def get_xml_content(project_id: int, db: Session = Depends(database.get_db)):
     if out_dir:
         base_name = os.path.splitext(os.path.basename(project.filepath))[0]
         final_filepath = os.path.join(out_dir, f"{base_name}_final.xml")
-        s4c_filepath = os.path.join(out_dir, f"{base_name}_s4c.xml")
+        raw_filepath = os.path.join(out_dir, f"{base_name}_raw.xml")
         
         if os.path.exists(final_filepath):
             with open(final_filepath, "r", encoding="utf-8") as f:
-                return {"xml": f.read()}
-        elif os.path.exists(s4c_filepath):
-            with open(s4c_filepath, "r", encoding="utf-8") as f:
-                return {"xml": f.read()}
+                return {"xml": f.read(), "type": "final"}
+        elif os.path.exists(raw_filepath):
+            with open(raw_filepath, "r", encoding="utf-8") as f:
+                return {"xml": f.read(), "type": "s4c"}
                 
-    return {"xml": ""}
+    return {"xml": "", "type": ""}
 
 class XMLUpdateRequest(BaseModel):
     xml: str
+    type: str = "final"
 
 @router.post("/projects/{project_id}/xml")
 def save_xml_content(project_id: int, request: XMLUpdateRequest, db: Session = Depends(database.get_db)):
@@ -256,12 +272,17 @@ def save_xml_content(project_id: int, request: XMLUpdateRequest, db: Session = D
         raise HTTPException(status_code=400, detail="Invalid project path")
         
     base_name = os.path.splitext(os.path.basename(project.filepath))[0]
-    final_filepath = os.path.join(out_dir, f"{base_name}_final.xml")
+    if request.type == "s4c":
+        filepath = os.path.join(out_dir, f"{base_name}_raw.xml")
+    else:
+        filepath = os.path.join(out_dir, f"{base_name}_final.xml")
     
-    with open(final_filepath, "w", encoding="utf-8") as f:
+    with open(filepath, "w", encoding="utf-8") as f:
         f.write(request.xml)
         
-    project.result_filepath = final_filepath
+    if request.type == "final":
+        project.result_filepath = filepath
+    
     db.commit()
     return {"message": "XML saved successfully"}
 
@@ -310,3 +331,134 @@ def get_html_preview(project_id: int, db: Session = Depends(database.get_db)):
                 return {"html": f"<div style='color:red; padding: 20px;'>Error generating preview: {str(e)}</div>"}
                 
     return {"html": "<div style='color:gray; padding: 20px;'>No final XML available for preview.</div>"}
+
+@router.get("/projects/{project_id}/s4c-html")
+def get_s4c_html_preview(project_id: int, db: Session = Depends(database.get_db)):
+    project = db.query(PostProdXMLConversionProject).filter(PostProdXMLConversionProject.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    out_dir = os.path.dirname(project.filepath) if project.filepath else ""
+    if out_dir:
+        base_name = os.path.splitext(os.path.basename(project.filepath))[0]
+        raw_filepath = os.path.join(out_dir, f"{base_name}_raw.xml")
+        
+        if os.path.exists(raw_filepath):
+            try:
+                import re
+                from saxonche import PySaxonProcessor
+                xslt_path = os.path.join(os.path.dirname(__file__), "rawxml.xsl")
+                
+                with open(raw_filepath, "r", encoding="utf-8") as f:
+                    xml_data = f.read()
+                xml_data_no_dtd = re.sub(r"<!DOCTYPE[^>]+>", "", xml_data, flags=re.IGNORECASE)
+                
+                with PySaxonProcessor(license=False) as proc:
+                    xsltproc = proc.new_xslt30_processor()
+                    executable = xsltproc.compile_stylesheet(stylesheet_file=xslt_path)
+                    
+                    builder = proc.new_document_builder()
+                    xdm_node = builder.parse_xml(xml_text=xml_data_no_dtd)
+                    html_str = str(executable.transform_to_string(xdm_node=xdm_node))
+                    
+                return {"html": html_str}
+            except Exception as e:
+                return {"html": f"<div style='color:red; padding: 20px;'>Error generating S4C preview: {str(e)}</div>"}
+                
+    return {"html": "<div style='color:gray; padding: 20px;'>No S4C XML available for preview.</div>"}
+
+from pydantic import BaseModel
+
+class ValidateRequest(BaseModel):
+    xmlType: str
+
+@router.post("/projects/{project_id}/validate")
+def validate_xml_endpoint(project_id: int, req: ValidateRequest, db: Session = Depends(database.get_db)):
+    project = db.query(PostProdXMLConversionProject).filter(PostProdXMLConversionProject.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    out_dir = os.path.dirname(project.filepath) if project.filepath else ""
+    base_name = os.path.splitext(os.path.basename(project.filepath))[0] if out_dir else ""
+    
+    if req.xmlType == "s4c":
+        xml_filepath = os.path.join(out_dir, f"{base_name}_raw.xml")
+    else:
+        xml_filepath = os.path.join(out_dir, f"{base_name}_final.xml")
+        
+    if not os.path.exists(xml_filepath):
+        raise HTTPException(status_code=404, detail=f"XML file not found: {xml_filepath}")
+        
+    # Well-formedness check using lxml
+    from lxml import etree
+    is_well_formed = True
+    well_formed_errors = []
+    
+    try:
+        doc = etree.parse(xml_filepath)
+    except etree.XMLSyntaxError as e:
+        is_well_formed = False
+        well_formed_errors.append(f"Line {e.lineno or 0}: {str(e)}")
+        
+    is_dtd_valid = True
+    dtd_errors = []
+    
+    # DTD Validation only for final XML for now
+    if is_well_formed and req.xmlType == "final":
+        from app.domains.post_prod.xml_conversion.validators.dtd_validator import validate_xml
+        v_errors = validate_xml(xml_filepath, project.target_format or "JATS")
+        for err in v_errors:
+            if err["error_type"] == "DTD":
+                is_dtd_valid = False
+                dtd_errors.append(f"Line {err.get('line_number', 0)}: {err.get('message', '')}")
+            elif err["error_type"] == "XMLSyntax":
+                is_well_formed = False
+                well_formed_errors.append(f"Line {err.get('line_number', 0)}: {err.get('message', '')}")
+            elif err["error_type"] == "System":
+                is_dtd_valid = False
+                dtd_errors.append(err.get('message', ''))
+                
+    return {
+        "isWellFormed": is_well_formed,
+        "wellFormedErrors": well_formed_errors,
+        "isDtdValid": is_dtd_valid if req.xmlType == "final" else True,
+        "dtdErrors": dtd_errors
+    }
+
+@router.post("/projects/{project_id}/complete")
+def complete_project(project_id: int, db: Session = Depends(database.get_db)):
+    project = db.query(PostProdXMLConversionProject).filter(PostProdXMLConversionProject.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    project.conversion_status = "Completed"
+    project.qc_status = "Completed"
+    project.completed_at = datetime.utcnow()
+    db.commit()
+    return {"message": "Project marked as Completed"}
+
+@router.delete("/projects/{project_id}")
+def delete_project(project_id: int, db: Session = Depends(database.get_db), current_user: dict = Depends(get_current_user_from_cookie)):
+    """Delete an XML conversion project and its associated files/folders from disk."""
+    project = db.query(PostProdXMLConversionProject).filter(PostProdXMLConversionProject.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Delete the project folder from disk (contains PDF + any generated XMLs)
+    if project.filepath:
+        project_dir = os.path.dirname(project.filepath)
+        if os.path.exists(project_dir):
+            try:
+                shutil.rmtree(project_dir)
+            except Exception as e:
+                # Log but don't block deletion of DB record
+                print(f"Warning: Could not delete project folder {project_dir}: {e}")
+
+    # Delete history records first (FK constraint)
+    db.query(PostProdXMLConversionHistory).filter(PostProdXMLConversionHistory.project_id == project_id).delete()
+
+    # Delete the project DB record
+    db.delete(project)
+    db.commit()
+
+    return {"message": "Project deleted successfully"}

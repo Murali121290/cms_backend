@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, timezone
 
 from app.database import get_db, SessionLocal
-from app.domains.books_on_demand.models import BodJob, BodClientConfig
+from app.domains.books_on_demand.models import BodJob
 from app.domains.books_on_demand.services.ftp_service import BodFtpService
 from app.domains.notifications.email_service import send_bod_qc_ready_email, send_bod_new_job_email, send_bod_job_completed_email
 from pydantic import BaseModel
@@ -19,19 +19,10 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-@router.get("/configs")
-def list_configs(db: Session = Depends(get_db)):
-    """List active BOD client configurations."""
-    configs = db.query(BodClientConfig).filter(BodClientConfig.is_active == True).all()
-    return configs
-
-
 @router.get("/jobs")
-def list_jobs(client_id: int = None, status: str = None, db: Session = Depends(get_db)):
+def list_jobs(status: str = None, db: Session = Depends(get_db)):
     """List all Books on Demand jobs with optional filtering."""
     query = db.query(BodJob).filter(BodJob.is_deleted == False)
-    if client_id:
-        query = query.filter(BodJob.client_id == client_id)
     if status:
         query = query.filter(BodJob.status == status)
     
@@ -41,7 +32,6 @@ def list_jobs(client_id: int = None, status: str = None, db: Session = Depends(g
     for job in jobs:
         job_dict = {
             "id": job.id,
-            "client_id": job.client_id,
             "pdf_filename": job.pdf_filename,
             "pdf_filepath": job.pdf_filepath,
             "pdf_page_count": job.pdf_page_count,
@@ -59,7 +49,7 @@ def list_jobs(client_id: int = None, status: str = None, db: Session = Depends(g
             "updated_at": job.updated_at,
             "due_date": job.due_date,
             "due_date_history": job.due_date_history,
-            "client_name": job.client_config.client_name if job.client_config else "Unknown"
+            "client_name": "BOD"
         }
         result.append(job_dict)
     return result
@@ -74,7 +64,6 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
         
     return {
         "id": job.id,
-        "client_id": job.client_id,
         "pdf_filename": job.pdf_filename,
         "pdf_filepath": job.pdf_filepath,
         "pdf_page_count": job.pdf_page_count,
@@ -92,7 +81,7 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
         "updated_at": job.updated_at,
         "due_date": job.due_date,
         "due_date_history": job.due_date_history,
-        "client_name": job.client_config.client_name if job.client_config else "Unknown"
+        "client_name": "BOD"
     }
 
 @router.get("/jobs/{job_id}/download-pdf")
@@ -145,7 +134,7 @@ def get_customer_report(
     for job in jobs:
         report.append({
             "id": job.id,
-            "client_name": job.client_config.client_name if job.client_config else "Unknown",
+            "client_name": "BOD",
             "pdf_filename": job.pdf_filename,
             "pdf_type": job.pdf_type,
             "pdf_language": job.pdf_language,
@@ -316,9 +305,9 @@ def advance_job_stage(job_id: int, background_tasks: BackgroundTasks, db: Sessio
     return _advance_job_logic(job, background_tasks, db)
 
 def _advance_job_logic(job: BodJob, background_tasks: BackgroundTasks, db: Session):
-    config = db.query(BodClientConfig).filter(BodClientConfig.id == job.client_id).first()
-    
-    stages = config.custom_stages if config.custom_stages else ["Add job", "Production", "QC", "Archive"]
+    settings = get_settings()
+    stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Production,QC,Archive"
+    stages = [s.strip() for s in stages_str.split(",")]
     
     if job.current_stage_index >= len(stages) - 1:
         raise HTTPException(status_code=400, detail="Job is already at the final stage")
@@ -350,33 +339,94 @@ def _advance_job_logic(job: BodJob, background_tasks: BackgroundTasks, db: Sessi
     db.commit()
     db.refresh(job)
     
+    manager_email = settings.BOD_MANAGER_EMAIL
+    
     # Send email if moving to QC or Archive
-    if job.current_stage_name == "QC":
-        send_bod_qc_ready_email(config.manager_email, job.project_name, job.epub_filename or job.pdf_filename)
-    elif job.current_stage_name == "Archive":
-        send_bod_job_completed_email(config.manager_email, job.project_name, job.epub_filename or job.pdf_filename)
+    if job.current_stage_name == "QC" and manager_email:
+        send_bod_qc_ready_email(manager_email, job.project_name, job.epub_filename or job.pdf_filename)
+    elif job.current_stage_name == "Archive" and manager_email:
+        send_bod_job_completed_email(manager_email, job.project_name, job.epub_filename or job.pdf_filename)
         
     # Upload to FTP if moving to Archive and epub exists
     if job.current_stage_name == "Archive" and job.epub_filename and job.epub_filepath:
-        background_tasks.add_task(_upload_to_ftp_task, job.client_id, job.epub_filepath, job.epub_filename)
+        background_tasks.add_task(_upload_to_ftp_task, job.epub_filepath, job.epub_filename, job.ace_report_filepath, job.epubcheck_report_filepath, job.pdf_filename)
 
         
-    return {"message": "Job advanced to next stage", "job": job}
+    return {"message": "Job advanced successfully", "job": job}
 
 
-def _upload_to_ftp_task(config_id: int, local_epub_path: str, remote_epub_name: str):
-    db = SessionLocal()
+import zipfile
+
+def _upload_to_ftp_task(local_epub_path: str, remote_epub_name: str, ace_path: str = None, epubcheck_path: str = None, pdf_filename: str = None):
+    settings = get_settings()
+    if not settings.BOD_FTP_HOST:
+        logger.error("BOD FTP host is not configured.")
+        return
+        
+    delivery_dir = settings.BOD_FTP_DELIVERY_PATH
+    if not delivery_dir:
+        logger.error("BOD_FTP_DELIVERY_PATH is not configured in environment.")
+        raise ValueError("BOD_FTP_DELIVERY_PATH is missing from environment configuration.")
+    
     try:
-        config = db.query(BodClientConfig).filter(BodClientConfig.id == config_id).first()
-        if config:
-            with BodFtpService(config.ftp_host, config.ftp_username, config.ftp_password) as ftp:
-                ftp.upload_file(local_epub_path, f"/BOD/Delivery/{remote_epub_name}")
+        # Create a combined zip file named after the PDF or EPUB
+        if pdf_filename:
+            zip_filename = pdf_filename.replace('.pdf', '.zip')
+        else:
+            zip_filename = remote_epub_name.replace('.epub', '.zip')
+        local_dir = os.path.dirname(local_epub_path)
+        zip_filepath = os.path.join(local_dir, zip_filename)
+        
+        with zipfile.ZipFile(zip_filepath, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            if os.path.exists(local_epub_path):
+                zipf.write(local_epub_path, os.path.basename(local_epub_path))
+            if ace_path and os.path.exists(ace_path):
+                zipf.write(ace_path, os.path.basename(ace_path))
+            if epubcheck_path and os.path.exists(epubcheck_path):
+                zipf.write(epubcheck_path, os.path.basename(epubcheck_path))
+                
+        with BodFtpService(settings.BOD_FTP_HOST, settings.BOD_FTP_USERNAME, settings.BOD_FTP_PASSWORD) as ftp:
+            ftp.ensure_dir(delivery_dir)
+            ftp.upload_file(zip_filepath, zip_filename)
     except Exception as e:
         logger.error(f"Failed background FTP upload for {remote_epub_name}: {str(e)}")
-    finally:
-        db.close()
 
 
+@router.post("/jobs/{job_id}/upload-qc-reports")
+def upload_qc_reports(
+    job_id: int,
+    ace_report: UploadFile = File(None),
+    epubcheck_report: UploadFile = File(None),
+    db: Session = Depends(get_db)
+):
+    """Upload ACE and Epubcheck reports for a job."""
+    job = db.query(BodJob).filter(BodJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+        
+    settings = get_settings()
+    upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
+    project_dir = os.path.join(upload_dir, "bod", "BOD", job.project_name)
+    os.makedirs(project_dir, exist_ok=True)
+    
+    if ace_report:
+        if not ace_report.filename.endswith("_ace_report.zip"):
+            raise HTTPException(status_code=400, detail="ACE validation report must end with '_ace_report.zip'")
+        ace_path = os.path.join(project_dir, ace_report.filename)
+        with open(ace_path, "wb") as buffer:
+            shutil.copyfileobj(ace_report.file, buffer)
+        job.ace_report_filepath = ace_path
+        
+    if epubcheck_report:
+        if not epubcheck_report.filename.endswith("_log.txt"):
+            raise HTTPException(status_code=400, detail="Epubcheck validation report must end with '_log.txt'")
+        epubcheck_path = os.path.join(project_dir, epubcheck_report.filename)
+        with open(epubcheck_path, "wb") as buffer:
+            shutil.copyfileobj(epubcheck_report.file, buffer)
+        job.epubcheck_report_filepath = epubcheck_path
+        
+    db.commit()
+    return {"message": "Reports uploaded successfully"}
 @router.post("/jobs/{job_id}/upload-epub")
 def upload_epub(
     job_id: int, 
@@ -396,8 +446,7 @@ def upload_epub(
     upload_dir = getattr(settings, "UPLOAD_FOLDER", "/opt/cms_runtime/data/uploads")
     bod_upload_dir = os.path.join(upload_dir, "bod")
     
-    config = db.query(BodClientConfig).filter(BodClientConfig.id == job.client_id).first()
-    project_dir = os.path.join(bod_upload_dir, config.client_name, job.project_name)
+    project_dir = os.path.join(bod_upload_dir, "BOD", job.project_name)
     os.makedirs(project_dir, exist_ok=True)
     
     local_path = os.path.join(project_dir, file.filename)
@@ -411,8 +460,8 @@ def upload_epub(
     now_iso = datetime.now(timezone.utc).isoformat()
     history = dict(job.stage_history)
     
-    config = db.query(BodClientConfig).filter(BodClientConfig.id == job.client_id).first()
-    stages = config.custom_stages if config.custom_stages else ["Add job", "Production", "QC", "Archive"]
+    stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Production,QC,Archive"
+    stages = [s.strip() for s in stages_str.split(",")]
     
     qc_index = stages.index("QC") if "QC" in stages else 2
     
@@ -437,26 +486,22 @@ def upload_epub(
         job.current_assignee = None
         
         # Send email
-        send_bod_qc_ready_email(config.manager_email, job.project_name, job.epub_filename or job.pdf_filename)
+        if settings.BOD_MANAGER_EMAIL:
+            send_bod_qc_ready_email(settings.BOD_MANAGER_EMAIL, job.project_name, job.epub_filename or job.pdf_filename)
             
     job.stage_history = history
     db.commit()
     db.refresh(job)
     
-    return {"message": "EPUB uploaded and job advanced", "job": job}
+    return {"message": "EPUB uploaded and moved to QC", "job": job}
 
 
 @router.post("/jobs")
 def create_job(
-    client_id: int = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
     """Manually upload a PDF to create a Books on Demand job via the UI."""
-    config = db.query(BodClientConfig).filter(BodClientConfig.id == client_id).first()
-    if not config:
-        raise HTTPException(status_code=404, detail="Client not found")
-        
     if not file.filename.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="File must be a PDF")
         
@@ -466,7 +511,7 @@ def create_job(
     
     project_name = file.filename.rsplit('.', 1)[0]
     
-    project_dir = os.path.join(bod_upload_dir, config.client_name, project_name)
+    project_dir = os.path.join(bod_upload_dir, "BOD", project_name)
     os.makedirs(project_dir, exist_ok=True)
     
     local_path = os.path.join(project_dir, file.filename)
@@ -505,7 +550,8 @@ def create_job(
     except Exception as e:
         logger.error(f"Failed to extract page count and type for {file.filename}: {e}")
         
-    stages = config.custom_stages if config.custom_stages else ["Add job", "Production", "QC", "Archive"]
+    stages_str = settings.BOD_CUSTOM_STAGES if settings.BOD_CUSTOM_STAGES else "Add job,Production,QC,Archive"
+    stages = [s.strip() for s in stages_str.split(",")]
     first_stage = stages[0]
     
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -519,7 +565,6 @@ def create_job(
     }
     
     new_job = BodJob(
-        client_id=client_id,
         project_name=project_name,
         pdf_filename=file.filename,
         pdf_filepath=local_path,
@@ -538,6 +583,7 @@ def create_job(
     db.refresh(new_job)
     
     # Send email
-    send_bod_new_job_email(config.manager_email, new_job.project_name, file.filename)
+    if settings.BOD_MANAGER_EMAIL:
+        send_bod_new_job_email(settings.BOD_MANAGER_EMAIL, new_job.project_name, file.filename)
     
     return {"message": "Job created successfully", "job": new_job}

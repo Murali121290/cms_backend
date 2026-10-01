@@ -92,3 +92,22 @@ class BodFtpService:
         except Exception as e:
             logger.error(f"Failed to upload {local_path}: {str(e)}")
             raise
+
+    def ensure_dir(self, remote_dir: str):
+        """Create remote directory structure if it doesn't exist and navigate into it."""
+        try:
+            self.ftp.cwd("/")
+            parts = [p for p in remote_dir.split('/') if p]
+            for part in parts:
+                try:
+                    self.ftp.cwd(part)
+                except Exception:
+                    try:
+                        self.ftp.mkd(part)
+                        self.ftp.cwd(part)
+                    except Exception as e:
+                        logger.error(f"Failed to create or change to directory {part}: {e}")
+                        raise
+        except Exception as e:
+            logger.error(f"Failed to ensure directory {remote_dir}: {e}")
+            raise
