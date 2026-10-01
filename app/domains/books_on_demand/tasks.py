@@ -84,6 +84,9 @@ def watch_ftp_for_new_pdfs():
                         stages = [s.strip() for s in stages_str.split(",")]
                         initial_stage_name = stages[0]
                         now_iso = datetime.now(timezone.utc).isoformat()
+                        now_utc = datetime.utcnow()
+                        from datetime import timedelta
+                        
                         initial_history = {
                             initial_stage_name: {
                                 "start_time": now_iso
@@ -100,7 +103,9 @@ def watch_ftp_for_new_pdfs():
                             current_stage_index=0,
                             current_stage_name=initial_stage_name,
                             stage_history=initial_history,
-                            status="Active"
+                            status="Active",
+                            created_at=now_utc,
+                            due_date=now_utc + timedelta(days=3)
                         )
                         db.add(new_job)
                         db.commit()

@@ -521,7 +521,7 @@ def create_job(
         
     page_count = None
     pdf_type = None
-    pdf_language = "Unknown"
+    pdf_language = "None"
     try:
         import fitz
         doc = fitz.open(local_path)
