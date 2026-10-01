@@ -71,7 +71,7 @@ export function BodInternalJobPage() {
     setIsAdvancing(true)
     try {
       await api.post(`/bod/jobs/${jobId}/advance`)
-      toast.success("Job advanced to next stage")
+      toast.success("QC completed and uploaded to FTP")
       fetchJob()
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "Failed to advance stage")
@@ -92,7 +92,7 @@ export function BodInternalJobPage() {
       await api.post(`/bod/jobs/${jobId}/upload-epub`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       })
-      toast.success("EPUB uploaded and job advanced")
+      toast.success("EPUB uploaded and moved to QC")
       navigate('/bod/internal')
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "Failed to upload EPUB")
@@ -171,8 +171,8 @@ export function BodInternalJobPage() {
           <h1 className="text-2xl font-bold font-serif text-text m-0 flex items-center gap-3">
             {job.pdf_filename}
             <span className={`capitalize font-bold px-2.5 py-0.5 rounded-md text-[10px] border tracking-wider ${isCompleted
-                ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600'
-                : 'bg-primary/10 border-primary/20 text-primary'
+              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600'
+              : 'bg-primary/10 border-primary/20 text-primary'
               }`}>
               {job.status}
             </span>
@@ -238,27 +238,27 @@ export function BodInternalJobPage() {
 
           <div className="space-y-4 flex-1 overflow-y-auto pt-4 pr-1">
 
-          <div className="bg-background border border-border rounded-lg p-3 flex items-center justify-between">
-            <div className="min-w-0">
-              <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-0.5">Source PDF</p>
-              <p className="text-sm font-semibold truncate">{job.pdf_filename}</p>
-            </div>
-            <Button size="sm" variant="outline" onClick={downloadPdf} leftIcon={<Download size={14} />}>
-              Download
-            </Button>
-          </div>
-
-          {job.epub_filename && (
             <div className="bg-background border border-border rounded-lg p-3 flex items-center justify-between">
               <div className="min-w-0">
-                <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-0.5">Processed EPUB</p>
-                <p className="text-sm font-semibold truncate">{job.epub_filename}</p>
+                <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-0.5">Source PDF</p>
+                <p className="text-sm font-semibold truncate">{job.pdf_filename}</p>
               </div>
-              <Button size="sm" variant="outline" onClick={downloadEpub} leftIcon={<Download size={14} />}>
+              <Button size="sm" variant="outline" onClick={downloadPdf} leftIcon={<Download size={14} />}>
                 Download
               </Button>
             </div>
-          )}
+
+            {job.epub_filename && (
+              <div className="bg-background border border-border rounded-lg p-3 flex items-center justify-between">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold text-muted uppercase tracking-wider mb-0.5">Processed EPUB</p>
+                  <p className="text-sm font-semibold truncate">{job.epub_filename}</p>
+                </div>
+                <Button size="sm" variant="outline" onClick={downloadEpub} leftIcon={<Download size={14} />}>
+                  Download
+                </Button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -267,18 +267,16 @@ export function BodInternalJobPage() {
           <div className="flex items-center gap-4 border-b border-border mb-4 shrink-0 overflow-x-auto hide-scrollbar">
             <button
               onClick={() => setActiveTab('stage')}
-              className={`pb-2 text-sm font-bold transition-colors border-b-2 ${
-                activeTab === 'stage' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
-              }`}
+              className={`pb-2 text-sm font-bold transition-colors border-b-2 ${activeTab === 'stage' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                }`}
             >
               Stage History
             </button>
             {job.assigned_users && Array.isArray(job.assigned_users) && job.assigned_users.length > 0 && (
               <button
                 onClick={() => setActiveTab('assignment')}
-                className={`pb-2 text-sm font-bold transition-colors border-b-2 ${
-                  activeTab === 'assignment' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
-                }`}
+                className={`pb-2 text-sm font-bold transition-colors border-b-2 ${activeTab === 'assignment' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                  }`}
               >
                 Assignment History
               </button>
@@ -286,9 +284,8 @@ export function BodInternalJobPage() {
             {job.due_date_history && Array.isArray(job.due_date_history) && job.due_date_history.length > 0 && (
               <button
                 onClick={() => setActiveTab('duedate')}
-                className={`pb-2 text-sm font-bold transition-colors border-b-2 ${
-                  activeTab === 'duedate' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
-                }`}
+                className={`pb-2 text-sm font-bold transition-colors border-b-2 ${activeTab === 'duedate' ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-text'
+                  }`}
               >
                 Due Date History
               </button>
@@ -297,96 +294,96 @@ export function BodInternalJobPage() {
 
           <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
             {activeTab === 'stage' && (
-            <div className="space-y-4">
-              {Object.keys(job.stage_history || {}).map((stageName, idx) => {
-                const data = job.stage_history[stageName]
-                const isCurrent = stageName === job.current_stage_name && !isCompleted
+              <div className="space-y-4">
+                {Object.keys(job.stage_history || {}).map((stageName, idx) => {
+                  const data = job.stage_history[stageName]
+                  const isCurrent = stageName === job.current_stage_name && !isCompleted
 
-                return (
-                  <div key={idx} className="flex gap-3">
-                    <div className="flex flex-col items-center">
-                      <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${data.end_time ? 'bg-emerald-500/20 text-emerald-600' :
+                  return (
+                    <div key={idx} className="flex gap-3">
+                      <div className="flex flex-col items-center">
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${data.end_time ? 'bg-emerald-500/20 text-emerald-600' :
                           isCurrent ? 'bg-primary/20 text-primary border-2 border-primary/30' :
                             'bg-accent text-muted'
-                        }`}>
-                        {data.end_time ? <CheckCircle2 size={12} /> : <div className="w-1.5 h-1.5 rounded-full bg-current" />}
-                      </div>
-                      {idx !== Object.keys(job.stage_history).length - 1 && (
-                        <div className="w-px h-full bg-border my-1" />
-                      )}
-                    </div>
-
-                    <div className="pb-4 flex-1">
-                      <h4 className={`text-sm font-bold ${isCurrent ? 'text-text' : 'text-text/70'}`}>{stageName}</h4>
-
-                      <div className="mt-1.5 space-y-1">
-                        {data.assignee && (
-                          <div className="flex items-center gap-1.5 text-xs text-muted">
-                            <User size={12} /> Assigned to: <strong className="text-text">{getUserDisplayName(data.assignee)}</strong>
-                          </div>
-                        )}
-
-                        {data.start_time && (
-                          <div className="flex items-center gap-1.5 text-xs text-muted">
-                            <Clock size={12} /> Started: {formatDateTime(data.start_time)}
-                          </div>
-                        )}
-
-                        {data.end_time && (
-                          <div className="flex items-center gap-1.5 text-xs text-muted">
-                            <CheckCircle2 size={12} /> Completed: {formatDateTime(data.end_time)}
-                          </div>
+                          }`}>
+                          {data.end_time ? <CheckCircle2 size={12} /> : <div className="w-1.5 h-1.5 rounded-full bg-current" />}
+                        </div>
+                        {idx !== Object.keys(job.stage_history).length - 1 && (
+                          <div className="w-px h-full bg-border my-1" />
                         )}
                       </div>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
 
-          {activeTab === 'assignment' && job.assigned_users && Array.isArray(job.assigned_users) && job.assigned_users.length > 0 && (
-            <div className="space-y-3">
-              {job.assigned_users.map((assignment: any, idx: number) => (
-                <div key={idx} className="flex items-center justify-between bg-background border border-border rounded-lg p-3">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-primary/10 text-primary rounded-lg shrink-0">
-                      <User size={14} />
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-text m-0">Assigned to: {getUserDisplayName(assignment.user_id)}</p>
-                      <p className="text-[10px] text-muted m-0 mt-0.5">Stage: {assignment.stage} • Assigned By: {getUserDisplayName(assignment.assigned_by) || 'System'}</p>
-                    </div>
-                  </div>
-                  <div className="text-xs text-muted font-medium">
-                    {formatDateTime(assignment.time)}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+                      <div className="pb-4 flex-1">
+                        <h4 className={`text-sm font-bold ${isCurrent ? 'text-text' : 'text-text/70'}`}>{stageName}</h4>
 
-          {activeTab === 'duedate' && job.due_date_history && Array.isArray(job.due_date_history) && job.due_date_history.length > 0 && (
-            <div className="space-y-3">
-              {job.due_date_history.map((historyItem: any, idx: number) => (
-                <div key={idx} className="flex items-start justify-between bg-background border border-border rounded-lg p-3 gap-4">
-                  <div className="flex items-start gap-3">
-                    <div className="p-2 bg-primary/10 text-primary rounded-lg shrink-0 mt-0.5">
-                      <Calendar size={14} />
+                        <div className="mt-1.5 space-y-1">
+                          {data.assignee && (
+                            <div className="flex items-center gap-1.5 text-xs text-muted">
+                              <User size={12} /> Assigned to: <strong className="text-text">{getUserDisplayName(data.assignee)}</strong>
+                            </div>
+                          )}
+
+                          {data.start_time && (
+                            <div className="flex items-center gap-1.5 text-xs text-muted">
+                              <Clock size={12} /> Started: {formatDateTime(data.start_time)}
+                            </div>
+                          )}
+
+                          {data.end_time && (
+                            <div className="flex items-center gap-1.5 text-xs text-muted">
+                              <CheckCircle2 size={12} /> Completed: {formatDateTime(data.end_time)}
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-sm font-semibold text-text m-0">Changed Due Date to: {new Date(historyItem.date).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium' })}</p>
-                      <p className="text-xs text-text/80 mt-1 mb-0 break-words">Reason: {historyItem.reason}</p>
-                      <p className="text-[10px] text-muted m-0 mt-1">Changed By: {historyItem.changed_by}</p>
+                  )
+                })}
+              </div>
+            )}
+
+            {activeTab === 'assignment' && job.assigned_users && Array.isArray(job.assigned_users) && job.assigned_users.length > 0 && (
+              <div className="space-y-3">
+                {job.assigned_users.map((assignment: any, idx: number) => (
+                  <div key={idx} className="flex items-center justify-between bg-background border border-border rounded-lg p-3">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-primary/10 text-primary rounded-lg shrink-0">
+                        <User size={14} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-text m-0">Assigned to: {getUserDisplayName(assignment.user_id)}</p>
+                        <p className="text-[10px] text-muted m-0 mt-0.5">Stage: {assignment.stage} • Assigned By: {getUserDisplayName(assignment.assigned_by) || 'System'}</p>
+                      </div>
+                    </div>
+                    <div className="text-xs text-muted font-medium">
+                      {formatDateTime(assignment.time)}
                     </div>
                   </div>
-                  <div className="text-xs text-muted font-medium shrink-0 pt-1 text-right">
-                    {formatDateTime(historyItem.timestamp)}
+                ))}
+              </div>
+            )}
+
+            {activeTab === 'duedate' && job.due_date_history && Array.isArray(job.due_date_history) && job.due_date_history.length > 0 && (
+              <div className="space-y-3">
+                {job.due_date_history.map((historyItem: any, idx: number) => (
+                  <div key={idx} className="flex items-start justify-between bg-background border border-border rounded-lg p-3 gap-4">
+                    <div className="flex items-start gap-3">
+                      <div className="p-2 bg-primary/10 text-primary rounded-lg shrink-0 mt-0.5">
+                        <Calendar size={14} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-text m-0">Changed Due Date to: {new Date(historyItem.date).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium' })}</p>
+                        <p className="text-xs text-text/80 mt-1 mb-0 break-words">Reason: {historyItem.reason}</p>
+                        <p className="text-[10px] text-muted m-0 mt-1">Changed By: {historyItem.changed_by}</p>
+                      </div>
+                    </div>
+                    <div className="text-xs text-muted font-medium shrink-0 pt-1 text-right">
+                      {formatDateTime(historyItem.timestamp)}
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>

@@ -3,29 +3,10 @@ from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database import Base
 
-class BodClientConfig(Base):
-    __tablename__ = "bod_client_configs"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    client_name = Column(String(255), nullable=False, unique=True)
-    ftp_host = Column(String(255), nullable=False)
-    ftp_username = Column(String(255), nullable=False)
-    ftp_password = Column(String(255), nullable=False)
-    ftp_base_path = Column(String(255), nullable=True, default="BOD")
-    manager_email = Column(String(255), nullable=False)
-    custom_stages = Column(JSON, nullable=False, default=list) # e.g. ["Add job", "Production", "QC", "Archive"]
-    is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    jobs = relationship("BodJob", back_populates="client_config", cascade="all, delete-orphan")
-
-
 class BodJob(Base):
     __tablename__ = "bod_jobs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    client_id = Column(Integer, ForeignKey("bod_client_configs.id"), nullable=False)
     project_name = Column(String(255), nullable=True)
     pdf_filename = Column(String(255), nullable=False)
     pdf_filepath = Column(String(1024), nullable=True)
@@ -46,4 +27,4 @@ class BodJob(Base):
     due_date = Column(DateTime, nullable=True)
     due_date_history = Column(JSON, nullable=False, default=list) # [{"date": "...", "reason": "...", "changed_by": "...", "timestamp": "..."}]
 
-    client_config = relationship("BodClientConfig", back_populates="jobs")
+

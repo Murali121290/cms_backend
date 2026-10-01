@@ -17,12 +17,10 @@ export function BodInternalPage() {
   const viewer = useSessionStore(s => s.viewer)
 
   const [jobs, setJobs] = useState<any[]>([])
-  const [clients, setClients] = useState<any[]>([])
   const [users, setUsers] = useState<any[]>([])
 
   // Form states
   const [showAddJobModal, setShowAddJobModal] = useState(false)
-  const [selectedClientId, setSelectedClientId] = useState('')
   const [pdfFile, setPdfFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
@@ -52,15 +50,6 @@ export function BodInternalPage() {
     }
   }
 
-  const fetchClients = async () => {
-    try {
-      const { data } = await api.get('/bod/configs')
-      setClients(data)
-    } catch (err) {
-      console.error('Failed to fetch clients', err)
-    }
-  }
-
   const fetchUsers = async () => {
     try {
       const uList = await usersApi.list()
@@ -72,7 +61,6 @@ export function BodInternalPage() {
 
   useEffect(() => {
     fetchJobs()
-    fetchClients()
     fetchUsers()
     const timer = setInterval(() => {
       fetchJobs()
@@ -98,12 +86,11 @@ export function BodInternalPage() {
 
   const handleAddJob = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!selectedClientId || !pdfFile) return
+    if (!pdfFile) return
 
     setUploading(true)
     setErrorMsg(null)
     const formData = new FormData()
-    formData.append('client_id', selectedClientId)
     formData.append('file', pdfFile)
 
     try {
@@ -112,7 +99,6 @@ export function BodInternalPage() {
       })
       toast.success("Job created successfully")
 
-      setSelectedClientId('')
       setPdfFile(null)
       setShowAddJobModal(false)
       fetchJobs()
@@ -827,16 +813,6 @@ export function BodInternalPage() {
 
             <form onSubmit={handleAddJob} className="space-y-3.5">
               <div>
-                <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Client Configuration</label>
-                <Dropdown
-                  value={selectedClientId}
-                  onChange={setSelectedClientId}
-                  placeholder="Select Client"
-                  options={clients.map(c => ({ value: c.id.toString(), label: c.client_name }))}
-                />
-              </div>
-
-              <div>
                 <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Upload PDF Document</label>
                 <div className="border border-dashed border-border hover:border-primary/60 rounded-lg p-5 text-center cursor-pointer transition-colors bg-background/50">
                   <input
@@ -880,7 +856,7 @@ export function BodInternalPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={uploading || !selectedClientId || !pdfFile}
+                  disabled={uploading || !pdfFile}
                   className="px-3.5 py-1.5 bg-primary text-primary-foreground font-bold rounded-lg hover:bg-primary/95 transition-colors disabled:opacity-45 disabled:cursor-not-allowed flex items-center gap-1.5 text-xs"
                 >
                   {uploading ? 'Uploading...' : 'Create Job'}

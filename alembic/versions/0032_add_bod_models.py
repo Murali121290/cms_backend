@@ -26,27 +26,9 @@ def upgrade() -> None:
     inspector = Inspector.from_engine(conn)
     tables = inspector.get_table_names()
 
-    if 'bod_client_configs' not in tables:
-        op.create_table('bod_client_configs',
-        sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column('client_name', sa.String(length=255), nullable=False),
-        sa.Column('ftp_host', sa.String(length=255), nullable=False),
-        sa.Column('ftp_username', sa.String(length=255), nullable=False),
-        sa.Column('ftp_password', sa.String(length=255), nullable=False),
-        sa.Column('ftp_base_path', sa.String(length=255), nullable=True, server_default='BOD'),
-        sa.Column('manager_email', sa.String(length=255), nullable=False),
-        sa.Column('custom_stages', sa.JSON(), nullable=False),
-        sa.Column('is_active', sa.Boolean(), nullable=False),
-        sa.Column('created_at', sa.DateTime(), nullable=True),
-        sa.Column('updated_at', sa.DateTime(), nullable=True),
-        sa.PrimaryKeyConstraint('id'),
-        sa.UniqueConstraint('client_name')
-        )
-
     if 'bod_jobs' not in tables:
         op.create_table('bod_jobs',
         sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column('client_id', sa.Integer(), nullable=False),
         sa.Column('pdf_filename', sa.String(length=255), nullable=False),
         sa.Column('pdf_filepath', sa.String(length=1024), nullable=True),
         sa.Column('pdf_page_count', sa.Integer(), nullable=True),
@@ -66,7 +48,6 @@ def upgrade() -> None:
         sa.Column('project_name', sa.String(length=255), nullable=True),
         sa.Column('current_assignee', sa.String(length=255), nullable=True),
         sa.Column('is_deleted', sa.Boolean(), server_default='false', nullable=False),
-        sa.ForeignKeyConstraint(['client_id'], ['bod_client_configs.id'], ),
         sa.PrimaryKeyConstraint('id')
         )
     else:
@@ -79,9 +60,17 @@ def upgrade() -> None:
             op.add_column('bod_jobs', sa.Column('pdf_language', sa.String(length=50), nullable=True))
         if 'due_date_history' not in columns:
             op.add_column('bod_jobs', sa.Column('due_date_history', sa.JSON(), server_default='[]', nullable=False))
+        if 'client_id' in columns:
+            try:
+                op.drop_constraint('bod_jobs_client_id_fkey', 'bod_jobs', type_='foreignkey')
+            except Exception:
+                pass
+            op.drop_column('bod_jobs', 'client_id')
+            
+    if 'bod_client_configs' in tables:
+        op.drop_table('bod_client_configs')
 
 
 def downgrade() -> None:
     """Downgrade schema."""
     op.drop_table('bod_jobs')
-    op.drop_table('bod_client_configs')
