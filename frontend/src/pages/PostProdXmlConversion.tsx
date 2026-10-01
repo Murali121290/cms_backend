@@ -658,19 +658,6 @@ export function PostProdXmlConversion() {
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Target Format</label>
-                <select
-                  value={targetFormat}
-                  onChange={e => setTargetFormat(e.target.value)}
-                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs text-text focus:outline-none focus:border-primary transition-colors"
-                  required
-                >
-                  <option value="JATS">JATS</option>
-                  <option value="BITS">BITS</option>
-                </select>
-              </div>
-
-              <div>
                 <label className="block text-[10px] font-bold text-muted uppercase tracking-wider mb-1.5">Upload Source PDF</label>
                 <div className="border border-dashed border-border hover:border-primary/60 rounded-lg p-5 text-center cursor-pointer transition-colors bg-background/50">
                   <input

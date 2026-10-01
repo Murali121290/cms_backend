@@ -159,7 +159,9 @@ def s4c_convert(project_id: int, db: Session = Depends(database.get_db)):
         raise HTTPException(status_code=404, detail="Project not found")
     
     import requests
-    url = "http://host.docker.internal:8080/convert"
+    url = os.environ.get("PDF2XML_API_URL")
+    if not url:
+        raise HTTPException(status_code=500, detail="PDF2XML_API_URL environment variable is not set")
     params = {
         "engine": "heuristic",
         "targets": "json,xml,jats,bits",
@@ -200,7 +202,9 @@ def target_convert(project_id: int, format: str = "JATS", db: Session = Depends(
     out_dir = os.path.dirname(project.filepath)
     base_name = os.path.splitext(os.path.basename(project.filepath))[0]
     import requests
-    url = "http://host.docker.internal:8080/convert"
+    url = os.environ.get("PDF2XML_API_URL")
+    if not url:
+        raise HTTPException(status_code=500, detail="PDF2XML_API_URL environment variable is not set")
     params = {
         "engine": "heuristic",
         "targets": "json,xml,jats,bits",

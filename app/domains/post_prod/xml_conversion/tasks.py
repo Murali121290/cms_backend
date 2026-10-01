@@ -1,5 +1,6 @@
 import logging
 import requests
+import os
 from datetime import datetime
 from app.database import SessionLocal
 from app.domains.post_prod.xml_conversion.models import PostProdXMLConversionHistory
@@ -26,7 +27,12 @@ def run_xml_conversion_pipeline(history_id: int):
         db.commit()
         
         # 1. PDF to S4C XML using external PDF2XML API
-        url = "http://host.docker.internal:8080/convert"
+        url = os.environ.get("PDF2XML_API_URL")
+        if not url:
+            logger.error("PDF2XML_API_URL environment variable is not set")
+            history.project.conversion_status = "Failed"
+            db.commit()
+            return
         params = {
             "engine": "heuristic",
             "targets": "json,xml,jats,bits",
