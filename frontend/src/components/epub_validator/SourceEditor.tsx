@@ -28,6 +28,8 @@ interface Props {
   onLineClick?: (lineNum: number, lineText: string) => void;
   onSave?: () => void;
   onDtdValidate?: () => Promise<{errors: Array<{line_number: number, message: string, error_type?: string}>}>;
+  /** Button text and tooltip for the DTD check, e.g. "JATS 1.3 DTD" (default: BITS). */
+  dtdLabel?: string;
 }
 
 // XML tag auto-closer
@@ -94,7 +96,7 @@ export function formatXmlString(xmlStr: string): string {
  * the app's design system (see FindReplacePanel).
  */
 export const SourceEditor = forwardRef<SourceEditorRef, Props>(
-  ({ value, onChange, className, readOnly = false, errors, onLogLineClick, onLineClick, onSave, onDtdValidate }, ref) => {
+  ({ value, onChange, className, readOnly = false, errors, onLogLineClick, onLineClick, onSave, onDtdValidate, dtdLabel }, ref) => {
     const cmRef = useRef<ReactCodeMirrorRef | null>(null);
     const [panelOpen, setPanelOpen] = useState(false);
     const [replaceMode, setReplaceMode] = useState(false);
@@ -264,6 +266,9 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
                   });
                 }
               }
+            } else if (line.to > line.from) {
+              // No extract (e.g. a DTD error reported by line only): mark the whole line.
+              diagnostics.push({ from, to, severity: 'error', message: err.message });
             }
           } catch (e) {
             console.error("Failed to add lint highlight:", e);
@@ -576,11 +581,11 @@ export const SourceEditor = forwardRef<SourceEditorRef, Props>(
                 ? "hover:bg-red-100 active:bg-red-200 border-red-300 bg-red-50 text-red-800"
                 : "hover:bg-blue-100 active:bg-blue-200 border-blue-300 bg-blue-50 text-blue-800"
             )}
-            title="Validate document structure against BITS DTD schema"
+            title={dtdLabel ? `Validate against the ${dtdLabel}` : "Validate document structure against BITS DTD schema"}
           >
             <span className={dtdStatus === 'passed' ? "text-emerald-600 font-bold" : dtdStatus === 'error' ? "text-red-600 font-bold" : "text-blue-600 font-bold"}>
               {dtdStatus === 'passed' ? '🛡️' : dtdStatus === 'error' ? '❌' : '🛡️'}
-            </span> DTD Validate
+            </span> {dtdLabel ? `${dtdLabel} Validate` : 'DTD Validate'}
           </button>
           )}
 

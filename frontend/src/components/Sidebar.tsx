@@ -77,8 +77,8 @@ export function Sidebar() {
     Boolean(viewer?.roles && (viewer.roles as any[]).some((r: any) => String(typeof r === 'string' ? r : r.name).toLowerCase().includes('customer')))
 
   const hasBodCustomerAccess = Boolean(
-    (viewer as any)?.customer_access && 
-    Array.isArray((viewer as any).customer_access) && 
+    (viewer as any)?.customer_access &&
+    Array.isArray((viewer as any).customer_access) &&
     (viewer as any).customer_access.includes('BOD')
   )
 

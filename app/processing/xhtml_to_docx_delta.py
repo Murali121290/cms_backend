@@ -642,8 +642,11 @@ class XhtmlToDocxDeltaEngine:
             if block_el.tag == "li":
                 new_style = _determine_list_style(block_el)
             else:
-                new_style = block_el.get("data-style-label") or block_el.get("class", "")
-                new_style = new_style.split()[0] if new_style.strip() else "Normal"
+                # data-style-label holds one style name, which may contain spaces ("Heading 2",
+                # "List Paragraph"); only the class attribute is a space-separated list.
+                label = (block_el.get("data-style-label") or "").strip()
+                classes = (block_el.get("class") or "").split()
+                new_style = label or (classes[0] if classes else "Normal")
                 if new_style in ("Normal", "MsoNormal", ""):
                     new_style = "Normal"
                 new_style = normalize_structural_tag_case(new_style)

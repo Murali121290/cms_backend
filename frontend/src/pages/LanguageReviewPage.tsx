@@ -29,6 +29,7 @@ import {
 import apiClient from '@/api/client'
 import { toast } from '@/store/useToastStore'
 import { uiPaths } from '@/utils/appPaths'
+import { useJournalReviewMode } from '@/features/journals/useJournalReviewMode'
 import {
   listComments,
   createComment,
@@ -89,6 +90,8 @@ export function LanguageReviewPage() {
   const parsedChapterId = Number.parseInt(chapterId ?? '', 10)
   const parsedFileId = Number.parseInt(fileId ?? '', 10)
   const normalizedFileId = Number.isInteger(parsedFileId) && parsedFileId > 0 ? parsedFileId : null
+  // Journal articles open this page on a shadow book file with no chapter (see useJournalReviewMode).
+  const journal = useJournalReviewMode()
 
   const [activeRightTab, setActiveRightTab] = useState<'all' | 'grammar' | 'spelling' | 'sentence' | 'compounds' | 'bias' | 'comments' | 'rules'>('all')
   const [loading, setLoading] = useState(false)
@@ -512,21 +515,27 @@ export function LanguageReviewPage() {
       <header className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between flex-shrink-0 shadow-sm z-20">
         <div className="flex items-center gap-3">
           <button
-            onClick={() => navigate(uiPaths.chapterDetail(parsedProjectId, parsedChapterId))}
+            onClick={() => navigate(journal ? journal.backHref : uiPaths.chapterDetail(parsedProjectId, parsedChapterId))}
             className="p-2 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
-            title="Back to Chapter"
+            title={journal ? journal.backLabel : 'Back to Chapter'}
           >
             <ArrowLeft size={18} />
           </button>
           <div>
             <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
-              <Link to={uiPaths.projectDetail(parsedProjectId)} className="hover:text-slate-600">
-                Project #{parsedProjectId}
-              </Link>
-              <span>/</span>
-              <Link to={uiPaths.chapterDetail(parsedProjectId, parsedChapterId)} className="hover:text-slate-600">
-                Chapter #{parsedChapterId}
-              </Link>
+              {journal ? (
+                <Link to={journal.backHref} className="hover:text-slate-600">Journal article #{journal.articleId}</Link>
+              ) : (
+                <>
+                  <Link to={uiPaths.projectDetail(parsedProjectId)} className="hover:text-slate-600">
+                    Project #{parsedProjectId}
+                  </Link>
+                  <span>/</span>
+                  <Link to={uiPaths.chapterDetail(parsedProjectId, parsedChapterId)} className="hover:text-slate-600">
+                    Chapter #{parsedChapterId}
+                  </Link>
+                </>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <span className="font-semibold text-slate-800 text-sm">{fileName}</span>

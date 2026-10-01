@@ -203,6 +203,16 @@ def _get_all_paragraph_runs(para):
             alias, tag = _sdt_props(child)
             _collect_sdt_runs(child, alias, tag)
 
+        elif child_tag == qn('w:hyperlink'):
+            # Keep the link text (e.g. "Medline: 39044186" in a reference). Leaving it out
+            # hid it from the editor, and the next save then deleted it from the DOCX.
+            for h_child in child:
+                if h_child.tag == qn('w:r'):
+                    all_runs.append((Run(h_child, para), None, None, None))
+                elif h_child.tag in (qn('w:ins'), qn('w:del')):
+                    for r_elem in h_child.findall(qn('w:r')):
+                        all_runs.append((Run(r_elem, para), h_child, None, None))
+
     return all_runs
 
 
@@ -948,6 +958,12 @@ def _get_list_info(para, numbering_map=None) -> tuple[bool, str, int, str]:
     ilvl = 0
     numId = None
     
+    # Reference entries ("Reference-Numbered", REF-N, ...) carry their number as text, so they
+    # are never an HTML list - the "num" style-name heuristic below would render "1. 1. ...".
+    if pPr is None or pPr.find(qn("w:numPr")) is None:
+        if "reference" in style_lower or re.match(r"ref[-_ ]", style_lower):
+            return False, "bullet", 0, "1"
+
     if pPr is not None:
         numPr = pPr.find(qn("w:numPr"))
         if numPr is not None:

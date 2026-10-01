@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List, Any, Dict
+from typing import Optional, List, Any, Dict, Literal
 from datetime import datetime
 
 
@@ -36,6 +36,7 @@ class JournalBase(BaseModel):
     issue: Optional[str] = None
     journal_manager: Optional[str] = None
     status: str = "Active"
+    workflow_id: Optional[int] = None
 
 
 class JournalCreate(JournalBase):
@@ -44,10 +45,84 @@ class JournalCreate(JournalBase):
 
 class JournalResponse(JournalBase):
     id: int
+    workflow_name: Optional[str] = None
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+
+# Journal Workflow Schemas
+class JournalWorkflowCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=150)
+    description: Optional[str] = None
+    stage_numbers: List[int] = Field(min_length=1)
+    is_default: bool = False
+
+
+class JournalWorkflowResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    stage_numbers: List[int]
+    stages: List[str]
+    is_default: bool
+    is_active: bool
+
+
+# Overview rows for the client -> journal -> article pages
+class ArticleCounts(BaseModel):
+    total: int = 0
+    in_progress: int = 0
+    completed: int = 0
+    delayed: int = 0
+
+
+class JournalClientOverview(JournalClientResponse):
+    journal_count: int = 0
+    articles: ArticleCounts = Field(default_factory=ArticleCounts)
+
+
+class JournalSetupStatus(BaseModel):
+    template: Optional[str] = None       # active InDesign template file name
+    template_version: Optional[int] = None
+    fonts: int = 0
+    stylesheet: Optional[str] = None     # active style sheet name
+    grammarsheet: Optional[str] = None   # active grammar sheet name
+
+
+class JournalOverview(JournalResponse):
+    client_code: Optional[str] = None
+    publisher_name: Optional[str] = None
+    stages: List[str] = Field(default_factory=list)
+    articles: ArticleCounts = Field(default_factory=ArticleCounts)
+    setup: JournalSetupStatus = Field(default_factory=JournalSetupStatus)
+
+
+class ArticleStageStatus(BaseModel):
+    stage_number: int
+    stage_name: str
+    stage_status: str
+    assignee_id: Optional[int] = None
+    planned_end_date: Optional[datetime] = None
+
+
+class JournalArticleRow(BaseModel):
+    id: int
+    article_doi: Optional[str] = None
+    article_title: str
+    article_type: str
+    lead_author: Optional[str] = None
+    current_stage: str
+    status: str
+    priority: str
+    due_date: Optional[datetime] = None
+    current_assignee_id: Optional[int] = None
+    current_assignee_name: Optional[str] = None
+    delayed: bool = False
+    open_errors: int = 0
+    stages: List[ArticleStageStatus] = Field(default_factory=list)
+    created_at: datetime
 
 
 # Journal Article Schemas
@@ -100,3 +175,84 @@ class StageAdvanceRequest(BaseModel):
     article_id: int
     current_stage: str
     remarks: Optional[str] = None
+
+
+class StageAdvanceBody(BaseModel):
+    remarks: Optional[str] = None
+
+
+# Journal Style Sheet / Grammar Sheet Schemas
+class JournalStylesheetCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    style_rules: Dict[str, Any] = Field(default_factory=dict)
+    is_active: bool = True
+
+
+class JournalStylesheetResponse(JournalStylesheetCreate):
+    id: int
+    journal_id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class JournalGrammarsheetCreate(BaseModel):
+    name: str
+    language_variant: str = "US_English"
+    grammar_rules: Dict[str, Any] = Field(default_factory=dict)
+    is_active: bool = True
+
+
+class JournalGrammarsheetResponse(JournalGrammarsheetCreate):
+    id: int
+    journal_id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# Validation Check Schemas
+class JournalCheckRunResponse(BaseModel):
+    id: int
+    article_id: int
+    module: str
+    stage_number: int
+    status: str
+    rule_set_version: Optional[str] = None
+    rules_total: int
+    rules_passed: int
+    started_at: datetime
+    finished_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class JournalIssueResponse(BaseModel):
+    id: int
+    article_id: int
+    run_id: Optional[int] = None
+    module: str
+    rule_id: str
+    severity: str
+    title: str
+    message: Optional[str] = None
+    location: Optional[Dict[str, Any]] = None
+    context_snippet: Optional[str] = None
+    suggestion: Optional[Dict[str, Any]] = None
+    source_issue_id: Optional[int] = None
+    status: str
+    resolution: Optional[str] = None
+    resolved_by_id: Optional[int] = None
+    resolved_at: Optional[datetime] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class JournalIssueAction(BaseModel):
+    action: Literal["accept", "ignore", "reopen"]

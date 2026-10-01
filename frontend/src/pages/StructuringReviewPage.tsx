@@ -35,6 +35,7 @@ import { StylesPanel } from "@/features/structuringReview/components/EditorStyle
 import { VersionHistoryPanel } from "@/features/structuringReview/components/VersionHistoryPanel";
 import { useParagraphStyles } from "@/features/editor/useParagraphStyles";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { useJournalReviewMode } from "@/features/journals/useJournalReviewMode";
 import { uiPaths } from "@/utils/appPaths";
 import { ReferenceReviewSidePanel } from "@/features/referenceReview/components/ReferenceReviewSidePanel";
 
@@ -156,6 +157,8 @@ export function StructuringReviewPage() {
     Number.isInteger(parsedChapterId) && parsedChapterId > 0 ? parsedChapterId : null;
   const normalizedFileId =
     Number.isInteger(parsedFileId) && parsedFileId > 0 ? parsedFileId : null;
+  // Journal articles open this page on a shadow book file with no chapter (see useJournalReviewMode).
+  const journal = useJournalReviewMode();
 
   const editorRef = useRef<WysiwygEditorHandle>(null);
   const reviewQuery = useStructuringReviewQuery(normalizedFileId);
@@ -211,7 +214,7 @@ export function StructuringReviewPage() {
   );
 
   // ── Invalid params ────────────────────────────────────────────────────────
-  if (normalizedProjectId === null || normalizedChapterId === null || normalizedFileId === null) {
+  if (normalizedProjectId === null || (normalizedChapterId === null && !journal) || normalizedFileId === null) {
     return (
       <main className="page-enter min-h-screen bg-surface-100 p-6 flex items-center justify-center">
         <div className="bg-white rounded-lg shadow-card p-10 max-w-md w-full text-center space-y-4">
@@ -226,6 +229,13 @@ export function StructuringReviewPage() {
       </main>
     );
   }
+
+  const backHref = journal ? journal.backHref : uiPaths.chapterDetail(normalizedProjectId, normalizedChapterId as number);
+  const backLabel = journal ? journal.backLabel : "Back to Chapter";
+  const reviewPath = (id: number, tab: string) =>
+    journal
+      ? journal.reviewHref("structuring", normalizedProjectId, id, tab)
+      : uiPaths.structuringReview(normalizedProjectId, normalizedChapterId as number, id) + `?tab=${tab}`;
 
   // Top-level tab strip: Document Overview | Structuring Review.
   // The Structuring Review tab renders a unified workspace containing both
@@ -314,8 +324,8 @@ export function StructuringReviewPage() {
           <Button variant="primary" onClick={() => void reviewQuery.refetch()}>
             Try Again
           </Button>
-          <Link to={uiPaths.chapterDetail(normalizedProjectId, normalizedChapterId)}>
-            <Button variant="secondary">Back to Chapter</Button>
+          <Link to={backHref}>
+            <Button variant="secondary">{backLabel}</Button>
           </Link>
         </div>
       </div>,
@@ -330,8 +340,8 @@ export function StructuringReviewPage() {
           title="Structuring review unavailable"
           description="The structuring review contract returned no data."
         />
-        <Link to={uiPaths.chapterDetail(normalizedProjectId, normalizedChapterId)}>
-          <Button variant="primary">Back to Chapter</Button>
+        <Link to={backHref}>
+          <Button variant="primary">{backLabel}</Button>
         </Link>
       </div>,
     );
@@ -375,12 +385,12 @@ export function StructuringReviewPage() {
             breadcrumb={
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => navigate(uiPaths.chapterDetail(normalizedProjectId, normalizedChapterId))}
+                  onClick={() => navigate(backHref)}
                   className="p-2 rounded-lg hover:bg-surface text-muted hover:text-text transition-colors -ml-2"
                 >
                   <ArrowLeft size={18} />
                 </button>
-                <span className="text-sm font-medium text-navy-700 whitespace-nowrap">Back to Chapter</span>
+                <span className="text-sm font-medium text-navy-700 whitespace-nowrap">{backLabel}</span>
                 <span className="text-navy-300">·</span>
                 <span className="text-sm font-semibold text-text truncate">{review.file.filename}</span>
               </div>
@@ -541,7 +551,7 @@ export function StructuringReviewPage() {
                   fileId={normalizedFileId}
                   currentFileId={normalizedFileId}
                   onOpenVersion={(versionId) => {
-                    navigate(uiPaths.structuringReview(normalizedProjectId, normalizedChapterId, versionId) + "?tab=overview");
+                    navigate(reviewPath(versionId, "overview"));
                   }}
                 />
               </div>
@@ -612,7 +622,7 @@ export function StructuringReviewPage() {
               onSave={async (html) => {
                 const res = await editorSave.save(html);
                 if (res && res.file_id && res.file_id !== normalizedFileId) {
-                  navigate(uiPaths.structuringReview(normalizedProjectId, normalizedChapterId, res.file_id) + "?tab=editor");
+                  navigate(reviewPath(res.file_id, "editor"));
                 } else {
                   void reviewQuery.refetch();
                 }
@@ -636,8 +646,8 @@ export function StructuringReviewPage() {
                   onAddStyle={handleAddStyle}
                   editorRef={editorRef}
                   onOpenVersion={(versionId) => {
-                    if (normalizedProjectId && normalizedChapterId) {
-                      navigate(uiPaths.structuringReview(normalizedProjectId, normalizedChapterId, versionId) + "?tab=editor");
+                    if (normalizedProjectId && (normalizedChapterId || journal)) {
+                      navigate(reviewPath(versionId, "editor"));
                     }
                   }}
                 />
@@ -698,7 +708,7 @@ export function StructuringReviewPage() {
                 styles={allStyles}
                 fileId={normalizedFileId}
                 onOpenVersion={(versionId) =>
-                  navigate(uiPaths.structuringReview(normalizedProjectId, normalizedChapterId, versionId) + "?tab=onlyoffice")
+                  navigate(reviewPath(versionId, "onlyoffice"))
                 }
                 onAddStyle={handleAddStyle}
               /> */}
@@ -731,7 +741,7 @@ export function StructuringReviewPage() {
                 styles={allStyles}
                 fileId={normalizedFileId}
                 onOpenVersion={(versionId) =>
-                  navigate(uiPaths.structuringReview(normalizedProjectId, normalizedChapterId, versionId) + "?tab=collabora")
+                  navigate(reviewPath(versionId, "collabora"))
                 }
               /> */}
 

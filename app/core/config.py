@@ -72,6 +72,15 @@ class Settings(BaseSettings):
     PPH_MAX_WAIT_SECONDS: int = 4500   # 75 min — covers worst-case 1-hour jobs with headroom
     PPH_POLL_INTERVAL_SECONDS: int = 20  # Poll every 20s; jobs run 30-60 min so 2s is excessive
 
+    # Journal production (JATS) integration settings
+    # When set, Stage 4 sends the edited DOCX to the Windows XSLT server (docx_to_jats.xslt);
+    # otherwise, or if the server fails, the built-in XHTML -> JATS converter is used.
+    JATS_XSLT_URL: str = ""
+    JATS_XSLT_NAME: str = "docx_to_jats.xslt"
+    JATS_XSLT_TIMEOUT_SECONDS: int = 300
+    # InDesign Server endpoint for journal articles (JATS + journal template -> INDD/IDML/PDF).
+    JOURNAL_INDESIGN_ENDPOINT: str = "/convert-jats-to-indesign"
+
     # UMLS / NLM Medical Terminology API integration settings
     UMLS_API_KEY: str = ""
     UMLS_BASE_URL: str = "https://uts-ws.nlm.nih.gov/rest"

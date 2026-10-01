@@ -2880,16 +2880,16 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         }
         /* Fallback nested list styles when type attribute is not explicitly set */
         .ProseMirror ol:not([type]) {
-          list-style-type: upper-alpha !important;
-        }
-        .ProseMirror ol ol:not([type]) {
           list-style-type: decimal !important;
         }
-        .ProseMirror ol ol ol:not([type]) {
+        .ProseMirror ol ol:not([type]) {
           list-style-type: lower-alpha !important;
         }
-        .ProseMirror ol ol ol ol:not([type]) {
+        .ProseMirror ol ol ol:not([type]) {
           list-style-type: lower-roman !important;
+        }
+        .ProseMirror ol ol ol ol:not([type]) {
+          list-style-type: upper-alpha !important;
         }
 
         /* Pure HTML type attribute selectors (A, 1, a, I, i) */
@@ -3361,7 +3361,9 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         .ProseMirror p[data-style-label="GLOS-NL-FIRST"],
         .ProseMirror p[data-style-label="GLOS-NL-MID"],
         .ProseMirror p[data-style-label="UNBX-NL"],
-        .ProseMirror p[data-style-label^="EXER-"][data-style-label*="-NL-"] {
+        .ProseMirror p[data-style-label^="EXER-"][data-style-label*="-NL-"],
+        .ProseMirror p[data-style-label*="NumberList"],
+        .ProseMirror p[data-style-label="REF-N"] {
           position: relative !important;
           margin-left: 2rem !important;
           padding-left: 0.5rem !important;
@@ -3375,10 +3377,12 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         }
 
         /* Reset the counter for a new sequence of consecutive numbered list items */
-        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]) + p[data-style-label^="NL-"],
-        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]) + p[data-style-label*="-NL-"],
-        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]) + p[data-style-label$="-NL"],
-        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]) + p[data-style-label^="EXER-"][data-style-label*="-NL-"] {
+        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]):not(p[data-style-label*="NumberList"]):not(p[data-style-label="REF-N"]) + p[data-style-label^="NL-"],
+        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]):not(p[data-style-label*="NumberList"]):not(p[data-style-label="REF-N"]) + p[data-style-label*="-NL-"],
+        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]):not(p[data-style-label*="NumberList"]):not(p[data-style-label="REF-N"]) + p[data-style-label$="-NL"],
+        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]):not(p[data-style-label*="NumberList"]):not(p[data-style-label="REF-N"]) + p[data-style-label^="EXER-"][data-style-label*="-NL-"],
+        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]):not(p[data-style-label*="NumberList"]):not(p[data-style-label="REF-N"]) + p[data-style-label*="NumberList"],
+        .ProseMirror > *:not(p[data-style-label^="NL-"]):not(p[data-style-label*="-NL-"]):not(p[data-style-label$="-NL"]):not(p[data-style-label^="EXER-"][data-style-label*="-NL-"]):not(p[data-style-label*="NumberList"]):not(p[data-style-label="REF-N"]) + p[data-style-label="REF-N"] {
           counter-reset: structured-num-list;
         }
 
@@ -3386,7 +3390,9 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         .ProseMirror p[data-style-label^="NL-"],
         .ProseMirror p[data-style-label*="-NL-"],
         .ProseMirror p[data-style-label$="-NL"],
-        .ProseMirror p[data-style-label^="EXER-"][data-style-label*="-NL-"] {
+        .ProseMirror p[data-style-label^="EXER-"][data-style-label*="-NL-"],
+        .ProseMirror p[data-style-label*="NumberList"],
+        .ProseMirror p[data-style-label="REF-N"] {
           counter-increment: structured-num-list;
         }
 
@@ -3394,7 +3400,9 @@ export const WysiwygEditor = forwardRef<WysiwygEditorHandle, WysiwygEditorProps>
         .ProseMirror p[data-style-label^="NL-"]::before,
         .ProseMirror p[data-style-label*="-NL-"]::before,
         .ProseMirror p[data-style-label$="-NL"]::before,
-        .ProseMirror p[data-style-label^="EXER-"][data-style-label*="-NL-"]::before {
+        .ProseMirror p[data-style-label^="EXER-"][data-style-label*="-NL-"]::before,
+        .ProseMirror p[data-style-label*="NumberList"]::before,
+        .ProseMirror p[data-style-label="REF-N"]::before {
           content: counter(structured-num-list) ". " !important;
           position: absolute !important;
           left: -1rem !important;

@@ -32,6 +32,7 @@ import {
 } from "@/features/editor";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { useJournalReviewMode } from "@/features/journals/useJournalReviewMode";
 import { uiPaths } from "@/utils/appPaths";
 import {
   listComments,
@@ -64,6 +65,16 @@ export function TechnicalReviewPage() {
     Number.isInteger(parsedChapterId) && parsedChapterId > 0 ? parsedChapterId : null;
   const normalizedFileId =
     Number.isInteger(parsedFileId) && parsedFileId > 0 ? parsedFileId : null;
+  // Journal articles open this page on a shadow book file with no chapter (see useJournalReviewMode).
+  const journal = useJournalReviewMode();
+  const technicalPath = (id: number, query = "") =>
+    journal
+      ? journal.reviewHref("technical", normalizedProjectId!, id) + query.replace("?", "&")
+      : uiPaths.technicalReview(normalizedProjectId!, normalizedChapterId!, id) + query;
+  const backHref = journal
+    ? journal.backHref
+    : normalizedProjectId && normalizedChapterId ? uiPaths.chapterDetail(normalizedProjectId, normalizedChapterId) : uiPaths.projects;
+  const backLabel = journal ? journal.backLabel : "Back to Chapter";
 
   const [selectedStylesheetId, setSelectedStylesheetId] = useState<number | null>(null);
   const [editorFileId, setEditorFileId] = useState<number | null>(normalizedFileId);
@@ -596,11 +607,7 @@ export function TechnicalReviewPage() {
       if (res && res.new_file_id && res.new_file_id !== editorFileId) {
         setEditorFileId(res.new_file_id);
         navigate(
-          uiPaths.technicalReview(
-            normalizedProjectId!,
-            normalizedChapterId!,
-            res.new_file_id,
-          ),
+          technicalPath(res.new_file_id),
         );
       }
     } catch (e) {
@@ -635,7 +642,7 @@ export function TechnicalReviewPage() {
   }, [activeTab, filteredFindings, selectedOccurrenceIndex]);
 
   // Route error states
-  if (normalizedProjectId === null || normalizedChapterId === null || normalizedFileId === null) {
+  if (normalizedProjectId === null || (normalizedChapterId === null && !journal) || normalizedFileId === null) {
     return (
       <main className="min-h-screen bg-slate-50 p-6 flex items-center justify-center">
         <div className="bg-white rounded-xl shadow-card p-10 max-w-md w-full text-center space-y-4 border border-slate-200">
@@ -687,8 +694,8 @@ export function TechnicalReviewPage() {
             <Button variant="primary" onClick={() => void technicalReviewQuery.refetch()}>
               Try Again
             </Button>
-            <Link to={uiPaths.chapterDetail(normalizedProjectId, normalizedChapterId)}>
-              <Button variant="secondary">Back to Chapter</Button>
+            <Link to={backHref}>
+              <Button variant="secondary">{backLabel}</Button>
             </Link>
           </div>
         </div>
@@ -704,8 +711,8 @@ export function TechnicalReviewPage() {
             title="Technical review unavailable"
             description="The technical review contract returned no data."
           />
-          <Link to={uiPaths.chapterDetail(normalizedProjectId, normalizedChapterId)}>
-            <Button variant="primary">Back to Chapter</Button>
+          <Link to={backHref}>
+            <Button variant="primary">{backLabel}</Button>
           </Link>
         </div>
       </main>
@@ -733,7 +740,7 @@ export function TechnicalReviewPage() {
       {/* Top Header */}
       <TechnicalReviewHeader
         filename={file.filename}
-        chapterTitle={`Chapter #${normalizedChapterId}`}
+        chapterTitle={journal ? `Journal article #${journal.articleId}` : `Chapter #${normalizedChapterId}`}
         activeStylesheetName={activeStylesheetName}
         activeTab={activeTab}
         reviewedCount={appliedKeys.size}
@@ -751,7 +758,7 @@ export function TechnicalReviewPage() {
         }}
         isFullscreen={isFullscreen}
         onToggleFullscreen={() => setIsFullscreen(!isFullscreen)}
-        onBack={() => navigate(uiPaths.chapterDetail(normalizedProjectId, normalizedChapterId))}
+        onBack={() => navigate(backHref)}
       />
 
       {/* No Stylesheet Alert Banner */}
@@ -761,12 +768,12 @@ export function TechnicalReviewPage() {
           <div className="flex-1">
             <p className="text-xs font-bold text-amber-900">Active Stylesheet Required</p>
             <p className="text-xs text-amber-800 mt-0.5">
-              This project does not have an active editorial stylesheet. Please configure one in{" "}
+              {journal ? "This journal has no IA rules selected yet. Choose them in" : "This project does not have an active editorial stylesheet. Please configure one in"}{" "}
               <Link
-                to={`/projects/${normalizedProjectId}/stylesheets`}
+                to={journal ? journal.iaRulesHref : `/projects/${normalizedProjectId}/stylesheets`}
                 className="underline font-bold hover:text-amber-950"
               >
-                Project Stylesheets
+                {journal ? "Journal settings → IA rules" : "Project Stylesheets"}
               </Link>{" "}
               before reviewing stylesheet rule occurrences.
             </p>
@@ -845,11 +852,7 @@ export function TechnicalReviewPage() {
             onOpenVersion={(versionId) => {
               setEditorFileId(versionId);
               navigate(
-                uiPaths.technicalReview(
-                  normalizedProjectId!,
-                  normalizedChapterId!,
-                  versionId,
-                ) + "?tab=dashboard",
+                technicalPath(versionId, "?tab=dashboard"),
               );
             }}
           />
@@ -987,11 +990,7 @@ export function TechnicalReviewPage() {
                       if (res && res.file_id && res.file_id !== editorFileId) {
                         setEditorFileId(res.file_id);
                         navigate(
-                          uiPaths.technicalReview(
-                            normalizedProjectId!,
-                            normalizedChapterId!,
-                            res.file_id,
-                          ),
+                          technicalPath(res.file_id),
                         );
                       }
                     }}

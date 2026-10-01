@@ -2,11 +2,13 @@
 List-run position normalization.
 
 annotate_document() tags every list item with a flat "-MID" family tag
-(BL-MID, NL-MID, OBJ-BL-MID, ...) or, for references, REF-N/REF-U,
-regardless of where the item sits within its run. This pass walks the
-annotation list once, finds maximal contiguous runs of the same list
-family, and rewrites their position suffixes so each run reads
-FIRST -> MID* -> LAST (or just FIRST for a single-item run).
+(BL-MID, NL-MID, OBJ-BL-MID, ...) regardless of where the item sits within
+its run. This pass walks the annotation list once, finds maximal contiguous
+runs of the same list family, and rewrites their position suffixes so each
+run reads FIRST -> MID* -> LAST (or just FIRST for a single-item run).
+
+Reference entries (REF-N / REF-U) are out of scope: every entry keeps the
+flat REF-N / REF-U tag, with no FIRST/MID/LAST position suffix.
 
 Empty/PMI paragraphs, and nested "level 2" sub-list items (BL2-MID/NL2-MID/
 UL2-MID), sitting between two same-family items are treated as transparent
@@ -39,7 +41,7 @@ def _list_family(tag: str) -> Optional[str]:
     """Return the list-family prefix for *tag*, or None if it isn't a
     recognized flat list/reference tag."""
     if tag in _REF_FAMILIES:
-        return tag
+        return None  # references stay flat: REF-N / REF-U, never REF-N-FIRST/-MID/-LAST
     match = _LIST_FAMILY_SUFFIX_RE.match(tag or "")
     if not match:
         return None
