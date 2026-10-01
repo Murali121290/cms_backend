@@ -84,13 +84,13 @@ export function Sidebar() {
 
   const navItems = [
     ...(!isAccessibilityUser && !isCustomerUser
-      ? [{ to: '/', icon: LayoutDashboard, label: 'Dashboard' }]
+      ? [{ to: '/', icon: LayoutDashboard, label: 'Book Dashboard' }]
       : []),
     ...(!isAccessibilityUser && !isCustomerUser
       ? [{ to: '/workspace', icon: Briefcase, label: 'My Workspace' }]
       : []),
     ...(!isAccessibilityUser && !isCustomerUser
-      ? [{ to: '/clients', icon: Users, label: 'Clients' },
+      ? [{ to: '/clients', icon: Users, label: 'Books Production' },
       { to: '/reports', icon: BarChart3, label: 'Reports' }
       ]
       : []),
@@ -98,7 +98,7 @@ export function Sidebar() {
       ? [{ to: '/journal-production', icon: Briefcase, label: 'Journal Production' }]
       : []),
     ...((canAccess(ROLE_PERMISSIONS.access_post_production) || isAccessibilityUser || !isCustomerUser)
-      ? [{ to: '/post-production', icon: Layers, label: 'Backlist' }]
+      ? [{ to: '/post-production', icon: Layers, label: 'Backlist Hub' }]
       : []),
     ...((canAccess(ROLE_PERMISSIONS.access_post_production) || isAccessibilityUser || (isCustomerUser && hasBodCustomerAccess))
       ? [
