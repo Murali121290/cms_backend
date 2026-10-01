@@ -45,6 +45,8 @@ def upgrade() -> None:
         sa.Column('qc_status', sa.String(), nullable=True),
         sa.Column('result_filepath', sa.String(), nullable=True),
         sa.Column('created_at', sa.DateTime(), nullable=True),
+        sa.Column('completed_at', sa.DateTime(), nullable=True),
+        sa.Column('due_at', sa.DateTime(), nullable=True),
         sa.PrimaryKeyConstraint('id')
         )
         op.create_index(op.f('ix_post_prod_xmlConversion_projects_client_code'), PROJECTS, ['client_code'], unique=False)
@@ -56,6 +58,11 @@ def upgrade() -> None:
         for name in STATUS_COLUMNS:
             if name not in existing:
                 op.add_column(PROJECTS, sa.Column(name, sa.String(), nullable=True, server_default='YTS'))
+                
+        if 'completed_at' not in existing:
+            op.add_column(PROJECTS, sa.Column('completed_at', sa.DateTime(), nullable=True))
+        if 'due_at' not in existing:
+            op.add_column(PROJECTS, sa.Column('due_at', sa.DateTime(), nullable=True))
 
     if HISTORY not in tables:
         op.create_table(HISTORY,

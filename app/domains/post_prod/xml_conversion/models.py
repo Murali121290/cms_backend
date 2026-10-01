@@ -21,6 +21,8 @@ class PostProdXMLConversionProject(Base):
     qc_status = Column(String, default="YTS")
     result_filepath = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)
+    due_at = Column(DateTime, nullable=True)
 
     # Relationships
     history = relationship("PostProdXMLConversionHistory", back_populates="project", cascade="all, delete-orphan")

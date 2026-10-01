@@ -433,6 +433,7 @@ def complete_project(project_id: int, db: Session = Depends(database.get_db)):
         
     project.conversion_status = "Completed"
     project.qc_status = "Completed"
+    project.completed_at = datetime.utcnow()
     db.commit()
     return {"message": "Project marked as Completed"}
 
