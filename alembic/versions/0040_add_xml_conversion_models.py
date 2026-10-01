@@ -23,7 +23,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 PROJECTS = 'post_prod_xmlConversion_projects'
 HISTORY = 'post_prod_xmlConversion_history'
-STATUS_COLUMNS = ('s4c_xml_status', 'final_xml_status', 'qc_status')
+STATUS_COLUMNS = ('raw_xml_status', 'final_xml_status', 'qc_status')
 
 
 def upgrade() -> None:

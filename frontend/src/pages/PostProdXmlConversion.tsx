@@ -471,7 +471,8 @@ export function PostProdXmlConversion() {
             const status = proj.conversion_status || 'YTS'
             const isCompleted = status === 'Completed'
             const isProcessing = status === 'Processing'
-            const percent = isCompleted ? 100 : (isProcessing ? 50 : 0)
+            const completedStages = [proj.raw_xml_status, proj.final_xml_status, proj.qc_status].filter(s => s === 'Completed').length
+            const percent = Math.round((completedStages / 3) * 100)
 
             return (
               <div
@@ -554,7 +555,7 @@ export function PostProdXmlConversion() {
                   <div className="mt-3">
                     <div className="flex items-center justify-between text-[10px] text-muted font-bold mb-1">
                       <span>Progress</span>
-                      <span>{isCompleted ? '1/1' : '0/1'} Files</span>
+                      <span>{completedStages}/3 Stages</span>
                     </div>
                     <div className="h-1.5 w-full bg-border rounded-full overflow-hidden">
                       <div
