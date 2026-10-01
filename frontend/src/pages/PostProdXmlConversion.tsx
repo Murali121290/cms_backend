@@ -504,7 +504,7 @@ export function PostProdXmlConversion() {
                   <div className="flex justify-between items-start gap-2">
                     <div className="min-w-0">
                       <h3 className="font-semibold text-sm text-text truncate m-0 group-hover:text-primary transition-colors" title={proj.project_name}>{proj.project_name}</h3>
-                      <p className="text-[11px] text-muted mt-0.5">{proj.client_code} • {proj.target_format}</p>
+                      <p className="text-[11px] text-muted mt-0.5">{proj.client_code}</p>
                     </div>
                     <div className="flex items-center gap-2">
                       {isTeamLead && (
@@ -539,12 +539,12 @@ export function PostProdXmlConversion() {
                       />
                     </div>
                     <span className={`capitalize font-bold px-2 py-0.5 rounded-md text-[9px] border ${isCompleted
-                        ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
-                        : isProcessing
-                          ? 'bg-blue-500/10 border-blue-500/20 text-blue-500'
-                          : status === 'Failed'
-                            ? 'bg-red-500/10 border-red-500/20 text-red-500'
-                            : 'bg-primary/10 border-primary/20 text-primary'
+                      ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                      : isProcessing
+                        ? 'bg-blue-500/10 border-blue-500/20 text-blue-500'
+                        : status === 'Failed'
+                          ? 'bg-red-500/10 border-red-500/20 text-red-500'
+                          : 'bg-primary/10 border-primary/20 text-primary'
                       }`}>
                       {status}
                     </span>
