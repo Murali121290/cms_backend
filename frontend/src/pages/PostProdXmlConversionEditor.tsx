@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Play, Save, CheckCircle, Code, FileText, Download, ChevronDown } from 'lucide-react'
+import { ArrowLeft, Play, Save, CheckCircle, Code, FileText, Download, ChevronDown, AlertTriangle, AlertCircle, Loader2 } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { Button } from '@/components/ui/Button'
 import { toast } from '@/store/useToastStore'
@@ -21,6 +21,12 @@ export function PostProdXmlConversionEditor() {
   const [targetFormat, setTargetFormat] = useState('JATS')
   const [isFormatDropdownOpen, setIsFormatDropdownOpen] = useState(false)
   const [xmlType, setXmlType] = useState<'s4c' | 'final' | null>(null)
+  
+  const [isQcModalOpen, setIsQcModalOpen] = useState(false)
+  const [isQcRunning, setIsQcRunning] = useState(false)
+  const [qcResult, setQcResult] = useState<{isWellFormed: boolean, wellFormedErrors: string[], isDtdValid: boolean, dtdErrors: string[]} | null>(null)
+  const [isManuallyVerified, setIsManuallyVerified] = useState(false)
+  const [isCompleting, setIsCompleting] = useState(false)
 
   useDocumentTitle(`XML Editor - Project ${projectId || ''}`)
 
@@ -140,6 +146,38 @@ export function PostProdXmlConversionEditor() {
       toast.error('Failed to save XML')
     } finally {
       setIsSaving(false)
+    }
+  }
+
+  const handleRunQc = async () => {
+    setIsQcModalOpen(true)
+    setIsQcRunning(true)
+    setIsManuallyVerified(false)
+    setQcResult(null)
+    try {
+      if (hasUnsavedChanges) await handleSaveXml()
+      const res = await api.post(`/post-prod/xml-conversion/projects/${projectId}/validate`, { xmlType })
+      setQcResult(res.data)
+    } catch (err) {
+      console.error(err)
+      toast.error('Failed to run QC validation')
+      setIsQcModalOpen(false)
+    } finally {
+      setIsQcRunning(false)
+    }
+  }
+
+  const handleMarkComplete = async () => {
+    setIsCompleting(true)
+    try {
+      await api.post(`/post-prod/xml-conversion/projects/${projectId}/complete`)
+      toast.success('Project marked as completed!')
+      navigate('/post-production/xml-conversion')
+    } catch (err) {
+      console.error(err)
+      toast.error('Failed to complete project')
+    } finally {
+      setIsCompleting(false)
     }
   }
 
@@ -308,6 +346,18 @@ export function PostProdXmlConversionEditor() {
             </Button>
           )}
 
+          {xmlContent && xmlType === 'final' && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRunQc}
+              className="text-xs h-8 ml-2 border-emerald-500/50 text-emerald-600 hover:bg-emerald-500/10"
+              title="Run Quality Control Validation"
+            >
+              <span className="flex items-center gap-1.5"><CheckCircle size={14} /> Run QC</span>
+            </Button>
+          )}
+
         </div>
       </header>
 
@@ -357,8 +407,33 @@ export function PostProdXmlConversionEditor() {
                   if (hasUnsavedChanges) {
                     await handleSaveXml();
                   }
-                  const res = await api.post(`/post-prod/xml-conversion/projects/${projectId}/validate`);
-                  return res.data;
+                  const res = await api.post(`/post-prod/xml-conversion/projects/${projectId}/validate`, { xmlType });
+                  
+                  const mappedErrors: Array<{line_number: number, message: string, error_type?: string}> = [];
+                  
+                  if (!res.data.isWellFormed && res.data.wellFormedErrors) {
+                    res.data.wellFormedErrors.forEach((err: string) => {
+                      const match = err.match(/Line (\d+): (.*)/);
+                      if (match) {
+                        mappedErrors.push({ line_number: parseInt(match[1], 10), message: match[2], error_type: 'XMLSyntax' });
+                      } else {
+                        mappedErrors.push({ line_number: 0, message: err, error_type: 'XMLSyntax' });
+                      }
+                    });
+                  }
+                  
+                  if (!res.data.isDtdValid && res.data.dtdErrors) {
+                    res.data.dtdErrors.forEach((err: string) => {
+                      const match = err.match(/Line (\d+): (.*)/);
+                      if (match) {
+                        mappedErrors.push({ line_number: parseInt(match[1], 10), message: match[2], error_type: 'DTD' });
+                      } else {
+                        mappedErrors.push({ line_number: 0, message: err, error_type: 'DTD' });
+                      }
+                    });
+                  }
+                  
+                  return { errors: mappedErrors };
                 }}
                 className="w-full h-full text-[13px]"
               />
@@ -372,6 +447,121 @@ export function PostProdXmlConversionEditor() {
           </div>
         </div>
       </div>
+
+      {/* QC Modal */}
+      {isQcModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsQcModalOpen(false)} />
+          <div className="relative bg-card rounded-xl shadow-2xl w-full max-w-xl flex flex-col max-h-[85vh] border border-border">
+            <div className="px-6 py-4 border-b border-border flex justify-between items-center bg-muted/5 rounded-t-xl">
+              <h2 className="text-lg font-bold flex items-center gap-2">
+                <CheckCircle className="text-emerald-500" size={20} />
+                Quality Control ({xmlType === 's4c' ? 'S4C' : 'Final'} XML)
+              </h2>
+              <button onClick={() => setIsQcModalOpen(false)} className="text-muted hover:text-text transition-colors">
+                &times;
+              </button>
+            </div>
+            
+            <div className="p-6 flex-1 overflow-y-auto space-y-6">
+              {isQcRunning ? (
+                <div className="flex flex-col items-center justify-center py-12 text-muted">
+                  <Loader2 className="w-8 h-8 animate-spin mb-4 text-primary" />
+                  <p>Running automated validations...</p>
+                </div>
+              ) : qcResult ? (
+                <>
+                  {/* Stage 1 */}
+                  <div className={`p-4 rounded-lg border ${qcResult.isWellFormed ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-red-500/10 border-red-500/20'}`}>
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${qcResult.isWellFormed ? 'bg-emerald-500/20 text-emerald-500' : 'bg-red-500/20 text-red-500'}`}>
+                        {qcResult.isWellFormed ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-sm">Stage 1: Well-Formedness Check</h4>
+                        <p className={`text-xs ${qcResult.isWellFormed ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                          {qcResult.isWellFormed ? 'XML syntax is well-formed.' : 'XML contains syntax errors.'}
+                        </p>
+                      </div>
+                    </div>
+                    {!qcResult.isWellFormed && qcResult.wellFormedErrors?.length > 0 && (
+                      <div className="mt-3 text-xs bg-red-500/5 p-3 rounded border border-red-500/20 text-red-600 dark:text-red-400 max-h-32 overflow-y-auto">
+                        <ul className="list-disc pl-4 space-y-1">
+                          {qcResult.wellFormedErrors.map((err: string, i: number) => <li key={i}>{err}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Stage 2 */}
+                  <div className={`p-4 rounded-lg border ${qcResult.isDtdValid ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-red-500/10 border-red-500/20'}`}>
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${qcResult.isDtdValid ? 'bg-emerald-500/20 text-emerald-500' : 'bg-red-500/20 text-red-500'}`}>
+                        {qcResult.isDtdValid ? <CheckCircle size={16} /> : <AlertTriangle size={16} />}
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-sm">Stage 2: DTD Validation</h4>
+                        <p className={`text-xs ${qcResult.isDtdValid ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                          {qcResult.isDtdValid ? 'Document matches the DTD schema.' : 'Document failed schema validation.'}
+                        </p>
+                      </div>
+                    </div>
+                    {!qcResult.isDtdValid && qcResult.dtdErrors?.length > 0 && (
+                      <div className="mt-3 text-xs bg-red-500/5 p-3 rounded border border-red-500/20 text-red-600 dark:text-red-400 max-h-32 overflow-y-auto">
+                        <ul className="list-disc pl-4 space-y-1">
+                          {qcResult.dtdErrors.map((err: string, i: number) => <li key={i}>{err}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Stage 3 */}
+                  <div className={`p-4 rounded-lg border ${(qcResult.isWellFormed && qcResult.isDtdValid) ? 'bg-blue-500/10 border-blue-500/20' : 'bg-muted/10 border-border opacity-50'}`}>
+                    <div className="flex gap-3">
+                      <div className={`mt-0.5 w-8 h-8 rounded-full flex shrink-0 items-center justify-center ${(qcResult.isWellFormed && qcResult.isDtdValid) ? 'bg-blue-500/20 text-blue-500' : 'bg-muted text-muted-foreground'}`}>
+                        3
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-sm">Stage 3: Manual Verification</h4>
+                        <p className="text-xs text-muted mt-1 mb-3">
+                          Please verify the contents match the original PDF structure and text before marking as complete.
+                        </p>
+                        <label className={`flex items-center gap-2 text-sm ${(qcResult.isWellFormed && qcResult.isDtdValid) ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                          <input 
+                            type="checkbox" 
+                            className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                            checked={isManuallyVerified}
+                            onChange={(e) => setIsManuallyVerified(e.target.checked)}
+                            disabled={!(qcResult.isWellFormed && qcResult.isDtdValid)}
+                          />
+                          <span className="select-none font-medium text-text">I have manually verified the XML output.</span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : null}
+            </div>
+
+            <div className="px-6 py-4 border-t border-border flex justify-end gap-3 bg-muted/5 rounded-b-xl">
+              <Button variant="outline" onClick={() => setIsQcModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button 
+                onClick={handleMarkComplete} 
+                disabled={!isManuallyVerified || isCompleting}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white min-w-[140px]"
+              >
+                {isCompleting ? (
+                  <span className="flex items-center gap-2"><Loader2 size={16} className="animate-spin" /> Completing...</span>
+                ) : (
+                  <span className="flex items-center gap-2"><CheckCircle size={16} /> Mark as Complete</span>
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

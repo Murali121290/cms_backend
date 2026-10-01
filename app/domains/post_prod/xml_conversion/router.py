@@ -233,28 +233,7 @@ def target_convert(project_id: int, format: str = "JATS", db: Session = Depends(
     
     return {"xml": xml_content, "final_filepath": final_filepath}
 
-from app.domains.post_prod.xml_conversion.validators.dtd_validator import validate_xml
 
-@router.post("/projects/{project_id}/validate")
-def run_dtd_validation(project_id: int, db: Session = Depends(database.get_db)):
-    project = db.query(PostProdXMLConversionProject).filter(PostProdXMLConversionProject.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-        
-    final_filepath = project.result_filepath
-    if not final_filepath or not os.path.exists(final_filepath):
-        # Fallback to reconstructing the path
-        out_dir = os.path.dirname(project.filepath) if project.filepath else ""
-        if out_dir:
-            base_name = os.path.splitext(os.path.basename(project.filepath))[0]
-            final_filepath = os.path.join(out_dir, f"{base_name}_final.xml")
-            
-    if not final_filepath or not os.path.exists(final_filepath):
-        raise HTTPException(status_code=400, detail="Final XML file not found. Save the XML first.")
-        
-    format_name = project.target_format or "JATS"
-    errors = validate_xml(final_filepath, format=format_name)
-    return {"errors": errors}
 
 @router.get("/projects/{project_id}/xml")
 def get_xml_content(project_id: int, db: Session = Depends(database.get_db)):
@@ -387,6 +366,75 @@ def get_s4c_html_preview(project_id: int, db: Session = Depends(database.get_db)
                 return {"html": f"<div style='color:red; padding: 20px;'>Error generating S4C preview: {str(e)}</div>"}
                 
     return {"html": "<div style='color:gray; padding: 20px;'>No S4C XML available for preview.</div>"}
+
+from pydantic import BaseModel
+
+class ValidateRequest(BaseModel):
+    xmlType: str
+
+@router.post("/projects/{project_id}/validate")
+def validate_xml_endpoint(project_id: int, req: ValidateRequest, db: Session = Depends(database.get_db)):
+    project = db.query(PostProdXMLConversionProject).filter(PostProdXMLConversionProject.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    out_dir = os.path.dirname(project.filepath) if project.filepath else ""
+    base_name = os.path.splitext(os.path.basename(project.filepath))[0] if out_dir else ""
+    
+    if req.xmlType == "s4c":
+        xml_filepath = os.path.join(out_dir, f"{base_name}_raw.xml")
+    else:
+        xml_filepath = os.path.join(out_dir, f"{base_name}_final.xml")
+        
+    if not os.path.exists(xml_filepath):
+        raise HTTPException(status_code=404, detail=f"XML file not found: {xml_filepath}")
+        
+    # Well-formedness check using lxml
+    from lxml import etree
+    is_well_formed = True
+    well_formed_errors = []
+    
+    try:
+        doc = etree.parse(xml_filepath)
+    except etree.XMLSyntaxError as e:
+        is_well_formed = False
+        well_formed_errors.append(f"Line {e.lineno or 0}: {str(e)}")
+        
+    is_dtd_valid = True
+    dtd_errors = []
+    
+    # DTD Validation only for final XML for now
+    if is_well_formed and req.xmlType == "final":
+        from app.domains.post_prod.xml_conversion.validators.dtd_validator import validate_xml
+        v_errors = validate_xml(xml_filepath, project.target_format or "JATS")
+        for err in v_errors:
+            if err["error_type"] == "DTD":
+                is_dtd_valid = False
+                dtd_errors.append(f"Line {err.get('line_number', 0)}: {err.get('message', '')}")
+            elif err["error_type"] == "XMLSyntax":
+                is_well_formed = False
+                well_formed_errors.append(f"Line {err.get('line_number', 0)}: {err.get('message', '')}")
+            elif err["error_type"] == "System":
+                is_dtd_valid = False
+                dtd_errors.append(err.get('message', ''))
+                
+    return {
+        "isWellFormed": is_well_formed,
+        "wellFormedErrors": well_formed_errors,
+        "isDtdValid": is_dtd_valid if req.xmlType == "final" else True,
+        "dtdErrors": dtd_errors
+    }
+
+@router.post("/projects/{project_id}/complete")
+def complete_project(project_id: int, db: Session = Depends(database.get_db)):
+    project = db.query(PostProdXMLConversionProject).filter(PostProdXMLConversionProject.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    project.conversion_status = "Completed"
+    project.qc_status = "Completed"
+    db.commit()
+    return {"message": "Project marked as Completed"}
 
 @router.delete("/projects/{project_id}")
 def delete_project(project_id: int, db: Session = Depends(database.get_db), current_user: dict = Depends(get_current_user_from_cookie)):
