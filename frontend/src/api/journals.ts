@@ -648,6 +648,7 @@ export const journalsApi = {
     return res.data
   },
   archiveUrl: (articleId: number) => `${apiClient.defaults.baseURL ?? ''}/journals/articles/${articleId}/archive`,
+  layoutHtmlUrl: (articleId: number) => `${apiClient.defaults.baseURL ?? ''}/journals/articles/${articleId}/xml/layout-html`,
   downloadFileUrl: (articleId: number, file: ArticleFileRow) =>
     file.id === 'working'
       ? `${apiClient.defaults.baseURL ?? ''}/journals/articles/${articleId}/files/latest?ext=docx`

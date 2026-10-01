@@ -28,17 +28,28 @@ FOLDERS = [
     {"key": "backup", "label": "Backup", "hint": "Every superseded version, kept for the archive"},
 ]
 CATEGORY_FOLDER = {
-    "Manuscript": "manuscript", "XHTML": "manuscript", "Reference_Report": "manuscript",
+    "Manuscript": "manuscript", "XHTML": "manuscript", "Reference_Report": "backup",
     "Art": "art", "JATS_XML": "xml", "XML": "xml",
     "INDD": "indesign", "IDML": "indesign", "Preflight": "indesign",
     "Proof_PDF": "proof", "Proof": "proof", "Delivery_ZIP": "delivery",
     "Working_Copy": "backup",
 }
-_VERSION_SUFFIX = re.compile(r"_v\d+(?=\.[^.]+$)|_v\d+$")
+
+
+_VERSION_SUFFIX = re.compile(r"_v\d+(?=\.[^.]+$)|_v\d+$", re.IGNORECASE)
+_STRUCTURED_SUFFIX = re.compile(r"_(structured|processed)(?=\.[^.]+$)", re.IGNORECASE)
+
+
+def clean_display_name(filename: str) -> str:
+    name = _VERSION_SUFFIX.sub("", filename)
+    name = _STRUCTURED_SUFFIX.sub("", name)
+    return name
 
 
 def folder_of(category: str) -> str:
-    return CATEGORY_FOLDER.get(category, "manuscript")
+    return CATEGORY_FOLDER.get(category, "backup")
+
+
 
 
 def family_key(f: JournalFile) -> Tuple[str, str]:
@@ -46,7 +57,8 @@ def family_key(f: JournalFile) -> Tuple[str, str]:
         return ("Art", f"fig{f.figure_number}")
     if f.category == "Working_Copy":
         return ("Working_Copy", "working")
-    return (f.category, _VERSION_SUFFIX.sub("", f.filename))
+    base = clean_display_name(f.filename)
+    return (f.category, base)
 
 
 def families(db: Session, article_id: int) -> Dict[Tuple[str, str], List[JournalFile]]:
@@ -114,8 +126,9 @@ def file_row(db: Session, article: JournalArticle, f: JournalFile, versions: int
              folder: Optional[str] = None) -> dict:
     kind, label = _status(db, article, f)
     protected = f.path in current_paths(article) or folder == "backup"
+    display_name = clean_display_name(f.filename) if folder != "backup" else f.filename
     return {
-        "id": f.id, "filename": f.filename, "category": f.category, "type": (f.file_type or os.path.splitext(f.filename)[1].lstrip(".")).upper(),
+        "id": f.id, "filename": display_name, "raw_filename": f.filename, "category": f.category, "type": (f.file_type or os.path.splitext(f.filename)[1].lstrip(".")).upper(),
         "version": f.version, "versions": versions, "size": _size(f.path), "uploaded_at": f.uploaded_at,
         "uploaded_by": names.get(getattr(f, "uploaded_by_id", None)) or "system",
         "figure_number": f.figure_number, "status": {"kind": kind, "label": label},
@@ -128,12 +141,15 @@ def working_copy_row(article: JournalArticle, snapshots: List[JournalFile]) -> O
     path = article.edited_docx_path
     if not path or not os.path.exists(path):
         return None
+    orig_name = os.path.basename(article.original_docx_path) if article.original_docx_path else os.path.basename(path)
+    clean_name = clean_display_name(orig_name)
+    version = len(snapshots) + 1
     return {
-        "id": "working", "filename": os.path.basename(path), "category": "Working_Copy", "type": "DOCX",
-        "version": len(snapshots) + 1, "versions": len(snapshots) + 1, "size": _size(path),
+        "id": "working", "filename": clean_name, "category": "Working_Copy", "type": "DOCX",
+        "version": version, "versions": version, "size": _size(path),
         "uploaded_at": datetime.fromtimestamp(os.path.getmtime(path)), "uploaded_by": "editor",
-        "figure_number": None, "status": {"kind": "info", "label": "Working copy"}, "folder": "manuscript",
-        "protected": True, "exists": True, "note": "Edited in the review pages; the original upload is never changed",
+        "figure_number": None, "status": {"kind": "ok", "label": "Working copy"}, "folder": "manuscript",
+        "protected": True, "exists": True, "note": "Edited manuscript copy",
     }
 
 
@@ -153,7 +169,29 @@ def folder_listing(db: Session, article: JournalArticle) -> dict:
                                       "note": f"Superseded {latest.category.replace('_', ' ')} (current is v{latest.version})"})
     wc = working_copy_row(article, fams.get(("Working_Copy", "working"), []))
     if wc:
+        manuscript_rows = listing["manuscript"]
+        listing["manuscript"] = []
+        for r in manuscript_rows:
+            if r["category"] == "Manuscript":
+                listing["backup"].append({**r, "folder": "backup", "note": f"Original upload (superseded by working copy v{wc['version']})"})
+            else:
+                listing["manuscript"].append(r)
         listing["manuscript"].insert(0, wc)
+
+    # Strictly filter Manuscript folder: ONLY active DOCX and active XHTML allowed!
+    # Move all reports, logs, json dumps, and auxiliary files to backup.
+    clean_manuscript = []
+    for r in listing["manuscript"]:
+        cat = r.get("category")
+        file_type = r.get("type", "").upper()
+        if cat in ("Working_Copy", "Manuscript") and file_type == "DOCX":
+            clean_manuscript.append(r)
+        elif cat == "XHTML" and file_type == "XHTML":
+            clean_manuscript.append(r)
+        else:
+            listing["backup"].append({**r, "folder": "backup", "note": "Auxiliary report / log"})
+    listing["manuscript"] = clean_manuscript
+
     for rows in listing.values():
         rows.sort(key=lambda r: (r["id"] != "working", r["category"] != "Manuscript", str(r["filename"]).lower()))
 
@@ -163,6 +201,7 @@ def folder_listing(db: Session, article: JournalArticle) -> dict:
         folders.append({**spec, "count": len(rows), "attention": any(r["status"]["kind"] in ("err", "warn") for r in rows),
                         "files": rows})
     return {"folders": folders, "delivery_readiness": delivery_readiness(db, article)}
+
 
 
 def history(db: Session, article: JournalArticle, file_id) -> List[dict]:

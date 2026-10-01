@@ -19,11 +19,13 @@ import { ArticleFilesPanel } from './journals/ArticleFilesPanel'
 import { JatsXmlEditor } from '@/features/journals/JatsXmlEditor'
 import { PreEditingSteps } from '@/features/journals/PreEditingSteps'
 
+import { useAuthStore } from '@/store/useAuthStore'
+
 const CHECKS: { key: JournalCheckModule; name: string; stage: number }[] = [
   { key: 'structuring', name: 'Structuring', stage: STAGE.PRE_EDITING },
   { key: 'references', name: 'Reference validation', stage: STAGE.PRE_EDITING },
-  { key: 'ia_rules', name: 'IA rules', stage: STAGE.PRE_EDITING },
-  { key: 'technical', name: 'Technical checks', stage: STAGE.PRE_EDITING },
+  { key: 'ia_rules', name: 'Mechanical rules', stage: STAGE.PRE_EDITING },
+  { key: 'technical', name: 'Citation checks', stage: STAGE.PRE_EDITING },
   { key: 'language', name: 'Language editing', stage: STAGE.LANGUAGE },
   { key: 'xml', name: 'XML & DTD validation', stage: STAGE.XML },
   { key: 'indesign_qc', name: 'InDesign final QC', stage: STAGE.INDESIGN_QC },
@@ -285,8 +287,8 @@ export function JournalArticleEditorPage() {
   }
 
   const [refReport, setRefReport] = useState<number | null>(null)
-  // Main view: the WYSIWYG XHTML editor, or (once converted) the JATS XML source editor.
-  const [view, setView] = useState<'xhtml' | 'xml'>(hash === '#xml' ? 'xml' : 'xhtml')
+  // Main view: the WYSIWYG XHTML editor, JATS XML source editor, or Layout HTML preview.
+  const [view, setView] = useState<'xhtml' | 'xml' | 'layout'>(hash === '#xml' ? 'xml' : hash === '#layout' ? 'layout' : 'xhtml')
   const [jatsVersion, setJatsVersion] = useState(0)
   const stageAction = async (kind: 'jats' | 'indesign' | 'indesign-status' | 'references' | 'references-status') => {
     setStageBusy(true)
@@ -357,7 +359,7 @@ export function JournalArticleEditorPage() {
       <div className="flex gap-1 p-2 border-b border-border">
         {(['checks', 'styles', 'files'] as const).map(t => (
           <button key={t} type="button" onClick={() => setSideTab(t)} aria-pressed={sideTab === t}
-                  className={cn('px-3 py-1 rounded-full text-xs font-semibold capitalize', sideTab === t ? 'bg-primary text-white' : 'text-muted hover:text-text')}>
+            className={cn('px-3 py-1 rounded-full text-xs font-semibold capitalize', sideTab === t ? 'bg-primary text-white' : 'text-muted hover:text-text')}>
             {t}
           </button>
         ))}
@@ -369,14 +371,14 @@ export function JournalArticleEditorPage() {
       ) : sideTab === 'styles' ? (
         <div className="flex-1 min-h-0">
           <StylesPanel styles={styles} editorRef={editorRef}
-                       onAddStyle={s => setCustomStyles(prev => prev.includes(s) ? prev : [...prev, s])} />
+            onAddStyle={s => setCustomStyles(prev => prev.includes(s) ? prev : [...prev, s])} />
         </div>
       ) : (
         <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
           <div className="grid grid-cols-3 gap-2">
             {(['error', 'warning', 'info'] as const).map(s => (
               <button key={s} type="button" onClick={() => setSeverityFilter(severityFilter === s ? 'all' : s)}
-                      className={cn('rounded-lg border p-2 text-left', severityFilter === s ? 'border-primary' : 'border-border')}>
+                className={cn('rounded-lg border p-2 text-left', severityFilter === s ? 'border-primary' : 'border-border')}>
                 <div className={cn('text-xl font-semibold tabular-nums', s === 'error' ? 'text-danger' : s === 'warning' ? 'text-amber-600' : 'text-primary')}>
                   {counts.bySeverity[s]}
                 </div>
@@ -389,7 +391,7 @@ export function JournalArticleEditorPage() {
             const run = ws.check_runs[c.key]
             return (
               <button key={c.key} type="button" onClick={() => setModuleFilter(moduleFilter === c.key ? 'all' : c.key)}
-                      className={cn('w-full text-left rounded-md border px-3 py-2 text-xs', moduleFilter === c.key ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40')}>
+                className={cn('w-full text-left rounded-md border px-3 py-2 text-xs', moduleFilter === c.key ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40')}>
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-medium text-text text-sm">{c.name}</span>
                   <span className="flex gap-1">
@@ -421,8 +423,8 @@ export function JournalArticleEditorPage() {
       {/* Header */}
       <header className="bg-card border-b border-border px-4 py-2.5 flex flex-wrap items-center gap-3">
         <Link to={`/journal-production/articles/${id}`}
-              className="size-8 rounded-full border border-border flex items-center justify-center text-muted hover:text-text"
-              aria-label="Back to the article files" title="Back to the article files">
+          className="size-8 rounded-full border border-border flex items-center justify-center text-muted hover:text-text"
+          aria-label="Back to the article files" title="Back to the article files">
           <ArrowLeft className="size-4" />
         </Link>
         <div className="min-w-0 mr-auto">
@@ -464,8 +466,8 @@ export function JournalArticleEditorPage() {
         )}
         {!done && (
           <Button size="sm" onClick={advance} isLoading={advancing}
-                  disabled={stageNo === STAGE.PRE_EDITING && ws.pre_editing.applies && !ws.pre_editing.all_finished}
-                  title={stageNo === STAGE.PRE_EDITING && !ws.pre_editing.all_finished ? 'Finish all 4 Pre-Editing steps first' : undefined}>
+            disabled={stageNo === STAGE.PRE_EDITING && ws.pre_editing.applies && !ws.pre_editing.all_finished}
+            title={stageNo === STAGE.PRE_EDITING && !ws.pre_editing.all_finished ? 'Finish all 4 Pre-Editing steps first' : undefined}>
             Complete {shortStage(article.current_stage)}
           </Button>
         )}
@@ -478,8 +480,8 @@ export function JournalArticleEditorPage() {
           const current = !isDone && s.stage_name === article.current_stage
           return (
             <li key={s.stage_number} aria-current={current ? 'step' : undefined}
-                className={cn('flex items-center gap-1.5 text-xs px-3 py-1 rounded-md whitespace-nowrap',
-                  current ? 'bg-amber-500/10 text-amber-700 font-semibold' : isDone ? 'text-green-600' : 'text-muted')}>
+              className={cn('flex items-center gap-1.5 text-xs px-3 py-1 rounded-md whitespace-nowrap',
+                current ? 'bg-amber-500/10 text-amber-700 font-semibold' : isDone ? 'text-green-600' : 'text-muted')}>
               <span className={cn('size-4 rounded-full flex items-center justify-center text-[10px]',
                 isDone ? 'bg-green-600 text-white' : current ? 'bg-amber-500 text-white' : 'bg-border')}>
                 {isDone ? <Check className="size-2.5" /> : s.stage_number}
@@ -514,8 +516,8 @@ export function JournalArticleEditorPage() {
         <aside className="w-[340px] shrink-0 bg-card border-r border-border flex flex-col min-h-0 overflow-y-auto">
           {stageNo === STAGE.PRE_EDITING && ws.pre_editing.applies && selectedStep && (
             <PreEditingSteps state={ws.pre_editing} selected={selectedStep} busy={stepBusy}
-                             onSelect={key => { setSelectedStep(key); setModuleFilter(ws.pre_editing.steps.find(s => s.key === key)?.module ?? 'all') }}
-                             onRun={runStep} onFinish={finishStep} onReopen={reopenStep} />
+              onSelect={key => { setSelectedStep(key); setModuleFilter(ws.pre_editing.steps.find(s => s.key === key)?.module ?? 'all') }}
+              onRun={runStep} onFinish={finishStep} onReopen={reopenStep} />
           )}
           <div className="p-3 space-y-2 border-b border-border">
             <div className="flex items-center gap-2">
@@ -526,16 +528,16 @@ export function JournalArticleEditorPage() {
               <span className="sr-only">Search findings</span>
               <Search className="size-3.5 text-muted absolute left-2.5 top-1/2 -translate-y-1/2" />
               <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search findings or rules…"
-                     className="h-8 w-full rounded-md border border-border bg-background pl-8 pr-2 text-xs outline-none focus:ring-2 focus:ring-primary/30" />
+                className="h-8 w-full rounded-md border border-border bg-background pl-8 pr-2 text-xs outline-none focus:ring-2 focus:ring-primary/30" />
             </label>
             <div className="flex flex-wrap gap-1">
               <button type="button" onClick={() => setModuleFilter('all')}
-                      className={cn('px-2 py-0.5 rounded text-[11px] font-semibold', moduleFilter === 'all' ? 'bg-text text-card' : 'bg-surface text-muted')}>
+                className={cn('px-2 py-0.5 rounded text-[11px] font-semibold', moduleFilter === 'all' ? 'bg-text text-card' : 'bg-surface text-muted')}>
                 ALL ({issues.length})
               </button>
               {modulesWithIssues.map(c => (
                 <button key={c.key} type="button" onClick={() => setModuleFilter(c.key)}
-                        className={cn('px-2 py-0.5 rounded text-[11px] font-semibold uppercase', moduleFilter === c.key ? 'bg-text text-card' : 'bg-surface text-muted')}>
+                  className={cn('px-2 py-0.5 rounded text-[11px] font-semibold uppercase', moduleFilter === c.key ? 'bg-text text-card' : 'bg-surface text-muted')}>
                   {c.name.split(' ')[0]} ({counts.byModule[c.key]})
                 </button>
               ))}
@@ -543,7 +545,7 @@ export function JournalArticleEditorPage() {
             <div className="grid grid-cols-4 rounded-md bg-surface p-0.5 text-[11px]">
               {(['all', 'error', 'warning', 'info'] as const).map(s => (
                 <button key={s} type="button" onClick={() => setSeverityFilter(s)}
-                        className={cn('py-1 rounded capitalize', severityFilter === s ? 'bg-card shadow-sm font-semibold text-text' : 'text-muted')}>
+                  className={cn('py-1 rounded capitalize', severityFilter === s ? 'bg-card shadow-sm font-semibold text-text' : 'text-muted')}>
                   {s === 'info' ? 'Hints' : s === 'all' ? 'All' : `${s}s`}
                 </button>
               ))}
@@ -561,10 +563,10 @@ export function JournalArticleEditorPage() {
               const canApply = i.suggestion?.type === 'replace' && occIndexByIssue.has(i.id)
               return (
                 <article key={i.id} id={`finding-${i.id}`}
-                         className={cn('rounded-lg border bg-card p-3 space-y-1.5 border-l-4 text-xs cursor-pointer',
-                           i.severity === 'error' ? 'border-l-red-500' : i.severity === 'warning' ? 'border-l-amber-500' : 'border-l-blue-500',
-                           selected ? 'ring-2 ring-primary/40 border-primary' : 'border-border')}
-                         onClick={() => goTo(i)}>
+                  className={cn('rounded-lg border bg-card p-3 space-y-1.5 border-l-4 text-xs cursor-pointer',
+                    i.severity === 'error' ? 'border-l-red-500' : i.severity === 'warning' ? 'border-l-amber-500' : 'border-l-blue-500',
+                    selected ? 'ring-2 ring-primary/40 border-primary' : 'border-border')}
+                  onClick={() => goTo(i)}>
                   <div className="flex items-center gap-2">
                     <span className="font-bold uppercase text-[10px] tracking-wide text-text">{CHECK_NAME[i.module] ?? i.module}</span>
                     <span className="font-mono text-muted">{i.rule_id}</span>
@@ -611,11 +613,11 @@ export function JournalArticleEditorPage() {
         <main className="flex-1 min-w-0 min-h-0 flex flex-col">
           {ws.jats && (
             <div className="flex items-center gap-1 bg-slate-900 px-3 pt-1.5 shrink-0" role="tablist" aria-label="Article view">
-              {([['xhtml', 'WYSIWYG XHTML'], ['xml', 'JATS XML Source']] as const).map(([key, label]) => (
-                <button key={key} type="button" role="tab" aria-selected={xmlView === (key === 'xml')}
-                        onClick={() => setView(key)}
-                        className={cn('px-4 py-1.5 text-xs font-semibold rounded-t-md border-b-2',
-                          xmlView === (key === 'xml') ? 'bg-white text-slate-900 border-blue-500' : 'text-slate-300 border-transparent hover:text-white')}>
+              {([['xhtml', 'WYSIWYG XHTML'], ['xml', 'JATS XML Source'], ['layout', 'Layout Preview (HTML)']] as const).map(([key, label]) => (
+                <button key={key} type="button" role="tab" aria-selected={view === key}
+                  onClick={() => setView(key)}
+                  className={cn('px-4 py-1.5 text-xs font-semibold rounded-t-md border-b-2',
+                    view === key ? 'bg-white text-slate-900 border-blue-500' : 'text-slate-300 border-transparent hover:text-white')}>
                   {label}{key === 'xml' ? ` · v${ws.jats!.version}` : ''}
                 </button>
               ))}
@@ -624,12 +626,20 @@ export function JournalArticleEditorPage() {
               )}
             </div>
           )}
-          {xmlView ? (
+          {view === 'layout' && ws.jats ? (
+            <iframe
+              title="Layout Preview HTML"
+              src={journalsApi.layoutHtmlUrl(id)}
+              className="w-full border-0 bg-white"
+              style={{ height: editorHeight }}
+            />
+          ) : view === 'xml' && ws.jats ? (
             <JatsXmlEditor articleId={id} version={jatsVersion} height={editorHeight} onSaved={load} />
           ) : ws.xhtml ? (
             <WysiwygEditor
               ref={editorRef}
               key={`${id}-${ws.xhtml.file.version}`}
+              fileId={String(ws.xhtml.file.id)}
               initialContent={ws.xhtml.content}
               onSave={saveEdits}
               isSaving={saving}

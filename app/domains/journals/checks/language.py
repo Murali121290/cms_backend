@@ -11,7 +11,7 @@ import re
 from typing import Dict, List
 
 from app.domains.journals.checks.base import CheckResult, IssueDraft, JournalCheck, register
-from app.domains.journals.manuscript import load_blocks, resolve_manuscript_path, snippet
+from app.domains.journals.manuscript import heading_level, load_blocks, resolve_manuscript_path, snippet
 from app.domains.journals.models import JournalGrammarsheet
 
 PROFILE_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "processing", "language_editing", "config", "profiles")
@@ -102,7 +102,34 @@ class LanguageCheck(JournalCheck):
                 in_refs = True
             if in_refs or b.category in SKIP_CATEGORIES:
                 continue
+            # Detect Headings (Head1 to Head7 / Heading 1..7) and Captions (FGC, FigureLegend, TT, TableCaption, Caption, etc.)
+            is_heading = (
+                heading_level(b.category) is not None
+                or bool(re.match(r"^(Head\d|Heading\s*\d)$", b.category or "", re.I))
+                or bool(re.match(r"^(Head\d|Heading\s*\d)$", b.style or "", re.I))
+            )
+            is_caption = (
+                (b.category or "") in ("FGC", "FigureLegend", "TT", "TableCaption", "Figure Caption", "Table Title", "Caption", "TB-CAP", "FIG-CAP")
+                or (b.style or "") in ("FGC", "ArticleTitle", "ArticleType","FigureLegend", "TT", "TableCaption", "Figure Caption", "Table Title", "Caption", "TB-CAP", "FIG-CAP")
+            )
+
             for f in analyze(b.text, rules, dictionary, sentences(b.text)):
+                msg_lower = (f.message or "").lower()
+
+                # Rule 1: Ignore "Sentence may be missing terminal punctuation" on Headings (Head1-Head7) and Captions (FGC, FigureLegend, TT, TableCaption)
+                if (is_heading or is_caption) and ("missing terminal punctuation" in msg_lower or f.rule_id == "terminal_punctuation"):
+                    continue
+
+                # Rule 2: Ignore "Sentence should start with a capital letter" and "Add a space after punctuation" on URLs and Initials
+                if "start with a capital letter" in msg_lower or f.rule_id == "start_capital" or "space after punctuation" in msg_lower or f.rule_id == "GP003":
+                    ctx = b.text[max(0, f.start - 15):min(len(b.text), f.end + 25)]
+                    # Check for URL / DOI / Email
+                    is_url = bool(re.search(r"https?://|www\.|doi\.org|10\.\d{4,9}/|[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}|://|doi\:", ctx, re.I))
+                    # Check for Initials / Abbreviations (e.g. J.K., A.B., Smith, J., e.g., i.e., et al., vol., p., etc.)
+                    is_initials = bool(re.search(r"\b[A-Z]\.(?:[A-Z]\.)*|\b[A-Z]\.,|\b(?:e\.g\.|i\.e\.|vs\.|et al\.|vol\.|no\.|p\.|pp\.|ref\.|fig\.|eq\.|dr\.|prof\.|mr\.|mrs\.|ms\.)\b", ctx, re.I))
+                    if is_url or is_initials:
+                        continue
+
                 suggestion = f.suggestion
                 if f.original[:1].isupper() and suggestion[:1].islower():
                     suggestion = suggestion[:1].upper() + suggestion[1:]  # "In order to" -> "To", not "to"

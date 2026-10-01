@@ -28,9 +28,9 @@ STEPS: List[Dict[str, str]] = [
      "description": "Paragraph styles, front matter and headings"},
     {"key": "references", "label": "Reference validation", "module": "references",
      "description": "bib_* and cite_bib styles, citations against the reference list, DOIs"},
-    {"key": "ia_rules", "label": "IA rules", "module": "ia_rules",
-     "description": "The IA rules selected in Journal settings"},
-    {"key": "technical", "label": "Technical checks", "module": "technical",
+    {"key": "ia_rules", "label": "Mechanical rules", "module": "ia_rules",
+     "description": "The Mechanical & IA rules selected in Journal settings"},
+    {"key": "technical", "label": "Citation checks", "module": "technical",
      "description": "Figure and table callouts, equations, keywords"},
 ]
 STEP_KEYS = [s["key"] for s in STEPS]
@@ -184,17 +184,67 @@ def _structure(db: Session, article: JournalArticle, restructure: bool) -> Dict[
 
 
 def _style_references(db: Session, article: JournalArticle) -> Dict[str, Any]:
-    """Local reference structuring on the working copy (bib_* on the list, cite_bib on citations)."""
+    """Run reference structuring, validation and Gemini AI conversion via ReferencesEngine."""
+    import shutil
+    import time
     from app.domains.journals.checks.structuring import active_stylesheet
-    from app.domains.journals.production import apply_local_reference_styles, reference_options
+    from app.domains.journals.files import article_dir, save_version
+    from app.domains.journals.manuscript import resolve_manuscript_path
+    from app.domains.journals.production import apply_local_reference_styles, reference_options, snapshot_working_copy
+    from app.processing.references_engine import ReferencesEngine
 
-    opts = reference_options(db, article)
-    if not (opts["engine"] == "local" and opts["run_structuring"] and article.edited_docx_path
-            and os.path.exists(article.edited_docx_path)):
-        return {"reference_styling": None}
+    source = article.edited_docx_path if article.edited_docx_path and os.path.exists(article.edited_docx_path) \
+        else resolve_manuscript_path(db, article)
+    if not source or not os.path.exists(source):
+        raise StepError(400, "No working manuscript DOCX is available for reference processing.")
+
     sheet = active_stylesheet(db, article)
     rules = ((sheet.style_rules if sheet else None) or {}).get("references") or {}
-    return {"reference_styling": apply_local_reference_styles(article.edited_docx_path, rules.get("citation_form", "auto"))}
+    opts = reference_options(db, article)
+
+    # Configure exact PPH reference payload parameters
+    opts["report_only"] = False
+    opts["run_num_validation"] = True
+    opts["run_apa_validation"] = False
+    opts["run_conversion"] = True
+    opts["run_structuring"] = False
+    opts["target_style"] = rules.get("convert_to") or "Auto"
+    citation_form = rules.get("citation_form", "brackets")
+    opts["citation_format"] = "brackets" if citation_form in ("brackets", "auto", "") else citation_form
+
+    run_dir = article_dir(article, "references", time.strftime("run_%Y%m%d_%H%M%S"))
+    os.makedirs(run_dir, exist_ok=True)
+    work = os.path.join(run_dir, os.path.basename(source))
+    shutil.copyfile(source, work)
+
+    opts.pop("engine", None)
+    styling = None
+    outputs: List[str] = []
+    try:
+        # Call process_document to submit to PPH (which uses PPH if PPH_ENABLED=true or falls back gracefully)
+        outputs = ReferencesEngine().process_document(work, **opts)
+    except Exception as e:
+        logger.warning("ReferencesEngine failed for article %s: %s", article.id, e)
+        outputs = ReferencesEngine()._run_local_fallback(work, f"fallback after error: {e}")
+
+    processed = next((p for p in outputs if p.lower().endswith(".docx") and os.path.exists(p)), None)
+    saved = []
+    for p in outputs:
+        if p == processed or not os.path.exists(p):
+            continue
+        with open(p, "rb") as fh:
+            saved.append(save_version(db, article, "Reference_Report", os.path.basename(p), fh.read(), "references").filename)
+
+    if processed:
+        styling = apply_local_reference_styles(processed, citation_form)
+        snapshot_working_copy(db, article, "before step 2 reference validation")
+        if not article.edited_docx_path:
+            base = os.path.splitext(os.path.basename(source))[0]
+            article.edited_docx_path = os.path.join(article_dir(article, "edited"), f"{base}_structured.docx")
+        shutil.copyfile(processed, article.edited_docx_path)
+        db.commit()
+
+    return {"reference_styling": styling, "saved_reports": saved}
 
 
 def run_step(db: Session, article: JournalArticle, key: str, user_id: Optional[int] = None,
@@ -235,9 +285,10 @@ def run_step(db: Session, article: JournalArticle, key: str, user_id: Optional[i
     db.refresh(row)
     state = _state(row)
     errors = _counts(db, article.id, spec["module"])["error"]
-    # Re-running a finished step keeps it finished while it stays clean.
-    status = "finished" if was_finished and errors == 0 else "in_progress"
-    state[key] = {**state.get(key, {}), "status": status, "ran_at": _now(), "error": None}
+    # When a step runs with 0 open errors, mark it finished right away.
+    status = "finished" if errors == 0 else "in_progress"
+    finished_at = state.get(key, {}).get("finished_at") or _now() if status == "finished" else None
+    state[key] = {**state.get(key, {}), "status": status, "ran_at": _now(), "finished_at": finished_at, "error": None}
     _save(db, row, state)
     return out
 

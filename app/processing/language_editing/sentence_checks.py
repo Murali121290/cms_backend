@@ -55,16 +55,24 @@ def terminal_punctuation(sent: str, off: int, rule: Rule, params: dict[str, Any]
     return []
 
 
+URL_PAT = re.compile(r"https?://|www\.|doi\.org|10\.\d{4,9}/|[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}", re.I)
+ABBREV_PAT = re.compile(r"^(?:e\.g\.|i\.e\.|vs\.|et al\.|vol\.|no\.|p\.|pp\.|ref\.|fig\.|eq\.|dr\.|prof\.|mr\.|mrs\.|ms\.|v\d|i\d|\d)", re.I)
+INITIALS_PAT = re.compile(r"\b[A-Z]\.(?:[A-Z]\.)*|\b[A-Z]\.,")
+
+
 @register("start_capital")
 def start_capital(sent: str, off: int, rule: Rule, params: dict[str, Any]) -> list[Finding]:
     stripped = sent.lstrip()
     if not stripped:
         return []
-    # Guard against display quotes ("...", “...”, '...', ‘...’) or tags (<...>) at sentence start
-    if stripped[0] in ('"', "'", '“', '‘', '”', '’', '<'):
+    # Guard against display quotes, tags, numbers, URLs, initials, abbreviations at sentence start
+    if stripped[0] in ('"', "'", '“', '‘', '”', '’', '<') or URL_PAT.search(stripped[:35]) or ABBREV_PAT.search(stripped[:15]):
         return []
     m = re.search(r"[A-Za-z]", sent)
     if m and sent[m.start()].islower():
+        ctx = sent[max(0, m.start() - 10):min(len(sent), m.start() + 25)]
+        if URL_PAT.search(ctx) or "://" in ctx or "@" in ctx or "doi" in ctx.lower() or INITIALS_PAT.search(ctx):
+            return []
         i = off + m.start()
         orig_char = sent[m.start()]
         return [Finding(

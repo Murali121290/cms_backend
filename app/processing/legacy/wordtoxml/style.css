@@ -280,3 +280,58 @@ a:hover {
     color: #3730a3;
     text-decoration: underline;
 }
+
+/* AFFILIATIONS & INLINE STYLES */
+.aff-info {
+    font-size: 13px;
+    color: #64748b;
+    margin-top: 6px;
+    text-align: center;
+}
+
+.abstract {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 20px 24px;
+    margin: 30px 0;
+}
+.abstract-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #1e293b;
+    margin-bottom: 10px;
+}
+
+.keywords {
+    margin: 20px 0;
+    font-size: 14px;
+    color: #475569;
+}
+.keyword-title {
+    font-weight: 700;
+    color: #1e293b;
+    display: inline;
+    margin-right: 8px;
+}
+.kwd-list {
+    display: inline;
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+.kwd-list li {
+    display: inline-block;
+    background: #f1f5f9;
+    padding: 2px 10px;
+    border-radius: 12px;
+    margin-right: 6px;
+    margin-bottom: 4px;
+    font-size: 13px;
+    color: #334155;
+}
+
+.bold, [content-type="bold"] { font-weight: bold; }
+.italic, [content-type="italic"] { font-style: italic; }
+sup { font-size: 0.75em; vertical-align: super; line-height: 0; }
+sub { font-size: 0.75em; vertical-align: sub; line-height: 0; }

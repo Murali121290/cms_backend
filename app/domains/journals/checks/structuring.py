@@ -10,7 +10,7 @@ from app.domains.journals.models import JournalStylesheet
 MAPPED_CHAR_STYLES = {
     "Default Paragraph Font", "Emphasis", "Strong", "Hyperlink", "FollowedHyperlink",
     "Subtle Emphasis", "Intense Emphasis", "Footnote Reference", "Endnote Reference",
-    "Comment Reference", "annotation reference", "Placeholder Text",
+    "Comment Reference", "annotation reference", "Placeholder Text", "bold", "italic", "subscript", "superscript", "singleunderline", "bolditalics"
 }
 HEADING_PATTERN = re.compile(r"^(\d+(?:\.\d+)*)\.?\s+[A-Z]")
 TABLE_CAPTION = re.compile(r"^Table\s+\d+", re.I)

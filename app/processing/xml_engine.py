@@ -190,7 +190,7 @@ class XMLEngine:
             print(f"Failed to generate layout HTML file: {layout_err}")
 
     @staticmethod
-    def generate_layout_html(db, xml_file_path: str, project, chapter) -> str:
+    def generate_layout_html(db, xml_file_path: str, project=None, chapter=None) -> str:
         """
         Transforms the given XML file into Layout HTML using style.xsl,
         injects layout CSS styling and hides query comment blocks.
@@ -232,21 +232,22 @@ class XMLEngine:
                 with open(css_path, "r", encoding="utf-8") as css_f:
                     css_content = css_f.read()
                 
-                # Check current chapter first
-                design_css_path = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "Misc", "layout_design.css")
-                if not os.path.exists(design_css_path):
-                    # Fallback: look for the Design template chapter in the same project
-                    design_chapter = db.query(ChapterInfo).filter(
-                        ChapterInfo.project == project.code,
-                        ChapterInfo.chapters.ilike("Design%")
-                    ).first()
-                    if design_chapter:
-                        design_css_path = os.path.join(UPLOAD_DIR, project.code, design_chapter.chapters, "Misc", "layout_design.css")
-                
-                if os.path.exists(design_css_path):
-                    with open(design_css_path, "r", encoding="utf-8") as design_css_f:
-                        design_css_content = design_css_f.read()
-                    css_content += f"\n\n/* Custom Design Layout Styles */\n{design_css_content}"
+                if project and chapter:
+                    # Check current chapter first
+                    design_css_path = os.path.join(UPLOAD_DIR, project.code, chapter.chapters, "Misc", "layout_design.css")
+                    if not os.path.exists(design_css_path):
+                        # Fallback: look for the Design template chapter in the same project
+                        design_chapter = db.query(ChapterInfo).filter(
+                            ChapterInfo.project == project.code,
+                            ChapterInfo.chapters.ilike("Design%")
+                        ).first()
+                        if design_chapter:
+                            design_css_path = os.path.join(UPLOAD_DIR, project.code, design_chapter.chapters, "Misc", "layout_design.css")
+                    
+                    if os.path.exists(design_css_path):
+                        with open(design_css_path, "r", encoding="utf-8") as design_css_f:
+                            design_css_content = design_css_f.read()
+                        css_content += f"\n\n/* Custom Design Layout Styles */\n{design_css_content}"
                 
                 css_style_tag = f"<style>\n{css_content}\n</style>"
             except Exception:

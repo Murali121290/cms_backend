@@ -34,14 +34,23 @@ function Counts({ step }: { step: PreEditingStep }) {
   )
 }
 
+const STEP_LABELS: Record<string, string> = {
+  structuring: 'Structuring',
+  references: 'Reference validation',
+  ia_rules: 'Mechanical rules',
+  technical: 'Citation checks',
+}
+
 function subtitle(step: PreEditingStep, busy: boolean) {
   if (busy || step.status === 'running') return step.key === 'structuring' && !step.ran ? 'Structuring the manuscript…' : 'Running…'
   if (step.status === 'locked') return step.was_finished ? 'Finished before; locked until the step above is finished again' : step.blocked_reason ?? 'Locked'
   if (step.status === 'failed') return step.error ?? 'The last run failed'
+  if (step.key === 'ia_rules') return 'The Mechanical & IA rules selected in Journal settings'
+  if (step.key === 'technical') return 'Figure and table callouts, equations, keywords'
   return step.description
 }
 
-/** Pre-Editing as four gated steps (Structuring → References → IA rules → Technical), finished one by one. */
+/** Pre-Editing as four gated steps (Structuring → References → Mechanical rules → Citation checks), finished one by one. */
 export function PreEditingSteps({ state, selected, busy, onSelect, onRun, onFinish, onReopen }: Props) {
   const done = state.steps.filter(s => s.status === 'finished').length
   const step = state.steps.find(s => s.key === selected) ?? state.steps[0]
@@ -65,7 +74,7 @@ export function PreEditingSteps({ state, selected, busy, onSelect, onRun, onFini
                 <StepIcon step={s} busy={busy === s.key} />
                 <span className="min-w-0 flex-1">
                   <span className="flex flex-wrap items-center gap-1.5 text-[13px] font-semibold">
-                    {s.number}. {s.label} <Counts step={s} />
+                    {s.number}. {STEP_LABELS[s.key] ?? s.label} <Counts step={s} />
                   </span>
                   <span className="block text-[11px] text-muted leading-snug">{subtitle(s, busy === s.key)}</span>
                 </span>

@@ -896,6 +896,27 @@ def get_article_jats(article_id: int, db: Session = Depends(get_db)):
             "findings": _xml_findings(db, article_id, content)}
 
 
+@router.get("/articles/{article_id}/xml/layout-html")
+def get_article_layout_html(article_id: int, db: Session = Depends(get_db)):
+    """Generate layout HTML preview from the latest JATS XML of an article."""
+    from fastapi.responses import HTMLResponse
+    from app.processing.xml_engine import XMLEngine
+    article = _get_article(db, article_id)
+    row = latest_file(db, article_id, "JATS_XML")
+    if not row or not os.path.exists(row.path):
+        raise HTTPException(status_code=404, detail="No JATS XML exists for this article yet")
+    try:
+        html_str = XMLEngine.generate_layout_html(db, row.path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate layout HTML: {str(e)}")
+
+    return HTMLResponse(
+        content=html_str,
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"}
+    )
+
+
+
 class XmlContentBody(BaseModel):
     content: str
 
