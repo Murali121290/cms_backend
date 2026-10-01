@@ -31,7 +31,7 @@ def validate_xml(xml_path: str, format: str) -> List[Dict]:
         import os
         base_dir = os.path.dirname(__file__)
         if format.upper() == "BITS":
-            dtd_path = os.path.join(base_dir, "..", "..", "..", "processing", "legacy", "wordtoxml", "BITS-Book-1.0-DTD", "BITS-book1.dtd")
+            dtd_path = os.path.join(base_dir, "..", "dtd", "BITS-book2-2", "BITS-book2-2.dtd")
         else:
             dtd_path = os.path.join(base_dir, "..", "dtd", "JATS-Archiving-1-4-MathML3-DTD", "JATS-archivearticle1-4-mathml3.dtd")
             

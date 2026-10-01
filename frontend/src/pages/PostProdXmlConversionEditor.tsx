@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Play, Save, CheckCircle, Code, FileText, Download } from 'lucide-react'
+import { ArrowLeft, Play, Save, CheckCircle, Code, FileText, Download, ChevronDown } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { Button } from '@/components/ui/Button'
 import { toast } from '@/store/useToastStore'
@@ -18,6 +18,9 @@ export function PostProdXmlConversionEditor() {
   const [isS4cConverting, setIsS4cConverting] = useState(false)
   const [isTargetConverting, setIsTargetConverting] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [targetFormat, setTargetFormat] = useState('JATS')
+  const [isFormatDropdownOpen, setIsFormatDropdownOpen] = useState(false)
+  const [xmlType, setXmlType] = useState<'s4c' | 'final' | null>(null)
 
   useDocumentTitle(`XML Editor - Project ${projectId || ''}`)
 
@@ -38,12 +41,20 @@ export function PostProdXmlConversionEditor() {
           const xmlRes = await api.get(`/post-prod/xml-conversion/projects/${projectId}/xml`)
           if (xmlRes.data?.xml) {
             setXmlContent(xmlRes.data.xml)
-          }
-          const htmlRes = await api.get(`/post-prod/xml-conversion/projects/${projectId}/html`)
-          if (htmlRes.data?.html) {
-            setHtmlContent(htmlRes.data.html)
-            if (htmlRes.data.html.indexOf('No final XML') === -1) {
-              setViewMode('html')
+            if (xmlRes.data.type) setXmlType(xmlRes.data.type)
+            
+            if (xmlRes.data.type === 's4c') {
+              const s4cHtmlRes = await api.get(`/post-prod/xml-conversion/projects/${projectId}/s4c-html`)
+              if (s4cHtmlRes.data?.html && s4cHtmlRes.data.html.indexOf('No S4C XML') === -1) {
+                setHtmlContent(s4cHtmlRes.data.html)
+                setViewMode('html')
+              }
+            } else {
+              const htmlRes = await api.get(`/post-prod/xml-conversion/projects/${projectId}/html`)
+              if (htmlRes.data?.html && htmlRes.data.html.indexOf('No final XML') === -1) {
+                setHtmlContent(htmlRes.data.html)
+                setViewMode('html')
+              }
             }
           }
         } catch (err) {
@@ -64,6 +75,14 @@ export function PostProdXmlConversionEditor() {
     try {
       const res = await api.post(`/post-prod/xml-conversion/projects/${projectId}/s4c-convert`)
       setXmlContent(res.data.xml)
+      setXmlType('s4c')
+      
+      const htmlRes = await api.get(`/post-prod/xml-conversion/projects/${projectId}/s4c-html`)
+      if (htmlRes.data?.html) {
+        setHtmlContent(htmlRes.data.html)
+        setViewMode('html')
+      }
+      
       toast.success('Converted to S4C XML successfully')
     } catch (err) {
       console.error(err)
@@ -80,8 +99,9 @@ export function PostProdXmlConversionEditor() {
     }
     setIsTargetConverting(true)
     try {
-      const res = await api.post(`/post-prod/xml-conversion/projects/${projectId}/target-convert`)
+      const res = await api.post(`/post-prod/xml-conversion/projects/${projectId}/target-convert?format=${targetFormat}`)
       setXmlContent(res.data.xml)
+      setXmlType('final')
 
       const htmlRes = await api.get(`/post-prod/xml-conversion/projects/${projectId}/html`)
       if (htmlRes.data?.html) {
@@ -100,10 +120,15 @@ export function PostProdXmlConversionEditor() {
   const handleSaveXml = async () => {
     setIsSaving(true)
     try {
-      await api.post(`/post-prod/xml-conversion/projects/${projectId}/xml`, { xml: xmlContent })
+      await api.post(`/post-prod/xml-conversion/projects/${projectId}/xml`, { xml: xmlContent, type: xmlType })
 
       // Update HTML preview if possible
-      const htmlRes = await api.get(`/post-prod/xml-conversion/projects/${projectId}/html`)
+      let htmlRes;
+      if (xmlType === 's4c') {
+        htmlRes = await api.get(`/post-prod/xml-conversion/projects/${projectId}/s4c-html`)
+      } else {
+        htmlRes = await api.get(`/post-prod/xml-conversion/projects/${projectId}/html`)
+      }
       if (htmlRes.data?.html) {
         setHtmlContent(htmlRes.data.html)
       }
@@ -219,19 +244,57 @@ export function PostProdXmlConversionEditor() {
             </Button>
           )}
 
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={handleTargetConversion}
-            disabled={isTargetConverting || !xmlContent}
-            className="text-xs h-8"
-          >
-            {isTargetConverting ? (
-              <span className="flex items-center gap-1.5"><div className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Converting...</span>
-            ) : (
-              <span className="flex items-center gap-1.5"><Play size={14} /> Convert Target XML</span>
+          <div className="relative flex items-center bg-white dark:bg-[#202020] border border-gray-200 dark:border-white/10 rounded-md overflow-visible">
+            <button
+              onClick={() => !isTargetConverting && xmlContent && setIsFormatDropdownOpen(!isFormatDropdownOpen)}
+              disabled={isTargetConverting || !xmlContent}
+              className="px-3 h-8 text-xs font-medium flex items-center justify-between gap-2 hover:bg-gray-50 dark:hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed min-w-[70px] transition-colors"
+            >
+              <span>{targetFormat}</span>
+              <ChevronDown size={14} className={`text-muted transition-transform ${isFormatDropdownOpen ? 'rotate-180' : ''}`} />
+            </button>
+            
+            {isFormatDropdownOpen && (
+              <>
+                <div 
+                  className="fixed inset-0 z-40" 
+                  onClick={() => setIsFormatDropdownOpen(false)}
+                />
+                <div className="absolute top-full left-0 mt-1 w-[120px] bg-white dark:bg-[#202020] border border-gray-200 dark:border-white/10 rounded-md shadow-lg z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+                  {['JATS', 'BITS'].map((fmt) => (
+                    <button
+                      key={fmt}
+                      onClick={() => {
+                        setTargetFormat(fmt)
+                        setIsFormatDropdownOpen(false)
+                      }}
+                      className={`w-full px-3 py-2 text-left text-xs transition-colors hover:bg-gray-100 dark:hover:bg-white/10 ${targetFormat === fmt ? 'font-semibold text-primary' : 'text-text dark:text-gray-300'}`}
+                    >
+                      {fmt}
+                    </button>
+                  ))}
+                </div>
+              </>
             )}
-          </Button>
+            
+            <div className="w-px h-5 bg-gray-200 dark:bg-white/10" />
+            
+            <button
+              onClick={handleTargetConversion}
+              disabled={isTargetConverting || !xmlContent}
+              className="px-3 h-8 text-xs hover:bg-primary/10 transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed group relative"
+              title="Convert Target XML"
+            >
+              {isTargetConverting ? (
+                <div className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <>
+                  <Play size={14} className="text-primary group-hover:scale-110 transition-transform" />
+                  <span className="font-medium text-primary hidden sm:inline">Run</span>
+                </>
+              )}
+            </button>
+          </div>
 
           {xmlContent && (
             <Button
@@ -267,7 +330,7 @@ export function PostProdXmlConversionEditor() {
           <div className="h-9 bg-[#2d2d2d] flex items-center px-3 border-b border-black/40">
             <div className="flex items-center gap-1.5 text-[#cccccc] text-xs font-mono">
               <Code size={13} className="text-[#569cd6]" />
-              {xmlContent ? (viewMode === 'xml' ? 'output.xml' : 'preview.html') : 'No output yet'}
+              {xmlContent ? (viewMode === 'xml' ? (project?.filename ? project.filename.replace(/\.pdf$/i, xmlType === 's4c' ? '_raw.xml' : '_final.xml') : (xmlType === 's4c' ? 'raw.xml' : 'final.xml')) : (project?.filename ? project.filename.replace(/\.pdf$/i, '_preview.html') : 'preview.html')) : 'No output yet'}
             </div>
           </div>
 
