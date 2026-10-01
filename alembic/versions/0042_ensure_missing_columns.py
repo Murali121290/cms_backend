@@ -26,6 +26,12 @@ def upgrade() -> None:
     # 1. bod_jobs missing columns
     if 'bod_jobs' in tables:
         columns = {c['name'] for c in inspector.get_columns('bod_jobs')}
+        if 'client_id' in columns:
+            try:
+                op.drop_constraint('bod_jobs_client_id_fkey', 'bod_jobs', type_='foreignkey')
+            except Exception:
+                pass
+            op.drop_column('bod_jobs', 'client_id')
         if 'ace_report_filepath' not in columns:
             op.add_column('bod_jobs', sa.Column('ace_report_filepath', sa.String(length=1024), nullable=True))
         if 'epubcheck_report_filepath' not in columns:

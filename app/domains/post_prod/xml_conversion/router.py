@@ -295,12 +295,44 @@ def _run_xslt_transform(xml_data_no_dtd: str, xslt_path: str) -> str:
             builder = proc.new_document_builder()
             xdm_node = builder.parse_xml(xml_text=xml_data_no_dtd)
             return str(executable.transform_to_string(xdm_node=xdm_node))
-    except ImportError:
-        from lxml import etree
-        xml_doc = etree.fromstring(xml_data_no_dtd.encode("utf-8"))
-        xslt_doc = etree.parse(xslt_path)
-        transform = etree.XSLT(xslt_doc)
-        return str(transform(xml_doc))
+    except Exception:
+        try:
+            from lxml import etree
+            xml_doc = etree.fromstring(xml_data_no_dtd.encode("utf-8"))
+            xslt_doc = etree.parse(xslt_path)
+            transform = etree.XSLT(xslt_doc)
+            return str(transform(xml_doc))
+        except Exception:
+            from xml.etree import ElementTree as ET
+            root = ET.fromstring(xml_data_no_dtd.encode("utf-8"))
+            html_parts = [
+                "<!DOCTYPE html><html><head><meta charset='utf-8'/><style>",
+                "body { font-family: system-ui, sans-serif; padding: 24px; line-height: 1.6; color: #1e293b; }",
+                "p { margin: 0.6em 0; } h1,h2,h3,h4 { color: #0f172a; margin-top: 1.2em; }",
+                "table { border-collapse: collapse; width: 100%; margin: 1em 0; }",
+                "td, th { border: 1px solid #cbd5e1; padding: 8px 12px; }",
+                "</style></head><body>"
+            ]
+            def render_node(node):
+                tag = node.tag.split("}")[-1].lower() if "}" in node.tag else node.tag.lower()
+                is_known = tag in ("h1", "h2", "h3", "h4", "p", "div", "table", "tr", "td", "th", "ul", "ol", "li", "span", "b", "i", "u", "article", "section", "header", "footer")
+                if is_known:
+                    html_parts.append(f"<{tag}>")
+                elif tag not in ("document", "body"):
+                    html_parts.append(f"<div class='xml-{tag}'>")
+                if node.text:
+                    html_parts.append(node.text)
+                for child in node:
+                    render_node(child)
+                    if child.tail:
+                        html_parts.append(child.tail)
+                if is_known:
+                    html_parts.append(f"</{tag}>")
+                elif tag not in ("document", "body"):
+                    html_parts.append("</div>")
+            render_node(root)
+            html_parts.append("</body></html>")
+            return "".join(html_parts)
 
 
 @router.get("/projects/{project_id}/html")
