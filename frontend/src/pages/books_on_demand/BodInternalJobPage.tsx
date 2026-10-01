@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Download, Upload, ArrowRight, User, CheckCircle2, Clock, Layers, Calendar } from 'lucide-react'
+import { ArrowLeft, Download, Upload, ArrowRight, User, CheckCircle2, Clock, Layers, Calendar, XCircle, CheckCircle, Loader2 } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useRBAC } from '@/hooks/useRBAC'
 import { usersApi } from '@/api/users'
@@ -21,6 +21,13 @@ export function BodInternalJobPage() {
   const [isAdvancing, setIsAdvancing] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [activeTab, setActiveTab] = useState<'stage' | 'assignment' | 'duedate'>('stage')
+
+  const [showQCModal, setShowQCModal] = useState(false)
+  const [qcChecks, setQcChecks] = useState({
+    ace: false,
+    epubCheck: false,
+    manualQC: false
+  })
 
   const formatDateTime = (dateStr: string | null) => {
     if (!dateStr) return ''
@@ -194,7 +201,7 @@ export function BodInternalJobPage() {
         {/* Action Buttons */}
         <div className="flex gap-2">
           {!isCompleted && job.current_stage_name === 'QC' && (
-            <Button variant="outline" onClick={advanceStage} disabled={isAdvancing} rightIcon={!isAdvancing ? <ArrowRight size={14} /> : undefined}>
+            <Button variant="outline" onClick={() => setShowQCModal(true)} disabled={isAdvancing} rightIcon={!isAdvancing ? <ArrowRight size={14} /> : undefined}>
               {isAdvancing ? 'Loading...' : 'Completed'}
             </Button>
           )}
@@ -387,6 +394,100 @@ export function BodInternalJobPage() {
           </div>
         </div>
       </div>
+
+      {/* QC Completion Modal */}
+      {showQCModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowQCModal(false)} />
+          <div className="relative bg-card rounded-xl shadow-2xl w-full max-w-xl flex flex-col max-h-[85vh] border border-border">
+            <div className="px-6 py-4 border-b border-border flex justify-between items-center bg-muted/5 rounded-t-xl">
+              <h2 className="text-lg font-bold flex items-center gap-2">
+                <CheckCircle className="text-emerald-500" size={20} />
+                Quality Control (Books on Demand)
+              </h2>
+              <button onClick={() => setShowQCModal(false)} className="text-muted hover:text-text transition-colors">
+                &times;
+              </button>
+            </div>
+            
+            <div className="p-6 flex-1 overflow-y-auto space-y-6">
+              {/* Stage 1 */}
+              <div className="p-4 rounded-lg border bg-emerald-500/10 border-emerald-500/20">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full flex items-center justify-center bg-emerald-500/20 text-emerald-500">
+                    <CheckCircle size={16} />
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-sm">Stage 1: ACE Validation</h4>
+                    <p className="text-xs text-emerald-600 dark:text-emerald-400">
+                      ACE validation done.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Stage 2 */}
+              <div className="p-4 rounded-lg border bg-emerald-500/10 border-emerald-500/20">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full flex items-center justify-center bg-emerald-500/20 text-emerald-500">
+                    <CheckCircle size={16} />
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-sm">Stage 2: Epub Check Validation</h4>
+                    <p className="text-xs text-emerald-600 dark:text-emerald-400">
+                      Epub check validation done.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Stage 3 */}
+              <div className="p-4 rounded-lg border bg-blue-500/10 border-blue-500/20">
+                <div className="flex gap-3">
+                  <div className="mt-0.5 w-8 h-8 rounded-full flex shrink-0 items-center justify-center bg-blue-500/20 text-blue-500">
+                    3
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-sm">Stage 3: Manual Verification</h4>
+                    <p className="text-xs text-muted mt-1 mb-3">
+                      Please verify the contents match the original PDF structure and text before marking as complete.
+                    </p>
+                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                      <input 
+                        type="checkbox" 
+                        className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                        checked={qcChecks.manualQC}
+                        onChange={(e) => setQcChecks(prev => ({ ...prev, manualQC: e.target.checked }))}
+                      />
+                      <span className="select-none font-medium text-text">I have manually verified the EPUB output.</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-6 py-4 border-t border-border flex justify-end gap-3 bg-muted/5 rounded-b-xl">
+              <Button variant="outline" onClick={() => setShowQCModal(false)}>
+                Cancel
+              </Button>
+              <Button 
+                onClick={() => {
+                  setShowQCModal(false)
+                  advanceStage()
+                }}
+                disabled={!qcChecks.manualQC || isAdvancing}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white min-w-[140px]"
+              >
+                {isAdvancing ? (
+                  <span className="flex items-center gap-2"><Loader2 size={16} className="animate-spin" /> Completing...</span>
+                ) : (
+                  <span className="flex items-center gap-2"><CheckCircle size={16} /> Mark as Complete</span>
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -361,9 +361,15 @@ def _upload_to_ftp_task(local_epub_path: str, remote_epub_name: str):
         logger.error("BOD FTP host is not configured.")
         return
         
+    delivery_dir = settings.BOD_FTP_DELIVERY_PATH
+    if not delivery_dir:
+        logger.error("BOD_FTP_DELIVERY_PATH is not configured in environment.")
+        raise ValueError("BOD_FTP_DELIVERY_PATH is missing from environment configuration.")
+    
     try:
         with BodFtpService(settings.BOD_FTP_HOST, settings.BOD_FTP_USERNAME, settings.BOD_FTP_PASSWORD) as ftp:
-            ftp.upload_file(local_epub_path, f"/BOD/Delivery/{remote_epub_name}")
+            ftp.ensure_dir(delivery_dir)
+            ftp.upload_file(local_epub_path, f"{remote_epub_name}")
     except Exception as e:
         logger.error(f"Failed background FTP upload for {remote_epub_name}: {str(e)}")
 
