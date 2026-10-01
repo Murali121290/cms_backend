@@ -286,6 +286,23 @@ def save_xml_content(project_id: int, request: XMLUpdateRequest, db: Session = D
     db.commit()
     return {"message": "XML saved successfully"}
 
+def _run_xslt_transform(xml_data_no_dtd: str, xslt_path: str) -> str:
+    try:
+        from saxonche import PySaxonProcessor
+        with PySaxonProcessor(license=False) as proc:
+            xsltproc = proc.new_xslt30_processor()
+            executable = xsltproc.compile_stylesheet(stylesheet_file=xslt_path)
+            builder = proc.new_document_builder()
+            xdm_node = builder.parse_xml(xml_text=xml_data_no_dtd)
+            return str(executable.transform_to_string(xdm_node=xdm_node))
+    except ImportError:
+        from lxml import etree
+        xml_doc = etree.fromstring(xml_data_no_dtd.encode("utf-8"))
+        xslt_doc = etree.parse(xslt_path)
+        transform = etree.XSLT(xslt_doc)
+        return str(transform(xml_doc))
+
+
 @router.get("/projects/{project_id}/html")
 def get_html_preview(project_id: int, db: Session = Depends(database.get_db)):
     project = db.query(PostProdXMLConversionProject).filter(PostProdXMLConversionProject.id == project_id).first()
@@ -300,7 +317,6 @@ def get_html_preview(project_id: int, db: Session = Depends(database.get_db)):
         if os.path.exists(final_filepath):
             try:
                 import re
-                from saxonche import PySaxonProcessor
                 xslt_path = os.path.join(os.path.dirname(__file__), "xml_preview.xsl")
                 
                 # Strip DOCTYPE to bypass JAXP entity expansion limits
@@ -308,23 +324,15 @@ def get_html_preview(project_id: int, db: Session = Depends(database.get_db)):
                     xml_data = f.read()
                 xml_data_no_dtd = re.sub(r"<!DOCTYPE[^>]+>", "", xml_data, flags=re.IGNORECASE)
                 
-                with PySaxonProcessor(license=False) as proc:
-                    xsltproc = proc.new_xslt30_processor()
-                    executable = xsltproc.compile_stylesheet(stylesheet_file=xslt_path)
+                html_str = _run_xslt_transform(xml_data_no_dtd, xslt_path)
+                
+                # Inline CSS
+                css_path = os.path.join(os.path.dirname(__file__), "preview.css")
+                if os.path.exists(css_path):
+                    with open(css_path, "r") as css_f:
+                        css_content = css_f.read()
                     
-                    # Create an XDM node directly from string to avoid writing temp file
-                    builder = proc.new_document_builder()
-                    xdm_node = builder.parse_xml(xml_text=xml_data_no_dtd)
-                    html_str = str(executable.transform_to_string(xdm_node=xdm_node))
-                    
-                    # Inline CSS
-                    css_path = os.path.join(os.path.dirname(__file__), "preview.css")
-                    if os.path.exists(css_path):
-                        with open(css_path, "r") as css_f:
-                            css_content = css_f.read()
-                        
-                        import re
-                        html_str = re.sub(r'<link[^>]*href=["\']?preview\.css["\']?[^>]*>', f'<style>{css_content}</style>', html_str)
+                    html_str = re.sub(r'<link[^>]*href=["\']?preview\.css["\']?[^>]*>', f'<style>{css_content}</style>', html_str)
                     
                 return {"html": html_str}
             except Exception as e:
@@ -346,20 +354,13 @@ def get_s4c_html_preview(project_id: int, db: Session = Depends(database.get_db)
         if os.path.exists(raw_filepath):
             try:
                 import re
-                from saxonche import PySaxonProcessor
                 xslt_path = os.path.join(os.path.dirname(__file__), "rawxml.xsl")
                 
                 with open(raw_filepath, "r", encoding="utf-8") as f:
                     xml_data = f.read()
                 xml_data_no_dtd = re.sub(r"<!DOCTYPE[^>]+>", "", xml_data, flags=re.IGNORECASE)
                 
-                with PySaxonProcessor(license=False) as proc:
-                    xsltproc = proc.new_xslt30_processor()
-                    executable = xsltproc.compile_stylesheet(stylesheet_file=xslt_path)
-                    
-                    builder = proc.new_document_builder()
-                    xdm_node = builder.parse_xml(xml_text=xml_data_no_dtd)
-                    html_str = str(executable.transform_to_string(xdm_node=xdm_node))
+                html_str = _run_xslt_transform(xml_data_no_dtd, xslt_path)
                     
                 return {"html": html_str}
             except Exception as e:

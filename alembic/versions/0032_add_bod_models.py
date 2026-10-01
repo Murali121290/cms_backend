@@ -62,6 +62,10 @@ def upgrade() -> None:
             op.add_column('bod_jobs', sa.Column('pdf_language', sa.String(length=50), nullable=True))
         if 'due_date_history' not in columns:
             op.add_column('bod_jobs', sa.Column('due_date_history', sa.JSON(), server_default='[]', nullable=False))
+        if 'ace_report_filepath' not in columns:
+            op.add_column('bod_jobs', sa.Column('ace_report_filepath', sa.String(length=1024), nullable=True))
+        if 'epubcheck_report_filepath' not in columns:
+            op.add_column('bod_jobs', sa.Column('epubcheck_report_filepath', sa.String(length=1024), nullable=True))
         if 'client_id' in columns:
             try:
                 op.drop_constraint('bod_jobs_client_id_fkey', 'bod_jobs', type_='foreignkey')
