@@ -16,7 +16,7 @@ class PostProdXMLConversionProject(Base):
     filename = Column(String, nullable=False)
     filepath = Column(String, nullable=False)
     conversion_status = Column(String, default="YTS") # Overall status
-    s4c_xml_status = Column(String, default="YTS")
+    raw_xml_status = Column(String, default="YTS")
     final_xml_status = Column(String, default="YTS")
     qc_status = Column(String, default="YTS")
     result_filepath = Column(String, nullable=True)

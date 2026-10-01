@@ -184,7 +184,7 @@ def s4c_convert(project_id: int, db: Session = Depends(database.get_db)):
     with open(raw_filepath, "w", encoding="utf-8") as f:
         f.write(xml_content)
         
-    project.s4c_xml_status = "Completed"
+    project.raw_xml_status = "Completed"
     if project.conversion_status == "YTS":
         project.conversion_status = "In-progress"
     db.commit()

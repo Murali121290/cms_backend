@@ -14,7 +14,7 @@ from sqlalchemy.engine.reflection import Inspector
 
 # revision identifiers, used by Alembic.
 revision: str = '0040_add_xml_conversion_models'
-down_revision: Union[str, Sequence[str], None] = '0038_journal_file_uploader'
+down_revision: Union[str, Sequence[str], None] = '0032_add_bod_models'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -35,6 +35,9 @@ def upgrade() -> None:
         sa.Column('filename', sa.String(), nullable=False),
         sa.Column('filepath', sa.String(), nullable=False),
         sa.Column('conversion_status', sa.String(), nullable=True),
+        sa.Column('raw_xml_status', sa.String(), nullable=True),
+        sa.Column('final_xml_status', sa.String(), nullable=True),
+        sa.Column('qc_status', sa.String(), nullable=True),
         sa.Column('result_filepath', sa.String(), nullable=True),
         sa.Column('created_at', sa.DateTime(), nullable=True),
         sa.PrimaryKeyConstraint('id')
