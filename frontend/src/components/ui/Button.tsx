@@ -79,14 +79,14 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
           />
         ) : (
           leftIcon && (
-            <span className={cn(iconSizeClasses[size], "shrink-0")} aria-hidden="true">
+            <span className={cn(iconSizeClasses[size], "shrink-0 inline-flex items-center justify-center")} aria-hidden="true">
               {leftIcon}
             </span>
           )
         )}
         {children && <span>{children}</span>}
         {!isLoading && rightIcon && (
-          <span className={cn(iconSizeClasses[size], "shrink-0")} aria-hidden="true">
+          <span className={cn(iconSizeClasses[size], "shrink-0 inline-flex items-center justify-center")} aria-hidden="true">
             {rightIcon}
           </span>
         )}

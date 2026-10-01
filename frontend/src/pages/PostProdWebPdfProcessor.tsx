@@ -657,6 +657,8 @@ export function PostProdWebPdfProcessor() {
     try {
       await mergeProjectFiles(selectedProject.id, selectedFiles);
       toast.success('PDF files merged successfully!');
+      setPdfRefreshKey(Date.now());
+      setSelectedProject(prev => prev ? { ...prev, status: "Merged" } : prev);
       fetchProjects();
     } catch (err: any) {
       toast.error(err.message || 'Failed to merge PDF files.');
@@ -1048,7 +1050,6 @@ export function PostProdWebPdfProcessor() {
           {!selectedProject && isTeamLead && (
             <Button
               onClick={() => setShowAddModal(true)}
-              className="text-xs font-semibold h-9 px-3 flex items-center gap-1.5"
               leftIcon={<Plus size={15} />}
             >
               Create Project
@@ -1110,7 +1111,7 @@ export function PostProdWebPdfProcessor() {
                       }`}>
                       {selectedProject.status === 'Merged' || selectedProject.status === 'Trimmed' ? <CheckCircle2 size={14} /> : '1'}
                     </div>
-                    <h2 className="text-sm font-bold text-text m-0">Step 1 — Merge PDF</h2>
+                    <h2 className="text-sm font-bold text-text m-0">Merge PDF</h2>
                   </div>
                   {activeStep === 1 ? <ChevronUp size={18} className="text-muted" /> : <ChevronDown size={18} className="text-muted" />}
                 </button>
@@ -1124,9 +1125,9 @@ export function PostProdWebPdfProcessor() {
                       <Button
                         onClick={handleMerge}
                         disabled={merging || loadingFiles}
-                        className="text-xs font-semibold h-8 px-4 flex items-center gap-1.5 shrink-0"
+                        leftIcon={merging ? <RefreshCw size={14} className="animate-spin" /> : <Play size={14} />}
+                        className="text-xs font-semibold h-8 px-4 shrink-0"
                       >
-                        {merging ? <RefreshCw size={14} className="animate-spin" /> : <Play size={14} />}
                         {merging ? 'Merging...' : 'Merge & Convert'}
                       </Button>
                     </div>
@@ -1238,7 +1239,7 @@ export function PostProdWebPdfProcessor() {
                       }`}>
                       {selectedProject.status === 'Trimmed' ? <CheckCircle2 size={14} /> : '2'}
                     </div>
-                    <h2 className="text-sm font-bold text-text m-0">Step 2 — Trim PDF</h2>
+                    <h2 className="text-sm font-bold text-text m-0">Trim PDF</h2>
                   </div>
                   {activeStep === 2 ? <ChevronUp size={18} className="text-muted" /> : <ChevronDown size={18} className="text-muted" />}
                 </button>
@@ -1252,9 +1253,9 @@ export function PostProdWebPdfProcessor() {
                       <Button
                         onClick={handleTrim}
                         disabled={trimming}
-                        className="text-xs font-semibold h-8 px-4 flex items-center gap-1.5 shrink-0"
+                        leftIcon={trimming ? <RefreshCw size={14} className="animate-spin" /> : <Edit size={14} />}
+                        className="text-xs font-semibold h-8 px-4 shrink-0"
                       >
-                        {trimming ? <RefreshCw size={14} className="animate-spin" /> : <Edit size={14} />}
                         {trimming ? 'Trimming...' : 'Trim PDF'}
                       </Button>
                     </div>
@@ -1367,7 +1368,7 @@ export function PostProdWebPdfProcessor() {
                         fontsStatus.all_embedded ? <CheckCircle2 size={14} /> : <XCircle size={14} />
                       ) : '3'}
                     </div>
-                    <h2 className="text-sm font-bold text-text m-0">Step 3 — Check Fonts</h2>
+                    <h2 className="text-sm font-bold text-text m-0">Check Fonts</h2>
                   </div>
                   {activeStep === 3 ? <ChevronUp size={18} className="text-muted" /> : <ChevronDown size={18} className="text-muted" />}
                 </button>
@@ -1381,9 +1382,9 @@ export function PostProdWebPdfProcessor() {
                       <Button
                         onClick={handleCheckFonts}
                         disabled={checkingFonts}
-                        className="text-xs font-semibold h-8 px-4 flex items-center gap-1.5 shrink-0"
+                        leftIcon={checkingFonts ? <RefreshCw size={14} className="animate-spin" /> : <FileText size={14} />}
+                        className="text-xs font-semibold h-8 px-4 shrink-0"
                       >
-                        {checkingFonts ? <RefreshCw size={14} className="animate-spin" /> : <FileText size={14} />}
                         {checkingFonts ? 'Checking...' : 'Check Fonts'}
                       </Button>
                     </div>
@@ -1438,7 +1439,7 @@ export function PostProdWebPdfProcessor() {
                         securityStatus.is_free_of_protection ? <CheckCircle2 size={14} /> : <XCircle size={14} />
                       ) : '4'}
                     </div>
-                    <h2 className="text-sm font-bold text-text m-0">Step 4 — Check Security</h2>
+                    <h2 className="text-sm font-bold text-text m-0">Check Security</h2>
                   </div>
                   {activeStep === 4 ? <ChevronUp size={18} className="text-muted" /> : <ChevronDown size={18} className="text-muted" />}
                 </button>
@@ -1452,9 +1453,9 @@ export function PostProdWebPdfProcessor() {
                       <Button
                         onClick={handleCheckSecurity}
                         disabled={checkingSecurity}
-                        className="text-xs font-semibold h-8 px-4 flex items-center gap-1.5 shrink-0"
+                        leftIcon={checkingSecurity ? <RefreshCw size={14} className="animate-spin" /> : <ShieldAlert size={14} />}
+                        className="text-xs font-semibold h-8 px-4 shrink-0"
                       >
-                        {checkingSecurity ? <RefreshCw size={14} className="animate-spin" /> : <ShieldAlert size={14} />}
                         {checkingSecurity ? 'Checking...' : 'Check Security'}
                       </Button>
                     </div>
@@ -1503,7 +1504,7 @@ export function PostProdWebPdfProcessor() {
                         bookmarksStatus.success ? <CheckCircle2 size={14} /> : <XCircle size={14} />
                       ) : '5'}
                     </div>
-                    <h2 className="text-sm font-bold text-text m-0">Step 5 — Generate Bookmarks</h2>
+                    <h2 className="text-sm font-bold text-text m-0">Generate Bookmarks</h2>
                   </div>
                   {activeStep === 5 ? <ChevronUp size={18} className="text-muted" /> : <ChevronDown size={18} className="text-muted" />}
                 </button>
@@ -1528,9 +1529,9 @@ export function PostProdWebPdfProcessor() {
                       <Button
                         onClick={handleGenerateBookmarks}
                         disabled={generatingBookmarks}
-                        className="text-xs font-semibold h-8 px-4 flex items-center gap-1.5 shrink-0"
+                        leftIcon={generatingBookmarks ? <RefreshCw size={14} className="animate-spin" /> : <FileText size={14} />}
+                        className="text-xs font-semibold h-8 px-4 shrink-0"
                       >
-                        {generatingBookmarks ? <RefreshCw size={14} className="animate-spin" /> : <FileText size={14} />}
                         {generatingBookmarks ? 'Generating...' : 'Generate'}
                       </Button>
                     </div>
@@ -1569,9 +1570,10 @@ export function PostProdWebPdfProcessor() {
                           variant="secondary"
                           size="sm"
                           onClick={handleOpenEditBookmarks}
+                          leftIcon={<Edit size={14} />}
                           className="text-xs"
                         >
-                          <Edit size={14} className="mr-1.5" /> Edit Bookmarks
+                          Edit Bookmarks
                         </Button>
                       </div>
                     )}
@@ -1595,8 +1597,8 @@ export function PostProdWebPdfProcessor() {
                               {editingBookmarksList.length === 0 ? (
                                 <div className="p-8 flex flex-col items-center justify-center border border-dashed border-border rounded-lg bg-card text-center mt-2">
                                   <p className="text-xs text-muted mb-3">No bookmarks found.</p>
-                                  <Button size="sm" variant="secondary" onClick={() => setEditingBookmarksList([{ title: 'New Bookmark', level: 1, page: 1 }])}>
-                                    <Plus size={14} className="mr-1.5" /> Add Bookmark
+                                  <Button size="sm" variant="secondary" leftIcon={<Plus size={14} />} onClick={() => setEditingBookmarksList([{ title: 'New Bookmark', level: 1, page: 1 }])}>
+                                    Add Bookmark
                                   </Button>
                                 </div>
                               ) : (
@@ -1662,8 +1664,7 @@ export function PostProdWebPdfProcessor() {
 
                             <div className="flex items-center justify-end gap-3 pt-2">
                               <Button variant="ghost" size="sm" onClick={() => setShowEditBookmarksModal(false)} disabled={savingBookmarks} className="text-xs">Cancel</Button>
-                              <Button size="sm" onClick={handleSaveBookmarks} disabled={savingBookmarks || loadingBookmarks} className="text-xs flex items-center gap-1.5">
-                                {savingBookmarks && <RefreshCw size={14} className="animate-spin" />}
+                              <Button size="sm" onClick={handleSaveBookmarks} disabled={savingBookmarks || loadingBookmarks} leftIcon={savingBookmarks ? <RefreshCw size={14} className="animate-spin" /> : undefined} className="text-xs">
                                 Save Changes
                               </Button>
                             </div>
@@ -1788,25 +1789,19 @@ export function PostProdWebPdfProcessor() {
                         onClick={handleAnalyzeLinks}
                         disabled={analyzingLinks || generatingLinks || linkType === 'none'}
                         variant={linksAnalysisStatus ? 'outline' : 'primary'}
-                        className="flex-1 flex items-center justify-center gap-2"
+                        leftIcon={analyzingLinks ? <RefreshCw size={16} className="animate-spin" /> : <FileText size={16} />}
+                        className="flex-1"
                       >
-                        {analyzingLinks ? (
-                          <><RefreshCw size={16} className="animate-spin" /> Analyzing...</>
-                        ) : (
-                          <><FileText size={16} /> Analyze Links</>
-                        )}
+                        {analyzingLinks ? 'Analyzing...' : 'Analyze Links'}
                       </Button>
 
                       <Button
                         onClick={handleApplyLinks}
                         disabled={generatingLinks || analyzingLinks || !linksAnalysisStatus || linkType === 'none'}
-                        className="flex-1 flex items-center justify-center gap-2"
+                        leftIcon={generatingLinks ? <RefreshCw size={16} className="animate-spin" /> : <Play size={16} />}
+                        className="flex-1"
                       >
-                        {generatingLinks ? (
-                          <><RefreshCw size={16} className="animate-spin" /> Applying Links...</>
-                        ) : (
-                          <><Play size={16} /> Apply / Fix</>
-                        )}
+                        {generatingLinks ? 'Applying Links...' : 'Apply / Fix'}
                       </Button>
                     </div>
 
@@ -1916,25 +1911,19 @@ export function PostProdWebPdfProcessor() {
                         onClick={handleAnalyzeUrlLinks}
                         disabled={analyzingUrlLinks || applyingUrlLinks}
                         variant={urlLinksAnalysis ? 'outline' : 'primary'}
-                        className="flex-1 flex items-center justify-center gap-2"
+                        leftIcon={analyzingUrlLinks ? <RefreshCw size={16} className="animate-spin" /> : <FileText size={16} />}
+                        className="flex-1"
                       >
-                        {analyzingUrlLinks ? (
-                          <><RefreshCw size={16} className="animate-spin" /> Analyzing...</>
-                        ) : (
-                          <><FileText size={16} /> Analyze URLs</>
-                        )}
+                        {analyzingUrlLinks ? 'Analyzing...' : 'Analyze URLs'}
                       </Button>
 
                       <Button
                         onClick={handleApplyUrlLinks}
                         disabled={applyingUrlLinks || analyzingUrlLinks || !urlLinksAnalysis || urlLinksAnalysis.not_linked === 0}
-                        className="flex-1 flex items-center justify-center gap-2"
+                        leftIcon={applyingUrlLinks ? <RefreshCw size={16} className="animate-spin" /> : <Play size={16} />}
+                        className="flex-1"
                       >
-                        {applyingUrlLinks ? (
-                          <><RefreshCw size={16} className="animate-spin" /> Applying...</>
-                        ) : (
-                          <><Play size={16} /> Apply / Fix</>
-                        )}
+                        {applyingUrlLinks ? 'Applying...' : 'Apply / Fix'}
                       </Button>
                     </div>
                   </div>
@@ -2045,25 +2034,19 @@ export function PostProdWebPdfProcessor() {
                         onClick={handleAnalyzeEmailLinks}
                         disabled={analyzingEmailLinks || applyingEmailLinks}
                         variant={emailLinksAnalysis ? 'outline' : 'primary'}
-                        className="flex-1 flex items-center justify-center gap-2"
+                        leftIcon={analyzingEmailLinks ? <RefreshCw size={16} className="animate-spin" /> : <FileText size={16} />}
+                        className="flex-1"
                       >
-                        {analyzingEmailLinks ? (
-                          <><RefreshCw size={16} className="animate-spin" /> Analyzing...</>
-                        ) : (
-                          <><FileText size={16} /> Analyze Emails</>
-                        )}
+                        {analyzingEmailLinks ? 'Analyzing...' : 'Analyze Emails'}
                       </Button>
 
                       <Button
                         onClick={handleApplyEmailLinks}
                         disabled={applyingEmailLinks || analyzingEmailLinks || !emailLinksAnalysis || emailLinksAnalysis.not_linked === 0}
-                        className="flex-1 flex items-center justify-center gap-2"
+                        leftIcon={applyingEmailLinks ? <RefreshCw size={16} className="animate-spin" /> : <Play size={16} />}
+                        className="flex-1"
                       >
-                        {applyingEmailLinks ? (
-                          <><RefreshCw size={16} className="animate-spin" /> Applying...</>
-                        ) : (
-                          <><Play size={16} /> Apply / Fix</>
-                        )}
+                        {applyingEmailLinks ? 'Applying...' : 'Apply / Fix'}
                       </Button>
                     </div>
                   </div>
@@ -2174,25 +2157,19 @@ export function PostProdWebPdfProcessor() {
                         onClick={handleAnalyzeEndnoteLinks}
                         disabled={analyzingEndnoteLinks || applyingEndnoteLinks}
                         variant={endnoteLinksAnalysis ? 'outline' : 'primary'}
-                        className="flex-1 flex items-center justify-center gap-2"
+                        leftIcon={analyzingEndnoteLinks ? <RefreshCw size={16} className="animate-spin" /> : <FileText size={16} />}
+                        className="flex-1"
                       >
-                        {analyzingEndnoteLinks ? (
-                          <><RefreshCw size={16} className="animate-spin" /> Analyzing...</>
-                        ) : (
-                          <><FileText size={16} /> Analyze Notes</>
-                        )}
+                        {analyzingEndnoteLinks ? 'Analyzing...' : 'Analyze Notes'}
                       </Button>
 
                       <Button
                         onClick={handleApplyEndnoteLinks}
                         disabled={applyingEndnoteLinks || analyzingEndnoteLinks || !endnoteLinksAnalysis || endnoteLinksAnalysis.not_linked === 0}
-                        className="flex-1 flex items-center justify-center gap-2"
+                        leftIcon={applyingEndnoteLinks ? <RefreshCw size={16} className="animate-spin" /> : <Play size={16} />}
+                        className="flex-1"
                       >
-                        {applyingEndnoteLinks ? (
-                          <><RefreshCw size={16} className="animate-spin" /> Applying...</>
-                        ) : (
-                          <><Play size={16} /> Apply / Fix</>
-                        )}
+                        {applyingEndnoteLinks ? 'Applying...' : 'Apply / Fix'}
                       </Button>
                     </div>
                   </div>
@@ -2306,25 +2283,19 @@ export function PostProdWebPdfProcessor() {
                         onClick={handleAnalyzeCrossrefLinks}
                         disabled={analyzingCrossrefLinks || applyingCrossrefLinks}
                         variant={crossrefLinksAnalysis ? 'outline' : 'primary'}
-                        className="flex-1 flex items-center justify-center gap-2"
+                        leftIcon={analyzingCrossrefLinks ? <RefreshCw size={16} className="animate-spin" /> : <FileText size={16} />}
+                        className="flex-1"
                       >
-                        {analyzingCrossrefLinks ? (
-                          <><RefreshCw size={16} className="animate-spin" /> Analyzing...</>
-                        ) : (
-                          <><FileText size={16} /> Analyze References</>
-                        )}
+                        {analyzingCrossrefLinks ? 'Analyzing...' : 'Analyze References'}
                       </Button>
 
                       <Button
                         onClick={handleApplyCrossrefLinks}
                         disabled={applyingCrossrefLinks || analyzingCrossrefLinks || !crossrefLinksAnalysis || crossrefLinksAnalysis.not_linked === 0}
-                        className="flex-1 flex items-center justify-center gap-2"
+                        leftIcon={applyingCrossrefLinks ? <RefreshCw size={16} className="animate-spin" /> : <Play size={16} />}
+                        className="flex-1"
                       >
-                        {applyingCrossrefLinks ? (
-                          <><RefreshCw size={16} className="animate-spin" /> Applying...</>
-                        ) : (
-                          <><Play size={16} /> Apply / Fix</>
-                        )}
+                        {applyingCrossrefLinks ? 'Applying...' : 'Apply / Fix'}
                       </Button>
                     </div>
                   </div>
@@ -2531,8 +2502,7 @@ export function PostProdWebPdfProcessor() {
             <Button variant="ghost" type="button" onClick={() => setShowAddModal(false)} className="text-xs font-semibold">
               Cancel
             </Button>
-            <Button type="submit" disabled={uploading} className="text-xs font-semibold flex items-center gap-1">
-              {uploading ? <RefreshCw className="w-3 h-3 animate-spin" /> : null}
+            <Button type="submit" disabled={uploading} leftIcon={uploading ? <RefreshCw className="w-3 h-3 animate-spin" /> : undefined} className="text-xs font-semibold">
               {uploading ? 'Uploading...' : 'Create & Upload'}
             </Button>
           </div>
