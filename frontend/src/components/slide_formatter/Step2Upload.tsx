@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { useStore } from '@/store/useSlideFormatterStore';
+import { useStore, BASE_URL } from '@/store/useSlideFormatterStore';
 import { Upload, FileText, Check, AlertCircle, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -14,6 +14,9 @@ export const Step2Upload: React.FC = () => {
     includeTableCaptions,
     setIncludeFigureCaptions,
     setIncludeTableCaptions,
+    masterSwapMode,
+    setMasterSwapMode,
+    convertDeck,
     uploadInputPptFile,
     uploadPdfFile,
     setStep
@@ -98,7 +101,7 @@ export const Step2Upload: React.FC = () => {
                 style={{ width: `${conversionProgress}%` }}
               ></div>
             </div>
-            <p className="text-xs text-[var(--color-muted)] text-center">Formatting shapes, fonts, and slides... {conversionProgress}%</p>
+            <p className="text-xs text-[var(--color-muted)]">Formatting shapes, fonts, and slides... {conversionProgress}%</p>
           </div>
         </div>
       ) : (
@@ -110,7 +113,7 @@ export const Step2Upload: React.FC = () => {
                 <FileText className="w-5 h-5 text-[var(--color-amber)]" />
                 <span>1. Raw Content PPTX</span>
               </h3>
-              <p className="text-xs text-[var(--color-muted)] mt-1 text-left">
+              <p className="text-xs text-[var(--color-muted)] mt-1">
                 The input presentation containing raw text, slide titles, and basic tables.
               </p>
             </div>
@@ -122,7 +125,7 @@ export const Step2Upload: React.FC = () => {
               onDrop={(e) => handleDrop(e, 'ppt')}
               onClick={() => pptInputRef.current?.click()}
               className={`dashed-drop flex flex-col items-center justify-center p-6 text-center cursor-pointer min-h-[160px] ${
-                pptDrag ? "drag-active border-[var(--color-amber)] bg-amber-50/10" : ""
+                pptDrag ? "drag-active border-[var(--color-amber)]" : ""
               }`}
             >
               <input
@@ -144,9 +147,10 @@ export const Step2Upload: React.FC = () => {
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
+                      // Clear in store
                       useStore.setState({ inputPptName: null });
                     }}
-                    className="text-xs text-red-500 hover:underline cursor-pointer"
+                    className="text-xs text-red-500 hover:underline"
                   >
                     Remove
                   </button>
@@ -172,7 +176,7 @@ export const Step2Upload: React.FC = () => {
                 <FileText className="w-5 h-5 text-[var(--color-navy)]" />
                 <span>2. Source PDF Document</span>
               </h3>
-              <p className="text-xs text-[var(--color-muted)] mt-1 text-left">
+              <p className="text-xs text-[var(--color-muted)] mt-1">
                 The document containing tables, charts, or images to extract and insert.
               </p>
             </div>
@@ -184,7 +188,7 @@ export const Step2Upload: React.FC = () => {
               onDrop={(e) => handleDrop(e, 'pdf')}
               onClick={() => pdfInputRef.current?.click()}
               className={`dashed-drop flex flex-col items-center justify-center p-6 text-center cursor-pointer min-h-[160px] ${
-                pdfDrag ? "drag-active border-[var(--color-amber)] bg-amber-50/10" : ""
+                pdfDrag ? "drag-active border-[var(--color-amber)]" : ""
               }`}
             >
               <input
@@ -208,7 +212,7 @@ export const Step2Upload: React.FC = () => {
                       e.stopPropagation();
                       useStore.setState({ sourcePdfName: null, sourcePdfPages: 0, pdfUrl: null });
                     }}
-                    className="text-xs text-red-500 hover:underline cursor-pointer"
+                    className="text-xs text-red-500 hover:underline"
                   >
                     Remove
                   </button>
@@ -231,10 +235,10 @@ export const Step2Upload: React.FC = () => {
 
       {!isConverting && (
         <div className="surface-card p-4 space-y-3">
-          <h3 className="text-xs font-black uppercase tracking-wider text-[var(--color-navy)] text-left">
+          <h3 className="text-xs font-black uppercase tracking-wider text-[var(--color-navy)]">
             Caption Options
           </h3>
-          <p className="text-xs text-[var(--color-muted)] text-left">
+          <p className="text-xs text-[var(--color-muted)]">
             Choose whether to insert captions below figures and tables when processing the presentation.
           </p>
           <div className="flex flex-col sm:flex-row gap-4">
@@ -244,7 +248,7 @@ export const Step2Upload: React.FC = () => {
                 role="switch"
                 aria-checked={includeFigureCaptions}
                 onClick={() => setIncludeFigureCaptions(!includeFigureCaptions)}
-                className={`relative w-10 h-5 rounded-full transition-colors duration-200 focus:outline-none cursor-pointer ${
+                className={`relative w-10 h-5 rounded-full transition-colors duration-200 focus:outline-none ${
                   includeFigureCaptions ? 'bg-[var(--color-navy)]' : 'bg-zinc-300'
                 }`}
               >
@@ -265,7 +269,7 @@ export const Step2Upload: React.FC = () => {
                 role="switch"
                 aria-checked={includeTableCaptions}
                 onClick={() => setIncludeTableCaptions(!includeTableCaptions)}
-                className={`relative w-10 h-5 rounded-full transition-colors duration-200 focus:outline-none cursor-pointer ${
+                className={`relative w-10 h-5 rounded-full transition-colors duration-200 focus:outline-none ${
                   includeTableCaptions ? 'bg-[var(--color-navy)]' : 'bg-zinc-300'
                 }`}
               >
@@ -284,20 +288,83 @@ export const Step2Upload: React.FC = () => {
       )}
 
       {!isConverting && (
-        <div className="flex justify-between items-center bg-white/60 p-4 border border-[var(--color-border)] rounded-[var(--radius-custom)]">
-          <div className="flex items-center space-x-2 text-xs text-[var(--color-muted)]">
-            <AlertCircle className="w-4 h-4" />
-            <span>
-              Using template master: <strong>{selectedTemplate ? selectedTemplate.name : "None selected"}</strong>
+        <div className="space-y-3">
+          <div className="flex items-center gap-3 bg-white/60 p-3 border border-[var(--color-border)] rounded-[var(--radius-custom)]">
+            <label className="flex items-center gap-3 cursor-pointer select-none">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={masterSwapMode}
+                onClick={() => setMasterSwapMode(!masterSwapMode)}
+                className={`relative w-10 h-5 rounded-full transition-colors duration-200 focus:outline-none ${
+                  masterSwapMode ? 'bg-[var(--color-navy)]' : 'bg-zinc-300'
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${
+                    masterSwapMode ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+              <span className="text-sm font-medium text-[var(--color-navy)]">
+                Master Swap Mode
+              </span>
+            </label>
+            <span className="text-xs text-[var(--color-muted)]">
+              Rebuild deck inside the template. Combine with PDF figures or skip and export directly.
             </span>
           </div>
-          <button
-            onClick={() => setStep(3)}
-            disabled={!inputPptName || !sourcePdfName}
-            className="px-6 py-3 bg-[var(--color-navy)] hover:bg-[var(--color-navy-light)] disabled:bg-neutral-300 text-white font-semibold rounded-[var(--radius-custom)] transition-all cursor-pointer shadow-md"
-          >
-            Proceed to PDF Figures
-          </button>
+          <div className="flex justify-between items-center bg-white/60 p-4 border border-[var(--color-border)] rounded-[var(--radius-custom)]">
+            <div className="flex items-center space-x-2 text-xs text-[var(--color-muted)]">
+              <AlertCircle className="w-4 h-4" />
+              <span>
+                Using template master: <strong>{selectedTemplate ? selectedTemplate.name : "None selected"}</strong>
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setStep(3)}
+                disabled={!inputPptName || !sourcePdfName}
+                title={
+                  !inputPptName
+                    ? 'Upload a content PPTX first'
+                    : !sourcePdfName
+                    ? 'Upload a source PDF first'
+                    : masterSwapMode
+                    ? 'Rebuild with template + insert PDF figures'
+                    : 'Proceed to figure workflow'
+                }
+                className="px-6 py-3 bg-[var(--color-navy)] hover:bg-[var(--color-navy-light)] disabled:bg-neutral-300 text-white font-semibold rounded-[var(--radius-custom)] transition-all cursor-pointer shadow-md"
+              >
+                Proceed to PDF Figures
+              </button>
+              {masterSwapMode && (
+                <button
+                  onClick={async () => {
+                    console.log('[master-swap] click', { inputPptName, selectedTemplate, masterSwapMode });
+                    try {
+                      await convertDeck(5);
+                      toast.success('Master swap complete');
+                    } catch (e: any) {
+                      console.error('[master-swap] convertDeck threw:', e);
+                      toast.error(`Master swap failed: ${e?.message || e}`);
+                    }
+                  }}
+                  disabled={!inputPptName || !selectedTemplate}
+                  title={
+                    !inputPptName
+                      ? 'Upload a content PPTX first'
+                      : !selectedTemplate
+                      ? 'Select a template first'
+                      : 'Rebuild deck now without inserting PDF figures'
+                  }
+                  className="px-6 py-3 bg-[var(--color-amber)] hover:bg-amber-500 disabled:bg-neutral-300 text-white font-semibold rounded-[var(--radius-custom)] transition-all cursor-pointer shadow-md"
+                >
+                  Skip PDF &amp; Run Now
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

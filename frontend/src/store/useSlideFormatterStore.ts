@@ -1,5 +1,10 @@
 import { create } from 'zustand';
 
+// Backend is mounted under the CMS API prefix; standalone pptbuilder used
+// `/api` — the CMS embeds it at `/api/v2/post-prod/ppt-builder`.
+export const BASE_URL = '/api/v2/post-prod/ppt-builder';
+
+// Generate or retrieve session ID cookie
 (function getOrCreateSessionId() {
   if (typeof document !== 'undefined') {
     let sessionId = document.cookie.split('; ').find(row => row.startsWith('session_id='))?.split('=')[1];
@@ -37,7 +42,7 @@ export interface ShapeData {
     idx: number;
   };
   style?: ShapeStyle;
-  imageUrl?: string;
+  imageUrl?: string; // If an image has been placed/exists
   textBody?: {
     bodyProperties?: Record<string, any>;
     paragraphs?: any[];
@@ -75,8 +80,8 @@ export interface RunData {
 }
 
 export interface AltTextEntry {
-  figure_key: string;
-  element: string;
+  figure_key: string;   // e.g. "figure 1.1"
+  element: string;      // raw element number from Excel
   chapter: string;
   decorative: boolean;
   alt_text_short: string;
@@ -85,15 +90,15 @@ export interface AltTextEntry {
 
 export interface Figure {
   id: string;
-  name: string;
-  url: string;
-  page: number;
-  filename: string;
-  caption?: string;
-  captionRuns?: RunData[];
-  credit?: string;
-  creditRuns?: RunData[];
-  alt_text?: string;
+  name: string; // e.g. Figure2.3
+  url: string; // url to render
+  page: number; // 1-indexed
+  filename: string; // unique identifier in backend uploads
+  caption?: string; // extracted figure caption
+  captionRuns?: RunData[]; // per-run bold/italic from PDF
+  credit?: string;  // extracted figure credit
+  creditRuns?: RunData[]; // per-run bold/italic from PDF
+  alt_text?: string; // accessibility alt text from Excel
   mappedTo?: {
     slideIndex: number;
     shapeIndex: number;
@@ -102,12 +107,12 @@ export interface Figure {
 
 export interface PdfCaption {
   id: string;
-  page: number;
-  label: string;
-  text: string;
-  runs?: RunData[];
-  credit?: string;
-  creditRuns?: RunData[];
+  page: number; // 1-indexed
+  label: string; // e.g. "Figure 1.1" or "Table 1"
+  text: string;  // full caption text
+  runs?: RunData[]; // per-run bold/italic styling from PDF
+  credit?: string; // credit text
+  creditRuns?: RunData[]; // per-run bold/italic for credit
 }
 
 interface StoredTemplate {
@@ -116,9 +121,11 @@ interface StoredTemplate {
 }
 
 interface DeckforgeState {
+  // Navigation
   step: number;
   setStep: (step: number) => void;
 
+  // Step 1: Template Upload
   savedTemplates: StoredTemplate[];
   selectedTemplate: StoredTemplate | null;
   templateStyles: StylesData | null;
@@ -130,6 +137,7 @@ interface DeckforgeState {
   customers: string[];
   fetchCustomers: () => Promise<void>;
   
+  // Step 2: Source Uploads
   inputPptName: string | null;
   detectedChapter: number | null;
   sourcePdfName: string | null;
@@ -140,9 +148,12 @@ interface DeckforgeState {
   includeTableCaptions: boolean;
   setIncludeFigureCaptions: (val: boolean) => void;
   setIncludeTableCaptions: (val: boolean) => void;
+  masterSwapMode: boolean;
+  setMasterSwapMode: (val: boolean) => void;
 
+  // Step 3: PDF Figure Extraction
   pdfUrl: string | null;
-  currentPdfPage: number;
+  currentPdfPage: number; // 0-indexed
   figures: Figure[];
   pdfCaptions: PdfCaption[];
   altTextEntries: AltTextEntry[];
@@ -155,6 +166,7 @@ interface DeckforgeState {
   deleteFigure: (id: string) => void;
   uploadAltTextExcel: (file: File) => Promise<void>;
 
+  // Step 4: Review & Mapping
   slides: SlideData[] | null;
   currentSlideIndex: number;
   setCurrentSlideIndex: (idx: number) => void;
@@ -164,6 +176,7 @@ interface DeckforgeState {
   placeFigureAtCoordinates: (slideIndex: number, figureId: string, x_pt: number, y_pt: number, w_pt: number, h_pt: number) => Promise<void>;
   removeFigureFromShape: (slideIndex: number, shapeIndex: number) => Promise<void>;
 
+  // API Methods
   fetchTemplates: () => Promise<void>;
   uploadTemplateFile: (file: File) => Promise<void>;
   selectTemplate: (filename: string) => Promise<void>;
@@ -173,12 +186,11 @@ interface DeckforgeState {
   resetSession: () => Promise<void>;
 }
 
-const BASE_URL = '/api/v2/post-prod/ppt-builder';
-
 export const useStore = create<DeckforgeState>((set, get) => ({
   step: 1,
   setStep: (step) => set({ step }),
 
+  // Step 1
   savedTemplates: [],
   selectedTemplate: null,
   templateStyles: null,
@@ -189,6 +201,7 @@ export const useStore = create<DeckforgeState>((set, get) => ({
   setProjectName: (projectName) => set({ projectName }),
   customers: [],
 
+  // Step 2
   inputPptName: null,
   detectedChapter: null,
   sourcePdfName: null,
@@ -199,7 +212,10 @@ export const useStore = create<DeckforgeState>((set, get) => ({
   includeTableCaptions: true,
   setIncludeFigureCaptions: (val) => set({ includeFigureCaptions: val }),
   setIncludeTableCaptions: (val) => set({ includeTableCaptions: val }),
+  masterSwapMode: false,
+  setMasterSwapMode: (val) => set({ masterSwapMode: val }),
 
+  // Step 3
   pdfUrl: null,
   currentPdfPage: 0,
   figures: [],
@@ -207,6 +223,7 @@ export const useStore = create<DeckforgeState>((set, get) => ({
   altTextEntries: [],
   altTextLoading: false,
 
+  // Step 4
   slides: null,
   currentSlideIndex: 0,
   focusedShapeIndex: null,
@@ -356,12 +373,14 @@ export const useStore = create<DeckforgeState>((set, get) => ({
           figures: figuresPayload,
           include_figure_captions: get().includeFigureCaptions,
           include_table_captions: get().includeTableCaptions,
+          mode: get().masterSwapMode ? 'master_swap' : 'restyle',
         }),
       });
       const data = await res.json();
       if (data.ok) {
         clearInterval(interval);
 
+        // Sync figure mapping state for figures auto-inserted by Python
         const updatedFigures = get().figures.map((fig) => {
           const mapping = (data.autoInserted || []).find((m: any) => m.filename === fig.filename);
           if (mapping) {
@@ -397,6 +416,7 @@ export const useStore = create<DeckforgeState>((set, get) => ({
 
   addFigure: (figData) => {
     set((state) => {
+      // Calculate figure count for this specific page to assign an index
       const pageFigures = state.figures.filter((f) => f.page === figData.page);
       const index = pageFigures.length + 1;
       const id = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -451,6 +471,7 @@ export const useStore = create<DeckforgeState>((set, get) => ({
       const data = await res.json();
       if (!data.ok) throw new Error(data.detail || 'Parse failed');
       const entries: AltTextEntry[] = data.entries;
+      // Auto-assign alt text to any figure whose name already matches a key
       const altMap: Record<string, AltTextEntry> = {};
       entries.forEach((e) => { altMap[e.figure_key] = e; });
       set((state) => ({
@@ -494,6 +515,9 @@ export const useStore = create<DeckforgeState>((set, get) => ({
         if (figure.captionRuns?.length) {
           formData.append('caption_runs', JSON.stringify(figure.captionRuns));
         }
+      }
+      if (figure.alt_text && figure.alt_text.trim()) {
+        formData.append('alt_text', figure.alt_text.trim());
       }
 
       const res = await fetch(`${BASE_URL}/add-image`, {
@@ -542,6 +566,9 @@ export const useStore = create<DeckforgeState>((set, get) => ({
           formData.append('caption_runs', JSON.stringify(figure.captionRuns));
         }
       }
+      if (figure.alt_text && figure.alt_text.trim()) {
+        formData.append('alt_text', figure.alt_text.trim());
+      }
 
       const res = await fetch(`${BASE_URL}/add-image`, {
         method: 'POST',
@@ -564,6 +591,9 @@ export const useStore = create<DeckforgeState>((set, get) => ({
   },
 
   removeFigureFromShape: async (slideIndex, shapeIndex) => {
+    // Currently, there's no explicit endpoint to delete a shape image,
+    // but we can update our local mapping so the frontend removes it from view
+    // and resets the figure status.
     set((state) => ({
       figures: state.figures.map((f) =>
         f.mappedTo?.slideIndex === slideIndex && f.mappedTo?.shapeIndex === shapeIndex
@@ -590,9 +620,11 @@ export const useStore = create<DeckforgeState>((set, get) => ({
   setFocusedShapeIndex: (focusedShapeIndex) => set({ focusedShapeIndex }),
 
   resetSession: async () => {
+    // Clear uploaded files on the server first
     try {
       await fetch(`${BASE_URL}/reset`, { method: 'POST' });
     } catch (_) {}
+    // Then reset all local frontend state
     set({
       step: 1,
       selectedTemplate: null,

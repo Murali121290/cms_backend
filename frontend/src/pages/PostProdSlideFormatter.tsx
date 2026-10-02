@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { Toaster } from 'sonner';
 import { ArrowLeft, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useStore } from '@/store/useSlideFormatterStore';
@@ -105,6 +106,11 @@ export function PostProdSlideFormatter() {
         {step === 4 && <Step4Mapping />}
         {step === 5 && <Step5Export />}
       </div>
+
+      {/* Step components use sonner's toast.* for success/error feedback.
+          Without a Toaster mounted the calls are no-ops — the user sees
+          nothing when a request fails, which reads as "button did nothing". */}
+      <Toaster position="top-right" richColors expand={false} />
     </motion.div>
   );
 }
