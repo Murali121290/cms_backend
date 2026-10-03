@@ -22,7 +22,7 @@ from app.domains.journals.schemas import (
     JournalClientCreate, JournalClientResponse,
     JournalCreate, JournalResponse,
     JournalArticleCreate, JournalArticleResponse,
-    StageAssignmentRequest, StageAdvanceBody,
+    StageAssignmentRequest, ArticleAssignRequest, ArticleDelayUpdateRequest, StageAdvanceBody,
     JournalStylesheetCreate, JournalStylesheetResponse,
     JournalGrammarsheetCreate, JournalGrammarsheetResponse,
     JournalCheckRunResponse, JournalIssueResponse, JournalIssueAction,
@@ -58,6 +58,28 @@ def _get_journal(db: Session, journal_id: int) -> Journal:
     if not journal:
         raise HTTPException(status_code=404, detail="Journal not found")
     return journal
+
+
+# --- Journal Users / Team Members ---
+@router.get("/users")
+def list_journal_users(db: Session = Depends(get_db)):
+    """List active system users for assignment in Journal Production."""
+    from app.domains.auth.models import User
+    users = db.query(User).filter(User.active_status == True).order_by(User.id).all()
+    out = []
+    for u in users:
+        full_name = " ".join(p for p in (u.first_name, u.last_name) if p).strip() or u.username
+        out.append({
+            "id": u.id,
+            "username": u.username,
+            "name": full_name,
+            "first_name": u.first_name,
+            "last_name": u.last_name,
+            "email": u.email,
+            "role": u.role or u.designation or "Operator",
+            "team": u.team
+        })
+    return out
 
 
 # --- Journal Clients ---
@@ -209,6 +231,93 @@ def assign_stage(req: StageAssignmentRequest, db: Session = Depends(get_db)):
 
     db.commit()
     return {"status": "success", "message": "Workflow assignment saved"}
+
+
+@router.patch("/articles/{article_id}/assign")
+def assign_article(article_id: int, req: ArticleAssignRequest, db: Session = Depends(get_db)):
+    """Assign an article to a user/operator, plan stage dates & SLA hours."""
+    article = _get_article(db, article_id)
+
+    if req.assignee_id:
+        article.current_assignee_id = req.assignee_id
+    if req.assignee_name:
+        article.assigned_user_name = req.assignee_name
+    if req.planned_start_date:
+        article.planned_start_date = req.planned_start_date
+    if req.planned_end_date:
+        article.planned_end_date = req.planned_end_date
+    if req.sla_hours is not None:
+        article.sla_hours = req.sla_hours
+    if req.complexity_level:
+        article.complexity_level = req.complexity_level
+    if req.remarks:
+        article.assignment_remarks = req.remarks
+
+    # Also update JournalStageDetail for target or current stage
+    if req.stage_number:
+        stage_detail = db.query(JournalStageDetail).filter(
+            JournalStageDetail.article_id == article_id,
+            JournalStageDetail.stage_number == req.stage_number
+        ).first()
+    else:
+        stage_detail = db.query(JournalStageDetail).filter(
+            JournalStageDetail.article_id == article_id,
+            JournalStageDetail.stage_name == article.current_stage
+        ).first()
+
+    if stage_detail:
+        if req.assignee_id:
+            stage_detail.assignee_id = req.assignee_id
+        if req.planned_start_date:
+            stage_detail.planned_start_date = req.planned_start_date
+        if req.planned_end_date:
+            stage_detail.planned_end_date = req.planned_end_date
+        if req.sla_hours is not None:
+            stage_detail.sla_hours = req.sla_hours
+        if req.remarks:
+            stage_detail.remarks = req.remarks
+
+    db.commit()
+    db.refresh(article)
+    return {
+        "status": "success",
+        "message": f"Article #{article_id} assigned successfully",
+        "article_id": article_id,
+        "assigned_user_name": article.assigned_user_name,
+        "current_stage": article.current_stage
+    }
+
+
+@router.patch("/articles/{article_id}/delay")
+def update_article_delay(article_id: int, req: ArticleDelayUpdateRequest, db: Session = Depends(get_db)):
+    """Log or update operational/publisher delay on an article and set revised due date."""
+    article = _get_article(db, article_id)
+
+    article.is_delayed = True
+    article.delay_category = req.delay_category
+    article.delay_reason = req.delay_reason
+    article.revised_due_date = req.revised_due_date
+    article.delay_days = req.delay_days or 0
+    article.delay_logged_at = datetime.utcnow()
+
+    # Also update stage detail
+    stage_detail = db.query(JournalStageDetail).filter(
+        JournalStageDetail.article_id == article_id,
+        JournalStageDetail.stage_name == article.current_stage
+    ).first()
+    if stage_detail:
+        stage_detail.delayed = True
+
+    db.commit()
+    db.refresh(article)
+    return {
+        "status": "success",
+        "message": f"Delay logged for Article #{article_id} ({req.delay_category})",
+        "article_id": article_id,
+        "is_delayed": article.is_delayed,
+        "delay_category": article.delay_category,
+        "revised_due_date": article.revised_due_date
+    }
 
 
 # --- ZIP Upload & Metadata Extraction Endpoints ---
@@ -1465,11 +1574,14 @@ def journal_article_rows(journal_id: int, db: Session = Depends(get_db)):
     rows = []
     for a in articles:
         own = stages.get(a.id, [])
+        assignee_name = names.get(a.current_assignee_id) or a.assigned_user_name
         rows.append(JournalArticleRow(
             id=a.id, article_doi=a.article_doi, article_title=a.article_title, article_type=a.article_type,
             lead_author=a.lead_author, current_stage=a.current_stage, status=a.status, priority=a.priority,
-            due_date=a.due_date, current_assignee_id=a.current_assignee_id, current_assignee_name=names.get(a.current_assignee_id),
-            delayed=_is_delayed(a, own), open_errors=errors.get(a.id, 0), created_at=a.created_at,
+            complexity_level=a.complexity_level or "Medium", due_date=a.due_date, revised_due_date=a.revised_due_date,
+            current_assignee_id=a.current_assignee_id, current_assignee_name=assignee_name,
+            delayed=_is_delayed(a, own), delay_category=a.delay_category, delay_reason=a.delay_reason,
+            delay_days=a.delay_days or 0, open_errors=errors.get(a.id, 0), created_at=a.created_at,
             stages=[ArticleStageStatus(stage_number=s.stage_number, stage_name=s.stage_name, stage_status=s.stage_status,
                                        assignee_id=s.assignee_id, planned_end_date=s.planned_end_date) for s in own],
         ))

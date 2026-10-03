@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { AlertTriangle, ArrowRight, FileText, Settings, Trash2, Upload } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Clock, FileText, Settings, Trash2, Upload, UserCheck } from 'lucide-react'
 import {
   journalsApi, type ArticleUploadResult, type JournalArticleRow, type JournalIssue, type JournalOverview,
 } from '@/api/journals'
+import { AssignModal } from '@/components/journals/AssignModal'
+import { LogDelayModal } from '@/components/journals/LogDelayModal'
 import { getApiErrorMessage } from '@/api/client'
 import { Breadcrumb } from '@/components/ui/Breadcrumb'
 import { Button } from '@/components/ui/Button'
@@ -37,6 +39,9 @@ export function JournalArticlesPage() {
   const [proceeding, setProceeding] = useState<JournalArticleRow | null>(null)
   const [proceedBusy, setProceedBusy] = useState(false)
   const [blocked, setBlocked] = useState<{ message: string; issues: JournalIssue[] } | null>(null)
+
+  const [assigningArticle, setAssigningArticle] = useState<JournalArticleRow | null>(null)
+  const [delayingArticle, setDelayingArticle] = useState<JournalArticleRow | null>(null)
 
   const [deleting, setDeleting] = useState<JournalArticleRow | null>(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
@@ -281,9 +286,21 @@ export function JournalArticlesPage() {
                     </td>
                     <td className="px-4 py-3"><StageProgress stages={a.stages} current={a.current_stage} /></td>
                     <td className="px-4 py-3 whitespace-nowrap">{a.current_assignee_name ?? <span className="text-muted">Unassigned</span>}</td>
-                    <td className="px-4 py-3 whitespace-nowrap tabular-nums">{fmtDate(a.due_date)}</td>
+                    <td className="px-4 py-3 whitespace-nowrap tabular-nums">
+                      <div>{fmtDate(a.revised_due_date || a.due_date)}</div>
+                      {a.revised_due_date && a.due_date && a.revised_due_date !== a.due_date && (
+                        <div className="text-[10px] text-muted line-through">{fmtDate(a.due_date)}</div>
+                      )}
+                    </td>
                     <td className="px-4 py-3 whitespace-nowrap">
-                      {a.delayed ? <Badge variant="error" size="sm">Delayed</Badge> : <Badge variant={done ? 'success' : 'default'} size="sm">{a.status}</Badge>}
+                      {a.delayed ? (
+                        <div className="space-y-0.5">
+                          <Badge variant="error" size="sm">Delayed {a.delay_category ? `· ${a.delay_category}` : ''}</Badge>
+                          {a.delay_reason && <div className="text-[11px] text-red-600 line-clamp-1 max-w-[140px]" title={a.delay_reason}>{a.delay_reason}</div>}
+                        </div>
+                      ) : (
+                        <Badge variant={done ? 'success' : 'default'} size="sm">{a.status}</Badge>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1.5">
@@ -341,6 +358,19 @@ export function JournalArticlesPage() {
                               }} />
                             </label>
                             <label className="w-full px-3 py-1.5 text-left font-medium text-text hover:bg-surface flex items-center justify-between cursor-pointer">
+                              <span>🖼️ Upload Art Package</span>
+                              <input type="file" accept=".zip,.tif,.tiff,.eps,.jpg,.png" className="hidden" onChange={async (e) => {
+                                const f = e.target.files?.[0]
+                                if (f) {
+                                  try {
+                                    const r = await journalsApi.replaceArticleFile(a.id, f)
+                                    toast.success(r.message || 'Artwork package updated')
+                                    await load()
+                                  } catch (err) { toast.error(getApiErrorMessage(err, 'Artwork update failed')) }
+                                }
+                              }} />
+                            </label>
+                            <label className="w-full px-3 py-1.5 text-left font-medium text-text hover:bg-surface flex items-center justify-between cursor-pointer">
                               <span>🏷️ Replace XML</span>
                               <input type="file" accept=".xml,.jats" className="hidden" onChange={async (e) => {
                                 const f = e.target.files?.[0]
@@ -382,6 +412,12 @@ export function JournalArticlesPage() {
                           </div>
                         </div>
 
+                        {!done && (
+                          <>
+                            <Button size="sm" variant="outline" leftIcon={<UserCheck className="size-3.5" />} onClick={() => setAssigningArticle(a)}>Assign</Button>
+                            <Button size="sm" variant="outline" className="text-amber-700 bg-amber-50 border-amber-300 hover:bg-amber-100" leftIcon={<Clock className="size-3.5" />} onClick={() => setDelayingArticle(a)}>Log Delay</Button>
+                          </>
+                        )}
                         <Button size="sm" variant="secondary" onClick={() => navigate(`/journal-production/articles/${a.id}`)}>Open</Button>
                         <Button size="sm" variant="ghost" onClick={() => navigate(`/journal-article-editor/${a.id}`)}>Review</Button>
                         <Button size="sm" variant="ghost" className="text-danger hover:bg-danger/10" aria-label={`Delete ${a.article_title}`}
@@ -523,6 +559,22 @@ export function JournalArticlesPage() {
           </div>
         )}
       </Modal>
+
+      {/* Assign Modal */}
+      <AssignModal
+        isOpen={!!assigningArticle}
+        onClose={() => setAssigningArticle(null)}
+        article={assigningArticle}
+        onSuccess={load}
+      />
+
+      {/* Log Delay Modal */}
+      <LogDelayModal
+        isOpen={!!delayingArticle}
+        onClose={() => setDelayingArticle(null)}
+        article={delayingArticle}
+        onSuccess={load}
+      />
     </div>
   )
 }

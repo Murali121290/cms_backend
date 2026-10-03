@@ -116,10 +116,15 @@ class JournalArticleRow(BaseModel):
     current_stage: str
     status: str
     priority: str
+    complexity_level: str = "Medium"
     due_date: Optional[datetime] = None
+    revised_due_date: Optional[datetime] = None
     current_assignee_id: Optional[int] = None
     current_assignee_name: Optional[str] = None
     delayed: bool = False
+    delay_category: Optional[str] = None
+    delay_reason: Optional[str] = None
+    delay_days: Optional[int] = 0
     open_errors: int = 0
     stages: List[ArticleStageStatus] = Field(default_factory=list)
     created_at: datetime
@@ -149,7 +154,13 @@ class JournalArticleResponse(JournalArticleBase):
     id: int
     current_stage: str
     current_assignee_id: Optional[int] = None
+    assigned_user_name: Optional[str] = None
     status: str
+    is_delayed: bool = False
+    delay_category: Optional[str] = None
+    delay_reason: Optional[str] = None
+    revised_due_date: Optional[datetime] = None
+    delay_days: Optional[int] = 0
     xhtml_path: Optional[str] = None
     jats_xml_path: Optional[str] = None
     proof_pdf_path: Optional[str] = None
@@ -169,6 +180,24 @@ class StageAssignmentRequest(BaseModel):
     planned_end_date: Optional[datetime] = None
     sla_hours: int = 24
     complexity_level: str = "Medium"
+
+
+class ArticleAssignRequest(BaseModel):
+    stage_number: Optional[int] = None
+    assignee_name: Optional[str] = None
+    assignee_id: Optional[int] = None
+    planned_start_date: Optional[datetime] = None
+    planned_end_date: Optional[datetime] = None
+    sla_hours: Optional[int] = 24
+    complexity_level: Optional[str] = "Medium"
+    remarks: Optional[str] = None
+
+
+class ArticleDelayUpdateRequest(BaseModel):
+    delay_category: str
+    revised_due_date: datetime
+    delay_days: Optional[int] = 0
+    delay_reason: str
 
 
 class StageAdvanceRequest(BaseModel):

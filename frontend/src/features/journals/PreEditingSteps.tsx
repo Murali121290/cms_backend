@@ -46,7 +46,7 @@ function subtitle(step: PreEditingStep, busy: boolean) {
   if (step.status === 'locked') return step.was_finished ? 'Finished before; locked until the step above is finished again' : step.blocked_reason ?? 'Locked'
   if (step.status === 'failed') return step.error ?? 'The last run failed'
   if (step.key === 'ia_rules') return 'The Mechanical & IA rules selected in Journal settings'
-  if (step.key === 'technical') return 'Figure and table callouts, equations, keywords'
+  if (step.key === 'technical') return 'Figure and table callouts, equations, keywords, art folder image validation'
   return step.description
 }
 

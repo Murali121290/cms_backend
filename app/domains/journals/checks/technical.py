@@ -19,7 +19,7 @@ from app.domains.journals.checks.base import CheckResult, IssueDraft, JournalChe
 from app.domains.journals.checks.structuring import active_stylesheet
 from app.domains.journals.manuscript import load_blocks, resolve_manuscript_path, snippet
 
-RULES = ("JT-FIG", "JT-UNIT", "JT-PCT", "JT-RANGE", "JT-EQ", "JT-CITE", "JT-KWD")
+RULES = ("JT-FIG", "JT-UNIT", "JT-PCT", "JT-RANGE", "JT-EQ", "JT-CITE", "JT-KWD", "JT-ART-COUNT", "JT-ART-MISSING", "JT-ART-UNLINKED")
 TEXT_SKIP = {"References", "Reference Heading", "Front Matter", "Authors", "Affiliation", "Keywords",
              "Table Body", "Table Column Header"}
 CAPTION_CATEGORIES = {"Figure Caption", "Table Title", "Caption"}
@@ -170,5 +170,48 @@ class TechnicalCheck(JournalCheck):
                         rule_id="JT-CITE", severity="warning", title=f"{kind} {n} is never mentioned in the text",
                         message=f"Cite {kind.lower()} {n} in the text before it appears, or query the author.",
                         location=_loc(b), context_snippet=snippet(b.text, 0, 0, 80), fingerprint=f"JT-CITE:{kind}:{n}"))
+
+        # Artwork Folder & Image File Validation
+        from app.domains.journals.models import JournalFile
+        from app.domains.journals.art import figure_from_name
+        art_records = db.query(JournalFile).filter(
+            JournalFile.article_id == article.id,
+            JournalFile.category.in_(["art", "Artwork", "figure", "Figure"])
+        ).all() if article and getattr(article, "id", None) else []
+
+        art_file_map = {}
+        for f in art_records:
+            num = figure_from_name(f.filename)
+            if num is not None:
+                art_file_map.setdefault(num, []).append(f.filename)
+
+        num_captions = len(figure_captions)
+        num_art_files = len(art_records)
+
+        if num_captions > 0:
+            if num_art_files < num_captions:
+                issues.append(IssueDraft(
+                    rule_id="JT-ART-COUNT", severity="error",
+                    title=f"Art folder count mismatch: {num_captions} figure caption(s) found, but {num_art_files} image file(s) in art folder",
+                    message=f"The manuscript contains {num_captions} figure caption(s), but only {num_art_files} artwork file(s) were found in the art folder. Please upload missing art files or add an author query.",
+                    suggestion={"type": "art_upload_or_comment", "action": "upload_missing", "count_expected": num_captions, "count_found": num_art_files},
+                    fingerprint=f"JT-ART-COUNT:{article.id}:{num_captions}:{num_art_files}"
+                ))
+
+            for n, b in sorted(figure_captions.items()):
+                if n not in art_file_map:
+                    issues.append(IssueDraft(
+                        rule_id="JT-ART-MISSING", severity="error",
+                        title=f"Missing artwork image file for Figure {n}",
+                        message=f"Figure {n} has a caption in text, but no artwork image file (e.g. fig{n}.tif, fig{n}.png, Figure_{n}.jpg) was found in the art folder.",
+                        location=_loc(b), context_snippet=snippet(b.text, 0, 0, 80),
+                        suggestion={
+                            "type": "art_upload_or_comment",
+                            "figure_number": n,
+                            "expected_filename": f"fig{n}.tif",
+                            "comment_template": f"AQ: Figure {n} image file missing from submission. Please supply high-resolution artwork file."
+                        },
+                        fingerprint=f"JT-ART-MISSING:{b.block_id}:{n}"
+                    ))
 
         return CheckResult(issues=issues, rules_total=len(RULES), rule_set_version=sheet.name if sheet else "Default technical rules")

@@ -25,14 +25,16 @@ def _unzip(data: bytes) -> Dict[str, bytes]:
 
 
 class JatsXsltClient:
-    """POST {JATS_XSLT_URL}/convert, multipart field "file" = the DOCX, form field "xslt" = JATS_XSLT_NAME.
+    """POST {JATS_XSLT_URL}/convert or /journal/docx-to-xml, multipart field "file" = DOCX.
 
     The response is either the JATS XML itself or a ZIP containing one .xml file.
+    If the server is unavailable or fails, caller falls back to local converter.
     """
 
     def __init__(self, base_url: Optional[str] = None, timeout: Optional[int] = None):
         s = get_settings()
-        self.base_url = (base_url if base_url is not None else s.JATS_XSLT_URL).rstrip("/")
+        url = base_url if base_url is not None else (s.JATS_XSLT_URL or s.INDESIGN_SERVER_URL or "")
+        self.base_url = url.rstrip("/")
         self.xslt = s.JATS_XSLT_NAME
         self.timeout = timeout or s.JATS_XSLT_TIMEOUT_SECONDS
 
@@ -41,23 +43,33 @@ class JatsXsltClient:
         return bool(self.base_url)
 
     def convert(self, docx_path: str) -> bytes:
-        try:
-            with open(docx_path, "rb") as fh:
-                r = requests.post(f"{self.base_url}/convert", files={"file": (os.path.basename(docx_path), fh)},
-                                  data={"xslt": self.xslt}, timeout=(15, self.timeout))
-        except requests.RequestException as e:
-            raise JournalServerError(f"XSLT server unreachable: {e}") from e
-        if r.status_code >= 400:
-            raise JournalServerError(f"XSLT server returned HTTP {r.status_code}: {r.text[:300]}")
-        body = r.content
-        if body[:2] == b"PK":
-            xml = [v for k, v in _unzip(body).items() if k.lower().endswith(".xml")]
-            if not xml:
-                raise JournalServerError("XSLT server ZIP contained no .xml file")
-            return xml[0]
-        if b"<article" not in body[:4000]:
-            raise JournalServerError("XSLT server response is not a JATS <article>")
-        return body
+        if not self.base_url:
+            raise JournalServerError("XSLT / Conversion server URL is not configured")
+
+        endpoints = ["/journal/docx-to-xml", "/convert-docx-to-xml", "/convert"]
+        last_error = None
+        for ep in endpoints:
+            try:
+                with open(docx_path, "rb") as fh:
+                    r = requests.post(f"{self.base_url}{ep}", files={"file": (os.path.basename(docx_path), fh)},
+                                      data={"xslt": self.xslt}, timeout=(15, self.timeout))
+                if r.status_code < 400:
+                    body = r.content
+                    if body[:2] == b"PK":
+                        xml = [v for k, v in _unzip(body).items() if k.lower().endswith(".xml")]
+                        if not xml:
+                            raise JournalServerError("XSLT server ZIP contained no .xml file")
+                        return xml[0]
+                    if b"<article" in body[:4000] or b"<?xml" in body[:4000]:
+                        return body
+                else:
+                    last_error = f"HTTP {r.status_code}: {r.text[:200]}"
+            except requests.RequestException as e:
+                last_error = str(e)
+                continue
+
+        raise JournalServerError(f"Word-to-XML Windows conversion server unreachable or failed: {last_error}")
+
 
 
 class JournalInDesignClient:
@@ -117,3 +129,29 @@ class JournalInDesignClient:
         if r.content[:2] != b"PK":
             raise JournalServerError("InDesign server did not return a ZIP")
         return _unzip(r.content)
+
+    def export_final(self, indd_path: str, art_paths: Optional[Iterable[str]] = None,
+                     client_code: Optional[str] = None) -> Dict[str, bytes]:
+        """Process 3: Send .indd layout package to /journal/indesign-to-final and return final delivery outputs."""
+        if not self.base_url:
+            raise JournalServerError("INDESIGN_SERVER_URL is not configured")
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.write(indd_path, os.path.basename(indd_path))
+            for a in art_paths or []:
+                if os.path.exists(a):
+                    zf.write(a, f"artfile/{os.path.basename(a)}")
+        try:
+            r = requests.post(f"{self.base_url}/journal/indesign-to-final",
+                              params={"client": client_code or "default"},
+                              files={"file": ("package.zip", buf.getvalue(), "application/zip")},
+                              timeout=(30, 900))
+        except requests.RequestException as e:
+            raise JournalServerError(f"InDesign server unreachable: {e}") from e
+        if r.status_code >= 400:
+            raise JournalServerError(f"InDesign server returned HTTP {r.status_code}: {r.text[:300]}")
+        if r.content[:2] != b"PK":
+            raise JournalServerError("InDesign server did not return a ZIP")
+        return _unzip(r.content)
+
+

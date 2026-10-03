@@ -1,5 +1,16 @@
 import apiClient from './client'
 
+export interface JournalUser {
+  id: number
+  username: string
+  name: string
+  first_name?: string
+  last_name?: string
+  email?: string
+  role?: string
+  team?: string
+}
+
 export interface JournalClient {
   id: number
   client_code: string
@@ -122,10 +133,15 @@ export interface JournalArticleRow {
   current_stage: string
   status: string
   priority: string
+  complexity_level?: string
   due_date?: string
+  revised_due_date?: string
   current_assignee_id?: number
   current_assignee_name?: string
   delayed: boolean
+  delay_category?: string
+  delay_reason?: string
+  delay_days?: number
   open_errors: number
   stages: ArticleStageStatus[]
   created_at: string
@@ -655,6 +671,18 @@ export const journalsApi = {
       : `${apiClient.defaults.baseURL ?? ''}/journals/articles/${articleId}/files/${file.id}/download`,
   createDelivery: async (articleId: number, opts: { include_indesign: boolean; include_art: boolean }): Promise<{ file: JournalFileInfo; readiness: DeliveryCheck[]; completed: boolean }> => {
     const res = await apiClient.post(`/journals/articles/${articleId}/delivery`, opts)
+    return res.data
+  },
+  getUsers: async (): Promise<JournalUser[]> => {
+    const res = await apiClient.get('/journals/users')
+    return res.data
+  },
+  assignArticle: async (articleId: number, data: { stage_number?: number; assignee_id?: number; assignee_name?: string; planned_start_date?: string; planned_end_date?: string; sla_hours?: number; complexity_level?: string; remarks?: string }): Promise<any> => {
+    const res = await apiClient.patch(`/journals/articles/${articleId}/assign`, data)
+    return res.data
+  },
+  updateDelay: async (articleId: number, data: { delay_category: string; revised_due_date: string; delay_days?: number; delay_reason: string }): Promise<any> => {
+    const res = await apiClient.patch(`/journals/articles/${articleId}/delay`, data)
     return res.data
   },
 }

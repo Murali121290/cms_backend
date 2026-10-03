@@ -90,10 +90,23 @@ class JournalArticle(Base):
     # Workflow Status & Assignee
     current_stage = Column(String(100), default="1. Pre-Editing", nullable=False)
     current_assignee_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    assigned_user_name = Column(String(255), nullable=True)
     status = Column(String(30), default="In-progress", nullable=False) # In-progress, Completed, Hold
     priority = Column(String(30), default="Normal", nullable=False)
     complexity_level = Column(String(30), default="Medium", nullable=False)
     due_date = Column(DateTime(timezone=True), nullable=True)
+    planned_start_date = Column(DateTime(timezone=True), nullable=True)
+    planned_end_date = Column(DateTime(timezone=True), nullable=True)
+    sla_hours = Column(Integer, default=24, nullable=True)
+    assignment_remarks = Column(Text, nullable=True)
+
+    # Delay Management
+    is_delayed = Column(Boolean, default=False, nullable=False)
+    delay_category = Column(String(100), nullable=True) # Author, Publisher, Technical, Layout, Vendor
+    delay_reason = Column(Text, nullable=True)
+    revised_due_date = Column(DateTime(timezone=True), nullable=True)
+    delay_days = Column(Integer, default=0, nullable=True)
+    delay_logged_at = Column(DateTime(timezone=True), nullable=True)
     
     # Process Paths
     original_docx_path = Column(String(500), nullable=True)
