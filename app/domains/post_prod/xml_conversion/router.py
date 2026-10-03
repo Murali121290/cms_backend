@@ -163,7 +163,7 @@ def s4c_convert(project_id: int, db: Session = Depends(database.get_db)):
     if not url:
         raise HTTPException(status_code=500, detail="PDF2XML_API_URL environment variable is not set")
     params = {
-        "engine": "heuristic",
+        "engine": "docling",
         "targets": "json,xml,jats,bits",
         "return_xml": "rawxml"
     }
@@ -206,7 +206,7 @@ def target_convert(project_id: int, format: str = "JATS", db: Session = Depends(
     if not url:
         raise HTTPException(status_code=500, detail="PDF2XML_API_URL environment variable is not set")
     params = {
-        "engine": "heuristic",
+        "engine": "docling",
         "targets": "json,xml,jats,bits",
         "return_xml": format.lower()
     }

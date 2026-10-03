@@ -34,7 +34,7 @@ def run_xml_conversion_pipeline(history_id: int):
             db.commit()
             return
         params = {
-            "engine": "heuristic",
+            "engine": "docling",
             "targets": "json,xml,jats,bits",
             "return_xml": "rawxml"
         }
