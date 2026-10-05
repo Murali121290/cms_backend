@@ -11,8 +11,12 @@ from typing import Iterable, List, Optional
 
 from lxml import etree
 
-DTD_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "resources", "jats", "1.3")
-DTD_FILE = "JATS-journalpublishing1-3-mathml3.dtd"
+DTD_DIR_13 = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "resources", "jats", "1.3"))
+DTD_FILE_13 = "JATS-journalpublishing1-3-mathml3.dtd"
+
+DTD_DIR_20 = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "resources", "jats", "2.0"))
+DTD_FILE_20 = "journalpublishing.dtd"
+
 XLINK_HREF = "{http://www.w3.org/1999/xlink}href"
 
 
@@ -27,9 +31,13 @@ class XmlFinding:
     detail: Optional[str] = None  # e.g. the unresolved ID or missing asset name
 
 
-@lru_cache(maxsize=1)
-def jats_dtd() -> etree.DTD:
-    return etree.DTD(os.path.abspath(os.path.join(DTD_DIR, DTD_FILE)))
+@lru_cache(maxsize=2)
+def jats_dtd(version: str = "2.0") -> etree.DTD:
+    if str(version).startswith("2") or version == "2.0":
+        path = os.path.join(DTD_DIR_20, DTD_FILE_20)
+        if os.path.exists(path):
+            return etree.DTD(path)
+    return etree.DTD(os.path.join(DTD_DIR_13, DTD_FILE_13))
 
 
 def _classify(message: str):
@@ -59,7 +67,7 @@ HINTS = {
 }
 
 
-def validate_jats(xml: bytes, assets: Optional[Iterable[str]] = None) -> List[XmlFinding]:
+def validate_jats(xml: bytes, assets: Optional[Iterable[str]] = None, dtd_version: str = "2.0") -> List[XmlFinding]:
     parser = etree.XMLParser(load_dtd=False, no_network=True, resolve_entities=False, huge_tree=False)
     try:
         doc = etree.fromstring(xml, parser)
@@ -67,7 +75,11 @@ def validate_jats(xml: bytes, assets: Optional[Iterable[str]] = None) -> List[Xm
         return [XmlFinding("XML-WF", "error", "XML is not well-formed", str(e), line=getattr(e, "lineno", None))]
 
     findings: List[XmlFinding] = []
-    dtd = jats_dtd()
+    if doc.get("dtd-version") == "2.0" or b'journalpublishing.dtd' in xml or b'Journal Publishing DTD v2.0' in xml:
+        dtd_version = "2.0"
+    elif doc.get("dtd-version") == "1.3" or b'JATS-journalpublishing1-3' in xml or b'dtd/1.3' in xml:
+        dtd_version = "1.3"
+    dtd = jats_dtd(dtd_version)
     if not dtd.validate(doc):
         seen = set()
         for err in dtd.error_log.filter_from_errors():

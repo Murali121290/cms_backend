@@ -76,6 +76,8 @@ def save_version(db: Session, article: JournalArticle, category: str, filename: 
     version = q.count() + 1
     name = f"{stem}_v{version}{ext}"
     path = os.path.join(article_dir(article, subdir), name)
+    if isinstance(data, str):
+        data = data.encode("utf-8")
     with open(path, "wb") as fh:
         fh.write(data)
     row = JournalFile(article_id=article.id, filename=name, file_type=ext.lstrip(".").lower(), category=category,

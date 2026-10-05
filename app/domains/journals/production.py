@@ -79,6 +79,16 @@ def convert_to_jats(db: Session, article: JournalArticle, user_id: Optional[int]
     elif xslt.configured:
         fallback_reason = "No DOCX available for the XSLT server"
 
+    if xml is None and docx_path and os.path.exists(docx_path):
+        try:
+            from app.domains.journals.jats.manuscript_to_jats import convert_docx_to_jats
+            profile_path = os.path.join(os.path.dirname(__file__), "jats", "profiles", "jmir_mededu_profile.json")
+            if os.path.exists(profile_path):
+                xml = convert_docx_to_jats(docx_path, profile_path)
+                converter = "manuscript-to-jats"
+        except Exception as py_err:
+            logger.warning("manuscript_to_jats converter failed for article %s, using fallback: %s", article.id, py_err)
+
     if xml is None:
         if article.xhtml_path and os.path.exists(article.xhtml_path):
             with open(article.xhtml_path, encoding="utf-8") as fh:
@@ -97,6 +107,9 @@ def convert_to_jats(db: Session, article: JournalArticle, user_id: Optional[int]
             figure_files=figure_files(db, article.id),
             char_styles=char_styles,
         )
+
+    if isinstance(xml, str):
+        xml = xml.encode("utf-8")
 
     base = re.sub(r"[^\w.-]+", "_", article.article_doi or f"article_{article.id}")
     row = save_version(db, article, "JATS_XML", f"{base}.xml", xml, "xml")

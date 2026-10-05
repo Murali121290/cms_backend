@@ -1,0 +1,125 @@
+{
+  "schema_name": "JMIR-NLM-JATS-2.0-profile",
+  "doctype": "<!DOCTYPE article PUBLIC \"-//NLM//DTD Journal Publishing DTD v2.0 20040830//EN\" \"journalpublishing.dtd\">",
+  "article_type": "research-article",
+  "language": "en",
+  "journal": {
+    "nlm_ta": "JMIR Med Educ",
+    "publisher_id": "mededu",
+    "index": "20",
+    "title": "JMIR Medical Education",
+    "abbrev_title": "JMIR Med Educ",
+    "issn_epub": "2369-3762",
+    "publisher_name": "JMIR Publications",
+    "publisher_location": "Toronto, Canada",
+    "site_url": "https://mededu.jmir.org",
+    "issue": "1"
+  },
+  "styles": {
+    "article_type": [
+      "ArticleType"
+    ],
+    "article_title": [
+      "ArticleTitle"
+    ],
+    "authors": [
+      "ArticleAuthor"
+    ],
+    "affiliation": [
+      "ArticleAffiliation"
+    ],
+    "correspondence": [
+      "CorrespondenceAuthor"
+    ],
+    "abstract": [
+      "Abstract"
+    ],
+    "keywords": [
+      "Keywords"
+    ],
+    "heading1": [
+      "Head1"
+    ],
+    "heading2": [
+      "Head2"
+    ],
+    "body": [
+      "Para-FL",
+      "ParaFirstLine-Ind",
+      "Para-FL1"
+    ],
+    "figure_caption": [
+      "FigureLegend"
+    ],
+    "table_caption": [
+      "TableCaption"
+    ],
+    "table_note": [
+      "TableNote"
+    ],
+    "list": [
+      "UL-FL1_first",
+      "UL-FL1",
+      "UL-FL1_last"
+    ],
+    "references_heading": [
+      "ReferencesHeading1"
+    ],
+    "reference": [
+      "Reference-Numbered"
+    ]
+  },
+  "body": {
+    "top_level": [
+      "Introduction",
+      "Methods",
+      "Results",
+      "Discussion"
+    ],
+    "sec_type": {
+      "Introduction": "intro",
+      "Methods": "methods",
+      "Results": "results",
+      "Discussion": "discussion"
+    },
+    "parent_overrides": {
+      "Conclusions": "Discussion"
+    }
+  },
+  "back": {
+    "acknowledgments": "Acknowledgments",
+    "notes": [
+      "Funding",
+      "Data Availability"
+    ],
+    "contributors": "Authors' Contributions",
+    "conflicts": "Conflicts of Interest",
+    "appendices": "Multimedia Appendices",
+    "references": "References",
+    "abbreviations": "Abbreviations",
+    "appendix_item_pattern": "(?:Multimedia Appendix|Checklist)\\s+\\d+"
+  },
+  "assets": {
+    "figure_extension": ".png",
+    "figure_digits": 2,
+    "figure_pattern": "{journal}_v{volume}i{issue}e{elocation}_fig{num:02d}{ext}",
+    "supp_pattern": "{journal}_v{volume}i{issue}e{elocation}_app{num}.{ext}"
+  },
+  "country_names": [
+    "United Arab Emirates",
+    "Saudi Arabia",
+    "United States",
+    "United Kingdom",
+    "Canada",
+    "Australia",
+    "India"
+  ],
+  "abstract_sec_types": [
+    "methods",
+    "results",
+    "conclusions"
+  ],
+  "merge_paragraphs_sections": [
+    "Participants and Recruitment"
+  ]
+}
