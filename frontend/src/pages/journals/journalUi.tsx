@@ -24,6 +24,88 @@ export function initials(name: string) {
   return name.split(/[\s-]+/).filter(Boolean).slice(0, 2).map(w => w[0]?.toUpperCase()).join('')
 }
 
+export function clientCodeInitials(code?: string, name?: string): string {
+  if (code) {
+    const cleaned = code.replace(/[-_\d]+$/, '').trim()
+    if (cleaned.length >= 2 && cleaned.length <= 5) {
+      return cleaned.toUpperCase()
+    }
+  }
+  if (name) {
+    return initials(name)
+  }
+  return (code || 'CL').slice(0, 4).toUpperCase()
+}
+
+export interface ClientTheme {
+  bannerBg: string
+  avatarBg: string
+  avatarText: string
+  borderColor: string
+  shadowColor: string
+}
+
+const CLIENT_THEMES: ClientTheme[] = [
+  {
+    bannerBg: 'bg-gradient-to-br from-teal-500/20 via-teal-500/10 to-teal-500/5 border-b border-teal-500/20',
+    avatarBg: 'bg-gradient-to-br from-teal-500 to-teal-700',
+    avatarText: 'text-white font-extrabold',
+    borderColor: 'hover:border-teal-500/40',
+    shadowColor: 'hover:shadow-teal-500/10',
+  },
+  {
+    bannerBg: 'bg-gradient-to-br from-indigo-500/20 via-indigo-500/10 to-indigo-500/5 border-b border-indigo-500/20',
+    avatarBg: 'bg-gradient-to-br from-indigo-500 to-indigo-700',
+    avatarText: 'text-white font-extrabold',
+    borderColor: 'hover:border-indigo-500/40',
+    shadowColor: 'hover:shadow-indigo-500/10',
+  },
+  {
+    bannerBg: 'bg-gradient-to-br from-rose-500/20 via-rose-500/10 to-rose-500/5 border-b border-rose-500/20',
+    avatarBg: 'bg-gradient-to-br from-rose-500 to-rose-700',
+    avatarText: 'text-white font-extrabold',
+    borderColor: 'hover:border-rose-500/40',
+    shadowColor: 'hover:shadow-rose-500/10',
+  },
+  {
+    bannerBg: 'bg-gradient-to-br from-amber-500/20 via-amber-500/10 to-amber-500/5 border-b border-amber-500/20',
+    avatarBg: 'bg-gradient-to-br from-amber-500 to-amber-600',
+    avatarText: 'text-slate-950 font-extrabold',
+    borderColor: 'hover:border-amber-500/40',
+    shadowColor: 'hover:shadow-amber-500/10',
+  },
+  {
+    bannerBg: 'bg-gradient-to-br from-purple-500/20 via-purple-500/10 to-purple-500/5 border-b border-purple-500/20',
+    avatarBg: 'bg-gradient-to-br from-purple-500 to-purple-700',
+    avatarText: 'text-white font-extrabold',
+    borderColor: 'hover:border-purple-500/40',
+    shadowColor: 'hover:shadow-purple-500/10',
+  },
+  {
+    bannerBg: 'bg-gradient-to-br from-cyan-500/20 via-cyan-500/10 to-cyan-500/5 border-b border-cyan-500/20',
+    avatarBg: 'bg-gradient-to-br from-cyan-500 to-cyan-700',
+    avatarText: 'text-white font-extrabold',
+    borderColor: 'hover:border-cyan-500/40',
+    shadowColor: 'hover:shadow-cyan-500/10',
+  },
+  {
+    bannerBg: 'bg-gradient-to-br from-emerald-500/20 via-emerald-500/10 to-emerald-500/5 border-b border-emerald-500/20',
+    avatarBg: 'bg-gradient-to-br from-emerald-500 to-emerald-700',
+    avatarText: 'text-white font-extrabold',
+    borderColor: 'hover:border-emerald-500/40',
+    shadowColor: 'hover:shadow-emerald-500/10',
+  },
+]
+
+export function getClientTheme(code: string): ClientTheme {
+  let hash = 0
+  for (let i = 0; i < (code || '').length; i++) {
+    hash = code.charCodeAt(i) + ((hash << 5) - hash)
+  }
+  const index = Math.abs(hash) % CLIENT_THEMES.length
+  return CLIENT_THEMES[index]
+}
+
 /** A stage advance refused by the API: 409 {detail: {message, blocking_issues}} */
 export function advanceError(err: unknown): { message: string; issues: JournalIssue[] } {
   if (axios.isAxiosError(err) && err.response?.status === 409) {

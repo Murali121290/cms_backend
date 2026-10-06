@@ -416,7 +416,7 @@ def background_processing_task(
                         from app.processing.docx_to_xhtml_runs import DocxToXhtmlRunsEngine
                         xhtml_dir = os.path.join(dir_name, "xhtml")
                         os.makedirs(xhtml_dir, exist_ok=True)
-                        xhtml_path = os.path.join(xhtml_dir, f"{name_only}_Processed.html")
+                        xhtml_path = os.path.join(xhtml_dir, f"{name_only}.html")
                         content = DocxToXhtmlRunsEngine().convert(output_path)
                         with open(xhtml_path, "w", encoding="utf-8") as f:
                             f.write(content)
@@ -1012,6 +1012,16 @@ def background_processing_task(
                         shutil.move(processed_path, file_path)
                         file_record.uploaded_at = now_ist_naive()
                         logger.info(f"In-place overwrite: {file_record.filename} (v{file_record.version})")
+
+                        # Ensure pre-generated XHTML timestamp is updated after DOCX is overwritten
+                        try:
+                            dir_name_sub = os.path.dirname(file_path)
+                            base_name_sub = os.path.splitext(os.path.basename(file_path))[0]
+                            xhtml_candidate = os.path.join(dir_name_sub, "xhtml", f"{base_name_sub}.html")
+                            if os.path.exists(xhtml_candidate):
+                                os.utime(xhtml_candidate, None)
+                        except Exception as ut_err:
+                            logger.warning(f"Could not update timestamp on XHTML candidate: {ut_err}")
                     else:
                         mime = "application/octet-stream"
                         if processed_filename.endswith(".html"):

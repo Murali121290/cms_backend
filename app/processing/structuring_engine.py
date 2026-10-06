@@ -115,6 +115,8 @@ class StructuringEngine:
             from app.processing.docx_to_xhtml_runs import DocxToXhtmlRunsEngine
             dir_name = os.path.dirname(docx_path)
             base_name = os.path.splitext(os.path.basename(docx_path))[0]
+            if base_name.endswith("_Processed"):
+                base_name = base_name[:-10]
             xhtml_dir = os.path.join(dir_name, "xhtml")
             os.makedirs(xhtml_dir, exist_ok=True)
             xhtml_path = os.path.join(xhtml_dir, f"{base_name}.html")

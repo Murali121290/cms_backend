@@ -63,23 +63,12 @@ def article_meta(db: Session, article: JournalArticle) -> ArticleMeta:
 
 
 def convert_to_jats(db: Session, article: JournalArticle, user_id: Optional[int] = None) -> Dict[str, Any]:
-    """Stage 3: produce a new JATS XML version, then run the XML & DTD check."""
+    """Stage 3: produce a new JATS XML version using local converter, then run the XML & DTD check."""
     docx_path = article.edited_docx_path if article.edited_docx_path and os.path.exists(article.edited_docx_path) \
         else resolve_manuscript_path(db, article)
     xml, converter, fallback_reason = None, "local", None
 
-    xslt = JatsXsltClient()
-    if xslt.configured and docx_path:
-        try:
-            xml = xslt.convert(docx_path)
-            converter = "xslt-server"
-        except JournalServerError as e:
-            fallback_reason = str(e)
-            logger.warning("JATS XSLT server failed for article %s, using local converter: %s", article.id, e)
-    elif xslt.configured:
-        fallback_reason = "No DOCX available for the XSLT server"
-
-    if xml is None and docx_path and os.path.exists(docx_path):
+    if docx_path and os.path.exists(docx_path):
         try:
             from app.domains.journals.jats.manuscript_to_jats import convert_docx_to_jats
             profile_path = os.path.join(os.path.dirname(__file__), "jats", "profiles", "jmir_mededu_profile.json")
@@ -93,7 +82,7 @@ def convert_to_jats(db: Session, article: JournalArticle, user_id: Optional[int]
         if article.xhtml_path and os.path.exists(article.xhtml_path):
             with open(article.xhtml_path, encoding="utf-8") as fh:
                 xhtml = fh.read()
-        elif docx_path:
+        elif docx_path and os.path.exists(docx_path):
             from app.processing.docx_to_xhtml_runs import DocxToXhtmlRunsEngine
             xhtml = DocxToXhtmlRunsEngine().convert(docx_path)
         else:
@@ -165,7 +154,10 @@ def run_indesign_job(article_id: int, user_id: Optional[int] = None) -> None:
         from app.domains.journals.service import INDESIGN
         stage5 = _stage(db, article_id, INDESIGN)
         journal = db.query(Journal).filter(Journal.id == article.journal_id).first()
-        client = db.query(JournalClient).filter(JournalClient.id == journal.client_id).first()
+        client = db.query(JournalClient).filter(JournalClient.id == journal.client_id).first() if journal else None
+        if stage5:
+            stage5.remarks = "InDesign generation running..."
+            db.commit()
         try:
             outputs = JournalInDesignClient().generate(
                 article.jats_xml_path, indesign_template(db, article), art_file_paths(db, article_id), client.client_code,

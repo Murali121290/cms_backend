@@ -102,7 +102,17 @@ def art_files(db: Session, article_id: int) -> List[JournalFile]:
 
 
 def art_file_paths(db: Session, article_id: int) -> List[str]:
-    return [r.path for r in art_files(db, article_id) if os.path.splitext(r.filename)[1].lower() in ART_EXTENSIONS]
+    paths = [r.path for r in art_files(db, article_id) if os.path.splitext(r.filename)[1].lower() in ART_EXTENSIONS]
+    article = db.query(JournalArticle).get(article_id)
+    if article:
+        art_dir = article_dir(article, "art")
+        if os.path.exists(art_dir):
+            for fn in os.listdir(art_dir):
+                fp = os.path.join(art_dir, fn)
+                if os.path.isfile(fp) and os.path.splitext(fn)[1].lower() in ART_EXTENSIONS:
+                    if fp not in paths:
+                        paths.append(fp)
+    return paths
 
 
 def figure_files(db: Session, article_id: int) -> Dict[int, str]:

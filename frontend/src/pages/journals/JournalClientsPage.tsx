@@ -7,7 +7,8 @@ import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { FullPageSpinner } from '@/components/ui/Spinner'
 import { toast } from '@/store/useToastStore'
-import { NewClientModal, initials } from './journalUi'
+import { cn } from '@/utils/cn'
+import { NewClientModal, clientCodeInitials, getClientTheme } from './journalUi'
 
 export function JournalClientsPage() {
   const navigate = useNavigate()
@@ -67,30 +68,50 @@ export function JournalClientsPage() {
           action={!clients.length && <Button leftIcon={<Plus />} onClick={() => setShowNew(true)}>New client</Button>}
         />
       ) : (
-        <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
-          {visible.map(c => (
-            <button
-              key={c.id}
-              type="button"
-              onClick={() => navigate(`/journal-production/clients/${c.id}`)}
-              className="text-left bg-card rounded-xl border border-border shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-            >
-              <div className="flex items-center justify-center h-28 bg-primary/5">
-                <div className="size-14 rounded-full bg-primary/15 text-primary flex items-center justify-center text-lg font-bold">
-                  {initials(c.publisher_name)}
+        <div className="grid gap-6 grid-cols-[repeat(auto-fill,minmax(310px,1fr))]">
+          {visible.map(c => {
+            const theme = getClientTheme(c.client_code)
+            const codeInit = clientCodeInitials(c.client_code, c.publisher_name)
+            return (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => navigate(`/journal-production/clients/${c.id}`)}
+                className={cn(
+                  'text-left bg-card rounded-2xl border border-border shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-primary/40 flex flex-col',
+                  theme.borderColor,
+                  theme.shadowColor
+                )}
+              >
+                <div className={cn('flex items-center justify-center h-32 relative', theme.bannerBg)}>
+                  <div className={cn('size-16 rounded-2xl flex items-center justify-center text-xl font-black tracking-wide shadow-lg border border-white/20', theme.avatarBg, theme.avatarText)}>
+                    {codeInit}
+                  </div>
                 </div>
-              </div>
-              <div className="px-4 py-3 border-b border-border text-center">
-                <p className="font-semibold text-text truncate">{c.publisher_name}</p>
-                <p className="text-xs text-muted font-mono mt-0.5">{c.client_code} · JATS {c.jats_version}</p>
-              </div>
-              <div className="px-4 py-3 flex justify-center gap-4 text-xs text-muted flex-wrap">
-                <span>Journals : <strong className="text-text tabular-nums">{c.journal_count}</strong></span>
-                <span>Active : <strong className="text-green-600 tabular-nums">{c.articles.in_progress}</strong></span>
-                <span>Delay : <strong className="text-red-500 tabular-nums">{c.articles.delayed}</strong></span>
-              </div>
-            </button>
-          ))}
+                <div className="p-4 border-b border-border text-center flex-1 flex flex-col justify-center">
+                  <p className="font-bold text-base text-text leading-snug line-clamp-2" title={c.publisher_name}>{c.publisher_name}</p>
+                  <div className="mt-1.5 flex items-center justify-center gap-2 text-xs">
+                    <span className="font-mono font-semibold px-2 py-0.5 rounded bg-surface border border-border text-text">{c.client_code}</span>
+                    <span className="text-muted">· JATS {c.jats_version}</span>
+                  </div>
+                </div>
+                <div className="px-5 py-3.5 flex justify-around text-xs bg-card/60">
+                  <div className="flex flex-col items-center">
+                    <span className="text-[10px] text-muted font-bold uppercase tracking-wider">Journals</span>
+                    <strong className="text-text tabular-nums text-sm font-semibold">{c.journal_count}</strong>
+                  </div>
+                  <div className="flex flex-col items-center">
+                    <span className="text-[10px] text-muted font-bold uppercase tracking-wider">Active</span>
+                    <strong className="text-green-500 tabular-nums text-sm font-semibold">{c.articles.in_progress}</strong>
+                  </div>
+                  <div className="flex flex-col items-center">
+                    <span className="text-[10px] text-muted font-bold uppercase tracking-wider">Delay</span>
+                    <strong className="text-red-400 tabular-nums text-sm font-semibold">{c.articles.delayed}</strong>
+                  </div>
+                </div>
+              </button>
+            )
+          })}
         </div>
       )}
 

@@ -18,6 +18,7 @@ import { STAGE, advanceError, shortStage } from './journals/journalUi'
 import { ArticleFilesPanel } from './journals/ArticleFilesPanel'
 import { JatsXmlEditor } from '@/features/journals/JatsXmlEditor'
 import { PreEditingSteps } from '@/features/journals/PreEditingSteps'
+import 'pdfjs-viewer-element'
 
 import { useAuthStore } from '@/store/useAuthStore'
 
@@ -206,6 +207,16 @@ export function JournalArticleEditorPage() {
     }, 3000)
     return () => window.clearInterval(t)
   }, [structuring?.status, stepBusy, id, load])
+  const autoSwitchedPdf = useRef(false)
+  useEffect(() => {
+    if (ws?.proof_pdf && !autoSwitchedPdf.current && !hash) {
+      autoSwitchedPdf.current = true
+      if (stageNo >= 4) {
+        setView('pdf')
+      }
+    }
+  }, [ws?.proof_pdf, stageNo, hash])
+
   useEffect(() => {
     if (preState && selectedStep === null) {
       const key = preState.current_step ?? 'technical'
@@ -261,6 +272,20 @@ export function JournalArticleEditorPage() {
     }
   }
 
+  const ignoreAll = async () => {
+    if (issues.length === 0) return
+    try {
+      const res = await journalsApi.ignoreAllIssues(id, {
+        module: moduleFilter === 'all' ? undefined : moduleFilter,
+        severity: severityFilter === 'all' ? undefined : severityFilter,
+      })
+      toast.success(`Ignored ${res.ignored_count} finding(s)`)
+      await load()
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Could not ignore findings'))
+    }
+  }
+
   /** Apply a replace suggestion to the text (as a tracked change when TC is on), then mark it accepted. */
   const applyFix = async (issue: JournalIssue) => {
     const idx = occIndexByIssue.get(issue.id)
@@ -287,11 +312,55 @@ export function JournalArticleEditorPage() {
   }
 
   const [refReport, setRefReport] = useState<number | null>(null)
-  // Main view: the WYSIWYG XHTML editor, JATS XML source editor, or Layout HTML preview.
-  const [view, setView] = useState<'xhtml' | 'xml' | 'layout'>(hash === '#xml' ? 'xml' : hash === '#layout' ? 'layout' : 'xhtml')
+  // Main view: the WYSIWYG XHTML editor, JATS XML source editor, Layout HTML preview, or Proof PDF viewer.
+  const [view, setView] = useState<'xhtml' | 'xml' | 'layout' | 'pdf'>(
+    hash === '#pdf' || hash === '#proof' ? 'pdf' : hash === '#xml' ? 'xml' : hash === '#layout' ? 'layout' : 'xhtml'
+  )
   const [jatsVersion, setJatsVersion] = useState(0)
+  // Auto-poll for active InDesign generation job on mount/stage load
+  useEffect(() => {
+    if (stageNo !== STAGE.INDESIGN) return
+    let timer: number | null = null
+    const checkStatus = async () => {
+      try {
+        const st = await journalsApi.getInDesignStatus(id)
+        if (st.status && (st.status.includes('queued') || st.status.includes('running'))) {
+          setStageBusy(true)
+          if (!timer) {
+            timer = window.setInterval(async () => {
+              try {
+                const s = await journalsApi.getInDesignStatus(id)
+                if (s.proof_pdf || (s.status && (s.status.includes('generated') || s.status.includes('failed')))) {
+                  if (timer) window.clearInterval(timer)
+                  timer = null
+                  await load()
+                  setStageBusy(false)
+                  if (s.proof_pdf) {
+                    toast.success('InDesign proof PDF received! Displaying proof PDF.')
+                    setView('pdf')
+                  } else if (s.status?.includes('failed')) {
+                    toast.error(`InDesign generation failed: ${s.status}`)
+                  }
+                }
+              } catch (e) {
+                // ignore
+              }
+            }, 3000)
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+    void checkStatus()
+    return () => {
+      if (timer) window.clearInterval(timer)
+    }
+  }, [stageNo, id, load])
+
   const stageAction = async (kind: 'jats' | 'indesign' | 'indesign-status' | 'references' | 'references-status') => {
     setStageBusy(true)
+    let shouldKeepBusy = false
     try {
       if (kind === 'references') {
         const r = await journalsApi.processReferences(id)
@@ -311,17 +380,43 @@ export function JournalArticleEditorPage() {
         setView('xml')
       } else if (kind === 'indesign') {
         await journalsApi.generateInDesign(id)
-        toast.success('InDesign generation started. Use "Check InDesign status" in a few minutes.')
+        toast.success('InDesign generation started on Windows server. Waiting for proof PDF...')
+        setStageBusy(true)
+        shouldKeepBusy = true
+        const pollInterval = window.setInterval(async () => {
+          try {
+            const st = await journalsApi.getInDesignStatus(id)
+            if (st.proof_pdf || (st.status && (st.status.includes('generated') || st.status.includes('failed')))) {
+              window.clearInterval(pollInterval)
+              await load()
+              setStageBusy(false)
+              if (st.proof_pdf) {
+                toast.success('InDesign proof PDF received! Displaying proof PDF.')
+                setView('pdf')
+              } else if (st.status?.includes('failed')) {
+                toast.error(`InDesign generation failed: ${st.status}`)
+              }
+            }
+          } catch (e) {
+            // ignore temporary polling errors
+          }
+        }, 3000)
+        return
       } else {
         const s = await journalsApi.getInDesignStatus(id)
         toast.success(s.status ?? 'No InDesign job has run yet')
         setModuleFilter('indesign_qc')
+        if (s.proof_pdf) {
+          setView('pdf')
+        }
       }
       await load()
     } catch (err) {
       toast.error(getApiErrorMessage(err, 'The stage action failed'))
     } finally {
-      setStageBusy(false)
+      if (!shouldKeepBusy) {
+        setStageBusy(false)
+      }
     }
   }
 
@@ -336,6 +431,30 @@ export function JournalArticleEditorPage() {
       setBlocked(advanceError(err))
     } finally {
       setAdvancing(false)
+    }
+  }
+
+  const [revertTarget, setRevertTarget] = useState<number | null>(null)
+  const [reverting, setReverting] = useState(false)
+
+  const handleRevertStage = async (targetStageNo: number) => {
+    setReverting(true)
+    try {
+      const res = await journalsApi.revertStage(id, targetStageNo)
+      toast.success(`Moved workflow back to Stage ${res.new_stage_number ?? targetStageNo} (${shortStage(res.new_stage)})`)
+      await load()
+      setRevertTarget(null)
+      if (targetStageNo === STAGE.PRE_EDITING) {
+        setView('xhtml')
+      } else if (targetStageNo === STAGE.XML) {
+        setView('xml')
+      } else if (targetStageNo >= STAGE.INDESIGN) {
+        setView('pdf')
+      }
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Could not move stage back'))
+    } finally {
+      setReverting(false)
     }
   }
 
@@ -464,6 +583,12 @@ export function JournalArticleEditorPage() {
             Download proof PDF
           </a>
         )}
+        {stageNo > 1 && (
+          <Button variant="secondary" size="sm" onClick={() => setRevertTarget(ws.stages.find(s => s.stage_number < stageNo)?.stage_number ?? 1)}
+            title="Move back to a previous workflow stage to edit manuscript/XML and re-run stage conversions">
+            ↩ Move Back Stage
+          </Button>
+        )}
         {!done && (
           <Button size="sm" onClick={advance} isLoading={advancing}
             disabled={stageNo === STAGE.PRE_EDITING && ws.pre_editing.applies && !ws.pre_editing.all_finished}
@@ -478,15 +603,23 @@ export function JournalArticleEditorPage() {
         {ws.stages.map(s => {
           const isDone = s.stage_status === 'Completed'
           const current = !isDone && s.stage_name === article.current_stage
+          const isPrevious = s.stage_number < stageNo || isDone
           return (
-            <li key={s.stage_number} aria-current={current ? 'step' : undefined}
-              className={cn('flex items-center gap-1.5 text-xs px-3 py-1 rounded-md whitespace-nowrap',
-                current ? 'bg-amber-500/10 text-amber-700 font-semibold' : isDone ? 'text-green-600' : 'text-muted')}>
-              <span className={cn('size-4 rounded-full flex items-center justify-center text-[10px]',
-                isDone ? 'bg-green-600 text-white' : current ? 'bg-amber-500 text-white' : 'bg-border')}>
-                {isDone ? <Check className="size-2.5" /> : s.stage_number}
-              </span>
-              {shortStage(s.stage_name)}
+            <li key={s.stage_number} aria-current={current ? 'step' : undefined}>
+              <button
+                type="button"
+                disabled={!isPrevious || current || reverting}
+                onClick={() => isPrevious && !current && setRevertTarget(s.stage_number)}
+                title={isPrevious && !current ? `Click to move workflow back to Stage ${s.stage_number} (${shortStage(s.stage_name)})` : undefined}
+                className={cn('flex items-center gap-1.5 text-xs px-3 py-1 rounded-md whitespace-nowrap transition-colors',
+                  current ? 'bg-amber-500/10 text-amber-700 font-semibold' :
+                  isPrevious ? 'text-green-600 hover:bg-surface cursor-pointer' : 'text-muted cursor-default')}>
+                <span className={cn('size-4 rounded-full flex items-center justify-center text-[10px]',
+                  isDone ? 'bg-green-600 text-white' : current ? 'bg-amber-500 text-white' : 'bg-border')}>
+                  {isDone ? <Check className="size-2.5" /> : s.stage_number}
+                </span>
+                {shortStage(s.stage_name)}
+              </button>
             </li>
           )
         })}
@@ -523,6 +656,12 @@ export function JournalArticleEditorPage() {
             <div className="flex items-center gap-2">
               <p className="text-xs font-bold uppercase tracking-wider text-text">Findings checklist</p>
               <span className="rounded-full bg-surface px-2 text-xs tabular-nums">{issues.length}</span>
+              {visible.length > 0 && (
+                <button type="button" onClick={ignoreAll}
+                  className="ml-auto text-[11px] font-semibold text-primary hover:underline">
+                  Ignore all ({visible.length})
+                </button>
+              )}
             </div>
             <label className="relative block">
               <span className="sr-only">Search findings</span>
@@ -601,7 +740,7 @@ export function JournalArticleEditorPage() {
                     {l.para_idx !== undefined && (
                       <Button size="sm" variant="ghost" leftIcon={<Crosshair />} onClick={() => goTo(i)}>Go to</Button>
                     )}
-                    {i.severity !== 'error' && <Button size="sm" variant="ghost" onClick={() => resolve(i, 'ignore')}>Ignore</Button>}
+                    <Button size="sm" variant="ghost" onClick={() => resolve(i, 'ignore')}>Ignore</Button>
                   </div>
                 </article>
               )
@@ -613,12 +752,18 @@ export function JournalArticleEditorPage() {
         <main className="flex-1 min-w-0 min-h-0 flex flex-col">
           {ws.jats && (
             <div className="flex items-center gap-1 bg-slate-900 px-3 pt-1.5 shrink-0" role="tablist" aria-label="Article view">
-              {([['xhtml', 'WYSIWYG XHTML'], ['xml', 'JATS XML Source'], ['layout', 'Layout Preview (HTML)']] as const).map(([key, label]) => (
+              {([
+                ['xhtml', 'WYSIWYG XHTML'],
+                ['xml', 'JATS XML Source'],
+                ['layout', 'Layout Preview (HTML)'],
+                ...(ws.proof_pdf || stageNo >= 4 ? [['pdf', 'Proof PDF (InDesign)']] : [])
+              ] as const).map(([key, label]) => (
                 <button key={key} type="button" role="tab" aria-selected={view === key}
-                  onClick={() => setView(key)}
-                  className={cn('px-4 py-1.5 text-xs font-semibold rounded-t-md border-b-2',
+                  onClick={() => setView(key as any)}
+                  className={cn('px-4 py-1.5 text-xs font-semibold rounded-t-md border-b-2 transition-colors',
                     view === key ? 'bg-white text-slate-900 border-blue-500' : 'text-slate-300 border-transparent hover:text-white')}>
-                  {label}{key === 'xml' ? ` · v${ws.jats!.version}` : ''}
+                  {label}
+                  {key === 'xml' ? ` · v${ws.jats!.version}` : key === 'pdf' && ws.proof_pdf ? ` · v${ws.proof_pdf.version}` : ''}
                 </button>
               ))}
               {(ws.open_issues.xml?.error ?? 0) > 0 && (
@@ -626,7 +771,23 @@ export function JournalArticleEditorPage() {
               )}
             </div>
           )}
-          {view === 'layout' && ws.jats ? (
+          {view === 'pdf' ? (
+            ws.proof_pdf || stageNo >= 4 ? (
+              <div className="w-full bg-slate-800 shrink-0" style={{ height: editorHeight }}>
+                {/* @ts-ignore */}
+                <pdfjs-viewer-element
+                  src={journalsApi.proofPdfUrl(id)}
+                  key={journalsApi.proofPdfUrl(id)}
+                  style={{ width: '100%', height: '100%', display: 'block', border: '0' }}
+                />
+              </div>
+            ) : (
+              <EmptyState
+                title="No Proof PDF generated yet"
+                description="Run Generate InDesign to create the proof PDF and view it here."
+              />
+            )
+          ) : view === 'layout' && ws.jats ? (
             <iframe
               title="Layout Preview HTML"
               src={journalsApi.layoutHtmlUrl(id)}
@@ -670,6 +831,53 @@ export function JournalArticleEditorPage() {
           )}
         </main>
       </div>
+
+      {/* Move Back Stage Modal */}
+      {revertTarget !== null && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-card border border-border rounded-xl p-6 max-w-md w-full shadow-2xl flex flex-col gap-4">
+            <div className="flex items-center gap-3">
+              <div className="size-10 rounded-lg bg-amber-500/10 text-amber-600 flex items-center justify-center text-lg font-bold">↩</div>
+              <div>
+                <h2 className="text-base font-bold text-text">Move Back Workflow Stage</h2>
+                <p className="text-xs text-muted">Return to an earlier stage to make edits and re-run stage conversions.</p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase text-muted tracking-wider">Select Target Stage:</p>
+              <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
+                {ws.stages.filter(s => s.stage_number < stageNo || s.stage_status === 'Completed').map(s => (
+                  <button
+                    key={s.stage_number}
+                    type="button"
+                    onClick={() => setRevertTarget(s.stage_number)}
+                    className={cn('w-full flex items-center justify-between px-3 py-2.5 rounded-lg border text-xs text-left transition-all',
+                      revertTarget === s.stage_number ? 'border-primary bg-primary/10 text-primary font-semibold' : 'border-border bg-surface/50 text-text hover:bg-surface')}>
+                    <div>
+                      <p className="font-semibold">Stage {s.stage_number}: {shortStage(s.stage_name)}</p>
+                      <p className="text-[11px] text-muted mt-0.5">
+                        {s.stage_number === 1 ? 'Edit manuscript text & re-run pre-editing checks' :
+                         s.stage_number === 2 ? 'Review language editing & style rules' :
+                         s.stage_number === 3 ? 'Re-convert DOCX/XHTML to JATS XML & validate DTD' :
+                         s.stage_number === 4 ? 'Re-generate InDesign layout & proof PDF' : 'Return to stage'}
+                      </p>
+                    </div>
+                    {revertTarget === s.stage_number && <Check className="size-4 text-primary shrink-0" />}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+              <Button variant="ghost" size="sm" onClick={() => setRevertTarget(null)} disabled={reverting}>Cancel</Button>
+              <Button variant="secondary" size="sm" onClick={() => revertTarget && handleRevertStage(revertTarget)} isLoading={reverting}>
+                Confirm & Move Back
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

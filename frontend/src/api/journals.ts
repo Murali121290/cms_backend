@@ -154,6 +154,7 @@ export interface ArticleWorkspace {
   xhtml: { file: { id: number; filename: string; version: number }; content: string } | null
   /** Latest JATS XML version (Stage 4 onwards); the editor shows the XML tab once it exists. */
   jats: JournalFileInfo | null
+  proof_pdf?: JournalFileInfo | null
   pre_editing: PreEditingState
   check_runs: Partial<Record<string, { status: string; rules_total: number; rules_passed: number; finished_at?: string }>>
   open_issues: Partial<Record<string, Record<'error' | 'warning' | 'info', number>>>
@@ -502,6 +503,10 @@ export const journalsApi = {
     const res = await apiClient.post(`/journals/articles/${articleId}/advance-stage`, { remarks })
     return res.data
   },
+  revertStage: async (articleId: number, targetStage: number | string, remarks?: string): Promise<any> => {
+    const res = await apiClient.post(`/journals/articles/${articleId}/move-stage`, { target_stage: targetStage, remarks })
+    return res.data
+  },
   assignStage: async (data: StageAssignment): Promise<{ status: string; message: string }> => {
     const res = await apiClient.post('/journals/articles/assign-stage', data)
     return res.data
@@ -597,6 +602,10 @@ export const journalsApi = {
     const res = await apiClient.patch(`/journals/articles/${articleId}/issues/${issueId}`, { action })
     return res.data
   },
+  ignoreAllIssues: async (articleId: number, opts: { module?: string; severity?: string } = {}): Promise<{ status: string; ignored_count: number }> => {
+    const res = await apiClient.post(`/journals/articles/${articleId}/issues/ignore-all`, opts)
+    return res.data
+  },
 
   // Stage 4: JATS XML
   convertToJats: async (articleId: number): Promise<JatsConversionResult> => {
@@ -665,6 +674,7 @@ export const journalsApi = {
   },
   archiveUrl: (articleId: number) => `${apiClient.defaults.baseURL ?? ''}/journals/articles/${articleId}/archive`,
   layoutHtmlUrl: (articleId: number) => `${apiClient.defaults.baseURL ?? ''}/journals/articles/${articleId}/xml/layout-html`,
+  proofPdfUrl: (articleId: number) => `${apiClient.defaults.baseURL ?? ''}/journals/articles/${articleId}/proof`,
   downloadFileUrl: (articleId: number, file: ArticleFileRow) =>
     file.id === 'working'
       ? `${apiClient.defaults.baseURL ?? ''}/journals/articles/${articleId}/files/latest?ext=docx`

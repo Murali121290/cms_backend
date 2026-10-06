@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List, Any, Dict, Literal
+from typing import Optional, List, Any, Dict, Literal, Union
 from datetime import datetime
 
 
@@ -207,6 +207,11 @@ class StageAdvanceRequest(BaseModel):
 
 
 class StageAdvanceBody(BaseModel):
+    remarks: Optional[str] = None
+
+
+class StageRevertBody(BaseModel):
+    target_stage: Union[int, str]
     remarks: Optional[str] = None
 
 

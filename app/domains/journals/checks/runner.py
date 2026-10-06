@@ -44,20 +44,32 @@ def run_check(db: Session, article: JournalArticle, key: str, user_id: Optional[
         raise
 
     previous = db.query(JournalIssue).filter(JournalIssue.article_id == article.id, JournalIssue.module == key).all()
-    ignored = {i.fingerprint for i in previous if i.status == "ignored"}
+    resolved_by_fp = {}
+    resolved_by_rule_loc = {}
     for old in previous:
+        if old.status in ("ignored", "fixed") or old.resolution is not None:
+            resolved_by_fp[old.fingerprint] = (old.status, old.resolution)
+            loc_str = str(old.location) if old.location else ""
+            if old.rule_id and loc_str:
+                resolved_by_rule_loc[(old.rule_id, loc_str)] = (old.status, old.resolution)
         if old.status == "open":
             old.status = "superseded"
 
     by_fingerprint = {}
     for draft in result.issues:
+        loc_str = str(draft.location) if draft.location else ""
+        resolved_match = resolved_by_fp.get(draft.fingerprint) or resolved_by_rule_loc.get((draft.rule_id, loc_str))
+
+        status_val = resolved_match[0] if resolved_match else "open"
+        resolution_val = resolved_match[1] if resolved_match else None
+
         issue = JournalIssue(
             article_id=article.id, run_id=run.id, module=key,
             rule_id=draft.rule_id, severity=draft.severity, title=draft.title, message=draft.message,
             location=draft.location, context_snippet=draft.context_snippet, suggestion=draft.suggestion,
             fingerprint=draft.fingerprint,
-            status="ignored" if draft.fingerprint in ignored and draft.severity != "error" else "open",
-            resolution="ignored" if draft.fingerprint in ignored and draft.severity != "error" else None,
+            status=status_val,
+            resolution=resolution_val,
         )
         db.add(issue)
         by_fingerprint[draft.fingerprint] = (issue, draft)

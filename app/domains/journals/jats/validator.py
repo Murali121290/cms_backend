@@ -106,11 +106,29 @@ def validate_jats(xml: bytes, assets: Optional[Iterable[str]] = None, dtd_versio
         findings.append(XmlFinding("JATS-M01", "warning", "Article DOI is missing",
                                    "article-meta has no <article-id pub-id-type=\"doi\">. Add the DOI to the article record.", line=am.sourceline))
     if assets is not None:
-        names = {os.path.basename(a).lower() for a in assets}
+        names = set()
+        for a in assets:
+            base = os.path.basename(a).lower()
+            names.add(base)
+            unver = re.sub(r"_v\d+(\.[a-zA-Z0-9]+)$", r"\1", base)
+            names.add(unver)
+            unver_noext = re.sub(r"_v\d+$", "", base)
+            names.add(unver_noext)
+            fig_padded = re.sub(r"fig0+(\d+)", r"fig\1", unver)
+            names.add(fig_padded)
+            fig_unpadded = re.sub(r"fig(\d+)", lambda m: f"fig{int(m.group(1)):02d}", unver)
+            names.add(fig_unpadded)
+
         for g in doc.iter("graphic", "inline-graphic"):
             href = g.get(XLINK_HREF) or ""
-            if href and os.path.basename(href).lower() not in names:
-                findings.append(XmlFinding("PKG-A01", "warning", f"Image “{href}” is not in the article files",
-                                           f"<{g.tag} xlink:href=\"{href}\"> has no matching art file. Upload it or relink the graphic.",
-                                           line=g.sourceline, detail=href))
+            if href:
+                href_base = os.path.basename(href).lower()
+                href_unver = re.sub(r"_v\d+(\.[a-zA-Z0-9]+)$", r"\1", href_base)
+                href_fig_padded = re.sub(r"fig0+(\d+)", r"fig\1", href_unver)
+                href_fig_unpadded = re.sub(r"fig(\d+)", lambda m: f"fig{int(m.group(1)):02d}", href_unver)
+
+                if not ({href_base, href_unver, href_fig_padded, href_fig_unpadded} & names):
+                    findings.append(XmlFinding("PKG-A01", "warning", f"Image “{href}” is not in the article files",
+                                               f"<{g.tag} xlink:href=\"{href}\"> has no matching art file. Upload it or relink the graphic.",
+                                               line=g.sourceline, detail=href))
     return findings

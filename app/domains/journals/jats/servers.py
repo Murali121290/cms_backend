@@ -6,6 +6,7 @@ raw bytes and raise JournalServerError on any failure.
 """
 import io
 import os
+import re
 import time
 import zipfile
 from typing import Dict, Iterable, Optional
@@ -106,7 +107,11 @@ class JournalInDesignClient:
                     zf.write(d, f"template/{'fonts/' if d.lower().endswith(('.otf', '.ttf', '.ttc')) else ''}{os.path.basename(d)}")
             for a in art_paths:
                 if os.path.exists(a):
-                    zf.write(a, f"artfile/{os.path.basename(a)}")
+                    orig_fname = os.path.basename(a)
+                    clean_fname = re.sub(r"_v\d+(\.[a-zA-Z0-9]+)$", r"\1", orig_fname, flags=re.IGNORECASE)
+                    zf.write(a, f"artfile/{clean_fname}")
+                    if clean_fname != orig_fname:
+                        zf.write(a, f"artfile/{orig_fname}")
 
         lock = self._lock()
         deadline = time.monotonic() + wait_seconds
@@ -140,7 +145,11 @@ class JournalInDesignClient:
             zf.write(indd_path, os.path.basename(indd_path))
             for a in art_paths or []:
                 if os.path.exists(a):
-                    zf.write(a, f"artfile/{os.path.basename(a)}")
+                    orig_fname = os.path.basename(a)
+                    clean_fname = re.sub(r"_v\d+(\.[a-zA-Z0-9]+)$", r"\1", orig_fname, flags=re.IGNORECASE)
+                    zf.write(a, f"artfile/{clean_fname}")
+                    if clean_fname != orig_fname:
+                        zf.write(a, f"artfile/{orig_fname}")
         try:
             r = requests.post(f"{self.base_url}/journal/indesign-to-final",
                               params={"client": client_code or "default"},
